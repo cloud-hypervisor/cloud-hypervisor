@@ -5149,6 +5149,68 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(target_arch = "x86_64")]
+    // This test runs a guest with Landlock enabled and hotplugs a new disk. As
+    // the path for the hotplug disk is not pre-added to Landlock rules, this
+    // the test will result in a failure.
+    fn test_landlock() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        #[cfg(target_arch = "x86_64")]
+        let kernel_path = direct_kernel_boot_path();
+        #[cfg(target_arch = "aarch64")]
+        let kernel_path = edk2_path();
+
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--landlock"])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // Check /dev/vdc is not there
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vdc.*16M || true")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1),
+                0
+            );
+
+            // Now let's add the extra disk.
+            let mut blk_file_path = dirs::home_dir().unwrap();
+            blk_file_path.push("workloads");
+            blk_file_path.push("blk.img");
+            // As the path to the hotplug disk is not pre-added, this remote
+            // command will fail.
+            assert!(!remote_command(
+                &api_socket,
+                "add-disk",
+                Some(format!("path={},id=test0", blk_file_path.to_str().unwrap()).as_str()),
+            ));
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_disk_hotplug() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
