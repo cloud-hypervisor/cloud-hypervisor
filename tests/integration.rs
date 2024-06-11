@@ -5210,8 +5210,7 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
-    #[test]
-    fn test_disk_hotplug() {
+    fn _test_disk_hotplug(landlock_enabled: bool) {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
 
@@ -5222,17 +5221,28 @@ mod common_parallel {
 
         let api_socket = temp_api_path(&guest.tmp_dir);
 
-        let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket])
+        let mut blk_file_path = dirs::home_dir().unwrap();
+        blk_file_path.push("workloads");
+        blk_file_path.push("blk.img");
+
+        let mut cmd = GuestCommand::new(&guest);
+        if landlock_enabled {
+            cmd.args(["--landlock"]).args([
+                "--landlock-rules",
+                format!("path={:?},access=rw", blk_file_path).as_str(),
+            ]);
+        }
+
+        cmd.args(["--api-socket", &api_socket])
             .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
+            .capture_output();
+
+        let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
@@ -5249,9 +5259,6 @@ mod common_parallel {
             );
 
             // Now let's add the extra disk.
-            let mut blk_file_path = dirs::home_dir().unwrap();
-            blk_file_path.push("workloads");
-            blk_file_path.push("blk.img");
             let (cmd_success, cmd_output) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
@@ -5366,6 +5373,17 @@ mod common_parallel {
         let output = child.wait_with_output().unwrap();
 
         handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_disk_hotplug() {
+        _test_disk_hotplug(false)
+    }
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_disk_hotplug_with_landlock() {
+        _test_disk_hotplug(true)
     }
 
     fn create_loop_device(backing_file_path: &str, block_size: u32, num_retries: usize) -> String {
