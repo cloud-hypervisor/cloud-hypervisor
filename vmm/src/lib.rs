@@ -766,6 +766,19 @@ impl Vmm {
             MigratableError::MigrateReceive(anyhow!("Error creating console devices: {:?}", e))
         })?);
 
+        if self
+            .vm_config
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .landlock_enable
+        {
+            apply_landlock(self.vm_config.as_ref().unwrap().clone()).map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error applying landlock: {:?}", e))
+            })?;
+        }
+
         let vm = Vm::create_hypervisor_vm(
             &self.hypervisor,
             #[cfg(feature = "tdx")]
