@@ -516,12 +516,15 @@ impl MemoryManager {
     /// In practice, this function can perform multiple memory mappings of the
     /// same backing file if there's a hole in the address space between two
     /// RAM ranges.
+    ///
     /// One example might be ram_regions containing 2 regions (0-3G and 4G-6G)
     /// and zones containing two zones (size 1G and size 4G).
+    ///
     /// This function will create 3 resulting memory regions:
     /// - First one mapping entirely the first memory zone on 0-1G range
     /// - Second one mapping partially the second memory zone on 1G-3G range
     /// - Third one mapping partially the second memory zone on 4G-6G range
+    ///
     /// Also, all memory regions are page-size aligned (e.g. their sizes must
     /// be multiple of page-size), which may leave an additional hole in the
     /// address space when hugepage is used.
