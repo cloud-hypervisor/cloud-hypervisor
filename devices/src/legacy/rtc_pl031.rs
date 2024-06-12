@@ -9,7 +9,6 @@
 //! a real-time clock input.
 //!
 use crate::{read_le_u32, write_le_u32};
-use std::fmt;
 use std::sync::{Arc, Barrier};
 use std::time::Instant;
 use std::{io, result};
@@ -70,80 +69,6 @@ impl From<ClockType> for libc::clockid_t {
             ClockType::ProcessCpu => libc::CLOCK_PROCESS_CPUTIME_ID,
             ClockType::ThreadCpu => libc::CLOCK_THREAD_CPUTIME_ID,
         }
-    }
-}
-
-/// Structure representing the date in local time with nanosecond precision.
-pub struct LocalTime {
-    /// Seconds in current minute.
-    sec: i32,
-    /// Minutes in current hour.
-    min: i32,
-    /// Hours in current day, 24H format.
-    hour: i32,
-    /// Days in current month.
-    mday: i32,
-    /// Months in current year.
-    mon: i32,
-    /// Years passed since 1900 BC.
-    year: i32,
-    /// Nanoseconds in current second.
-    nsec: i64,
-}
-
-impl LocalTime {
-    /// Returns the [LocalTime](struct.LocalTime.html) structure for the calling moment.
-    #[cfg(test)]
-    pub fn now() -> LocalTime {
-        let mut timespec = libc::timespec {
-            tv_sec: 0,
-            tv_nsec: 0,
-        };
-        let mut tm: libc::tm = libc::tm {
-            tm_sec: 0,
-            tm_min: 0,
-            tm_hour: 0,
-            tm_mday: 0,
-            tm_mon: 0,
-            tm_year: 0,
-            tm_wday: 0,
-            tm_yday: 0,
-            tm_isdst: 0,
-            tm_gmtoff: 0,
-            tm_zone: std::ptr::null(),
-        };
-
-        // SAFETY: the parameters are valid.
-        unsafe {
-            libc::clock_gettime(libc::CLOCK_REALTIME, &mut timespec);
-            libc::localtime_r(&timespec.tv_sec, &mut tm);
-        }
-
-        LocalTime {
-            sec: tm.tm_sec,
-            min: tm.tm_min,
-            hour: tm.tm_hour,
-            mday: tm.tm_mday,
-            mon: tm.tm_mon,
-            year: tm.tm_year,
-            nsec: timespec.tv_nsec,
-        }
-    }
-}
-
-impl fmt::Display for LocalTime {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}-{:02}-{:02}T{:02}:{:02}:{:02}.{:09}",
-            self.year + 1900,
-            self.mon + 1,
-            self.mday,
-            self.hour,
-            self.min,
-            self.sec,
-            self.nsec
-        )
     }
 }
 
@@ -312,6 +237,70 @@ mod tests {
     use vmm_sys_util::eventfd::EventFd;
 
     const LEGACY_RTC_MAPPED_IO_START: u64 = 0x0901_0000;
+
+    struct LocalTime {
+        sec: i32,
+        min: i32,
+        hour: i32,
+        mday: i32,
+        mon: i32,
+        year: i32,
+        nsec: i64,
+    }
+
+    impl LocalTime {
+        fn now() -> LocalTime {
+            let mut timespec = libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 0,
+            };
+            let mut tm: libc::tm = libc::tm {
+                tm_sec: 0,
+                tm_min: 0,
+                tm_hour: 0,
+                tm_mday: 0,
+                tm_mon: 0,
+                tm_year: 0,
+                tm_wday: 0,
+                tm_yday: 0,
+                tm_isdst: 0,
+                tm_gmtoff: 0,
+                tm_zone: std::ptr::null(),
+            };
+
+            // SAFETY: the parameters are valid.
+            unsafe {
+                libc::clock_gettime(libc::CLOCK_REALTIME, &mut timespec);
+                libc::localtime_r(&timespec.tv_sec, &mut tm);
+            }
+
+            LocalTime {
+                sec: tm.tm_sec,
+                min: tm.tm_min,
+                hour: tm.tm_hour,
+                mday: tm.tm_mday,
+                mon: tm.tm_mon,
+                year: tm.tm_year,
+                nsec: timespec.tv_nsec,
+            }
+        }
+    }
+
+    impl std::fmt::Display for LocalTime {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "{}-{:02}-{:02}T{:02}:{:02}:{:02}.{:09}",
+                self.year + 1900,
+                self.mon + 1,
+                self.mday,
+                self.hour,
+                self.min,
+                self.sec,
+                self.nsec
+            )
+        }
+    }
 
     #[test]
     fn test_get_time() {
