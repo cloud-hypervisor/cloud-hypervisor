@@ -32,24 +32,26 @@ pub struct VirtioPciCommonConfigState {
 /// device.
 ///
 /// * Registers:
+///
 /// ** About the whole device.
-/// le32 device_feature_select;     // 0x00 // read-write
-/// le32 device_feature;            // 0x04 // read-only for driver
-/// le32 driver_feature_select;     // 0x08 // read-write
-/// le32 driver_feature;            // 0x0C // read-write
-/// le16 msix_config;               // 0x10 // read-write
-/// le16 num_queues;                // 0x12 // read-only for driver
-/// u8 device_status;               // 0x14 // read-write (driver_status)
-/// u8 config_generation;           // 0x15 // read-only for driver
+///    le32 device_feature_select;     // 0x00 // read-write
+///    le32 device_feature;            // 0x04 // read-only for driver
+///    le32 driver_feature_select;     // 0x08 // read-write
+///    le32 driver_feature;            // 0x0C // read-write
+///    le16 msix_config;               // 0x10 // read-write
+///    le16 num_queues;                // 0x12 // read-only for driver
+///    u8 device_status;               // 0x14 // read-write (driver_status)
+///    u8 config_generation;           // 0x15 // read-only for driver
+///
 /// ** About a specific virtqueue.
-/// le16 queue_select;              // 0x16 // read-write
-/// le16 queue_size;                // 0x18 // read-write, power of 2, or 0.
-/// le16 queue_msix_vector;         // 0x1A // read-write
-/// le16 queue_enable;              // 0x1C // read-write (Ready)
-/// le16 queue_notify_off;          // 0x1E // read-only for driver
-/// le64 queue_desc;                // 0x20 // read-write
-/// le64 queue_avail;               // 0x28 // read-write
-/// le64 queue_used;                // 0x30 // read-write
+///    le16 queue_select;              // 0x16 // read-write
+///    le16 queue_size;                // 0x18 // read-write, power of 2, or 0.
+///    le16 queue_msix_vector;         // 0x1A // read-write
+///    le16 queue_enable;              // 0x1C // read-write (Ready)
+///    le16 queue_notify_off;          // 0x1E // read-only for driver
+///    le64 queue_desc;                // 0x20 // read-write
+///    le64 queue_avail;               // 0x28 // read-write
+///    le64 queue_used;                // 0x30 // read-write
 pub struct VirtioPciCommonConfig {
     pub access_platform: Option<Arc<dyn AccessPlatform>>,
     pub driver_status: u8,
