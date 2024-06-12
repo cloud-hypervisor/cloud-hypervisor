@@ -10160,6 +10160,142 @@ mod live_migration {
         handle_child_output(Ok(()), &ovs_output);
     }
 
+    // This test exercises the local live-migration between two Cloud Hypervisor VMs on the
+    // same host with Landlock enabled on both VMs. The test validates the following:
+    // 1. The source VM is up and functional
+    // 2. Ensure Landlock is enabled on source VM by hotplugging a disk. As the path for this
+    //    disk is not known to the source VM this step will fail.
+    // 3. The 'send-migration' and 'receive-migration' command finished successfully;
+    // 4. The source VM terminated gracefully after live migration;
+    // 5. The destination VM is functional after live migration;
+    // 6. Ensure Landlock is enabled on destination VM by hotplugging a disk. As the path for
+    //    this disk is not known to the destination VM this step will fail.
+    fn _test_live_migration_with_landlock() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let kernel_path = direct_kernel_boot_path();
+        let net_id = "net123";
+        let net_params = format!(
+            "id={},tap=,mac={},ip={},mask=255.255.255.0",
+            net_id, guest.network.guest_mac, guest.network.host_ip
+        );
+
+        let boot_vcpus = 2;
+        let max_vcpus = 4;
+
+        let mut blk_file_path = dirs::home_dir().unwrap();
+        blk_file_path.push("workloads");
+        blk_file_path.push("blk.img");
+
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let mut src_child = GuestCommand::new(&guest)
+            .args([
+                "--cpus",
+                format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
+            ])
+            .args(["--memory", "size=4G,shared=on"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .args(["--api-socket", &src_api_socket])
+            .args(["--landlock"])
+            .args(["--net", net_params.as_str()])
+            .args([
+                "--landlock-rules",
+                format!("path={:?},access=rw", guest.tmp_dir.as_path()).as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        // Start the destination VM
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .args(["--landlock"])
+            .args([
+                "--landlock-rules",
+                format!("path={:?},access=rw", guest.tmp_dir.as_path()).as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // Make sure the source VM is functaionl
+            // Check the number of vCPUs
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+
+            // Check the guest RAM
+            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+
+            // Check Landlock is enabled by hot-plugging a disk.
+            assert!(!remote_command(
+                &src_api_socket,
+                "add-disk",
+                Some(format!("path={},id=test0", blk_file_path.to_str().unwrap()).as_str()),
+            ));
+
+            // Start the live-migration
+            let migration_socket = String::from(
+                guest
+                    .tmp_dir
+                    .as_path()
+                    .join("live-migration.sock")
+                    .to_str()
+                    .unwrap(),
+            );
+
+            assert!(
+                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, true),
+                "Unsuccessful command: 'send-migration' or 'receive-migration'."
+            );
+        });
+
+        // Check and report any errors occurred during the live-migration
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during live-migration",
+            );
+        }
+
+        // Check the source vm has been terminated successful (give it '3s' to settle)
+        thread::sleep(std::time::Duration::new(3, 0));
+        if !src_child.try_wait().unwrap().map_or(false, |s| s.success()) {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "source VM was not terminated successfully.",
+            );
+        };
+
+        // Post live-migration check to make sure the destination VM is funcational
+        let r = std::panic::catch_unwind(|| {
+            // Perform same checks to validate VM has been properly migrated
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+        });
+
+        // Check Landlock is enabled on destination VM by hot-plugging a disk.
+        assert!(!remote_command(
+            &dest_api_socket,
+            "add-disk",
+            Some(format!("path={},id=test0", blk_file_path.to_str().unwrap()).as_str()),
+        ));
+
+        // Clean-up the destination VM and make sure it terminated correctly
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &dest_output);
+    }
+
     mod live_migration_parallel {
         use super::*;
         #[test]
@@ -10200,6 +10336,11 @@ mod live_migration {
         #[test]
         fn test_live_upgrade_watchdog_local() {
             _test_live_migration_watchdog(true, true)
+        }
+        #[test]
+        #[cfg(target_arch = "x86_64")]
+        fn test_live_migration_with_landlock() {
+            _test_live_migration_with_landlock()
         }
     }
 
