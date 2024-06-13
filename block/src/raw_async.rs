@@ -8,7 +8,7 @@ use crate::async_io::{
 use crate::DiskTopology;
 use io_uring::{opcode, squeue, types, IoUring};
 use std::fs::File;
-use std::io::{Seek, SeekFrom};
+use std::io::{Error, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -84,7 +84,7 @@ impl AsyncIo for RawFileAsync {
 
         // SAFETY: we know the file descriptor is valid and we
         // relied on vm-memory to provide the buffer address.
-        let _ = unsafe {
+        unsafe {
             sq.push(
                 &opcode::Readv::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
                     .offset(offset.try_into().unwrap())
@@ -92,6 +92,7 @@ impl AsyncIo for RawFileAsync {
                     .flags(squeue::Flags::ASYNC)
                     .user_data(user_data),
             )
+            .map_err(|_| AsyncIoError::ReadVectored(Error::other("Submission queue is full")))?
         };
 
         // Update the submission queue and submit new operations to the
@@ -112,7 +113,7 @@ impl AsyncIo for RawFileAsync {
 
         // SAFETY: we know the file descriptor is valid and we
         // relied on vm-memory to provide the buffer address.
-        let _ = unsafe {
+        unsafe {
             sq.push(
                 &opcode::Writev::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
                     .offset(offset.try_into().unwrap())
@@ -120,6 +121,7 @@ impl AsyncIo for RawFileAsync {
                     .flags(squeue::Flags::ASYNC)
                     .user_data(user_data),
             )
+            .map_err(|_| AsyncIoError::WriteVectored(Error::other("Submission queue is full")))?
         };
 
         // Update the submission queue and submit new operations to the
@@ -135,13 +137,14 @@ impl AsyncIo for RawFileAsync {
             let (submitter, mut sq, _) = self.io_uring.split();
 
             // SAFETY: we know the file descriptor is valid.
-            let _ = unsafe {
+            unsafe {
                 sq.push(
                     &opcode::Fsync::new(types::Fd(self.fd))
                         .build()
                         .flags(squeue::Flags::ASYNC)
                         .user_data(user_data),
                 )
+                .map_err(|_| AsyncIoError::Fsync(Error::other("Submission queue is full")))?
             };
 
             // Update the submission queue and submit new operations to the
