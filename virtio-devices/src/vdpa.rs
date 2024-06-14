@@ -462,6 +462,10 @@ impl Pausable for Vdpa {
     }
 
     fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+        if !self.common.paused.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
         if !self.migrating {
             Err(MigratableError::Resume(anyhow!(
                 "Can't resume a vDPA device outside live migration"
