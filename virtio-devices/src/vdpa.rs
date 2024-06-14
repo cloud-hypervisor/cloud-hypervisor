@@ -151,7 +151,7 @@ impl Vdpa {
                     last: state.iova_range_last,
                 },
                 state.backend_features,
-                true,
+                false,
             )
         } else {
             let device_type = vhost.get_device_id().map_err(Error::GetDeviceId)?;
