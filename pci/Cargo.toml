@@ -25,9 +25,9 @@ vfio_user = { git = "https://github.com/rust-vmm/vfio-user", branch = "main" }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = { version = "0.14.1", features = [
-  "backend-mmap",
   "backend-atomic",
   "backend-bitmap",
+  "backend-mmap",
 ] }
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = "0.12.1"

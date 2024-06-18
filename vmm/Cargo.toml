@@ -8,11 +8,11 @@ version = "0.1.0"
 dbus_api = ["blocking", "futures", "zbus"]
 default = []
 dhat-heap = ["dhat"]                                                         # For heap profiling
-guest_debug = ["kvm", "gdbstub", "gdbstub_arch"]
-igvm = ["hex", "dep:igvm", "igvm_defs", "mshv-bindings", "range_map_vec"]
+guest_debug = ["gdbstub", "gdbstub_arch", "kvm"]
+igvm = ["dep:igvm", "hex", "igvm_defs", "mshv-bindings", "range_map_vec"]
 io_uring = ["block/io_uring"]
-kvm = ["hypervisor/kvm", "vfio-ioctls/kvm", "vm-device/kvm", "pci/kvm"]
-mshv = ["hypervisor/mshv", "vfio-ioctls/mshv", "vm-device/mshv", "pci/mshv"]
+kvm = ["hypervisor/kvm", "pci/kvm", "vfio-ioctls/kvm", "vm-device/kvm"]
+mshv = ["hypervisor/mshv", "pci/mshv", "vfio-ioctls/mshv", "vm-device/mshv"]
 sev_snp = ["arch/sev_snp", "hypervisor/sev_snp", "virtio-devices/sev_snp"]
 tdx = ["arch/tdx", "hypervisor/tdx"]
 tracing = ["tracer/tracing"]
@@ -40,12 +40,12 @@ hypervisor = { path = "../hypervisor" }
 igvm = { version = "0.3.1", optional = true }
 igvm_defs = { version = "0.3.1", optional = true }
 libc = "0.2.153"
-linux-loader = { version = "0.11.0", features = ["elf", "bzimage", "pe"] }
+linux-loader = { version = "0.11.0", features = ["bzimage", "elf", "pe"] }
 log = "0.4.21"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 mshv-bindings = { git = "https://github.com/rust-vmm/mshv", tag = "v0.2.0", features = [
-  "with-serde",
   "fam-wrappers",
+  "with-serde",
 ], optional = true }
 net_util = { path = "../net_util" }
 once_cell = "1.19.0"
@@ -54,7 +54,7 @@ pci = { path = "../pci" }
 range_map_vec = { version = "0.2.0", optional = true }
 rate_limiter = { path = "../rate_limiter" }
 seccompiler = "0.4.0"
-serde = { version = "1.0.197", features = ["rc", "derive"] }
+serde = { version = "1.0.197", features = ["derive", "rc"] }
 serde_json = "1.0.115"
 serial_buffer = { path = "../serial_buffer" }
 signal-hook = "0.3.17"
@@ -68,9 +68,9 @@ virtio-queue = "0.12.0"
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = { version = "0.14.1", features = [
-  "backend-mmap",
   "backend-atomic",
   "backend-bitmap",
+  "backend-mmap",
 ] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
