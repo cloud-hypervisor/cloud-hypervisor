@@ -30,9 +30,9 @@ serde_with = { version = "3.7.0", default-features = false, features = [
 serial_buffer = { path = "../serial_buffer" }
 thiserror = "1.0.60"
 vhost = { version = "0.11.0", features = [
-  "vhost-user-frontend",
-  "vhost-user-backend",
   "vhost-kern",
+  "vhost-user-backend",
+  "vhost-user-frontend",
   "vhost-vdpa",
 ] }
 virtio-bindings = { version = "0.2.2", features = ["virtio-v5_0_0"] }
@@ -40,9 +40,9 @@ virtio-queue = "0.12.0"
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = { version = "0.14.1", features = [
-  "backend-mmap",
   "backend-atomic",
   "backend-bitmap",
+  "backend-mmap",
 ] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }

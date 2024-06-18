@@ -6,8 +6,8 @@ name = "hypervisor"
 version = "0.1.0"
 
 [features]
-kvm = ["kvm-ioctls", "kvm-bindings", "vfio-ioctls/kvm"]
-mshv = ["mshv-ioctls", "mshv-bindings", "vfio-ioctls/mshv", "iced-x86"]
+kvm = ["kvm-bindings", "kvm-ioctls", "vfio-ioctls/kvm"]
+mshv = ["iced-x86", "mshv-bindings", "mshv-ioctls", "vfio-ioctls/mshv"]
 sev_snp = ["igvm", "igvm_defs"]
 tdx = []
 
@@ -21,25 +21,25 @@ kvm-ioctls = { version = "0.17.0", optional = true }
 libc = "0.2.153"
 log = "0.4.21"
 mshv-bindings = { git = "https://github.com/rust-vmm/mshv", tag = "v0.2.0", features = [
-  "with-serde",
   "fam-wrappers",
+  "with-serde",
 ], optional = true }
 mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", tag = "v0.2.0", optional = true }
-serde = { version = "1.0.197", features = ["rc", "derive"] }
+serde = { version = "1.0.197", features = ["derive", "rc"] }
 serde_with = { version = "3.7.0", default-features = false, features = [
   "macros",
 ] }
 thiserror = "1.0.60"
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
 vm-memory = { version = "0.14.1", features = [
-  "backend-mmap",
   "backend-atomic",
+  "backend-mmap",
 ] }
 vmm-sys-util = { version = "0.12.1", features = ["with-serde"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
 default-features = false
-features = ["std", "decoder", "op_code_info", "instr_info", "fast_fmt"]
+features = ["decoder", "fast_fmt", "instr_info", "op_code_info", "std"]
 optional = true
 version = "1.21.0"
 
