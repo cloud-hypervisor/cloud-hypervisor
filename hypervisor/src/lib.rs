@@ -118,7 +118,7 @@ pub fn vec_with_array_field<T: Default, F>(count: usize) -> Vec<T> {
 ///
 /// User memory region structure
 ///
-#[derive(Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct UserMemoryRegion {
     pub slot: u32,
     pub guest_phys_addr: u64,
