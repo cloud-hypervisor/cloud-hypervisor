@@ -5,7 +5,7 @@ default-run = "cloud-hypervisor"
 description = "Open source Virtual Machine Monitor (VMM) that runs on top of KVM & MSHV"
 edition = "2021"
 homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
-license = "LICENSE-APACHE & LICENSE-BSD-3-Clause"
+license = "Apache-2.0 AND BSD-3-Clause"
 name = "cloud-hypervisor"
 version = "40.0.0"
 # Minimum buildable version:
