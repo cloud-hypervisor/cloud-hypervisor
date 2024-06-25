@@ -5,7 +5,7 @@ authors = ["The Cloud Hypervisor Authors", "Cyberus Technology GmbH"]
 edition = "2021"
 default-run = "cloud-hypervisor"
 build = "build.rs"
-license = "LICENSE-APACHE & LICENSE-BSD-3-Clause"
+license = "Apache-2.0 AND BSD-3-Clause"
 description = "Open source Virtual Machine Monitor (VMM) that runs on top of KVM"
 homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
 # Minimum buildable version:
