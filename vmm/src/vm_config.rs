@@ -802,7 +802,7 @@ pub struct VmConfig {
 }
 
 impl VmConfig {
-    pub fn apply_landlock(&self) -> LandlockResult<()> {
+    pub(crate) fn apply_landlock(&self) -> LandlockResult<()> {
         let mut landlock = Landlock::new()?;
 
         if let Some(mem_zones) = &self.memory.zones {

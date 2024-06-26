@@ -35,7 +35,7 @@ pub enum LandlockError {
 // https://docs.rs/landlock/latest/landlock/enum.ABI.html for more info on ABI
 static ABI: ABI = ABI::V3;
 
-pub struct LandlockAccess {
+pub(crate) struct LandlockAccess {
     access: BitFlags<AccessFs>,
 }
 
@@ -83,7 +83,7 @@ impl Landlock {
         Ok(Landlock { ruleset })
     }
 
-    pub fn add_rule(
+    pub(crate) fn add_rule(
         &mut self,
         path: PathBuf,
         access: BitFlags<AccessFs>,
@@ -100,7 +100,7 @@ impl Landlock {
         Ok(())
     }
 
-    pub fn add_rule_with_access(
+    pub(crate) fn add_rule_with_access(
         &mut self,
         path: PathBuf,
         access: &str,
