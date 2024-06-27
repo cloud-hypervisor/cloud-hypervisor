@@ -841,6 +841,52 @@ mod tests {
     }
 
     #[test]
+    // Emulate only one instruction.
+    //
+    // mov rax, 0x1000
+    // mov rbx, qword ptr [rax+10h]
+    // The emulation should stop after the first instruction.
+    fn test_emulate_one_instruction() {
+        let target_rax: u64 = 0x1000;
+        let ip: u64 = 0x1000;
+        let cpu_id = 0;
+        let memory = [
+            // Code at IP
+            0x48, 0xc7, 0xc0, 0x00, 0x10, 0x00, 0x00, // mov rax, 0x1000
+            0x48, 0x8b, 0x58, 0x10, // mov rbx, qword ptr [rax+10h]
+            // Padding
+            0x00, 0x00, 0x00, 0x00, 0x00, // Padding is all zeroes
+            // Data at IP + 0x10 (0x1234567812345678 in LE)
+            0x78, 0x56, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12,
+        ];
+        let insn = [
+            0x48, 0xc7, 0xc0, 0x00, 0x10, 0x00, 0x00, // mov rax, 0x1000
+            0x48, 0x8b, 0x58, 0x10, // mov rbx, qword ptr [rax+10h]
+        ];
+
+        let mut vmm = MockVmm::new(ip, vec![], Some((ip, &memory)));
+        assert!(vmm.emulate_insn(cpu_id, &insn, Some(1)).is_ok());
+
+        let new_ip: u64 = vmm.cpu_state(cpu_id).unwrap().ip();
+        assert_eq!(new_ip, ip + 0x7 /* length of mov rax,0x1000 */);
+
+        let rax: u64 = vmm
+            .cpu_state(cpu_id)
+            .unwrap()
+            .read_reg(Register::RAX)
+            .unwrap();
+        assert_eq!(rax, target_rax);
+
+        // The second instruction is not executed so RBX should be zero.
+        let rbx: u64 = vmm
+            .cpu_state(cpu_id)
+            .unwrap()
+            .read_reg(Register::RBX)
+            .unwrap();
+        assert_eq!(rbx, 0);
+    }
+
+    #[test]
     // Emulate truncated instruction stream, which should cause a fetch.
     //
     // mov rax, 0x1000
