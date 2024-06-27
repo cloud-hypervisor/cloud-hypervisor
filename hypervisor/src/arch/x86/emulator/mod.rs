@@ -775,6 +775,7 @@ mod tests {
     // Emulate truncated instruction stream, which should cause a fetch.
     //
     // mov rax, 0x1000
+    // mov rbx, qword ptr [rax+10h]
     // Test with a first instruction truncated.
     fn test_fetch_first_instruction() {
         let ip: u64 = 0x1000;
