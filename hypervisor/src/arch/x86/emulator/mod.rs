@@ -561,7 +561,7 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
 
         decoder.set_ip(state.ip());
 
-        while decoder.can_decode() && !stop_emulation {
+        while !stop_emulation {
             decoder.decode_out(&mut insn);
 
             if decoder.last_error() == DecoderError::NoMoreBytes {
@@ -595,8 +595,6 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
                         insn_format!(insn)
                     )));
                 }
-
-                stop_emulation = true;
             }
 
             // Emulate the decoded instruction
@@ -770,6 +768,69 @@ mod mock_vmm {
 mod tests {
     use super::*;
     use crate::arch::x86::emulator::mock_vmm::*;
+
+    #[test]
+    // Emulate executing an empty stream. Instructions should be fetched from
+    // memory.
+    //
+    // mov rax, 0x1000
+    // mov rbx, qword ptr [rax+10h]
+    fn test_empty_instruction_stream() {
+        let target_rax: u64 = 0x1000;
+        let target_rbx: u64 = 0x1234567812345678;
+        let ip: u64 = 0x1000;
+        let cpu_id = 0;
+        let memory = [
+            // Code at IP
+            0x48, 0xc7, 0xc0, 0x00, 0x10, 0x00, 0x00, // mov rax, 0x1000
+            0x48, 0x8b, 0x58, 0x10, // mov rbx, qword ptr [rax+10h]
+            // Padding
+            0x00, 0x00, 0x00, 0x00, 0x00, // Padding is all zeroes
+            // Data at IP + 0x10 (0x1234567812345678 in LE)
+            0x78, 0x56, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12,
+        ];
+
+        let mut vmm = MockVmm::new(ip, vec![], Some((ip, &memory)));
+        assert!(vmm.emulate_insn(cpu_id, &[], Some(2)).is_ok());
+
+        let rax: u64 = vmm
+            .cpu_state(cpu_id)
+            .unwrap()
+            .read_reg(Register::RAX)
+            .unwrap();
+        assert_eq!(rax, target_rax);
+
+        let rbx: u64 = vmm
+            .cpu_state(cpu_id)
+            .unwrap()
+            .read_reg(Register::RBX)
+            .unwrap();
+        assert_eq!(rbx, target_rbx);
+    }
+
+    #[test]
+    // Emulate executing an empty stream. Instructions should be fetched from
+    // memory. The emulation should abort.
+    //
+    // mov rax, 0x1000
+    // mov rbx, qword ptr [rax+10h]
+    // ... garbage ...
+    fn test_empty_instruction_stream_bad() {
+        let ip: u64 = 0x1000;
+        let cpu_id = 0;
+        let memory = [
+            // Code at IP
+            0x48, 0xc7, 0xc0, 0x00, 0x10, 0x00, 0x00, // mov rax, 0x1000
+            0x48, 0x8b, 0x58, 0x10, // mov rbx, qword ptr [rax+10h]
+            // Padding
+            0xff, 0xff, 0xff, 0xff, 0xff, // Garbage
+            // Data at IP + 0x10 (0x1234567812345678 in LE)
+            0x78, 0x56, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12,
+        ];
+
+        let mut vmm = MockVmm::new(ip, vec![], Some((ip, &memory)));
+        assert!(vmm.emulate_insn(cpu_id, &[], None).is_err());
+    }
 
     #[test]
     // Emulate truncated instruction stream, which should cause a fetch.
