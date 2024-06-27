@@ -778,6 +778,7 @@ mod tests {
     // mov rbx, qword ptr [rax+10h]
     // Test with a first instruction truncated.
     fn test_fetch_first_instruction() {
+        let target_rax: u64 = 0x1000;
         let ip: u64 = 0x1000;
         let cpu_id = 0;
         let memory = [
@@ -802,7 +803,7 @@ mod tests {
             .unwrap()
             .read_reg(Register::RAX)
             .unwrap();
-        assert_eq!(rax, ip);
+        assert_eq!(rax, target_rax);
     }
 
     #[test]
