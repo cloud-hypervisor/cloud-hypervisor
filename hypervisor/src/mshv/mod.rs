@@ -641,7 +641,6 @@ impl cpu::Vcpu for MshvVcpu {
                 hv_message_type_HVMSG_UNMAPPED_GPA => {
                     let info = x.to_memory_info().unwrap();
                     let insn_len = info.instruction_byte_count as usize;
-                    assert!(insn_len > 0 && insn_len <= 16);
 
                     let mut context = MshvEmulatorContext {
                         vcpu: self,
@@ -653,7 +652,10 @@ impl cpu::Vcpu for MshvVcpu {
 
                     // Emulate the trapped instruction, and only the first one.
                     let new_state = emul
-                        .emulate_first_insn(self.vp_index as usize, &info.instruction_bytes)
+                        .emulate_first_insn(
+                            self.vp_index as usize,
+                            &info.instruction_bytes[..insn_len],
+                        )
                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
 
                     // Set CPU state back.
