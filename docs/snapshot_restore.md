@@ -8,6 +8,10 @@ snapshot and creates the exact same virtual machine, restoring the previously
 saved states. The new virtual machine is restored in a paused state, as it was
 before the snapshot was performed.
 
+## Limitations
+
+VFIO devices and Intel SGX are out of scope. For example, this includes the `--fs` option for `virtio-fs`.
+
 ## Snapshot a Cloud Hypervisor VM
 
 First thing, we must run a Cloud Hypervisor VM:
@@ -107,7 +111,3 @@ need to be provided along with the VM restore command in the following syntax:
 In the example above, the net device with id `net1` will be backed by FDs '23'
 and '24', and the net device with id `net2` will be backed by FDs '25' and '26'
 from the restored VM.
-
-## Limitations
-
-VFIO devices and Intel SGX are out of scope.
