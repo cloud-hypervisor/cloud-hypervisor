@@ -180,6 +180,8 @@ impl RequestHandler for StubApiRequestHandler {
                 vdpa: None,
                 vsock: None,
                 pvpanic: false,
+                #[cfg(feature = "pvmemcontrol")]
+                pvmemcontrol: None,
                 iommu: false,
                 #[cfg(target_arch = "x86_64")]
                 sgx_epc: None,

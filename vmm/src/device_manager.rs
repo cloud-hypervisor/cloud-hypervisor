@@ -49,6 +49,8 @@ use devices::gic;
 use devices::ioapic;
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
+#[cfg(feature = "pvmemcontrol")]
+use devices::pvmemcontrol::{PvmemcontrolBusDevice, PvmemcontrolPciDevice};
 use devices::{
     interrupt_controller, interrupt_controller::InterruptController, AcpiNotificationFlags,
 };
@@ -89,7 +91,7 @@ use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
-use vm_device::{Bus, BusDevice, Resource};
+use vm_device::{Bus, BusDevice, BusDeviceSync, Resource};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::GuestMemoryRegion;
 use vm_memory::{Address, GuestAddress, GuestUsize, MmapRegion};
@@ -118,6 +120,8 @@ const DEBUGCON_DEVICE_NAME: &str = "__debug_console";
 const GPIO_DEVICE_NAME: &str = "__gpio";
 const RNG_DEVICE_NAME: &str = "__rng";
 const IOMMU_DEVICE_NAME: &str = "__iommu";
+#[cfg(feature = "pvmemcontrol")]
+const PVMEMCONTROL_DEVICE_NAME: &str = "__pvmemcontrol";
 const BALLOON_DEVICE_NAME: &str = "__balloon";
 const CONSOLE_DEVICE_NAME: &str = "__console";
 const PVPANIC_DEVICE_NAME: &str = "__pvpanic";
@@ -194,6 +198,10 @@ pub enum DeviceManagerError {
 
     /// Cannot create virtio-balloon device
     CreateVirtioBalloon(io::Error),
+
+    /// Cannot create pvmemcontrol device
+    #[cfg(feature = "pvmemcontrol")]
+    CreatePvmemcontrol(io::Error),
 
     /// Cannot create virtio-watchdog device
     CreateVirtioWatchdog(io::Error),
@@ -818,7 +826,7 @@ pub struct DeviceManager {
     // Let the DeviceManager keep strong references to the BusDevice devices.
     // This allows the IO and MMIO buses to be provided with Weak references,
     // which prevents cyclic dependencies.
-    bus_devices: Vec<Arc<Mutex<dyn BusDevice>>>,
+    bus_devices: Vec<Arc<dyn BusDeviceSync>>,
 
     // Counter to keep track of the consumed device IDs.
     device_id_cnt: Wrapping<usize>,
@@ -885,6 +893,12 @@ pub struct DeviceManager {
     #[cfg(target_arch = "aarch64")]
     // GPIO device for AArch64
     gpio_device: Option<Arc<Mutex<devices::legacy::Gpio>>>,
+
+    #[cfg(feature = "pvmemcontrol")]
+    pvmemcontrol_devices: Option<(
+        Arc<PvmemcontrolBusDevice>,
+        Arc<Mutex<PvmemcontrolPciDevice>>,
+    )>,
 
     // pvpanic device
     pvpanic_device: Option<Arc<Mutex<devices::PvPanicDevice>>>,
@@ -1165,6 +1179,8 @@ impl DeviceManager {
             virtio_mem_devices: Vec::new(),
             #[cfg(target_arch = "aarch64")]
             gpio_device: None,
+            #[cfg(feature = "pvmemcontrol")]
+            pvmemcontrol_devices: None,
             pvpanic_device: None,
             force_iommu,
             io_uring_supported: None,
@@ -1183,7 +1199,7 @@ impl DeviceManager {
         address_manager
             .mmio_bus
             .insert(
-                Arc::clone(&device_manager) as Arc<Mutex<dyn BusDevice>>,
+                Arc::clone(&device_manager) as Arc<dyn BusDeviceSync>,
                 acpi_address.0,
                 DEVICE_MANAGER_ACPI_SIZE as u64,
             )
@@ -1226,7 +1242,7 @@ impl DeviceManager {
                 self.address_manager
                     .mmio_bus
                     .insert(
-                        Arc::clone(&self.memory_manager) as Arc<Mutex<dyn BusDevice>>,
+                        Arc::clone(&self.memory_manager) as Arc<dyn BusDeviceSync>,
                         acpi_address.0,
                         MEMORY_MANAGER_ACPI_SIZE as u64,
                     )
@@ -1268,7 +1284,7 @@ impl DeviceManager {
         if let Some(tpm) = self.config.clone().lock().unwrap().tpm.as_ref() {
             let tpm_dev = self.add_tpm_device(tpm.socket.clone())?;
             self.bus_devices
-                .push(Arc::clone(&tpm_dev) as Arc<Mutex<dyn BusDevice>>)
+                .push(Arc::clone(&tpm_dev) as Arc<dyn BusDeviceSync>)
         }
         self.legacy_interrupt_manager = Some(legacy_interrupt_manager);
 
@@ -1277,6 +1293,17 @@ impl DeviceManager {
         self.add_pci_devices(virtio_devices.clone())?;
 
         self.virtio_devices = virtio_devices;
+
+        // Add pvmemcontrol if required
+        #[cfg(feature = "pvmemcontrol")]
+        {
+            if self.config.lock().unwrap().pvmemcontrol.is_some() {
+                let (pvmemcontrol_bus_device, pvmemcontrol_pci_device) =
+                    self.make_pvmemcontrol_device()?;
+                self.pvmemcontrol_devices =
+                    Some((pvmemcontrol_bus_device, pvmemcontrol_pci_device));
+            }
+        }
 
         if self.config.clone().lock().unwrap().pvpanic {
             self.pvpanic_device = self.add_pvpanic_device()?;
@@ -1400,11 +1427,11 @@ impl DeviceManager {
             #[cfg(target_arch = "x86_64")]
             if let Some(pci_config_io) = segment.pci_config_io.as_ref() {
                 self.bus_devices
-                    .push(Arc::clone(pci_config_io) as Arc<Mutex<dyn BusDevice>>);
+                    .push(Arc::clone(pci_config_io) as Arc<dyn BusDeviceSync>);
             }
 
             self.bus_devices
-                .push(Arc::clone(&segment.pci_config_mmio) as Arc<Mutex<dyn BusDevice>>);
+                .push(Arc::clone(&segment.pci_config_mmio) as Arc<dyn BusDeviceSync>);
         }
 
         Ok(())
@@ -1489,7 +1516,7 @@ impl DeviceManager {
             .map_err(DeviceManagerError::BusError)?;
 
         self.bus_devices
-            .push(Arc::clone(&interrupt_controller) as Arc<Mutex<dyn BusDevice>>);
+            .push(Arc::clone(&interrupt_controller) as Arc<dyn BusDeviceSync>);
 
         // Fill the device tree with a new node. In case of restore, we
         // know there is nothing to do, so we can simply override the
@@ -1521,7 +1548,7 @@ impl DeviceManager {
         )));
 
         self.bus_devices
-            .push(Arc::clone(&shutdown_device) as Arc<Mutex<dyn BusDevice>>);
+            .push(Arc::clone(&shutdown_device) as Arc<dyn BusDeviceSync>);
 
         #[cfg(target_arch = "x86_64")]
         {
@@ -1584,12 +1611,12 @@ impl DeviceManager {
             )
             .map_err(DeviceManagerError::BusError)?;
         self.bus_devices
-            .push(Arc::clone(&ged_device) as Arc<Mutex<dyn BusDevice>>);
+            .push(Arc::clone(&ged_device) as Arc<dyn BusDeviceSync>);
 
         let pm_timer_device = Arc::new(Mutex::new(devices::AcpiPmTimerDevice::new()));
 
         self.bus_devices
-            .push(Arc::clone(&pm_timer_device) as Arc<Mutex<dyn BusDevice>>);
+            .push(Arc::clone(&pm_timer_device) as Arc<dyn BusDeviceSync>);
 
         #[cfg(target_arch = "x86_64")]
         {
@@ -1629,7 +1656,7 @@ impl DeviceManager {
         )));
 
         self.bus_devices
-            .push(Arc::clone(&i8042) as Arc<Mutex<dyn BusDevice>>);
+            .push(Arc::clone(&i8042) as Arc<dyn BusDeviceSync>);
 
         self.address_manager
             .io_bus
@@ -1657,7 +1684,7 @@ impl DeviceManager {
             )));
 
             self.bus_devices
-                .push(Arc::clone(&cmos) as Arc<Mutex<dyn BusDevice>>);
+                .push(Arc::clone(&cmos) as Arc<dyn BusDeviceSync>);
 
             self.address_manager
                 .io_bus
@@ -1667,7 +1694,7 @@ impl DeviceManager {
             let fwdebug = Arc::new(Mutex::new(devices::legacy::FwDebugDevice::new()));
 
             self.bus_devices
-                .push(Arc::clone(&fwdebug) as Arc<Mutex<dyn BusDevice>>);
+                .push(Arc::clone(&fwdebug) as Arc<dyn BusDeviceSync>);
 
             self.address_manager
                 .io_bus
@@ -1678,7 +1705,7 @@ impl DeviceManager {
         // 0x80 debug port
         let debug_port = Arc::new(Mutex::new(devices::legacy::DebugPort::new(self.timestamp)));
         self.bus_devices
-            .push(Arc::clone(&debug_port) as Arc<Mutex<dyn BusDevice>>);
+            .push(Arc::clone(&debug_port) as Arc<dyn BusDeviceSync>);
         self.address_manager
             .io_bus
             .insert(debug_port, 0x80, 0x1)
@@ -1710,7 +1737,7 @@ impl DeviceManager {
         let rtc_device = Arc::new(Mutex::new(devices::legacy::Rtc::new(interrupt_group)));
 
         self.bus_devices
-            .push(Arc::clone(&rtc_device) as Arc<Mutex<dyn BusDevice>>);
+            .push(Arc::clone(&rtc_device) as Arc<dyn BusDeviceSync>);
 
         let addr = arch::layout::LEGACY_RTC_MAPPED_IO_START;
 
@@ -1752,7 +1779,7 @@ impl DeviceManager {
         )));
 
         self.bus_devices
-            .push(Arc::clone(&gpio_device) as Arc<Mutex<dyn BusDevice>>);
+            .push(Arc::clone(&gpio_device) as Arc<dyn BusDeviceSync>);
 
         let addr = arch::layout::LEGACY_GPIO_MAPPED_IO_START;
 
@@ -1802,7 +1829,7 @@ impl DeviceManager {
             .unwrap_or(debug_console::DEFAULT_PORT);
 
         self.bus_devices
-            .push(Arc::clone(&debug_console) as Arc<Mutex<dyn BusDevice>>);
+            .push(Arc::clone(&debug_console) as Arc<dyn BusDeviceSync>);
 
         self.address_manager
             .allocator
@@ -1853,7 +1880,7 @@ impl DeviceManager {
         )));
 
         self.bus_devices
-            .push(Arc::clone(&serial) as Arc<Mutex<dyn BusDevice>>);
+            .push(Arc::clone(&serial) as Arc<dyn BusDeviceSync>);
 
         self.address_manager
             .allocator
@@ -1910,7 +1937,7 @@ impl DeviceManager {
         )));
 
         self.bus_devices
-            .push(Arc::clone(&serial) as Arc<Mutex<dyn BusDevice>>);
+            .push(Arc::clone(&serial) as Arc<dyn BusDeviceSync>);
 
         let addr = arch::layout::LEGACY_SERIAL_MAPPED_IO_START;
 
@@ -3048,6 +3075,48 @@ impl DeviceManager {
         Ok(devices)
     }
 
+    #[cfg(feature = "pvmemcontrol")]
+    fn make_pvmemcontrol_device(
+        &mut self,
+    ) -> DeviceManagerResult<(
+        Arc<PvmemcontrolBusDevice>,
+        Arc<Mutex<PvmemcontrolPciDevice>>,
+    )> {
+        let id = String::from(PVMEMCONTROL_DEVICE_NAME);
+        let pci_segment_id = 0x0_u16;
+
+        let (pci_segment_id, pci_device_bdf, resources) =
+            self.pci_resources(&id, pci_segment_id)?;
+
+        info!("Creating pvmemcontrol device: id = {}", id);
+        let (pvmemcontrol_pci_device, pvmemcontrol_bus_device) =
+            devices::pvmemcontrol::PvmemcontrolDevice::make_device(
+                id.clone(),
+                self.memory_manager.lock().unwrap().guest_memory(),
+            );
+
+        let pvmemcontrol_pci_device = Arc::new(Mutex::new(pvmemcontrol_pci_device));
+        let pvmemcontrol_bus_device = Arc::new(pvmemcontrol_bus_device);
+
+        let new_resources = self.add_pci_device(
+            pvmemcontrol_bus_device.clone(),
+            pvmemcontrol_pci_device.clone(),
+            pci_segment_id,
+            pci_device_bdf,
+            resources,
+        )?;
+
+        let mut node = device_node!(id, pvmemcontrol_pci_device);
+
+        node.resources = new_resources;
+        node.pci_bdf = Some(pci_device_bdf);
+        node.pci_device_handle = None;
+
+        self.device_tree.lock().unwrap().insert(id, node);
+
+        Ok((pvmemcontrol_bus_device, pvmemcontrol_pci_device))
+    }
+
     fn make_virtio_balloon_devices(&mut self) -> DeviceManagerResult<Vec<MetaVirtioDevice>> {
         let mut devices = Vec::new();
 
@@ -3412,7 +3481,7 @@ impl DeviceManager {
 
     fn add_pci_device(
         &mut self,
-        bus_device: Arc<Mutex<dyn BusDevice>>,
+        bus_device: Arc<dyn BusDeviceSync>,
         pci_device: Arc<Mutex<dyn PciDevice>>,
         segment_id: u16,
         bdf: PciBdf,
@@ -4076,7 +4145,7 @@ impl DeviceManager {
 
                 (
                     Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn PciDevice>>,
-                    Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn BusDevice>>,
+                    Arc::clone(&vfio_pci_device) as Arc<dyn BusDeviceSync>,
                     None as Option<Arc<Mutex<dyn virtio_devices::VirtioDevice>>>,
                     false,
                 )
@@ -4108,7 +4177,7 @@ impl DeviceManager {
 
                 (
                     Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn PciDevice>>,
-                    Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn BusDevice>>,
+                    Arc::clone(&virtio_pci_device) as Arc<dyn BusDeviceSync>,
                     Some(dev.virtio_device()),
                     dev.dma_handler().is_some() && !iommu_attached,
                 )
@@ -4124,7 +4193,7 @@ impl DeviceManager {
 
                 (
                     Arc::clone(&vfio_user_pci_device) as Arc<Mutex<dyn PciDevice>>,
-                    Arc::clone(&vfio_user_pci_device) as Arc<Mutex<dyn BusDevice>>,
+                    Arc::clone(&vfio_user_pci_device) as Arc<dyn BusDeviceSync>,
                     None as Option<Arc<Mutex<dyn virtio_devices::VirtioDevice>>>,
                     true,
                 )
