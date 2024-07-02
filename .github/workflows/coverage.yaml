@@ -1,0 +1,68 @@
+name: Code cov for (x86-64)
+on:
+  pull_request:
+    types: [opened]
+  merge_group:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  RUSTFLAGS: "-Cinstrument-coverage"
+  LLVM_PROFILE_FILE: "ch-%p-%m.profraw"
+
+jobs:
+  build:
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ 'garm-jammy' ]
+        libc: [ 'gnu' ]
+    name: Code cov (x86-64)
+    runs-on: ${{ github.event_name == 'pull_request' && !(matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') && 'ubuntu-latest' || format('{0}-16', matrix.runner) }}
+    steps:
+      - name: Code checkout
+        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install Docker
+        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install ca-certificates curl gnupg
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+          sudo chmod a+r /usr/share/keyrings/docker-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update
+          sudo apt install -y docker-ce docker-ce-cli
+      - name: Prepare for VDPA
+        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
+        run: scripts/prepare_vdpa.sh
+      - name: Run unit tests
+        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
+        run: scripts/dev_cli.sh tests --unit --libc ${{ matrix.libc }}
+      - name: Load openvswitch module
+        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
+        run: sudo modprobe openvswitch
+      - name: Run integration tests
+        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
+        timeout-minutes: 40
+        run: scripts/dev_cli.sh tests --integration --libc ${{ matrix.libc }}
+      - name: Run live-migration integration tests
+        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
+        timeout-minutes: 20
+        run: scripts/dev_cli.sh tests --integration-live-migration --libc ${{ matrix.libc }}
+      - name: Export code coverage reports
+        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
+        run: scripts/dev_cli.sh tests --coverage --libc ${{ matrix.libc }}
+        timeout-minutes: 60
+      - name: Upload coverage reports to Codecov
+        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
+        uses: codecov/codecov-action@v4
+        with:
+          #          token: ${{ secrets.CODECOV_TOKEN }} todo: delete token after test !!!
+          token: 6980efe5-a813-451f-ac36-749022ce30f4
+      - name: Skipping build for PR
+        if: ${{ github.event_name == 'pull_request' && matrix.runner != 'garm-jammy' && matrix.libc != 'gnu' }}
+        run: echo "Skipping build for PR"
