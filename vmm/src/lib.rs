@@ -18,6 +18,7 @@ use crate::config::{
 };
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggable;
+use crate::landlock::Landlock;
 use crate::memory_manager::MemoryManager;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
@@ -29,6 +30,7 @@ use anyhow::anyhow;
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
 use api::http::HttpApiHandle;
 use console_devices::{pre_create_console_devices, ConsoleInfo};
+use landlock::LandlockError;
 use libc::{tcsetattr, termios, EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
@@ -75,6 +77,7 @@ mod gdb;
 #[cfg(feature = "igvm")]
 mod igvm;
 pub mod interrupt;
+pub mod landlock;
 pub mod memory_manager;
 pub mod migration;
 mod pci_segment;
@@ -195,6 +198,14 @@ pub enum Error {
 
     #[error("Failed to join on threads: {0:?}")]
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
+
+    /// Cannot create Landlock object
+    #[error("Error creating landlock object: {0}")]
+    CreateLandlock(LandlockError),
+
+    /// Cannot apply landlock based sandboxing
+    #[error("Error applying landlock: {0}")]
+    ApplyLandlock(LandlockError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -327,6 +338,7 @@ pub fn feature_list() -> Vec<String> {
 pub fn start_event_monitor_thread(
     mut monitor: event_monitor::Monitor,
     seccomp_action: &SeccompAction,
+    landlock_enable: bool,
     hypervisor_type: hypervisor::HypervisorType,
     exit_event: EventFd,
 ) -> Result<thread::JoinHandle<Result<()>>> {
@@ -343,6 +355,17 @@ pub fn start_event_monitor_thread(
                     .map_err(Error::ApplySeccompFilter)
                     .map_err(|e| {
                         error!("Error applying seccomp filter: {:?}", e);
+                        exit_event.write(1).ok();
+                        e
+                    })?;
+            }
+            if landlock_enable {
+                Landlock::new()
+                    .map_err(Error::CreateLandlock)?
+                    .restrict_self()
+                    .map_err(Error::ApplyLandlock)
+                    .map_err(|e| {
+                        error!("Error applying landlock to event monitor thread: {:?}", e);
                         exit_event.write(1).ok();
                         e
                     })?;
@@ -389,6 +412,7 @@ pub fn start_vmm_thread(
     exit_event: EventFd,
     seccomp_action: &SeccompAction,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
+    landlock_enable: bool,
 ) -> Result<VmmThreadHandle> {
     #[cfg(feature = "guest_debug")]
     let gdb_hw_breakpoints = hypervisor.get_guest_debug_hw_bps();
@@ -429,7 +453,7 @@ pub fn start_vmm_thread(
                     exit_event,
                 )?;
 
-                vmm.setup_signal_handler()?;
+                vmm.setup_signal_handler(landlock_enable)?;
 
                 vmm.control_loop(
                     Rc::new(api_receiver),
@@ -466,6 +490,7 @@ pub fn start_vmm_thread(
             seccomp_action,
             exit_event,
             hypervisor_type,
+            landlock_enable,
         )?)
     } else if let Some(http_fd) = http_fd {
         Some(api::start_http_fd_thread(
@@ -475,6 +500,7 @@ pub fn start_vmm_thread(
             seccomp_action,
             exit_event,
             hypervisor_type,
+            landlock_enable,
         )?)
     } else {
         None
@@ -590,7 +616,7 @@ impl Vmm {
         }
     }
 
-    fn setup_signal_handler(&mut self) -> Result<()> {
+    fn setup_signal_handler(&mut self, landlock_enable: bool) -> Result<()> {
         let signals = Signals::new(Self::HANDLED_SIGNALS);
         match signals {
             Ok(signals) => {
@@ -617,6 +643,21 @@ impl Vmm {
                                     return;
                                 }
                             }
+                            if landlock_enable{
+                                match Landlock::new() {
+                                    Ok(landlock) => {
+                                        let _ = landlock.restrict_self().map_err(Error::ApplyLandlock).map_err(|e| {
+                                            error!("Error applying Landlock to signal handler thread: {:?}", e);
+                                            exit_evt.write(1).ok();
+                                        });
+                                    }
+                                    Err(e) => {
+                                        error!("Error creating Landlock object: {:?}", e);
+                                        exit_evt.write(1).ok();
+                                    }
+                                };
+                            }
+
                             std::panic::catch_unwind(AssertUnwindSafe(|| {
                                 Vmm::signal_handler(signals, original_termios_opt, &exit_evt);
                             }))
@@ -634,6 +675,7 @@ impl Vmm {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn new(
         vmm_version: VmmVersionInfo,
         api_evt: EventFd,
@@ -723,6 +765,19 @@ impl Vmm {
         self.console_info = Some(pre_create_console_devices(self).map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error creating console devices: {:?}", e))
         })?);
+
+        if self
+            .vm_config
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .landlock_enable
+        {
+            apply_landlock(self.vm_config.as_ref().unwrap().clone()).map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error applying landlock: {:?}", e))
+            })?;
+        }
 
         let vm = Vm::create_hypervisor_vm(
             &self.hypervisor,
@@ -1209,6 +1264,11 @@ impl Vmm {
     }
 }
 
+fn apply_landlock(vm_config: Arc<Mutex<VmConfig>>) -> result::Result<(), LandlockError> {
+    vm_config.lock().unwrap().apply_landlock()?;
+    Ok(())
+}
+
 impl RequestHandler for Vmm {
     fn vm_create(&mut self, config: Arc<Mutex<VmConfig>>) -> result::Result<(), VmError> {
         // We only store the passed VM config.
@@ -1217,6 +1277,18 @@ impl RequestHandler for Vmm {
             self.vm_config = Some(config);
             self.console_info =
                 Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
+
+            if self
+                .vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .landlock_enable
+            {
+                apply_landlock(self.vm_config.as_ref().unwrap().clone())
+                    .map_err(VmError::ApplyLandlock)?;
+            }
             Ok(())
         } else {
             Err(VmError::VmAlreadyCreated)
@@ -1399,6 +1471,18 @@ impl RequestHandler for Vmm {
             Some(restore_cfg.prefault),
         )?;
         self.vm = Some(vm);
+
+        if self
+            .vm_config
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .landlock_enable
+        {
+            apply_landlock(self.vm_config.as_ref().unwrap().clone())
+                .map_err(VmError::ApplyLandlock)?;
+        }
 
         // Now we can restore the rest of the VM.
         if let Some(ref mut vm) = self.vm {
@@ -2189,6 +2273,8 @@ mod unit_tests {
             platform: None,
             tpm: None,
             preserved_fds: None,
+            landlock_enable: false,
+            landlock_config: None,
         }))
     }
 

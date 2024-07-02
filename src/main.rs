@@ -23,6 +23,7 @@ use vmm::api::dbus::{dbus_api_graceful_shutdown, DBusApiOptions};
 use vmm::api::http::http_api_graceful_shutdown;
 use vmm::api::ApiAction;
 use vmm::config;
+use vmm::landlock::{Landlock, LandlockError};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
 
@@ -85,6 +86,10 @@ enum Error {
     LoggerSetup(log::SetLoggerError),
     #[error("Failed to gracefully shutdown http api: {0}")]
     HttpApiShutdown(#[source] vmm::Error),
+    #[error("Failed to create Landlock object")]
+    CreateLandlock(#[source] LandlockError),
+    #[error("Failed to apply Landlock")]
+    ApplyLandlock(#[source] LandlockError),
 }
 
 #[derive(Error, Debug)]
@@ -270,6 +275,24 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 .help(config::DiskConfig::SYNTAX)
                 .num_args(1..)
                 .group("vm-config"),
+        )
+        .arg(
+            Arg::new("landlock")
+                .long("landlock")
+                .num_args(0)
+                .help(
+                    "enable/disable Landlock.",
+                )
+                .action(ArgAction::SetTrue)
+                .default_value("false")
+                .group("vm-config"),
+        )
+        .arg(
+            Arg::new("landlock-rules")
+            .long("landlock-rules")
+            .help(config::LandlockConfig::SYNTAX)
+            .num_args(1..)
+            .group("vm-config"),
         )
         .arg(
             Arg::new("net")
@@ -634,6 +657,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     let vm_debug_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateDebugEventFd)?;
 
     let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateExitEventFd)?;
+    let landlock_enable = cmd_arguments.get_flag("landlock");
 
     #[allow(unused_mut)]
     let mut event_monitor = cmd_arguments
@@ -703,6 +727,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         vmm::start_event_monitor_thread(
             monitor,
             &seccomp_action,
+            landlock_enable,
             hypervisor.hypervisor_type(),
             exit_evt.try_clone().unwrap(),
         )
@@ -729,6 +754,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         exit_evt.try_clone().unwrap(),
         &seccomp_action,
         hypervisor,
+        landlock_enable,
     )
     .map_err(Error::StartVmmThread)?;
 
@@ -774,6 +800,13 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         if let Err(e) = exit_evt.write(1) {
             warn!("writing to exit EventFd: {e}");
         }
+    }
+
+    if landlock_enable {
+        Landlock::new()
+            .map_err(Error::CreateLandlock)?
+            .restrict_self()
+            .map_err(Error::ApplyLandlock)?;
     }
 
     vmm_thread_handle
@@ -1032,6 +1065,8 @@ mod unit_tests {
             platform: None,
             tpm: None,
             preserved_fds: None,
+            landlock_enable: false,
+            landlock_config: None,
         };
 
         assert_eq!(expected_vm_config, result_vm_config);
