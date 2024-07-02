@@ -30,10 +30,7 @@ Linux kernel confirms Landlock support with above message in dmesg.
 ## Implementation Details
 
 To enable Landlock, Cloud-Hypervisor process needs the full list of files it
-needs to access over its lifetime. Most of these files are received as VM
-Configuration (`struct VmConfig`). Landlock is enabled in `vm_create` stage, as
-this is the earliest stage in guest boot sequence which has access to guest's
-VM Configuration.
+needs to access over its lifetime. Landlock is enabled in the `vm_create` stage.
 
 ## Enable Landlock
 
