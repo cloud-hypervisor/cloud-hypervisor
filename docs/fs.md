@@ -8,9 +8,13 @@ the VIRTIO specification which allows any VMM to perform filesystem sharing.
 
 ## Limitations
 
-Using __virtio-fs__ devices in combination snapshot/restore is currently not supported.
+Using __virtio-fs__ devices in combination snapshot/restore is currently not
+supported.
 
-The reason is that virtio-fs doesn't support migration. And more specifically, the virtiofsd daemon described below doesn't implement the migration mechanisms that are exposed by vhost-user. Only DPDK and SPDK (vhost-user-net and vhost-user-block respectively) implement the migration mechanism.
+The reason is that virtio-fs doesn't support migration. And more specifically,
+the virtiofsd daemon described below doesn't implement the migration mechanisms
+that are exposed by vhost-user. Only DPDK and SPDK (vhost-user-net and
+vhost-user-block respectively) implement the migration mechanism.
 
 ## Pre-requisites
 

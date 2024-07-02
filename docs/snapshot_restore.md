@@ -10,7 +10,8 @@ before the snapshot was performed.
 
 ## Limitations
 
-VFIO devices and Intel SGX are out of scope. For example, this includes the `--fs` option for `virtio-fs`.
+VFIO devices and Intel SGX are out of scope. For example, this includes the
+`--fs` option for `virtio-fs`.
 
 ## Snapshot a Cloud Hypervisor VM
 
