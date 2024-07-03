@@ -638,13 +638,18 @@ impl cpu::Vcpu for MshvVcpu {
                     Ok(cpu::VmExit::Ignore)
                 }
                 #[cfg(target_arch = "x86_64")]
-                hv_message_type_HVMSG_UNMAPPED_GPA => {
+                msg_type @ (hv_message_type_HVMSG_UNMAPPED_GPA
+                | hv_message_type_HVMSG_GPA_INTERCEPT) => {
                     let info = x.to_memory_info().unwrap();
                     let insn_len = info.instruction_byte_count as usize;
+                    let gva = info.guest_virtual_address;
+                    let gpa = info.guest_physical_address;
+
+                    debug!("Exit ({:?}) GVA {:x} GPA {:x}", msg_type, gva, gpa);
 
                     let mut context = MshvEmulatorContext {
                         vcpu: self,
-                        map: (info.guest_virtual_address, info.guest_physical_address),
+                        map: (gva, gpa),
                     };
 
                     // Create a new emulator.
