@@ -1526,8 +1526,10 @@ impl<'a> MshvEmulatorContext<'a> {
             return Ok(self.map.1);
         }
 
-        // TODO: More fine-grained control for the flags
-        let flags = HV_TRANSLATE_GVA_VALIDATE_READ | HV_TRANSLATE_GVA_VALIDATE_WRITE;
+        // We can only get into here when executing guest code. Check for R and X permissions. In
+        // the future if we have other use cases, we may want to allow the caller to specify the
+        // flags.
+        let flags = HV_TRANSLATE_GVA_VALIDATE_READ | HV_TRANSLATE_GVA_VALIDATE_EXECUTE;
 
         let (gpa, result_code) = self
             .vcpu
