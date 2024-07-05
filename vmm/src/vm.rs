@@ -92,7 +92,7 @@ use vm_memory::{Address, ByteValued, GuestMemoryRegion, ReadVolatile};
 use vm_memory::{
     Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, WriteVolatile,
 };
-use vm_migration::protocol::{Request, Response, Status};
+use vm_migration::protocol::{Request, Response};
 use vm_migration::{
     protocol::MemoryRangeTable, snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot,
     Snapshottable, Transportable,
@@ -2237,15 +2237,10 @@ impl Vm {
                     MigratableError::MigrateSend(anyhow!("Error sending memory fd: {}", e))
                 })?;
 
-            let res = Response::read_from(socket)?;
-            if res.status() != Status::Ok {
-                warn!("Error during memory fd migration");
-                Request::abandon().write_to(socket)?;
-                Response::read_from(socket).ok();
-                return Err(MigratableError::MigrateSend(anyhow!(
-                    "Error during memory fd migration"
-                )));
-            }
+            Response::read_from(socket)?.ok_or_abandon(
+                socket,
+                MigratableError::MigrateSend(anyhow!("Error during memory fd migration")),
+            )?;
         }
 
         Ok(())

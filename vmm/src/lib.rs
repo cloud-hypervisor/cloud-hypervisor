@@ -884,15 +884,10 @@ impl Vmm {
         table.write_to(socket)?;
         // And then the memory itself
         vm.send_memory_regions(&table, socket)?;
-        let res = Response::read_from(socket)?;
-        if res.status() != Status::Ok {
-            warn!("Error during dirty memory migration");
-            Request::abandon().write_to(socket)?;
-            Response::read_from(socket).ok();
-            return Err(MigratableError::MigrateSend(anyhow!(
-                "Error during dirty memory migration"
-            )));
-        }
+        Response::read_from(socket)?.ok_or_abandon(
+            socket,
+            MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
+        )?;
 
         Ok(true)
     }
@@ -911,15 +906,10 @@ impl Vmm {
 
         // Start the migration
         Request::start().write_to(&mut socket)?;
-        let res = Response::read_from(&mut socket)?;
-        if res.status() != Status::Ok {
-            warn!("Error starting migration");
-            Request::abandon().write_to(&mut socket)?;
-            Response::read_from(&mut socket).ok();
-            return Err(MigratableError::MigrateSend(anyhow!(
-                "Error starting migration"
-            )));
-        }
+        Response::read_from(&mut socket)?.ok_or_abandon(
+            &mut socket,
+            MigratableError::MigrateSend(anyhow!("Error starting migration")),
+        )?;
 
         // Send config
         let vm_config = vm.get_config();
@@ -966,15 +956,10 @@ impl Vmm {
         socket
             .write_all(&config_data)
             .map_err(MigratableError::MigrateSocket)?;
-        let res = Response::read_from(&mut socket)?;
-        if res.status() != Status::Ok {
-            warn!("Error during config migration");
-            Request::abandon().write_to(&mut socket)?;
-            Response::read_from(&mut socket).ok();
-            return Err(MigratableError::MigrateSend(anyhow!(
-                "Error during config migration"
-            )));
-        }
+        Response::read_from(&mut socket)?.ok_or_abandon(
+            &mut socket,
+            MigratableError::MigrateSend(anyhow!("Error during config migration")),
+        )?;
 
         // Let every Migratable object know about the migration being started.
         vm.start_migration()?;
@@ -994,15 +979,10 @@ impl Vmm {
             table.write_to(&mut socket)?;
             // And then the memory itself
             vm.send_memory_regions(&table, &mut socket)?;
-            let res = Response::read_from(&mut socket)?;
-            if res.status() != Status::Ok {
-                warn!("Error during memory migration");
-                Request::abandon().write_to(&mut socket)?;
-                Response::read_from(&mut socket).ok();
-                return Err(MigratableError::MigrateSend(anyhow!(
-                    "Error during memory migration"
-                )));
-            }
+            Response::read_from(&mut socket)?.ok_or_abandon(
+                &mut socket,
+                MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
+            )?;
 
             // Try at most 5 passes of dirty memory sending
             const MAX_DIRTY_MIGRATIONS: usize = 5;
@@ -1029,27 +1009,17 @@ impl Vmm {
         socket
             .write_all(&snapshot_data)
             .map_err(MigratableError::MigrateSocket)?;
-        let res = Response::read_from(&mut socket)?;
-        if res.status() != Status::Ok {
-            warn!("Error during state migration");
-            Request::abandon().write_to(&mut socket)?;
-            Response::read_from(&mut socket).ok();
-            return Err(MigratableError::MigrateSend(anyhow!(
-                "Error during state migration"
-            )));
-        }
-
+        Response::read_from(&mut socket)?.ok_or_abandon(
+            &mut socket,
+            MigratableError::MigrateSend(anyhow!("Error during state migration")),
+        )?;
         // Complete the migration
         Request::complete().write_to(&mut socket)?;
-        let res = Response::read_from(&mut socket)?;
-        if res.status() != Status::Ok {
-            warn!("Error completing migration");
-            Request::abandon().write_to(&mut socket)?;
-            Response::read_from(&mut socket).ok();
-            return Err(MigratableError::MigrateSend(anyhow!(
-                "Error completing migration"
-            )));
-        }
+        Response::read_from(&mut socket)?.ok_or_abandon(
+            &mut socket,
+            MigratableError::MigrateSend(anyhow!("Error completing migration")),
+        )?;
+
         info!("Migration complete");
 
         // Let every Migratable object know about the migration being complete
