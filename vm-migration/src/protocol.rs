@@ -190,6 +190,22 @@ impl Response {
         Ok(response)
     }
 
+    pub fn ok_or_abandon<T>(
+        self,
+        fd: &mut T,
+        error: MigratableError,
+    ) -> Result<Response, MigratableError>
+    where
+        T: Read + Write,
+    {
+        if self.status != Status::Ok {
+            Request::abandon().write_to(fd)?;
+            Response::read_from(fd)?;
+            return Err(error);
+        }
+        Ok(self)
+    }
+
     pub fn write_to(&self, fd: &mut dyn Write) -> Result<(), MigratableError> {
         fd.write_all(Self::as_slice(self))
             .map_err(MigratableError::MigrateSocket)
