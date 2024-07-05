@@ -6,13 +6,14 @@
 use crate::arch::emulator::{PlatformEmulator, PlatformError};
 
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::emulator::{Emulator, EmulatorCpuState};
+use crate::arch::x86::emulator::{CpuStateManager, Emulator, EmulatorCpuState};
 use crate::cpu;
 use crate::cpu::Vcpu;
 use crate::hypervisor;
 use crate::vec_with_array_field;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::HypervisorType;
+use iced_x86::Register;
 use mshv_bindings::*;
 use mshv_ioctls::{set_registers_64, InterruptRequest, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
 use std::any::Any;
@@ -637,14 +638,18 @@ impl cpu::Vcpu for MshvVcpu {
                     Ok(cpu::VmExit::Ignore)
                 }
                 #[cfg(target_arch = "x86_64")]
-                hv_message_type_HVMSG_UNMAPPED_GPA => {
+                msg_type @ (hv_message_type_HVMSG_UNMAPPED_GPA
+                | hv_message_type_HVMSG_GPA_INTERCEPT) => {
                     let info = x.to_memory_info().unwrap();
                     let insn_len = info.instruction_byte_count as usize;
-                    assert!(insn_len > 0 && insn_len <= 16);
+                    let gva = info.guest_virtual_address;
+                    let gpa = info.guest_physical_address;
+
+                    debug!("Exit ({:?}) GVA {:x} GPA {:x}", msg_type, gva, gpa);
 
                     let mut context = MshvEmulatorContext {
                         vcpu: self,
-                        map: (info.guest_virtual_address, info.guest_physical_address),
+                        map: (gva, gpa),
                     };
 
                     // Create a new emulator.
@@ -652,7 +657,10 @@ impl cpu::Vcpu for MshvVcpu {
 
                     // Emulate the trapped instruction, and only the first one.
                     let new_state = emul
-                        .emulate_first_insn(self.vp_index as usize, &info.instruction_bytes)
+                        .emulate_first_insn(
+                            self.vp_index as usize,
+                            &info.instruction_bytes[..insn_len],
+                        )
                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
 
                     // Set CPU state back.
@@ -1526,8 +1534,10 @@ impl<'a> MshvEmulatorContext<'a> {
             return Ok(self.map.1);
         }
 
-        // TODO: More fine-grained control for the flags
-        let flags = HV_TRANSLATE_GVA_VALIDATE_READ | HV_TRANSLATE_GVA_VALIDATE_WRITE;
+        // We can only get into here when executing guest code. Check for R and X permissions. In
+        // the future if we have other use cases, we may want to allow the caller to specify the
+        // flags.
+        let flags = HV_TRANSLATE_GVA_VALIDATE_READ | HV_TRANSLATE_GVA_VALIDATE_EXECUTE;
 
         let (gpa, result_code) = self
             .vcpu
@@ -1634,8 +1644,11 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
         self.translate(gva)
     }
 
-    fn fetch(&self, _ip: u64, _instruction_bytes: &mut [u8]) -> Result<(), PlatformError> {
-        Err(PlatformError::MemoryReadFailure(anyhow!("unimplemented")))
+    fn fetch(&self, ip: u64, instruction_bytes: &mut [u8]) -> Result<(), PlatformError> {
+        let rip =
+            self.cpu_state(self.vcpu.vp_index as usize)?
+                .linearize(Register::CS, ip, false)?;
+        self.read_memory(rip, instruction_bytes)
     }
 }
 

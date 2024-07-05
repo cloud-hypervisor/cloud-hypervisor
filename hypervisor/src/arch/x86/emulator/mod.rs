@@ -588,6 +588,7 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
                 // Once we have the new stream, we must create a new decoder
                 // and emulate one last instruction from the last decoded IP.
                 decoder = Decoder::new(64, &fetched_insn_stream, DecoderOptions::NONE);
+                decoder.set_ip(last_decoded_ip);
                 decoder.decode_out(&mut insn);
                 if decoder.last_error() != DecoderError::None {
                     return Err(EmulationError::InstructionFetchingError(anyhow!(
