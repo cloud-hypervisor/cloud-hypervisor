@@ -809,8 +809,12 @@ pub fn kill_child(child: &mut Child) {
     }
 
     // The timeout period elapsed without the child exiting
-    if child.wait_timeout(Duration::new(5, 0)).unwrap().is_none() {
+    if child.wait_timeout(Duration::new(10, 0)).unwrap().is_none() {
         let _ = child.kill();
+        let rust_flags = env::var("RUSTFLAGS").unwrap_or_default();
+        if rust_flags.contains("-Cinstrument-coverage") {
+            panic!("Wait child timeout, please check the reason.")
+        }
     }
 }
 
