@@ -1640,10 +1640,6 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
             .map_err(|e| PlatformError::SetCpuStateFailure(e.into()))
     }
 
-    fn gva_to_gpa(&self, gva: u64) -> Result<u64, PlatformError> {
-        self.translate(gva)
-    }
-
     fn fetch(&self, ip: u64, instruction_bytes: &mut [u8]) -> Result<(), PlatformError> {
         let rip =
             self.cpu_state(self.vcpu.vp_index as usize)?
