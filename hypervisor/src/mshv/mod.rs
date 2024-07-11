@@ -1529,15 +1529,10 @@ struct MshvEmulatorContext<'a> {
 impl<'a> MshvEmulatorContext<'a> {
     // Do the actual gva -> gpa translation
     #[allow(non_upper_case_globals)]
-    fn translate(&self, gva: u64) -> Result<u64, PlatformError> {
+    fn translate(&self, gva: u64, flags: u32) -> Result<u64, PlatformError> {
         if self.map.0 == gva {
             return Ok(self.map.1);
         }
-
-        // We can only get into here when executing guest code. Check for R and X permissions. In
-        // the future if we have other use cases, we may want to allow the caller to specify the
-        // flags.
-        let flags = HV_TRANSLATE_GVA_VALIDATE_READ | HV_TRANSLATE_GVA_VALIDATE_EXECUTE;
 
         let (gpa, result_code) = self
             .vcpu
@@ -1549,15 +1544,14 @@ impl<'a> MshvEmulatorContext<'a> {
             _ => Err(PlatformError::TranslateVirtualAddress(anyhow!(result_code))),
         }
     }
-}
 
-#[cfg(target_arch = "x86_64")]
-/// Platform emulation for Hyper-V
-impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
-    type CpuState = EmulatorCpuState;
-
-    fn read_memory(&self, gva: u64, data: &mut [u8]) -> Result<(), PlatformError> {
-        let gpa = self.translate(gva)?;
+    fn read_memory_flags(
+        &self,
+        gva: u64,
+        data: &mut [u8],
+        flags: u32,
+    ) -> Result<(), PlatformError> {
+        let gpa = self.translate(gva, flags)?;
         debug!(
             "mshv emulator: memory read {} bytes from [{:#x} -> {:#x}]",
             data.len(),
@@ -1575,9 +1569,19 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
 
         Ok(())
     }
+}
+
+#[cfg(target_arch = "x86_64")]
+/// Platform emulation for Hyper-V
+impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
+    type CpuState = EmulatorCpuState;
+
+    fn read_memory(&self, gva: u64, data: &mut [u8]) -> Result<(), PlatformError> {
+        self.read_memory_flags(gva, data, HV_TRANSLATE_GVA_VALIDATE_READ)
+    }
 
     fn write_memory(&mut self, gva: u64, data: &[u8]) -> Result<(), PlatformError> {
-        let gpa = self.translate(gva)?;
+        let gpa = self.translate(gva, HV_TRANSLATE_GVA_VALIDATE_WRITE)?;
         debug!(
             "mshv emulator: memory write {} bytes at [{:#x} -> {:#x}]",
             data.len(),
@@ -1644,7 +1648,11 @@ impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
         let rip =
             self.cpu_state(self.vcpu.vp_index as usize)?
                 .linearize(Register::CS, ip, false)?;
-        self.read_memory(rip, instruction_bytes)
+        self.read_memory_flags(
+            rip,
+            instruction_bytes,
+            HV_TRANSLATE_GVA_VALIDATE_READ | HV_TRANSLATE_GVA_VALIDATE_EXECUTE,
+        )
     }
 }
 
