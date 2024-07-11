@@ -137,14 +137,6 @@ pub trait PlatformEmulator {
     ///
     fn set_cpu_state(&self, cpu_id: usize, state: Self::CpuState) -> Result<(), PlatformError>;
 
-    /// Translate a guest virtual address into a physical one
-    ///
-    /// # Arguments
-    ///
-    /// * `gva` - Guest virtual address to translate.
-    ///
-    fn gva_to_gpa(&self, gva: u64) -> Result<u64, PlatformError>;
-
     /// Fetch instruction bytes from memory.
     ///
     /// # Arguments

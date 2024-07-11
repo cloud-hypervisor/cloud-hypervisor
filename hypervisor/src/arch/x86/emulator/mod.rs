@@ -750,10 +750,6 @@ mod mock_vmm {
             Ok(())
         }
 
-        fn gva_to_gpa(&self, gva: u64) -> Result<u64, PlatformError> {
-            Ok(gva)
-        }
-
         fn fetch(&self, ip: u64, instruction_bytes: &mut [u8]) -> Result<(), PlatformError> {
             let rip = self
                 .state
