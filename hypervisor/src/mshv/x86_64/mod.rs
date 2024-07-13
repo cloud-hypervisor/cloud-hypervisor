@@ -14,6 +14,8 @@ use crate::arch::x86::{
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+pub mod emulator;
+
 ///
 /// Export generically-named wrappers of mshv_bindings for Unix-based platforms
 ///

@@ -3,18 +3,15 @@
 // Copyright © 2020, Microsoft Corporation
 //
 
-use crate::arch::emulator::{PlatformEmulator, PlatformError};
-
+use crate::arch::emulator::PlatformEmulator;
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::emulator::{CpuStateManager, Emulator, EmulatorCpuState};
+use crate::arch::x86::emulator::Emulator;
 use crate::cpu;
-use crate::cpu::Vcpu;
 use crate::hypervisor;
+use crate::mshv::emulator::MshvEmulatorContext;
 use crate::vec_with_array_field;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::HypervisorType;
-#[cfg(target_arch = "x86_64")]
-use iced_x86::Register;
 use mshv_bindings::*;
 use mshv_ioctls::{set_registers_64, InterruptRequest, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
 use std::any::Any;
@@ -22,18 +19,15 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
-
 #[cfg(feature = "sev_snp")]
 mod snp_constants;
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
-#[cfg(feature = "sev_snp")]
-use snp_constants::*;
-
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
-
 use crate::{
     CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
     USER_MEMORY_REGION_ADJUSTABLE, USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ,
@@ -41,18 +35,16 @@ use crate::{
 };
 #[cfg(feature = "sev_snp")]
 use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
-use vmm_sys_util::eventfd::EventFd;
-#[cfg(target_arch = "x86_64")]
-pub use x86_64::VcpuMshvState;
-#[cfg(target_arch = "x86_64")]
-pub use x86_64::*;
-
+#[cfg(feature = "sev_snp")]
+use snp_constants::*;
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
-
+use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
+pub use x86_64::*;
+#[cfg(target_arch = "x86_64")]
+pub use x86_64::{emulator, VcpuMshvState};
 
 const DIRTY_BITMAP_CLEAR_DIRTY: u64 = 0x4;
 const DIRTY_BITMAP_SET_DIRTY: u64 = 0x8;
@@ -1517,143 +1509,6 @@ impl MshvVcpu {
         self.fd
             .set_vcpu_events(events)
             .map_err(|e| cpu::HypervisorCpuError::SetVcpuEvents(e.into()))
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-struct MshvEmulatorContext<'a> {
-    vcpu: &'a MshvVcpu,
-    map: (u64, u64), // Initial GVA to GPA mapping provided by the hypervisor
-}
-
-#[cfg(target_arch = "x86_64")]
-impl<'a> MshvEmulatorContext<'a> {
-    // Do the actual gva -> gpa translation
-    #[allow(non_upper_case_globals)]
-    fn translate(&self, gva: u64, flags: u32) -> Result<u64, PlatformError> {
-        if self.map.0 == gva {
-            return Ok(self.map.1);
-        }
-
-        let (gpa, result_code) = self
-            .vcpu
-            .translate_gva(gva, flags.into())
-            .map_err(|e| PlatformError::TranslateVirtualAddress(anyhow!(e)))?;
-
-        match result_code {
-            hv_translate_gva_result_code_HV_TRANSLATE_GVA_SUCCESS => Ok(gpa),
-            _ => Err(PlatformError::TranslateVirtualAddress(anyhow!(result_code))),
-        }
-    }
-
-    fn read_memory_flags(
-        &self,
-        gva: u64,
-        data: &mut [u8],
-        flags: u32,
-    ) -> Result<(), PlatformError> {
-        let gpa = self.translate(gva, flags)?;
-        debug!(
-            "mshv emulator: memory read {} bytes from [{:#x} -> {:#x}]",
-            data.len(),
-            gva,
-            gpa
-        );
-
-        if let Some(vm_ops) = &self.vcpu.vm_ops {
-            if vm_ops.guest_mem_read(gpa, data).is_err() {
-                vm_ops
-                    .mmio_read(gpa, data)
-                    .map_err(|e| PlatformError::MemoryReadFailure(e.into()))?;
-            }
-        }
-
-        Ok(())
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
-/// Platform emulation for Hyper-V
-impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
-    type CpuState = EmulatorCpuState;
-
-    fn read_memory(&self, gva: u64, data: &mut [u8]) -> Result<(), PlatformError> {
-        self.read_memory_flags(gva, data, HV_TRANSLATE_GVA_VALIDATE_READ)
-    }
-
-    fn write_memory(&mut self, gva: u64, data: &[u8]) -> Result<(), PlatformError> {
-        let gpa = self.translate(gva, HV_TRANSLATE_GVA_VALIDATE_WRITE)?;
-        debug!(
-            "mshv emulator: memory write {} bytes at [{:#x} -> {:#x}]",
-            data.len(),
-            gva,
-            gpa
-        );
-
-        if let Some(vm_ops) = &self.vcpu.vm_ops {
-            if vm_ops.guest_mem_write(gpa, data).is_err() {
-                vm_ops
-                    .mmio_write(gpa, data)
-                    .map_err(|e| PlatformError::MemoryWriteFailure(e.into()))?;
-            }
-        }
-
-        Ok(())
-    }
-
-    fn cpu_state(&self, cpu_id: usize) -> Result<Self::CpuState, PlatformError> {
-        if cpu_id != self.vcpu.vp_index as usize {
-            return Err(PlatformError::GetCpuStateFailure(anyhow!(
-                "CPU id mismatch {:?} {:?}",
-                cpu_id,
-                self.vcpu.vp_index
-            )));
-        }
-
-        let regs = self
-            .vcpu
-            .get_regs()
-            .map_err(|e| PlatformError::GetCpuStateFailure(e.into()))?;
-        let sregs = self
-            .vcpu
-            .get_sregs()
-            .map_err(|e| PlatformError::GetCpuStateFailure(e.into()))?;
-
-        debug!("mshv emulator: Getting new CPU state");
-        debug!("mshv emulator: {:#x?}", regs);
-
-        Ok(EmulatorCpuState { regs, sregs })
-    }
-
-    fn set_cpu_state(&self, cpu_id: usize, state: Self::CpuState) -> Result<(), PlatformError> {
-        if cpu_id != self.vcpu.vp_index as usize {
-            return Err(PlatformError::SetCpuStateFailure(anyhow!(
-                "CPU id mismatch {:?} {:?}",
-                cpu_id,
-                self.vcpu.vp_index
-            )));
-        }
-
-        debug!("mshv emulator: Setting new CPU state");
-        debug!("mshv emulator: {:#x?}", state.regs);
-
-        self.vcpu
-            .set_regs(&state.regs)
-            .map_err(|e| PlatformError::SetCpuStateFailure(e.into()))?;
-        self.vcpu
-            .set_sregs(&state.sregs)
-            .map_err(|e| PlatformError::SetCpuStateFailure(e.into()))
-    }
-
-    fn fetch(&self, ip: u64, instruction_bytes: &mut [u8]) -> Result<(), PlatformError> {
-        let rip =
-            self.cpu_state(self.vcpu.vp_index as usize)?
-                .linearize(Register::CS, ip, false)?;
-        self.read_memory_flags(
-            rip,
-            instruction_bytes,
-            HV_TRANSLATE_GVA_VALIDATE_READ | HV_TRANSLATE_GVA_VALIDATE_EXECUTE,
-        )
     }
 }
 
