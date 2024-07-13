@@ -148,7 +148,7 @@ impl VhostUserBlkThread {
                     ) {
                         Ok(l) => {
                             len = l;
-                            VIRTIO_BLK_S_OK
+                            VIRTIO_BLK_S_OK as u8
                         }
                         Err(e) => {
                             len = 1;

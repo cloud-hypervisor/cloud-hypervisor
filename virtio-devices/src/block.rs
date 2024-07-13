@@ -215,7 +215,7 @@ impl BlockEpollHandler {
             } else {
                 desc_chain
                     .memory()
-                    .write_obj(VIRTIO_BLK_S_OK, request.status_addr)
+                    .write_obj(VIRTIO_BLK_S_OK as u8, request.status_addr)
                     .map_err(Error::RequestStatus)?;
 
                 // If no asynchronous operation has been submitted, we can
@@ -361,7 +361,7 @@ impl BlockEpollHandler {
                     .write_latency_avg
                     .store(write_avg, Ordering::Relaxed);
 
-                (VIRTIO_BLK_S_OK, result as u32)
+                (VIRTIO_BLK_S_OK as u8, result as u32)
             } else {
                 error!(
                     "Request failed: {:x?} {:?}",

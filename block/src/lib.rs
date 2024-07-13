@@ -164,8 +164,8 @@ pub enum ExecuteError {
 }
 
 impl ExecuteError {
-    pub fn status(&self) -> u32 {
-        match *self {
+    pub fn status(&self) -> u8 {
+        let status = match *self {
             ExecuteError::BadRequest(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::Flush(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::Read(_) => VIRTIO_BLK_S_IOERR,
@@ -180,7 +180,8 @@ impl ExecuteError {
             ExecuteError::AsyncWrite(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::AsyncFlush(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::TemporaryBufferAllocation(_) => VIRTIO_BLK_S_IOERR,
-        }
+        };
+        status as u8
     }
 }
 
