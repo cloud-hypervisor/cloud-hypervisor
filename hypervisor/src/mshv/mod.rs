@@ -13,6 +13,7 @@ use crate::hypervisor;
 use crate::vec_with_array_field;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::HypervisorType;
+#[cfg(target_arch = "x86_64")]
 use iced_x86::Register;
 use mshv_bindings::*;
 use mshv_ioctls::{set_registers_64, InterruptRequest, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
