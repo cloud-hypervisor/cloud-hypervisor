@@ -6,6 +6,6 @@ version = "0.1.0"
 [dependencies]
 epoll = "4.3.3"
 libc = "0.2.153"
-log = "0.4.21"
+log = "0.4.22"
 thiserror = "1.0.60"
 vmm-sys-util = "0.12.1"

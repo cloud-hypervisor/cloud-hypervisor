@@ -8,7 +8,7 @@ version = "0.1.0"
 default = []
 
 [dependencies]
-log = "0.4.21"
+log = "0.4.22"
 virtio-queue = "0.12.0"
 vm-memory = { version = "0.14.1", features = [
   "backend-atomic",
