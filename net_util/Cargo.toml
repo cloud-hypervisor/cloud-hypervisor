@@ -8,7 +8,7 @@ version = "0.1.0"
 epoll = "4.3.3"
 getrandom = "0.2.14"
 libc = "0.2.153"
-log = "0.4.21"
+log = "0.4.22"
 net_gen = { path = "../net_gen" }
 rate_limiter = { path = "../rate_limiter" }
 serde = { version = "1.0.197", features = ["derive"] }
