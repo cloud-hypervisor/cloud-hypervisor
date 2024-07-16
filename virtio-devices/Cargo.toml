@@ -28,7 +28,7 @@ serde_with = { version = "3.7.0", default-features = false, features = [
   "macros",
 ] }
 serial_buffer = { path = "../serial_buffer" }
-thiserror = "1.0.60"
+thiserror = "1.0.62"
 vhost = { version = "0.11.0", features = [
   "vhost-kern",
   "vhost-user-backend",

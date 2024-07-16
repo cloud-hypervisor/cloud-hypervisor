@@ -17,7 +17,7 @@ libc = "0.2.153"
 linux-loader = { version = "0.11.0", features = ["bzimage", "elf", "pe"] }
 log = "0.4.22"
 serde = { version = "1.0.197", features = ["derive", "rc"] }
-thiserror = "1.0.60"
+thiserror = "1.0.62"
 uuid = "1.8.0"
 vm-memory = { version = "0.14.1", features = [
   "backend-bitmap",

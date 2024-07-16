@@ -16,7 +16,7 @@ libc = "0.2.153"
 log = "0.4.22"
 pci = { path = "../pci" }
 serde = { version = "1.0.197", features = ["derive"] }
-thiserror = "1.0.60"
+thiserror = "1.0.62"
 tpm = { path = "../tpm" }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
