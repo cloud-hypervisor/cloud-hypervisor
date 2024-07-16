@@ -84,30 +84,36 @@ param is set. The fields included in JSON include:
 | date               | Date for executing the program           |
 | results            | A list of metrics                        |
 
-A sample example is below.
+
+## Example
+
+Here is an example of generating metrics data for the boot time using
+`pmem`:
+
+```bash
+$ ./scripts/dev_cli.sh tests --metrics -- -- --test-filter boot_time_pmem_ms
+```
+
+Here is a sample output:
 
 ```json
 {
-  "git_human_readable": "v38.0-421-gc67f7997-dirty",
-  "git_revision": "c67f799717f99efc0a798683520278da25d5f8b9",
-  "git_commit_date": "Fri Jul 12 00:02:26 2024 +0000",
-  "date": "Mon Jul 15 17:33:19 CST 2024",
+  "git_human_readable": "v40.0",
+  "git_revision": "e9b263975786abbf895469b93dfc00f21ce39a88",
+  "git_commit_date": "Fri Jun 21 08:40:44 2024 +0000",
+  "date": "Tue Jul 16 16:35:29 UTC 2024",
   "results": [
     {
-      "name": "boot_time_ms",
-      "mean": xxx,
-      "std_dev": xxx,
-      "max": xxx,
-      "min": xxx
-    },
-    {
-      "name": "block_multi_queue_read_MiBps",
-      "mean": xxx,
-      "std_dev": xxx,
-      "max": xxx,
-      "min": xxx
-    },
-    ...
+      "name": "boot_time_pmem_ms",
+      "mean": 105.9461,
+      "std_dev": 7.140993312558129,
+      "max": 120.01499999999999,
+      "min": 92.37600000000002
+    }
   ]
 }
 ```
+
+Note that the metrics data above is for illustration purpose only and
+does not represent the actual performance of Cloud Hypervisor on your
+system.
