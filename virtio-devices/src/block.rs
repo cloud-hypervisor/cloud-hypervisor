@@ -40,6 +40,7 @@ use std::sync::{Arc, Barrier};
 use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
 use virtio_bindings::virtio_config::*;
+use virtio_bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -399,13 +400,23 @@ impl BlockEpollHandler {
         Ok(used_descs)
     }
 
-    fn signal_used_queue(&self) -> result::Result<(), DeviceError> {
-        self.interrupt_cb
-            .trigger(VirtioInterruptType::Queue(self.queue_index))
-            .map_err(|e| {
-                error!("Failed to signal used queue: {:?}", e);
-                DeviceError::FailedSignalingUsedQueue(e)
-            })
+    fn signal_used_queue(&mut self) -> result::Result<(), DeviceError> {
+        let mem = self.mem.memory();
+
+        if self
+            .queue
+            .needs_notification(mem.deref())
+            .map_err(DeviceError::QueueNeedsNotification)?
+        {
+            self.interrupt_cb
+                .trigger(VirtioInterruptType::Queue(self.queue_index))
+                .map_err(|e| {
+                    error!("Failed to signal used queue: {:?}", e);
+                    DeviceError::FailedSignalingUsedQueue(e)
+                })
+        } else {
+            Ok(())
+        }
     }
 
     fn set_queue_thread_affinity(&self) {
@@ -606,7 +617,8 @@ impl Block {
                     | (1u64 << VIRTIO_BLK_F_FLUSH)
                     | (1u64 << VIRTIO_BLK_F_CONFIG_WCE)
                     | (1u64 << VIRTIO_BLK_F_BLK_SIZE)
-                    | (1u64 << VIRTIO_BLK_F_TOPOLOGY);
+                    | (1u64 << VIRTIO_BLK_F_TOPOLOGY)
+                    | (1u64 << VIRTIO_RING_F_EVENT_IDX);
 
                 if iommu {
                     avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
@@ -779,8 +791,12 @@ impl VirtioDevice for Block {
         self.update_writeback();
 
         let mut epoll_threads = Vec::new();
+        let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
+
         for i in 0..queues.len() {
-            let (_, queue, queue_evt) = queues.remove(0);
+            let (_, mut queue, queue_evt) = queues.remove(0);
+            queue.set_event_idx(event_idx);
+
             let queue_size = queue.size();
             let (kill_evt, pause_evt) = self.common.dup_eventfds();
             let queue_idx = i as u16;

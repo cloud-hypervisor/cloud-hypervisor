@@ -122,6 +122,8 @@ pub enum Error {
     QueueAddUsed(virtio_queue::Error),
     #[error("Failed to : {0}")]
     QueueIterator(virtio_queue::Error),
+    #[error("Failed to check if queue needs notification: {0}")]
+    QueueNeedsNotification(virtio_queue::Error),
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
