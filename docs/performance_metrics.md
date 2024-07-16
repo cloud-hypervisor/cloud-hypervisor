@@ -37,9 +37,11 @@ $ ./scripts/dev_cli.sh tests --metrics -- -- --timeout 5 --iterations 10
 
 ## Performance Tests Details
 
-The following table lists the supported performance tests with default timeout and number of iterations.
-The `timeout` defines the maximum execution time of each test for each iteration. 
-The `iteration` defines how many times a test needs to be executed to generate the final metrics data.
+The following table lists the supported performance tests with default
+timeout and number of iterations. The `timeout` defines the maximum
+execution time of each test for each iteration. The `iteration` defines
+how many times a test needs to be executed to generate the final metrics
+data.
 
 | **Type**   | **Metric**                                 | **Timeout(s)** | **Iterations** |
 |------------|--------------------------------------------|----------------|----------------|
@@ -52,7 +54,7 @@ The `iteration` defines how many times a test needs to be executed to generate t
 |            | virtio_net_throughput_single_queue_tx_gbps | 10             | 5              |
 |            | virtio_net_throughput_multi_queue_rx_gbps  | 10             | 5              |
 |            | virtio_net_throughput_multi_queue_tx_gbps  | 10             | 5              |
-| Block      | block_read_MiBps                           | 10             | 5              | 
+| Block      | block_read_MiBps                           | 10             | 5              |
 |            | block_write_MiBps                          | 10             | 5              |
 |            | block_random_read_MiBps                    | 10             | 5              |
 |            | block_random_write_MiBps                   | 10             | 5              |
@@ -71,8 +73,8 @@ The `iteration` defines how many times a test needs to be executed to generate t
 
 ## Output Format
 
-Performance-metrics output the result into a json file if `report-file` param is set.
-The fields included in JSON include:
+Performance-metrics output the result into a json file if `report-file`
+param is set. The fields included in JSON include:
 
 | Field Name         | Content                                  |
 |--------------------|------------------------------------------|
