@@ -13,6 +13,7 @@ pub mod cmp;
 pub mod mov;
 pub mod movs;
 pub mod or;
+pub mod stos;
 
 fn get_op<T: CpuStateManager>(
     insn: &Instruction,

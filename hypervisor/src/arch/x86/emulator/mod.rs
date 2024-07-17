@@ -536,7 +536,12 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
             (movs, Movsw_m16_m16),
             (movs, Movsb_m8_m8),
             // OR
-            (or, Or_rm8_r8)
+            (or, Or_rm8_r8),
+            // STOS
+            (stos, Stosb_m8_AL),
+            (stos, Stosw_m16_AX),
+            (stos, Stosd_m32_EAX),
+            (stos, Stosq_m64_RAX)
         );
 
         handler
