@@ -7,11 +7,17 @@ version = "0.1.0"
 [features]
 dbus_api = ["blocking", "futures", "zbus"]
 default = []
-dhat-heap = ["dhat"]                                                         # For heap profiling
+dhat-heap = ["dhat"] # For heap profiling
 guest_debug = ["gdbstub", "gdbstub_arch", "kvm"]
 igvm = ["dep:igvm", "hex", "igvm_defs", "mshv-bindings", "range_map_vec"]
 io_uring = ["block/io_uring"]
-kvm = ["hypervisor/kvm", "pci/kvm", "vfio-ioctls/kvm", "vm-device/kvm"]
+kvm = [
+  "arch/kvm",
+  "hypervisor/kvm",
+  "pci/kvm",
+  "vfio-ioctls/kvm",
+  "vm-device/kvm",
+]
 mshv = ["hypervisor/mshv", "pci/mshv", "vfio-ioctls/mshv", "vm-device/mshv"]
 sev_snp = ["arch/sev_snp", "hypervisor/sev_snp", "virtio-devices/sev_snp"]
 tdx = ["arch/tdx", "hypervisor/tdx"]

@@ -34,6 +34,7 @@ use std::arch::x86_64;
 pub mod tdx;
 
 // CPUID feature bits
+#[cfg(feature = "kvm")]
 const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
 const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
 const MTRR_EDX_BIT: u8 = 12; // Hypervisor ecx bit.
@@ -619,17 +620,8 @@ pub fn generate_common_cpuid(
         "Generating guest CPUID for with physical address size: {}",
         config.phys_bits
     );
-    let cpuid_patches = vec![
-        // Patch tsc deadline timer bit
-        CpuidPatch {
-            function: 1,
-            index: 0,
-            flags_bit: None,
-            eax_bit: None,
-            ebx_bit: None,
-            ecx_bit: Some(TSC_DEADLINE_TIMER_ECX_BIT),
-            edx_bit: None,
-        },
+    #[allow(unused_mut)]
+    let mut cpuid_patches = vec![
         // Patch hypervisor bit
         CpuidPatch {
             function: 1,
@@ -651,6 +643,23 @@ pub fn generate_common_cpuid(
             edx_bit: Some(MTRR_EDX_BIT),
         },
     ];
+
+    #[cfg(feature = "kvm")]
+    if matches!(
+        hypervisor.hypervisor_type(),
+        hypervisor::HypervisorType::Kvm
+    ) {
+        // Patch tsc deadline timer bit
+        cpuid_patches.push(CpuidPatch {
+            function: 1,
+            index: 0,
+            flags_bit: None,
+            eax_bit: None,
+            ebx_bit: None,
+            ecx_bit: Some(TSC_DEADLINE_TIMER_ECX_BIT),
+            edx_bit: None,
+        });
+    }
 
     // Supported CPUID
     let mut cpuid = hypervisor
