@@ -2011,4 +2011,38 @@ impl vm::Vm for MshvVm {
                 ))
             })
     }
+
+    #[cfg(feature = "sev_snp")]
+    fn gain_page_access(&self, gpa: u64, size: u32) -> vm::Result<()> {
+        if !self.sev_snp_enabled {
+            return Ok(());
+        }
+
+        let start_gpfn: u64 = gpa >> PAGE_SHIFT;
+        let end_gpfn: u64 = (gpa + size as u64 - 1) >> PAGE_SHIFT;
+
+        let gpas: Vec<u64> = (start_gpfn..=end_gpfn).map(|x| x << PAGE_SHIFT).collect();
+
+        if !gpas.is_empty() {
+            let mut gpa_list = vec_with_array_field::<mshv_modify_gpa_host_access, u64>(gpas.len());
+            gpa_list[0].gpa_list_size = gpas.len() as u64;
+            gpa_list[0].host_access = HV_MAP_GPA_READABLE | HV_MAP_GPA_WRITABLE;
+            gpa_list[0].acquire = 1;
+            gpa_list[0].flags = 0;
+
+            // SAFETY: gpa_list initialized with gpas.len() and now it is being turned into
+            // gpas_slice with gpas.len() again. It is guaranteed to be large enough to hold
+            // everything from gpas.
+            unsafe {
+                let gpas_slice: &mut [u64] = gpa_list[0].gpa_list.as_mut_slice(gpas.len());
+                gpas_slice.copy_from_slice(gpas.as_slice());
+            }
+
+            self.fd
+                .modify_gpa_host_access(&gpa_list[0])
+                .map_err(|e| vm::HypervisorVmError::ModifyGpaHostAccess(e.into()))?;
+        }
+
+        Ok(())
+    }
 }
