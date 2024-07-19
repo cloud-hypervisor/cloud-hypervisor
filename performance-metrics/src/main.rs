@@ -274,7 +274,7 @@ mod adjuster {
     }
 }
 
-const TEST_LIST: [PerformanceTest; 29] = [
+const TEST_LIST: [PerformanceTest; 30] = [
     PerformanceTest {
         name: "boot_time_ms",
         func_ptr: performance_boot_time,
@@ -305,6 +305,16 @@ const TEST_LIST: [PerformanceTest; 29] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::s_to_ms,
+    },
+    PerformanceTest {
+        name: "restore_latency_time_ms",
+        func_ptr: performance_restore_latency,
+        control: PerformanceTestControl {
+            test_timeout: 2,
+            test_iterations: 10,
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::identity,
     },
     PerformanceTest {
         name: "boot_time_16_vcpus_pmem_ms",
