@@ -23,6 +23,7 @@ pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-
 enum Error {
     BootTimeParse,
     Infra(InfraError),
+    RestoreTimeParse,
 }
 
 impl From<InfraError> for Error {
@@ -74,6 +75,26 @@ fn direct_kernel_boot_path() -> PathBuf {
     kernel_path.push("Image");
 
     kernel_path
+}
+
+fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
+    let mut cmd = std::process::Command::new(clh_command("ch-remote"));
+    cmd.args([&format!("--api-socket={}", api_socket), command]);
+
+    if let Some(arg) = arg {
+        cmd.arg(arg);
+    }
+    let output = cmd.output().unwrap();
+    if output.status.success() {
+        true
+    } else {
+        eprintln!(
+            "Error running ch-remote command: {:?}\nstderr: {}",
+            &cmd,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        false
+    }
 }
 
 pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
@@ -406,6 +427,120 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     }
 }
 
+// Parse the event_monitor file based on the format that each event
+// is followed by a double newline
+fn parse_event_file(event_file: &str) -> Vec<serde_json::Value> {
+    let content = fs::read(event_file).unwrap();
+    let mut ret = Vec::new();
+    for entry in String::from_utf8_lossy(&content)
+        .trim()
+        .split("\n\n")
+        .collect::<Vec<&str>>()
+    {
+        ret.push(serde_json::from_str(entry).unwrap());
+    }
+    ret
+}
+
+fn parse_restore_time_output(events: &[serde_json::Value]) -> Result<f64, Error> {
+    for entry in events.iter() {
+        if entry["event"].as_str().unwrap() == "restored" {
+            let duration = entry["timestamp"]["secs"].as_u64().unwrap() as f64 * 1_000f64
+                + entry["timestamp"]["nanos"].as_u64().unwrap() as f64 / 1_000_000f64;
+            return Ok(duration);
+        }
+    }
+    Err(Error::RestoreTimeParse)
+}
+
+fn measure_restore_time(
+    cmd: &mut GuestCommand,
+    event_file: &str,
+    test_timeout: u32,
+) -> Result<f64, Error> {
+    let mut child = cmd
+        .capture_output()
+        .verbosity(VerbosityLevel::Warn)
+        .set_print_cmd(false)
+        .spawn()
+        .unwrap();
+
+    thread::sleep(Duration::new((test_timeout / 2) as u64, 0));
+    let _ = child.kill();
+    let output = child.wait_with_output().unwrap();
+
+    let json_events = parse_event_file(event_file);
+
+    parse_restore_time_output(&json_events).inspect_err(|_| {
+        eprintln!(
+            "\n\n==== Start child stdout ====\n\n{}\n\n==== End child stdout ====\
+            \n\n==== Start child stderr ====\n\n{}\n\n==== End child stderr ====",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    })
+}
+
+pub fn performance_restore_latency(control: &PerformanceTestControl) -> f64 {
+    let r = std::panic::catch_unwind(|| {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = performance_test_new_guest(Box::new(focal));
+        let api_socket_source = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("cloud-hypervisor.sock")
+                .to_str()
+                .unwrap(),
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_source])
+            .args([
+                "--cpus",
+                &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
+            ])
+            .args(["--memory", "size=256M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--console", "off"])
+            .default_disks()
+            .set_print_cmd(false)
+            .spawn()
+            .unwrap();
+
+        thread::sleep(Duration::new((control.test_timeout / 2) as u64, 0));
+        let snapshot_dir = String::from(guest.tmp_dir.as_path().join("snapshot").to_str().unwrap());
+        std::fs::create_dir(&snapshot_dir).unwrap();
+        assert!(remote_command(&api_socket_source, "pause", None));
+        assert!(remote_command(
+            &api_socket_source,
+            "snapshot",
+            Some(format!("file://{}", snapshot_dir).as_str()),
+        ));
+
+        let _ = child.kill();
+
+        let event_path = String::from(guest.tmp_dir.as_path().join("event.json").to_str().unwrap());
+        let mut cmd = GuestCommand::new(&guest);
+        let c = cmd
+            .args([
+                "--restore",
+                format!("source_url=file://{}", snapshot_dir).as_str(),
+            ])
+            .args(["--event-monitor", format!("path={}", event_path).as_str()]);
+
+        measure_restore_time(c, event_path.as_str(), control.test_timeout).unwrap()
+    });
+
+    match r {
+        Ok(r) => r,
+        Err(_) => {
+            panic!("test failed!");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -496,7 +631,42 @@ cloud-hypervisor: 613.57361ms: <vcpu0> INFO:vmm/src/vm.rs:392 -- [Debug I/O port
 
         assert_eq!(parse_boot_time_output(output.as_bytes()).unwrap(), 0.4525);
     }
+    #[test]
+    fn test_parse_restore_time_output() {
+        let output = r#"
+{
+  "timestamp": {
+    "secs": 0,
+    "nanos": 4664404
+  },
+  "source": "virtio-device",
+  "event": "activated",
+  "properties": {
+    "id": "__rng"
+  }
+}
 
+{
+  "timestamp": {
+    "secs": 0,
+    "nanos": 5505133
+  },
+  "source": "vm",
+  "event": "restored",
+  "properties": null
+}
+"#;
+        let mut ret = Vec::new();
+        for entry in String::from(output)
+            .trim()
+            .split("\n\n")
+            .collect::<Vec<&str>>()
+        {
+            ret.push(serde_json::from_str(entry).unwrap());
+        }
+
+        assert_eq!(parse_restore_time_output(&ret).unwrap(), 5.505133_f64);
+    }
     #[test]
     fn test_parse_fio_output() {
         let output = r#"

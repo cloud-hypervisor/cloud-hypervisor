@@ -31,6 +31,7 @@ $ ./scripts/dev_cli.sh tests --metrics -- -- --report-file /tmp/metrics.json --t
 ```
 
 To set custom timeout or test iterations for all performance tests:
+
 ```
 $ ./scripts/dev_cli.sh tests --metrics -- -- --timeout 5 --iterations 10
 ```
@@ -70,6 +71,7 @@ data.
 |            | block_multi_queue_write_IOPS               | 10             | 5              |
 |            | block_multi_queue_random_read_IOPS         | 10             | 5              |
 |            | block_multi_queue_random_write_IOPS        | 10             | 5              |
+| Other      | restore_latency_time_ms                    | 2              | 10             |
 
 ## Output Format
 
@@ -83,7 +85,6 @@ param is set. The fields included in JSON include:
 | git_commit_date    | Commit date of HEAD                      |
 | date               | Date for executing the program           |
 | results            | A list of metrics                        |
-
 
 ## Example
 
