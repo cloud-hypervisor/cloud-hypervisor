@@ -926,15 +926,7 @@ impl cpu::Vcpu for MshvVcpu {
                                             )?;
 
                                             // Clear the SW_EXIT_INFO1 register to indicate no error
-                                            let mut swei1_rw_gpa_arg =
-                                                mshv_bindings::mshv_read_write_gpa {
-                                                    base_gpa: ghcb_gpa + GHCB_SW_EXITINFO1_OFFSET,
-                                                    byte_count: std::mem::size_of::<u64>() as u32,
-                                                    ..Default::default()
-                                                };
-                                            self.fd.gpa_write(&mut swei1_rw_gpa_arg).map_err(
-                                                |e| cpu::HypervisorCpuError::GpaWrite(e.into()),
-                                            )?;
+                                            self.clear_swexit_info1(ghcb_gpa)?;
                                         }
                                         SVM_NAE_HV_DOORBELL_PAGE_QUERY => {
                                             let mut reg_assocs = [ hv_register_assoc {
@@ -956,6 +948,9 @@ impl cpu::Vcpu for MshvVcpu {
                                             self.fd.gpa_write(&mut swei2_rw_gpa_arg).map_err(
                                                 |e| cpu::HypervisorCpuError::GpaWrite(e.into()),
                                             )?;
+
+                                            // Clear the SW_EXIT_INFO1 register to indicate no error
+                                            self.clear_swexit_info1(ghcb_gpa)?;
                                         }
                                         SVM_NAE_HV_DOORBELL_PAGE_CLEAR => {
                                             let mut swei2_rw_gpa_arg =
@@ -1056,14 +1051,7 @@ impl cpu::Vcpu for MshvVcpu {
                                     }
 
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
-                                    let mut swei1_rw_gpa_arg = mshv_bindings::mshv_read_write_gpa {
-                                        base_gpa: ghcb_gpa + GHCB_SW_EXITINFO1_OFFSET,
-                                        byte_count: std::mem::size_of::<u64>() as u32,
-                                        ..Default::default()
-                                    };
-                                    self.fd
-                                        .gpa_write(&mut swei1_rw_gpa_arg)
-                                        .map_err(|e| cpu::HypervisorCpuError::GpaWrite(e.into()))?;
+                                    self.clear_swexit_info1(ghcb_gpa)?;
                                 }
                                 SVM_EXITCODE_MMIO_READ => {
                                     let src_gpa =
@@ -1092,6 +1080,9 @@ impl cpu::Vcpu for MshvVcpu {
                                     self.fd
                                         .gpa_write(&mut arg)
                                         .map_err(|e| cpu::HypervisorCpuError::GpaWrite(e.into()))?;
+
+                                    // Clear the SW_EXIT_INFO1 register to indicate no error
+                                    self.clear_swexit_info1(ghcb_gpa)?;
                                 }
                                 SVM_EXITCODE_MMIO_WRITE => {
                                     let dst_gpa =
@@ -1120,6 +1111,9 @@ impl cpu::Vcpu for MshvVcpu {
                                                 cpu::HypervisorCpuError::RunVcpu(e.into())
                                             })?;
                                     }
+
+                                    // Clear the SW_EXIT_INFO1 register to indicate no error
+                                    self.clear_swexit_info1(ghcb_gpa)?;
                                 }
                                 SVM_EXITCODE_SNP_GUEST_REQUEST => {
                                     let req_gpa =
@@ -1165,15 +1159,8 @@ impl cpu::Vcpu for MshvVcpu {
                                         .sev_snp_ap_create(&mshv_ap_create_req)
                                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
 
-                                    let mut swei1_rw_gpa_arg = mshv_bindings::mshv_read_write_gpa {
-                                        base_gpa: ghcb_gpa + GHCB_SW_EXITINFO1_OFFSET,
-                                        byte_count: std::mem::size_of::<u64>() as u32,
-                                        ..Default::default()
-                                    };
-
-                                    self.fd
-                                        .gpa_write(&mut swei1_rw_gpa_arg)
-                                        .map_err(|e| cpu::HypervisorCpuError::GpaWrite(e.into()))?;
+                                    // Clear the SW_EXIT_INFO1 register to indicate no error
+                                    self.clear_swexit_info1(ghcb_gpa)?;
                                 }
                                 _ => panic!(
                                     "GHCB_INFO_NORMAL: Unhandled exit code: {:0x}",
@@ -1509,6 +1496,27 @@ impl MshvVcpu {
         self.fd
             .set_vcpu_events(events)
             .map_err(|e| cpu::HypervisorCpuError::SetVcpuEvents(e.into()))
+    }
+
+    ///
+    /// Clear SW_EXIT_INFO1 register for SEV-SNP guests.
+    ///
+    #[cfg(feature = "sev_snp")]
+    fn clear_swexit_info1(
+        &self,
+        ghcb_gpa: u64,
+    ) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
+        // Clear the SW_EXIT_INFO1 register to indicate no error
+        let mut swei1_rw_gpa_arg = mshv_bindings::mshv_read_write_gpa {
+            base_gpa: ghcb_gpa + GHCB_SW_EXITINFO1_OFFSET,
+            byte_count: std::mem::size_of::<u64>() as u32,
+            ..Default::default()
+        };
+        self.fd
+            .gpa_write(&mut swei1_rw_gpa_arg)
+            .map_err(|e| cpu::HypervisorCpuError::GpaWrite(e.into()))?;
+
+        Ok(cpu::VmExit::Ignore)
     }
 }
 
