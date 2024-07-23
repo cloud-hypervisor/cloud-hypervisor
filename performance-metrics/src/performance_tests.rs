@@ -255,7 +255,7 @@ fn measure_boot_time(cmd: &mut GuestCommand, test_timeout: u32) -> Result<f64, E
     let _ = child.kill();
     let output = child.wait_with_output().unwrap();
 
-    parse_boot_time_output(&output.stderr).map_err(|e| {
+    parse_boot_time_output(&output.stderr).inspect_err(|_| {
         eprintln!(
             "\n\n==== Start child stdout ====\n\n{}\n\n==== End child stdout ====",
             String::from_utf8_lossy(&output.stdout)
@@ -264,8 +264,6 @@ fn measure_boot_time(cmd: &mut GuestCommand, test_timeout: u32) -> Result<f64, E
             "\n\n==== Start child stderr ====\n\n{}\n\n==== End child stderr ====",
             String::from_utf8_lossy(&output.stderr)
         );
-
-        e
     })
 }
 
