@@ -524,14 +524,11 @@ mod tests {
             None,
         );
 
-        pl011.write(0, UARTDR, &[b'x', b'y']);
-        pl011.write(0, UARTDR, &[b'a']);
-        pl011.write(0, UARTDR, &[b'b']);
-        pl011.write(0, UARTDR, &[b'c']);
-        assert_eq!(
-            pl011_out.buf.lock().unwrap().as_slice(),
-            &[b'x', b'a', b'b', b'c']
-        );
+        pl011.write(0, UARTDR, b"xy");
+        pl011.write(0, UARTDR, b"a");
+        pl011.write(0, UARTDR, b"b");
+        pl011.write(0, UARTDR, b"c");
+        assert_eq!(pl011_out.buf.lock().unwrap().as_slice(), b"xabc");
     }
 
     #[test]
@@ -549,7 +546,7 @@ mod tests {
         // write 1 to the interrupt event fd, so that read doesn't block in case the event fd
         // counter doesn't change (for 0 it blocks)
         assert!(intr_evt.write(1).is_ok());
-        pl011.queue_input_bytes(&[b'a', b'b', b'c']).unwrap();
+        pl011.queue_input_bytes(b"abc").unwrap();
 
         assert_eq!(intr_evt.read().unwrap(), 2);
 
