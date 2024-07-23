@@ -913,9 +913,8 @@ impl Vmm {
         // And then read the memory itself
         memory_manager
             .receive_memory_regions(&table, socket)
-            .map_err(|e| {
+            .inspect_err(|_| {
                 Response::error().write_to(socket).ok();
-                e
             })?;
         Response::ok().write_to(socket)?;
         Ok(())
