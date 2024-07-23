@@ -205,7 +205,7 @@ impl FromStr for ByteSized {
                 0
             };
 
-            let s = s.trim_end_matches(|c| c == 'K' || c == 'M' || c == 'G');
+            let s = s.trim_end_matches(['K', 'M', 'G']);
             s.parse::<u64>()
                 .map_err(|_| ByteSizedParseError::InvalidValue(s.to_owned()))?
                 << shift
