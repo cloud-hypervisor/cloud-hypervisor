@@ -352,9 +352,8 @@ impl Request {
         let desc = desc_chain
             .next()
             .ok_or(Error::DescriptorChainTooShort)
-            .map_err(|e| {
+            .inspect_err(|_| {
                 error!("Missing head descriptor");
-                e
             })?;
 
         // The descriptor contains the request type which MUST be readable.
