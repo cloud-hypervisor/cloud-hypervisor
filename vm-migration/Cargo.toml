@@ -7,7 +7,7 @@ version = "0.1.0"
 [dependencies]
 anyhow = "1.0.81"
 serde = { version = "1.0.197", features = ["derive", "rc"] }
-serde_json = "1.0.115"
+serde_json = "1.0.120"
 thiserror = "1.0.62"
 vm-memory = { version = "0.14.1", features = [
   "backend-atomic",
