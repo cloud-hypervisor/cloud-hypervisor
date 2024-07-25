@@ -29,7 +29,7 @@ inherits = "release"
 strip = false
 
 [dependencies]
-anyhow = "1.0.81"
+anyhow = "1.0.86"
 api_client = { path = "api_client" }
 clap = { version = "4.5.4", features = ["string"] }
 dhat = { version = "0.3.3", optional = true }
