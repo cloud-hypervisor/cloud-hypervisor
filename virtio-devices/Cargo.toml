@@ -9,7 +9,7 @@ default = []
 sev_snp = []
 
 [dependencies]
-anyhow = "1.0.81"
+anyhow = "1.0.86"
 arc-swap = "1.7.1"
 block = { path = "../block" }
 byteorder = "1.5.0"
