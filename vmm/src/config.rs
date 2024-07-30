@@ -496,6 +496,8 @@ pub struct VmParams<'a> {
     pub igvm: Option<&'a str>,
     #[cfg(feature = "sev_snp")]
     pub host_data: Option<&'a str>,
+    pub landlock_enable: bool,
+    pub landlock_config: Option<Vec<&'a str>>,
 }
 
 impl<'a> VmParams<'a> {
@@ -561,6 +563,10 @@ impl<'a> VmParams<'a> {
         let igvm = args.get_one::<String>("igvm").map(|x| x as &str);
         #[cfg(feature = "sev_snp")]
         let host_data = args.get_one::<String>("host-data").map(|x| x as &str);
+        let landlock_enable = args.get_flag("landlock");
+        let landlock_config: Option<Vec<&str>> = args
+            .get_many::<String>("landlock-rules")
+            .map(|x| x.map(|y| y as &str).collect());
 
         VmParams {
             cpus,
@@ -599,6 +605,8 @@ impl<'a> VmParams<'a> {
             igvm,
             #[cfg(feature = "sev_snp")]
             host_data,
+            landlock_enable,
+            landlock_config,
         }
     }
 }
@@ -2326,12 +2334,6 @@ impl TpmConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct LandlockConfig {
-    pub path: PathBuf,
-    pub access: String,
-}
-
 impl LandlockConfig {
     pub const SYNTAX: &'static str = "Landlock parameters \
         \"path=<path/to/{file/dir}>,access=[rw]\"";
@@ -2723,6 +2725,12 @@ impl VmConfig {
             .map(|p| p.iommu_segments.is_some())
             .unwrap_or_default();
 
+        if let Some(landlock_configs) = &self.landlock_config {
+            for landlock_config in landlock_configs {
+                landlock_config.validate()?;
+            }
+        }
+
         Ok(id_list)
     }
 
@@ -2893,6 +2901,16 @@ impl VmConfig {
         #[cfg(feature = "guest_debug")]
         let gdb = vm_params.gdb;
 
+        let mut landlock_config: Option<Vec<LandlockConfig>> = None;
+        if let Some(ll_config) = vm_params.landlock_config {
+            landlock_config = Some(
+                ll_config
+                    .iter()
+                    .map(|rule| LandlockConfig::parse(rule))
+                    .collect::<Result<Vec<LandlockConfig>>>()?,
+            );
+        }
+
         let mut config = VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory, vm_params.memory_zones)?,
@@ -2924,6 +2942,8 @@ impl VmConfig {
             platform,
             tpm,
             preserved_fds: None,
+            landlock_enable: vm_params.landlock_enable,
+            landlock_config,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -3050,6 +3070,7 @@ impl Clone for VmConfig {
                 .as_ref()
                 // SAFETY: FFI call with valid FDs
                 .map(|fds| fds.iter().map(|fd| unsafe { libc::dup(*fd) }).collect()),
+            landlock_config: self.landlock_config.clone(),
             ..*self
         }
     }
@@ -3848,6 +3869,8 @@ mod tests {
                     ..net_fixture()
                 },
             ]),
+            landlock_enable: false,
+            landlock_config: None,
         };
 
         let valid_config = RestoreConfig {
@@ -4036,6 +4059,8 @@ mod tests {
             platform: None,
             tpm: None,
             preserved_fds: None,
+            landlock_enable: false,
+            landlock_config: None,
         };
 
         assert!(valid_config.validate().is_ok());
