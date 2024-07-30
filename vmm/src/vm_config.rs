@@ -2,10 +2,19 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+use crate::{landlock::LandlockError, Landlock};
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
-use std::{net::Ipv4Addr, path::PathBuf};
+use std::{fs, net::Ipv4Addr, path::PathBuf, result};
 use virtio_devices::RateLimiterConfig;
+
+pub type LandlockResult<T> = result::Result<T, LandlockError>;
+
+/// Trait to apply Landlock on VmConfig elements
+pub(crate) trait ApplyLandlock {
+    /// Apply Landlock rules to file paths
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()>;
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpuAffinity {
@@ -132,6 +141,15 @@ pub struct MemoryZoneConfig {
     pub prefault: bool,
 }
 
+impl ApplyLandlock for MemoryZoneConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        if let Some(file) = &self.file {
+            landlock.add_rule_with_access(file.to_path_buf(), "rw")?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub enum HotplugMethod {
     #[default]
@@ -243,6 +261,15 @@ pub struct DiskConfig {
     pub serial: Option<String>,
     #[serde(default)]
     pub queue_affinity: Option<Vec<VirtQueueAffinity>>,
+}
+
+impl ApplyLandlock for DiskConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        if let Some(path) = &self.path {
+            landlock.add_rule_with_access(path.to_path_buf(), "rw")?;
+        }
+        Ok(())
+    }
 }
 
 pub const DEFAULT_DISK_NUM_QUEUES: usize = 1;
@@ -378,6 +405,14 @@ impl Default for RngConfig {
     }
 }
 
+impl ApplyLandlock for RngConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        // Rng Path only need read access
+        landlock.add_rule_with_access(self.src.to_path_buf(), "r")?;
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct BalloonConfig {
     pub size: u64,
@@ -411,6 +446,13 @@ pub fn default_fsconfig_queue_size() -> u16 {
     1024
 }
 
+impl ApplyLandlock for FsConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        landlock.add_rule_with_access(self.socket.to_path_buf(), "rw")?;
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PmemConfig {
     pub file: PathBuf,
@@ -424,6 +466,13 @@ pub struct PmemConfig {
     pub id: Option<String>,
     #[serde(default)]
     pub pci_segment: u16,
+}
+
+impl ApplyLandlock for PmemConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        landlock.add_rule_with_access(self.file.to_path_buf(), "rw")?;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -450,6 +499,18 @@ pub fn default_consoleconfig_file() -> Option<PathBuf> {
     None
 }
 
+impl ApplyLandlock for ConsoleConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        if let Some(file) = &self.file {
+            landlock.add_rule_with_access(file.to_path_buf(), "rw")?;
+        }
+        if let Some(socket) = &self.socket {
+            landlock.add_rule_with_access(socket.to_path_buf(), "rw")?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(target_arch = "x86_64")]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DebugConsoleConfig {
@@ -470,6 +531,15 @@ impl Default for DebugConsoleConfig {
         }
     }
 }
+#[cfg(target_arch = "x86_64")]
+impl ApplyLandlock for DebugConsoleConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        if let Some(file) = &self.file {
+            landlock.add_rule_with_access(file.to_path_buf(), "rw")?;
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DeviceConfig {
@@ -484,6 +554,22 @@ pub struct DeviceConfig {
     pub x_nv_gpudirect_clique: Option<u8>,
 }
 
+impl ApplyLandlock for DeviceConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        let device_path = fs::read_link(self.path.as_path()).map_err(LandlockError::OpenPath)?;
+        let iommu_group = device_path.file_name();
+        let iommu_group_str = iommu_group
+            .ok_or(LandlockError::InvalidPath)?
+            .to_str()
+            .ok_or(LandlockError::InvalidPath)?;
+
+        let vfio_group_path = "/dev/vfio/".to_owned() + iommu_group_str;
+        landlock.add_rule_with_access(vfio_group_path.into(), "rw")?;
+
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct UserDeviceConfig {
     pub socket: PathBuf,
@@ -491,6 +577,13 @@ pub struct UserDeviceConfig {
     pub id: Option<String>,
     #[serde(default)]
     pub pci_segment: u16,
+}
+
+impl ApplyLandlock for UserDeviceConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        landlock.add_rule_with_access(self.socket.to_path_buf(), "rw")?;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -510,6 +603,13 @@ pub fn default_vdpaconfig_num_queues() -> usize {
     1
 }
 
+impl ApplyLandlock for VdpaConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        landlock.add_rule_with_access(self.path.to_path_buf(), "rw")?;
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VsockConfig {
     pub cid: u32,
@@ -520,6 +620,13 @@ pub struct VsockConfig {
     pub id: Option<String>,
     #[serde(default)]
     pub pci_segment: u16,
+}
+
+impl ApplyLandlock for VsockConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        landlock.add_rule_with_access(self.socket.to_path_buf(), "rw")?;
+        Ok(())
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -575,6 +682,30 @@ pub struct PayloadConfig {
     pub host_data: Option<String>,
 }
 
+impl ApplyLandlock for PayloadConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        // Payload only needs read access
+        if let Some(firmware) = &self.firmware {
+            landlock.add_rule_with_access(firmware.to_path_buf(), "r")?;
+        }
+
+        if let Some(kernel) = &self.kernel {
+            landlock.add_rule_with_access(kernel.to_path_buf(), "r")?;
+        }
+
+        if let Some(initramfs) = &self.initramfs {
+            landlock.add_rule_with_access(initramfs.to_path_buf(), "r")?;
+        }
+
+        #[cfg(feature = "igvm")]
+        if let Some(igvm) = &self.igvm {
+            landlock.add_rule_with_access(igvm.to_path_buf(), "r")?;
+        }
+
+        Ok(())
+    }
+}
+
 pub fn default_serial() -> ConsoleConfig {
     ConsoleConfig {
         file: None,
@@ -596,6 +727,26 @@ pub fn default_console() -> ConsoleConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct TpmConfig {
     pub socket: PathBuf,
+}
+
+impl ApplyLandlock for TpmConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        landlock.add_rule_with_access(self.socket.to_path_buf(), "rw")?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct LandlockConfig {
+    pub path: PathBuf,
+    pub access: String,
+}
+
+impl ApplyLandlock for LandlockConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        landlock.add_rule_with_access(self.path.to_path_buf(), self.access.clone().as_str())?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -645,4 +796,94 @@ pub struct VmConfig {
     // valid, and will be closed when the holding VmConfig instance is destroyed.
     #[serde(skip)]
     pub preserved_fds: Option<Vec<i32>>,
+    #[serde(default)]
+    pub landlock_enable: bool,
+    pub landlock_config: Option<Vec<LandlockConfig>>,
+}
+
+impl VmConfig {
+    pub(crate) fn apply_landlock(&self) -> LandlockResult<()> {
+        let mut landlock = Landlock::new()?;
+
+        if let Some(mem_zones) = &self.memory.zones {
+            for zone in mem_zones.iter() {
+                zone.apply_landlock(&mut landlock)?;
+            }
+        }
+
+        let disks = &self.disks;
+        if let Some(disks) = disks {
+            for disk in disks.iter() {
+                disk.apply_landlock(&mut landlock)?;
+            }
+        }
+
+        self.rng.apply_landlock(&mut landlock)?;
+
+        if let Some(fs_configs) = &self.fs {
+            for fs_config in fs_configs.iter() {
+                fs_config.apply_landlock(&mut landlock)?;
+            }
+        }
+
+        if let Some(pmem_configs) = &self.pmem {
+            for pmem_config in pmem_configs.iter() {
+                pmem_config.apply_landlock(&mut landlock)?;
+            }
+        }
+
+        self.console.apply_landlock(&mut landlock)?;
+        self.serial.apply_landlock(&mut landlock)?;
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            self.debug_console.apply_landlock(&mut landlock)?;
+        }
+
+        if let Some(devices) = &self.devices {
+            landlock.add_rule_with_access("/dev/vfio/vfio".into(), "rw")?;
+
+            for device in devices.iter() {
+                device.apply_landlock(&mut landlock)?;
+            }
+        }
+
+        if let Some(user_devices) = &self.user_devices {
+            for user_devices in user_devices.iter() {
+                user_devices.apply_landlock(&mut landlock)?;
+            }
+        }
+
+        if let Some(vdpa_configs) = &self.vdpa {
+            for vdpa_config in vdpa_configs.iter() {
+                vdpa_config.apply_landlock(&mut landlock)?;
+            }
+        }
+
+        if let Some(vsock_config) = &self.vsock {
+            vsock_config.apply_landlock(&mut landlock)?;
+        }
+
+        if let Some(payload) = &self.payload {
+            payload.apply_landlock(&mut landlock)?;
+        }
+
+        if let Some(tpm_config) = &self.tpm {
+            tpm_config.apply_landlock(&mut landlock)?;
+        }
+
+        if self.net.is_some() {
+            landlock.add_rule_with_access("/dev/net/tun".into(), "rw")?;
+        }
+
+        if let Some(landlock_configs) = &self.landlock_config {
+            for landlock_config in landlock_configs.iter() {
+                landlock_config.apply_landlock(&mut landlock)?;
+            }
+        }
+
+        landlock.restrict_self()?;
+
+        Ok(())
+    }
 }

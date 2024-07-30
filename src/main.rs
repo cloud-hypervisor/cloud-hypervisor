@@ -285,14 +285,14 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 )
                 .action(ArgAction::SetTrue)
                 .default_value("false")
-                .group("vmm-config"),
+                .group("vm-config"),
         )
         .arg(
             Arg::new("landlock-rules")
             .long("landlock-rules")
             .help(config::LandlockConfig::SYNTAX)
             .num_args(1..)
-            .group("vmm-config"),
+            .group("vm-config"),
         )
         .arg(
             Arg::new("net")
@@ -657,31 +657,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     let vm_debug_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateDebugEventFd)?;
 
     let exit_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateExitEventFd)?;
-
     let landlock_enable = cmd_arguments.get_flag("landlock");
-    let landlock_config_str_vec: Option<Vec<&str>> = cmd_arguments
-        .get_many::<String>("landlock-rules")
-        .map(|x| x.map(|y| y as &str).collect());
-
-    let landlock_config = if let Some(str_vec) = landlock_config_str_vec {
-        Some(
-            str_vec
-                .into_iter()
-                .map(config::LandlockConfig::parse)
-                .collect::<config::Result<Vec<config::LandlockConfig>>>()
-                .map_err(Error::ParsingConfig)?,
-        )
-    } else {
-        None
-    };
-
-    if let Some(lc) = landlock_config.as_ref() {
-        for c in lc.iter() {
-            c.validate()
-                .map_err(config::Error::Validation)
-                .map_err(Error::ParsingConfig)?;
-        }
-    }
 
     #[allow(unused_mut)]
     let mut event_monitor = cmd_arguments
@@ -779,7 +755,6 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         &seccomp_action,
         hypervisor,
         landlock_enable,
-        landlock_config,
     )
     .map_err(Error::StartVmmThread)?;
 
@@ -1090,6 +1065,8 @@ mod unit_tests {
             platform: None,
             tpm: None,
             preserved_fds: None,
+            landlock_enable: false,
+            landlock_config: None,
         };
 
         assert_eq!(expected_vm_config, result_vm_config);
