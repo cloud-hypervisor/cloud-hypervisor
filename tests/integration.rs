@@ -10213,11 +10213,6 @@ mod live_migration {
         dest_api_socket.push_str(".dest");
         let mut dest_child = GuestCommand::new(&guest)
             .args(["--api-socket", &dest_api_socket])
-            .args(["--landlock"])
-            .args([
-                "--landlock-rules",
-                format!("path={:?},access=rw", guest.tmp_dir.as_path()).as_str(),
-            ])
             .capture_output()
             .spawn()
             .unwrap();
