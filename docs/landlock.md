@@ -27,22 +27,41 @@ $ sudo dmesg | grep -w  landlock
 ```
 Linux kernel confirms Landlock support with above message in dmesg.
 
-## Implementation Details
-
-To enable Landlock, Cloud-Hypervisor process needs the full list of files it
-needs to access over its lifetime. Most of these files are received as VM
-Configuration (`struct VmConfig`). Landlock is enabled in `vm_create` stage, as
-this is the earliest stage in guest boot sequence which has access to guest's
-VM Configuration.
-
 ## Enable Landlock
 
+At the time of enabling Landlock, Cloud-Hypervisor process needs the complete
+list of files it accesses over its lifetime. So, Landlock is enabled `vm_create`
+stage of guest boot.
+
+### Command Line
 Append `--landlock` to Cloud-Hypervisor's command line to enable Landlock
 support.
 
 If you expect guest to access additional paths after it boots
 (ex: during hotplug), those paths can be passed using `--landlock-rules` command
 line parameter.
+
+### API
+Landlock can also be enabled during `vm.create` request by passing a config like below:
+
+```
+{
+...
+    "landlock_enable": true,
+    "landlock_rules": [
+      {
+        "path": "/tmp/disk1",
+        "access": "rw"
+      },
+      {
+        "path": "/tmp/disk2",
+        "access": "rw"
+      }
+    ]
+...
+}
+```
+
 
 ## Usage Examples
 
