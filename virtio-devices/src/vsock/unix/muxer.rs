@@ -509,7 +509,6 @@ impl VsockMuxer {
                 .map_err(Error::UnixRead)?;
         }
 
-        let _ = command;
         let command = partial_command_map.remove(&stream.as_raw_fd()).unwrap();
 
         let mut word_iter = std::str::from_utf8(&command.buf[..command.len])
