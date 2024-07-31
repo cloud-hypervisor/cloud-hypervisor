@@ -495,11 +495,10 @@ impl VsockMuxer {
         const MIN_COMMAND_LEN: usize = 10;
 
         // Bring in the minimum number of bytes that we should be able to read.
-        if command.len < MIN_COMMAND_LEN {
-            command.len += stream
-                .read(&mut command.buf[command.len..MIN_COMMAND_LEN])
-                .map_err(Error::UnixRead)?;
-        }
+        stream
+            .read_exact(&mut command.buf[command.len..MIN_COMMAND_LEN])
+            .map_err(Error::UnixRead)?;
+        command.len = MIN_COMMAND_LEN;
 
         // Now, finish reading the destination port number, by bringing in one byte at a time,
         // until we reach an EOL terminator (or our buffer space runs out).  Yeah, not
