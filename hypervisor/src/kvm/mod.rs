@@ -337,6 +337,23 @@ impl From<ClockData> for kvm_clock_data {
     }
 }
 
+impl From<kvm_bindings::kvm_regs> for crate::StandardRegisters {
+    fn from(s: kvm_bindings::kvm_regs) -> Self {
+        crate::StandardRegisters::Kvm(s)
+    }
+}
+
+impl From<crate::StandardRegisters> for kvm_bindings::kvm_regs {
+    fn from(e: crate::StandardRegisters) -> Self {
+        match e {
+            crate::StandardRegisters::Kvm(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("StandardRegisters are not valid"),
+        }
+    }
+}
+
 impl From<kvm_irq_routing_entry> for IrqRoutingEntry {
     fn from(s: kvm_irq_routing_entry) -> Self {
         IrqRoutingEntry::Kvm(s)
