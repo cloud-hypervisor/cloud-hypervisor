@@ -1066,7 +1066,7 @@ mod unit_tests {
             tpm: None,
             preserved_fds: None,
             landlock_enable: false,
-            landlock_config: None,
+            landlock_rules: None,
         };
 
         assert_eq!(expected_vm_config, result_vm_config);

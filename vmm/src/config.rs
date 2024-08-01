@@ -497,7 +497,7 @@ pub struct VmParams<'a> {
     #[cfg(feature = "sev_snp")]
     pub host_data: Option<&'a str>,
     pub landlock_enable: bool,
-    pub landlock_config: Option<Vec<&'a str>>,
+    pub landlock_rules: Option<Vec<&'a str>>,
 }
 
 impl<'a> VmParams<'a> {
@@ -564,7 +564,7 @@ impl<'a> VmParams<'a> {
         #[cfg(feature = "sev_snp")]
         let host_data = args.get_one::<String>("host-data").map(|x| x as &str);
         let landlock_enable = args.get_flag("landlock");
-        let landlock_config: Option<Vec<&str>> = args
+        let landlock_rules: Option<Vec<&str>> = args
             .get_many::<String>("landlock-rules")
             .map(|x| x.map(|y| y as &str).collect());
 
@@ -606,7 +606,7 @@ impl<'a> VmParams<'a> {
             #[cfg(feature = "sev_snp")]
             host_data,
             landlock_enable,
-            landlock_config,
+            landlock_rules,
         }
     }
 }
@@ -2725,9 +2725,9 @@ impl VmConfig {
             .map(|p| p.iommu_segments.is_some())
             .unwrap_or_default();
 
-        if let Some(landlock_configs) = &self.landlock_config {
-            for landlock_config in landlock_configs {
-                landlock_config.validate()?;
+        if let Some(landlock_rules) = &self.landlock_rules {
+            for landlock_rule in landlock_rules {
+                landlock_rule.validate()?;
             }
         }
 
@@ -2901,10 +2901,10 @@ impl VmConfig {
         #[cfg(feature = "guest_debug")]
         let gdb = vm_params.gdb;
 
-        let mut landlock_config: Option<Vec<LandlockConfig>> = None;
-        if let Some(ll_config) = vm_params.landlock_config {
-            landlock_config = Some(
-                ll_config
+        let mut landlock_rules: Option<Vec<LandlockConfig>> = None;
+        if let Some(ll_rules) = vm_params.landlock_rules {
+            landlock_rules = Some(
+                ll_rules
                     .iter()
                     .map(|rule| LandlockConfig::parse(rule))
                     .collect::<Result<Vec<LandlockConfig>>>()?,
@@ -2943,7 +2943,7 @@ impl VmConfig {
             tpm,
             preserved_fds: None,
             landlock_enable: vm_params.landlock_enable,
-            landlock_config,
+            landlock_rules,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -3070,7 +3070,7 @@ impl Clone for VmConfig {
                 .as_ref()
                 // SAFETY: FFI call with valid FDs
                 .map(|fds| fds.iter().map(|fd| unsafe { libc::dup(*fd) }).collect()),
-            landlock_config: self.landlock_config.clone(),
+            landlock_rules: self.landlock_rules.clone(),
             ..*self
         }
     }
@@ -3870,7 +3870,7 @@ mod tests {
                 },
             ]),
             landlock_enable: false,
-            landlock_config: None,
+            landlock_rules: None,
         };
 
         let valid_config = RestoreConfig {
@@ -4060,7 +4060,7 @@ mod tests {
             tpm: None,
             preserved_fds: None,
             landlock_enable: false,
-            landlock_config: None,
+            landlock_rules: None,
         };
 
         assert!(valid_config.validate().is_ok());

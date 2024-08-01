@@ -2243,7 +2243,7 @@ mod unit_tests {
             tpm: None,
             preserved_fds: None,
             landlock_enable: false,
-            landlock_config: None,
+            landlock_rules: None,
         }))
     }
 
