@@ -798,7 +798,7 @@ pub struct VmConfig {
     pub preserved_fds: Option<Vec<i32>>,
     #[serde(default)]
     pub landlock_enable: bool,
-    pub landlock_config: Option<Vec<LandlockConfig>>,
+    pub landlock_rules: Option<Vec<LandlockConfig>>,
 }
 
 impl VmConfig {
@@ -876,9 +876,9 @@ impl VmConfig {
             landlock.add_rule_with_access("/dev/net/tun".into(), "rw")?;
         }
 
-        if let Some(landlock_configs) = &self.landlock_config {
-            for landlock_config in landlock_configs.iter() {
-                landlock_config.apply_landlock(&mut landlock)?;
+        if let Some(landlock_rules) = &self.landlock_rules {
+            for landlock_rule in landlock_rules.iter() {
+                landlock_rule.apply_landlock(&mut landlock)?;
             }
         }
 
