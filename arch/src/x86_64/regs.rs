@@ -12,7 +12,7 @@ use crate::layout::{
 use crate::{EntryPoint, GuestMemoryMmap};
 use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
 use hypervisor::arch::x86::regs::CR0_PE;
-use hypervisor::arch::x86::{FpuState, SpecialRegisters, StandardRegisters};
+use hypervisor::arch::x86::{FpuState, SpecialRegisters};
 use std::sync::Arc;
 use std::{mem, result};
 use thiserror::Error;
@@ -94,20 +94,19 @@ pub fn setup_msrs(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
 /// * `entry_point` - Description of the boot entry to set up.
 pub fn setup_regs(vcpu: &Arc<dyn hypervisor::Vcpu>, entry_point: EntryPoint) -> Result<()> {
-    let regs = match entry_point.setup_header {
-        None => StandardRegisters {
-            rflags: 0x0000000000000002u64,
-            rip: entry_point.entry_addr.raw_value(),
-            rbx: PVH_INFO_START.raw_value(),
-            ..Default::default()
-        },
-        Some(_) => StandardRegisters {
-            rflags: 0x0000000000000002u64,
-            rip: entry_point.entry_addr.raw_value(),
-            rsp: BOOT_STACK_POINTER.raw_value(),
-            rsi: ZERO_PAGE_START.raw_value(),
-            ..Default::default()
-        },
+    let mut regs = vcpu.create_standard_regs();
+    match entry_point.setup_header {
+        None => {
+            regs.set_rflags(0x0000000000000002u64);
+            regs.set_rip(entry_point.entry_addr.raw_value());
+            regs.set_rbx(PVH_INFO_START.raw_value());
+        }
+        Some(_) => {
+            regs.set_rflags(0x0000000000000002u64);
+            regs.set_rip(entry_point.entry_addr.raw_value());
+            regs.set_rsp(BOOT_STACK_POINTER.raw_value());
+            regs.set_rsi(ZERO_PAGE_START.raw_value());
+        }
     };
     vcpu.set_regs(&regs).map_err(Error::SetBaseRegisters)
 }
