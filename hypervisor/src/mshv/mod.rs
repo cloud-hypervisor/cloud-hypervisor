@@ -413,6 +413,13 @@ pub struct MshvVcpu {
 /// let vcpu = vm.create_vcpu(0, None).unwrap();
 /// ```
 impl cpu::Vcpu for MshvVcpu {
+    ///
+    /// Returns StandardRegisters with default value set
+    ///
+    #[cfg(target_arch = "x86_64")]
+    fn create_standard_regs(&self) -> crate::arch::x86::StandardRegisters {
+        mshv_bindings::StandardRegisters::default().into()
+    }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Returns the vCPU general purpose registers.

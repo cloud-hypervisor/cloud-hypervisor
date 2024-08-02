@@ -322,6 +322,12 @@ pub type Result<T> = anyhow::Result<T, HypervisorCpuError>;
 ///
 pub trait Vcpu: Send + Sync {
     ///
+    /// Returns StandardRegisters with default value set
+    ///
+    fn create_standard_regs(&self) -> StandardRegisters {
+        unimplemented!();
+    }
+    ///
     /// Returns the vCPU general purpose registers.
     ///
     fn get_regs(&self) -> Result<StandardRegisters>;
