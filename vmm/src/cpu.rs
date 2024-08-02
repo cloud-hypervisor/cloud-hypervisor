@@ -51,7 +51,7 @@ use hypervisor::arch::x86::CpuIdEntry;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use hypervisor::arch::x86::MsrEntry;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use hypervisor::arch::x86::{SpecialRegisters, StandardRegisters};
+use hypervisor::arch::x86::SpecialRegisters;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::kvm::kvm_bindings;
 #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
@@ -62,6 +62,8 @@ use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 use hypervisor::CpuVendor;
 #[cfg(feature = "kvm")]
 use hypervisor::HypervisorType;
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use hypervisor::StandardRegisters;
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
 use libc::{c_void, siginfo_t};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -1595,6 +1597,15 @@ impl CpuManager {
         pptt
     }
 
+    #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+    fn create_standard_regs(&self, cpu_id: u8) -> StandardRegisters {
+        self.vcpus[usize::from(cpu_id)]
+            .lock()
+            .unwrap()
+            .vcpu
+            .create_standard_regs()
+    }
+
     #[cfg(feature = "guest_debug")]
     fn get_regs(&self, cpu_id: u8) -> Result<StandardRegisters> {
         self.vcpus[usize::from(cpu_id)]
@@ -2331,14 +2342,28 @@ impl Debuggable for CpuManager {
             .get_regs(cpu_id as u8)
             .map_err(DebuggableError::ReadRegs)?;
         let regs = [
-            gregs.rax, gregs.rbx, gregs.rcx, gregs.rdx, gregs.rsi, gregs.rdi, gregs.rbp, gregs.rsp,
-            gregs.r8, gregs.r9, gregs.r10, gregs.r11, gregs.r12, gregs.r13, gregs.r14, gregs.r15,
+            gregs.get_rax(),
+            gregs.get_rbx(),
+            gregs.get_rcx(),
+            gregs.get_rdx(),
+            gregs.get_rsi(),
+            gregs.get_rdi(),
+            gregs.get_rbp(),
+            gregs.get_rsp(),
+            gregs.get_r8(),
+            gregs.get_r9(),
+            gregs.get_r10(),
+            gregs.get_r11(),
+            gregs.get_r12(),
+            gregs.get_r13(),
+            gregs.get_r14(),
+            gregs.get_r15(),
         ];
 
         // GDB exposes 32-bit eflags instead of 64-bit rflags.
         // https://github.com/bminor/binutils-gdb/blob/master/gdb/features/i386/64bit-core.xml
-        let eflags = gregs.rflags as u32;
-        let rip = gregs.rip;
+        let eflags = gregs.get_rflags() as u32;
+        let rip = gregs.get_rip();
 
         // Segment registers: CS, SS, DS, ES, FS, GS
         let sregs = self
@@ -2386,27 +2411,26 @@ impl Debuggable for CpuManager {
         let orig_gregs = self
             .get_regs(cpu_id as u8)
             .map_err(DebuggableError::ReadRegs)?;
-        let gregs = StandardRegisters {
-            rax: regs.regs[0],
-            rbx: regs.regs[1],
-            rcx: regs.regs[2],
-            rdx: regs.regs[3],
-            rsi: regs.regs[4],
-            rdi: regs.regs[5],
-            rbp: regs.regs[6],
-            rsp: regs.regs[7],
-            r8: regs.regs[8],
-            r9: regs.regs[9],
-            r10: regs.regs[10],
-            r11: regs.regs[11],
-            r12: regs.regs[12],
-            r13: regs.regs[13],
-            r14: regs.regs[14],
-            r15: regs.regs[15],
-            rip: regs.rip,
-            // Update the lower 32-bit of rflags.
-            rflags: (orig_gregs.rflags & !(u32::MAX as u64)) | (regs.eflags as u64),
-        };
+        let mut gregs = self.create_standard_regs(cpu_id as u8);
+        gregs.set_rax(regs.regs[0]);
+        gregs.set_rbx(regs.regs[1]);
+        gregs.set_rcx(regs.regs[2]);
+        gregs.set_rdx(regs.regs[3]);
+        gregs.set_rsi(regs.regs[4]);
+        gregs.set_rdi(regs.regs[5]);
+        gregs.set_rbp(regs.regs[6]);
+        gregs.set_rsp(regs.regs[7]);
+        gregs.set_r8(regs.regs[8]);
+        gregs.set_r9(regs.regs[9]);
+        gregs.set_r10(regs.regs[10]);
+        gregs.set_r11(regs.regs[11]);
+        gregs.set_r12(regs.regs[12]);
+        gregs.set_r13(regs.regs[13]);
+        gregs.set_r14(regs.regs[14]);
+        gregs.set_r15(regs.regs[15]);
+        gregs.set_rip(regs.rip);
+        // Update the lower 32-bit of rflags.
+        gregs.set_rflags((orig_gregs.get_rflags() & !(u32::MAX as u64)) | (regs.eflags as u64));
 
         self.set_regs(cpu_id as u8, &gregs)
             .map_err(DebuggableError::WriteRegs)?;
@@ -2566,11 +2590,24 @@ impl CpuElf64Writable for CpuManager {
                 .map_err(|_e| GuestDebuggableError::Coredump(anyhow!("get regs failed")))?;
 
             let regs1 = [
-                gregs.r15, gregs.r14, gregs.r13, gregs.r12, gregs.rbp, gregs.rbx, gregs.r11,
-                gregs.r10,
+                gregs.get_r15(),
+                gregs.get_r14(),
+                gregs.get_r13(),
+                gregs.get_r12(),
+                gregs.get_rbp(),
+                gregs.get_rbx(),
+                gregs.get_r11(),
+                gregs.get_r10(),
             ];
             let regs2 = [
-                gregs.r9, gregs.r8, gregs.rax, gregs.rcx, gregs.rdx, gregs.rsi, gregs.rdi, orig_rax,
+                gregs.get_r9(),
+                gregs.get_r8(),
+                gregs.get_rax(),
+                gregs.get_rcx(),
+                gregs.get_rdx(),
+                gregs.get_rsi(),
+                gregs.get_rdi(),
+                orig_rax,
             ];
 
             let sregs = self.vcpus[usize::from(vcpu_id)]
@@ -2582,8 +2619,8 @@ impl CpuElf64Writable for CpuManager {
 
             debug!(
                 "rip 0x{:x} rsp 0x{:x} gs 0x{:x} cs 0x{:x} ss 0x{:x} ds 0x{:x}",
-                gregs.rip,
-                gregs.rsp,
+                gregs.get_rip(),
+                gregs.get_rsp(),
                 sregs.gs.base,
                 sregs.cs.selector,
                 sregs.ss.selector,
@@ -2593,10 +2630,10 @@ impl CpuElf64Writable for CpuManager {
             let regs = X86_64UserRegs {
                 regs1,
                 regs2,
-                rip: gregs.rip,
+                rip: gregs.get_rip(),
                 cs: sregs.cs.selector as u64,
-                eflags: gregs.rflags,
-                rsp: gregs.rsp,
+                eflags: gregs.get_rflags(),
+                rsp: gregs.get_rsp(),
                 ss: sregs.ss.selector as u64,
                 fs_base: sregs.fs.base,
                 gs_base: sregs.gs.base,
@@ -2655,13 +2692,25 @@ impl CpuElf64Writable for CpuManager {
                 .map_err(|_e| GuestDebuggableError::Coredump(anyhow!("get regs failed")))?;
 
             let regs1 = [
-                gregs.rax, gregs.rbx, gregs.rcx, gregs.rdx, gregs.rsi, gregs.rdi, gregs.rsp,
-                gregs.rbp,
+                gregs.get_rax(),
+                gregs.get_rbx(),
+                gregs.get_rcx(),
+                gregs.get_rdx(),
+                gregs.get_rsi(),
+                gregs.get_rdi(),
+                gregs.get_rsp(),
+                gregs.get_rbp(),
             ];
 
             let regs2 = [
-                gregs.r8, gregs.r9, gregs.r10, gregs.r11, gregs.r12, gregs.r13, gregs.r14,
-                gregs.r15,
+                gregs.get_r8(),
+                gregs.get_r9(),
+                gregs.get_r10(),
+                gregs.get_r11(),
+                gregs.get_r12(),
+                gregs.get_r13(),
+                gregs.get_r14(),
+                gregs.get_r15(),
             ];
 
             let sregs = self.vcpus[usize::from(vcpu_id)]
@@ -2700,8 +2749,8 @@ impl CpuElf64Writable for CpuManager {
                 size: size_of::<DumpCpusState>() as u32,
                 regs1,
                 regs2,
-                rip: gregs.rip,
-                rflags: gregs.rflags,
+                rip: gregs.get_rip(),
+                rflags: gregs.get_rflags(),
                 cs,
                 ds,
                 es,
@@ -2737,7 +2786,8 @@ mod tests {
     use arch::layout::ZERO_PAGE_START;
     use arch::x86_64::interrupts::*;
     use arch::x86_64::regs::*;
-    use hypervisor::arch::x86::{FpuState, LapicState, StandardRegisters};
+    use hypervisor::arch::x86::{FpuState, LapicState};
+    use hypervisor::StandardRegisters;
     use linux_loader::loader::bootparam::setup_header;
 
     #[test]
@@ -2822,17 +2872,15 @@ mod tests {
         let vm = hv.create_vm().expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0, None).unwrap();
 
-        let expected_regs: StandardRegisters = StandardRegisters {
-            rflags: 0x0000000000000002u64,
-            rbx: arch::layout::PVH_INFO_START.0,
-            rip: 1,
-            ..Default::default()
-        };
+        let mut expected_regs: StandardRegisters = vcpu.create_standard_regs();
+        expected_regs.set_rflags(0x0000000000000002u64);
+        expected_regs.set_rbx(arch::layout::PVH_INFO_START.0);
+        expected_regs.set_rip(1);
 
         setup_regs(
             &vcpu,
             arch::EntryPoint {
-                entry_addr: vm_memory::GuestAddress(expected_regs.rip),
+                entry_addr: vm_memory::GuestAddress(expected_regs.get_rip()),
                 setup_header: None,
             },
         )
@@ -2848,18 +2896,16 @@ mod tests {
         let vm = hv.create_vm().expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0, None).unwrap();
 
-        let expected_regs: StandardRegisters = StandardRegisters {
-            rflags: 0x0000000000000002u64,
-            rip: 1,
-            rsp: BOOT_STACK_POINTER.0,
-            rsi: ZERO_PAGE_START.0,
-            ..Default::default()
-        };
+        let mut expected_regs: StandardRegisters = vcpu.create_standard_regs();
+        expected_regs.set_rflags(0x0000000000000002u64);
+        expected_regs.set_rip(1);
+        expected_regs.set_rsp(BOOT_STACK_POINTER.0);
+        expected_regs.set_rsi(ZERO_PAGE_START.0);
 
         setup_regs(
             &vcpu,
             arch::EntryPoint {
-                entry_addr: vm_memory::GuestAddress(expected_regs.rip),
+                entry_addr: vm_memory::GuestAddress(expected_regs.get_rip()),
                 setup_header: Some(setup_header {
                     ..Default::default()
                 }),

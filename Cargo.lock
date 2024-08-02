@@ -992,6 +992,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "byteorder",
+ "cfg-if",
  "concat-idents",
  "env_logger",
  "iced-x86",

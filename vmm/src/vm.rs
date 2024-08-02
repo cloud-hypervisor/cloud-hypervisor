@@ -3236,10 +3236,10 @@ pub fn test_vm() {
     vcpu.set_sregs(&vcpu_sregs).expect("set sregs failed");
 
     let mut vcpu_regs = vcpu.get_regs().expect("get regs failed");
-    vcpu_regs.rip = 0x1000;
-    vcpu_regs.rax = 2;
-    vcpu_regs.rbx = 3;
-    vcpu_regs.rflags = 2;
+    vcpu_regs.set_rip(0x1000);
+    vcpu_regs.set_rax(2);
+    vcpu_regs.set_rbx(3);
+    vcpu_regs.set_rflags(2);
     vcpu.set_regs(&vcpu_regs).expect("set regs failed");
 
     loop {

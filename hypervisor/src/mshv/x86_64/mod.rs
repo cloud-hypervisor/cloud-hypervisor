@@ -9,7 +9,6 @@
 //
 use crate::arch::x86::{
     CpuIdEntry, DescriptorTable, FpuState, LapicState, MsrEntry, SegmentRegister, SpecialRegisters,
-    StandardRegisters,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -70,56 +69,6 @@ impl fmt::Display for VcpuMshvState {
                 self.dbg,
                 self.vp_states,
         )
-    }
-}
-
-impl From<StandardRegisters> for MshvStandardRegisters {
-    fn from(regs: StandardRegisters) -> Self {
-        Self {
-            rax: regs.rax,
-            rbx: regs.rbx,
-            rcx: regs.rcx,
-            rdx: regs.rdx,
-            rsi: regs.rsi,
-            rdi: regs.rdi,
-            rsp: regs.rsp,
-            rbp: regs.rbp,
-            r8: regs.r8,
-            r9: regs.r9,
-            r10: regs.r10,
-            r11: regs.r11,
-            r12: regs.r12,
-            r13: regs.r13,
-            r14: regs.r14,
-            r15: regs.r15,
-            rip: regs.rip,
-            rflags: regs.rflags,
-        }
-    }
-}
-
-impl From<MshvStandardRegisters> for StandardRegisters {
-    fn from(regs: MshvStandardRegisters) -> Self {
-        Self {
-            rax: regs.rax,
-            rbx: regs.rbx,
-            rcx: regs.rcx,
-            rdx: regs.rdx,
-            rsi: regs.rsi,
-            rdi: regs.rdi,
-            rsp: regs.rsp,
-            rbp: regs.rbp,
-            r8: regs.r8,
-            r9: regs.r9,
-            r10: regs.r10,
-            r11: regs.r11,
-            r12: regs.r12,
-            r13: regs.r13,
-            r14: regs.r14,
-            r15: regs.r15,
-            rip: regs.rip,
-            rflags: regs.rflags,
-        }
     }
 }
 
