@@ -14,7 +14,7 @@ tdx = []
 [dependencies]
 anyhow = "1.0.86"
 byteorder = "1.5.0"
-igvm = { version = "0.3.1", optional = true }
+igvm = { version = "0.3.3", optional = true }
 igvm_defs = { version = "0.3.1", optional = true }
 kvm-bindings = { version = "0.8.1", optional = true, features = ["serde"] }
 kvm-ioctls = { version = "0.17.0", optional = true }
