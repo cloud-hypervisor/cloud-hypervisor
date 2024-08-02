@@ -10,7 +10,7 @@
 
 use crate::arch::x86::{
     CpuIdEntry, DescriptorTable, FpuState, LapicState, MsrEntry, SegmentRegister, SpecialRegisters,
-    StandardRegisters, XsaveState, CPUID_FLAG_VALID_INDEX,
+    XsaveState, CPUID_FLAG_VALID_INDEX,
 };
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 use serde::{Deserialize, Serialize};
@@ -76,57 +76,6 @@ pub struct VcpuKvmState {
     pub xcrs: ExtendedControlRegisters,
     pub mp_state: MpState,
     pub tsc_khz: Option<u32>,
-}
-
-impl From<StandardRegisters> for kvm_regs {
-    fn from(regs: StandardRegisters) -> Self {
-        Self {
-            rax: regs.get_rax(),
-            rbx: regs.get_rbx(),
-            rcx: regs.get_rcx(),
-            rdx: regs.get_rdx(),
-            rsi: regs.get_rsi(),
-            rdi: regs.get_rdi(),
-            rsp: regs.get_rsp(),
-            rbp: regs.get_rbp(),
-            r8: regs.get_r8(),
-            r9: regs.get_r9(),
-            r10: regs.get_r10(),
-            r11: regs.get_r11(),
-            r12: regs.get_r12(),
-            r13: regs.get_r13(),
-            r14: regs.get_r14(),
-            r15: regs.get_r15(),
-            rip: regs.get_rip(),
-            rflags: regs.get_rflags(),
-        }
-    }
-}
-
-impl From<kvm_regs> for StandardRegisters {
-    fn from(regs: kvm_regs) -> Self {
-        let mut sregs = StandardRegisters::default();
-        sregs.set_rax(regs.rax);
-        sregs.set_rbx(regs.rbx);
-        sregs.set_rcx(regs.rcx);
-        sregs.set_rdx(regs.rdx);
-        sregs.set_rsi(regs.rsi);
-        sregs.set_rdi(regs.rdi);
-        sregs.set_rsp(regs.rsp);
-        sregs.set_rbp(regs.rbp);
-        sregs.set_r8(regs.r8);
-        sregs.set_r9(regs.r9);
-        sregs.set_r10(regs.r10);
-        sregs.set_r11(regs.r11);
-        sregs.set_r12(regs.r12);
-        sregs.set_r13(regs.r13);
-        sregs.set_r14(regs.r14);
-        sregs.set_r15(regs.r15);
-        sregs.set_rip(regs.rip);
-        sregs.set_rflags(regs.rflags);
-
-        sregs
-    }
 }
 
 impl From<SegmentRegister> for kvm_segment {

@@ -51,7 +51,7 @@ use hypervisor::arch::x86::CpuIdEntry;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use hypervisor::arch::x86::MsrEntry;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use hypervisor::arch::x86::{SpecialRegisters, StandardRegisters};
+use hypervisor::arch::x86::SpecialRegisters;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::kvm::kvm_bindings;
 #[cfg(all(target_arch = "aarch64", feature = "kvm"))]
@@ -62,6 +62,8 @@ use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 use hypervisor::CpuVendor;
 #[cfg(feature = "kvm")]
 use hypervisor::HypervisorType;
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use hypervisor::StandardRegisters;
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
 use libc::{c_void, siginfo_t};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -2784,7 +2786,8 @@ mod tests {
     use arch::layout::ZERO_PAGE_START;
     use arch::x86_64::interrupts::*;
     use arch::x86_64::regs::*;
-    use hypervisor::arch::x86::{FpuState, LapicState, StandardRegisters};
+    use hypervisor::arch::x86::{FpuState, LapicState};
+    use hypervisor::StandardRegisters;
     use linux_loader::loader::bootparam::setup_header;
 
     #[test]

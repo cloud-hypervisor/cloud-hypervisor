@@ -14,7 +14,6 @@
 #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
 pub mod emulator;
 pub mod gdt;
-use concat_idents::concat_idents;
 #[allow(non_camel_case_types)]
 #[allow(non_snake_case)]
 #[allow(non_upper_case_globals)]
@@ -172,92 +171,6 @@ macro_rules! msr_data {
         }
     };
 }
-
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
-pub struct StandardRegisters {
-    rax: u64,
-    rbx: u64,
-    rcx: u64,
-    rdx: u64,
-    rsi: u64,
-    rdi: u64,
-    rsp: u64,
-    rbp: u64,
-    r8: u64,
-    r9: u64,
-    r10: u64,
-    r11: u64,
-    r12: u64,
-    r13: u64,
-    r14: u64,
-    r15: u64,
-    rip: u64,
-    rflags: u64,
-}
-
-macro_rules! set_x86_64_reg {
-    ($reg_name:ident) => {
-        concat_idents!(method_name = "set_", $reg_name {
-            #[cfg(target_arch = "x86_64")]
-            impl StandardRegisters {
-                pub fn method_name(&mut self, val: u64) {
-                    self.$reg_name = val;
-                }
-            }
-        });
-    }
-}
-
-macro_rules! get_x86_64_reg {
-    ($reg_name:ident) => {
-        concat_idents!(method_name = "get_", $reg_name {
-            #[cfg(target_arch = "x86_64")]
-            impl StandardRegisters {
-                pub fn method_name(&self) -> u64 {
-                    self.$reg_name
-                }
-            }
-        });
-    }
-}
-
-set_x86_64_reg!(rax);
-set_x86_64_reg!(rbx);
-set_x86_64_reg!(rcx);
-set_x86_64_reg!(rdx);
-set_x86_64_reg!(rsi);
-set_x86_64_reg!(rdi);
-set_x86_64_reg!(rsp);
-set_x86_64_reg!(rbp);
-set_x86_64_reg!(r8);
-set_x86_64_reg!(r9);
-set_x86_64_reg!(r10);
-set_x86_64_reg!(r11);
-set_x86_64_reg!(r12);
-set_x86_64_reg!(r13);
-set_x86_64_reg!(r14);
-set_x86_64_reg!(r15);
-set_x86_64_reg!(rip);
-set_x86_64_reg!(rflags);
-
-get_x86_64_reg!(rax);
-get_x86_64_reg!(rbx);
-get_x86_64_reg!(rcx);
-get_x86_64_reg!(rdx);
-get_x86_64_reg!(rsi);
-get_x86_64_reg!(rdi);
-get_x86_64_reg!(rsp);
-get_x86_64_reg!(rbp);
-get_x86_64_reg!(r8);
-get_x86_64_reg!(r9);
-get_x86_64_reg!(r10);
-get_x86_64_reg!(r11);
-get_x86_64_reg!(r12);
-get_x86_64_reg!(r13);
-get_x86_64_reg!(r14);
-get_x86_64_reg!(r15);
-get_x86_64_reg!(rip);
-get_x86_64_reg!(rflags);
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 pub struct DescriptorTable {
