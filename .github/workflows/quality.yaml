@@ -80,6 +80,13 @@ jobs:
           command: clippy
           args: --target=${{ matrix.target }} --locked --all --all-targets --tests --examples --features "guest_debug" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
+      - name: Clippy (default features + pvmemcontrol)
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
+          command: clippy
+          args: --target=${{ matrix.target }} --locked --all --all-targets --tests --examples --features "pvmemcontrol" -- -D warnings -D clippy::undocumented_unsafe_blocks
+
       - name: Clippy (default features + tracing)
         uses: actions-rs/cargo@v1
         with:

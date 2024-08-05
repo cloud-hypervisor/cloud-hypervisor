@@ -49,6 +49,9 @@ jobs:
       - name: Build (default features + guest_debug)
         run: cargo rustc --locked --bin cloud-hypervisor --features "guest_debug" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
+      - name: Build (default features + pvmemcontrol)
+        run: cargo rustc --locked --bin cloud-hypervisor --features "pvmemcontrol" -- -D warnings -D clippy::undocumented_unsafe_blocks
+
       - name: Build (mshv)
         run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "mshv"  -- -D warnings -D clippy::undocumented_unsafe_blocks
 
