@@ -3741,15 +3741,22 @@ impl DeviceManager {
         // Create the AccessPlatform trait from the implementation IommuMapping.
         // This will provide address translation for any virtio device sitting
         // behind a vIOMMU.
-        let access_platform: Option<Arc<dyn AccessPlatform>> = if let Some(mapping) = iommu_mapping
-        {
-            Some(Arc::new(AccessPlatformMapping::new(
+        let mut access_platform: Option<Arc<dyn AccessPlatform>> = None;
+
+        if let Some(mapping) = iommu_mapping {
+            access_platform = Some(Arc::new(AccessPlatformMapping::new(
                 pci_device_bdf.into(),
                 mapping.clone(),
-            )))
-        } else {
-            None
-        };
+            )));
+        }
+
+        // If SEV-SNP is enabled create the AccessPlatform from SevSnpPageAccessProxy
+        #[cfg(feature = "sev_snp")]
+        if self.config.lock().unwrap().is_sev_snp_enabled() {
+            access_platform = Some(Arc::new(SevSnpPageAccessProxy::new(
+                self.address_manager.vm.clone(),
+            )));
+        }
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
 
