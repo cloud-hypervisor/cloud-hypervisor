@@ -19,6 +19,7 @@ use vm_virtio::{AccessPlatform, Translatable};
 pub struct TxVirtio {
     pub counter_bytes: Wrapping<u64>,
     pub counter_frames: Wrapping<u64>,
+    iovecs: IovecBuffer,
 }
 
 impl Default for TxVirtio {
@@ -32,6 +33,7 @@ impl TxVirtio {
         TxVirtio {
             counter_bytes: Wrapping(0),
             counter_frames: Wrapping(0),
+            iovecs: IovecBuffer::new(),
         }
     }
 
@@ -54,7 +56,7 @@ impl TxVirtio {
 
             let mut next_desc = desc_chain.next();
 
-            let mut iovecs = Vec::new();
+            let mut iovecs = self.iovecs.borrow();
             while let Some(desc) = next_desc {
                 let desc_addr = desc
                     .addr()
@@ -145,6 +147,7 @@ impl TxVirtio {
 pub struct RxVirtio {
     pub counter_bytes: Wrapping<u64>,
     pub counter_frames: Wrapping<u64>,
+    iovecs: IovecBuffer,
 }
 
 impl Default for RxVirtio {
@@ -158,6 +161,7 @@ impl RxVirtio {
         RxVirtio {
             counter_bytes: Wrapping(0),
             counter_frames: Wrapping(0),
+            iovecs: IovecBuffer::new(),
         }
     }
 
@@ -193,7 +197,7 @@ impl RxVirtio {
                 .ok_or(NetQueuePairError::DescriptorInvalidHeader)?;
             let mut next_desc = Some(desc);
 
-            let mut iovecs = Vec::new();
+            let mut iovecs = self.iovecs.borrow();
             while let Some(desc) = next_desc {
                 let desc_addr = desc
                     .addr()
@@ -285,6 +289,53 @@ impl RxVirtio {
         }
 
         Ok(exhausted_descs)
+    }
+}
+
+#[derive(Default, Clone)]
+struct IovecBuffer(Vec<libc::iovec>);
+
+// SAFETY: Implementing Send for IovecBuffer is safe as the pointer inside is iovec.
+// The iovecs are usually constructed from virtio descriptors, which are safe to send across
+// threads.
+unsafe impl Send for IovecBuffer {}
+// SAFETY: Implementing Sync for IovecBuffer is safe as the pointer inside is iovec.
+// The iovecs are usually constructed from virtio descriptors, which are safe to access from
+// multiple threads.
+unsafe impl Sync for IovecBuffer {}
+
+impl IovecBuffer {
+    fn new() -> Self {
+        // Here we use 4 as the default capacity because it is enough for most cases.
+        const DEFAULT_CAPACITY: usize = 4;
+        IovecBuffer(Vec::with_capacity(DEFAULT_CAPACITY))
+    }
+
+    fn borrow(&mut self) -> IovecBufferBorrowed<'_> {
+        IovecBufferBorrowed(&mut self.0)
+    }
+}
+
+struct IovecBufferBorrowed<'a>(&'a mut Vec<libc::iovec>);
+
+impl<'a> std::ops::Deref for IovecBufferBorrowed<'a> {
+    type Target = Vec<libc::iovec>;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+impl<'a> std::ops::DerefMut for IovecBufferBorrowed<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0
+    }
+}
+
+impl Drop for IovecBufferBorrowed<'_> {
+    fn drop(&mut self) {
+        // Clear the buffer to make sure old values are not used after
+        self.0.clear();
     }
 }
 
