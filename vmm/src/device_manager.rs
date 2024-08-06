@@ -800,6 +800,20 @@ impl SevSnpPageAccessProxy {
     }
 }
 
+#[cfg(all(feature = "mshv", feature = "sev_snp"))]
+impl AccessPlatform for SevSnpPageAccessProxy {
+    fn translate_gpa(&self, base: u64, _size: u64) -> std::result::Result<u64, std::io::Error> {
+        Ok(base)
+    }
+
+    fn translate_gva(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error> {
+        self.vm
+            .gain_page_access(base, size as u32)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        Ok(base)
+    }
+}
+
 pub struct DeviceManager {
     // Manage address space related to devices
     address_manager: Arc<AddressManager>,
