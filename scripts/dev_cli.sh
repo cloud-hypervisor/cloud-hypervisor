@@ -200,6 +200,7 @@ cmd_help() {
     echo "        --integration-rate-limiter   Run the rate-limiter integration tests."
     echo "        --libc                       Select the C library Cloud Hypervisor will be built against. Default is gnu"
     echo "        --metrics                    Generate performance metrics"
+    echo "        --coverage                   Generate code coverage information"
     echo "        --volumes                    Hash separated volumes to be exported. Example --volumes /mnt:/mnt#/myvol:/myvol"
     echo "        --hypervisor                 Underlying hypervisor. Options kvm, mshv"
     echo "        --all                        Run all tests."
@@ -332,6 +333,7 @@ cmd_tests() {
     integration_live_migration=false
     integration_rate_limiter=false
     metrics=false
+    coverage=false
     libc="gnu"
     arg_vols=""
     hypervisor="kvm"
@@ -350,6 +352,7 @@ cmd_tests() {
         "--integration-live-migration") { integration_live_migration=true; } ;;
         "--integration-rate-limiter") { integration_rate_limiter=true; } ;;
         "--metrics") { metrics=true; } ;;
+        "--coverage") { coverage=true; } ;;
         "--libc")
             shift
             [[ "$1" =~ ^(musl|gnu)$ ]] ||
@@ -417,6 +420,7 @@ cmd_tests() {
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
             --env TARGET_CC="$target_cc" \
+            --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             "$CTR_IMAGE" \
             ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -440,6 +444,7 @@ cmd_tests() {
             --env RUSTFLAGS="$rustflags" \
             --env TARGET_CC="$target_cc" \
             --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             "$CTR_IMAGE" \
             dbus-run-session ./scripts/run_integration_tests_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -532,6 +537,7 @@ cmd_tests() {
             --env RUSTFLAGS="$rustflags" \
             --env TARGET_CC="$target_cc" \
             --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             "$CTR_IMAGE" \
             ./scripts/run_integration_tests_live_migration.sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -581,6 +587,29 @@ cmd_tests() {
             --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             "$CTR_IMAGE" \
             ./scripts/run_metrics.sh "$@" || fix_dir_perms $? || exit $?
+    fi
+
+    if [ "$coverage" = true ]; then
+        say "Generating code coverage information for $target..."
+        $DOCKER_RUNTIME run \
+            --workdir "$CTR_CLH_ROOT_DIR" \
+            --rm \
+            --privileged \
+            --security-opt seccomp=unconfined \
+            --ipc=host \
+            --net="$CTR_CLH_NET" \
+            --mount type=tmpfs,destination=/tmp \
+            --volume /dev:/dev \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+            ${exported_volumes:+"$exported_volumes"} \
+            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
+            --env USER="root" \
+            --env BUILD_TARGET="$target" \
+            --env RUSTFLAGS="$rustflags" \
+            --env TARGET_CC="$target_cc" \
+            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            "$CTR_IMAGE" \
+            dbus-run-session ./scripts/run_coverage.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     fix_dir_perms $?

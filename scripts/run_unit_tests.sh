@@ -17,5 +17,5 @@ elif [[ $(uname -m) = "x86_64" ]]; then
 fi
 
 export RUST_BACKTRACE=1
-cargo test --lib --bins --target "$BUILD_TARGET" --workspace ${cargo_args[@]} || exit 1
-cargo test --doc --target "$BUILD_TARGET" --workspace ${cargo_args[@]} || exit 1
+cargo test --lib --bins --target "$BUILD_TARGET" --release --workspace ${cargo_args[@]} || exit 1
+cargo test --doc --target "$BUILD_TARGET" --release --workspace ${cargo_args[@]} || exit 1
