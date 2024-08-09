@@ -40,7 +40,7 @@ macro_rules! movs {
             let len = std::mem::size_of::<$bound>();
 
             while count > 0 {
-                let mut memory: [u8; 4] = [0; 4];
+                let mut memory: [u8; 8] = [0; 8];
 
                 let src = state
                     .linearize(Register::DS, rsi, false)
@@ -83,6 +83,11 @@ macro_rules! movs {
     };
 }
 
+pub struct Movsq_m64_m64;
+impl<T: CpuStateManager> InstructionHandler<T> for Movsq_m64_m64 {
+    movs!(u64);
+}
+
 pub struct Movsd_m32_m32;
 impl<T: CpuStateManager> InstructionHandler<T> for Movsd_m32_m32 {
     movs!(u32);
@@ -102,6 +107,40 @@ impl<T: CpuStateManager> InstructionHandler<T> for Movsb_m8_m8 {
 mod tests {
     use super::*;
     use crate::arch::x86::emulator::mock_vmm::*;
+
+    #[test]
+    fn test_rep_movsq_m64_m64() {
+        let ip: u64 = 0x1000;
+        let memory: [u8; 32] = [
+            0x78, 0x56, 0x34, 0x12, // 0x12345678
+            0xdd, 0xcc, 0xbb, 0xaa, // 0xaabbccdd
+            0xa5, 0x5a, 0xa5, 0x5a, // 0x5aa55aa5
+            0xcd, 0xcd, 0xcd, 0xcd, // 0xcdcdcdcd
+            0x00, 0x00, 0x00, 0x00, // 0x00000000
+            0x00, 0x00, 0x00, 0x00, // 0x00000000
+            0x00, 0x00, 0x00, 0x00, // 0x00000000
+            0x00, 0x00, 0x00, 0x00, // 0x00000000
+        ];
+        let insn = [0xf3, 0x48, 0xa5]; // rep movsq
+        let regs = vec![
+            (Register::ECX, 2),
+            (Register::ESI, 0),
+            (Register::EDI, 0x10),
+        ];
+        let mut data = [0u8; 8];
+
+        let mut vmm = MockVmm::new(ip, regs, Some((0, &memory)));
+
+        assert!(vmm.emulate_first_insn(0, &insn).is_ok());
+
+        vmm.read_memory(0x10, &mut data).unwrap();
+        assert_eq!(0xaabbccdd12345678, <u64>::from_le_bytes(data));
+        vmm.read_memory(0x18, &mut data).unwrap();
+        assert_eq!(0xcdcdcdcd5aa55aa5, <u64>::from_le_bytes(data));
+        // The rest should be default value 0 from MockVmm
+        vmm.read_memory(0x20, &mut data).unwrap();
+        assert_eq!(0x0, <u64>::from_le_bytes(data));
+    }
 
     #[test]
     fn test_rep_movsd_m32_m32() {
