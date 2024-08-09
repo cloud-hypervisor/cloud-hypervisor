@@ -11,13 +11,13 @@
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::{RegList, StandardRegisters, VcpuInit};
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{
-    CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, StandardRegisters,
-};
+use crate::arch::x86::{CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters};
 #[cfg(feature = "tdx")]
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
 use crate::CpuState;
 use crate::MpState;
+#[cfg(target_arch = "x86_64")]
+use crate::StandardRegisters;
 use thiserror::Error;
 use vm_memory::GuestAddress;
 
@@ -321,6 +321,12 @@ pub type Result<T> = anyhow::Result<T, HypervisorCpuError>;
 /// Trait to represent a generic Vcpu
 ///
 pub trait Vcpu: Send + Sync {
+    ///
+    /// Returns StandardRegisters with default value set
+    ///
+    fn create_standard_regs(&self) -> StandardRegisters {
+        unimplemented!();
+    }
     ///
     /// Returns the vCPU general purpose registers.
     ///

@@ -44,11 +44,12 @@ use vmm_sys_util::eventfd::EventFd;
 pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{
-    CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, StandardRegisters, XsaveState,
-    NUM_IOAPIC_PINS,
+    CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, XsaveState, NUM_IOAPIC_PINS,
 };
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
+#[cfg(target_arch = "x86_64")]
+use crate::StandardRegisters;
 use crate::{
     CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
     USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
@@ -333,6 +334,23 @@ impl From<ClockData> for kvm_clock_data {
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
             _ => panic!("CpuState is not valid"),
+        }
+    }
+}
+
+impl From<kvm_bindings::kvm_regs> for crate::StandardRegisters {
+    fn from(s: kvm_bindings::kvm_regs) -> Self {
+        crate::StandardRegisters::Kvm(s)
+    }
+}
+
+impl From<crate::StandardRegisters> for kvm_bindings::kvm_regs {
+    fn from(e: crate::StandardRegisters) -> Self {
+        match e {
+            crate::StandardRegisters::Kvm(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("StandardRegisters are not valid"),
         }
     }
 }
@@ -1190,6 +1208,13 @@ pub struct KvmVcpu {
 /// let vcpu = vm.create_vcpu(0, None).unwrap();
 /// ```
 impl cpu::Vcpu for KvmVcpu {
+    ///
+    /// Returns StandardRegisters with default value set
+    ///
+    #[cfg(target_arch = "x86_64")]
+    fn create_standard_regs(&self) -> StandardRegisters {
+        kvm_bindings::kvm_regs::default().into()
+    }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Returns the vCPU general purpose registers.

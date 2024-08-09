@@ -10,7 +10,7 @@
 
 use crate::arch::x86::{
     CpuIdEntry, DescriptorTable, FpuState, LapicState, MsrEntry, SegmentRegister, SpecialRegisters,
-    StandardRegisters, XsaveState, CPUID_FLAG_VALID_INDEX,
+    XsaveState, CPUID_FLAG_VALID_INDEX,
 };
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 use serde::{Deserialize, Serialize};
@@ -76,56 +76,6 @@ pub struct VcpuKvmState {
     pub xcrs: ExtendedControlRegisters,
     pub mp_state: MpState,
     pub tsc_khz: Option<u32>,
-}
-
-impl From<StandardRegisters> for kvm_regs {
-    fn from(regs: StandardRegisters) -> Self {
-        Self {
-            rax: regs.rax,
-            rbx: regs.rbx,
-            rcx: regs.rcx,
-            rdx: regs.rdx,
-            rsi: regs.rsi,
-            rdi: regs.rdi,
-            rsp: regs.rsp,
-            rbp: regs.rbp,
-            r8: regs.r8,
-            r9: regs.r9,
-            r10: regs.r10,
-            r11: regs.r11,
-            r12: regs.r12,
-            r13: regs.r13,
-            r14: regs.r14,
-            r15: regs.r15,
-            rip: regs.rip,
-            rflags: regs.rflags,
-        }
-    }
-}
-
-impl From<kvm_regs> for StandardRegisters {
-    fn from(regs: kvm_regs) -> Self {
-        Self {
-            rax: regs.rax,
-            rbx: regs.rbx,
-            rcx: regs.rcx,
-            rdx: regs.rdx,
-            rsi: regs.rsi,
-            rdi: regs.rdi,
-            rsp: regs.rsp,
-            rbp: regs.rbp,
-            r8: regs.r8,
-            r9: regs.r9,
-            r10: regs.r10,
-            r11: regs.r11,
-            r12: regs.r12,
-            r13: regs.r13,
-            r14: regs.r14,
-            r15: regs.r15,
-            rip: regs.rip,
-            rflags: regs.rflags,
-        }
-    }
 }
 
 impl From<SegmentRegister> for kvm_segment {

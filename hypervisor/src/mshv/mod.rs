@@ -165,6 +165,23 @@ impl From<CpuState> for VcpuMshvState {
     }
 }
 
+impl From<mshv_bindings::StandardRegisters> for crate::StandardRegisters {
+    fn from(s: mshv_bindings::StandardRegisters) -> Self {
+        crate::StandardRegisters::Mshv(s)
+    }
+}
+
+impl From<crate::StandardRegisters> for mshv_bindings::StandardRegisters {
+    fn from(e: crate::StandardRegisters) -> Self {
+        match e {
+            crate::StandardRegisters::Mshv(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("StandardRegisters are not valid"),
+        }
+    }
+}
+
 impl From<mshv_msi_routing_entry> for IrqRoutingEntry {
     fn from(s: mshv_msi_routing_entry) -> Self {
         IrqRoutingEntry::Mshv(s)
@@ -413,11 +430,18 @@ pub struct MshvVcpu {
 /// let vcpu = vm.create_vcpu(0, None).unwrap();
 /// ```
 impl cpu::Vcpu for MshvVcpu {
+    ///
+    /// Returns StandardRegisters with default value set
+    ///
+    #[cfg(target_arch = "x86_64")]
+    fn create_standard_regs(&self) -> crate::StandardRegisters {
+        mshv_bindings::StandardRegisters::default().into()
+    }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Returns the vCPU general purpose registers.
     ///
-    fn get_regs(&self) -> cpu::Result<crate::arch::x86::StandardRegisters> {
+    fn get_regs(&self) -> cpu::Result<crate::StandardRegisters> {
         Ok(self
             .fd
             .get_regs()
@@ -429,7 +453,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Sets the vCPU general purpose registers.
     ///
-    fn set_regs(&self, regs: &crate::arch::x86::StandardRegisters) -> cpu::Result<()> {
+    fn set_regs(&self, regs: &crate::StandardRegisters) -> cpu::Result<()> {
         let regs = (*regs).into();
         self.fd
             .set_regs(&regs)
