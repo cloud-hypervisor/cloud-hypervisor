@@ -19,6 +19,7 @@ use vm_virtio::{AccessPlatform, Translatable};
 pub struct TxVirtio {
     pub counter_bytes: Wrapping<u64>,
     pub counter_frames: Wrapping<u64>,
+    iovecs: IovecBuffer,
 }
 
 impl Default for TxVirtio {
@@ -32,6 +33,7 @@ impl TxVirtio {
         TxVirtio {
             counter_bytes: Wrapping(0),
             counter_frames: Wrapping(0),
+            iovecs: IovecBuffer::new(),
         }
     }
 
@@ -54,7 +56,7 @@ impl TxVirtio {
 
             let mut next_desc = desc_chain.next();
 
-            let mut iovecs = Vec::new();
+            let mut iovecs = self.iovecs.borrow();
             while let Some(desc) = next_desc {
                 let desc_addr = desc
                     .addr()
@@ -145,6 +147,7 @@ impl TxVirtio {
 pub struct RxVirtio {
     pub counter_bytes: Wrapping<u64>,
     pub counter_frames: Wrapping<u64>,
+    iovecs: IovecBuffer,
 }
 
 impl Default for RxVirtio {
@@ -158,6 +161,7 @@ impl RxVirtio {
         RxVirtio {
             counter_bytes: Wrapping(0),
             counter_frames: Wrapping(0),
+            iovecs: IovecBuffer::new(),
         }
     }
 
@@ -193,7 +197,7 @@ impl RxVirtio {
                 .ok_or(NetQueuePairError::DescriptorInvalidHeader)?;
             let mut next_desc = Some(desc);
 
-            let mut iovecs = Vec::new();
+            let mut iovecs = self.iovecs.borrow();
             while let Some(desc) = next_desc {
                 let desc_addr = desc
                     .addr()
@@ -285,6 +289,44 @@ impl RxVirtio {
         }
 
         Ok(exhausted_descs)
+    }
+}
+
+#[derive(Default, Clone)]
+struct IovecBuffer(Vec<libc::iovec>);
+
+unsafe impl Send for IovecBuffer {}
+unsafe impl Sync for IovecBuffer {}
+
+impl IovecBuffer {
+    const fn new() -> Self {
+        IovecBuffer(Vec::new())
+    }
+
+    fn borrow(&mut self) -> IovecBufferBorrowed<'_> {
+        IovecBufferBorrowed(&mut self.0)
+    }
+}
+
+struct IovecBufferBorrowed<'a>(&'a mut Vec<libc::iovec>);
+
+impl<'a> std::ops::Deref for IovecBufferBorrowed<'a> {
+    type Target = Vec<libc::iovec>;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
+impl<'a> std::ops::DerefMut for IovecBufferBorrowed<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.0
+    }
+}
+
+impl Drop for IovecBufferBorrowed<'_> {
+    fn drop(&mut self) {
+        self.0.clear();
     }
 }
 
