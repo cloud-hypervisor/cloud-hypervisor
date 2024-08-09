@@ -781,6 +781,39 @@ pub struct AcpiPlatformAddresses {
     pub sleep_status_reg_address: Option<GenericAddress>,
 }
 
+#[cfg(all(feature = "mshv", feature = "sev_snp"))]
+struct SevSnpPageAccessProxy {
+    vm: Arc<dyn hypervisor::Vm>,
+}
+
+#[cfg(all(feature = "mshv", feature = "sev_snp"))]
+impl std::fmt::Debug for SevSnpPageAccessProxy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SNP Page access proxy")
+    }
+}
+
+#[cfg(all(feature = "mshv", feature = "sev_snp"))]
+impl SevSnpPageAccessProxy {
+    fn new(vm: Arc<dyn hypervisor::Vm>) -> SevSnpPageAccessProxy {
+        SevSnpPageAccessProxy { vm }
+    }
+}
+
+#[cfg(all(feature = "mshv", feature = "sev_snp"))]
+impl AccessPlatform for SevSnpPageAccessProxy {
+    fn translate_gpa(&self, base: u64, _size: u64) -> std::result::Result<u64, std::io::Error> {
+        Ok(base)
+    }
+
+    fn translate_gva(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error> {
+        self.vm
+            .gain_page_access(base, size as u32)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        Ok(base)
+    }
+}
+
 pub struct DeviceManager {
     // Manage address space related to devices
     address_manager: Arc<AddressManager>,
@@ -3708,15 +3741,22 @@ impl DeviceManager {
         // Create the AccessPlatform trait from the implementation IommuMapping.
         // This will provide address translation for any virtio device sitting
         // behind a vIOMMU.
-        let access_platform: Option<Arc<dyn AccessPlatform>> = if let Some(mapping) = iommu_mapping
-        {
-            Some(Arc::new(AccessPlatformMapping::new(
+        let mut access_platform: Option<Arc<dyn AccessPlatform>> = None;
+
+        if let Some(mapping) = iommu_mapping {
+            access_platform = Some(Arc::new(AccessPlatformMapping::new(
                 pci_device_bdf.into(),
                 mapping.clone(),
-            )))
-        } else {
-            None
-        };
+            )));
+        }
+
+        // If SEV-SNP is enabled create the AccessPlatform from SevSnpPageAccessProxy
+        #[cfg(feature = "sev_snp")]
+        if self.config.lock().unwrap().is_sev_snp_enabled() {
+            access_platform = Some(Arc::new(SevSnpPageAccessProxy::new(
+                self.address_manager.vm.clone(),
+            )));
+        }
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
 

@@ -235,6 +235,12 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to set VM property: {0}")]
     SetVmProperty(#[source] anyhow::Error),
+    ///
+    /// Modify GPA host access error
+    ///
+    #[cfg(feature = "sev_snp")]
+    #[error("Failed to modify GPA host access: {0}")]
+    ModifyGpaHostAccess(#[source] anyhow::Error),
 }
 ///
 /// Result type for returning from a function
@@ -402,6 +408,11 @@ pub trait Vm: Send + Sync + Any {
 
     /// Resume the VM
     fn resume(&self) -> Result<()> {
+        Ok(())
+    }
+
+    #[cfg(feature = "sev_snp")]
+    fn gain_page_access(&self, _gpa: u64, _size: u32) -> Result<()> {
         Ok(())
     }
 }
