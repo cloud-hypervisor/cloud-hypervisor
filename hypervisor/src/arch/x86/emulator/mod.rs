@@ -532,6 +532,7 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
             (mov, Mov_moffs64_RAX),
             (mov, Mov_RAX_moffs64),
             // MOVS
+            (movs, Movsq_m64_m64),
             (movs, Movsd_m32_m32),
             (movs, Movsw_m16_m16),
             (movs, Movsb_m8_m8),
