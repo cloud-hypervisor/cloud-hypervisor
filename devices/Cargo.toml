@@ -8,7 +8,7 @@ version = "0.1.0"
 acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main" }
 anyhow = "1.0.86"
 arch = { path = "../arch" }
-bitflags = "2.5.0"
+bitflags = "2.6.0"
 byteorder = "1.5.0"
 event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
