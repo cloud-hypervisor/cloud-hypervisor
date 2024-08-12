@@ -799,6 +799,10 @@ impl cpu::Vcpu for MshvVcpu {
                         }
                         GHCB_INFO_REGISTER_REQUEST => {
                             let mut ghcb_gpa = hv_x64_register_sev_ghcb::default();
+
+                            // Disable the previously used GHCB page.
+                            self.disable_prev_ghcb_page()?;
+
                             // SAFETY: Accessing a union element from bindgen generated bindings.
                             unsafe {
                                 ghcb_gpa.__bindgen_anon_1.set_enabled(1);
@@ -826,6 +830,7 @@ impl cpu::Vcpu for MshvVcpu {
                                 resp_ghcb_msr.__bindgen_anon_2.set_gpa_page_number(
                                     ghcb_msr.__bindgen_anon_2.gpa_page_number(),
                                 );
+                                debug!("GHCB GPA is {:x}", ghcb_gpa.as_uint64);
                             }
                             // SAFETY: Accessing a union element from bindgen generated bindings.
                             let reg_name_value = unsafe {
@@ -1456,6 +1461,42 @@ impl cpu::Vcpu for MshvVcpu {
 }
 
 impl MshvVcpu {
+    ///
+    /// Deactivate previously used GHCB page.
+    ///
+    #[cfg(feature = "sev_snp")]
+    fn disable_prev_ghcb_page(&self) -> cpu::Result<()> {
+        let mut reg_assocs = [hv_register_assoc {
+            name: hv_register_name_HV_X64_REGISTER_SEV_GHCB_GPA,
+            ..Default::default()
+        }];
+        self.fd.get_reg(&mut reg_assocs).unwrap();
+        // SAFETY: Accessing a union element from bindgen generated bindings.
+        let prev_ghcb_gpa = unsafe { reg_assocs[0].value.reg64 };
+
+        debug!("Prev GHCB GPA is {:x}", prev_ghcb_gpa);
+
+        let mut ghcb_gpa = hv_x64_register_sev_ghcb::default();
+
+        // SAFETY: Accessing a union element from bindgen generated bindings.
+        unsafe {
+            ghcb_gpa.__bindgen_anon_1.set_enabled(0);
+            ghcb_gpa.__bindgen_anon_1.set_page_number(prev_ghcb_gpa);
+        }
+
+        // SAFETY: Accessing a union element from bindgen generated bindings.
+        let reg_name_value = unsafe {
+            [(
+                hv_register_name_HV_X64_REGISTER_SEV_GHCB_GPA,
+                ghcb_gpa.as_uint64,
+            )]
+        };
+
+        set_registers_64!(self.fd, reg_name_value)
+            .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+
+        Ok(())
+    }
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call that returns the vcpu's current "xcrs".
