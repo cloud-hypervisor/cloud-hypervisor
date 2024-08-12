@@ -13,6 +13,7 @@ use virtio_bindings::virtio_net::{
     VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4, VIRTIO_NET_F_GUEST_TSO6,
     VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_OK,
 };
+use virtio_ext::QueueExt;
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestMemoryError};
 use vm_virtio::{AccessPlatform, Translatable};
@@ -62,7 +63,10 @@ impl CtrlQueue {
         queue: &mut Queue,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
     ) -> Result<()> {
-        while let Some(mut desc_chain) = queue.pop_descriptor_chain(mem) {
+        while let Some(mut desc_chain) = queue
+            .pop_desc_chain_with_notification(mem)
+            .map_err(Error::QueueEnableNotification)?
+        {
             let ctrl_desc = desc_chain.next().ok_or(Error::NoControlHeaderDescriptor)?;
 
             let ctrl_hdr: ControlHeader = desc_chain
@@ -142,13 +146,6 @@ impl CtrlQueue {
             queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), len)
                 .map_err(Error::QueueAddUsed)?;
-
-            if !queue
-                .enable_notification(mem)
-                .map_err(Error::QueueEnableNotification)?
-            {
-                break;
-            }
         }
 
         Ok(())

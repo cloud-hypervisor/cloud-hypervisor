@@ -384,11 +384,12 @@ impl VhostUserBackendMut for VhostUserBlkBackend {
                     // calling process_queue() until it stops finding new
                     // requests on the queue.
                     loop {
-                        vring
+                        thread.process_queue(&mut vring);
+                        if !vring
                             .get_queue_mut()
                             .enable_notification(self.mem.memory().deref())
-                            .unwrap();
-                        if !thread.process_queue(&mut vring) {
+                            .unwrap()
+                        {
                             break;
                         }
                     }

@@ -41,6 +41,7 @@ use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
 use virtio_bindings::virtio_config::*;
 use virtio_bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
+use virtio_ext::QueueExt;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -143,7 +144,10 @@ impl BlockEpollHandler {
     fn process_queue_submit(&mut self) -> Result<()> {
         let queue = &mut self.queue;
 
-        while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
+        while let Some(mut desc_chain) = queue
+            .pop_desc_chain_with_notification(self.mem.memory())
+            .map_err(Error::QueueEnableNotification)?
+        {
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref())
                 .map_err(Error::RequestParsing)?;
 
@@ -164,9 +168,6 @@ impl BlockEpollHandler {
                 queue
                     .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
                     .map_err(Error::QueueAddUsed)?;
-                queue
-                    .enable_notification(self.mem.memory().deref())
-                    .map_err(Error::QueueEnableNotification)?;
                 continue;
             }
 
@@ -226,9 +227,6 @@ impl BlockEpollHandler {
                 queue
                     .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
                     .map_err(Error::QueueAddUsed)?;
-                queue
-                    .enable_notification(self.mem.memory().deref())
-                    .map_err(Error::QueueEnableNotification)?;
             }
         }
 
@@ -240,22 +238,7 @@ impl BlockEpollHandler {
             EpollHelperError::HandleEvent(anyhow!("Failed to process queue (submit): {:?}", e))
         })?;
 
-        if self
-            .queue
-            .needs_notification(self.mem.memory().deref())
-            .map_err(|e| {
-                EpollHelperError::HandleEvent(anyhow!(
-                    "Failed to check needs_notification: {:?}",
-                    e
-                ))
-            })?
-        {
-            self.signal_used_queue().map_err(|e| {
-                EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {:?}", e))
-            })?;
-        }
-
-        Ok(())
+        self.try_signal_used_queue()
     }
 
     #[inline]
@@ -387,14 +370,9 @@ impl BlockEpollHandler {
             mem.write_obj(status, request.status_addr)
                 .map_err(Error::RequestStatus)?;
 
-            let queue = &mut self.queue;
-
-            queue
+            self.queue
                 .add_used(mem.deref(), desc_index, len)
                 .map_err(Error::QueueAddUsed)?;
-            queue
-                .enable_notification(mem.deref())
-                .map_err(Error::QueueEnableNotification)?;
         }
 
         self.counters
@@ -421,6 +399,25 @@ impl BlockEpollHandler {
                 error!("Failed to signal used queue: {:?}", e);
                 DeviceError::FailedSignalingUsedQueue(e)
             })
+    }
+
+    fn try_signal_used_queue(&mut self) -> result::Result<(), EpollHelperError> {
+        if self
+            .queue
+            .needs_notification(self.mem.memory().deref())
+            .map_err(|e| {
+                EpollHelperError::HandleEvent(anyhow!(
+                    "Failed to check needs_notification: {:?}",
+                    e
+                ))
+            })?
+        {
+            self.signal_used_queue().map_err(|e| {
+                EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {:?}", e))
+            })?;
+        }
+
+        Ok(())
     }
 
     fn set_queue_thread_affinity(&self) {
@@ -514,8 +511,14 @@ impl EpollHelperHandler for BlockEpollHandler {
 
                 // Process the queue only when the rate limit is not reached
                 if !rate_limit_reached {
-                    self.process_queue_submit_and_signal()?
+                    self.process_queue_submit().map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to process queue (submit): {:?}",
+                            e
+                        ))
+                    })?;
                 }
+                self.try_signal_used_queue()?;
             }
             RATE_LIMITER_EVENT => {
                 if let Some(rate_limiter) = &mut self.rate_limiter {
