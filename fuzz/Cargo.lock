@@ -111,9 +111,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.5.0"
+version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf4b9d6a944f767f8e5e0db018570623c85f3d925ac718db4e06d0187adb21c1"
+checksum = "b048fb63fd8b5923fc5aa7b340d8e156aec7ec02f0c78fa8a6ddc2613f6f71de"
 
 [[package]]
 name = "block"
@@ -149,9 +149,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "cc"
-version = "1.1.7"
+version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26a5c3fd7bfa1ce3897a3a3501d362b2d87b7f2583ebcb4a949ec25911025cbc"
+checksum = "e9e8aabfac534be767c909e0690571677d49f41bd8465ae876fe043d52ba5292"
 dependencies = [
  "jobserver",
  "libc",
@@ -277,7 +277,7 @@ dependencies = [
  "acpi_tables",
  "anyhow",
  "arch",
- "bitflags 2.5.0",
+ "bitflags 2.6.0",
  "byteorder",
  "event_monitor",
  "hypervisor",
@@ -321,7 +321,7 @@ version = "4.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "74351c3392ea1ff6cd2628e0042d268ac2371cb613252ff383b6dfa50d22fa79"
 dependencies = [
- "bitflags 2.5.0",
+ "bitflags 2.6.0",
  "libc",
 ]
 
@@ -384,7 +384,7 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6341b3480afbb34eaefc7f92713bc92f2d83e338aaa1c44192f9c2956f4a4903"
 dependencies = [
- "bitflags 2.5.0",
+ "bitflags 2.6.0",
  "cfg-if",
  "log",
  "managed",
@@ -502,7 +502,7 @@ version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bedae2ca4a531bebe311abaf9691f5cc14eaa21475243caa2e39c43bb872947d"
 dependencies = [
- "bitflags 2.5.0",
+ "bitflags 2.6.0",
  "kvm-bindings",
  "libc",
  "vmm-sys-util",
@@ -992,7 +992,7 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6be08d1166d41a78861ad50212ab3f9eca0729c349ac3a7a8f557c62406b87cc"
 dependencies = [
- "bitflags 2.5.0",
+ "bitflags 2.6.0",
  "libc",
  "vm-memory",
  "vmm-sys-util",
@@ -1116,7 +1116,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "arch",
- "bitflags 2.5.0",
+ "bitflags 2.6.0",
  "block",
  "cfg-if",
  "clap",
