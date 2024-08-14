@@ -500,9 +500,9 @@ dependencies = [
 
 [[package]]
 name = "kvm-bindings"
-version = "0.8.1"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a82e7e8725a39a0015e511a46cc1f7d90cecc180db1610c4d0d4339a9e48bd21"
+checksum = "2efe3f1a4437bffe000e6297a593b98184213cd27486776c335f95ab53d48e3a"
 dependencies = [
  "serde",
  "vmm-sys-util",
@@ -511,9 +511,9 @@ dependencies = [
 
 [[package]]
 name = "kvm-ioctls"
-version = "0.17.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bedae2ca4a531bebe311abaf9691f5cc14eaa21475243caa2e39c43bb872947d"
+checksum = "92c2176b91f68903b54ac8c6185bada7d607ca6110998976ff15c032f88a7d39"
 dependencies = [
  "bitflags 2.6.0",
  "kvm-bindings",
@@ -968,7 +968,7 @@ dependencies = [
 [[package]]
 name = "vfio-bindings"
 version = "0.4.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#da8c5b67095fb70f5ef237ca63d316219888f015"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#94bec9fa2a94a29e11d83766a992cb85496fcb7c"
 dependencies = [
  "vmm-sys-util",
 ]
@@ -976,7 +976,7 @@ dependencies = [
 [[package]]
 name = "vfio-ioctls"
 version = "0.2.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#da8c5b67095fb70f5ef237ca63d316219888f015"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#94bec9fa2a94a29e11d83766a992cb85496fcb7c"
 dependencies = [
  "byteorder",
  "kvm-bindings",
