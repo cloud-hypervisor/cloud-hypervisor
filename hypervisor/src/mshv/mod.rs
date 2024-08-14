@@ -1012,7 +1012,8 @@ impl cpu::Vcpu for MshvVcpu {
                                         byte_count: std::mem::size_of::<u64>() as u32,
                                         ..Default::default()
                                     };
-                                    swei2_rw_gpa_arg.data.copy_from_slice(&value.to_le_bytes());
+                                    swei2_rw_gpa_arg.data[0..8]
+                                        .copy_from_slice(&value.to_le_bytes());
                                     self.fd
                                         .gpa_write(&mut swei2_rw_gpa_arg)
                                         .map_err(|e| cpu::HypervisorCpuError::GpaWrite(e.into()))?;
