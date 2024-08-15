@@ -7,7 +7,7 @@ edition = "2021"
 homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
 license = "Apache-2.0 AND BSD-3-Clause"
 name = "cloud-hypervisor"
-version = "40.0.0"
+version = "41.0.0"
 # Minimum buildable version:
 # Keep in sync with version in .github/workflows/build.yaml
 # Policy on MSRV (see #4318):
