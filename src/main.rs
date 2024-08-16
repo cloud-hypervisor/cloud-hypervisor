@@ -456,22 +456,21 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         );
 
     #[cfg(target_arch = "x86_64")]
-    let app = app.arg(
-        Arg::new("sgx-epc")
-            .long("sgx-epc")
-            .help(config::SgxEpcConfig::SYNTAX)
-            .num_args(1..)
-            .group("vm-config"),
-    );
-
-    #[cfg(target_arch = "x86_64")]
-    let app = app.arg(
-        Arg::new("debug-console")
-            .long("debug-console")
-            .help("Debug console: off|pty|tty|file=</path/to/a/file>,iobase=<port in hex>")
-            .default_value("off,iobase=0xe9")
-            .group("vm-config"),
-    );
+    let app = app
+        .arg(
+            Arg::new("sgx-epc")
+                .long("sgx-epc")
+                .help(config::SgxEpcConfig::SYNTAX)
+                .num_args(1..)
+                .group("vm-config"),
+        )
+        .arg(
+            Arg::new("debug-console")
+                .long("debug-console")
+                .help("Debug console: off|pty|tty|file=</path/to/a/file>,iobase=<port in hex>")
+                .default_value("off,iobase=0xe9")
+                .group("vm-config"),
+        );
 
     #[cfg(feature = "guest_debug")]
     let app = app.arg(
