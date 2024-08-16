@@ -15,7 +15,7 @@ io-uring = { version = "0.6.3", optional = true }
 libc = "0.2.155"
 log = "0.4.22"
 remain = "0.2.14"
-serde = { version = "1.0.197", features = ["derive"] }
+serde = { version = "1.0.208", features = ["derive"] }
 smallvec = "1.13.2"
 thiserror = "1.0.62"
 uuid = { version = "1.8.0", features = ["v4"] }

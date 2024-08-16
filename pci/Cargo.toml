@@ -15,7 +15,7 @@ byteorder = "1.5.0"
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.155"
 log = "0.4.22"
-serde = { version = "1.0.197", features = ["derive"] }
+serde = { version = "1.0.208", features = ["derive"] }
 thiserror = "1.0.62"
 vfio-bindings = { git = "https://github.com/rust-vmm/vfio", branch = "main", features = [
   "fam-wrappers",
