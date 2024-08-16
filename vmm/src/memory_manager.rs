@@ -1740,14 +1740,14 @@ impl MemoryManager {
         log_dirty: bool,
     ) -> Result<u32, Error> {
         let slot = self.allocate_memory_slot();
-        let mem_region = self.vm.make_user_memory_region(
+        let mem_region = unsafe {self.vm.make_user_memory_region(
             slot,
             guest_phys_addr,
             memory_size,
             userspace_addr,
             readonly,
             log_dirty,
-        );
+        )};
 
         info!(
             "Creating userspace mapping: {:x} -> {:x} {:x}, slot {}",
@@ -1813,14 +1813,14 @@ impl MemoryManager {
         mergeable: bool,
         slot: u32,
     ) -> Result<(), Error> {
-        let mem_region = self.vm.make_user_memory_region(
+        let mem_region = unsafe {self.vm.make_user_memory_region(
             slot,
             guest_phys_addr,
             memory_size,
             userspace_addr,
             false, /* readonly -- don't care */
             false, /* log dirty */
-        );
+        )};
 
         self.vm
             .remove_user_memory_region(mem_region)

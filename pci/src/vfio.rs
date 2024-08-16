@@ -1641,14 +1641,14 @@ impl VfioPciDevice {
 
                     region.user_memory_regions.push(user_memory_region);
 
-                    let mem_region = self.vm.make_user_memory_region(
+                    let mem_region = unsafe {self.vm.make_user_memory_region(
                         user_memory_region.slot,
                         user_memory_region.start,
                         user_memory_region.size,
                         user_memory_region.host_addr,
                         false,
                         false,
-                    );
+                    )};
 
                     self.vm
                         .create_user_memory_region(mem_region)
@@ -1684,14 +1684,14 @@ impl VfioPciDevice {
                 }
 
                 // Remove region
-                let r = self.vm.make_user_memory_region(
+                let r = unsafe {self.vm.make_user_memory_region(
                     user_memory_region.slot,
                     user_memory_region.start,
                     user_memory_region.size,
                     user_memory_region.host_addr,
                     false,
                     false,
-                );
+                )};
 
                 if let Err(e) = self.vm.remove_user_memory_region(r) {
                     error!("Could not remove the userspace memory region: {}", e);
@@ -1855,14 +1855,14 @@ impl PciDevice for VfioPciDevice {
 
                 for user_memory_region in region.user_memory_regions.iter_mut() {
                     // Remove old region
-                    let old_mem_region = self.vm.make_user_memory_region(
+                    let old_mem_region = unsafe {self.vm.make_user_memory_region(
                         user_memory_region.slot,
                         user_memory_region.start,
                         user_memory_region.size,
                         user_memory_region.host_addr,
                         false,
                         false,
-                    );
+                    )};
 
                     self.vm
                         .remove_user_memory_region(old_mem_region)
@@ -1876,14 +1876,14 @@ impl PciDevice for VfioPciDevice {
                     }
 
                     // Insert new region
-                    let new_mem_region = self.vm.make_user_memory_region(
+                    let new_mem_region = unsafe {self.vm.make_user_memory_region(
                         user_memory_region.slot,
                         user_memory_region.start,
                         user_memory_region.size,
                         user_memory_region.host_addr,
                         false,
                         false,
-                    );
+                    )};
 
                     self.vm
                         .create_user_memory_region(new_mem_region)

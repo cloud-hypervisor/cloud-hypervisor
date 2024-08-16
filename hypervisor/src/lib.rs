@@ -120,11 +120,11 @@ pub fn vec_with_array_field<T: Default, F>(count: usize) -> Vec<T> {
 ///
 #[derive(Debug, Default, Eq, PartialEq)]
 pub struct UserMemoryRegion {
-    pub slot: u32,
-    pub guest_phys_addr: u64,
-    pub memory_size: u64,
-    pub userspace_addr: u64,
-    pub flags: u32,
+    slot: u32,
+    guest_phys_addr: u64,
+    memory_size: u64,
+    userspace_addr: u64,
+    flags: u32,
 }
 
 ///

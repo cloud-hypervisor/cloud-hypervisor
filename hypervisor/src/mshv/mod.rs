@@ -1769,7 +1769,7 @@ impl vm::Vm for MshvVm {
         Ok(())
     }
 
-    fn make_user_memory_region(
+    unsafe fn make_user_memory_region(
         &self,
         _slot: u32,
         guest_phys_addr: u64,

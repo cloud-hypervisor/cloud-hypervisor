@@ -605,7 +605,7 @@ impl vm::Vm for KvmVm {
     ///
     /// Creates a memory region structure that can be used with {create/remove}_user_memory_region
     ///
-    fn make_user_memory_region(
+    unsafe fn make_user_memory_region(
         &self,
         slot: u32,
         guest_phys_addr: u64,

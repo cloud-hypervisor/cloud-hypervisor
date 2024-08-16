@@ -686,14 +686,14 @@ impl DeviceRelocation for AddressManager {
                 let mut virtio_dev = virtio_dev.lock().unwrap();
                 if let Some(mut shm_regions) = virtio_dev.get_shm_regions() {
                     if shm_regions.addr.raw_value() == old_base {
-                        let mem_region = self.vm.make_user_memory_region(
+                        let mem_region = unsafe {self.vm.make_user_memory_region(
                             shm_regions.mem_slot,
                             old_base,
                             shm_regions.len,
                             shm_regions.host_addr,
                             false,
                             false,
-                        );
+                        )};
 
                         self.vm.remove_user_memory_region(mem_region).map_err(|e| {
                             io::Error::new(
@@ -703,14 +703,14 @@ impl DeviceRelocation for AddressManager {
                         })?;
 
                         // Create new mapping by inserting new region to KVM.
-                        let mem_region = self.vm.make_user_memory_region(
+                        let mem_region = unsafe {self.vm.make_user_memory_region(
                             shm_regions.mem_slot,
                             new_base,
                             shm_regions.len,
                             shm_regions.host_addr,
                             false,
                             false,
-                        );
+                        )};
 
                         self.vm.create_user_memory_region(mem_region).map_err(|e| {
                             io::Error::new(

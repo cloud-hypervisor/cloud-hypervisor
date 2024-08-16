@@ -317,7 +317,7 @@ pub trait Vm: Send + Sync + Any {
     /// Sets the GSI routing table entries, overwriting any previously set
     fn set_gsi_routing(&self, entries: &[IrqRoutingEntry]) -> Result<()>;
     /// Creates a memory region structure that can be used with {create/remove}_user_memory_region
-    fn make_user_memory_region(
+    unsafe fn make_user_memory_region(
         &self,
         slot: u32,
         guest_phys_addr: u64,
