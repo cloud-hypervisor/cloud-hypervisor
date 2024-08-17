@@ -958,14 +958,19 @@ impl MemoryManager {
             arch::layout::UEFI_START,
         )
         .unwrap();
-        let uefi_mem_region = self.vm.make_user_memory_region(
-            uefi_mem_slot,
-            uefi_region.start_addr().raw_value(),
-            uefi_region.len(),
-            uefi_region.as_ptr() as u64,
-            false,
-            false,
-        );
+
+        // SAFETY: make_user_memory_region called with valid params:
+        // slot, guest_phys_addr, memory_size, userspace_addr
+        let uefi_mem_region = unsafe {
+            self.vm.make_user_memory_region(
+                uefi_mem_slot,
+                uefi_region.start_addr().raw_value(),
+                uefi_region.len(),
+                uefi_region.as_ptr() as u64,
+                false,
+                false,
+            )
+        };
         self.vm
             .create_user_memory_region(uefi_mem_region)
             .map_err(Error::CreateUefiFlash)?;
@@ -1740,14 +1745,19 @@ impl MemoryManager {
         log_dirty: bool,
     ) -> Result<u32, Error> {
         let slot = self.allocate_memory_slot();
-        let mem_region = unsafe {self.vm.make_user_memory_region(
-            slot,
-            guest_phys_addr,
-            memory_size,
-            userspace_addr,
-            readonly,
-            log_dirty,
-        )};
+
+        // SAFETY: make_user_memory_region called with valid params:
+        // slot, guest_phys_addr, memory_size, userspace_addr
+        let mem_region = unsafe {
+            self.vm.make_user_memory_region(
+                slot,
+                guest_phys_addr,
+                memory_size,
+                userspace_addr,
+                readonly,
+                log_dirty,
+            )
+        };
 
         info!(
             "Creating userspace mapping: {:x} -> {:x} {:x}, slot {}",
@@ -1813,14 +1823,18 @@ impl MemoryManager {
         mergeable: bool,
         slot: u32,
     ) -> Result<(), Error> {
-        let mem_region = unsafe {self.vm.make_user_memory_region(
-            slot,
-            guest_phys_addr,
-            memory_size,
-            userspace_addr,
-            false, /* readonly -- don't care */
-            false, /* log dirty */
-        )};
+        // SAFETY: make_user_memory_region called with valid params:
+        // slot, guest_phys_addr, memory_size, userspace_addr
+        let mem_region = unsafe {
+            self.vm.make_user_memory_region(
+                slot,
+                guest_phys_addr,
+                memory_size,
+                userspace_addr,
+                false, /* readonly -- don't care */
+                false, /* log dirty */
+            )
+        };
 
         self.vm
             .remove_user_memory_region(mem_region)

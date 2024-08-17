@@ -602,9 +602,8 @@ impl vm::Vm for KvmVm {
             .map_err(|e| vm::HypervisorVmError::SetGsiRouting(e.into()))
     }
 
-    ///
+    /// # Safety
     /// Creates a memory region structure that can be used with {create/remove}_user_memory_region
-    ///
     unsafe fn make_user_memory_region(
         &self,
         slot: u32,
