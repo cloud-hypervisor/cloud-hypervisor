@@ -316,8 +316,13 @@ pub trait Vm: Send + Sync + Any {
     fn make_routing_entry(&self, gsi: u32, config: &InterruptSourceConfig) -> IrqRoutingEntry;
     /// Sets the GSI routing table entries, overwriting any previously set
     fn set_gsi_routing(&self, entries: &[IrqRoutingEntry]) -> Result<()>;
-    /// # Safety
     /// Creates a memory region structure that can be used with {create/remove}_user_memory_region
+    ///
+    /// # Safety
+    ///         
+    /// The caller must guarantee the validity of the following parameters:
+    /// slot, guest_phys_addr, memory_size, userspace_addr.
+    ///
     unsafe fn make_user_memory_region(
         &self,
         slot: u32,
