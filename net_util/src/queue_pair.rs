@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use super::{register_listener, unregister_listener, vnet_hdr_len, Tap};
-use crate::GuestMemoryMmap;
 use rate_limiter::{RateLimiter, TokenType};
 use std::io;
 use std::num::Wrapping;
@@ -12,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
+use vm_memory::bitmap::Bitmap;
 use vm_memory::{Bytes, GuestMemory};
 use vm_virtio::{AccessPlatform, Translatable};
 
@@ -35,9 +35,9 @@ impl TxVirtio {
         }
     }
 
-    pub fn process_desc_chain(
+    pub fn process_desc_chain<B: Bitmap + 'static>(
         &mut self,
-        mem: &GuestMemoryMmap,
+        mem: &vm_memory::GuestMemoryMmap<B>,
         tap: &Tap,
         queue: &mut Queue,
         rate_limiter: &mut Option<RateLimiter>,
@@ -161,9 +161,9 @@ impl RxVirtio {
         }
     }
 
-    pub fn process_desc_chain(
+    pub fn process_desc_chain<B: Bitmap + 'static>(
         &mut self,
-        mem: &GuestMemoryMmap,
+        mem: &vm_memory::GuestMemoryMmap<B>,
         tap: &Tap,
         queue: &mut Queue,
         rate_limiter: &mut Option<RateLimiter>,
@@ -350,9 +350,9 @@ pub struct NetQueuePair {
 }
 
 impl NetQueuePair {
-    pub fn process_tx(
+    pub fn process_tx<B: Bitmap + 'static>(
         &mut self,
-        mem: &GuestMemoryMmap,
+        mem: &vm_memory::GuestMemoryMmap<B>,
         queue: &mut Queue,
     ) -> Result<bool, NetQueuePairError> {
         let tx_tap_retry = self.tx.process_desc_chain(
@@ -400,9 +400,9 @@ impl NetQueuePair {
             .map_err(NetQueuePairError::QueueNeedsNotification)
     }
 
-    pub fn process_rx(
+    pub fn process_rx<B: Bitmap + 'static>(
         &mut self,
-        mem: &GuestMemoryMmap,
+        mem: &vm_memory::GuestMemoryMmap<B>,
         queue: &mut Queue,
     ) -> Result<bool, NetQueuePairError> {
         self.rx_desc_avail = !self.rx.process_desc_chain(
