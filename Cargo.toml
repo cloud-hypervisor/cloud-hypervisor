@@ -31,7 +31,7 @@ strip = false
 [dependencies]
 anyhow = "1.0.86"
 api_client = { path = "api_client" }
-clap = { version = "4.5.4", features = ["string"] }
+clap = { version = "4.5.13", features = ["string"] }
 dhat = { version = "0.3.3", optional = true }
 epoll = "4.3.3"
 event_monitor = { path = "event_monitor" }
