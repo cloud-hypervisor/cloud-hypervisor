@@ -235,11 +235,7 @@ impl BlockEpollHandler {
         Ok(())
     }
 
-    fn process_queue_submit_and_signal(&mut self) -> result::Result<(), EpollHelperError> {
-        self.process_queue_submit().map_err(|e| {
-            EpollHelperError::HandleEvent(anyhow!("Failed to process queue (submit): {:?}", e))
-        })?;
-
+    fn try_signal_used_queue(&mut self) -> result::Result<(), EpollHelperError> {
         if self
             .queue
             .needs_notification(self.mem.memory().deref())
@@ -256,6 +252,14 @@ impl BlockEpollHandler {
         }
 
         Ok(())
+    }
+
+    fn process_queue_submit_and_signal(&mut self) -> result::Result<(), EpollHelperError> {
+        self.process_queue_submit().map_err(|e| {
+            EpollHelperError::HandleEvent(anyhow!("Failed to process queue (submit): {:?}", e))
+        })?;
+
+        self.try_signal_used_queue()
     }
 
     #[inline]
@@ -514,8 +518,14 @@ impl EpollHelperHandler for BlockEpollHandler {
 
                 // Process the queue only when the rate limit is not reached
                 if !rate_limit_reached {
-                    self.process_queue_submit_and_signal()?
+                    self.process_queue_submit().map_err(|e| {
+                        EpollHelperError::HandleEvent(anyhow!(
+                            "Failed to process queue (submit): {:?}",
+                            e
+                        ))
+                    })?;
                 }
+                self.try_signal_used_queue()?;
             }
             RATE_LIMITER_EVENT => {
                 if let Some(rate_limiter) = &mut self.rate_limiter {
