@@ -28,6 +28,72 @@ pub struct VirtioPciCommonConfigState {
     pub msix_queues: Vec<u16>,
 }
 
+/* The standard layout for the ring is a continuous chunk of memory which looks
+ * like this.  We assume num is a power of 2.
+ *
+ * struct vring
+ * {
+ *	// The actual descriptors (16 bytes each)
+ *	struct vring_desc desc[num];
+ *
+ *	// A ring of available descriptor heads with free-running index.
+ *	__virtio16 avail_flags;
+ *	__virtio16 avail_idx;
+ *	__virtio16 available[num];
+ *	__virtio16 used_event_idx;
+ *
+ *	// Padding to the next align boundary.
+ *	char pad[];
+ *
+ *	// A ring of used descriptor heads with free-running index.
+ *	__virtio16 used_flags;
+ *	__virtio16 used_idx;
+ *	struct vring_used_elem used[num];
+ *	__virtio16 avail_event_idx;
+ * };
+ * struct vring_desc {
+ *	__virtio64 addr;
+ *	__virtio32 len;
+ *	__virtio16 flags;
+ *	__virtio16 next;
+ * };
+ *
+ * struct vring_avail {
+ *	__virtio16 flags;
+ *	__virtio16 idx;
+ *	__virtio16 ring[];
+ * };
+ *
+ * // u32 is used here for ids for padding reasons.
+ * struct vring_used_elem {
+ *	// Index of start of used descriptor chain.
+ *	__virtio32 id;
+ *	// Total length of the descriptor chain which was used (written to)
+ *	__virtio32 len;
+ * };
+*
+ * Kernel header used for this reference: include/uapi/linux/virtio_ring.h
+ * Virtio Spec: https://docs.oasis-open.org/virtio/virtio/v1.2/csd01/virtio-v1.2-csd01.html
+ *
+ */
+const VRING_DESC_ELEMENT_SIZE: usize = 16;
+const VRING_AVAIL_ELEMENT_SIZE: usize = 2;
+const VRING_USED_ELEMENT_SIZE: usize = 8;
+pub enum VringType {
+    Desc,
+    Avail,
+    Used,
+}
+
+pub fn get_vring_size(t: VringType, queue_size: u16) -> u64 {
+    let (length_except_ring, element_size) = match t {
+        VringType::Desc => (0, VRING_DESC_ELEMENT_SIZE),
+        VringType::Avail => (6, VRING_AVAIL_ELEMENT_SIZE),
+        VringType::Used => (6, VRING_USED_ELEMENT_SIZE),
+    };
+    (length_except_ring + element_size * queue_size as usize) as u64
+}
+
 /// Contains the data for reading and writing the common configuration structure of a virtio PCI
 /// device.
 ///
