@@ -159,6 +159,11 @@ pub enum HypervisorCpuError {
     #[error("Failed to init vcpu: {0}")]
     VcpuInit(#[source] anyhow::Error),
     ///
+    /// Vcpu Finalize error
+    ///
+    #[error("Failed to finalize vcpu: {0}")]
+    VcpuFinalize(#[source] anyhow::Error),
+    ///
     /// Setting one reg error
     ///
     #[error("Failed to init vcpu: {0}")]
@@ -417,6 +422,10 @@ pub trait Vcpu: Send + Sync {
     ///
     #[cfg(target_arch = "aarch64")]
     fn vcpu_init(&self, kvi: &VcpuInit) -> Result<()>;
+
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_finalize(&self, feature: i32) -> Result<()>;
+
     ///
     /// Gets a list of the guest registers that are supported for the
     /// KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.

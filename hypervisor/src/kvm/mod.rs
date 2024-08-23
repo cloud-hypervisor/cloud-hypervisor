@@ -1881,6 +1881,15 @@ impl cpu::Vcpu for KvmVcpu {
             .map_err(|e| cpu::HypervisorCpuError::VcpuInit(e.into()))
     }
 
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_finalize(&self, feature: i32) -> cpu::Result<()> {
+        self.fd
+            .lock()
+            .unwrap()
+            .vcpu_finalize(&feature)
+            .map_err(|e| cpu::HypervisorCpuError::VcpuFinalize(e.into()))
+    }
+
     ///
     /// Gets a list of the guest registers that are supported for the
     /// KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.

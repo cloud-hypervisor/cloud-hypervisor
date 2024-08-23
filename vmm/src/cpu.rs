@@ -142,6 +142,10 @@ pub enum Error {
     #[error("Error initialising vCPU: {0}")]
     VcpuArmInit(#[source] hypervisor::HypervisorCpuError),
 
+    #[cfg(target_arch = "aarch64")]
+    #[error("Error finalising vCPU: {0}")]
+    VcpuArmFinalize(#[source] hypervisor::HypervisorCpuError),
+
     #[error("Failed to join on vCPU threads: {0:?}")]
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
@@ -417,8 +421,10 @@ impl Vcpu {
     /// Initializes an aarch64 specific vcpu for booting Linux.
     #[cfg(target_arch = "aarch64")]
     pub fn init(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
+        use std::arch::is_aarch64_feature_detected;
         let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
-
+        let sve_supported =
+            is_aarch64_feature_detected!("sve") || is_aarch64_feature_detected!("sve2");
         // This reads back the kernel's preferred target type.
         vm.get_preferred_target(&mut kvi)
             .map_err(Error::VcpuArmPreferredTarget)?;
@@ -432,11 +438,28 @@ impl Vcpu {
         {
             kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PMU_V3;
         }
+
+        if sve_supported
+            && vm
+                .as_any()
+                .downcast_ref::<hypervisor::kvm::KvmVm>()
+                .unwrap()
+                .check_extension(Cap::ArmSve)
+        {
+            kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_SVE;
+        }
+
         // Non-boot cpus are powered off initially.
         if self.id > 0 {
             kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_POWER_OFF;
         }
-        self.vcpu.vcpu_init(&kvi).map_err(Error::VcpuArmInit)
+        self.vcpu.vcpu_init(&kvi).map_err(Error::VcpuArmInit)?;
+        if sve_supported {
+            self.vcpu
+                .vcpu_finalize(kvm_bindings::KVM_ARM_VCPU_SVE as i32)
+                .map_err(Error::VcpuArmFinalize)?;
+        }
+        Ok(())
     }
 
     /// Runs the VCPU until it exits, returning the reason.
