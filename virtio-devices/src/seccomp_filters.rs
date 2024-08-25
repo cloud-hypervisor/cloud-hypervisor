@@ -270,6 +270,8 @@ fn virtio_thread_common() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_write, vec![]),
+        #[cfg(debug_assertions)]
+        (libc::SYS_fcntl, vec![]),
     ]
 }
 
