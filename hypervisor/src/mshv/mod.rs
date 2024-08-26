@@ -973,18 +973,6 @@ impl cpu::Vcpu for MshvVcpu {
                                         }
                                     }
                                 }
-                                SVM_EXITCODE_SNP_EXTENDED_GUEST_REQUEST => {
-                                    warn!("Fetching extended guest request is not supported");
-                                    // Extended guest request is not supported by the Hypervisor
-                                    // Returning the error to the guest
-                                    // 0x6 means `The NAE event was not valid`
-                                    // Reference: GHCB Spec, page 42
-                                    let value: u64 = 0x6;
-                                    self.gpa_write(
-                                        ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
-                                        &value.to_le_bytes(),
-                                    )?;
-                                }
                                 SVM_EXITCODE_IOIO_PROT => {
                                     let exit_info1 =
                                         info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1 as u32;
@@ -1078,7 +1066,26 @@ impl cpu::Vcpu for MshvVcpu {
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
                                     self.clear_swexit_info1(ghcb_gpa)?;
                                 }
-                                SVM_EXITCODE_SNP_GUEST_REQUEST => {
+                                SVM_EXITCODE_SNP_GUEST_REQUEST
+                                | SVM_EXITCODE_SNP_EXTENDED_GUEST_REQUEST => {
+                                    if exit_code == SVM_EXITCODE_SNP_EXTENDED_GUEST_REQUEST {
+                                        info!("Fetching extended guest request is not supported");
+                                        // We don't support extended guest request, so we just write empty data.
+                                        // This matches the behavior of KVM in Linux 6.11.
+
+                                        // Read RAX & RBX from the GHCB.
+                                        let mut data = [0; 8];
+                                        self.gpa_read(ghcb_gpa + GHCB_RAX_OFFSET, &mut data)?;
+                                        let data_gpa = u64::from_le_bytes(data);
+                                        self.gpa_read(ghcb_gpa + GHCB_RBX_OFFSET, &mut data)?;
+                                        let data_npages = u64::from_le_bytes(data);
+
+                                        if data_npages > 0 {
+                                            // The certificates are terminated by 24 zero bytes.
+                                            self.gpa_write(data_gpa, &[0; 24])?;
+                                        }
+                                    }
+
                                     let req_gpa =
                                         info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1;
                                     let rsp_gpa =
