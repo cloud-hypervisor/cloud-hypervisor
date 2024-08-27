@@ -403,6 +403,10 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         // but the ioctl API is limited to u8
         256
     }
+
+    fn get_guest_debug_hw_bps(&self) -> usize {
+        0
+    }
 }
 
 /// Vcpu struct for Microsoft Hypervisor
