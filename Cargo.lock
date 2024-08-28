@@ -2368,6 +2368,7 @@ dependencies = [
  "event_monitor",
  "libc",
  "log",
+ "mshv-ioctls",
  "net_gen",
  "net_util",
  "pci",
