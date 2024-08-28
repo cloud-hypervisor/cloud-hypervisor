@@ -42,8 +42,6 @@ use devices::interrupt_controller::InterruptController;
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::{X86SegmentRegs, X86_64CoreRegs as CoreRegs};
-#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
-use hypervisor::aarch64::StandardRegisters;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use hypervisor::arch::x86::msr_index;
 #[cfg(target_arch = "x86_64")]
@@ -62,7 +60,7 @@ use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 use hypervisor::CpuVendor;
 #[cfg(feature = "kvm")]
 use hypervisor::HypervisorType;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+#[cfg(feature = "guest_debug")]
 use hypervisor::StandardRegisters;
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
 use libc::{c_void, siginfo_t};
@@ -2395,9 +2393,9 @@ impl Debuggable for CpuManager {
             .get_regs(cpu_id as u8)
             .map_err(DebuggableError::ReadRegs)?;
         Ok(CoreRegs {
-            x: gregs.regs.regs,
-            sp: gregs.regs.sp,
-            pc: gregs.regs.pc,
+            x: gregs.get_regs(),
+            sp: gregs.get_sp(),
+            pc: gregs.get_pc(),
             ..Default::default()
         })
     }
@@ -2465,9 +2463,9 @@ impl Debuggable for CpuManager {
             .get_regs(cpu_id as u8)
             .map_err(DebuggableError::ReadRegs)?;
 
-        gregs.regs.regs = regs.x;
-        gregs.regs.sp = regs.sp;
-        gregs.regs.pc = regs.pc;
+        gregs.set_regs(regs.x);
+        gregs.set_sp(regs.sp);
+        gregs.set_pc(regs.pc);
 
         self.set_regs(cpu_id as u8, &gregs)
             .map_err(DebuggableError::WriteRegs)?;
@@ -2924,8 +2922,8 @@ mod tests {
     use arch::{aarch64::regs, layout};
     use hypervisor::kvm::aarch64::is_system_register;
     use hypervisor::kvm::kvm_bindings::{
-        kvm_regs, kvm_vcpu_init, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
-        KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
+        kvm_vcpu_init, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM_CORE,
+        KVM_REG_SIZE_U64,
     };
     use hypervisor::{arm64_core_reg_id, offset_of};
     use std::mem;
@@ -2987,7 +2985,7 @@ mod tests {
             "Failed to get core register: Exec format error (os error 8)"
         );
 
-        let mut state = kvm_regs::default();
+        let mut state = vcpu.create_standard_regs();
         let res = vcpu.set_regs(&state);
         assert!(res.is_err());
         assert_eq!(
@@ -2999,7 +2997,7 @@ mod tests {
         let res = vcpu.get_regs();
         assert!(res.is_ok());
         state = res.unwrap();
-        assert_eq!(state.regs.pstate, 0x3C5);
+        assert_eq!(state.get_pstate(), 0x3C5);
 
         assert!(vcpu.set_regs(&state).is_ok());
     }
