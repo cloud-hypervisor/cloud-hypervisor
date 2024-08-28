@@ -6,7 +6,7 @@ version = "0.1.0"
 
 [features]
 default = []
-sev_snp = []
+sev_snp = ["mshv-ioctls"]
 
 [dependencies]
 anyhow = "1.0.86"
@@ -17,6 +17,7 @@ epoll = "4.3.3"
 event_monitor = { path = "../event_monitor" }
 libc = "0.2.155"
 log = "0.4.22"
+mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", tag = "v0.2.0", optional = true }
 net_gen = { path = "../net_gen" }
 net_util = { path = "../net_util" }
 pci = { path = "../pci" }

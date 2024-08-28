@@ -56,6 +56,17 @@ const VFIO_IOMMU_UNMAP_DMA: u64 = 0x3b72;
 // See include/uapi/linux/if_tun.h in the kernel code.
 const TUNSETOFFLOAD: u64 = 0x4004_54d0;
 
+#[cfg(feature = "sev_snp")]
+fn create_mshv_sev_snp_ioctl_seccomp_rule() -> Vec<SeccompRule> {
+    or![and![Cond::new(
+        1,
+        ArgLen::Dword,
+        Eq,
+        mshv_ioctls::MSHV_MODIFY_GPA_HOST_ACCESS()
+    )
+    .unwrap()]]
+}
+
 fn create_virtio_console_ioctl_seccomp_rule() -> Vec<SeccompRule> {
     or![and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ).unwrap()]]
 }
@@ -259,6 +270,8 @@ fn virtio_thread_common() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_epoll_wait, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_futex, vec![]),
+        #[cfg(feature = "sev_snp")]
+        (libc::SYS_ioctl, create_mshv_sev_snp_ioctl_seccomp_rule()),
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
