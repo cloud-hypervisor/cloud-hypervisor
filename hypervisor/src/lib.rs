@@ -270,3 +270,45 @@ get_x86_64_reg!(r14);
 get_x86_64_reg!(r15);
 get_x86_64_reg!(rip);
 get_x86_64_reg!(rflags);
+
+macro_rules! set_aarch64_reg {
+    ($reg_name:ident, $type:ty) => {
+        concat_idents!(method_name = "set_", $reg_name {
+            #[cfg(target_arch = "aarch64")]
+            impl StandardRegisters {
+                pub fn method_name(&mut self, val: $type) {
+                    match self {
+                        #[cfg(feature = "kvm")]
+                        StandardRegisters::Kvm(s) => s.regs.$reg_name = val,
+                    }
+                }
+            }
+        });
+    }
+}
+
+macro_rules! get_aarch64_reg {
+    ($reg_name:ident, $type:ty) => {
+        concat_idents!(method_name = "get_", $reg_name {
+            #[cfg(target_arch = "aarch64")]
+            impl StandardRegisters {
+                pub fn method_name(&self) -> $type {
+                    match self {
+                        #[cfg(feature = "kvm")]
+                        StandardRegisters::Kvm(s) => s.regs.$reg_name,
+                    }
+                }
+            }
+        });
+    }
+}
+
+set_aarch64_reg!(regs, [u64; 31usize]);
+set_aarch64_reg!(sp, u64);
+set_aarch64_reg!(pc, u64);
+set_aarch64_reg!(pstate, u64);
+
+get_aarch64_reg!(regs, [u64; 31usize]);
+get_aarch64_reg!(sp, u64);
+get_aarch64_reg!(pc, u64);
+get_aarch64_reg!(pstate, u64);
