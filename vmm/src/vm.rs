@@ -335,6 +335,10 @@ pub enum Error {
 
     #[error("Error locking disk images: Another instance likely holds a lock")]
     LockingError(#[source] DeviceManagerError),
+
+    #[cfg(feature = "ivshmem")]
+    #[error("Error reprogramming: {0}")]
+    ReProgramPCIBar(#[source] DeviceManagerError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -495,6 +499,7 @@ impl Vm {
         exit_evt: EventFd,
         reset_evt: EventFd,
         #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
+        #[cfg(feature = "ivshmem")] reprogram_evt: EventFd,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
@@ -611,6 +616,8 @@ impl Vm {
             cpu_manager.clone(),
             exit_evt.try_clone().map_err(Error::EventFdClone)?,
             reset_evt,
+            #[cfg(feature = "ivshmem")]
+            reprogram_evt,
             seccomp_action.clone(),
             numa_nodes.clone(),
             &activate_evt,
@@ -863,6 +870,7 @@ impl Vm {
         exit_evt: EventFd,
         reset_evt: EventFd,
         #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
+        #[cfg(feature = "ivshmem")] reprogram_evt: EventFd,
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
@@ -943,6 +951,8 @@ impl Vm {
             reset_evt,
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
+            #[cfg(feature = "ivshmem")]
+            reprogram_evt,
             seccomp_action,
             hypervisor,
             activate_evt,
@@ -2655,6 +2665,15 @@ impl Vm {
             .unwrap()
             .nmi()
             .map_err(|_| Error::ErrorNmi);
+    }
+
+    #[cfg(feature = "ivshmem")]
+    pub fn reprogramming_pci_bar(&self) -> Result<()> {
+        self.device_manager
+            .lock()
+            .unwrap()
+            .remapping_ivshmem_bar_memory()
+            .map_err(Error::ReProgramPCIBar)
     }
 }
 
