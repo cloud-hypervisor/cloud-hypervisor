@@ -493,7 +493,7 @@ impl Vm {
         activate_evt: EventFd,
         timestamp: Instant,
         console_info: Option<ConsoleInfo>,
-        console_resize_pipe: Option<File>,
+        console_resize_pipe: Option<Arc<File>>,
         original_termios: Arc<Mutex<Option<termios>>>,
         snapshot: Option<Snapshot>,
     ) -> Result<Self> {
@@ -801,7 +801,7 @@ impl Vm {
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
         console_info: Option<ConsoleInfo>,
-        console_resize_pipe: Option<File>,
+        console_resize_pipe: Option<Arc<File>>,
         original_termios: Arc<Mutex<Option<termios>>>,
         snapshot: Option<Snapshot>,
         source_url: Option<&str>,

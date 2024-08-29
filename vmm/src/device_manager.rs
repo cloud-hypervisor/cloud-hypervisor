@@ -1248,7 +1248,7 @@ impl DeviceManager {
     pub fn create_devices(
         &mut self,
         console_info: Option<ConsoleInfo>,
-        console_resize_pipe: Option<File>,
+        console_resize_pipe: Option<Arc<File>>,
         original_termios_opt: Arc<Mutex<Option<termios>>>,
     ) -> DeviceManagerResult<()> {
         trace_scoped!("create_devices");
@@ -2006,7 +2006,7 @@ impl DeviceManager {
         &mut self,
         virtio_devices: &mut Vec<MetaVirtioDevice>,
         console_fd: Option<RawFd>,
-        resize_pipe: Option<File>,
+        resize_pipe: Option<Arc<File>>,
     ) -> DeviceManagerResult<Option<Arc<virtio_devices::ConsoleResizer>>> {
         let console_config = self.config.lock().unwrap().console.clone();
         let endpoint = match console_config.mode {
@@ -2024,7 +2024,7 @@ impl DeviceManager {
                     // SAFETY: pty_fd is guaranteed to be a valid fd from
                     // pre_create_console_devices() in vmm/src/console_devices.rs
                     let file = unsafe { File::from_raw_fd(pty_fd) };
-                    self.console_resize_pipe = resize_pipe.map(Arc::new);
+                    self.console_resize_pipe = resize_pipe;
                     Endpoint::PtyPair(file.try_clone().unwrap(), file)
                 } else {
                     return Err(DeviceManagerError::InvalidConsoleFd);
@@ -2113,7 +2113,7 @@ impl DeviceManager {
         interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
         virtio_devices: &mut Vec<MetaVirtioDevice>,
         console_info: Option<ConsoleInfo>,
-        console_resize_pipe: Option<File>,
+        console_resize_pipe: Option<Arc<File>>,
     ) -> DeviceManagerResult<Arc<Console>> {
         let serial_config = self.config.lock().unwrap().serial.clone();
         if console_info.is_none() {

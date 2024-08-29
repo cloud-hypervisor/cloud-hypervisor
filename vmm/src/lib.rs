@@ -576,7 +576,7 @@ pub struct Vmm {
     signals: Option<Handle>,
     threads: Vec<thread::JoinHandle<()>>,
     original_termios_opt: Arc<Mutex<Option<termios>>>,
-    console_resize_pipe: Option<File>,
+    console_resize_pipe: Option<Arc<File>>,
     console_info: Option<ConsoleInfo>,
 }
 
@@ -868,7 +868,7 @@ impl Vmm {
             activate_evt,
             timestamp,
             self.console_info.clone(),
-            None,
+            self.console_resize_pipe.as_ref().map(Arc::clone),
             Arc::clone(&self.original_termios_opt),
             Some(snapshot),
         )
@@ -1306,7 +1306,7 @@ impl RequestHandler for Vmm {
                         self.hypervisor.clone(),
                         activate_evt,
                         self.console_info.clone(),
-                        None,
+                        self.console_resize_pipe.as_ref().map(Arc::clone),
                         Arc::clone(&self.original_termios_opt),
                         None,
                         None,
@@ -1433,7 +1433,7 @@ impl RequestHandler for Vmm {
             self.hypervisor.clone(),
             activate_evt,
             self.console_info.clone(),
-            None,
+            self.console_resize_pipe.as_ref().map(Arc::clone),
             Arc::clone(&self.original_termios_opt),
             Some(snapshot),
             Some(source_url),
@@ -1492,10 +1492,7 @@ impl RequestHandler for Vmm {
         // First we stop the current VM
         let (config, console_resize_pipe) = if let Some(mut vm) = self.vm.take() {
             let config = vm.get_config();
-            let console_resize_pipe = vm
-                .console_resize_pipe()
-                .as_ref()
-                .map(|pipe| pipe.try_clone().unwrap());
+            let console_resize_pipe = vm.console_resize_pipe();
             vm.shutdown()?;
             (config, console_resize_pipe)
         } else {
