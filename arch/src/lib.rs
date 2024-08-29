@@ -1,5 +1,6 @@
 // Copyright 2020 Arm Limited (or its affiliates). All rights reserved.
 // Copyright © 2020, Oracle and/or its affiliates.
+// Copyright © 2024, Institute of Software, CAS. All rights reserved.
 //
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
@@ -31,6 +32,9 @@ pub enum Error {
     #[cfg(target_arch = "aarch64")]
     #[error("Platform specific error (aarch64): {0:?}")]
     PlatformSpecific(aarch64::Error),
+    #[cfg(target_arch = "riscv64")]
+    #[error("Platform specific error (riscv64): {0:?}")]
+    PlatformSpecific(riscv64::Error),
     #[error("The memory map table extends past the end of guest memory")]
     MemmapTablePastRamEnd,
     #[error("Error writing memory map table to guest memory")]
@@ -84,6 +88,17 @@ pub use aarch64::{
     layout::IRQ_BASE, uefi, EntryPoint, _NSIG,
 };
 
+/// Module for riscv64 related functionality.
+#[cfg(target_arch = "riscv64")]
+pub mod riscv64;
+
+#[cfg(target_arch = "riscv64")]
+pub use riscv64::{
+    arch_memory_regions, configure_system, configure_vcpu, fdt::DeviceInfoForFdt,
+    get_host_cpu_phys_bits, initramfs_load_addr, layout, layout::CMDLINE_MAX_SIZE,
+    layout::IRQ_BASE, uefi, EntryPoint, _NSIG,
+};
+
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 
@@ -131,10 +146,10 @@ pub enum DeviceType {
     /// Device Type: Virtio.
     Virtio(u32),
     /// Device Type: Serial.
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     Serial,
     /// Device Type: RTC.
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     Rtc,
     /// Device Type: GPIO.
     #[cfg(target_arch = "aarch64")]
@@ -152,7 +167,7 @@ impl fmt::Display for DeviceType {
 
 /// Structure to describe MMIO device information
 #[derive(Clone, Debug)]
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 pub struct MmioDeviceInfo {
     pub addr: u64,
     pub len: u64,
@@ -169,7 +184,7 @@ pub struct PciSpaceInfo {
     pub pci_device_space_size: u64,
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 impl DeviceInfoForFdt for MmioDeviceInfo {
     fn addr(&self) -> u64 {
         self.addr
