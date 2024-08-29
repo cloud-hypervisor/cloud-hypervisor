@@ -11,6 +11,7 @@ dhat-heap = ["dhat"] # For heap profiling
 guest_debug = ["gdbstub", "gdbstub_arch", "kvm"]
 igvm = ["dep:igvm", "hex", "igvm_defs", "mshv-bindings", "range_map_vec"]
 io_uring = ["block/io_uring"]
+ivshmem = ["devices/ivshmem"]
 kvm = [
   "arch/kvm",
   "hypervisor/kvm",

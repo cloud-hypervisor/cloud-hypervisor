@@ -24,6 +24,8 @@ use vmm::api::ApiAction;
 use vmm::config::{RestoreConfig, VmParams};
 use vmm::landlock::{Landlock, LandlockError};
 use vmm::vm_config;
+#[cfg(feature = "ivshmem")]
+use vmm::vm_config::IvshmemConfig;
 #[cfg(target_arch = "x86_64")]
 use vmm::vm_config::SgxEpcConfig;
 use vmm::vm_config::{
@@ -288,6 +290,12 @@ fn get_cli_options_sorted(
             .long("initramfs")
             .help("Path to initramfs image")
             .num_args(1)
+            .group("vm-config"),
+        #[cfg(feature = "ivshmem")]
+        Arg::new("ivshmem")
+            .long("ivshmem")
+            .help(IvshmemConfig::SYNTAX)
+            .num_args(1..)
             .group("vm-config"),
         Arg::new("kernel")
             .long("kernel")
@@ -1019,6 +1027,8 @@ mod unit_tests {
             preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
+            #[cfg(feature = "ivshmem")]
+            ivshmem: None,
         };
 
         assert_eq!(expected_vm_config, result_vm_config);
