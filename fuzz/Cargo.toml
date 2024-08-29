@@ -11,6 +11,7 @@ cargo-fuzz = true
 [features]
 default = ["mshv_emulator"]
 igvm = []
+ivshmem = []
 mshv_emulator = ["hypervisor/mshv_emulator"]
 pvmemcontrol = []
 
