@@ -633,6 +633,23 @@ impl ApplyLandlock for VsockConfig {
     }
 }
 
+pub const DEFAULT_IVSHMEM_SIZE: usize = 128;
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct IvshmemConfig {
+    pub path: PathBuf,
+    pub size: usize,
+}
+
+impl Default for IvshmemConfig {
+    fn default() -> Self {
+        Self {
+            path: PathBuf::new(),
+            size: DEFAULT_IVSHMEM_SIZE << 20,
+        }
+    }
+}
+
 #[cfg(target_arch = "x86_64")]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct SgxEpcConfig {
@@ -806,6 +823,7 @@ pub struct VmConfig {
     #[serde(default)]
     pub landlock_enable: bool,
     pub landlock_rules: Option<Vec<LandlockConfig>>,
+    pub ivshmem: Option<IvshmemConfig>,
 }
 
 impl VmConfig {

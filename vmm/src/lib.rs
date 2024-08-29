@@ -2243,6 +2243,7 @@ mod unit_tests {
             preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
+            ivshmem: None,
         }))
     }
 

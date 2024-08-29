@@ -453,6 +453,13 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 .num_args(1)
                 .help(config::TpmConfig::SYNTAX)
                 .group("vmm-config"),
+        )
+        .arg(
+            Arg::new("ivshmem")
+                .long("ivshmem")
+                .help(config::IvshmemConfig::SYNTAX)
+                .num_args(1..)
+                .group("vm-config"),
         );
 
     #[cfg(target_arch = "x86_64")]
@@ -1079,6 +1086,7 @@ mod unit_tests {
             preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
+            ivshmem: None,
         };
 
         assert_eq!(expected_vm_config, result_vm_config);
