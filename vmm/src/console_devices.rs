@@ -183,14 +183,14 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             console_info.console_main_fd = Some(main_fd.into_raw_fd());
             set_raw_mode(&sub_fd.as_raw_fd(), vmm.original_termios_opt.clone())?;
             vmconfig.console.file = Some(path.clone());
-            vmm.console_resize_pipe = Some(
+            vmm.console_resize_pipe = Some(Arc::new(
                 listen_for_sigwinch_on_tty(
                     sub_fd,
                     &vmm.seccomp_action,
                     vmm.hypervisor.hypervisor_type(),
                 )
                 .map_err(ConsoleDeviceError::StartSigwinchListener)?,
-            );
+            ));
         }
         ConsoleOutputMode::Tty => {
             // Duplicating the file descriptors like this is needed as otherwise
@@ -206,14 +206,14 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
 
             // SAFETY: FFI call. Trivially safe.
             if unsafe { libc::isatty(stdout.as_raw_fd()) } == 1 {
-                vmm.console_resize_pipe = Some(
+                vmm.console_resize_pipe = Some(Arc::new(
                     listen_for_sigwinch_on_tty(
                         stdout.try_clone().unwrap(),
                         &vmm.seccomp_action,
                         vmm.hypervisor.hypervisor_type(),
                     )
                     .map_err(ConsoleDeviceError::StartSigwinchListener)?,
-                );
+                ));
             }
 
             // Make sure stdout is in raw mode, if it's a terminal.
@@ -255,14 +255,14 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
 
             // SAFETY: FFI call. Trivially safe.
             if unsafe { libc::isatty(stdout.as_raw_fd()) } == 1 {
-                vmm.console_resize_pipe = Some(
+                vmm.console_resize_pipe = Some(Arc::new(
                     listen_for_sigwinch_on_tty(
                         stdout.try_clone().unwrap(),
                         &vmm.seccomp_action,
                         vmm.hypervisor.hypervisor_type(),
                     )
                     .map_err(ConsoleDeviceError::StartSigwinchListener)?,
-                );
+                ));
             }
 
             // Make sure stdout is in raw mode, if it's a terminal.
