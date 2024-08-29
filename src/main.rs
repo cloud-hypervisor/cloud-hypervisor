@@ -27,9 +27,9 @@ use vmm::vm_config;
 #[cfg(target_arch = "x86_64")]
 use vmm::vm_config::SgxEpcConfig;
 use vmm::vm_config::{
-    BalloonConfig, DeviceConfig, DiskConfig, FsConfig, LandlockConfig, NetConfig, NumaConfig,
-    PciSegmentConfig, PmemConfig, RateLimiterGroupConfig, TpmConfig, UserDeviceConfig, VdpaConfig,
-    VmConfig, VsockConfig,
+    BalloonConfig, DeviceConfig, DiskConfig, FsConfig, IvshmemConfig, LandlockConfig, NetConfig,
+    NumaConfig, PciSegmentConfig, PmemConfig, RateLimiterGroupConfig, TpmConfig, UserDeviceConfig,
+    VdpaConfig, VmConfig, VsockConfig,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
@@ -288,6 +288,11 @@ fn get_cli_options_sorted(
             .long("initramfs")
             .help("Path to initramfs image")
             .num_args(1)
+            .group("vm-config"),
+        Arg::new("ivshmem")
+            .long("ivshmem")
+            .help(IvshmemConfig::SYNTAX)
+            .num_args(1..)
             .group("vm-config"),
         Arg::new("kernel")
             .long("kernel")
@@ -1019,6 +1024,7 @@ mod unit_tests {
             preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
+            ivshmem: None,
         };
 
         assert_eq!(expected_vm_config, result_vm_config);
