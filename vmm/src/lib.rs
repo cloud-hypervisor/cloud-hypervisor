@@ -423,6 +423,8 @@ pub fn feature_list() -> Vec<String> {
         "tdx".to_string(),
         #[cfg(feature = "tracing")]
         "tracing".to_string(),
+        #[cfg(feature = "ivshmem")]
+        "ivshmem".to_string(),
     ]
 }
 
@@ -2438,6 +2440,8 @@ mod unit_tests {
             preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
+            #[cfg(feature = "ivshmem")]
+            ivshmem: None,
         })
     }
 
