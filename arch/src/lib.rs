@@ -1,6 +1,6 @@
+// Copyright © 2024, Institute of Software, CAS. All rights reserved.
 // Copyright 2020 Arm Limited (or its affiliates). All rights reserved.
 // Copyright © 2020, Oracle and/or its affiliates.
-// Copyright © 2024, Institute of Software, CAS. All rights reserved.
 //
 // Copyright 2018 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0

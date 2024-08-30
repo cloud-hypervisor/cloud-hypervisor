@@ -139,10 +139,7 @@ fn create_cpu_nodes(fdt: &mut FdtWriter, num_cpus: u32) -> Result<(), FdtError> 
     Ok(())
 }
 
-fn create_memory_node(
-    fdt: &mut FdtWriter,
-    guest_mem: &GuestMemoryMmap,
-) -> FdtWriterResult<()> {
+fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &GuestMemoryMmap) -> FdtWriterResult<()> {
     unimplemented!()
 }
 

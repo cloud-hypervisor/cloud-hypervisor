@@ -4,8 +4,8 @@
 
 /// Module for the flattened device tree.
 pub mod fdt;
-// /// Layout for this riscv64 system.
-// pub mod layout;
+/// Layout for this riscv64 system.
+pub mod layout;
 // /// Module for system registers definition
 // pub mod regs;
 // /// Module for loading UEFI binary.
