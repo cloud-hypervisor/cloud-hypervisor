@@ -1,0 +1,11 @@
+[package]
+authors = ["The Cloud Hypervisor Authors"]
+edition = "2021"
+name = "virtio-ext"
+version = "0.1.0"
+
+description = "virtio helper traits"
+
+[dependencies]
+virtio-queue = "0.12.0"
+vm-memory = "0.14.1"

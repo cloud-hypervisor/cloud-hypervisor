@@ -10,6 +10,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
+use virtio_ext::QueueExt;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::bitmap::Bitmap;
 use vm_memory::{Bytes, GuestMemory};
@@ -48,7 +49,10 @@ impl TxVirtio {
         let mut retry_write = false;
         let mut rate_limit_reached = false;
 
-        while let Some(mut desc_chain) = queue.pop_descriptor_chain(mem) {
+        while let Some(mut desc_chain) = queue
+            .pop_desc_chain_with_notification(mem)
+            .map_err(NetQueuePairError::QueueEnableNotification)?
+        {
             if rate_limit_reached {
                 queue.go_to_previous_position();
                 break;
@@ -130,13 +134,6 @@ impl TxVirtio {
             queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), len)
                 .map_err(NetQueuePairError::QueueAddUsed)?;
-
-            if !queue
-                .enable_notification(mem)
-                .map_err(NetQueuePairError::QueueEnableNotification)?
-            {
-                break;
-            }
         }
 
         Ok(retry_write)
@@ -176,7 +173,10 @@ impl RxVirtio {
         let mut exhausted_descs = true;
         let mut rate_limit_reached = false;
 
-        while let Some(mut desc_chain) = queue.pop_descriptor_chain(mem) {
+        while let Some(mut desc_chain) = queue
+            .pop_desc_chain_with_notification(mem)
+            .map_err(NetQueuePairError::QueueEnableNotification)?
+        {
             if rate_limit_reached {
                 exhausted_descs = false;
                 queue.go_to_previous_position();
@@ -279,13 +279,6 @@ impl RxVirtio {
             queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), len)
                 .map_err(NetQueuePairError::QueueAddUsed)?;
-
-            if !queue
-                .enable_notification(mem)
-                .map_err(NetQueuePairError::QueueEnableNotification)?
-            {
-                break;
-            }
         }
 
         Ok(exhausted_descs)

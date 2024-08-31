@@ -1330,6 +1330,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "virtio-bindings",
+ "virtio-ext",
  "virtio-queue",
  "vm-memory",
  "vm-virtio",
@@ -2381,6 +2382,7 @@ dependencies = [
  "thiserror",
  "vhost",
  "virtio-bindings",
+ "virtio-ext",
  "virtio-queue",
  "vm-allocator",
  "vm-device",
@@ -2388,6 +2390,14 @@ dependencies = [
  "vm-migration",
  "vm-virtio",
  "vmm-sys-util",
+]
+
+[[package]]
+name = "virtio-ext"
+version = "0.1.0"
+dependencies = [
+ "virtio-queue",
+ "vm-memory",
 ]
 
 [[package]]
