@@ -5,8 +5,8 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 #![no_main]
-use libfuzzer_sys::fuzz_target;
 use block::qcow::{QcowFile, RawFile};
+use libfuzzer_sys::fuzz_target;
 use std::ffi;
 use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
