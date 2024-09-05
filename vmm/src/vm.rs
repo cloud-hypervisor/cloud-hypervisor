@@ -827,6 +827,8 @@ impl Vm {
             tdx_enabled,
             #[cfg(feature = "sev_snp")]
             sev_snp_enabled,
+            #[cfg(feature = "sev_snp")]
+            vm_config.lock().unwrap().memory.total_size(),
         )?;
 
         let phys_bits = physical_bits(&hypervisor, vm_config.lock().unwrap().cpus.max_phys_bits);
@@ -885,6 +887,7 @@ impl Vm {
         hypervisor: &Arc<dyn hypervisor::Hypervisor>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
+        #[cfg(feature = "sev_snp")] mem_size: u64,
     ) -> Result<Arc<dyn hypervisor::Vm>> {
         hypervisor.check_required_extensions().unwrap();
 
@@ -901,7 +904,7 @@ impl Vm {
                 // Otherwise SEV_SNP_DISABLED: 0
                 // value of sev_snp_enabled is mapped to SEV_SNP_ENABLED for true or SEV_SNP_DISABLED for false
                 let vm = hypervisor
-                    .create_vm_with_type(u64::from(sev_snp_enabled))
+                    .create_vm_with_type_and_memory(u64::from(sev_snp_enabled), mem_size)
                     .unwrap();
             } else {
                 let vm = hypervisor.create_vm().unwrap();
