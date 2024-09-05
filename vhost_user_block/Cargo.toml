@@ -10,7 +10,7 @@ block = { path = "../block" }
 clap = { version = "4.5.13", features = ["cargo", "wrap_help"] }
 env_logger = "0.11.3"
 epoll = "4.3.3"
-libc = "0.2.155"
+libc = "0.2.158"
 log = "0.4.22"
 option_parser = { path = "../option_parser" }
 vhost = { version = "0.11.0", features = ["vhost-user-backend"] }
