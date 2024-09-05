@@ -5,12 +5,18 @@
 
 use std::any::Any;
 use std::collections::HashMap;
+#[cfg(feature = "sev_snp")]
+use std::num::NonZeroUsize;
 use std::sync::{Arc, RwLock};
 
+#[cfg(feature = "sev_snp")]
+use arc_swap::ArcSwap;
 use mshv_bindings::*;
 use mshv_ioctls::{set_registers_64, InterruptRequest, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
+#[cfg(feature = "sev_snp")]
+use vm_memory::bitmap::AtomicBitmap;
 
 use crate::arch::emulator::PlatformEmulator;
 #[cfg(target_arch = "x86_64")]
@@ -303,6 +309,14 @@ impl MshvHypervisor {
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
                 #[cfg(feature = "sev_snp")]
                 sev_snp_enabled: mshv_vm_type == VmType::Snp,
+                #[cfg(feature = "sev_snp")]
+                host_access_pages: ArcSwap::new(
+                    AtomicBitmap::new(
+                        _mem_size.unwrap_or_default() as usize,
+                        NonZeroUsize::new(HV_PAGE_SIZE).unwrap(),
+                    )
+                    .into(),
+                ),
             }))
         }
 
@@ -457,6 +471,8 @@ pub struct MshvVcpu {
     vm_fd: Arc<VmFd>,
     #[cfg(feature = "sev_snp")]
     ghcb: Option<Ghcb>,
+    #[cfg(feature = "sev_snp")]
+    host_access_pages: ArcSwap<AtomicBitmap>,
 }
 
 /// Implementation of Vcpu trait for Microsoft Hypervisor
@@ -784,6 +800,12 @@ impl cpu::Vcpu for MshvVcpu {
                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(anyhow!(
                             "Unhandled VCPU exit: attribute intercept - couldn't modify host access {}", e
                         )))?;
+                    // Guest is revoking the shared access, so we need to update the bitmap
+                    self.host_access_pages.rcu(|_bitmap| {
+                        let bm = self.host_access_pages.load().as_ref().clone();
+                        bm.reset_addr_range(gpa_start as usize, gfn_count as usize);
+                        bm
+                    });
                     Ok(cpu::VmExit::Ignore)
                 }
                 #[cfg(target_arch = "x86_64")]
@@ -1586,6 +1608,8 @@ pub struct MshvVm {
     dirty_log_slots: Arc<RwLock<HashMap<u64, MshvDirtyLogSlot>>>,
     #[cfg(feature = "sev_snp")]
     sev_snp_enabled: bool,
+    #[cfg(feature = "sev_snp")]
+    host_access_pages: ArcSwap<AtomicBitmap>,
 }
 
 impl MshvVm {
@@ -1716,6 +1740,8 @@ impl vm::Vm for MshvVm {
             vm_fd: self.fd.clone(),
             #[cfg(feature = "sev_snp")]
             ghcb,
+            #[cfg(feature = "sev_snp")]
+            host_access_pages: ArcSwap::new(self.host_access_pages.load().clone()),
         };
         Ok(Arc::new(vcpu))
     }
@@ -2108,6 +2134,7 @@ impl vm::Vm for MshvVm {
     #[cfg(feature = "sev_snp")]
     fn gain_page_access(&self, gpa: u64, size: u32) -> vm::Result<()> {
         use mshv_ioctls::set_bits;
+        const ONE_GB: usize = 1024 * 1024 * 1024;
 
         if !self.sev_snp_enabled {
             return Ok(());
@@ -2116,7 +2143,25 @@ impl vm::Vm for MshvVm {
         let start_gpfn: u64 = gpa >> PAGE_SHIFT;
         let end_gpfn: u64 = (gpa + size as u64 - 1) >> PAGE_SHIFT;
 
-        let gpas: Vec<u64> = (start_gpfn..=end_gpfn).map(|x| x << PAGE_SHIFT).collect();
+        // Enlarge the bitmap if the PFN is greater than the bitmap length
+        if end_gpfn >= self.host_access_pages.load().as_ref().len() as u64 {
+            self.host_access_pages.rcu(|bitmap| {
+                let mut bm = bitmap.as_ref().clone();
+                bm.enlarge(ONE_GB);
+                bm
+            });
+        }
+
+        let gpas: Vec<u64> = (start_gpfn..=end_gpfn)
+            .filter(|x| {
+                !self
+                    .host_access_pages
+                    .load()
+                    .as_ref()
+                    .is_bit_set(*x as usize)
+            })
+            .map(|x| x << PAGE_SHIFT)
+            .collect();
 
         if !gpas.is_empty() {
             let mut gpa_list = vec_with_array_field::<mshv_modify_gpa_host_access, u64>(gpas.len());
@@ -2139,6 +2184,14 @@ impl vm::Vm for MshvVm {
             self.fd
                 .modify_gpa_host_access(&gpa_list[0])
                 .map_err(|e| vm::HypervisorVmError::ModifyGpaHostAccess(e.into()))?;
+
+            for acquired_gpa in gpas {
+                self.host_access_pages.rcu(|bitmap| {
+                    let bm = bitmap.clone();
+                    bm.set_bit((acquired_gpa >> PAGE_SHIFT) as usize);
+                    bm
+                });
+            }
         }
 
         Ok(())
