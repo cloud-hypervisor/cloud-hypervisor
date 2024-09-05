@@ -118,6 +118,17 @@ pub trait Hypervisor: Send + Sync {
     fn create_vm_with_type(&self, _vm_type: u64) -> Result<Arc<dyn Vm>> {
         unreachable!()
     }
+    ///
+    /// Create a Vm of a specific type using the underlying hypervisor, passing memory size
+    /// Return a hypervisor-agnostic Vm trait object
+    ///
+    fn create_vm_with_type_and_memory(
+        &self,
+        _vm_type: u64,
+        #[cfg(feature = "sev_snp")] _mem_size: u64,
+    ) -> Result<Arc<dyn Vm>> {
+        unreachable!()
+    }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Get the supported CpuID
