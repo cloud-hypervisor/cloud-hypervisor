@@ -7,7 +7,7 @@ version = "0.1.0"
 [dependencies]
 epoll = "4.3.3"
 getrandom = "0.2.14"
-libc = "0.2.155"
+libc = "0.2.158"
 log = "0.4.22"
 net_gen = { path = "../net_gen" }
 rate_limiter = { path = "../rate_limiter" }

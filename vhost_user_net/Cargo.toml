@@ -9,7 +9,7 @@ version = "0.1.0"
 clap = { version = "4.5.13", features = ["cargo", "wrap_help"] }
 env_logger = "0.11.3"
 epoll = "4.3.3"
-libc = "0.2.155"
+libc = "0.2.158"
 log = "0.4.22"
 net_util = { path = "../net_util" }
 option_parser = { path = "../option_parser" }
