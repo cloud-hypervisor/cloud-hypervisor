@@ -115,6 +115,7 @@ pub enum VsockEpollHandlerError {
 }
 
 /// A passive, event-driven object, that needs to be notified whenever an epoll-able event occurs.
+///
 /// An event-polling control loop will use `get_polled_fd()` and `get_polled_evset()` to query
 /// the listener for the file descriptor and the set of events it's interested in. When such an
 /// event occurs, the control loop will route the event to the listener via `notify()`.
@@ -130,8 +131,9 @@ pub trait VsockEpollListener {
     fn notify(&mut self, evset: epoll::Events);
 }
 
-/// Any channel that handles vsock packet traffic: sending and receiving packets. Since we're
-/// implementing the device model here, our responsibility is to always process the sending of
+/// Trait to describe any channel that handles vsock packet traffic (sending and receiving packets)
+///
+/// Since we're implementing the device model here, our responsibility is to always process the sending of
 /// packets (i.e. the TX queue). So, any locally generated data, addressed to the driver (e.g.
 /// a connection response or RST), will have to be queued, until we get to processing the RX queue.
 ///
@@ -151,8 +153,9 @@ pub trait VsockChannel {
     fn has_pending_rx(&self) -> bool;
 }
 
-/// The vsock backend, which is basically an epoll-event-driven vsock channel, that needs to be
-/// sendable through a mpsc channel (the latter due to how `vmm::EpollContext` works).
+/// The vsock backend, which is basically an epoll-event-driven vsock channel
+///
+/// It that needs to be sendable through a mpsc channel (the latter due to how `vmm::EpollContext` works).
 /// Currently, the only implementation we have is `crate::virtio::unix::muxer::VsockMuxer`, which
 /// translates guest-side vsock connections to host-side Unix domain socket connections.
 pub trait VsockBackend: VsockChannel + VsockEpollListener + Send {}

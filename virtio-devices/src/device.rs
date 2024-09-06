@@ -177,6 +177,8 @@ pub trait VirtioDevice: Send {
     fn set_access_platform(&mut self, _access_platform: Arc<dyn AccessPlatform>) {}
 }
 
+/// Trait to define address translation for devices managed by virtio-iommu
+///
 /// Trait providing address translation the same way a physical DMA remapping
 /// table would provide translation between an IOVA and a physical address.
 /// The goal of this trait is to be used by virtio devices to perform the
