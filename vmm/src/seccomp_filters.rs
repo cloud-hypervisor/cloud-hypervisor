@@ -226,6 +226,7 @@ fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, Backe
             MSHV_ISSUE_PSP_GUEST_REQUEST()
         )?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_ROOT_HVCALL())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_ASSERT_INTERRUPT())?],
     ])
 }
 
@@ -719,6 +720,7 @@ fn create_vcpu_ioctl_seccomp_rule_mshv() -> Result<Vec<SeccompRule>, BackendErro
             MSHV_ISSUE_PSP_GUEST_REQUEST()
         )?],
         and![Cond::new(1, ArgLen::Dword, Eq, MSHV_ROOT_HVCALL())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, MSHV_ASSERT_INTERRUPT())?],
     ])
 }
 
