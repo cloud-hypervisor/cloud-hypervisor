@@ -57,18 +57,27 @@ const VFIO_IOMMU_UNMAP_DMA: u64 = 0x3b72;
 const TUNSETOFFLOAD: u64 = 0x4004_54d0;
 
 #[cfg(feature = "sev_snp")]
-fn create_mshv_sev_snp_ioctl_seccomp_rule() -> Vec<SeccompRule> {
-    or![and![Cond::new(
+fn mshv_sev_snp_ioctl_seccomp_rule() -> SeccompRule {
+    and![Cond::new(
         1,
         ArgLen::Dword,
         Eq,
         mshv_ioctls::MSHV_MODIFY_GPA_HOST_ACCESS()
     )
-    .unwrap()]]
+    .unwrap()]
+}
+
+#[cfg(feature = "sev_snp")]
+fn create_mshv_sev_snp_ioctl_seccomp_rule() -> Vec<SeccompRule> {
+    or![mshv_sev_snp_ioctl_seccomp_rule()]
 }
 
 fn create_virtio_console_ioctl_seccomp_rule() -> Vec<SeccompRule> {
-    or![and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ).unwrap()]]
+    or![
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ).unwrap()],
+        #[cfg(feature = "sev_snp")]
+        mshv_sev_snp_ioctl_seccomp_rule(),
+    ]
 }
 
 fn create_virtio_iommu_ioctl_seccomp_rule() -> Vec<SeccompRule> {
@@ -96,6 +105,8 @@ fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_fsync, vec![]),
         (libc::SYS_ftruncate, vec![]),
         (libc::SYS_getrandom, vec![]),
+        #[cfg(feature = "sev_snp")]
+        (libc::SYS_ioctl, create_mshv_sev_snp_ioctl_seccomp_rule()),
         (libc::SYS_io_destroy, vec![]),
         (libc::SYS_io_getevents, vec![]),
         (libc::SYS_io_submit, vec![]),
@@ -138,11 +149,17 @@ fn virtio_net_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_readv, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
         (libc::SYS_writev, vec![]),
+        #[cfg(feature = "sev_snp")]
+        (libc::SYS_ioctl, create_mshv_sev_snp_ioctl_seccomp_rule()),
     ]
 }
 
 fn create_virtio_net_ctl_ioctl_seccomp_rule() -> Vec<SeccompRule> {
-    or![and![Cond::new(1, ArgLen::Dword, Eq, TUNSETOFFLOAD).unwrap()],]
+    or![
+        and![Cond::new(1, ArgLen::Dword, Eq, TUNSETOFFLOAD).unwrap()],
+        #[cfg(feature = "sev_snp")]
+        mshv_sev_snp_ioctl_seccomp_rule(),
+    ]
 }
 
 fn virtio_net_ctl_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
@@ -157,6 +174,8 @@ fn virtio_rng_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
         (libc::SYS_sched_getaffinity, vec![]),
         (libc::SYS_set_robust_list, vec![]),
+        #[cfg(feature = "sev_snp")]
+        (libc::SYS_ioctl, create_mshv_sev_snp_ioctl_seccomp_rule()),
     ]
 }
 
@@ -210,7 +229,11 @@ fn virtio_vhost_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 }
 
 fn create_vsock_ioctl_seccomp_rule() -> Vec<SeccompRule> {
-    or![and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO,).unwrap()],]
+    or![
+        and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO,).unwrap()],
+        #[cfg(feature = "sev_snp")]
+        mshv_sev_snp_ioctl_seccomp_rule(),
+    ]
 }
 
 fn virtio_vsock_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
@@ -270,8 +293,6 @@ fn virtio_thread_common() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_epoll_wait, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_futex, vec![]),
-        #[cfg(feature = "sev_snp")]
-        (libc::SYS_ioctl, create_mshv_sev_snp_ioctl_seccomp_rule()),
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
