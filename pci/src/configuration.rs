@@ -180,8 +180,10 @@ impl PciSubclass for PciNetworkControllerSubclass {
     }
 }
 
-/// A PCI class programming interface. Each combination of `PciClassCode` and
-/// `PciSubclass` can specify a set of register-level programming interfaces.
+/// Trait to define a PCI class programming interface
+///
+/// Each combination of `PciClassCode` and `PciSubclass` can specify a
+/// set of register-level programming interfaces.
 /// This trait is implemented by each programming interface.
 /// It allows use of a trait object to generate configurations.
 pub trait PciProgrammingInterface {
@@ -418,6 +420,7 @@ pub struct PciConfigurationState {
 }
 
 /// Contains the configuration space of a PCI node.
+///
 /// See the [specification](https://en.wikipedia.org/wiki/PCI_configuration_space).
 /// The configuration space is accessed with DWORD reads and writes from the guest.
 pub struct PciConfiguration {

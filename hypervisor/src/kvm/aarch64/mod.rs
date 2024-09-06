@@ -82,6 +82,7 @@ macro_rules! arm64_core_reg_id {
 }
 
 /// Specifies whether a particular register is a system register or not.
+///
 /// The kernel splits the registers on aarch64 in core registers and system registers.
 /// So, below we get the system registers by checking that they are not core registers.
 ///

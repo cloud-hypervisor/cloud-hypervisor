@@ -43,10 +43,11 @@ pub enum Error {
     EventFdWrite(#[source] io::Error),
 }
 
-/// The RateLimiterGroupHandle is a handle to a RateLimiterGroup that may be
-/// used in exactly the same way as the RateLimiter type. When the RateLimiter
-/// within a RateLimiterGroup is unblocked, each RateLimiterGroupHandle will
-/// be notified.
+/// Handle to a RateLimiterGroup
+///
+/// The RateLimiterGroupHandle may be used in exactly the same way as
+/// the RateLimiter type. When the RateLimiter within a RateLimiterGroup
+/// is unblocked, each RateLimiterGroupHandle will be notified.
 pub struct RateLimiterGroupHandle {
     eventfd: Arc<EventFd>,
     inner: Arc<RateLimiterGroupInner>,

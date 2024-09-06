@@ -905,6 +905,7 @@ pub fn configure_vcpu(
 }
 
 /// Returns a Vec of the valid memory addresses.
+///
 /// These should be used to configure the GuestMemory structure for the platform.
 /// For x86_64 all addresses are valid from the start of the kernel except a
 /// carve out at the end of 32bit address space.

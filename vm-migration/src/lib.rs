@@ -63,6 +63,7 @@ pub trait Pausable {
 }
 
 /// A Snapshottable component snapshot section.
+///
 /// Migratable component can split their migration snapshot into
 /// separate sections.
 /// Splitting a component migration data into different sections
@@ -94,6 +95,8 @@ impl SnapshotData {
     }
 }
 
+/// Data structure to describe snapshot data
+///
 /// A Snapshottable component's snapshot is a tree of snapshots, where leafs
 /// contain the snapshot data. Nodes of this tree track all their children
 /// through the snapshots field, which is basically their sub-components.
@@ -207,8 +210,9 @@ pub trait Transportable: Pausable + Snapshottable {
     }
 }
 
-/// Trait to be implemented by any component (device, CPU, RAM, etc) that
-/// can be migrated.
+/// Trait to define shared behaviors of components that can be migrated
+///
+/// Examples are device, CPU, RAM, etc.
 /// All migratable components are paused before being snapshotted, and then
 /// eventually resumed. Thus any Migratable component must be both Pausable
 /// and Snapshottable.

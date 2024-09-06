@@ -155,6 +155,8 @@ impl TryInto<rate_limiter::RateLimiter> for RateLimiterConfig {
     }
 }
 
+/// Return the host virtual address corresponding to the given guest address range
+///
 /// Convert an absolute address into an address space (GuestMemory)
 /// to a host pointer and verify that the provided size define a valid
 /// range within a single memory region.
