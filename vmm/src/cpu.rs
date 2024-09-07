@@ -421,6 +421,7 @@ impl Vcpu {
     pub fn init(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         use std::arch::is_aarch64_feature_detected;
         let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
+        #[allow(clippy::nonminimal_bool)]
         let sve_supported =
             is_aarch64_feature_detected!("sve") || is_aarch64_feature_detected!("sve2");
         // This reads back the kernel's preferred target type.
