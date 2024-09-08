@@ -42,6 +42,7 @@ checkout_repo() {
     fi
 }
 
+# Not actively used by CI
 build_custom_linux() {
     ARCH=$(uname -m)
     SRCDIR=$PWD
@@ -127,6 +128,24 @@ download_hypervisor_fw() {
     pushd "$WORKLOADS_DIR" || exit
     rm -f "$FW"
     time wget --quiet "$FW_URL" || exit 1
+    popd || exit
+}
+
+download_linux() {
+    if [ -n "$AUTH_DOWNLOAD_TOKEN" ]; then
+        echo "Using authenticated download from GitHub"
+        KERNEL_URLS=$(curl --silent https://api.github.com/repos/cloud-hypervisor/linux/releases/latest \
+            --header "Authorization: Token $AUTH_DOWNLOAD_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+    else
+        echo "Using anonymous download from GitHub"
+        KERNEL_URLS=$(curl --silent https://api.github.com/repos/cloud-hypervisor/linux/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+    fi
+    pushd "$WORKLOADS_DIR" || exit
+    for url in $KERNEL_URLS; do
+        wget --quiet "$url" || exit 1
+    done
+
     popd || exit
 }
 

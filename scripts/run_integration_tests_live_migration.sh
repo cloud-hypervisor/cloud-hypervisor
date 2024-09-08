@@ -56,7 +56,8 @@ popd || exit
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
 VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
 if [ ! -f "$VMLINUX_IMAGE" ]; then
-    build_custom_linux
+    # Download prebuild linux binaries
+    download_linux
 fi
 
 CFLAGS=""
