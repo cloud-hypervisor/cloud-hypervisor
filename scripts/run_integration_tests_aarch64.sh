@@ -154,8 +154,8 @@ update_workloads() {
     fi
     popd || exit
 
-    # Build custom kernel for guest VMs
-    build_custom_linux
+    # Download prebuild linux binaries
+    download_linux
 
     # Update the kernel in the cloud image for some tests that requires recent kernel version
     FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME="focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw"

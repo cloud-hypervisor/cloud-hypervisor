@@ -80,8 +80,8 @@ if [ "${TEST_ARCH}" == "aarch64" ]; then
     guestunmount "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR"
 fi
 
-# Build custom kernel based on virtio-pmem and virtio-fs upstream patches
-build_custom_linux
+# Download prebuild linux binaries
+download_linux
 
 CFLAGS=""
 if [[ "${BUILD_TARGET}" == "${TEST_ARCH}-unknown-linux-musl" ]]; then
