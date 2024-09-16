@@ -644,7 +644,6 @@ impl Console {
             if iommu {
                 avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
             }
-            
 
             (
                 avail_features,
