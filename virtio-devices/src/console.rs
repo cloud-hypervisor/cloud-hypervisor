@@ -742,6 +742,7 @@ impl VirtioDevice for Console {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
+        info!("Activating virtio-console");
         self.common.activate(&queues, &interrupt_cb)?;
         self.resizer
             .acked_features
