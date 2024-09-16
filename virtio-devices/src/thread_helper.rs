@@ -29,12 +29,14 @@ where
 {
     let seccomp_filter = get_seccomp_filter(seccomp_action, thread_type)
         .map_err(ActivateError::CreateSeccompFilter)?;
+    info!("spawn_virtio_thread: Created seccomp filter for thread: {}", name);
 
     let thread_exit_evt = exit_evt
         .try_clone()
         .map_err(ActivateError::CloneExitEventFd)?;
     let thread_name = name.to_string();
 
+    info!("spawn_virtio_thread: Created a thread with name: {}", thread_name);
     thread::Builder::new()
         .name(name.to_string())
         .spawn(move || {

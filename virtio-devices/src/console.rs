@@ -775,11 +775,12 @@ impl VirtioDevice for Console {
             pause_evt,
             self.common.access_platform.clone(),
         );
-
+        info!("virtio-console: activate: Created a new epoll handler");
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
         let mut epoll_threads = Vec::new();
 
+        info!("virtio-console: activate: Spawning virtio-console epoll thread");
         spawn_virtio_thread(
             &self.id,
             &self.seccomp_action,
@@ -789,6 +790,7 @@ impl VirtioDevice for Console {
             move || handler.run(paused, paused_sync.unwrap()),
         )?;
 
+        info!("virtio-console: activate: Spawned epoll thread");
         self.common.epoll_threads = Some(epoll_threads);
 
         event!("virtio-device", "activated", "id", &self.id);
