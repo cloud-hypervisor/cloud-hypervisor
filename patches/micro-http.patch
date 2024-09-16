@@ -1,0 +1,19 @@
+
+diff --git a/BUILD b/BUILD
+new file mode 100644
+index 000000000..f0f41ac2c
+--- /dev/null
++++ BUILD
+@@ -0,0 +1,11 @@
++load("@rules_rust//rust:defs.bzl", "rust_library")
++
++rust_library(
++    name = "micro-http",
++    srcs = glob(["src/*.rs", "src/**/*.rs"]),
++    visibility = ["//visibility:public"],
++    deps = [
++        "@crates//:libc",
++        "@crates//:vmm-sys-util",
++    ],
++)
++

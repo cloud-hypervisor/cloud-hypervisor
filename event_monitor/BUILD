@@ -9,10 +9,10 @@ rust_library(
     srcs = glob(["src/*.rs"]),
     visibility = ["//visibility:public"],
     deps = [
-        "@cloud-hypervisor_crate_index//:flume",
-        "@cloud-hypervisor_crate_index//:libc",
-        "@cloud-hypervisor_crate_index//:once_cell",
-        "@cloud-hypervisor_crate_index//:serde",
-        "@cloud-hypervisor_crate_index//:serde_json"
+        "@crates//:flume",
+        "@crates//:libc",
+        "@crates//:once_cell",
+        "@crates//:serde",
+        "@crates//:serde_json"
         ],
 )

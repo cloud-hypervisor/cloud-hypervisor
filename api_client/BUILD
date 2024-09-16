@@ -9,7 +9,7 @@ rust_library(
     srcs = ["src/lib.rs"],
     visibility = ["//visibility:public"],
     deps = [
-        "@cloud-hypervisor_crate_index//:vmm-sys-util",
-        "@cloud-hypervisor_crate_index//:thiserror"
+        "@crates//:vmm-sys-util",
+        "@crates//:thiserror"
         ],
 )

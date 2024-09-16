@@ -1,0 +1,16 @@
+
+diff --git a/BUILD b/BUILD
+new file mode 100644
+index 000000000..f0f41ac2c
+--- /dev/null
++++ BUILD
+@@ -0,0 +1,8 @@
++load("@rules_rust//rust:defs.bzl", "rust_library")
++
++rust_library(
++    name = "acpi-tables",
++    srcs = glob(["src/*.rs"]),
++    visibility = ["//visibility:public"],
++    deps = ["@crates//:zerocopy"],
++)
++

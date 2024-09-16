@@ -5,3 +5,276 @@
 # For more details, please check https://github.com/bazelbuild/bazel/issues/18958
 ###############################################################################
 bazel_dep(name = "rules_rust", version = "0.45.1")
+
+RUST_EDITION = "2021"
+RUST_VERSION = "1.79.0"
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+edition = RUST_EDITION,
+versions = [RUST_VERSION],
+)
+use_repo(rust, "rust_toolchains")
+register_toolchains("@rust_toolchains//:all")
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "acpi-tables",
+    patch_args = ["-p1"],
+    patch_tool = "patch",
+    patches = ["//patches:acpi-tables.patch"],
+    sha256 = "288631399bf1211a2cdabf4974e7af915684224bc3f3d174b8acce6314a8b49a",
+    strip_prefix = "acpi_tables-849d5950196f66dd10f2b2606d8fe8c7cb39ec24",
+    urls = [
+        "https://github.com/rust-vmm/acpi_tables/archive/849d5950196f66dd10f2b2606d8fe8c7cb39ec24.zip",
+    ],
+)
+
+http_archive(
+    name = "micro-http",
+    patch_args = ["-p1"],
+    patch_tool = "patch",
+    patches = ["//patches:micro-http.patch"],
+    sha256 = "fa4ebc9cdb6beb5e0dea3272d7e4b051f4c9650cb694743a737fbcdd4ad24727",
+    strip_prefix = "micro-http-8182cd5523b63ceb52ad9d0e7eb6fb95683e6d1b",
+    urls = [
+        "https://github.com/firecracker-microvm/micro-http/archive/8182cd5523b63ceb52ad9d0e7eb6fb95683e6d1b.zip",
+    ],
+)
+
+http_archive(
+    name = "vfio",
+    patch_args = ["-p1"],
+    patch_tool = "patch",
+    patches = ["//patches:vfio-ioctls.patch"],
+    sha256 = "4b2de558321a771c0b1c0175a972c84cf998f6ab76aae90a3f35547f135fc968",
+    strip_prefix = "vfio-a51a4746b0d317bfc21fa49d40f9287f3b8137fd",
+    urls = [
+        "https://github.com/rust-vmm/vfio/archive/a51a4746b0d317bfc21fa49d40f9287f3b8137fd.zip",
+    ],
+)
+
+http_archive(
+    name = "vfio-user",
+    patch_args = ["-p1"],
+    patch_tool = "patch",
+    patches = ["//patches:vfio-user.patch"],
+    sha256 = "2f4492f382e649032f6474a01c3d6ff80bf4e4b8d16e4b3ccdd2ade783231266",
+    strip_prefix = "vfio-user-a1f6e52829e069b6d698b2cfeecac742e4653186",
+    urls = [
+        "https://github.com/rust-vmm/vfio-user/archive/a1f6e52829e069b6d698b2cfeecac742e4653186.zip",
+    ],
+)
+
+crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate")
+
+crate.spec(
+    package = "anyhow",
+    version = "1.0.86",
+)
+crate.spec(
+    package = "arc-swap",
+    version = "1.5.0",
+)
+crate.spec(
+    package = "bitflags",
+    version = "2.3.3",
+)
+crate.spec(
+    package = "byteorder",
+    version = "1.5.0",
+)
+crate.spec(
+    package = "cfg-if",
+    version = "1.0.0",
+)
+crate.spec(
+    package = "clap",
+    features = [
+        "color",
+        "derive",
+        "env",
+        "error-context",
+        "help",
+        "std",
+        "string",
+        "suggestions",
+        "usage",
+    ],
+    version = "4.5.16",
+)
+crate.spec(
+    package = "clap_derive",
+    version = "*",
+)
+crate.spec(
+    package = "concat-idents",
+    version = "*",
+)
+crate.spec(
+    package = "crc-any",
+    version = "2.5.0",
+)
+crate.spec(
+    package = "env_logger",
+    version = "*",
+)
+crate.spec(
+    package = "epoll",
+    version = "4.3.1",
+)
+crate.spec(
+    package = "fdt",
+    version = "0.1.5",
+)
+crate.spec(
+    package = "flume",
+    version = "0.10.0",
+)
+crate.spec(
+    package = "getrandom",
+    version = "0.2.9",
+)
+crate.spec(
+    package = "kvm-bindings",
+    features = ["serde"],
+    version = "0.8.1",
+)
+crate.spec(
+    package = "kvm-ioctls",
+    version = "0.17.0",
+)
+crate.spec(
+    package = "landlock",
+    version = "0.4.0",
+)
+crate.spec(
+    package = "libc",
+    version = "0.2.153",
+)
+crate.spec(
+    package = "linux-loader",
+    features = [
+        "bzimage",
+        "elf",
+        "pe",
+    ],
+    version = "0.11.0",
+)
+crate.spec(
+    package = "log",
+    version = "0.4.21",
+)
+crate.spec(
+    package = "once_cell",
+    version = "1.19.0",
+)
+crate.spec(
+    package = "remain",
+    version = "0.2.6",
+)
+crate.spec(
+    package = "seccompiler",
+    version = "0.3.0",
+)
+crate.spec(
+    package = "serde",
+    features = [
+        "derive",
+        "rc",
+    ],
+    version = "1.0.208",
+)
+crate.spec(
+    package = "serde_derive",
+    version = "1.0.194",
+)
+crate.spec(
+    package = "serde_json",
+    version = "1.0.115",
+)
+crate.spec(
+    package = "serde_with",
+    version = "3.0.0",
+)
+crate.spec(
+    package = "signal-hook",
+    version = "0.3.17",
+)
+crate.spec(
+    package = "smallvec",
+    version = "1.11.0",
+)
+crate.spec(
+    package = "thiserror",
+    version = "1.0.63",
+)
+crate.spec(
+    package = "uuid",
+    features = [
+        "getrandom",
+        "rng",
+        "std",
+        "v4",
+    ],
+    version = "1.4.0",
+)
+crate.spec(
+    package = "vfio-bindings",
+    version = "0.3.1",
+)
+crate.spec(
+    package = "vhost",
+    features = [
+        "test-utils",
+        "vhost-kern",
+        "vhost-net",
+        "vhost-user",
+        "vhost-user-backend",
+        "vhost-user-frontend",
+        "vhost-vdpa",
+    ],
+    version = "0.11.0",
+)
+crate.spec(
+    package = "vhost-user-backend",
+    version = "0.15.0",
+)
+crate.spec(
+    package = "virtio-bindings",
+    version = "0.2.2",
+)
+crate.spec(
+    package = "virtio-queue",
+    version = "0.12.0",
+)
+crate.spec(
+    package = "vm-fdt",
+    version = "0.2.0",
+)
+crate.spec(
+    package = "vm-memory",
+    features = [
+        "arc-swap",
+        "backend-atomic",
+        "backend-mmap",
+        "backend-bitmap",
+    ],
+    version = "0.14.0",
+)
+crate.spec(
+    package = "vmm-sys-util",
+    features = ["with-serde"],
+    version = "0.12.0",
+)
+crate.spec(
+    package = "zerocopy",
+    features = [
+        "alloc",
+        "derive",
+    ],
+    version = "0.7.0",
+)
+
+crate.from_specs()
+use_repo(crate, "crates")

@@ -9,7 +9,7 @@ rust_library(
     srcs = glob(["src/*.rs"]),
     visibility = ["//visibility:public"],
     deps = [
-        "@cloud-hypervisor_crate_index//:virtio-queue",
-        "@cloud-hypervisor_crate_index//:vm-memory"
+        "@crates//:virtio-queue",
+        "@crates//:vm-memory"
         ],
 )

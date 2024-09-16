@@ -10,11 +10,11 @@ rust_library(
     visibility = ["//visibility:public"],
     deps = [
         "//net_gen",
-        "@cloud-hypervisor_crate_index//:anyhow",
-        "@cloud-hypervisor_crate_index//:libc",
-        "@cloud-hypervisor_crate_index//:byteorder",
-        "@cloud-hypervisor_crate_index//:log",
-        "@cloud-hypervisor_crate_index//:thiserror",
-        "@cloud-hypervisor_crate_index//:vmm-sys-util"
+        "@crates//:anyhow",
+        "@crates//:libc",
+        "@crates//:byteorder",
+        "@crates//:log",
+        "@crates//:thiserror",
+        "@crates//:vmm-sys-util"
         ],
 )
