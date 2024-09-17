@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -6,6 +6,21 @@ package(
 
 rust_library(
     name = "tpm",
+    srcs = glob(["src/*.rs"]),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//net_gen",
+        "@crates//:anyhow",
+        "@crates//:libc",
+        "@crates//:byteorder",
+        "@crates//:log",
+        "@crates//:thiserror",
+        "@crates//:vmm-sys-util"
+        ],
+)
+
+rust_test(
+    name = "tpm_test",
     srcs = glob(["src/*.rs"]),
     visibility = ["//visibility:public"],
     deps = [

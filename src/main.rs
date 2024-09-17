@@ -925,7 +925,7 @@ fn main() {
     let cmd_arguments = create_app(default_vcpus, default_memory, default_rng).get_matches();
 
     if cmd_arguments.get_flag("version") {
-        println!("{} {}", env!("CARGO_BIN_NAME"), env!("BUILD_VERSION"));
+        println!("{} {}", &std::env::var("CARGO_BIN_NAME").map_err(|_| "Couldn't find CARGO_BIN_NAME").unwrap(), env!("BUILD_VERSION"));
 
         if cmd_arguments.get_count("v") != 0 {
             println!("Enabled features: {:?}", vmm::feature_list());

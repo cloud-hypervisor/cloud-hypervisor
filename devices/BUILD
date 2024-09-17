@@ -1,0 +1,53 @@
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+rust_library(
+    name = "devices",
+    srcs = glob(["src/*.rs", "src/legacy/*.rs"]),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//arch",
+        "//event_monitor",
+        "//hypervisor",
+        "//pci",
+        "//tpm",
+        "//vm-allocator",
+        "//vm-device",
+        "//vm-migration",
+        "@acpi-tables//:acpi-tables",
+        "@crates//:anyhow",
+        "@crates//:bitflags",
+        "@crates//:byteorder",
+        "@crates//:libc",
+        "@crates//:log",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:vm-memory",
+        "@crates//:vmm-sys-util",
+    ],
+)
+
+rust_test(
+    name = "devices_test",
+    srcs = glob(["src/*.rs", "src/legacy/*.rs"]),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//arch",
+        "//event_monitor",
+        "//hypervisor",
+        "//pci",
+        "//tpm",
+        "//vm-allocator",
+        "//vm-device",
+        "//vm-migration",
+        "@acpi-tables//:acpi-tables",
+        "@crates//:anyhow",
+        "@crates//:bitflags",
+        "@crates//:byteorder",
+        "@crates//:libc",
+        "@crates//:log",
+        "@crates//:serde",
+        "@crates//:thiserror",
+        "@crates//:vm-memory",
+        "@crates//:vmm-sys-util",
+    ],
+)
