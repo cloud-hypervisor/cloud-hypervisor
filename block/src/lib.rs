@@ -58,15 +58,13 @@ use versionize_derive::Versionize;
 use virtio_bindings::virtio_blk::*;
 use virtio_queue::DescriptorChain;
 use vm_memory::{
-    bitmap::AtomicBitmap, bitmap::Bitmap, ByteValued, Bytes, GuestAddress, GuestMemory,
-    GuestMemoryError, GuestMemoryLoadGuard,
+    bitmap::Bitmap, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError,
+    GuestMemoryLoadGuard,
 };
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::aio;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::{ioctl_io_nr, ioctl_ioc_nr};
-
-type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
@@ -197,8 +195,8 @@ pub enum RequestType {
     Unsupported(u32),
 }
 
-pub fn request_type(
-    mem: &GuestMemoryMmap,
+pub fn request_type<B: Bitmap + 'static>(
+    mem: &vm_memory::GuestMemoryMmap<B>,
     desc_addr: GuestAddress,
 ) -> result::Result<RequestType, Error> {
     let type_ = mem.read_obj(desc_addr).map_err(Error::GuestMemory)?;
@@ -211,7 +209,10 @@ pub fn request_type(
     }
 }
 
-fn sector(mem: &GuestMemoryMmap, desc_addr: GuestAddress) -> result::Result<u64, Error> {
+fn sector<B: Bitmap + 'static>(
+    mem: &vm_memory::GuestMemoryMmap<B>,
+    desc_addr: GuestAddress,
+) -> result::Result<u64, Error> {
     const SECTOR_OFFSET: usize = 8;
     let addr = match mem.checked_offset(desc_addr, SECTOR_OFFSET) {
         Some(v) => v,
@@ -241,8 +242,8 @@ pub struct Request {
 }
 
 impl Request {
-    pub fn parse(
-        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
+    pub fn parse<B: Bitmap + 'static>(
+        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<vm_memory::GuestMemoryMmap<B>>>,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
     ) -> result::Result<Request, Error> {
         let hdr_desc = desc_chain
@@ -333,11 +334,11 @@ impl Request {
         Ok(req)
     }
 
-    pub fn execute<T: Seek + Read + Write>(
+    pub fn execute<T: Seek + Read + Write, B: Bitmap + 'static>(
         &self,
         disk: &mut T,
         disk_nsectors: u64,
-        mem: &GuestMemoryMmap,
+        mem: &vm_memory::GuestMemoryMmap<B>,
         serial: &[u8],
     ) -> result::Result<u32, ExecuteError> {
         disk.seek(SeekFrom::Start(self.sector << SECTOR_SHIFT))
@@ -390,9 +391,9 @@ impl Request {
         Ok(len)
     }
 
-    pub fn execute_async(
+    pub fn execute_async<B: Bitmap + 'static>(
         &mut self,
-        mem: &GuestMemoryMmap,
+        mem: &vm_memory::GuestMemoryMmap<B>,
         disk_nsectors: u64,
         disk_image: &mut dyn AsyncIo,
         serial: &[u8],
