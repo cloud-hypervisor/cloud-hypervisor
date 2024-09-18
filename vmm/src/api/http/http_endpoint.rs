@@ -18,7 +18,6 @@ use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use std::fs::File;
 use std::os::unix::io::IntoRawFd;
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
 use vmm_sys_util::eventfd::EventFd;
 
 // /api/v1/vm.create handler
@@ -36,7 +35,7 @@ impl EndpointHandler for VmCreate {
                 match &req.body {
                     Some(body) => {
                         // Deserialize into a VmConfig
-                        let mut vm_config: VmConfig = match serde_json::from_slice(body.raw())
+                        let mut vm_config: Box<VmConfig> = match serde_json::from_slice(body.raw())
                             .map_err(HttpError::SerdeJsonDeserialize)
                         {
                             Ok(config) => config,
@@ -53,7 +52,7 @@ impl EndpointHandler for VmCreate {
                         }
 
                         match crate::api::VmCreate
-                            .send(api_notifier, api_sender, Arc::new(Mutex::new(vm_config)))
+                            .send(api_notifier, api_sender, vm_config)
                             .map_err(HttpError::ApiError)
                         {
                             Ok(_) => Response::new(Version::Http11, StatusCode::NoContent),

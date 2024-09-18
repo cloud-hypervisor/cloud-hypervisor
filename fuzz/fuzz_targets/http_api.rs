@@ -9,7 +9,6 @@ use once_cell::sync::Lazy;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use vm_migration::MigratableError;
 use vmm::api::{
@@ -81,7 +80,7 @@ fn generate_request(bytes: &[u8]) -> Option<Request> {
 struct StubApiRequestHandler;
 
 impl RequestHandler for StubApiRequestHandler {
-    fn vm_create(&mut self, _: Arc<Mutex<VmConfig>>) -> Result<(), VmError> {
+    fn vm_create(&mut self, _: Box<VmConfig>) -> Result<(), VmError> {
         Ok(())
     }
 
@@ -120,7 +119,7 @@ impl RequestHandler for StubApiRequestHandler {
 
     fn vm_info(&self) -> Result<VmInfoResponse, VmError> {
         Ok(VmInfoResponse {
-            config: Arc::new(Mutex::new(VmConfig {
+            config: Box::new(VmConfig {
                 cpus: CpusConfig {
                     boot_vcpus: 1,
                     max_vcpus: 1,
@@ -194,7 +193,7 @@ impl RequestHandler for StubApiRequestHandler {
                 preserved_fds: None,
                 landlock_enable: false,
                 landlock_rules: None,
-            })),
+            }),
             state: VmState::Running,
             memory_actual_size: 0,
             device_tree: None,
