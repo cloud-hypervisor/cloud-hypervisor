@@ -51,7 +51,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::io;
 use std::sync::mpsc::{channel, RecvError, SendError, Sender};
-use std::sync::{Arc, Mutex};
 use vm_migration::MigratableError;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -210,10 +209,10 @@ impl Display for ApiError {
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct VmInfoResponse {
-    pub config: Arc<Mutex<VmConfig>>,
+    pub config: Box<VmConfig>,
     pub state: VmState,
     pub memory_actual_size: u64,
-    pub device_tree: Option<Arc<Mutex<DeviceTree>>>,
+    pub device_tree: Option<DeviceTree>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -287,7 +286,7 @@ pub enum ApiResponsePayload {
 pub type ApiResponse = Result<ApiResponsePayload, ApiError>;
 
 pub trait RequestHandler {
-    fn vm_create(&mut self, config: Arc<Mutex<VmConfig>>) -> Result<(), VmError>;
+    fn vm_create(&mut self, config: Box<VmConfig>) -> Result<(), VmError>;
 
     fn vm_boot(&mut self) -> Result<(), VmError>;
 
@@ -827,7 +826,7 @@ impl ApiAction for VmCounters {
 pub struct VmCreate;
 
 impl ApiAction for VmCreate {
-    type RequestBody = Arc<Mutex<VmConfig>>;
+    type RequestBody = Box<VmConfig>;
     type ResponseBody = ();
 
     fn request(

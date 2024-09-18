@@ -15,7 +15,7 @@ use signal_hook::consts::SIGSYS;
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::{env, io};
 use thiserror::Error;
 #[cfg(feature = "dbus_api")]
@@ -787,7 +787,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
                 .send(
                     api_evt.try_clone().unwrap(),
                     api_request_sender,
-                    Arc::new(Mutex::new(vm_config)),
+                    Box::new(vm_config),
                 )
                 .map_err(Error::VmCreate)?;
             vmm::api::VmBoot

@@ -20,7 +20,7 @@ use hypervisor::HypervisorType;
 use seccompiler::{apply_filter, SeccompAction};
 use std::panic::AssertUnwindSafe;
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use vmm_sys_util::eventfd::EventFd;
 use zbus::fdo::{self, Result};
@@ -201,7 +201,7 @@ impl DBusApi {
         let api_sender = self.clone_api_sender().await;
         let api_notifier = self.clone_api_notifier()?;
 
-        let mut vm_config: VmConfig = serde_json::from_str(&vm_config).map_err(api_error)?;
+        let mut vm_config: Box<VmConfig> = serde_json::from_str(&vm_config).map_err(api_error)?;
 
         if let Some(ref mut nets) = vm_config.net {
             if nets.iter().any(|net| net.fds.is_some()) {
@@ -212,11 +212,9 @@ impl DBusApi {
             }
         }
 
-        blocking::unblock(move || {
-            VmCreate.send(api_notifier, api_sender, Arc::new(Mutex::new(vm_config)))
-        })
-        .await
-        .map_err(api_error)?;
+        blocking::unblock(move || VmCreate.send(api_notifier, api_sender, vm_config))
+            .await
+            .map_err(api_error)?;
 
         Ok(())
     }

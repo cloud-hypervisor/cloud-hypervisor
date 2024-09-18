@@ -1239,11 +1239,11 @@ fn apply_landlock(vm_config: Arc<Mutex<VmConfig>>) -> result::Result<(), Landloc
 }
 
 impl RequestHandler for Vmm {
-    fn vm_create(&mut self, config: Arc<Mutex<VmConfig>>) -> result::Result<(), VmError> {
+    fn vm_create(&mut self, config: Box<VmConfig>) -> result::Result<(), VmError> {
         // We only store the passed VM config.
         // The VM will be created when being asked to boot it.
         if self.vm_config.is_none() {
-            self.vm_config = Some(config);
+            self.vm_config = Some(Arc::new(Mutex::new(*config)));
             self.console_info =
                 Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
 
@@ -1554,23 +1554,25 @@ impl RequestHandler for Vmm {
 
     fn vm_info(&self) -> result::Result<VmInfoResponse, VmError> {
         match &self.vm_config {
-            Some(config) => {
+            Some(vm_config) => {
                 let state = match &self.vm {
                     Some(vm) => vm.get_state()?,
                     None => VmState::Created,
                 };
+                let config = vm_config.lock().unwrap().clone();
 
-                let config = Arc::clone(config);
-
-                let mut memory_actual_size = config.lock().unwrap().memory.total_size();
+                let mut memory_actual_size = config.memory.total_size();
                 if let Some(vm) = &self.vm {
                     memory_actual_size -= vm.balloon_size();
                 }
 
-                let device_tree = self.vm.as_ref().map(|vm| vm.device_tree());
+                let device_tree = self
+                    .vm
+                    .as_ref()
+                    .map(|vm| vm.device_tree().lock().unwrap().clone());
 
                 Ok(VmInfoResponse {
-                    config,
+                    config: Box::new(config),
                     state,
                     memory_actual_size,
                     device_tree,
@@ -2164,8 +2166,8 @@ mod unit_tests {
         .unwrap()
     }
 
-    fn create_dummy_vm_config() -> Arc<Mutex<VmConfig>> {
-        Arc::new(Mutex::new(VmConfig {
+    fn create_dummy_vm_config() -> Box<VmConfig> {
+        Box::new(VmConfig {
             cpus: CpusConfig {
                 boot_vcpus: 1,
                 max_vcpus: 1,
@@ -2242,7 +2244,7 @@ mod unit_tests {
             preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
-        }))
+        })
     }
 
     #[test]
