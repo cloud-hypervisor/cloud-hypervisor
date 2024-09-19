@@ -6,16 +6,6 @@
 ###############################################################################
 bazel_dep(name = "rules_rust", version = "0.45.1")
 
-RUST_EDITION = "2021"
-RUST_VERSION = "1.79.0"
-rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
-rust.toolchain(
-edition = RUST_EDITION,
-versions = [RUST_VERSION],
-)
-use_repo(rust, "rust_toolchains")
-register_toolchains("@rust_toolchains//:all")
-
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(

@@ -1,0 +1,4 @@
+build:rbecache --remote_cache=grpcs://remotebuildexecution.googleapis.com
+build:rbecache --remote_default_exec_properties=cache-silo-key=FirstCachedBuild
+build:rbecache --remote_instance_name=projects/kiwi-air-force-remote-build/instances/default_instance
+build:rbecache --remote_timeout=3600

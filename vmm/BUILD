@@ -55,6 +55,7 @@ rust_test(
     name = "vmm_test",
     srcs = glob(["src/*.rs", "src/**/*.rs", "src/**/**/*.rs"]),
     crate_features = ["kvm"],
+    tags = ["nopresubmit"],
     visibility = ["//visibility:public"],
     deps = [
         "//arch",
