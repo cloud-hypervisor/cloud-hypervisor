@@ -13,6 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         rust:
+          - beta
           - stable
         target:
           - aarch64-unknown-linux-gnu
@@ -20,20 +21,12 @@ jobs:
           - x86_64-unknown-linux-gnu
           - x86_64-unknown-linux-musl
 
-        experimental: [false]
         include:
           - rust: beta
-            target: aarch64-unknown-linux-gnu
             experimental: true
-          - rust: beta
-            target: aarch64-unknown-linux-musl
-            experimental: true
-          - rust: beta
-            target: x86_64-unknown-linux-gnu
-            experimental: true
-          - rust: beta
-            target: x86_64-unknown-linux-musl
-            experimental: true
+          - rust: stable
+            experimental: false
+
     steps:
       - name: Code checkout
         uses: actions/checkout@v4
