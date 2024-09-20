@@ -711,11 +711,11 @@ impl VfioCommon {
 
             let bar_addr = match region_type {
                 PciBarRegionType::IoRegion => {
-                    #[cfg(target_arch = "aarch64")]
+                    #[cfg(not(target_arch = "x86_64"))]
                     unimplemented!();
 
                     // The address needs to be 4 bytes aligned.
-                    #[cfg(not(target_arch = "aarch64"))]
+                    #[cfg(target_arch = "x86_64")]
                     allocator
                         .lock()
                         .unwrap()
@@ -795,7 +795,7 @@ impl VfioCommon {
                 PciBarRegionType::IoRegion => {
                     #[cfg(target_arch = "x86_64")]
                     allocator.free_io_addresses(region.start, region.length);
-                    #[cfg(target_arch = "aarch64")]
+                    #[cfg(not(target_arch = "x86_64"))]
                     error!("I/O region is not supported");
                 }
                 PciBarRegionType::Memory32BitRegion => {
