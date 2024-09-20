@@ -13,7 +13,7 @@ use crate::config::{
     ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
     VdpaConfig, VhostMode, VmConfig, VsockConfig,
 };
-use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
+use crate::console_devices::{ConsoleDeviceError, ConsoleInfo, ConsoleOutput};
 use crate::cpu::{CpuManager, CPU_MANAGER_ACPI_SIZE};
 use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::interrupt::LegacyUserspaceInterruptManager;
@@ -70,7 +70,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::{self, stdout, IsTerminal, Seek, SeekFrom};
 use std::num::Wrapping;
-use std::os::fd::RawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::PathBuf;
@@ -2005,65 +2004,42 @@ impl DeviceManager {
     fn add_virtio_console_device(
         &mut self,
         virtio_devices: &mut Vec<MetaVirtioDevice>,
-        console_fd: Option<RawFd>,
+        console_fd: ConsoleOutput,
         resize_pipe: Option<Arc<File>>,
     ) -> DeviceManagerResult<Option<Arc<virtio_devices::ConsoleResizer>>> {
         let console_config = self.config.lock().unwrap().console.clone();
-        let endpoint = match console_config.mode {
-            ConsoleOutputMode::File => {
-                if let Some(file_fd) = console_fd {
-                    // SAFETY: file_fd is guaranteed to be a valid fd from
-                    // pre_create_console_devices() in vmm/src/console_devices.rs
-                    Endpoint::File(unsafe { File::from_raw_fd(file_fd) })
-                } else {
-                    return Err(DeviceManagerError::InvalidConsoleFd);
-                }
+        let endpoint = match console_fd {
+            ConsoleOutput::File(file) => Endpoint::File(file),
+            ConsoleOutput::Pty(file) => {
+                self.console_resize_pipe = resize_pipe;
+                Endpoint::PtyPair(Arc::new(file.try_clone().unwrap()), file)
             }
-            ConsoleOutputMode::Pty => {
-                if let Some(pty_fd) = console_fd {
-                    // SAFETY: pty_fd is guaranteed to be a valid fd from
-                    // pre_create_console_devices() in vmm/src/console_devices.rs
-                    let file = unsafe { File::from_raw_fd(pty_fd) };
+            ConsoleOutput::Tty(stdout) => {
+                if stdout.is_terminal() {
                     self.console_resize_pipe = resize_pipe;
-                    Endpoint::PtyPair(file.try_clone().unwrap(), file)
+                }
+
+                // If an interactive TTY then we can accept input
+                // SAFETY: FFI call. Trivially safe.
+                if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } {
+                    // SAFETY: FFI call to dup. Trivially safe.
+                    let stdin = unsafe { libc::dup(libc::STDIN_FILENO) };
+                    if stdin == -1 {
+                        return vmm_sys_util::errno::errno_result()
+                            .map_err(DeviceManagerError::DupFd);
+                    }
+                    // SAFETY: stdin is valid and owned solely by us.
+                    let stdin = unsafe { File::from_raw_fd(stdin) };
+                    Endpoint::FilePair(stdout, Arc::new(stdin))
                 } else {
-                    return Err(DeviceManagerError::InvalidConsoleFd);
+                    Endpoint::File(stdout)
                 }
             }
-            ConsoleOutputMode::Tty => {
-                if let Some(tty_fd) = console_fd {
-                    // SAFETY: tty_fd is guaranteed to be a valid fd from
-                    // pre_create_console_devices() in vmm/src/console_devices.rs
-                    let stdout = unsafe { File::from_raw_fd(tty_fd) };
-
-                    if stdout.is_terminal() {
-                        self.console_resize_pipe = resize_pipe;
-                    }
-
-                    // If an interactive TTY then we can accept input
-                    // SAFETY: FFI call. Trivially safe.
-                    if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } {
-                        // SAFETY: FFI call to dup. Trivially safe.
-                        let stdin = unsafe { libc::dup(libc::STDIN_FILENO) };
-                        if stdin == -1 {
-                            return vmm_sys_util::errno::errno_result()
-                                .map_err(DeviceManagerError::DupFd);
-                        }
-                        // SAFETY: stdin is valid and owned solely by us.
-                        let stdin = unsafe { File::from_raw_fd(stdin) };
-                        Endpoint::FilePair(stdout, stdin)
-                    } else {
-                        Endpoint::File(stdout)
-                    }
-                } else {
-                    return Err(DeviceManagerError::InvalidConsoleFd);
-                }
-            }
-            ConsoleOutputMode::Socket => {
+            ConsoleOutput::Socket(_) => {
                 return Err(DeviceManagerError::NoSocketOptionSupportForConsoleDevice);
             }
-            ConsoleOutputMode::Null => Endpoint::Null,
-            ConsoleOutputMode::Off => return Ok(None),
+            ConsoleOutput::Null => Endpoint::Null,
+            ConsoleOutput::Off => return Ok(None),
         };
         let id = String::from(CONSOLE_DEVICE_NAME);
 
@@ -2127,31 +2103,24 @@ impl DeviceManager {
 
         // SAFETY: console_info is Some, so it's safe to unwrap.
         let console_info = console_info.unwrap();
-        let serial_writer: Option<Box<dyn io::Write + Send>> = match serial_config.mode {
-            ConsoleOutputMode::File | ConsoleOutputMode::Tty => {
-                if console_info.serial_main_fd.is_none() {
-                    return Err(DeviceManagerError::InvalidConsoleInfo);
-                }
-                // SAFETY: serial_main_fd is Some, so it's safe to unwrap.
-                // SAFETY: serial_main_fd is guaranteed to be a valid fd from
-                // pre_create_console_devices() in vmm/src/console_devices.rs
-                Some(Box::new(unsafe {
-                    File::from_raw_fd(console_info.serial_main_fd.unwrap())
-                }))
+
+        let serial_writer: Option<Box<dyn io::Write + Send>> = match console_info.serial_main_fd {
+            ConsoleOutput::File(ref file) | ConsoleOutput::Tty(ref file) => {
+                Some(Box::new(Arc::clone(file)))
             }
-            ConsoleOutputMode::Off
-            | ConsoleOutputMode::Null
-            | ConsoleOutputMode::Pty
-            | ConsoleOutputMode::Socket => None,
+            ConsoleOutput::Off
+            | ConsoleOutput::Null
+            | ConsoleOutput::Pty(_)
+            | ConsoleOutput::Socket(_) => None,
         };
-        if serial_config.mode != ConsoleOutputMode::Off {
+
+        if !matches!(console_info.serial_main_fd, ConsoleOutput::Off) {
             let serial = self.add_serial_device(interrupt_manager, serial_writer)?;
-            self.serial_manager = match serial_config.mode {
-                ConsoleOutputMode::Pty | ConsoleOutputMode::Tty | ConsoleOutputMode::Socket => {
+            self.serial_manager = match console_info.serial_main_fd {
+                ConsoleOutput::Pty(_) | ConsoleOutput::Tty(_) | ConsoleOutput::Socket(_) => {
                     let serial_manager = SerialManager::new(
                         serial,
                         console_info.serial_main_fd,
-                        serial_config.mode,
                         serial_config.socket,
                     )
                     .map_err(DeviceManagerError::CreateSerialManager)?;
@@ -2174,24 +2143,13 @@ impl DeviceManager {
 
         #[cfg(target_arch = "x86_64")]
         {
-            let debug_console_config = self.config.lock().unwrap().debug_console.clone();
             let debug_console_writer: Option<Box<dyn io::Write + Send>> =
-                match debug_console_config.mode {
-                    ConsoleOutputMode::File | ConsoleOutputMode::Tty => {
-                        if console_info.debug_main_fd.is_none() {
-                            return Err(DeviceManagerError::InvalidConsoleInfo);
-                        }
-                        // SAFETY: debug_main_fd is Some, so it's safe to unwrap.
-                        // SAFETY: debug_main_fd is guaranteed to be a valid fd from
-                        // pre_create_console_devices() in vmm/src/console_devices.rs
-                        Some(Box::new(unsafe {
-                            File::from_raw_fd(console_info.debug_main_fd.unwrap())
-                        }))
-                    }
-                    ConsoleOutputMode::Off
-                    | ConsoleOutputMode::Null
-                    | ConsoleOutputMode::Pty
-                    | ConsoleOutputMode::Socket => None,
+                match console_info.debug_main_fd {
+                    ConsoleOutput::File(file) | ConsoleOutput::Tty(file) => Some(Box::new(file)),
+                    ConsoleOutput::Off
+                    | ConsoleOutput::Null
+                    | ConsoleOutput::Pty(_)
+                    | ConsoleOutput::Socket(_) => None,
                 };
             if let Some(writer) = debug_console_writer {
                 let _ = self.add_debug_console_device(writer)?;

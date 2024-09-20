@@ -23,12 +23,9 @@ use std::fs::read_link;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
-#[cfg(target_arch = "x86_64")]
-use std::io::stdout;
 use std::mem::zeroed;
 use std::os::fd::AsRawFd;
 use std::os::fd::FromRawFd;
-use std::os::fd::IntoRawFd;
 use std::os::fd::RawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixListener;
@@ -48,6 +45,10 @@ pub enum ConsoleDeviceError {
     #[error("Error creating console device: {0}")]
     CreateConsoleDevice(#[source] io::Error),
 
+    /// No socket option support for console device
+    #[error("No socket option support for console device")]
+    NoSocketOptionSupportForConsoleDevice,
+
     /// Error setting pty raw mode
     #[error("Error setting pty raw mode: {0}")]
     SetPtyRaw(#[source] vmm_sys_util::errno::Error),
@@ -63,14 +64,22 @@ pub enum ConsoleDeviceError {
 
 type ConsoleDeviceResult<T> = result::Result<T, ConsoleDeviceError>;
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
+pub enum ConsoleOutput {
+    File(Arc<File>),
+    Pty(Arc<File>),
+    Tty(Arc<File>),
+    Null,
+    Socket(Arc<UnixListener>),
+    Off,
+}
+
+#[derive(Clone)]
 pub struct ConsoleInfo {
-    // For each of File, Pty, Tty and Socket modes, below fields  hold the FD
-    // of console, serial and debug devices.
-    pub console_main_fd: Option<RawFd>,
-    pub serial_main_fd: Option<RawFd>,
+    pub console_main_fd: ConsoleOutput,
+    pub serial_main_fd: ConsoleOutput,
     #[cfg(target_arch = "x86_64")]
-    pub debug_main_fd: Option<RawFd>,
+    pub debug_main_fd: ConsoleOutput,
 }
 
 fn modify_mode<F: FnOnce(&mut termios)>(
@@ -179,123 +188,133 @@ fn dup_stdout() -> vmm_sys_util::errno::Result<File> {
 pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<ConsoleInfo> {
     let vm_config = vmm.vm_config.as_mut().unwrap().clone();
     let mut vmconfig = vm_config.lock().unwrap();
-    let mut console_info = ConsoleInfo::default();
 
-    match vmconfig.console.mode {
-        ConsoleOutputMode::File => {
-            let file = File::create(vmconfig.console.file.as_ref().unwrap())
-                .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
-            console_info.console_main_fd = Some(file.into_raw_fd());
-        }
-        ConsoleOutputMode::Pty => {
-            let (main_fd, sub_fd, path) =
-                create_pty().map_err(ConsoleDeviceError::CreateConsoleDevice)?;
-            console_info.console_main_fd = Some(main_fd.into_raw_fd());
-            set_raw_mode(&sub_fd.as_raw_fd(), vmm.original_termios_opt.clone())?;
-            vmconfig.console.file = Some(path.clone());
-            vmm.console_resize_pipe = Some(Arc::new(
-                listen_for_sigwinch_on_tty(
-                    sub_fd,
-                    &vmm.seccomp_action,
-                    vmm.hypervisor.hypervisor_type(),
-                )
-                .map_err(ConsoleDeviceError::StartSigwinchListener)?,
-            ));
-        }
-        ConsoleOutputMode::Tty => {
-            // Duplicating the file descriptors like this is needed as otherwise
-            // they will be closed on a reboot and the numbers reused
-
-            let stdout = dup_stdout().map_err(ConsoleDeviceError::DupFd)?;
-
-            // SAFETY: FFI call. Trivially safe.
-            if unsafe { libc::isatty(stdout.as_raw_fd()) } == 1 {
+    let console_info = ConsoleInfo {
+        console_main_fd: match vmconfig.console.mode {
+            ConsoleOutputMode::File => {
+                let file = File::create(vmconfig.console.file.as_ref().unwrap())
+                    .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
+                ConsoleOutput::File(Arc::new(file))
+            }
+            ConsoleOutputMode::Pty => {
+                let (main_fd, sub_fd, path) =
+                    create_pty().map_err(ConsoleDeviceError::CreateConsoleDevice)?;
+                set_raw_mode(&sub_fd.as_raw_fd(), vmm.original_termios_opt.clone())?;
+                vmconfig.console.file = Some(path.clone());
                 vmm.console_resize_pipe = Some(Arc::new(
                     listen_for_sigwinch_on_tty(
-                        stdout.try_clone().unwrap(),
+                        sub_fd,
                         &vmm.seccomp_action,
                         vmm.hypervisor.hypervisor_type(),
                     )
                     .map_err(ConsoleDeviceError::StartSigwinchListener)?,
                 ));
+                ConsoleOutput::Pty(Arc::new(main_fd))
             }
+            ConsoleOutputMode::Tty => {
+                // Duplicating the file descriptors like this is needed as otherwise
+                // they will be closed on a reboot and the numbers reused
 
-            // Make sure stdout is in raw mode, if it's a terminal.
-            set_raw_mode(&stdout, vmm.original_termios_opt.clone())?;
-            console_info.console_main_fd = Some(stdout.into_raw_fd());
-        }
-        ConsoleOutputMode::Null | ConsoleOutputMode::Socket | ConsoleOutputMode::Off => {}
-    }
+                let stdout = dup_stdout().map_err(ConsoleDeviceError::DupFd)?;
 
-    match vmconfig.serial.mode {
-        ConsoleOutputMode::File => {
-            let file = File::create(vmconfig.serial.file.as_ref().unwrap())
-                .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
-            console_info.serial_main_fd = Some(file.into_raw_fd());
-        }
-        ConsoleOutputMode::Pty => {
-            let (main_fd, sub_fd, path) =
-                create_pty().map_err(ConsoleDeviceError::CreateConsoleDevice)?;
-            console_info.serial_main_fd = Some(main_fd.into_raw_fd());
-            set_raw_mode(&sub_fd.as_raw_fd(), vmm.original_termios_opt.clone())?;
-            vmconfig.serial.file = Some(path.clone());
-        }
-        ConsoleOutputMode::Tty => {
-            // During vm_shutdown, when serial device is closed, FD#2(STDOUT)
-            // will be closed and FD#2 could be reused in a future boot of the
-            // guest by a different file.
-            //
-            // To ensure FD#2 always points to STANDARD OUT, a `dup` of STDOUT
-            // is passed to serial device. Doing so, even if the serial device
-            // were to be closed, FD#2 will continue to point to STANDARD OUT.
+                // SAFETY: FFI call. Trivially safe.
+                if unsafe { libc::isatty(stdout.as_raw_fd()) } == 1 {
+                    vmm.console_resize_pipe = Some(Arc::new(
+                        listen_for_sigwinch_on_tty(
+                            stdout.try_clone().unwrap(),
+                            &vmm.seccomp_action,
+                            vmm.hypervisor.hypervisor_type(),
+                        )
+                        .map_err(ConsoleDeviceError::StartSigwinchListener)?,
+                    ));
+                }
 
-            let stdout = dup_stdout().map_err(ConsoleDeviceError::DupFd)?;
-
-            // SAFETY: FFI call. Trivially safe.
-            if unsafe { libc::isatty(stdout.as_raw_fd()) } == 1 {
-                vmm.console_resize_pipe = Some(Arc::new(
-                    listen_for_sigwinch_on_tty(
-                        stdout.try_clone().unwrap(),
-                        &vmm.seccomp_action,
-                        vmm.hypervisor.hypervisor_type(),
-                    )
-                    .map_err(ConsoleDeviceError::StartSigwinchListener)?,
-                ));
+                // Make sure stdout is in raw mode, if it's a terminal.
+                set_raw_mode(&stdout, vmm.original_termios_opt.clone())?;
+                ConsoleOutput::Tty(Arc::new(stdout))
             }
+            ConsoleOutputMode::Socket => {
+                return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice)
+            }
+            ConsoleOutputMode::Null => ConsoleOutput::Null,
+            ConsoleOutputMode::Off => ConsoleOutput::Off,
+        },
+        serial_main_fd: match vmconfig.serial.mode {
+            ConsoleOutputMode::File => {
+                let file = File::create(vmconfig.serial.file.as_ref().unwrap())
+                    .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
+                ConsoleOutput::File(Arc::new(file))
+            }
+            ConsoleOutputMode::Pty => {
+                let (main_fd, sub_fd, path) =
+                    create_pty().map_err(ConsoleDeviceError::CreateConsoleDevice)?;
+                set_raw_mode(&sub_fd.as_raw_fd(), vmm.original_termios_opt.clone())?;
+                vmconfig.serial.file = Some(path.clone());
+                ConsoleOutput::Pty(Arc::new(main_fd))
+            }
+            ConsoleOutputMode::Tty => {
+                // During vm_shutdown, when serial device is closed, FD#2(STDOUT)
+                // will be closed and FD#2 could be reused in a future boot of the
+                // guest by a different file.
+                //
+                // To ensure FD#2 always points to STANDARD OUT, a `dup` of STDOUT
+                // is passed to serial device. Doing so, even if the serial device
+                // were to be closed, FD#2 will continue to point to STANDARD OUT.
 
-            // Make sure stdout is in raw mode, if it's a terminal.
-            set_raw_mode(&stdout, vmm.original_termios_opt.clone())?;
-            console_info.serial_main_fd = Some(stdout.into_raw_fd());
-        }
-        ConsoleOutputMode::Socket => {
-            let listener = UnixListener::bind(vmconfig.serial.socket.as_ref().unwrap())
-                .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
-            console_info.serial_main_fd = Some(listener.into_raw_fd());
-        }
-        ConsoleOutputMode::Null | ConsoleOutputMode::Off => {}
-    }
+                let stdout = dup_stdout().map_err(ConsoleDeviceError::DupFd)?;
 
-    #[cfg(target_arch = "x86_64")]
-    match vmconfig.debug_console.mode {
-        ConsoleOutputMode::File => {
-            let file = File::create(vmconfig.debug_console.file.as_ref().unwrap())
-                .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
-            console_info.debug_main_fd = Some(file.into_raw_fd());
-        }
-        ConsoleOutputMode::Pty => {
-            let (main_fd, sub_fd, path) =
-                create_pty().map_err(ConsoleDeviceError::CreateConsoleDevice)?;
-            console_info.debug_main_fd = Some(main_fd.into_raw_fd());
-            set_raw_mode(&sub_fd.as_raw_fd(), vmm.original_termios_opt.clone())?;
-            vmconfig.debug_console.file = Some(path.clone());
-        }
-        ConsoleOutputMode::Tty => {
-            let out = stdout();
-            console_info.debug_main_fd = Some(out.as_raw_fd());
-            set_raw_mode(&out, vmm.original_termios_opt.clone())?;
-        }
-        ConsoleOutputMode::Null | ConsoleOutputMode::Socket | ConsoleOutputMode::Off => {}
-    }
+                // SAFETY: FFI call. Trivially safe.
+                if unsafe { libc::isatty(stdout.as_raw_fd()) } == 1 {
+                    vmm.console_resize_pipe = Some(Arc::new(
+                        listen_for_sigwinch_on_tty(
+                            stdout.try_clone().unwrap(),
+                            &vmm.seccomp_action,
+                            vmm.hypervisor.hypervisor_type(),
+                        )
+                        .map_err(ConsoleDeviceError::StartSigwinchListener)?,
+                    ));
+                }
+
+                // Make sure stdout is in raw mode, if it's a terminal.
+                set_raw_mode(&stdout, vmm.original_termios_opt.clone())?;
+
+                ConsoleOutput::Tty(Arc::new(stdout))
+            }
+            ConsoleOutputMode::Socket => {
+                let listener = UnixListener::bind(vmconfig.serial.socket.as_ref().unwrap())
+                    .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
+                ConsoleOutput::Socket(Arc::new(listener))
+            }
+            ConsoleOutputMode::Null => ConsoleOutput::Null,
+            ConsoleOutputMode::Off => ConsoleOutput::Off,
+        },
+        #[cfg(target_arch = "x86_64")]
+        debug_main_fd: match vmconfig.debug_console.mode {
+            ConsoleOutputMode::File => {
+                let file = File::create(vmconfig.debug_console.file.as_ref().unwrap())
+                    .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
+                ConsoleOutput::File(Arc::new(file))
+            }
+            ConsoleOutputMode::Pty => {
+                let (main_fd, sub_fd, path) =
+                    create_pty().map_err(ConsoleDeviceError::CreateConsoleDevice)?;
+                set_raw_mode(&sub_fd.as_raw_fd(), vmm.original_termios_opt.clone())?;
+                vmconfig.debug_console.file = Some(path.clone());
+                ConsoleOutput::Pty(Arc::new(main_fd))
+            }
+            ConsoleOutputMode::Tty => {
+                let out =
+                    dup_stdout().map_err(|e| ConsoleDeviceError::CreateConsoleDevice(e.into()))?;
+                set_raw_mode(&out, vmm.original_termios_opt.clone())?;
+                ConsoleOutput::Tty(Arc::new(out))
+            }
+            ConsoleOutputMode::Socket => {
+                return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice)
+            }
+            ConsoleOutputMode::Null => ConsoleOutput::Null,
+            ConsoleOutputMode::Off => ConsoleOutput::Off,
+        },
+    };
 
     Ok(console_info)
 }
