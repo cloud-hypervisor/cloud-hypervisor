@@ -92,6 +92,7 @@ pub enum EpollDispatch {
     Socket = 2,
     Unknown,
 }
+const EPOLL_EVENTS_LEN: usize = 4;
 
 impl From<u64> for EpollDispatch {
     fn from(v: u64) -> Self {
@@ -291,9 +292,6 @@ impl SerialManager {
             .name("serial-manager".to_string())
             .spawn(move || {
                 std::panic::catch_unwind(AssertUnwindSafe(move || {
-                    // 3 for File, Kill, and Unknown
-                    const EPOLL_EVENTS_LEN: usize = 3;
-
                     let mut events =
                         [epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
 
