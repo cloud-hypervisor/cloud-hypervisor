@@ -166,6 +166,16 @@ fn create_pty() -> io::Result<(File, File, PathBuf)> {
     Ok((main, unsafe { File::from_raw_fd(sub_fd) }, path))
 }
 
+fn dup_stdout() -> vmm_sys_util::errno::Result<File> {
+    // SAFETY: FFI call to dup. Trivially safe.
+    let stdout = unsafe { libc::dup(libc::STDOUT_FILENO) };
+    if stdout == -1 {
+        return vmm_sys_util::errno::errno_result();
+    }
+    // SAFETY: stdout is valid and owned solely by us.
+    Ok(unsafe { File::from_raw_fd(stdout) })
+}
+
 pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<ConsoleInfo> {
     let vm_config = vmm.vm_config.as_mut().unwrap().clone();
     let mut vmconfig = vm_config.lock().unwrap();
@@ -196,13 +206,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             // Duplicating the file descriptors like this is needed as otherwise
             // they will be closed on a reboot and the numbers reused
 
-            // SAFETY: FFI call to dup. Trivially safe.
-            let stdout = unsafe { libc::dup(libc::STDOUT_FILENO) };
-            if stdout == -1 {
-                return vmm_sys_util::errno::errno_result().map_err(ConsoleDeviceError::DupFd);
-            }
-            // SAFETY: stdout is valid and owned solely by us.
-            let stdout = unsafe { File::from_raw_fd(stdout) };
+            let stdout = dup_stdout().map_err(ConsoleDeviceError::DupFd)?;
 
             // SAFETY: FFI call. Trivially safe.
             if unsafe { libc::isatty(stdout.as_raw_fd()) } == 1 {
@@ -245,13 +249,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             // is passed to serial device. Doing so, even if the serial device
             // were to be closed, FD#2 will continue to point to STANDARD OUT.
 
-            // SAFETY: FFI call to dup. Trivially safe.
-            let stdout = unsafe { libc::dup(libc::STDOUT_FILENO) };
-            if stdout == -1 {
-                return vmm_sys_util::errno::errno_result().map_err(ConsoleDeviceError::DupFd);
-            }
-            // SAFETY: stdout is valid and owned solely by us.
-            let stdout = unsafe { File::from_raw_fd(stdout) };
+            let stdout = dup_stdout().map_err(ConsoleDeviceError::DupFd)?;
 
             // SAFETY: FFI call. Trivially safe.
             if unsafe { libc::isatty(stdout.as_raw_fd()) } == 1 {
