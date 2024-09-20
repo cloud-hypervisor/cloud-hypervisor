@@ -108,10 +108,11 @@ struct ConsoleEpollHandler {
     file_event_registered: bool,
 }
 
+#[derive(Clone)]
 pub enum Endpoint {
-    File(File),
-    FilePair(File, File),
-    PtyPair(File, File),
+    File(Arc<File>),
+    FilePair(Arc<File>, Arc<File>),
+    PtyPair(Arc<File>, Arc<File>),
     Null,
 }
 
@@ -136,21 +137,6 @@ impl Endpoint {
 
     fn is_pty(&self) -> bool {
         matches!(self, Self::PtyPair(_, _))
-    }
-}
-
-impl Clone for Endpoint {
-    fn clone(&self) -> Self {
-        match self {
-            Self::File(f) => Self::File(f.try_clone().unwrap()),
-            Self::FilePair(f_out, f_in) => {
-                Self::FilePair(f_out.try_clone().unwrap(), f_in.try_clone().unwrap())
-            }
-            Self::PtyPair(f_out, f_in) => {
-                Self::PtyPair(f_out.try_clone().unwrap(), f_in.try_clone().unwrap())
-            }
-            Self::Null => Self::Null,
-        }
     }
 }
 
