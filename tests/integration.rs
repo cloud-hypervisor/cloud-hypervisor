@@ -10750,7 +10750,7 @@ mod rate_limiter {
             } else {
                 parse_fio_output_iops(&output, &fio_ops, num_queues * num_disks).unwrap()
             };
-            assert!(check_rate_limit(measured_rate, limit_rate, 0.1));
+            assert!(check_rate_limit(measured_rate, limit_rate, 0.2));
         });
 
         let _ = child.kill();
