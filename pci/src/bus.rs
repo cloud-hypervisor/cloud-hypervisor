@@ -134,7 +134,7 @@ impl PciBus {
                     io_bus
                         .insert(dev.clone(), bar.addr(), bar.size())
                         .map_err(PciRootError::PioInsert)?;
-                    #[cfg(target_arch = "aarch64")]
+                    #[cfg(not(target_arch = "x86_64"))]
                     error!("I/O region is not supported");
                 }
                 PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
