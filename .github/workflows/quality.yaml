@@ -91,7 +91,6 @@ jobs:
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: actions-rs/cargo@v1
         with:
-          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
           args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "mshv" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
@@ -99,7 +98,6 @@ jobs:
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: actions-rs/cargo@v1
         with:
-          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
           args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "mshv,kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
@@ -107,7 +105,6 @@ jobs:
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: actions-rs/cargo@v1
         with:
-          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
           args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "sev_snp" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
@@ -115,7 +112,6 @@ jobs:
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: actions-rs/cargo@v1
         with:
-          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
           args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "igvm" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
@@ -123,7 +119,6 @@ jobs:
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: actions-rs/cargo@v1
         with:
-          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
           args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "tdx,kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks
 
