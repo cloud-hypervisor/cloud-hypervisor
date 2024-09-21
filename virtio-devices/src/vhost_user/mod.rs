@@ -374,11 +374,6 @@ impl VhostUserCommon {
     }
 
     pub fn shutdown(&mut self) {
-        if let Some(vu) = &self.vu {
-            // SAFETY: trivially safe
-            let _ = unsafe { libc::close(vu.lock().unwrap().socket_handle().as_raw_fd()) };
-        }
-
         // Remove socket path if needed
         if self.server {
             let _ = std::fs::remove_file(&self.socket_path);
