@@ -1490,11 +1490,10 @@ impl RequestHandler for Vmm {
         event!("vm", "rebooting");
 
         // First we stop the current VM
-        let (config, console_resize_pipe) = if let Some(mut vm) = self.vm.take() {
+        let config = if let Some(mut vm) = self.vm.take() {
             let config = vm.get_config();
-            let console_resize_pipe = vm.console_resize_pipe();
             vm.shutdown()?;
-            (config, console_resize_pipe)
+            config
         } else {
             return Err(VmError::VmNotCreated);
         };
@@ -1536,7 +1535,7 @@ impl RequestHandler for Vmm {
             self.hypervisor.clone(),
             activate_evt,
             self.console_info.clone(),
-            console_resize_pipe,
+            self.console_resize_pipe.as_ref().map(Arc::clone),
             Arc::clone(&self.original_termios_opt),
             None,
             None,
