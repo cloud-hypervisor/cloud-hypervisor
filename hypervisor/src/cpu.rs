@@ -165,12 +165,12 @@ pub enum HypervisorCpuError {
     ///
     /// Setting one reg error
     ///
-    #[error("Failed to init vcpu: {0}")]
+    #[error("Failed to set one reg: {0}")]
     SetRegister(#[source] anyhow::Error),
     ///
     /// Getting one reg error
     ///
-    #[error("Failed to init vcpu: {0}")]
+    #[error("Failed to get one reg: {0}")]
     GetRegister(#[source] anyhow::Error),
     ///
     /// Getting guest clock paused error
