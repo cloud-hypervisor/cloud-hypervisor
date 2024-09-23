@@ -209,13 +209,13 @@ pub enum HypervisorCpuError {
     ///
     /// Getting AArch64 core register error
     ///
-    #[error("Failed to get core register: {0}")]
-    GetCoreRegister(#[source] anyhow::Error),
+    #[error("Failed to get aarch64 core register: {0}")]
+    GetAarchCoreRegister(#[source] anyhow::Error),
     ///
     /// Setting AArch64 core register error
     ///
-    #[error("Failed to set core register: {0}")]
-    SetCoreRegister(#[source] anyhow::Error),
+    #[error("Failed to set aarch64 core register: {0}")]
+    SetAarchCoreRegister(#[source] anyhow::Error),
     ///
     /// Getting AArch64 registers list error
     ///
