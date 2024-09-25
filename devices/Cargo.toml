@@ -21,7 +21,7 @@ thiserror = "1.0.62"
 tpm = { path = "../tpm" }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = { version = "0.14.1", features = [
+vm-memory = { version = "0.15.0", features = [
   "backend-atomic",
   "backend-bitmap",
   "backend-mmap",

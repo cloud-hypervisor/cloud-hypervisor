@@ -33,7 +33,7 @@ serde_with = { version = "3.9.0", default-features = false, features = [
 ] }
 thiserror = "1.0.62"
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
-vm-memory = { version = "0.14.1", features = [
+vm-memory = { version = "0.15.0", features = [
   "backend-atomic",
   "backend-mmap",
 ] }
