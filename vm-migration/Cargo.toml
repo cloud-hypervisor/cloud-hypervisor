@@ -9,7 +9,7 @@ anyhow = "1.0.87"
 serde = { version = "1.0.208", features = ["derive", "rc"] }
 serde_json = "1.0.120"
 thiserror = "1.0.62"
-vm-memory = { version = "0.14.1", features = [
+vm-memory = { version = "0.15.0", features = [
   "backend-atomic",
   "backend-mmap",
 ] }

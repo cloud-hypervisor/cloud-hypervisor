@@ -14,8 +14,8 @@ rate_limiter = { path = "../rate_limiter" }
 serde = { version = "1.0.208", features = ["derive"] }
 thiserror = "1.0.62"
 virtio-bindings = "0.2.2"
-virtio-queue = "0.12.0"
-vm-memory = { version = "0.14.1", features = [
+virtio-queue = "0.13.0"
+vm-memory = { version = "0.15.0", features = [
   "backend-atomic",
   "backend-bitmap",
   "backend-mmap",

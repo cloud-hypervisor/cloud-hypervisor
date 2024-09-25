@@ -45,7 +45,7 @@ signal-hook = "0.3.17"
 thiserror = "1.0.62"
 tpm = { path = "tpm" }
 tracer = { path = "tracer" }
-vm-memory = "0.14.1"
+vm-memory = "0.15.0"
 vmm = { path = "vmm" }
 vmm-sys-util = "0.12.1"
 zbus = { version = "4.1.2", optional = true }

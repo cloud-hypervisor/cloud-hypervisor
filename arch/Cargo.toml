@@ -15,12 +15,12 @@ anyhow = "1.0.87"
 byteorder = "1.5.0"
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.158"
-linux-loader = { version = "0.11.0", features = ["bzimage", "elf", "pe"] }
+linux-loader = { version = "0.12.0", features = ["bzimage", "elf", "pe"] }
 log = "0.4.22"
 serde = { version = "1.0.208", features = ["derive", "rc"] }
 thiserror = "1.0.62"
 uuid = "1.8.0"
-vm-memory = { version = "0.14.1", features = [
+vm-memory = { version = "0.15.0", features = [
   "backend-bitmap",
   "backend-mmap",
 ] }
