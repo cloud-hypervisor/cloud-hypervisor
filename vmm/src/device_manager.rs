@@ -3944,10 +3944,6 @@ impl DeviceManager {
         &self.pci_segments
     }
 
-    pub fn console(&self) -> &Arc<Console> {
-        &self.console
-    }
-
     #[cfg(target_arch = "aarch64")]
     pub fn cmdline_additions(&self) -> &[String] {
         self.cmdline_additions.as_slice()
