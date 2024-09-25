@@ -68,7 +68,7 @@ use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{File, OpenOptions};
-use std::io::{self, stdout, Seek, SeekFrom};
+use std::io::{self, stdout, IsTerminal, Seek, SeekFrom};
 use std::num::Wrapping;
 use std::os::fd::RawFd;
 use std::os::unix::fs::OpenOptionsExt;
@@ -2035,6 +2035,11 @@ impl DeviceManager {
                     // SAFETY: tty_fd is guaranteed to be a valid fd from
                     // pre_create_console_devices() in vmm/src/console_devices.rs
                     let stdout = unsafe { File::from_raw_fd(tty_fd) };
+
+                    if stdout.is_terminal() {
+                        self.console_resize_pipe = resize_pipe;
+                    }
+
                     // If an interactive TTY then we can accept input
                     // SAFETY: FFI call. Trivially safe.
                     if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } {
