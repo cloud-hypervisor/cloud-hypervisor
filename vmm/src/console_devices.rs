@@ -263,18 +263,6 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
 
                 let stdout = dup_stdout().map_err(ConsoleDeviceError::DupFd)?;
 
-                // SAFETY: FFI call. Trivially safe.
-                if unsafe { libc::isatty(stdout.as_raw_fd()) } == 1 {
-                    vmm.console_resize_pipe = Some(Arc::new(
-                        listen_for_sigwinch_on_tty(
-                            stdout.try_clone().unwrap(),
-                            &vmm.seccomp_action,
-                            vmm.hypervisor.hypervisor_type(),
-                        )
-                        .map_err(ConsoleDeviceError::StartSigwinchListener)?,
-                    ));
-                }
-
                 // Make sure stdout is in raw mode, if it's a terminal.
                 set_raw_mode(&stdout, vmm.original_termios_opt.clone())?;
 
