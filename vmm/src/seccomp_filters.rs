@@ -108,6 +108,9 @@ mod kvm {
     pub const KVM_NMI: u64 = 0xae9a;
     pub const KVM_GET_NESTED_STATE: u64 = 3229658814;
     pub const KVM_SET_NESTED_STATE: u64 = 1082175167;
+    pub const KVM_SEV_SNP_LAUNCH_START: u64 = 0x4018_aeb4;
+    pub const KVM_SEV_SNP_LAUNCH_UPDATE: u64 = 0x8018_aeb5;
+    pub const KVM_SEV_SNP_LAUNCH_FINISH: u64 = 0x4008_aeb7;
 }
 
 // MSHV IOCTL code. This is unstable until the kernel code has been declared stable.
@@ -247,6 +250,9 @@ fn create_vmm_ioctl_seccomp_rule_common_kvm() -> Result<Vec<SeccompRule>, Backen
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_NMI)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_NESTED_STATE)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_NESTED_STATE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_SEV_SNP_LAUNCH_START)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_SEV_SNP_LAUNCH_UPDATE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_SEV_SNP_LAUNCH_FINISH)?],
     ])
 }
 
@@ -976,5 +982,134 @@ pub fn get_seccomp_filter(
         )
         .and_then(|filter| filter.try_into())
         .map_err(Error::Backend),
+    }
+}
+
+#[cfg(test)]
+#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+mod tests {
+    use std::os::unix::io::AsRawFd;
+
+    use hypervisor::HypervisorType;
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+
+    fn test_seccomp_filter(
+        thread_type: Thread,
+        hypervisor_type: HypervisorType,
+        seccomp_action: SeccompAction,
+    ) -> Result<(), Error> {
+        let tmp_file = TempFile::new().unwrap();
+        let fd = tmp_file.as_file().as_raw_fd();
+        match get_seccomp_filter(&seccomp_action, thread_type, hypervisor_type) {
+            Ok(filter) => seccompiler::apply_filter(&filter)?,
+            Err(e) => panic!("Failed to get seccomp filter: {:?}", e),
+        }
+
+        // for musl, the ioctl fn expects i32, for gnu it expects u64
+        #[allow(clippy::useless_conversion)]
+        // SAFETY: Used for testing
+        unsafe {
+            libc::ioctl(fd, TCSETS.try_into().unwrap(), 0);
+            libc::ioctl(fd, TCGETS.try_into().unwrap(), 0);
+            libc::ioctl(fd, TIOCSCTTY.try_into().unwrap(), 0);
+            libc::ioctl(fd, TIOCGPGRP.try_into().unwrap(), 0);
+            libc::ioctl(fd, TIOCSPGRP.try_into().unwrap(), 0);
+            libc::ioctl(fd, TIOCGWINSZ.try_into().unwrap(), 0);
+            libc::ioctl(fd, TIOCSPTLCK.try_into().unwrap(), 0);
+            libc::ioctl(fd, TIOCGPTPEER.try_into().unwrap(), 0);
+            libc::ioctl(fd, FIOCLEX.try_into().unwrap(), 0);
+            libc::ioctl(fd, FIONBIO.try_into().unwrap(), 0);
+            libc::ioctl(fd, BLKSSZGET.try_into().unwrap(), 0);
+            libc::ioctl(fd, BLKPBSZGET.try_into().unwrap(), 0);
+            libc::ioctl(fd, BLKIOMIN.try_into().unwrap(), 0);
+            libc::ioctl(fd, BLKIOOPT.try_into().unwrap(), 0);
+            libc::ioctl(fd, TUNGETIFF.try_into().unwrap(), 0);
+            libc::ioctl(fd, TUNSETIFF.try_into().unwrap(), 0);
+            libc::ioctl(fd, TUNSETOFFLOAD.try_into().unwrap(), 0);
+            libc::ioctl(fd, TUNSETVNETHDRSZ.try_into().unwrap(), 0);
+            libc::ioctl(fd, TUNGETFEATURES.try_into().unwrap(), 0);
+            libc::ioctl(fd, SIOCGIFFLAGS.try_into().unwrap(), 0);
+            libc::ioctl(fd, SIOCGIFHWADDR.try_into().unwrap(), 0);
+            libc::ioctl(fd, SIOCSIFFLAGS.try_into().unwrap(), 0);
+            libc::ioctl(fd, SIOCSIFADDR.try_into().unwrap(), 0);
+            libc::ioctl(fd, SIOCGIFMTU.try_into().unwrap(), 0);
+            libc::ioctl(fd, SIOCSIFMTU.try_into().unwrap(), 0);
+            libc::ioctl(fd, SIOCSIFHWADDR.try_into().unwrap(), 0);
+            libc::ioctl(fd, SIOCSIFNETMASK.try_into().unwrap(), 0);
+            libc::ioctl(fd, VFIO_GET_API_VERSION.try_into().unwrap(), 0);
+            libc::ioctl(fd, VFIO_CHECK_EXTENSION.try_into().unwrap(), 0);
+            libc::ioctl(fd, VFIO_SET_IOMMU.try_into().unwrap(), 0);
+            libc::ioctl(fd, VFIO_GROUP_GET_STATUS.try_into().unwrap(), 0);
+            libc::ioctl(fd, VFIO_GROUP_SET_CONTAINER.try_into().unwrap(), 0);
+            libc::ioctl(fd, VFIO_GROUP_UNSET_CONTAINER.try_into().unwrap(), 0);
+            libc::ioctl(fd, VFIO_GROUP_GET_DEVICE_FD.try_into().unwrap(), 0);
+            libc::ioctl(fd, VFIO_DEVICE_GET_INFO.try_into().unwrap(), 0);
+            libc::ioctl(fd, VFIO_DEVICE_GET_REGION_INFO.try_into().unwrap(), 0);
+            libc::ioctl(fd, VFIO_DEVICE_GET_IRQ_INFO.try_into().unwrap(), 0);
+            libc::ioctl(fd, VFIO_DEVICE_SET_IRQS.try_into().unwrap(), 0);
+            libc::ioctl(fd, VFIO_DEVICE_RESET.try_into().unwrap(), 0);
+            libc::ioctl(fd, VFIO_IOMMU_MAP_DMA.try_into().unwrap(), 0);
+            libc::ioctl(fd, VFIO_IOMMU_UNMAP_DMA.try_into().unwrap(), 0);
+            libc::ioctl(fd, VFIO_DEVICE_IOEVENTFD.try_into().unwrap(), 0);
+
+            // KVM specific ioctls
+            {
+                libc::ioctl(fd, KVM_GET_API_VERSION.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_CREATE_VM.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_CHECK_EXTENSION.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_GET_VCPU_MMAP_SIZE.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_CREATE_VCPU.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_CREATE_IRQCHIP.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_RUN.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_SET_MP_STATE.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_SET_GSI_ROUTING.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_SET_DEVICE_ATTR.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_HAS_DEVICE_ATTR.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_SET_ONE_REG.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_SET_USER_MEMORY_REGION.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_IRQFD.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_IOEVENTFD.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_SET_VCPU_EVENTS.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_ENABLE_CAP.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_SET_REGS.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_GET_MP_STATE.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_GET_DEVICE_ATTR.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_GET_DIRTY_LOG.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_GET_VCPU_EVENTS.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_GET_ONE_REG.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_GET_REGS.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_GET_REG_LIST.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_GET_SUPPORTED_CPUID.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_CREATE_DEVICE.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_MEMORY_ENCRYPT_OP.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_NMI.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_SEV_SNP_LAUNCH_START.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_SEV_SNP_LAUNCH_UPDATE.try_into().unwrap(), 0);
+                libc::ioctl(fd, KVM_SEV_SNP_LAUNCH_FINISH.try_into().unwrap(), 0);
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_whitelist_ioctl_vmm() -> Result<(), Error> {
+        test_seccomp_filter(Thread::Vmm, HypervisorType::Kvm, SeccompAction::Trap)
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_blacklist_ioctl_vmm() {
+        let tmp_file = TempFile::new().unwrap();
+        let fd = tmp_file.as_file().as_raw_fd();
+
+        let filter =
+            get_seccomp_filter(&SeccompAction::Allow, Thread::Vmm, HypervisorType::Kvm).unwrap();
+        seccompiler::apply_filter(&filter).unwrap();
+
+        // SAFETY: Used for testing
+        unsafe { libc::ioctl(fd, 0x1234, 0) };
     }
 }
