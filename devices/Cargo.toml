@@ -5,7 +5,7 @@ name = "devices"
 version = "0.1.0"
 
 [dependencies]
-acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main" }
+acpi_tables = { workspace = true }
 anyhow = "1.0.87"
 arch = { path = "../arch" }
 bitflags = "2.6.0"
@@ -21,13 +21,13 @@ thiserror = "1.0.62"
 tpm = { path = "../tpm" }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = { version = "0.15.0", features = [
+vm-memory = { workspace = true, features = [
   "backend-atomic",
   "backend-bitmap",
   "backend-mmap",
 ] }
 vm-migration = { path = "../vm-migration" }
-vmm-sys-util = "0.12.1"
+vmm-sys-util = { workspace = true }
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]
 arch = { path = "../arch" }

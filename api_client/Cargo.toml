@@ -6,4 +6,4 @@ version = "0.1.0"
 
 [dependencies]
 thiserror = "1.0.62"
-vmm-sys-util = "0.12.1"
+vmm-sys-util = { workspace = true }
