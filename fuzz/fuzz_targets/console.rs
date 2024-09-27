@@ -66,7 +66,7 @@ fuzz_target!(|bytes| {
             memfd_create(&std::ffi::CString::new("fuzz_console_output").unwrap()).unwrap(),
         )
     };
-    let endpoint = virtio_devices::Endpoint::FilePair(output, pipe_rx);
+    let endpoint = virtio_devices::Endpoint::FilePair(Arc::new(output), Arc::new(pipe_rx));
 
     let (mut console, _) = virtio_devices::Console::new(
         "fuzzer_console".to_owned(),
