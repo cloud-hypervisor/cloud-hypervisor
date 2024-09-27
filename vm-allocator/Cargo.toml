@@ -6,7 +6,7 @@ version = "0.1.0"
 
 [dependencies]
 libc = "0.2.158"
-vm-memory = "0.15.0"
+vm-memory = { workspace = true }
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]
 arch = { path = "../arch" }

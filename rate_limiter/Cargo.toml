@@ -8,4 +8,4 @@ epoll = "4.3.3"
 libc = "0.2.158"
 log = "0.4.22"
 thiserror = "1.0.62"
-vmm-sys-util = "0.12.1"
+vmm-sys-util = { workspace = true }

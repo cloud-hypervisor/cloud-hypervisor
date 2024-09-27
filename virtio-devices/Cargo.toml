@@ -17,12 +17,12 @@ epoll = "4.3.3"
 event_monitor = { path = "../event_monitor" }
 libc = "0.2.158"
 log = "0.4.22"
-mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", tag = "v0.3.0", optional = true }
+mshv-ioctls = { workspace = true, optional = true }
 net_gen = { path = "../net_gen" }
 net_util = { path = "../net_util" }
 pci = { path = "../pci" }
 rate_limiter = { path = "../rate_limiter" }
-seccompiler = "0.4.0"
+seccompiler = { workspace = true }
 serde = { version = "1.0.208", features = ["derive"] }
 serde_json = "1.0.120"
 serde_with = { version = "3.9.0", default-features = false, features = [
@@ -30,21 +30,21 @@ serde_with = { version = "3.9.0", default-features = false, features = [
 ] }
 serial_buffer = { path = "../serial_buffer" }
 thiserror = "1.0.62"
-vhost = { version = "0.12.0", features = [
+vhost = { workspace = true, features = [
   "vhost-kern",
   "vhost-user-backend",
   "vhost-user-frontend",
   "vhost-vdpa",
 ] }
-virtio-bindings = { version = "0.2.2", features = ["virtio-v5_0_0"] }
-virtio-queue = "0.13.0"
+virtio-bindings = { workspace = true, features = ["virtio-v5_0_0"] }
+virtio-queue = { workspace = true }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = { version = "0.15.0", features = [
+vm-memory = { workspace = true, features = [
   "backend-atomic",
   "backend-bitmap",
   "backend-mmap",
 ] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
-vmm-sys-util = "0.12.1"
+vmm-sys-util = { workspace = true }

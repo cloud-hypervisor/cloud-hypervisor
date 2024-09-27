@@ -14,6 +14,6 @@ anyhow = "1.0.87"
 hypervisor = { path = "../hypervisor" }
 serde = { version = "1.0.208", features = ["derive", "rc"] }
 thiserror = "1.0.62"
-vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
-vm-memory = { version = "0.15.0", features = ["backend-mmap"] }
-vmm-sys-util = "0.12.1"
+vfio-ioctls = { workspace = true, default-features = false }
+vm-memory = { workspace = true, features = ["backend-mmap"] }
+vmm-sys-util = { workspace = true }
