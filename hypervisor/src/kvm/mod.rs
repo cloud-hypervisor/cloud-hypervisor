@@ -384,6 +384,8 @@ pub struct KvmVm {
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
     dirty_log_slots: Arc<RwLock<HashMap<u32, KvmDirtyLogSlot>>>,
+    #[cfg(feature = "sev_snp")]
+    sev_fd: x86_64::sev::SevFd,
 }
 
 impl KvmVm {
@@ -1078,6 +1080,9 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 fd: vm_fd,
                 msrs,
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                #[cfg(feature = "sev_snp")]
+                sev_fd: x86_64::sev::SevFd::new(&std::env::var("SEV_DEVICE_PATH").unwrap())
+                    .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilitis(e.into()))?,
             }))
         }
 

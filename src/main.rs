@@ -522,6 +522,15 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
             .num_args(1)
             .group("vm-config"),
     );
+    #[cfg(feature = "sev_snp")]
+    let app = app.arg(
+        Arg::new("sev_device_path")
+            .long("sev_device_path")
+            .help("Path to the sev device")
+            .num_args(1)
+            .group("vm-config")
+            .default_value("/dev/sev"),
+    );
     #[cfg(feature = "pvmemcontrol")]
     let app = app.arg(
         Arg::new("pvmemcontrol")
@@ -543,6 +552,15 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
 }
 
 fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
+    #[cfg(feature = "sev_snp")]
+    {
+        #[allow(unused_mut)]
+        let mut parser = OptionParser::new();
+        std::env::set_var(
+            "SEV_DEVICE_PATH",
+            parser.get("sev_device_path").unwrap_or_default(),
+        );
+    }
     let log_level = match cmd_arguments.get_count("v") {
         0 => LevelFilter::Warn,
         1 => LevelFilter::Info,

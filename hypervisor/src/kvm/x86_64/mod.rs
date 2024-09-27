@@ -8,6 +8,8 @@
 //
 //
 
+pub(crate) mod sev;
+
 use crate::arch::x86::{
     CpuIdEntry, DescriptorTable, FpuState, LapicState, MsrEntry, SegmentRegister, SpecialRegisters,
     XsaveState, CPUID_FLAG_VALID_INDEX,
