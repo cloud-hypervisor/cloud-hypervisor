@@ -11,12 +11,12 @@ rust_library(
     deps = [
         "//net_gen",
         "@crates//:anyhow",
-        "@crates//:libc",
         "@crates//:byteorder",
+        "@crates//:libc",
         "@crates//:log",
         "@crates//:thiserror",
-        "@crates//:vmm-sys-util"
-        ],
+        "@crates//:vmm-sys-util",
+    ],
 )
 
 rust_test(
@@ -26,10 +26,10 @@ rust_test(
     deps = [
         "//net_gen",
         "@crates//:anyhow",
-        "@crates//:libc",
         "@crates//:byteorder",
+        "@crates//:libc",
         "@crates//:log",
         "@crates//:thiserror",
-        "@crates//:vmm-sys-util"
-        ],
+        "@crates//:vmm-sys-util",
+    ],
 )

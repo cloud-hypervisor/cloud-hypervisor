@@ -13,8 +13,8 @@ rust_library(
         "@crates//:libc",
         "@crates//:log",
         "@crates//:thiserror",
-        "@crates//:vmm-sys-util"
-        ],
+        "@crates//:vmm-sys-util",
+    ],
 )
 
 rust_test(
@@ -26,6 +26,6 @@ rust_test(
         "@crates//:libc",
         "@crates//:log",
         "@crates//:thiserror",
-        "@crates//:vmm-sys-util"
-        ],
+        "@crates//:vmm-sys-util",
+    ],
 )

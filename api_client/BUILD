@@ -9,7 +9,7 @@ rust_library(
     srcs = ["src/lib.rs"],
     visibility = ["//visibility:public"],
     deps = [
+        "@crates//:thiserror",
         "@crates//:vmm-sys-util",
-        "@crates//:thiserror"
-        ],
+    ],
 )

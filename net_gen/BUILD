@@ -9,6 +9,6 @@ rust_library(
     srcs = glob(["src/*.rs"]),
     visibility = ["//visibility:public"],
     deps = [
-        "@crates//:vmm-sys-util"
-        ],
+        "@crates//:vmm-sys-util",
+    ],
 )

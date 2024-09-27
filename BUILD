@@ -1,8 +1,8 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary")
+
 licenses(["notice"])
 
 exports_files(["LICENSE"])
-
-load("@rules_rust//rust:defs.bzl", "rust_binary")
 
 CLOUD_HYPERVISOR_RUSTC_ENV = {
     "BUILD_VERSION": "nightly/2024-02-01",
@@ -12,10 +12,10 @@ rust_binary(
     name = "bin/cloud-hypervisor",
     srcs = ["src/main.rs"],
     crate_features = ["kvm"],
-    rustc_env = CLOUD_HYPERVISOR_RUSTC_ENV,
     proc_macro_deps = [
         "@crates//:clap_derive",
     ],
+    rustc_env = CLOUD_HYPERVISOR_RUSTC_ENV,
     deps = [
         "//api_client",
         "//event_monitor",

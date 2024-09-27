@@ -10,6 +10,6 @@ rust_library(
     visibility = ["//visibility:public"],
     deps = [
         "@crates//:virtio-queue",
-        "@crates//:vm-memory"
-        ],
+        "@crates//:vm-memory",
+    ],
 )

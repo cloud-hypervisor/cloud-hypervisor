@@ -1,5 +1,5 @@
-load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 load("@bazel_skylib//lib:selects.bzl", "selects")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 CLOUD_HYPERVISOR_ARM_TARGET_CPUS = (
     "@platforms//cpu:aarch64",
@@ -39,12 +39,11 @@ rust_library(
         ],
     }),
     crate_features = ["kvm"],
-    visibility = ["//visibility:public"],
     proc_macro_deps = [
         "@crates//:concat-idents",
     ],
+    visibility = ["//visibility:public"],
     deps = [
-        "@vfio//crates/vfio-ioctls",
         "@crates//:anyhow",
         "@crates//:byteorder",
         "@crates//:kvm-bindings",
@@ -56,6 +55,7 @@ rust_library(
         "@crates//:thiserror",
         "@crates//:vm-memory",
         "@crates//:vmm-sys-util",
+        "@vfio//crates/vfio-ioctls",
     ],
 )
 
@@ -89,12 +89,11 @@ rust_test(
         ],
     }),
     crate_features = ["kvm"],
-    visibility = ["//visibility:public"],
     proc_macro_deps = [
         "@crates//:concat-idents",
     ],
+    visibility = ["//visibility:public"],
     deps = [
-        "@vfio//crates/vfio-ioctls",
         "@crates//:anyhow",
         "@crates//:byteorder",
         "@crates//:kvm-bindings",
@@ -106,5 +105,6 @@ rust_test(
         "@crates//:thiserror",
         "@crates//:vm-memory",
         "@crates//:vmm-sys-util",
+        "@vfio//crates/vfio-ioctls",
     ],
 )

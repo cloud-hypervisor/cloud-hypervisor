@@ -2,7 +2,11 @@ load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "virtio-devices",
-    srcs = glob(["src/*.rs", "src/**/*.rs", "src/**/**/*.rs"]),
+    srcs = glob([
+        "src/*.rs",
+        "src/**/*.rs",
+        "src/**/**/*.rs",
+    ]),
     visibility = ["//visibility:public"],
     deps = [
         "//block",
@@ -37,7 +41,11 @@ rust_library(
 
 rust_test(
     name = "virtio-devices_test",
-    srcs = glob(["src/*.rs", "src/**/*.rs", "src/**/**/*.rs"]),
+    srcs = glob([
+        "src/*.rs",
+        "src/**/*.rs",
+        "src/**/**/*.rs",
+    ]),
     visibility = ["//visibility:public"],
     deps = [
         "//block",

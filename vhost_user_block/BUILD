@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library", "rust_binary")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -19,8 +19,8 @@ rust_library(
         "@crates//:virtio-bindings",
         "@crates//:virtio-queue",
         "@crates//:vm-memory",
-        "@crates//:vmm-sys-util"
-        ],
+        "@crates//:vmm-sys-util",
+    ],
 )
 
 rust_binary(
@@ -31,5 +31,5 @@ rust_binary(
         ":vhost_user_block",
         "@crates//:clap",
         "@crates//:env_logger",
-        ],
+    ],
 )

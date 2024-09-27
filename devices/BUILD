@@ -2,7 +2,10 @@ load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "devices",
-    srcs = glob(["src/*.rs", "src/legacy/*.rs"]),
+    srcs = glob([
+        "src/*.rs",
+        "src/legacy/*.rs",
+    ]),
     visibility = ["//visibility:public"],
     deps = [
         "//arch",
@@ -28,7 +31,10 @@ rust_library(
 
 rust_test(
     name = "devices_test",
-    srcs = glob(["src/*.rs", "src/legacy/*.rs"]),
+    srcs = glob([
+        "src/*.rs",
+        "src/legacy/*.rs",
+    ]),
     visibility = ["//visibility:public"],
     deps = [
         "//arch",

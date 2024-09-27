@@ -2,7 +2,11 @@ load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 
 rust_library(
     name = "vmm",
-    srcs = glob(["src/*.rs", "src/**/*.rs", "src/**/**/*.rs"]),
+    srcs = glob([
+        "src/*.rs",
+        "src/**/*.rs",
+        "src/**/**/*.rs",
+    ]),
     crate_features = ["kvm"],
     visibility = ["//visibility:public"],
     deps = [
@@ -23,10 +27,6 @@ rust_library(
         "//vm-migration",
         "//vm-virtio",
         "@acpi-tables//:acpi-tables",
-        "@vfio//crates/vfio-ioctls",
-        "@vfio-user//:vfio-user",
-        "@micro-http//:micro-http",
-        "@crates//:landlock",
         "@crates//:anyhow",
         "@crates//:arc-swap",
         "@crates//:bitflags",
@@ -34,6 +34,7 @@ rust_library(
         "@crates//:clap",
         "@crates//:epoll",
         "@crates//:flume",
+        "@crates//:landlock",
         "@crates//:libc",
         "@crates//:linux-loader",
         "@crates//:log",
@@ -48,12 +49,19 @@ rust_library(
         "@crates//:vm-memory",
         "@crates//:vmm-sys-util",
         "@crates//:zerocopy",
+        "@micro-http//:micro-http",
+        "@vfio-user//:vfio-user",
+        "@vfio//crates/vfio-ioctls",
     ],
 )
 
 rust_test(
     name = "vmm_test",
-    srcs = glob(["src/*.rs", "src/**/*.rs", "src/**/**/*.rs"]),
+    srcs = glob([
+        "src/*.rs",
+        "src/**/*.rs",
+        "src/**/**/*.rs",
+    ]),
     crate_features = ["kvm"],
     tags = ["nopresubmit"],
     visibility = ["//visibility:public"],
@@ -75,10 +83,6 @@ rust_test(
         "//vm-migration",
         "//vm-virtio",
         "@acpi-tables//:acpi-tables",
-        "@vfio//crates/vfio-ioctls",
-        "@vfio-user//:vfio-user",
-        "@micro-http//:micro-http",
-        "@crates//:landlock",
         "@crates//:anyhow",
         "@crates//:arc-swap",
         "@crates//:bitflags",
@@ -86,6 +90,7 @@ rust_test(
         "@crates//:clap",
         "@crates//:epoll",
         "@crates//:flume",
+        "@crates//:landlock",
         "@crates//:libc",
         "@crates//:linux-loader",
         "@crates//:log",
@@ -100,5 +105,8 @@ rust_test(
         "@crates//:vm-memory",
         "@crates//:vmm-sys-util",
         "@crates//:zerocopy",
+        "@micro-http//:micro-http",
+        "@vfio-user//:vfio-user",
+        "@vfio//crates/vfio-ioctls",
     ],
 )

@@ -13,6 +13,6 @@ rust_library(
         "@crates//:libc",
         "@crates//:once_cell",
         "@crates//:serde",
-        "@crates//:serde_json"
-        ],
+        "@crates//:serde_json",
+    ],
 )

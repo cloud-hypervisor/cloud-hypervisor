@@ -10,9 +10,9 @@ rust_library(
     visibility = ["//visibility:public"],
     deps = [
         "@crates//:anyhow",
+        "@crates//:serde",
+        "@crates//:serde_json",
         "@crates//:thiserror",
         "@crates//:vm-memory",
-        "@crates//:serde",
-        "@crates//:serde_json"
-        ],
+    ],
 )
