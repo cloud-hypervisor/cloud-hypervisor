@@ -4,10 +4,11 @@
 
 #![no_main]
 
-use libfuzzer_sys::fuzz_target;
-use seccompiler::SeccompAction;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::sync::{Arc, Mutex};
+
+use libfuzzer_sys::fuzz_target;
+use seccompiler::SeccompAction;
 use virtio_devices::{BlocksState, Mem, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{bitmap::AtomicBitmap, Bytes, GuestAddress, GuestMemoryAtomic};

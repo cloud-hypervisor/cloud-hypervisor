@@ -4,14 +4,15 @@
 
 #![no_main]
 
-use libc::{MAP_NORESERVE, MAP_PRIVATE, PROT_READ, PROT_WRITE};
-use libfuzzer_sys::fuzz_target;
-use seccompiler::SeccompAction;
 use std::ffi;
 use std::fs::File;
 use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::Arc;
+
+use libc::{MAP_NORESERVE, MAP_PRIVATE, PROT_READ, PROT_WRITE};
+use libfuzzer_sys::fuzz_target;
+use seccompiler::SeccompAction;
 use virtio_devices::{Pmem, UserspaceMapping, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
 use vm_memory::guest_memory::FileOffset;

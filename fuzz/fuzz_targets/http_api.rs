@@ -3,13 +3,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #![no_main]
-use libfuzzer_sys::fuzz_target;
-use micro_http::Request;
-use once_cell::sync::Lazy;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver};
 use std::thread;
+
+use libfuzzer_sys::fuzz_target;
+use micro_http::Request;
+use once_cell::sync::Lazy;
 use vm_migration::MigratableError;
 use vmm::api::{
     http::*, ApiRequest, RequestHandler, VmInfoResponse, VmReceiveMigrationData,
