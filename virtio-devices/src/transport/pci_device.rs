@@ -6,13 +6,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::transport::{VirtioPciCommonConfig, VirtioTransport, VIRTIO_PCI_COMMON_CONFIG_ID};
-use crate::GuestMemoryMmap;
-use crate::{
-    ActivateResult, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
-    DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
-    DEVICE_INIT,
-};
+use std::any::Any;
+use std::cmp;
+use std::io::Write;
+use std::ops::Deref;
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
+use std::sync::{Arc, Barrier, Mutex};
+
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use pci::{
@@ -21,12 +21,6 @@ use pci::{
     PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass, PciSubclass,
 };
 use serde::{Deserialize, Serialize};
-use std::any::Any;
-use std::cmp;
-use std::io::Write;
-use std::ops::Deref;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::{AddressAllocator, SystemAllocator};
@@ -41,6 +35,13 @@ use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
 
 use super::pci_common_config::VirtioPciCommonConfigState;
+use crate::transport::{VirtioPciCommonConfig, VirtioTransport, VIRTIO_PCI_COMMON_CONFIG_ID};
+use crate::GuestMemoryMmap;
+use crate::{
+    ActivateResult, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
+    DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
+    DEVICE_INIT,
+};
 
 /// Vector value used to disable MSI for a queue.
 const VIRTQ_MSI_NO_VECTOR: u16 = 0xffff;

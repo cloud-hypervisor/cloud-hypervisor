@@ -4,10 +4,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use iced_x86::*;
+
 use crate::arch::emulator::{EmulationError, PlatformEmulator, PlatformError};
 use crate::arch::x86::emulator::CpuStateManager;
 use crate::arch::x86::Exception;
-use iced_x86::*;
 
 pub mod cmp;
 pub mod mov;

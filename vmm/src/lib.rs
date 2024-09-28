@@ -8,6 +8,44 @@ extern crate event_monitor;
 #[macro_use]
 extern crate log;
 
+use std::collections::HashMap;
+use std::fs::File;
+use std::io;
+use std::io::{stdout, Read, Write};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::net::UnixListener;
+use std::os::unix::net::UnixStream;
+use std::panic::AssertUnwindSafe;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+use std::{result, thread};
+
+use anyhow::anyhow;
+#[cfg(feature = "dbus_api")]
+use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
+use api::http::HttpApiHandle;
+use console_devices::{pre_create_console_devices, ConsoleInfo};
+use landlock::LandlockError;
+use libc::{tcsetattr, termios, EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW};
+use memory_manager::MemoryManagerSnapshotData;
+use pci::PciBdf;
+use seccompiler::{apply_filter, SeccompAction};
+use serde::ser::{SerializeStruct, Serializer};
+use serde::{Deserialize, Serialize};
+use signal_hook::iterator::{Handle, Signals};
+use thiserror::Error;
+use tracer::trace_scoped;
+use vm_memory::bitmap::AtomicBitmap;
+use vm_memory::{ReadVolatile, WriteVolatile};
+use vm_migration::{protocol::*, Migratable};
+use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::signal::unblock_signal;
+use vmm_sys_util::sock_ctrl_msg::ScmSocket;
+
 use crate::api::{
     ApiRequest, ApiResponse, RequestHandler, VmInfoResponse, VmReceiveMigrationData,
     VmSendMigrationData, VmmPingResponse,
@@ -25,42 +63,6 @@ use crate::migration::get_vm_snapshot;
 use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
-use anyhow::anyhow;
-#[cfg(feature = "dbus_api")]
-use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
-use api::http::HttpApiHandle;
-use console_devices::{pre_create_console_devices, ConsoleInfo};
-use landlock::LandlockError;
-use libc::{tcsetattr, termios, EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW};
-use memory_manager::MemoryManagerSnapshotData;
-use pci::PciBdf;
-use seccompiler::{apply_filter, SeccompAction};
-use serde::ser::{SerializeStruct, Serializer};
-use serde::{Deserialize, Serialize};
-use signal_hook::iterator::{Handle, Signals};
-use std::collections::HashMap;
-use std::fs::File;
-use std::io;
-use std::io::{stdout, Read, Write};
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::os::unix::net::UnixListener;
-use std::os::unix::net::UnixStream;
-use std::panic::AssertUnwindSafe;
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
-use std::{result, thread};
-use thiserror::Error;
-use tracer::trace_scoped;
-use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::{ReadVolatile, WriteVolatile};
-use vm_migration::{protocol::*, Migratable};
-use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
-use vmm_sys_util::eventfd::EventFd;
-use vmm_sys_util::signal::unblock_signal;
-use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 mod acpi;
 pub mod api;
@@ -2141,13 +2143,14 @@ const DEVICE_MANAGER_SNAPSHOT_ID: &str = "device-manager";
 
 #[cfg(test)]
 mod unit_tests {
-    use super::*;
-    #[cfg(target_arch = "x86_64")]
-    use crate::config::DebugConsoleConfig;
     use config::{
         ConsoleConfig, ConsoleOutputMode, CpusConfig, HotplugMethod, MemoryConfig, PayloadConfig,
         RngConfig,
     };
+
+    use super::*;
+    #[cfg(target_arch = "x86_64")]
+    use crate::config::DebugConsoleConfig;
 
     fn create_dummy_vmm() -> Vmm {
         Vmm::new(

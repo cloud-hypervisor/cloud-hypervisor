@@ -2,15 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::convert::TryFrom;
+use std::io::Error as IoError;
+use std::path::PathBuf;
+
 #[cfg(test)]
 use landlock::make_bitflags;
 use landlock::{
     path_beneath_rules, Access, AccessFs, BitFlags, Ruleset, RulesetAttr, RulesetCreated,
     RulesetCreatedAttr, RulesetError, ABI,
 };
-use std::convert::TryFrom;
-use std::io::Error as IoError;
-use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

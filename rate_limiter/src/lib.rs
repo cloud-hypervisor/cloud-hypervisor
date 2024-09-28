@@ -51,6 +51,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
 use vmm_sys_util::timerfd::TimerFd;
 
 /// Module for group rate limiting.
@@ -519,9 +520,10 @@ impl Default for RateLimiter {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::*;
     use std::fmt;
     use std::thread;
+
+    use super::*;
 
     impl TokenBucket {
         // Resets the token bucket: budget set to max capacity and last-updated set to now.

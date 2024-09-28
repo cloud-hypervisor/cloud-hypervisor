@@ -5,6 +5,7 @@
 
 use std::io::{Read, Write};
 use std::os::unix::io::RawFd;
+
 use thiserror::Error;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 

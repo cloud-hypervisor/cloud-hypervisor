@@ -5,16 +5,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use super::Error as DeviceError;
-use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
-    RateLimiterConfig, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
-    EPOLL_HELPER_EVENT_LAST,
-};
-use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
-use crate::GuestMemoryMmap;
-use crate::VirtioInterrupt;
+use std::collections::HashMap;
+use std::net::Ipv4Addr;
+use std::num::Wrapping;
+use std::ops::Deref;
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::result;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier};
+use std::thread;
+
 use anyhow::anyhow;
 #[cfg(not(fuzzing))]
 use net_util::virtio_features_to_tap_offload;
@@ -25,15 +25,6 @@ use net_util::{
 };
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::net::Ipv4Addr;
-use std::num::Wrapping;
-use std::ops::Deref;
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::result;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier};
-use std::thread;
 use thiserror::Error;
 use virtio_bindings::virtio_config::*;
 use virtio_bindings::virtio_net::*;
@@ -43,6 +34,17 @@ use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
+
+use super::Error as DeviceError;
+use super::{
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
+    RateLimiterConfig, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
+    EPOLL_HELPER_EVENT_LAST,
+};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::GuestMemoryMmap;
+use crate::VirtioInterrupt;
 
 /// Control queue
 // Event available on the control queue.

@@ -3,10 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::protocol::MemoryRangeTable;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::protocol::MemoryRangeTable;
 
 pub mod protocol;
 

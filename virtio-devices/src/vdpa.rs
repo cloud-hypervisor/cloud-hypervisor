@@ -3,13 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::{
-    ActivateError, ActivateResult, GuestMemoryMmap, VirtioCommon, VirtioDevice, VirtioInterrupt,
-    VirtioInterruptType, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FEATURES_OK,
-    VIRTIO_F_IOMMU_PLATFORM,
-};
-use anyhow::anyhow;
-use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     io, result,
@@ -18,6 +11,9 @@ use std::{
         Arc, Mutex,
     },
 };
+
+use anyhow::anyhow;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vhost::{
     vdpa::{VhostVdpa, VhostVdpaIovaRange},
@@ -31,6 +27,12 @@ use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic}
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::{
+    ActivateError, ActivateResult, GuestMemoryMmap, VirtioCommon, VirtioDevice, VirtioInterrupt,
+    VirtioInterruptType, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FEATURES_OK,
+    VIRTIO_F_IOMMU_PLATFORM,
+};
 
 #[derive(Error, Debug)]
 pub enum Error {

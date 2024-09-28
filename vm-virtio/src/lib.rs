@@ -12,6 +12,7 @@
 
 use std::fmt::{self, Debug};
 use std::sync::Arc;
+
 use virtio_queue::{Queue, QueueT};
 use vm_memory::GuestAddress;
 

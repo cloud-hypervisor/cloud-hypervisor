@@ -12,22 +12,24 @@ pub mod layout;
 mod mpspec;
 mod mptable;
 pub mod regs;
-use crate::GuestMemoryMmap;
-use crate::InitramfsConfig;
-use crate::RegionType;
+use std::collections::BTreeMap;
+use std::mem;
+
 use hypervisor::arch::x86::{CpuIdEntry, CPUID_FLAG_VALID_INDEX};
 use hypervisor::{CpuVendor, HypervisorCpuError, HypervisorError};
 use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
 };
-use std::collections::BTreeMap;
-use std::mem;
 use thiserror::Error;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryRegion, GuestUsize,
 };
+
+use crate::GuestMemoryMmap;
+use crate::InitramfsConfig;
+use crate::RegionType;
 mod smbios;
 use std::arch::x86_64;
 #[cfg(feature = "tdx")]
@@ -1551,8 +1553,9 @@ fn update_cpuid_sgx(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use linux_loader::loader::bootparam::boot_e820_entry;
+
+    use super::*;
 
     #[test]
     fn regions_base_addr() {

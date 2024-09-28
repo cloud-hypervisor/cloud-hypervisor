@@ -6,6 +6,7 @@
 
 use core::fmt::Debug;
 use std::fmt::{self, Display};
+
 use thiserror::Error;
 
 #[derive(Clone, Copy, Error, Debug)]

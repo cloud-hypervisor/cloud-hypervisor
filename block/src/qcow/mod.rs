@@ -9,20 +9,15 @@ mod raw_file;
 mod refcount;
 mod vec_cache;
 
-use crate::qcow::{
-    qcow_raw_file::QcowRawFile,
-    refcount::RefCount,
-    vec_cache::{CacheMap, Cacheable, VecCache},
-};
-use crate::BlockBackend;
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use libc::{EINVAL, ENOSPC, ENOTSUP};
-use remain::sorted;
 use std::cmp::{max, min};
 use std::fs::OpenOptions;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::str;
+
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use libc::{EINVAL, ENOSPC, ENOTSUP};
+use remain::sorted;
 use thiserror::Error;
 use vmm_sys_util::{
     file_traits::FileSetLen, file_traits::FileSync, seek_hole::SeekHole, write_zeroes::PunchHole,
@@ -30,6 +25,12 @@ use vmm_sys_util::{
 };
 
 pub use crate::qcow::raw_file::RawFile;
+use crate::qcow::{
+    qcow_raw_file::QcowRawFile,
+    refcount::RefCount,
+    vec_cache::{CacheMap, Cacheable, VecCache},
+};
+use crate::BlockBackend;
 
 /// Nesting depth limit for disk formats that can open other disk files.
 const MAX_NESTING_DEPTH: u32 = 10;
@@ -1837,12 +1838,14 @@ pub fn detect_image_type(file: &mut RawFile) -> Result<ImageType> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs::File;
     use std::path::Path;
+
     use vmm_sys_util::tempdir::TempDir;
     use vmm_sys_util::tempfile::TempFile;
     use vmm_sys_util::write_zeroes::WriteZeroes;
+
+    use super::*;
 
     fn valid_header_v3() -> Vec<u8> {
         vec![

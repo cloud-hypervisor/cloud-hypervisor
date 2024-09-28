@@ -2,14 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::vhdx::vhdx_header::RegionTableEntry;
-use byteorder::{LittleEndian, ReadBytesExt};
-use remain::sorted;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::mem::size_of;
+
+use byteorder::{LittleEndian, ReadBytesExt};
+use remain::sorted;
 use thiserror::Error;
 use uuid::Uuid;
+
+use crate::vhdx::vhdx_header::RegionTableEntry;
 
 const METADATA_SIGN: u64 = 0x6174_6164_6174_656D;
 const METADATA_ENTRY_SIZE: usize = 32;

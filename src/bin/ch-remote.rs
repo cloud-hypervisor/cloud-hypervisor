@@ -3,17 +3,18 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::fmt;
+use std::io::Read;
+use std::marker::PhantomData;
+use std::os::unix::net::UnixStream;
+use std::process;
+
 use api_client::simple_api_command;
 use api_client::simple_api_command_with_fds;
 use api_client::simple_api_full_command;
 use api_client::Error as ApiClientError;
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use option_parser::{ByteSized, ByteSizedParseError};
-use std::fmt;
-use std::io::Read;
-use std::marker::PhantomData;
-use std::os::unix::net::UnixStream;
-use std::process;
 #[cfg(feature = "dbus_api")]
 use zbus::{proxy, zvariant::Optional};
 

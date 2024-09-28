@@ -2,13 +2,15 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult};
-use crate::vhdx::{Result as VhdxResult, Vhdx};
-use crate::AsyncAdaptor;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::sync::{Arc, Mutex, MutexGuard};
+
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult};
+use crate::vhdx::{Result as VhdxResult, Vhdx};
+use crate::AsyncAdaptor;
 
 pub struct VhdxDiskSync {
     vhdx_file: Arc<Mutex<Vhdx>>,

@@ -5,10 +5,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::{Arc, Barrier};
 use std::{io, result};
+
+use serde::{Deserialize, Serialize};
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -340,10 +341,12 @@ impl Migratable for Serial {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::Mutex;
+
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
     use vmm_sys_util::eventfd::EventFd;
+
+    use super::*;
 
     const SERIAL_NAME: &str = "serial";
 

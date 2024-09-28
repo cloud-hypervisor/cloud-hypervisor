@@ -4,7 +4,6 @@
 // Copyright 2023 Crusoe Energy Systems LLC
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{RateLimiter, TokenType};
 use core::panic::AssertUnwindSafe;
 use std::fs::File;
 use std::io;
@@ -12,8 +11,11 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::result;
 use std::sync::{Arc, Mutex};
 use std::thread;
+
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::{RateLimiter, TokenType};
 
 /// Errors associated with rate-limiter group.
 #[derive(Debug, Error)]
@@ -298,10 +300,12 @@ impl Drop for RateLimiterGroup {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::{os::fd::AsRawFd, thread, time::Duration};
+
+    use vmm_sys_util::eventfd::EventFd;
+
     use super::RateLimiterGroupHandle;
     use crate::{group::RateLimiterGroup, TokenBucket, TokenType, REFILL_TIMER_INTERVAL_MS};
-    use std::{os::fd::AsRawFd, thread, time::Duration};
-    use vmm_sys_util::eventfd::EventFd;
 
     impl RateLimiterGroupHandle {
         pub fn bandwidth(&self) -> Option<TokenBucket> {

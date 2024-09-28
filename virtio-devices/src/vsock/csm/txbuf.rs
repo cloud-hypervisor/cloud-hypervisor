@@ -144,10 +144,11 @@ impl TxBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Error as IoError;
     use std::io::ErrorKind;
     use std::io::Result as IoResult;
+
+    use super::*;
 
     struct TestSink {
         data: Vec<u8>,

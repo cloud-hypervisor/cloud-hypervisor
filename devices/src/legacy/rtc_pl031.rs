@@ -8,13 +8,15 @@
 //! This is achieved by generating an interrupt signal after counting for a programmed number of cycles of
 //! a real-time clock input.
 //!
-use crate::{read_le_u32, write_le_u32};
 use std::sync::{Arc, Barrier};
 use std::time::Instant;
 use std::{io, result};
+
 use thiserror::Error;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
+
+use crate::{read_le_u32, write_le_u32};
 
 // As you can see in https://static.docs.arm.com/ddi0224/c/real_time_clock_pl031_r1p3_technical_reference_manual_DDI0224C.pdf
 // at section 3.2 Summary of RTC registers, the total size occupied by this device is 0x000 -> 0xFFC + 4 = 0x1000.
@@ -228,13 +230,14 @@ impl BusDevice for Rtc {
 
 #[cfg(test)]
 mod tests {
+    use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
+    use vmm_sys_util::eventfd::EventFd;
+
     use super::*;
     use crate::{
         read_be_u16, read_be_u32, read_le_i32, read_le_u16, read_le_u64, write_be_u16,
         write_be_u32, write_le_i32, write_le_u16, write_le_u64,
     };
-    use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
-    use vmm_sys_util::eventfd::EventFd;
 
     const LEGACY_RTC_MAPPED_IO_START: u64 = 0x0901_0000;
 

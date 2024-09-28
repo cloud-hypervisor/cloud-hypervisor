@@ -5,9 +5,6 @@
 
 #![allow(clippy::undocumented_unsafe_blocks)]
 
-use once_cell::sync::Lazy;
-use serde_json::Value;
-use ssh2::Session;
 use std::env;
 use std::ffi::OsStr;
 use std::fmt::Display;
@@ -24,6 +21,10 @@ use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 use std::{fmt, fs};
+
+use once_cell::sync::Lazy;
+use serde_json::Value;
+use ssh2::Session;
 use vmm_sys_util::tempdir::TempDir;
 use wait_timeout::ChildExt;
 

@@ -1,18 +1,13 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{
-    ActivateError, EpollHelper, EpollHelperError, EpollHelperHandler, GuestMemoryMmap,
-    GuestRegionMmap, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER,
-    VIRTIO_F_NOTIFICATION_DATA, VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX,
-    VIRTIO_F_RING_INDIRECT_DESC, VIRTIO_F_VERSION_1,
-};
-use anyhow::anyhow;
-use serde::{Deserialize, Serialize};
 use std::io;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
+
+use anyhow::anyhow;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vhost::vhost_user::message::{
     VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
@@ -28,6 +23,13 @@ use vm_memory::{
 use vm_migration::{protocol::MemoryRangeTable, MigratableError, Snapshot};
 use vmm_sys_util::eventfd::EventFd;
 use vu_common_ctrl::VhostUserHandle;
+
+use crate::{
+    ActivateError, EpollHelper, EpollHelperError, EpollHelperHandler, GuestMemoryMmap,
+    GuestRegionMmap, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER,
+    VIRTIO_F_NOTIFICATION_DATA, VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX,
+    VIRTIO_F_RING_INDIRECT_DESC, VIRTIO_F_VERSION_1,
+};
 
 pub mod blk;
 pub mod fs;

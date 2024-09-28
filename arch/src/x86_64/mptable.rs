@@ -5,15 +5,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use crate::layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
-use crate::x86_64::{get_x2apic_id, mpspec};
-use crate::GuestMemoryMmap;
-use libc::c_uchar;
 use std::mem;
 use std::result;
 use std::slice;
+
+use libc::c_uchar;
 use thiserror::Error;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
+
+use crate::layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
+use crate::x86_64::{get_x2apic_id, mpspec};
+use crate::GuestMemoryMmap;
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
 // trait (in this case `ByteValued`) where:
@@ -304,11 +306,12 @@ pub fn setup_mptable(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::layout::MPTABLE_START;
     use vm_memory::{
         bitmap::BitmapSlice, GuestUsize, VolatileMemoryError, VolatileSlice, WriteVolatile,
     };
+
+    use super::*;
+    use crate::layout::MPTABLE_START;
 
     fn table_entry_size(type_: u8) -> usize {
         match type_ as u32 {

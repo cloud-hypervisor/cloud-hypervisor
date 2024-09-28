@@ -2,6 +2,20 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+use std::panic::AssertUnwindSafe;
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
+use std::thread;
+
+use futures::channel::oneshot;
+use futures::{executor, FutureExt};
+use hypervisor::HypervisorType;
+use seccompiler::{apply_filter, SeccompAction};
+use vmm_sys_util::eventfd::EventFd;
+use zbus::fdo::{self, Result};
+use zbus::zvariant::Optional;
+use zbus::{interface, ConnectionBuilder};
+
 use super::{ApiAction, ApiRequest};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::api::VmCoredump;
@@ -14,18 +28,6 @@ use crate::api::{
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error as VmmError, Result as VmmResult};
 use crate::{NetConfig, VmConfig};
-use futures::channel::oneshot;
-use futures::{executor, FutureExt};
-use hypervisor::HypervisorType;
-use seccompiler::{apply_filter, SeccompAction};
-use std::panic::AssertUnwindSafe;
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use vmm_sys_util::eventfd::EventFd;
-use zbus::fdo::{self, Result};
-use zbus::zvariant::Optional;
-use zbus::{interface, ConnectionBuilder};
 
 pub type DBusApiShutdownChannels = (oneshot::Sender<()>, oneshot::Receiver<()>);
 

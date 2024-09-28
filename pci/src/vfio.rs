@@ -3,25 +3,18 @@
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 
-use crate::msi::{MsiConfigState, MSI_CONFIG_ID};
-use crate::msix::MsixConfigState;
-use crate::{
-    msi_num_enabled_vectors, BarReprogrammingParams, MsiCap, MsiConfig, MsixCap, MsixConfig,
-    PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciBdf, PciCapabilityId,
-    PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciExpressCapabilityId,
-    PciHeaderType, PciSubclass, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, PCI_CONFIGURATION_ID,
-};
-use anyhow::anyhow;
-use byteorder::{ByteOrder, LittleEndian};
-use hypervisor::HypervisorVmError;
-use libc::{sysconf, _SC_PAGESIZE};
-use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
+
+use anyhow::anyhow;
+use byteorder::{ByteOrder, LittleEndian};
+use hypervisor::HypervisorVmError;
+use libc::{sysconf, _SC_PAGESIZE};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::{
@@ -39,6 +32,15 @@ use vm_device::{BusDevice, Resource};
 use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestUsize};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::msi::{MsiConfigState, MSI_CONFIG_ID};
+use crate::msix::MsixConfigState;
+use crate::{
+    msi_num_enabled_vectors, BarReprogrammingParams, MsiCap, MsiConfig, MsixCap, MsixConfig,
+    PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciBdf, PciCapabilityId,
+    PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciExpressCapabilityId,
+    PciHeaderType, PciSubclass, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, PCI_CONFIGURATION_ID,
+};
 
 pub(crate) const VFIO_COMMON_ID: &str = "vfio_common";
 

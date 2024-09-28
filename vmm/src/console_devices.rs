@@ -10,15 +10,6 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::sigwinch_listener::listen_for_sigwinch_on_tty;
-use crate::vm_config::ConsoleOutputMode;
-use crate::Vmm;
-use libc::cfmakeraw;
-use libc::isatty;
-use libc::tcgetattr;
-use libc::tcsetattr;
-use libc::termios;
-use libc::TCSANOW;
 use std::fs::read_link;
 use std::fs::File;
 use std::fs::OpenOptions;
@@ -33,7 +24,18 @@ use std::path::PathBuf;
 use std::result;
 use std::sync::Arc;
 use std::sync::Mutex;
+
+use libc::cfmakeraw;
+use libc::isatty;
+use libc::tcgetattr;
+use libc::tcsetattr;
+use libc::termios;
+use libc::TCSANOW;
 use thiserror::Error;
+
+use crate::sigwinch_listener::listen_for_sigwinch_on_tty;
+use crate::vm_config::ConsoleOutputMode;
+use crate::Vmm;
 
 const TIOCSPTLCK: libc::c_int = 0x4004_5431;
 const TIOCGPTPEER: libc::c_int = 0x5441;

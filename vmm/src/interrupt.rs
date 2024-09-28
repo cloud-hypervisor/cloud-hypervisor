@@ -3,12 +3,13 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use devices::interrupt_controller::InterruptController;
-use hypervisor::IrqRoutingEntry;
 use std::collections::HashMap;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+
+use devices::interrupt_controller::InterruptController;
+use hypervisor::IrqRoutingEntry;
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,

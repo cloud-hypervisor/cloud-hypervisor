@@ -5,6 +5,7 @@
 
 use std::fmt;
 use std::time::Instant;
+
 use vm_device::BusDevice;
 
 /// Debug I/O port, see:

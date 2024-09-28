@@ -4,12 +4,13 @@
 
 extern crate log;
 
-use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
-use remain::sorted;
 use std::collections::btree_map::BTreeMap;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
+
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
+use remain::sorted;
 use thiserror::Error;
 use uuid::Uuid;
 

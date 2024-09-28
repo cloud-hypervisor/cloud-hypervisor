@@ -3,11 +3,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::fs::File;
+use std::io::Write;
+
 #[cfg(target_arch = "x86_64")]
 use hypervisor::arch::x86::{DescriptorTable, SegmentRegister};
 use linux_loader::elf;
-use std::fs::File;
-use std::io::Write;
 use vm_memory::ByteValued;
 
 #[derive(Clone)]

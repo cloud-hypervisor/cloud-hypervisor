@@ -9,6 +9,7 @@ use std::sync::{
     Arc, Barrier,
 };
 use std::thread;
+
 use vm_device::BusDevice;
 use vmm_sys_util::eventfd::EventFd;
 

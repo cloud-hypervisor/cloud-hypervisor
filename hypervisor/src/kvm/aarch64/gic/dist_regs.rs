@@ -1,12 +1,13 @@
 // Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use kvm_ioctls::DeviceFd;
+
 use crate::arch::aarch64::gic::{Error, Result};
 use crate::device::HypervisorDeviceError;
 use crate::kvm::kvm_bindings::{
     kvm_device_attr, KVM_DEV_ARM_VGIC_GRP_DIST_REGS, KVM_DEV_ARM_VGIC_GRP_NR_IRQS,
 };
-use kvm_ioctls::DeviceFd;
 
 /*
  Distributor registers as detailed at page 456 from

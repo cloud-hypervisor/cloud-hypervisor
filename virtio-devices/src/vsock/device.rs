@@ -8,6 +8,26 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
+use std::io;
+use std::os::unix::io::AsRawFd;
+use std::path::PathBuf;
+use std::result;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Barrier, RwLock};
+
+use anyhow::anyhow;
+use byteorder::{ByteOrder, LittleEndian};
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
+use virtio_queue::Queue;
+use virtio_queue::QueueOwnedT;
+use virtio_queue::QueueT;
+use vm_memory::GuestAddressSpace;
+use vm_memory::GuestMemoryAtomic;
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vm_virtio::AccessPlatform;
+use vmm_sys_util::eventfd::EventFd;
+
 /// This is the `VirtioDevice` implementation for our vsock device. It handles the virtio-level
 /// device logic: feature negotiation, device configuration, and device activation.
 /// The run-time device logic (i.e. event-driven data handling) is implemented by
@@ -37,24 +57,6 @@ use crate::{
     EpollHelperHandler, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
     EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
-use anyhow::anyhow;
-use byteorder::{ByteOrder, LittleEndian};
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
-use std::io;
-use std::os::unix::io::AsRawFd;
-use std::path::PathBuf;
-use std::result;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Barrier, RwLock};
-use virtio_queue::Queue;
-use virtio_queue::QueueOwnedT;
-use virtio_queue::QueueT;
-use vm_memory::GuestAddressSpace;
-use vm_memory::GuestMemoryAtomic;
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
-use vm_virtio::AccessPlatform;
-use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
 const NUM_QUEUES: usize = 3;
@@ -522,11 +524,12 @@ impl<B> Migratable for Vsock<B> where B: VsockBackend + Sync + 'static {}
 
 #[cfg(test)]
 mod tests {
+    use libc::EFD_NONBLOCK;
+
     use super::super::tests::{NoopVirtioInterrupt, TestContext};
     use super::super::*;
     use super::*;
     use crate::ActivateError;
-    use libc::EFD_NONBLOCK;
 
     #[test]
     fn test_virtio_device() {

@@ -33,11 +33,21 @@
 pub mod dbus;
 pub mod http;
 
+use core::fmt;
+use std::fmt::Display;
+use std::io;
+use std::sync::mpsc::{channel, RecvError, SendError, Sender};
+use std::sync::{Arc, Mutex};
+
+use micro_http::Body;
+use serde::{Deserialize, Serialize};
+use vm_migration::MigratableError;
+use vmm_sys_util::eventfd::EventFd;
+
 #[cfg(feature = "dbus_api")]
 pub use self::dbus::start_dbus_thread;
 pub use self::http::start_http_fd_thread;
 pub use self::http::start_http_path_thread;
-
 use crate::config::{
     DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, UserDeviceConfig,
     VdpaConfig, VmConfig, VsockConfig,
@@ -45,15 +55,6 @@ use crate::config::{
 use crate::device_tree::DeviceTree;
 use crate::vm::{Error as VmError, VmState};
 use crate::Error as VmmError;
-use core::fmt;
-use micro_http::Body;
-use serde::{Deserialize, Serialize};
-use std::fmt::Display;
-use std::io;
-use std::sync::mpsc::{channel, RecvError, SendError, Sender};
-use std::sync::{Arc, Mutex};
-use vm_migration::MigratableError;
-use vmm_sys_util::eventfd::EventFd;
 
 /// API errors are sent back from the VMM API server through the ApiResponse.
 #[derive(Debug)]

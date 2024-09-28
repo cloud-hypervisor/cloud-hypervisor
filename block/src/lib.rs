@@ -30,15 +30,6 @@ pub mod vhd;
 pub mod vhdx;
 pub mod vhdx_sync;
 
-use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
-use crate::fixed_vhd::FixedVhd;
-use crate::qcow::{QcowFile, RawFile};
-use crate::vhdx::{Vhdx, VhdxError};
-#[cfg(feature = "io_uring")]
-use io_uring::{opcode, IoUring, Probe};
-use libc::{ioctl, S_IFBLK, S_IFMT};
-use serde::{Deserialize, Serialize};
-use smallvec::SmallVec;
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::cmp;
 use std::collections::VecDeque;
@@ -52,6 +43,12 @@ use std::result;
 use std::sync::Arc;
 use std::sync::MutexGuard;
 use std::time::Instant;
+
+#[cfg(feature = "io_uring")]
+use io_uring::{opcode, IoUring, Probe};
+use libc::{ioctl, S_IFBLK, S_IFMT};
+use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
 use virtio_queue::DescriptorChain;
@@ -63,6 +60,11 @@ use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::aio;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::{ioctl_io_nr, ioctl_ioc_nr};
+
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
+use crate::fixed_vhd::FixedVhd;
+use crate::qcow::{QcowFile, RawFile};
+use crate::vhdx::{Vhdx, VhdxError};
 
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;

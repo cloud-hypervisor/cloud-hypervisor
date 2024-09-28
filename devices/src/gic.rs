@@ -4,14 +4,15 @@
 
 use super::interrupt_controller::{Error, InterruptController};
 extern crate arch;
+use std::result;
+use std::sync::{Arc, Mutex};
+
 use anyhow::anyhow;
 use arch::layout;
 use hypervisor::{
     arch::aarch64::gic::{Vgic, VgicConfig},
     CpuState, GicState,
 };
-use std::result;
-use std::sync::{Arc, Mutex};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
     LegacyIrqSourceConfig, MsiIrqGroupConfig,
