@@ -52,6 +52,9 @@ jobs:
       - name: Formatting (rustfmt)
         run: cargo fmt --all -- --check
 
+      - name: Formatting (fuzz) (rustfmt)
+        run: cargo fmt --all --manifest-path fuzz/Cargo.toml -- --check
+
       - name: Clippy (kvm)
         uses: actions-rs/cargo@v1
         with:

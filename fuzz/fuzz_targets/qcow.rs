@@ -5,13 +5,14 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 #![no_main]
-use block::qcow::{QcowFile, RawFile};
-use libfuzzer_sys::fuzz_target;
 use std::ffi;
 use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::os::unix::io::{FromRawFd, RawFd};
+
+use block::qcow::{QcowFile, RawFile};
+use libfuzzer_sys::fuzz_target;
 
 // Take the first 64 bits of data as an address and the next 64 bits as data to
 // store there. The rest of the data is used as a qcow image.
