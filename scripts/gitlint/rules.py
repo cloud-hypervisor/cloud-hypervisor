@@ -55,6 +55,7 @@ class TitleStartsWithComponent(LineRule):
             'resources',
             'scripts',
             'serial_buffer',
+            'style',
             'test_data',
             'test_infra',
             'tests',
