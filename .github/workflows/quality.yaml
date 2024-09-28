@@ -50,7 +50,7 @@ jobs:
           git checkout ${{ github.sha }}
 
       - name: Formatting (rustfmt)
-        run: cargo fmt -- --check
+        run: cargo fmt --all -- --check
 
       - name: Clippy (kvm)
         uses: actions-rs/cargo@v1
