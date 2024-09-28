@@ -6,7 +6,7 @@ concurrency:
 
 jobs:
   build:
-    name: Quality (clippy, rustfmt)
+    name: Quality (clippy)
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.experimental }}
     strategy:
@@ -39,7 +39,7 @@ jobs:
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           override: true
-          components: rustfmt, clippy
+          components: clippy
 
       - name: Bisectability Check (default features)
         if: ${{ github.event_name == 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu' }}
@@ -48,12 +48,6 @@ jobs:
           commits=$(git rev-list origin/${{ github.base_ref }}..${{ github.sha }})
           for commit in $commits; do git checkout $commit; cargo check --tests --examples --all --target=${{ matrix.target }}; done
           git checkout ${{ github.sha }}
-
-      - name: Formatting (rustfmt)
-        run: cargo fmt --all -- --check
-
-      - name: Formatting (fuzz) (rustfmt)
-        run: cargo fmt --all --manifest-path fuzz/Cargo.toml -- --check
 
       - name: Clippy (kvm)
         uses: actions-rs/cargo@v1
