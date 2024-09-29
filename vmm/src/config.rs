@@ -4,10 +4,9 @@
 //
 
 use std::collections::{BTreeSet, HashMap};
-use std::fmt;
 use std::path::PathBuf;
-use std::result;
 use std::str::FromStr;
+use std::{fmt, result};
 
 use clap::ArgMatches;
 use option_parser::{

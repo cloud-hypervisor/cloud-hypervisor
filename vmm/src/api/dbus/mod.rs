@@ -26,8 +26,7 @@ use crate::api::{
     VmSendMigration, VmShutdown, VmSnapshot, VmmPing, VmmShutdown,
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
-use crate::{Error as VmmError, Result as VmmResult};
-use crate::{NetConfig, VmConfig};
+use crate::{Error as VmmError, NetConfig, Result as VmmResult, VmConfig};
 
 pub type DBusApiShutdownChannels = (oneshot::Sender<()>, oneshot::Receiver<()>);
 

@@ -19,17 +19,14 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use libc::{EINVAL, ENOSPC, ENOTSUP};
 use remain::sorted;
 use thiserror::Error;
-use vmm_sys_util::{
-    file_traits::FileSetLen, file_traits::FileSync, seek_hole::SeekHole, write_zeroes::PunchHole,
-    write_zeroes::WriteZeroesAt,
-};
+use vmm_sys_util::file_traits::{FileSetLen, FileSync};
+use vmm_sys_util::seek_hole::SeekHole;
+use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
+use crate::qcow::qcow_raw_file::QcowRawFile;
 pub use crate::qcow::raw_file::RawFile;
-use crate::qcow::{
-    qcow_raw_file::QcowRawFile,
-    refcount::RefCount,
-    vec_cache::{CacheMap, Cacheable, VecCache},
-};
+use crate::qcow::refcount::RefCount;
+use crate::qcow::vec_cache::{CacheMap, Cacheable, VecCache};
 use crate::BlockBackend;
 
 /// Nesting depth limit for disk formats that can open other disk files.

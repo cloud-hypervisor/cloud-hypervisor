@@ -1,10 +1,9 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
-use std::thread;
+use std::{result, thread};
 
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
@@ -13,10 +12,8 @@ use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatu
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
 use virtio_queue::Queue;
 use vm_memory::{ByteValued, GuestMemoryAtomic};
-use vm_migration::{
-    protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot, Snapshottable,
-    Transportable,
-};
+use vm_migration::protocol::MemoryRangeTable;
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 use super::vu_common_ctrl::VhostUserHandle;
@@ -25,10 +22,10 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::VhostUserCommon;
 use crate::{
-    ActivateResult, UserspaceMapping, VirtioCommon, VirtioDevice, VirtioDeviceType,
-    VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_IOMMU_PLATFORM,
+    ActivateResult, GuestMemoryMmap, GuestRegionMmap, MmapRegion, UserspaceMapping, VirtioCommon,
+    VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList,
+    VIRTIO_F_IOMMU_PLATFORM,
 };
-use crate::{GuestMemoryMmap, GuestRegionMmap, MmapRegion};
 
 const NUM_QUEUE_OFFSET: usize = 1;
 const DEFAULT_QUEUE_NUMBER: usize = 2;

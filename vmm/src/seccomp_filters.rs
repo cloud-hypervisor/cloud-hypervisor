@@ -5,8 +5,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use hypervisor::HypervisorType;
+use seccompiler::SeccompCmpOp::Eq;
 use seccompiler::{
-    BackendError, BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen, SeccompCmpOp::Eq,
+    BackendError, BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen,
     SeccompCondition as Cond, SeccompFilter, SeccompRule,
 };
 

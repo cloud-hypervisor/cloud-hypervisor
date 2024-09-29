@@ -21,14 +21,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
 
-use acpi_tables::{aml, sdt::Sdt, Aml};
+use acpi_tables::sdt::Sdt;
+use acpi_tables::{aml, Aml};
 use anyhow::anyhow;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use arch::aarch64::regs;
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::get_x2apic_id;
-use arch::EntryPoint;
-use arch::NumaNodes;
+use arch::{EntryPoint, NumaNodes};
 #[cfg(target_arch = "aarch64")]
 use devices::gic::Gic;
 use devices::interrupt_controller::InterruptController;
@@ -91,8 +91,7 @@ use crate::memory_manager::MemoryManager;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 #[cfg(target_arch = "x86_64")]
 use crate::vm::physical_bits;
-use crate::GuestMemoryMmap;
-use crate::CPU_MANAGER_SNAPSHOT_ID;
+use crate::{GuestMemoryMmap, CPU_MANAGER_SNAPSHOT_ID};
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 /// Extract the specified bits of a 64-bit integer.
 /// For example, to extrace 2 bits from offset 1 (zero based) of `6u64`,
@@ -2806,8 +2805,7 @@ impl CpuElf64Writable for CpuManager {
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[cfg(test)]
 mod tests {
-    use arch::layout::BOOT_STACK_POINTER;
-    use arch::layout::ZERO_PAGE_START;
+    use arch::layout::{BOOT_STACK_POINTER, ZERO_PAGE_START};
     use arch::x86_64::interrupts::*;
     use arch::x86_64::regs::*;
     use hypervisor::arch::x86::{FpuState, LapicState};
@@ -2947,7 +2945,8 @@ mod tests {
 mod tests {
     use std::mem;
 
-    use arch::{aarch64::regs, layout};
+    use arch::aarch64::regs;
+    use arch::layout;
     use hypervisor::kvm::aarch64::is_system_register;
     use hypervisor::kvm::kvm_bindings::{
         kvm_vcpu_init, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM_CORE,

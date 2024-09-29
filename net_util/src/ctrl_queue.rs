@@ -16,8 +16,7 @@ use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestMemoryError};
 use vm_virtio::{AccessPlatform, Translatable};
 
-use crate::GuestMemoryMmap;
-use crate::Tap;
+use crate::{GuestMemoryMmap, Tap};
 
 #[derive(Debug)]
 pub enum Error {

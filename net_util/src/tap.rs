@@ -424,10 +424,9 @@ impl AsRawFd for Tap {
 #[cfg(test)]
 mod tests {
     use std::net::Ipv4Addr;
-    use std::str;
     use std::sync::{mpsc, Mutex};
-    use std::thread;
     use std::time::Duration;
+    use std::{str, thread};
 
     use once_cell::sync::Lazy;
     use pnet::packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};

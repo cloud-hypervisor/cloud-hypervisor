@@ -4,19 +4,19 @@
 
 #![no_main]
 
-use std::ffi;
 use std::fs::File;
-use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::Arc;
+use std::{ffi, io};
 
 use libc::{MAP_NORESERVE, MAP_PRIVATE, PROT_READ, PROT_WRITE};
 use libfuzzer_sys::fuzz_target;
 use seccompiler::SeccompAction;
 use virtio_devices::{Pmem, UserspaceMapping, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
+use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::{bitmap::AtomicBitmap, Bytes, GuestAddress, GuestMemoryAtomic, MmapRegion};
+use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic, MmapRegion};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;

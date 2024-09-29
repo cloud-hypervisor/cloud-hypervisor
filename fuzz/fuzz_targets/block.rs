@@ -9,19 +9,20 @@
 #![no_main]
 
 use std::collections::BTreeMap;
-use std::ffi;
 use std::fs::File;
-use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::{ffi, io};
 
-use block::{async_io::DiskFile, raw_sync::RawFileDiskSync};
+use block::async_io::DiskFile;
+use block::raw_sync::RawFileDiskSync;
 use libfuzzer_sys::fuzz_target;
 use seccompiler::SeccompAction;
 use virtio_devices::{Block, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
-use vm_memory::{bitmap::AtomicBitmap, Bytes, GuestAddress, GuestMemoryAtomic};
+use vm_memory::bitmap::AtomicBitmap;
+use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;

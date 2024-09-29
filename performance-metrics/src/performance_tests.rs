@@ -5,13 +5,11 @@
 
 // Performance tests
 
-use std::fs;
 use std::path::PathBuf;
-use std::thread;
 use std::time::Duration;
+use std::{fs, thread};
 
-use test_infra::Error as InfraError;
-use test_infra::*;
+use test_infra::{Error as InfraError, *};
 
 use crate::{mean, PerformanceTestControl};
 

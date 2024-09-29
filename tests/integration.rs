@@ -11,24 +11,19 @@
 extern crate test_infra;
 
 use std::collections::HashMap;
-use std::fs;
-use std::io;
-use std::io::BufRead;
-use std::io::Read;
-use std::io::Seek;
-use std::io::Write;
+use std::io::{BufRead, Read, Seek, Write};
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::string::String;
-use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
-use std::sync::Mutex;
-use std::thread;
+use std::sync::{mpsc, Mutex};
+use std::{fs, io, thread};
 
 use net_util::MacAddr;
 use test_infra::*;
-use vmm_sys_util::{tempdir::TempDir, tempfile::TempFile};
+use vmm_sys_util::tempdir::TempDir;
+use vmm_sys_util::tempfile::TempFile;
 use wait_timeout::ChildExt;
 
 // Constant taken from the VMM crate.
@@ -2347,7 +2342,8 @@ fn make_guest_panic(guest: &Guest) {
 }
 
 mod common_parallel {
-    use std::{fs::OpenOptions, io::SeekFrom};
+    use std::fs::OpenOptions;
+    use std::io::SeekFrom;
 
     use crate::*;
 

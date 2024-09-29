@@ -4,13 +4,12 @@
 //
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::io::Read;
-use std::io::Seek;
-use std::io::SeekFrom;
+use std::io::{Read, Seek, SeekFrom};
 use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 
-use igvm::{snp_defs::SevVmsa, IgvmDirectiveHeader, IgvmFile, IgvmPlatformHeader, IsolationType};
+use igvm::snp_defs::SevVmsa;
+use igvm::{IgvmDirectiveHeader, IgvmFile, IgvmPlatformHeader, IsolationType};
 use igvm_defs::{
     IgvmPageDataType, IgvmPlatformType, IGVM_VHS_PARAMETER, IGVM_VHS_PARAMETER_INSERT,
 };
@@ -21,9 +20,8 @@ use thiserror::Error;
 use zerocopy::AsBytes;
 
 use crate::cpu::CpuManager;
-use crate::igvm::{
-    loader::Loader, BootPageAcceptance, IgvmLoadedInfo, StartupMemoryType, HV_PAGE_SIZE,
-};
+use crate::igvm::loader::Loader;
+use crate::igvm::{BootPageAcceptance, IgvmLoadedInfo, StartupMemoryType, HV_PAGE_SIZE};
 use crate::memory_manager::MemoryManager;
 #[cfg(feature = "sev_snp")]
 use crate::GuestMemoryMmap;

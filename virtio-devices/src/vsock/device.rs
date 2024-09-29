@@ -8,22 +8,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use std::io;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
-use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, RwLock};
+use std::{io, result};
 
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
-use virtio_queue::Queue;
-use virtio_queue::QueueOwnedT;
-use virtio_queue::QueueT;
-use vm_memory::GuestAddressSpace;
-use vm_memory::GuestMemoryAtomic;
+use virtio_queue::{Queue, QueueOwnedT, QueueT};
+use vm_memory::{GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
@@ -49,13 +45,12 @@ use vmm_sys_util::eventfd::EventFd;
 ///
 use super::{VsockBackend, VsockPacket};
 use crate::seccomp_filters::Thread;
-use crate::Error as DeviceError;
-use crate::GuestMemoryMmap;
-use crate::VirtioInterrupt;
+use crate::thread_helper::spawn_virtio_thread;
 use crate::{
-    thread_helper::spawn_virtio_thread, ActivateResult, EpollHelper, EpollHelperError,
-    EpollHelperHandler, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
-    EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Error as DeviceError,
+    GuestMemoryMmap, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
+    VirtioInterruptType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM,
+    VIRTIO_F_VERSION_1,
 };
 
 const QUEUE_SIZE: u16 = 256;

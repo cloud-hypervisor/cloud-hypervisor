@@ -10,18 +10,16 @@ extern crate log;
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io;
 use std::io::{stdout, Read, Write};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::os::unix::net::UnixListener;
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use std::{result, thread};
+use std::{io, result, thread};
 
 use anyhow::anyhow;
 #[cfg(feature = "dbus_api")]
@@ -40,8 +38,8 @@ use thiserror::Error;
 use tracer::trace_scoped;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{ReadVolatile, WriteVolatile};
-use vm_migration::{protocol::*, Migratable};
-use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vm_migration::protocol::*;
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;

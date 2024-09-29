@@ -50,11 +50,9 @@ use super::super::packet::VsockPacket;
 use super::super::{
     Result as VsockResult, VsockBackend, VsockChannel, VsockEpollListener, VsockError,
 };
-use super::defs;
 use super::muxer_killq::MuxerKillQ;
 use super::muxer_rxq::MuxerRxQ;
-use super::MuxerConnection;
-use super::{Error, Result};
+use super::{defs, Error, MuxerConnection, Result};
 
 /// A unique identifier of a `MuxerConnection` object. Connections are stored in a hash map,
 /// keyed by a `ConnMapKey` object.

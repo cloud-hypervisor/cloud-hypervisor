@@ -11,9 +11,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use std::cmp;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -23,18 +21,16 @@ use std::ops::Deref;
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Instant;
-use std::{result, str, thread};
+use std::{cmp, result, str, thread};
 
 use anyhow::anyhow;
-use arch::get_host_cpu_phys_bits;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{KVM_IDENTITY_MAP_START, KVM_TSS_START};
 #[cfg(feature = "tdx")]
 use arch::x86_64::tdx::TdvfSection;
-use arch::EntryPoint;
 #[cfg(target_arch = "aarch64")]
 use arch::PciSpaceInfo;
-use arch::{NumaNode, NumaNodes};
+use arch::{get_host_cpu_phys_bits, EntryPoint, NumaNode, NumaNodes};
 #[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller;
 use devices::AcpiNotificationFlags;
@@ -64,25 +60,23 @@ use vm_memory::{Address, ByteValued, GuestMemoryRegion, ReadVolatile};
 use vm_memory::{
     Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, WriteVolatile,
 };
-use vm_migration::protocol::{Request, Response};
+use vm_migration::protocol::{MemoryRangeTable, Request, Response};
 use vm_migration::{
-    protocol::MemoryRangeTable, snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot,
-    Snapshottable, Transportable,
+    snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 use crate::config::{
-    add_to_config, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig,
-    UserDeviceConfig, ValidationError, VdpaConfig, VmConfig, VsockConfig,
+    add_to_config, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, NumaConfig,
+    PayloadConfig, PmemConfig, UserDeviceConfig, ValidationError, VdpaConfig, VmConfig,
+    VsockConfig,
 };
-use crate::config::{NumaConfig, PayloadConfig};
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
     CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
 };
-use crate::cpu;
 use crate::device_manager::{DeviceManager, DeviceManagerError};
 use crate::device_tree::DeviceTree;
 #[cfg(feature = "guest_debug")]
@@ -98,9 +92,9 @@ use crate::migration::get_vm_snapshot;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::migration::url_to_file;
 use crate::migration::{url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
-use crate::GuestMemoryMmap;
 use crate::{
-    PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
+    cpu, GuestMemoryMmap, PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID,
+    MEMORY_MANAGER_SNAPSHOT_ID,
 };
 
 /// Errors associated with VM management

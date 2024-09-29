@@ -23,16 +23,19 @@ use std::time::Instant;
 use acpi_tables::sdt::GenericAddress;
 use acpi_tables::{aml, Aml};
 use anyhow::anyhow;
-use arch::layout;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
-use arch::NumaNodes;
+use arch::{layout, NumaNodes};
 #[cfg(target_arch = "aarch64")]
 use arch::{DeviceType, MmioDeviceInfo};
+use block::async_io::DiskFile;
+use block::fixed_vhd_sync::FixedVhdDiskSync;
+use block::qcow_sync::QcowDiskSync;
+use block::raw_async_aio::RawFileDiskAio;
+use block::raw_sync::RawFileDiskSync;
+use block::vhdx_sync::VhdxDiskSync;
 use block::{
-    async_io::DiskFile, block_aio_is_supported, block_io_uring_is_supported, detect_image_type,
-    fixed_vhd_sync::FixedVhdDiskSync, qcow, qcow_sync::QcowDiskSync, raw_async_aio::RawFileDiskAio,
-    raw_sync::RawFileDiskSync, vhdx, vhdx_sync::VhdxDiskSync, ImageType,
+    block_aio_is_supported, block_io_uring_is_supported, detect_image_type, qcow, vhdx, ImageType,
 };
 #[cfg(feature = "io_uring")]
 use block::{fixed_vhd_async::FixedVhdDiskAsync, raw_async::RawFileDisk};
@@ -40,15 +43,14 @@ use block::{fixed_vhd_async::FixedVhdDiskAsync, raw_async::RawFileDisk};
 use devices::debug_console::DebugConsole;
 #[cfg(target_arch = "aarch64")]
 use devices::gic;
+use devices::interrupt_controller::InterruptController;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
 #[cfg(feature = "pvmemcontrol")]
 use devices::pvmemcontrol::{PvmemcontrolBusDevice, PvmemcontrolPciDevice};
-use devices::{
-    interrupt_controller, interrupt_controller::InterruptController, AcpiNotificationFlags,
-};
+use devices::{interrupt_controller, AcpiNotificationFlags};
 use hypervisor::IoEventAddress;
 use libc::{
     tcsetattr, termios, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE,
@@ -63,13 +65,12 @@ use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use tracer::trace_scoped;
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd};
-use virtio_devices::transport::VirtioTransport;
-use virtio_devices::transport::{VirtioPciDevice, VirtioPciDeviceActivator};
+use virtio_devices::transport::{VirtioPciDevice, VirtioPciDeviceActivator, VirtioTransport};
 use virtio_devices::vhost_user::VhostUserConfig;
 use virtio_devices::{
-    AccessPlatformMapping, ActivateError, VdpaDmaMapping, VirtioMemMappingSource,
+    AccessPlatformMapping, ActivateError, Endpoint, IommuMapping, VdpaDmaMapping,
+    VirtioMemMappingSource,
 };
-use virtio_devices::{Endpoint, IommuMapping};
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
@@ -77,16 +78,15 @@ use vm_device::interrupt::{
 };
 use vm_device::{Bus, BusDevice, BusDeviceSync, Resource};
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::GuestMemoryRegion;
-use vm_memory::{Address, GuestAddress, GuestUsize, MmapRegion};
+use vm_memory::{Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion};
 #[cfg(target_arch = "x86_64")]
 use vm_memory::{GuestAddressSpace, GuestMemory};
+use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{
-    protocol::MemoryRangeTable, snapshot_from_id, state_from_id, Migratable, MigratableError,
-    Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,
+    snapshot_from_id, state_from_id, Migratable, MigratableError, Pausable, Snapshot, SnapshotData,
+    Snapshottable, Transportable,
 };
-use vm_virtio::AccessPlatform;
-use vm_virtio::VirtioDeviceType;
+use vm_virtio::{AccessPlatform, VirtioDeviceType};
 use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 use {devices::debug_console, devices::legacy::Serial};
@@ -98,15 +98,12 @@ use crate::config::{
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo, ConsoleOutput};
 use crate::cpu::{CpuManager, CPU_MANAGER_ACPI_SIZE};
 use crate::device_tree::{DeviceNode, DeviceTree};
-use crate::interrupt::LegacyUserspaceInterruptManager;
-use crate::interrupt::MsiInterruptManager;
+use crate::interrupt::{LegacyUserspaceInterruptManager, MsiInterruptManager};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager, MEMORY_MANAGER_ACPI_SIZE};
 use crate::pci_segment::PciSegment;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 use crate::vm_config::DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT;
-use crate::GuestRegionMmap;
-use crate::PciDeviceInfo;
-use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
+use crate::{device_node, GuestRegionMmap, PciDeviceInfo, DEVICE_MANAGER_SNAPSHOT_ID};
 
 #[cfg(target_arch = "aarch64")]
 const MMIO_LEN: u64 = 0x1000;

@@ -5,9 +5,11 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use acpi_tables::rsdp::Rsdp;
 #[cfg(target_arch = "aarch64")]
 use acpi_tables::sdt::GenericAddress;
-use acpi_tables::{rsdp::Rsdp, sdt::Sdt, Aml};
+use acpi_tables::sdt::Sdt;
+use acpi_tables::Aml;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::DeviceInfoForFdt;
 #[cfg(target_arch = "aarch64")]

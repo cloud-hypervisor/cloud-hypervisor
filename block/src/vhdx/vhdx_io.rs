@@ -8,10 +8,8 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use remain::sorted;
 use thiserror::Error;
 
-use crate::vhdx::{
-    vhdx_bat::{self, BatEntry, VhdxBatError},
-    vhdx_metadata::{self, DiskSpec},
-};
+use crate::vhdx::vhdx_bat::{self, BatEntry, VhdxBatError};
+use crate::vhdx::vhdx_metadata::{self, DiskSpec};
 
 const SECTOR_SIZE: u64 = 512;
 

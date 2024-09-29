@@ -15,8 +15,8 @@ use kvm_bindings::{
     KVM_REG_SIZE_MASK, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
 };
 pub use kvm_bindings::{kvm_one_reg as Register, kvm_vcpu_init as VcpuInit, RegList};
+pub use kvm_ioctls::{Cap, Kvm};
 use serde::{Deserialize, Serialize};
-pub use {kvm_ioctls::Cap, kvm_ioctls::Kvm};
 
 use crate::kvm::{KvmError, KvmResult};
 

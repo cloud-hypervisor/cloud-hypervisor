@@ -39,7 +39,8 @@ pub mod vhost_user;
 pub mod vsock;
 pub mod watchdog;
 
-use vm_memory::{bitmap::AtomicBitmap, GuestAddress, GuestMemory};
+use vm_memory::bitmap::AtomicBitmap;
+use vm_memory::{GuestAddress, GuestMemory};
 use vm_virtio::VirtioDeviceType;
 
 pub use self::balloon::Balloon;

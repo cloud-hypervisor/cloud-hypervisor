@@ -18,7 +18,8 @@ use std::io::{self, Write};
 use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
 use std::result;
-use std::sync::{atomic::AtomicBool, Arc, Barrier};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Barrier};
 
 use anyhow::anyhow;
 use seccompiler::SeccompAction;
@@ -33,11 +34,12 @@ use vm_memory::{
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
 use crate::{
-    seccomp_filters::Thread, thread_helper::spawn_virtio_thread, ActivateResult, EpollHelper,
-    EpollHelperError, EpollHelperHandler, GuestMemoryMmap, VirtioCommon, VirtioDevice,
-    VirtioDeviceType, VirtioInterrupt, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
-    VIRTIO_F_VERSION_1,
+    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, GuestMemoryMmap,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
+    EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
 };
 
 const QUEUE_SIZE: u16 = 128;

@@ -3,12 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::{
-    collections::HashMap,
-    ffi::CString,
-    io, result,
-    sync::{Arc, Barrier, Mutex, RwLock},
-};
+use std::collections::HashMap;
+use std::ffi::CString;
+use std::sync::{Arc, Barrier, Mutex, RwLock};
+use std::{io, result};
 
 use num_enum::TryFromPrimitive;
 use pci::{
@@ -16,11 +14,13 @@ use pci::{
     PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
 };
 use thiserror::Error;
-use vm_allocator::{page_size::get_page_size, AddressAllocator, SystemAllocator};
+use vm_allocator::page_size::get_page_size;
+use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::{BusDeviceSync, Resource};
+use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{
-    bitmap::AtomicBitmap, Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory,
-    GuestMemoryAtomic, GuestMemoryError, GuestMemoryMmap, Le32, Le64,
+    Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    GuestMemoryError, GuestMemoryMmap, Le32, Le64,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 

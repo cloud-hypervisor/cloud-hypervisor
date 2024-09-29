@@ -1,10 +1,9 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
-use std::thread;
+use std::{result, thread};
 
 use net_util::{build_net_config_space, CtrlQueue, MacAddr, VirtioNetConfig};
 use seccompiler::SeccompAction;
@@ -20,10 +19,8 @@ use virtio_bindings::virtio_net::{
 use virtio_bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, GuestMemoryAtomic};
-use vm_migration::{
-    protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot, Snapshottable,
-    Transportable,
-};
+use vm_migration::protocol::MemoryRangeTable;
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::seccomp_filters::Thread;
@@ -31,10 +28,10 @@ use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use crate::vhost_user::{Error, Result, VhostUserCommon};
 use crate::{
-    ActivateResult, NetCtrlEpollHandler, VirtioCommon, VirtioDevice, VirtioDeviceType,
-    VirtioInterrupt, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_VERSION_1,
+    ActivateResult, GuestMemoryMmap, GuestRegionMmap, NetCtrlEpollHandler, VirtioCommon,
+    VirtioDevice, VirtioDeviceType, VirtioInterrupt, VIRTIO_F_IOMMU_PLATFORM,
+    VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_VERSION_1,
 };
-use crate::{GuestMemoryMmap, GuestRegionMmap};
 
 const DEFAULT_QUEUE_NUMBER: usize = 2;
 

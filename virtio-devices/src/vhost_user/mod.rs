@@ -4,7 +4,8 @@
 use std::io;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
-use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Barrier, Mutex};
 
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
@@ -14,13 +15,11 @@ use vhost::vhost_user::message::{
 };
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontendReqHandler};
 use vhost::Error as VhostError;
-use virtio_queue::Error as QueueError;
-use virtio_queue::Queue;
-use vm_memory::{
-    mmap::MmapRegionError, Address, Error as MmapError, GuestAddressSpace, GuestMemory,
-    GuestMemoryAtomic,
-};
-use vm_migration::{protocol::MemoryRangeTable, MigratableError, Snapshot};
+use virtio_queue::{Error as QueueError, Queue};
+use vm_memory::mmap::MmapRegionError;
+use vm_memory::{Address, Error as MmapError, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
+use vm_migration::protocol::MemoryRangeTable;
+use vm_migration::{MigratableError, Snapshot};
 use vmm_sys_util::eventfd::EventFd;
 use vu_common_ctrl::VhostUserHandle;
 

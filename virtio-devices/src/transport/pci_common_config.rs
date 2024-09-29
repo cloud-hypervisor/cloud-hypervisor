@@ -410,8 +410,7 @@ mod tests {
     use vmm_sys_util::eventfd::EventFd;
 
     use super::*;
-    use crate::GuestMemoryMmap;
-    use crate::{ActivateResult, VirtioInterrupt};
+    use crate::{ActivateResult, GuestMemoryMmap, VirtioInterrupt};
 
     struct DummyDevice(u32);
     const QUEUE_SIZE: u16 = 256;

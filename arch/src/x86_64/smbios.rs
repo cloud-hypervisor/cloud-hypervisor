@@ -6,14 +6,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::mem;
-use std::result;
-use std::slice;
+use std::{mem, result, slice};
 
 use thiserror::Error;
 use uuid::Uuid;
-use vm_memory::ByteValued;
-use vm_memory::{Address, Bytes, GuestAddress};
+use vm_memory::{Address, ByteValued, Bytes, GuestAddress};
 
 use crate::layout::SMBIOS_START;
 use crate::GuestMemoryMmap;

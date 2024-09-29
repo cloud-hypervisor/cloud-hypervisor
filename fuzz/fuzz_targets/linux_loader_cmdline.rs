@@ -9,7 +9,8 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use vm_memory::{bitmap::AtomicBitmap, GuestAddress};
+use vm_memory::bitmap::AtomicBitmap;
+use vm_memory::GuestAddress;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 

@@ -36,11 +36,10 @@ use vmm_sys_util::eventfd::EventFd;
 
 use super::pci_common_config::VirtioPciCommonConfigState;
 use crate::transport::{VirtioPciCommonConfig, VirtioTransport, VIRTIO_PCI_COMMON_CONFIG_ID};
-use crate::GuestMemoryMmap;
 use crate::{
-    ActivateResult, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
-    DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED, DEVICE_FEATURES_OK,
-    DEVICE_INIT,
+    ActivateResult, GuestMemoryMmap, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
+    VirtioInterruptType, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED,
+    DEVICE_FEATURES_OK, DEVICE_INIT,
 };
 
 /// Vector value used to disable MSI for a queue.

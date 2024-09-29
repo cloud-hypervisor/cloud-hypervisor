@@ -12,9 +12,8 @@ use std::ops::{BitAnd, Deref, Not, Sub};
 use std::os::fd::AsFd;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
-use std::result;
 use std::sync::{Arc, Barrier, Mutex};
-use std::{ffi, thread};
+use std::{ffi, result, thread};
 
 use acpi_tables::{aml, Aml};
 use anyhow::anyhow;
@@ -37,14 +36,14 @@ use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::BusDevice;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
+use vm_memory::mmap::MmapRegionError;
 use vm_memory::{
-    mmap::MmapRegionError, Address, Error as MmapError, GuestAddress, GuestAddressSpace,
-    GuestMemory, GuestMemoryAtomic, GuestMemoryError, GuestMemoryRegion, GuestUsize, MmapRegion,
-    ReadVolatile,
+    Address, Error as MmapError, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    GuestMemoryError, GuestMemoryRegion, GuestUsize, MmapRegion, ReadVolatile,
 };
+use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
 use vm_migration::{
-    protocol::MemoryRange, protocol::MemoryRangeTable, Migratable, MigratableError, Pausable,
-    Snapshot, SnapshotData, Snapshottable, Transportable,
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -55,8 +54,7 @@ use crate::coredump::{
     CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
 };
 use crate::migration::url_to_path;
-use crate::MEMORY_MANAGER_SNAPSHOT_ID;
-use crate::{GuestMemoryMmap, GuestRegionMmap};
+use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID};
 
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
 

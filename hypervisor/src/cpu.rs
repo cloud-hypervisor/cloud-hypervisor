@@ -17,9 +17,7 @@ use crate::aarch64::{RegList, VcpuInit};
 use crate::arch::x86::{CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters};
 #[cfg(feature = "tdx")]
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
-use crate::CpuState;
-use crate::MpState;
-use crate::StandardRegisters;
+use crate::{CpuState, MpState, StandardRegisters};
 
 #[cfg(target_arch = "x86_64")]
 #[derive(Copy, Clone, Default)]

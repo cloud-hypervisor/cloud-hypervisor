@@ -8,13 +8,14 @@ use std::path::Path;
 use std::{mem, ptr};
 
 use anyhow::anyhow;
-use libc::c_void;
-use libc::{sockaddr_storage, socklen_t};
+use libc::{c_void, sockaddr_storage, socklen_t};
 use thiserror::Error;
 
 use crate::socket::SocketDev;
-use crate::{Commands, MemberType, Ptm, PtmCap, PtmEst, PtmInit, PtmResult, PtmSetBufferSize};
-use crate::{TPM_CRB_BUFFER_MAX, TPM_SUCCESS};
+use crate::{
+    Commands, MemberType, Ptm, PtmCap, PtmEst, PtmInit, PtmResult, PtmSetBufferSize,
+    TPM_CRB_BUFFER_MAX, TPM_SUCCESS,
+};
 
 const TPM_REQ_HDR_SIZE: usize = 10;
 

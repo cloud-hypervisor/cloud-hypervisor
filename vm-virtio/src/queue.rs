@@ -13,7 +13,8 @@ pub mod testing {
     use std::mem;
 
     use virtio_queue::{Queue, QueueT, VirtqUsedElem};
-    use vm_memory::{bitmap::AtomicBitmap, Address, Bytes, GuestAddress, GuestUsize};
+    use vm_memory::bitmap::AtomicBitmap;
+    use vm_memory::{Address, Bytes, GuestAddress, GuestUsize};
 
     type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 

@@ -19,8 +19,7 @@ use std::os::unix::io::RawFd;
 use std::result;
 #[cfg(target_arch = "x86_64")]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use vmm_sys_util::eventfd::EventFd;
@@ -34,13 +33,10 @@ pub use crate::aarch64::{
 };
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
-use crate::cpu;
-use crate::hypervisor;
-use crate::vec_with_array_field;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
-use crate::HypervisorType;
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset_of};
+use crate::{cpu, hypervisor, vec_with_array_field, HypervisorType};
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
@@ -62,9 +58,8 @@ use crate::arch::x86::{
 };
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
-use crate::StandardRegisters;
 use crate::{
-    CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
+    CpuState, IoEventAddress, IrqRoutingEntry, MpState, StandardRegisters, UserMemoryRegion,
     USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
 };
 // aarch64 dependencies
@@ -73,7 +68,6 @@ pub mod aarch64;
 #[cfg(target_arch = "aarch64")]
 use std::mem;
 
-pub use kvm_bindings;
 pub use kvm_bindings::{
     kvm_clock_data, kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug,
     kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state, kvm_userspace_memory_region,
@@ -89,12 +83,12 @@ use kvm_bindings::{
 };
 #[cfg(feature = "tdx")]
 use kvm_bindings::{kvm_run__bindgen_ty_1, KVMIO};
-pub use kvm_ioctls;
 pub use kvm_ioctls::{Cap, Kvm};
 use thiserror::Error;
 use vfio_ioctls::VfioDeviceFd;
 #[cfg(feature = "tdx")]
 use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_ioc_nr, ioctl_iowr_nr};
+pub use {kvm_bindings, kvm_ioctls};
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///

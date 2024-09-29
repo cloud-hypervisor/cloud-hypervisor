@@ -15,7 +15,8 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::slice;
 
 use libc::c_void;
-use vmm_sys_util::{seek_hole::SeekHole, write_zeroes::PunchHole, write_zeroes::WriteZeroesAt};
+use vmm_sys_util::seek_hole::SeekHole;
+use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
 use crate::BlockBackend;
 
