@@ -2,11 +2,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::vhd::VhdFooter;
-use crate::BlockBackend;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
+
+use crate::vhd::VhdFooter;
+use crate::BlockBackend;
 
 #[derive(Debug)]
 pub struct FixedVhd {

@@ -2,15 +2,17 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::fs::File;
+use std::io::{Seek, SeekFrom};
+use std::os::unix::io::{AsRawFd, RawFd};
+
+use io_uring::{opcode, squeue, types, IoUring};
+use vmm_sys_util::eventfd::EventFd;
+
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::DiskTopology;
-use io_uring::{opcode, squeue, types, IoUring};
-use std::fs::File;
-use std::io::{Seek, SeekFrom};
-use std::os::unix::io::{AsRawFd, RawFd};
-use vmm_sys_util::eventfd::EventFd;
 
 pub struct RawFileDisk {
     file: File,

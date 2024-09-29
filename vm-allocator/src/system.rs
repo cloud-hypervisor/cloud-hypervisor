@@ -13,7 +13,6 @@ use crate::address::AddressAllocator;
 use crate::gsi::GsiAllocator;
 #[cfg(target_arch = "x86_64")]
 use crate::gsi::GsiApic;
-
 use crate::page_size::get_page_size;
 
 /// Manages allocating system resources such as address space and interrupt numbers.

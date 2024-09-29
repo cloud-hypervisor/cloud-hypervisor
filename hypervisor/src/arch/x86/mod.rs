@@ -242,9 +242,10 @@ impl Default for LapicState {
 
 impl LapicState {
     pub fn get_klapic_reg(&self, reg_offset: usize) -> u32 {
-        use byteorder::{LittleEndian, ReadBytesExt};
         use std::io::Cursor;
         use std::mem;
+
+        use byteorder::{LittleEndian, ReadBytesExt};
 
         // SAFETY: plain old data type
         let sliceu8 = unsafe {
@@ -261,9 +262,10 @@ impl LapicState {
     }
 
     pub fn set_klapic_reg(&mut self, reg_offset: usize, value: u32) {
-        use byteorder::{LittleEndian, WriteBytesExt};
         use std::io::Cursor;
         use std::mem;
+
+        use byteorder::{LittleEndian, WriteBytesExt};
 
         // SAFETY: plain old data type
         let sliceu8 = unsafe {

@@ -3,6 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::any::Any;
+use std::result;
+use std::sync::{Arc, Barrier, Mutex};
+
 use anyhow::anyhow;
 use pci::{
     BarReprogrammingParams, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
@@ -10,9 +14,6 @@ use pci::{
     PCI_CONFIGURATION_ID,
 };
 use serde::{Deserialize, Serialize};
-use std::any::Any;
-use std::result;
-use std::sync::{Arc, Barrier, Mutex};
 use thiserror::Error;
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::{BusDevice, Resource};

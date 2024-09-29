@@ -2,11 +2,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-use crate::{landlock::LandlockError, Landlock};
+use std::{fs, net::Ipv4Addr, path::PathBuf, result};
+
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
-use std::{fs, net::Ipv4Addr, path::PathBuf, result};
 use virtio_devices::RateLimiterConfig;
+
+use crate::{landlock::LandlockError, Landlock};
 
 pub type LandlockResult<T> = result::Result<T, LandlockError>;
 

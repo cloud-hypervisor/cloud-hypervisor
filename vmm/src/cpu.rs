@@ -11,22 +11,16 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::config::CpusConfig;
+use std::collections::BTreeMap;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use crate::coredump::{
-    CpuElf64Writable, CpuSegment, CpuState as DumpCpusState, DumpState, Elf64Writable,
-    GuestDebuggableError, NoteDescType, X86_64ElfPrStatus, X86_64UserRegs, COREDUMP_NAME_SIZE,
-    NT_PRSTATUS,
-};
-#[cfg(feature = "guest_debug")]
-use crate::gdb::{get_raw_tid, Debuggable, DebuggableError};
-#[cfg(target_arch = "x86_64")]
-use crate::memory_manager::MemoryManager;
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
-#[cfg(target_arch = "x86_64")]
-use crate::vm::physical_bits;
-use crate::GuestMemoryMmap;
-use crate::CPU_MANAGER_SNAPSHOT_ID;
+use std::io::Write;
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use std::mem::size_of;
+use std::os::unix::thread::JoinHandleExt;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier, Mutex};
+use std::{cmp, io, result, thread};
+
 use acpi_tables::{aml, sdt::Sdt, Aml};
 use anyhow::anyhow;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
@@ -67,15 +61,6 @@ use libc::{c_void, siginfo_t};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf::Elf64_Nhdr;
 use seccompiler::{apply_filter, SeccompAction};
-use std::collections::BTreeMap;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use std::io::Write;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use std::mem::size_of;
-use std::os::unix::thread::JoinHandleExt;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
-use std::{cmp, io, result, thread};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::BusDevice;
@@ -91,6 +76,23 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 use zerocopy::AsBytes;
+
+use crate::config::CpusConfig;
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use crate::coredump::{
+    CpuElf64Writable, CpuSegment, CpuState as DumpCpusState, DumpState, Elf64Writable,
+    GuestDebuggableError, NoteDescType, X86_64ElfPrStatus, X86_64UserRegs, COREDUMP_NAME_SIZE,
+    NT_PRSTATUS,
+};
+#[cfg(feature = "guest_debug")]
+use crate::gdb::{get_raw_tid, Debuggable, DebuggableError};
+#[cfg(target_arch = "x86_64")]
+use crate::memory_manager::MemoryManager;
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
+#[cfg(target_arch = "x86_64")]
+use crate::vm::physical_bits;
+use crate::GuestMemoryMmap;
+use crate::CPU_MANAGER_SNAPSHOT_ID;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 /// Extract the specified bits of a 64-bit integer.
 /// For example, to extrace 2 bits from offset 1 (zero based) of `6u64`,
@@ -2943,6 +2945,8 @@ mod tests {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
+    use std::mem;
+
     use arch::{aarch64::regs, layout};
     use hypervisor::kvm::aarch64::is_system_register;
     use hypervisor::kvm::kvm_bindings::{
@@ -2950,7 +2954,6 @@ mod tests {
         KVM_REG_SIZE_U64,
     };
     use hypervisor::{arm64_core_reg_id, offset_of};
-    use std::mem;
 
     #[test]
     fn test_setup_regs() {

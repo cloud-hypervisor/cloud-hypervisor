@@ -3,14 +3,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::vfio::{UserMemoryRegion, Vfio, VfioCommon, VfioError, VFIO_COMMON_ID};
-use crate::{BarReprogrammingParams, PciBarConfiguration, VfioPciError};
-use crate::{PciBdf, PciDevice, PciDeviceError, PciSubclass};
-use hypervisor::HypervisorVmError;
 use std::any::Any;
 use std::os::unix::prelude::AsRawFd;
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
+
+use hypervisor::HypervisorVmError;
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::VfioIrq;
@@ -25,6 +23,10 @@ use vm_memory::{
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::vfio::{UserMemoryRegion, Vfio, VfioCommon, VfioError, VFIO_COMMON_ID};
+use crate::{BarReprogrammingParams, PciBarConfiguration, VfioPciError};
+use crate::{PciBdf, PciDevice, PciDeviceError, PciSubclass};
 
 pub struct VfioUserPciDevice {
     id: String,

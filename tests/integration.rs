@@ -10,7 +10,6 @@
 
 extern crate test_infra;
 
-use net_util::MacAddr;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
@@ -26,6 +25,8 @@ use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::sync::Mutex;
 use std::thread;
+
+use net_util::MacAddr;
 use test_infra::*;
 use vmm_sys_util::{tempdir::TempDir, tempfile::TempFile};
 use wait_timeout::ChildExt;
@@ -7955,8 +7956,9 @@ mod common_sequential {
 }
 
 mod windows {
-    use crate::*;
     use once_cell::sync::Lazy;
+
+    use crate::*;
 
     static NEXT_DISK_ID: Lazy<Mutex<u8>> = Lazy::new(|| Mutex::new(1));
 

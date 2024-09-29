@@ -4,14 +4,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::configuration::{self, PciBarRegionType};
-use crate::PciBarConfiguration;
 use std::any::Any;
 use std::fmt::{self, Display};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{io, result};
+
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::Resource;
+
+use crate::configuration::{self, PciBarRegionType};
+use crate::PciBarConfiguration;
 
 #[derive(Debug)]
 pub enum Error {

@@ -9,16 +9,18 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::device_manager::{AddressManager, DeviceManagerError, DeviceManagerResult};
+use std::sync::{Arc, Mutex};
+
 use acpi_tables::{aml, Aml};
 use arch::layout;
 use pci::{DeviceRelocation, PciBdf, PciBus, PciConfigMmio, PciRoot};
 #[cfg(target_arch = "x86_64")]
 use pci::{PciConfigIo, PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
-use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use vm_allocator::AddressAllocator;
 use vm_device::BusDeviceSync;
+
+use crate::device_manager::{AddressManager, DeviceManagerError, DeviceManagerResult};
 
 pub(crate) struct PciSegment {
     pub(crate) id: u16,

@@ -16,6 +16,12 @@ mod msix;
 mod vfio;
 mod vfio_user;
 
+use std::fmt::{self, Display};
+use std::num::ParseIntError;
+use std::str::FromStr;
+
+use serde::de::Visitor;
+
 pub use self::bus::{PciBus, PciConfigIo, PciConfigMmio, PciRoot, PciRootError};
 pub use self::configuration::{
     PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciCapability, PciCapabilityId,
@@ -30,10 +36,6 @@ pub use self::msi::{msi_num_enabled_vectors, MsiCap, MsiConfig};
 pub use self::msix::{MsixCap, MsixConfig, MsixTableEntry, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE};
 pub use self::vfio::{MmioRegion, VfioDmaMapping, VfioPciDevice, VfioPciError};
 pub use self::vfio_user::{VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError};
-use serde::de::Visitor;
-use std::fmt::{self, Display};
-use std::num::ParseIntError;
-use std::str::FromStr;
 
 /// PCI has four interrupt pins A->D.
 #[derive(Copy, Clone)]

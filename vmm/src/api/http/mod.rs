@@ -3,6 +3,26 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use core::fmt;
+use std::collections::BTreeMap;
+use std::fmt::Display;
+use std::fs::File;
+use std::os::unix::io::{IntoRawFd, RawFd};
+use std::os::unix::net::UnixListener;
+use std::panic::AssertUnwindSafe;
+use std::path::PathBuf;
+use std::sync::mpsc::Sender;
+use std::thread;
+
+use hypervisor::HypervisorType;
+use micro_http::{
+    Body, HttpServer, MediaType, Method, Request, Response, ServerError, StatusCode, Version,
+};
+use once_cell::sync::Lazy;
+use seccompiler::{apply_filter, SeccompAction};
+use serde_json::Error as SerdeError;
+use vmm_sys_util::eventfd::EventFd;
+
 use self::http_endpoint::{VmActionHandler, VmCreate, VmInfo, VmmPing, VmmShutdown};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::api::VmCoredump;
@@ -15,24 +35,6 @@ use crate::api::{
 use crate::landlock::Landlock;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error as VmmError, Result};
-use core::fmt;
-use hypervisor::HypervisorType;
-use micro_http::{
-    Body, HttpServer, MediaType, Method, Request, Response, ServerError, StatusCode, Version,
-};
-use once_cell::sync::Lazy;
-use seccompiler::{apply_filter, SeccompAction};
-use serde_json::Error as SerdeError;
-use std::collections::BTreeMap;
-use std::fmt::Display;
-use std::fs::File;
-use std::os::unix::io::{IntoRawFd, RawFd};
-use std::os::unix::net::UnixListener;
-use std::panic::AssertUnwindSafe;
-use std::path::PathBuf;
-use std::sync::mpsc::Sender;
-use std::thread;
-use vmm_sys_util::eventfd::EventFd;
 
 pub mod http_endpoint;
 

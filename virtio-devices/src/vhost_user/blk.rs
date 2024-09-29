@@ -1,23 +1,15 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::super::{ActivateResult, VirtioCommon, VirtioDevice, VirtioDeviceType};
-use super::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
-use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
-use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
-use crate::vhost_user::VhostUserCommon;
-use crate::{GuestMemoryMmap, GuestRegionMmap};
-use crate::{VirtioInterrupt, VIRTIO_F_IOMMU_PLATFORM};
-use block::VirtioBlockConfig;
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
 use std::mem;
 use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 use std::thread;
 
+use block::VirtioBlockConfig;
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use vhost::vhost_user::message::{
     VhostUserConfigFlags, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
     VHOST_USER_CONFIG_OFFSET,
@@ -35,6 +27,15 @@ use vm_migration::{
     Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
+
+use super::super::{ActivateResult, VirtioCommon, VirtioDevice, VirtioDeviceType};
+use super::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
+use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::vhost_user::VhostUserCommon;
+use crate::{GuestMemoryMmap, GuestRegionMmap};
+use crate::{VirtioInterrupt, VIRTIO_F_IOMMU_PLATFORM};
 
 const DEFAULT_QUEUE_NUMBER: usize = 1;
 

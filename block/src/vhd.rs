@@ -2,9 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{read_aligned_block_size, DiskTopology};
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
+
+use crate::{read_aligned_block_size, DiskTopology};
 
 #[derive(Clone, Copy)]
 pub struct VhdFooter {
@@ -117,10 +118,12 @@ pub fn is_fixed_vhd(f: &mut File) -> std::io::Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_fixed_vhd, VhdFooter};
     use std::fs::File;
     use std::io::{Seek, SeekFrom, Write};
+
     use vmm_sys_util::tempfile::TempFile;
+
+    use super::{is_fixed_vhd, VhdFooter};
 
     fn valid_fixed_vhd_footer() -> Vec<u8> {
         vec![

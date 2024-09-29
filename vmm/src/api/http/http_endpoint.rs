@@ -4,6 +4,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::fs::File;
+use std::os::unix::io::IntoRawFd;
+use std::sync::mpsc::Sender;
+
+use micro_http::{Body, Method, Request, Response, StatusCode, Version};
+use vmm_sys_util::eventfd::EventFd;
+
 use crate::api::http::{error_response, EndpointHandler, HttpError};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::api::VmCoredump;
@@ -14,11 +21,6 @@ use crate::api::{
     VmSendMigration, VmShutdown, VmSnapshot,
 };
 use crate::config::{NetConfig, RestoreConfig};
-use micro_http::{Body, Method, Request, Response, StatusCode, Version};
-use std::fs::File;
-use std::os::unix::io::IntoRawFd;
-use std::sync::mpsc::Sender;
-use vmm_sys_util::eventfd::EventFd;
 
 // /api/v1/vm.create handler
 pub struct VmCreate {}

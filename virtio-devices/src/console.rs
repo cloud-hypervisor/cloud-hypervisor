@@ -1,6 +1,28 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::cmp;
+use std::collections::VecDeque;
+use std::fs::File;
+use std::io;
+use std::io::{Read, Write};
+use std::os::unix::io::AsRawFd;
+use std::result;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Barrier, Mutex};
+
+use anyhow::anyhow;
+use libc::{EFD_NONBLOCK, TIOCGWINSZ};
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
+use serial_buffer::SerialBuffer;
+use thiserror::Error;
+use virtio_queue::{Queue, QueueT};
+use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vm_virtio::{AccessPlatform, Translatable};
+use vmm_sys_util::eventfd::EventFd;
+
 use super::Error as DeviceError;
 use super::{
     ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon, VirtioDevice,
@@ -11,26 +33,6 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::GuestMemoryMmap;
 use crate::VirtioInterrupt;
-use anyhow::anyhow;
-use libc::{EFD_NONBLOCK, TIOCGWINSZ};
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
-use serial_buffer::SerialBuffer;
-use std::cmp;
-use std::collections::VecDeque;
-use std::fs::File;
-use std::io;
-use std::io::{Read, Write};
-use std::os::unix::io::AsRawFd;
-use std::result;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
-use thiserror::Error;
-use virtio_queue::{Queue, QueueT};
-use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
-use vm_virtio::{AccessPlatform, Translatable};
-use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 256;
 const NUM_QUEUES: usize = 2;

@@ -3,12 +3,13 @@
 // Copyright © 2024, Microsoft Corporation
 //
 
+use iced_x86::Register;
+use mshv_bindings::*;
+
 use crate::arch::emulator::{PlatformEmulator, PlatformError};
 use crate::arch::x86::emulator::{CpuStateManager, EmulatorCpuState};
 use crate::cpu::Vcpu;
 use crate::mshv::MshvVcpu;
-use iced_x86::Register;
-use mshv_bindings::*;
 
 pub struct MshvEmulatorContext<'a> {
     pub vcpu: &'a MshvVcpu,

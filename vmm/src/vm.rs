@@ -11,36 +11,20 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::config::{
-    add_to_config, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig,
-    UserDeviceConfig, ValidationError, VdpaConfig, VmConfig, VsockConfig,
-};
-use crate::config::{NumaConfig, PayloadConfig};
-use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
+use std::cmp;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Seek, SeekFrom, Write};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use crate::coredump::{
-    CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
-};
-use crate::cpu;
-use crate::device_manager::{DeviceManager, DeviceManagerError};
-use crate::device_tree::DeviceTree;
-#[cfg(feature = "guest_debug")]
-use crate::gdb::{Debuggable, DebuggableError, GdbRequestPayload, GdbResponsePayload};
-#[cfg(feature = "igvm")]
-use crate::igvm::igvm_loader;
-use crate::landlock::LandlockError;
-use crate::memory_manager::{
-    Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
-};
-#[cfg(target_arch = "x86_64")]
-use crate::migration::get_vm_snapshot;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use crate::migration::url_to_file;
-use crate::migration::{url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
-use crate::GuestMemoryMmap;
-use crate::{
-    PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
-};
+use std::mem::size_of;
+use std::num::Wrapping;
+use std::ops::Deref;
+use std::os::unix::net::UnixStream;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
+use std::{result, str, thread};
+
 use anyhow::anyhow;
 use arch::get_host_cpu_phys_bits;
 #[cfg(target_arch = "x86_64")]
@@ -72,19 +56,6 @@ use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
 use linux_loader::loader::KernelLoader;
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
-use std::cmp;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::{self, Seek, SeekFrom, Write};
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use std::mem::size_of;
-use std::num::Wrapping;
-use std::ops::Deref;
-use std::os::unix::net::UnixStream;
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::Instant;
-use std::{result, str, thread};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::Bus;
@@ -100,6 +71,37 @@ use vm_migration::{
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
+
+use crate::config::{
+    add_to_config, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig,
+    UserDeviceConfig, ValidationError, VdpaConfig, VmConfig, VsockConfig,
+};
+use crate::config::{NumaConfig, PayloadConfig};
+use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use crate::coredump::{
+    CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
+};
+use crate::cpu;
+use crate::device_manager::{DeviceManager, DeviceManagerError};
+use crate::device_tree::DeviceTree;
+#[cfg(feature = "guest_debug")]
+use crate::gdb::{Debuggable, DebuggableError, GdbRequestPayload, GdbResponsePayload};
+#[cfg(feature = "igvm")]
+use crate::igvm::igvm_loader;
+use crate::landlock::LandlockError;
+use crate::memory_manager::{
+    Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
+};
+#[cfg(target_arch = "x86_64")]
+use crate::migration::get_vm_snapshot;
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use crate::migration::url_to_file;
+use crate::migration::{url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
+use crate::GuestMemoryMmap;
+use crate::{
+    PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
+};
 
 /// Errors associated with VM management
 #[derive(Debug, Error)]
@@ -3124,11 +3126,12 @@ mod tests {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
-    use super::*;
     use arch::aarch64::fdt::create_fdt;
     use arch::aarch64::layout;
     use arch::{DeviceType, MmioDeviceInfo};
     use devices::gic::Gic;
+
+    use super::*;
 
     const LEN: u64 = 4096;
 

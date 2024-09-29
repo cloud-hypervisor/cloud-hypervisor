@@ -9,22 +9,17 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::config::{
-    ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
-    VdpaConfig, VhostMode, VmConfig, VsockConfig,
-};
-use crate::console_devices::{ConsoleDeviceError, ConsoleInfo, ConsoleOutput};
-use crate::cpu::{CpuManager, CPU_MANAGER_ACPI_SIZE};
-use crate::device_tree::{DeviceNode, DeviceTree};
-use crate::interrupt::LegacyUserspaceInterruptManager;
-use crate::interrupt::MsiInterruptManager;
-use crate::memory_manager::{Error as MemoryManagerError, MemoryManager, MEMORY_MANAGER_ACPI_SIZE};
-use crate::pci_segment::PciSegment;
-use crate::serial_manager::{Error as SerialManagerError, SerialManager};
-use crate::vm_config::DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT;
-use crate::GuestRegionMmap;
-use crate::PciDeviceInfo;
-use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fs::{File, OpenOptions};
+use std::io::{self, stdout, IsTerminal, Seek, SeekFrom};
+use std::num::Wrapping;
+use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::path::PathBuf;
+use std::result;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
 use acpi_tables::sdt::GenericAddress;
 use acpi_tables::{aml, Aml};
 use anyhow::anyhow;
@@ -66,16 +61,6 @@ use pci::{
 use rate_limiter::group::RateLimiterGroup;
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fs::{File, OpenOptions};
-use std::io::{self, stdout, IsTerminal, Seek, SeekFrom};
-use std::num::Wrapping;
-use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::io::{AsRawFd, FromRawFd};
-use std::path::PathBuf;
-use std::result;
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
 use tracer::trace_scoped;
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd};
 use virtio_devices::transport::VirtioTransport;
@@ -105,6 +90,23 @@ use vm_virtio::VirtioDeviceType;
 use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 use {devices::debug_console, devices::legacy::Serial};
+
+use crate::config::{
+    ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
+    VdpaConfig, VhostMode, VmConfig, VsockConfig,
+};
+use crate::console_devices::{ConsoleDeviceError, ConsoleInfo, ConsoleOutput};
+use crate::cpu::{CpuManager, CPU_MANAGER_ACPI_SIZE};
+use crate::device_tree::{DeviceNode, DeviceTree};
+use crate::interrupt::LegacyUserspaceInterruptManager;
+use crate::interrupt::MsiInterruptManager;
+use crate::memory_manager::{Error as MemoryManagerError, MemoryManager, MEMORY_MANAGER_ACPI_SIZE};
+use crate::pci_segment::PciSegment;
+use crate::serial_manager::{Error as SerialManagerError, SerialManager};
+use crate::vm_config::DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT;
+use crate::GuestRegionMmap;
+use crate::PciDeviceInfo;
+use crate::{device_node, DEVICE_MANAGER_SNAPSHOT_ID};
 
 #[cfg(target_arch = "aarch64")]
 const MMIO_LEN: u64 = 0x1000;

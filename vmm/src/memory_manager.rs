@@ -2,29 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-#[cfg(target_arch = "x86_64")]
-use crate::config::SgxEpcConfig;
-use crate::config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use crate::coredump::{
-    CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
-};
-use crate::migration::url_to_path;
-use crate::MEMORY_MANAGER_SNAPSHOT_ID;
-use crate::{GuestMemoryMmap, GuestRegionMmap};
-use acpi_tables::{aml, Aml};
-use anyhow::anyhow;
-#[cfg(target_arch = "x86_64")]
-use arch::x86_64::{SgxEpcRegion, SgxEpcSection};
-use arch::RegionType;
-#[cfg(target_arch = "x86_64")]
-use devices::ioapic;
-#[cfg(target_arch = "aarch64")]
-use hypervisor::HypervisorVmError;
-use libc::_SC_NPROCESSORS_ONLN;
-#[cfg(target_arch = "x86_64")]
-use libc::{MAP_NORESERVE, MAP_POPULATE, MAP_SHARED, PROT_READ, PROT_WRITE};
-use serde::{Deserialize, Serialize};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -38,6 +15,20 @@ use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{ffi, thread};
+
+use acpi_tables::{aml, Aml};
+use anyhow::anyhow;
+#[cfg(target_arch = "x86_64")]
+use arch::x86_64::{SgxEpcRegion, SgxEpcSection};
+use arch::RegionType;
+#[cfg(target_arch = "x86_64")]
+use devices::ioapic;
+#[cfg(target_arch = "aarch64")]
+use hypervisor::HypervisorVmError;
+use libc::_SC_NPROCESSORS_ONLN;
+#[cfg(target_arch = "x86_64")]
+use libc::{MAP_NORESERVE, MAP_POPULATE, MAP_SHARED, PROT_READ, PROT_WRITE};
+use serde::{Deserialize, Serialize};
 use tracer::trace_scoped;
 use virtio_devices::BlocksState;
 #[cfg(target_arch = "x86_64")]
@@ -55,6 +46,17 @@ use vm_migration::{
     protocol::MemoryRange, protocol::MemoryRangeTable, Migratable, MigratableError, Pausable,
     Snapshot, SnapshotData, Snapshottable, Transportable,
 };
+
+#[cfg(target_arch = "x86_64")]
+use crate::config::SgxEpcConfig;
+use crate::config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use crate::coredump::{
+    CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
+};
+use crate::migration::url_to_path;
+use crate::MEMORY_MANAGER_SNAPSHOT_ID;
+use crate::{GuestMemoryMmap, GuestRegionMmap};
 
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
 

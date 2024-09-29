@@ -3,8 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use once_cell::sync::OnceCell;
-use serde::Serialize;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs::File;
@@ -12,6 +10,9 @@ use std::io;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use once_cell::sync::OnceCell;
+use serde::Serialize;
 
 static MONITOR: OnceCell<MonitorHandle> = OnceCell::new();
 

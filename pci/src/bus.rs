@@ -4,17 +4,19 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::any::Any;
+use std::collections::HashMap;
+use std::ops::DerefMut;
+use std::sync::{Arc, Barrier, Mutex};
+
+use byteorder::{ByteOrder, LittleEndian};
+use vm_device::{Bus, BusDevice, BusDeviceSync};
+
 use crate::configuration::{
     PciBarRegionType, PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType,
 };
 use crate::device::{DeviceRelocation, Error as PciDeviceError, PciDevice};
 use crate::PciBarConfiguration;
-use byteorder::{ByteOrder, LittleEndian};
-use std::any::Any;
-use std::collections::HashMap;
-use std::ops::DerefMut;
-use std::sync::{Arc, Barrier, Mutex};
-use vm_device::{Bus, BusDevice, BusDeviceSync};
 
 const VENDOR_ID_INTEL: u16 = 0x8086;
 const DEVICE_ID_INTEL_VIRT_PCIE_HOST: u16 = 0x0d57;

@@ -48,7 +48,8 @@ mod cpu;
 /// Device related module
 mod device;
 
-pub use crate::hypervisor::{Hypervisor, HypervisorError};
+use std::sync::Arc;
+
 use concat_idents::concat_idents;
 #[cfg(target_arch = "x86_64")]
 pub use cpu::CpuVendor;
@@ -56,11 +57,12 @@ pub use cpu::{HypervisorCpuError, Vcpu, VmExit};
 pub use device::HypervisorDeviceError;
 #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
 pub use kvm::{aarch64, GicState};
-use std::sync::Arc;
 pub use vm::{
     DataMatch, HypervisorVmError, InterruptSourceConfig, LegacyIrqSourceConfig, MsiIrqSourceConfig,
     Vm, VmOps,
 };
+
+pub use crate::hypervisor::{Hypervisor, HypervisorError};
 
 #[derive(Debug, Copy, Clone)]
 pub enum HypervisorType {

@@ -3,18 +3,20 @@
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 
-use crate::{PciCapability, PciCapabilityId};
-use byteorder::{ByteOrder, LittleEndian};
-use serde::Deserialize;
-use serde::Serialize;
 use std::io;
 use std::result;
 use std::sync::Arc;
+
+use byteorder::{ByteOrder, LittleEndian};
+use serde::Deserialize;
+use serde::Serialize;
 use vm_device::interrupt::{
     InterruptIndex, InterruptSourceConfig, InterruptSourceGroup, MsiIrqSourceConfig,
 };
 use vm_memory::ByteValued;
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
+
+use crate::{PciCapability, PciCapabilityId};
 
 const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
 const MSIX_TABLE_ENTRIES_MODULO: u64 = 16;
