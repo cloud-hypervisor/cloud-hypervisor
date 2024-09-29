@@ -27,9 +27,7 @@ use vm_memory::{
     GuestMemoryRegion, GuestUsize,
 };
 
-use crate::GuestMemoryMmap;
-use crate::InitramfsConfig;
-use crate::RegionType;
+use crate::{GuestMemoryMmap, InitramfsConfig, RegionType};
 mod smbios;
 use std::arch::x86_64;
 #[cfg(feature = "tdx")]

@@ -4,9 +4,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use seccompiler::SeccompCmpOp::Eq;
 use seccompiler::{
-    BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen, SeccompCmpOp::Eq,
-    SeccompCondition as Cond, SeccompFilter, SeccompRule,
+    BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen, SeccompCondition as Cond,
+    SeccompFilter, SeccompRule,
 };
 
 pub enum Thread {

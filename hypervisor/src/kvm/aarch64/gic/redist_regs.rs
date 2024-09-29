@@ -11,8 +11,7 @@ use crate::kvm::kvm_bindings::{
     KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP0_SHIFT, KVM_REG_ARM64_SYSREG_OP2_MASK,
     KVM_REG_ARM64_SYSREG_OP2_SHIFT, KVM_REG_SIZE_U64,
 };
-use crate::kvm::Register;
-use crate::kvm::VcpuKvmState;
+use crate::kvm::{Register, VcpuKvmState};
 use crate::CpuState;
 
 // Relevant redistributor registers that we want to save/restore.

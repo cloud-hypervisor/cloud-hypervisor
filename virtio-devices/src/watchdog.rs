@@ -22,15 +22,14 @@ use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
-use super::Error as DeviceError;
 use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon,
-    VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
+    Error as DeviceError, VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST,
+    VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
-use crate::GuestMemoryMmap;
-use crate::{VirtioInterrupt, VirtioInterruptType};
+use crate::{GuestMemoryMmap, VirtioInterrupt, VirtioInterruptType};
 
 const QUEUE_SIZE: u16 = 8;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];

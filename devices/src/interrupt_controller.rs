@@ -2,8 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::io;
-use std::result;
+use std::{io, result};
 
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;

@@ -1,11 +1,9 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::mem;
-use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
-use std::thread;
+use std::{mem, result, thread};
 
 use block::VirtioBlockConfig;
 use seccompiler::SeccompAction;
@@ -22,10 +20,8 @@ use virtio_bindings::virtio_blk::{
 };
 use virtio_queue::Queue;
 use vm_memory::{ByteValued, GuestMemoryAtomic};
-use vm_migration::{
-    protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot, Snapshottable,
-    Transportable,
-};
+use vm_migration::protocol::MemoryRangeTable;
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 use super::super::{ActivateResult, VirtioCommon, VirtioDevice, VirtioDeviceType};
@@ -34,8 +30,7 @@ use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::VhostUserCommon;
-use crate::{GuestMemoryMmap, GuestRegionMmap};
-use crate::{VirtioInterrupt, VIRTIO_F_IOMMU_PLATFORM};
+use crate::{GuestMemoryMmap, GuestRegionMmap, VirtioInterrupt, VIRTIO_F_IOMMU_PLATFORM};
 
 const DEFAULT_QUEUE_NUMBER: usize = 1;
 

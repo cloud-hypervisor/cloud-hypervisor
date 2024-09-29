@@ -25,8 +25,10 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::vfio::{UserMemoryRegion, Vfio, VfioCommon, VfioError, VFIO_COMMON_ID};
-use crate::{BarReprogrammingParams, PciBarConfiguration, VfioPciError};
-use crate::{PciBdf, PciDevice, PciDeviceError, PciSubclass};
+use crate::{
+    BarReprogrammingParams, PciBarConfiguration, PciBdf, PciDevice, PciDeviceError, PciSubclass,
+    VfioPciError,
+};
 
 pub struct VfioUserPciDevice {
     id: String,

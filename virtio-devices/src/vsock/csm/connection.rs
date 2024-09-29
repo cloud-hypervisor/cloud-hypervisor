@@ -88,9 +88,8 @@ use std::time::{Duration, Instant};
 use super::super::defs::uapi;
 use super::super::packet::VsockPacket;
 use super::super::{Result as VsockResult, VsockChannel, VsockEpollListener, VsockError};
-use super::defs;
 use super::txbuf::TxBuf;
-use super::{ConnState, Error, PendingRx, PendingRxSet, Result};
+use super::{defs, ConnState, Error, PendingRx, PendingRxSet, Result};
 
 /// A self-managing connection object, that handles communication between a guest-side AF_VSOCK
 /// socket and a host-side `Read + Write + AsRawFd` stream.

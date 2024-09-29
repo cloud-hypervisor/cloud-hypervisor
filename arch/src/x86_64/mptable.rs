@@ -5,9 +5,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use std::mem;
-use std::result;
-use std::slice;
+use std::{mem, result, slice};
 
 use libc::c_uchar;
 use thiserror::Error;
@@ -306,9 +304,8 @@ pub fn setup_mptable(
 
 #[cfg(test)]
 mod tests {
-    use vm_memory::{
-        bitmap::BitmapSlice, GuestUsize, VolatileMemoryError, VolatileSlice, WriteVolatile,
-    };
+    use vm_memory::bitmap::BitmapSlice;
+    use vm_memory::{GuestUsize, VolatileMemoryError, VolatileSlice, WriteVolatile};
 
     use super::*;
     use crate::layout::MPTABLE_START;

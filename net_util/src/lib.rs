@@ -26,7 +26,8 @@ use virtio_bindings::virtio_net::{
     VIRTIO_NET_F_GUEST_CSUM, VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4,
     VIRTIO_NET_F_GUEST_TSO6, VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_F_MAC, VIRTIO_NET_F_MQ,
 };
-use vm_memory::{bitmap::AtomicBitmap, ByteValued};
+use vm_memory::bitmap::AtomicBitmap;
+use vm_memory::ByteValued;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 

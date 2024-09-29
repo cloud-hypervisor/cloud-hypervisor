@@ -9,18 +9,15 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::num::Wrapping;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Barrier,
-};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier};
 use std::thread;
 
 use libc::EFD_NONBLOCK;
 use virtio_queue::Queue;
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestUsize};
 use vm_migration::{MigratableError, Pausable};
-use vm_virtio::AccessPlatform;
-use vm_virtio::VirtioDeviceType;
+use vm_virtio::{AccessPlatform, VirtioDeviceType};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{

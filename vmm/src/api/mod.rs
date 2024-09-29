@@ -45,8 +45,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(feature = "dbus_api")]
 pub use self::dbus::start_dbus_thread;
-pub use self::http::start_http_fd_thread;
-pub use self::http::start_http_path_thread;
+pub use self::http::{start_http_fd_thread, start_http_path_thread};
 use crate::config::{
     DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, UserDeviceConfig,
     VdpaConfig, VmConfig, VsockConfig,

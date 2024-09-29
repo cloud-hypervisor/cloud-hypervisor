@@ -5,27 +5,22 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-use std::{os::unix::net::UnixListener, sync::mpsc};
+use std::os::unix::net::UnixListener;
+use std::sync::mpsc;
 
-use gdbstub::{
-    arch::Arch,
-    common::{Signal, Tid},
-    conn::{Connection, ConnectionExt},
-    stub::{run_blocking, DisconnectReason, MultiThreadStopReason},
-    target::{
-        ext::{
-            base::{
-                multithread::{
-                    MultiThreadBase, MultiThreadResume, MultiThreadResumeOps,
-                    MultiThreadSingleStep, MultiThreadSingleStepOps,
-                },
-                BaseOps,
-            },
-            breakpoints::{Breakpoints, BreakpointsOps, HwBreakpoint, HwBreakpointOps},
-        },
-        Target, TargetError, TargetResult,
-    },
+use gdbstub::arch::Arch;
+use gdbstub::common::{Signal, Tid};
+use gdbstub::conn::{Connection, ConnectionExt};
+use gdbstub::stub::{run_blocking, DisconnectReason, MultiThreadStopReason};
+use gdbstub::target::ext::base::multithread::{
+    MultiThreadBase, MultiThreadResume, MultiThreadResumeOps, MultiThreadSingleStep,
+    MultiThreadSingleStepOps,
 };
+use gdbstub::target::ext::base::BaseOps;
+use gdbstub::target::ext::breakpoints::{
+    Breakpoints, BreakpointsOps, HwBreakpoint, HwBreakpointOps,
+};
+use gdbstub::target::{Target, TargetError, TargetResult};
 #[cfg(target_arch = "aarch64")]
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(target_arch = "aarch64")]

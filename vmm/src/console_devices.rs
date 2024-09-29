@@ -10,27 +10,16 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use std::fs::read_link;
-use std::fs::File;
-use std::fs::OpenOptions;
-use std::io;
+use std::fs::{read_link, File, OpenOptions};
 use std::mem::zeroed;
-use std::os::fd::AsRawFd;
-use std::os::fd::FromRawFd;
-use std::os::fd::RawFd;
+use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
-use std::result;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::{io, result};
 
-use libc::cfmakeraw;
-use libc::isatty;
-use libc::tcgetattr;
-use libc::tcsetattr;
-use libc::termios;
-use libc::TCSANOW;
+use libc::{cfmakeraw, isatty, tcgetattr, tcsetattr, termios, TCSANOW};
 use thiserror::Error;
 
 use crate::sigwinch_listener::listen_for_sigwinch_on_tty;

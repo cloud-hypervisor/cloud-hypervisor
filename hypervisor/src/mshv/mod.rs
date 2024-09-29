@@ -15,12 +15,9 @@ use vm::DataMatch;
 use crate::arch::emulator::PlatformEmulator;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::emulator::Emulator;
-use crate::cpu;
-use crate::hypervisor;
 use crate::mshv::emulator::MshvEmulatorContext;
-use crate::vec_with_array_field;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
-use crate::HypervisorType;
+use crate::{cpu, hypervisor, vec_with_array_field, HypervisorType};
 #[cfg(feature = "sev_snp")]
 mod snp_constants;
 // x86_64 dependencies

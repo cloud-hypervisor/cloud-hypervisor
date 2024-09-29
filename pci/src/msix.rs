@@ -3,13 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 
-use std::io;
-use std::result;
 use std::sync::Arc;
+use std::{io, result};
 
 use byteorder::{ByteOrder, LittleEndian};
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use vm_device::interrupt::{
     InterruptIndex, InterruptSourceConfig, InterruptSourceGroup, MsiIrqSourceConfig,
 };

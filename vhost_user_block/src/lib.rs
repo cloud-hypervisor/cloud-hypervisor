@@ -8,41 +8,32 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
-use std::fs::File;
-use std::fs::OpenOptions;
-use std::io::Read;
-use std::io::{Seek, SeekFrom, Write};
-use std::ops::Deref;
-use std::ops::DerefMut;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::ops::{Deref, DerefMut};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
-use std::process;
-use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::time::Instant;
-use std::{convert, error, fmt, io};
+use std::{convert, error, fmt, io, process, result};
 
-use block::{
-    build_serial,
-    qcow::{self, ImageType, QcowFile},
-    Request, VirtioBlockConfig,
-};
+use block::qcow::{self, ImageType, QcowFile};
+use block::{build_serial, Request, VirtioBlockConfig};
 use libc::EFD_NONBLOCK;
 use log::*;
 use option_parser::{OptionParser, OptionParserError, Toggle};
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
-use vhost_user_backend::{
-    bitmap::BitmapMmapRegion, VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringState, VringT,
-};
+use vhost_user_backend::bitmap::BitmapMmapRegion;
+use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringState, VringT};
 use virtio_bindings::virtio_blk::*;
 use virtio_bindings::virtio_config::VIRTIO_F_VERSION_1;
 use virtio_bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use virtio_queue::QueueT;
-use vm_memory::GuestAddressSpace;
-use vm_memory::{ByteValued, Bytes, GuestMemoryAtomic};
-use vmm_sys_util::{epoll::EventSet, eventfd::EventFd};
+use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
+use vmm_sys_util::epoll::EventSet;
+use vmm_sys_util::eventfd::EventFd;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<BitmapMmapRegion>;
 

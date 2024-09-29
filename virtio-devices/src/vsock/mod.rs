@@ -18,8 +18,7 @@ use std::os::unix::io::RawFd;
 use packet::VsockPacket;
 
 pub use self::device::Vsock;
-pub use self::unix::VsockUnixBackend;
-pub use self::unix::VsockUnixError;
+pub use self::unix::{VsockUnixBackend, VsockUnixError};
 
 mod defs {
 
@@ -178,8 +177,7 @@ mod tests {
     use super::*;
     use crate::device::{VirtioInterrupt, VirtioInterruptType};
     use crate::epoll_helper::EpollHelperHandler;
-    use crate::EpollHelper;
-    use crate::GuestMemoryMmap;
+    use crate::{EpollHelper, GuestMemoryMmap};
 
     pub struct NoopVirtioInterrupt {}
 

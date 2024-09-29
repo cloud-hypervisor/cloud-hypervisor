@@ -29,8 +29,7 @@ use crate::arch::x86::CpuIdEntry;
 use crate::cpu::Vcpu;
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
-use crate::UserMemoryRegion;
-use crate::{IoEventAddress, IrqRoutingEntry};
+use crate::{IoEventAddress, IrqRoutingEntry, UserMemoryRegion};
 
 ///
 /// I/O events data matches (32 or 64 bits).

@@ -19,9 +19,8 @@
 use std::collections::{HashMap, VecDeque};
 
 use super::super::VsockChannel;
-use super::defs;
 use super::muxer::{ConnMapKey, MuxerRx};
-use super::MuxerConnection;
+use super::{defs, MuxerConnection};
 
 /// The muxer RX queue.
 ///

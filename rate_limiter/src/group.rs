@@ -6,11 +6,9 @@
 
 use core::panic::AssertUnwindSafe;
 use std::fs::File;
-use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::result;
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::{io, result, thread};
 
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
@@ -300,12 +298,15 @@ impl Drop for RateLimiterGroup {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::{os::fd::AsRawFd, thread, time::Duration};
+    use std::os::fd::AsRawFd;
+    use std::thread;
+    use std::time::Duration;
 
     use vmm_sys_util::eventfd::EventFd;
 
     use super::RateLimiterGroupHandle;
-    use crate::{group::RateLimiterGroup, TokenBucket, TokenType, REFILL_TIMER_INTERVAL_MS};
+    use crate::group::RateLimiterGroup;
+    use crate::{TokenBucket, TokenType, REFILL_TIMER_INTERVAL_MS};
 
     impl RateLimiterGroupHandle {
         pub fn bandwidth(&self) -> Option<TokenBucket> {

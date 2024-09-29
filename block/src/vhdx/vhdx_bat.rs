@@ -10,7 +10,8 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use remain::sorted;
 use thiserror::Error;
 
-use crate::vhdx::{vhdx_header::RegionTableEntry, vhdx_metadata::DiskSpec};
+use crate::vhdx::vhdx_header::RegionTableEntry;
+use crate::vhdx::vhdx_metadata::DiskSpec;
 
 // Payload BAT Entry States
 pub const PAYLOAD_BLOCK_NOT_PRESENT: u64 = 0;

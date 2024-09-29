@@ -11,9 +11,8 @@
 extern crate log;
 
 use std::collections::BTreeMap;
-use std::fmt;
-use std::result;
 use std::sync::Arc;
+use std::{fmt, result};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

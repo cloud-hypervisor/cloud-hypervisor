@@ -5,22 +5,18 @@
 
 #![allow(clippy::undocumented_unsafe_blocks)]
 
-use std::env;
 use std::ffi::OsStr;
 use std::fmt::Display;
-use std::io;
 use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
 use std::sync::Mutex;
-use std::thread;
 use std::time::Duration;
-use std::{fmt, fs};
+use std::{env, fmt, fs, io, thread};
 
 use once_cell::sync::Lazy;
 use serde_json::Value;

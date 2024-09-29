@@ -12,9 +12,10 @@ use libfuzzer_sys::fuzz_target;
 use micro_http::Request;
 use once_cell::sync::Lazy;
 use vm_migration::MigratableError;
+use vmm::api::http::*;
 use vmm::api::{
-    http::*, ApiRequest, RequestHandler, VmInfoResponse, VmReceiveMigrationData,
-    VmSendMigrationData, VmmPingResponse,
+    ApiRequest, RequestHandler, VmInfoResponse, VmReceiveMigrationData, VmSendMigrationData,
+    VmmPingResponse,
 };
 use vmm::config::RestoreConfig;
 use vmm::vm::{Error as VmError, VmState};
