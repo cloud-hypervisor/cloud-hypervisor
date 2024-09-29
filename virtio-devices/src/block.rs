@@ -8,24 +8,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::Error as DeviceError;
-use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon,
-    VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
-};
-use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
-use crate::GuestMemoryMmap;
-use crate::VirtioInterrupt;
-use anyhow::anyhow;
-use block::{
-    async_io::AsyncIo, async_io::AsyncIoError, async_io::DiskFile, build_serial, Request,
-    RequestType, VirtioBlockConfig,
-};
-use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
-use rate_limiter::TokenType;
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -37,6 +19,16 @@ use std::path::PathBuf;
 use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
+
+use anyhow::anyhow;
+use block::{
+    async_io::AsyncIo, async_io::AsyncIoError, async_io::DiskFile, build_serial, Request,
+    RequestType, VirtioBlockConfig,
+};
+use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
+use rate_limiter::TokenType;
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
 use virtio_bindings::virtio_config::*;
@@ -46,6 +38,16 @@ use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMe
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
+
+use super::Error as DeviceError;
+use super::{
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon,
+    VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
+};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::GuestMemoryMmap;
+use crate::VirtioInterrupt;
 
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;

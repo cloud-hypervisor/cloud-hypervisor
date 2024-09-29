@@ -148,12 +148,11 @@ mod kvm {
     pub const KVM_NMI: u64 = 0xae9a;
 }
 
-#[cfg(feature = "kvm")]
-use kvm::*;
-
 // MSHV IOCTL code. This is unstable until the kernel code has been declared stable.
 #[cfg(feature = "mshv")]
 use hypervisor::mshv::mshv_ioctls::*;
+#[cfg(feature = "kvm")]
+use kvm::*;
 
 #[cfg(feature = "mshv")]
 fn create_vmm_ioctl_seccomp_rule_common_mshv() -> Result<Vec<SeccompRule>, BackendError> {

@@ -7,11 +7,13 @@
 // Copyright 2018-2019 CrowdStrike, Inc.
 //
 //
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+
 use crate::arch::x86::{
     CpuIdEntry, DescriptorTable, FpuState, LapicState, MsrEntry, SegmentRegister, SpecialRegisters,
 };
-use serde::{Deserialize, Serialize};
-use std::fmt;
 
 pub mod emulator;
 

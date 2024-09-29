@@ -3,20 +3,22 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::landlock::LandlockAccess;
-pub use crate::vm_config::*;
-use clap::ArgMatches;
-use option_parser::{
-    ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple,
-};
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::path::PathBuf;
 use std::result;
 use std::str::FromStr;
+
+use clap::ArgMatches;
+use option_parser::{
+    ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple,
+};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
+
+use crate::landlock::LandlockAccess;
+pub use crate::vm_config::*;
 
 const MAX_NUM_PCI_SEGMENTS: u16 = 96;
 
@@ -3104,11 +3106,13 @@ impl Drop for VmConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use net_util::MacAddr;
     use std::fs::File;
     use std::net::Ipv4Addr;
     use std::os::unix::io::AsRawFd;
+
+    use net_util::MacAddr;
+
+    use super::*;
 
     #[test]
     fn test_cpu_parsing() -> Result<()> {

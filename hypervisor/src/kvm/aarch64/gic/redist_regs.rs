@@ -2,6 +2,8 @@
 // Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use kvm_ioctls::DeviceFd;
+
 use crate::arch::aarch64::gic::{Error, Result};
 use crate::device::HypervisorDeviceError;
 use crate::kvm::kvm_bindings::{
@@ -12,7 +14,6 @@ use crate::kvm::kvm_bindings::{
 use crate::kvm::Register;
 use crate::kvm::VcpuKvmState;
 use crate::CpuState;
-use kvm_ioctls::DeviceFd;
 
 // Relevant redistributor registers that we want to save/restore.
 const GICR_CTLR: u32 = 0x0000;

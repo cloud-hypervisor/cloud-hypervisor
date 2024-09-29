@@ -8,6 +8,9 @@
 //
 //
 
+use thiserror::Error;
+use vm_memory::GuestAddress;
+
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::{RegList, VcpuInit};
 #[cfg(target_arch = "x86_64")]
@@ -17,8 +20,6 @@ use crate::kvm::{TdxExitDetails, TdxExitStatus};
 use crate::CpuState;
 use crate::MpState;
 use crate::StandardRegisters;
-use thiserror::Error;
-use vm_memory::GuestAddress;
 
 #[cfg(target_arch = "x86_64")]
 #[derive(Copy, Clone, Default)]

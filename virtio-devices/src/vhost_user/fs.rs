@@ -1,6 +1,24 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::result;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Barrier, Mutex};
+use std::thread;
+
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, Bytes};
+use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
+use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
+use virtio_queue::Queue;
+use vm_memory::{ByteValued, GuestMemoryAtomic};
+use vm_migration::{
+    protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot, Snapshottable,
+    Transportable,
+};
+use vmm_sys_util::eventfd::EventFd;
+
 use super::vu_common_ctrl::VhostUserHandle;
 use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
 use crate::seccomp_filters::Thread;
@@ -11,22 +29,6 @@ use crate::{
     VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_IOMMU_PLATFORM,
 };
 use crate::{GuestMemoryMmap, GuestRegionMmap, MmapRegion};
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, Bytes};
-use std::result;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Barrier, Mutex};
-use std::thread;
-use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
-use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
-use virtio_queue::Queue;
-use vm_memory::{ByteValued, GuestMemoryAtomic};
-use vm_migration::{
-    protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot, Snapshottable,
-    Transportable,
-};
-use vmm_sys_util::eventfd::EventFd;
 
 const NUM_QUEUE_OFFSET: usize = 1;
 const DEFAULT_QUEUE_NUMBER: usize = 2;

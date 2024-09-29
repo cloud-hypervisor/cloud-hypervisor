@@ -5,13 +5,15 @@
 
 // Performance tests
 
-use crate::{mean, PerformanceTestControl};
 use std::fs;
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
+
 use test_infra::Error as InfraError;
 use test_infra::*;
+
+use crate::{mean, PerformanceTestControl};
 
 #[cfg(target_arch = "x86_64")]
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";

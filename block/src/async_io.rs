@@ -2,9 +2,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::DiskTopology;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::DiskTopology;
 
 #[derive(Error, Debug)]
 pub enum DiskFileError {

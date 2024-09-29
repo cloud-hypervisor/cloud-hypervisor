@@ -5,7 +5,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-use crate::GuestMemoryMmap;
+use std::{os::unix::net::UnixListener, sync::mpsc};
+
 use gdbstub::{
     arch::Arch,
     common::{Signal, Tid},
@@ -33,8 +34,9 @@ use gdbstub_arch::aarch64::AArch64 as GdbArch;
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 #[cfg(target_arch = "x86_64")]
 use gdbstub_arch::x86::X86_64_SSE as GdbArch;
-use std::{os::unix::net::UnixListener, sync::mpsc};
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryError};
+
+use crate::GuestMemoryMmap;
 
 type ArchUsize = u64;
 

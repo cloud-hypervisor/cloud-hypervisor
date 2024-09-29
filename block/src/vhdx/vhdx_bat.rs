@@ -2,13 +2,15 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::vhdx::{vhdx_header::RegionTableEntry, vhdx_metadata::DiskSpec};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use remain::sorted;
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 use std::mem::size_of;
+
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use remain::sorted;
 use thiserror::Error;
+
+use crate::vhdx::{vhdx_header::RegionTableEntry, vhdx_metadata::DiskSpec};
 
 // Payload BAT Entry States
 pub const PAYLOAD_BLOCK_NOT_PRESENT: u64 = 0;

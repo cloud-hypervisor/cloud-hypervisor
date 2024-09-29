@@ -4,11 +4,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::RawFile;
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::mem::size_of;
+
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use vmm_sys_util::write_zeroes::WriteZeroes;
+
+use super::RawFile;
 
 /// A qcow file. Allows reading/writing clusters and appending clusters.
 #[derive(Debug)]

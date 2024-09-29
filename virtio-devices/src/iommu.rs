@@ -2,18 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::Error as DeviceError;
-use super::{
-    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon, VirtioDevice,
-    VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
-};
-use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
-use crate::GuestMemoryMmap;
-use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
-use anyhow::anyhow;
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io;
 use std::mem::size_of;
@@ -22,6 +10,10 @@ use std::os::unix::io::AsRawFd;
 use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex, RwLock};
+
+use anyhow::anyhow;
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
@@ -32,6 +24,16 @@ use vm_memory::{
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
+
+use super::Error as DeviceError;
+use super::{
+    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon, VirtioDevice,
+    VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
+};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::GuestMemoryMmap;
+use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
 
 /// Queues sizes
 const QUEUE_SIZE: u16 = 256;

@@ -8,14 +8,6 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
-use block::{
-    build_serial,
-    qcow::{self, ImageType, QcowFile},
-    Request, VirtioBlockConfig,
-};
-use libc::EFD_NONBLOCK;
-use log::*;
-use option_parser::{OptionParser, OptionParserError, Toggle};
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::Read;
@@ -30,6 +22,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::time::Instant;
 use std::{convert, error, fmt, io};
+
+use block::{
+    build_serial,
+    qcow::{self, ImageType, QcowFile},
+    Request, VirtioBlockConfig,
+};
+use libc::EFD_NONBLOCK;
+use log::*;
+use option_parser::{OptionParser, OptionParserError, Toggle};
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
 use vhost_user_backend::{

@@ -8,9 +8,6 @@ extern crate test_infra;
 
 mod performance_tests;
 
-use clap::{Arg, ArgAction, Command as ClapCommand};
-use performance_tests::*;
-use serde::{Deserialize, Serialize};
 use std::{
     env, fmt,
     process::Command,
@@ -18,6 +15,10 @@ use std::{
     thread,
     time::Duration,
 };
+
+use clap::{Arg, ArgAction, Command as ClapCommand};
+use performance_tests::*;
+use serde::{Deserialize, Serialize};
 use test_infra::FioOps;
 use thiserror::Error;
 

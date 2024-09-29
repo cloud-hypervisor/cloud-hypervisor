@@ -8,6 +8,23 @@
 //
 //
 
+use std::any::Any;
+use std::collections::HashMap;
+#[cfg(target_arch = "x86_64")]
+use std::fs::File;
+#[cfg(target_arch = "x86_64")]
+use std::os::unix::io::AsRawFd;
+#[cfg(feature = "tdx")]
+use std::os::unix::io::RawFd;
+use std::result;
+#[cfg(target_arch = "x86_64")]
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::sync::{Arc, RwLock};
+
+use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
+use vmm_sys_util::eventfd::EventFd;
+
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::gic::KvmGicV3Its;
 #[cfg(target_arch = "aarch64")]
@@ -24,35 +41,9 @@ use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::HypervisorType;
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset_of};
-use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
-use std::any::Any;
-use std::collections::HashMap;
-#[cfg(target_arch = "x86_64")]
-use std::fs::File;
-#[cfg(target_arch = "x86_64")]
-use std::os::unix::io::AsRawFd;
-#[cfg(feature = "tdx")]
-use std::os::unix::io::RawFd;
-use std::result;
-#[cfg(target_arch = "x86_64")]
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-use std::sync::{Arc, RwLock};
-use vmm_sys_util::eventfd::EventFd;
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
-#[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{
-    CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, XsaveState, NUM_IOAPIC_PINS,
-};
-#[cfg(target_arch = "x86_64")]
-use crate::ClockData;
-use crate::StandardRegisters;
-use crate::{
-    CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
-    USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
-};
 #[cfg(target_arch = "aarch64")]
 use aarch64::{RegList, Register};
 #[cfg(target_arch = "x86_64")]
@@ -64,9 +55,24 @@ use kvm_bindings::{
 use x86_64::check_required_kvm_extensions;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, VcpuKvmState};
+
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86::{
+    CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, XsaveState, NUM_IOAPIC_PINS,
+};
+#[cfg(target_arch = "x86_64")]
+use crate::ClockData;
+use crate::StandardRegisters;
+use crate::{
+    CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
+    USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
+};
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
+#[cfg(target_arch = "aarch64")]
+use std::mem;
+
 pub use kvm_bindings;
 pub use kvm_bindings::{
     kvm_clock_data, kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug,
@@ -85,8 +91,6 @@ use kvm_bindings::{
 use kvm_bindings::{kvm_run__bindgen_ty_1, KVMIO};
 pub use kvm_ioctls;
 pub use kvm_ioctls::{Cap, Kvm};
-#[cfg(target_arch = "aarch64")]
-use std::mem;
 use thiserror::Error;
 use vfio_ioctls::VfioDeviceFd;
 #[cfg(feature = "tdx")]
@@ -104,7 +108,6 @@ const KVM_CAP_SGX_ATTRIBUTE: u32 = 196;
 
 #[cfg(target_arch = "x86_64")]
 use vmm_sys_util::ioctl_io_nr;
-
 #[cfg(all(not(feature = "tdx"), target_arch = "x86_64"))]
 use vmm_sys_util::ioctl_ioc_nr;
 

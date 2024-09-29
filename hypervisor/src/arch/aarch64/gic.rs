@@ -2,10 +2,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{CpuState, GicState, HypervisorDeviceError, HypervisorVmError};
 use std::any::Any;
 use std::result;
+
 use thiserror::Error;
+
+use crate::{CpuState, GicState, HypervisorDeviceError, HypervisorVmError};
 
 /// Errors thrown while setting up the VGIC.
 #[derive(Debug, Error)]

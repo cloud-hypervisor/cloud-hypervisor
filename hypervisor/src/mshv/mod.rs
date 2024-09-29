@@ -3,6 +3,15 @@
 // Copyright © 2020, Microsoft Corporation
 //
 
+use std::any::Any;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+
+use mshv_bindings::*;
+use mshv_ioctls::{set_registers_64, InterruptRequest, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
+use vfio_ioctls::VfioDeviceFd;
+use vm::DataMatch;
+
 use crate::arch::emulator::PlatformEmulator;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::emulator::Emulator;
@@ -12,18 +21,32 @@ use crate::mshv::emulator::MshvEmulatorContext;
 use crate::vec_with_array_field;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::HypervisorType;
-use mshv_bindings::*;
-use mshv_ioctls::{set_registers_64, InterruptRequest, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
-use std::any::Any;
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-use vfio_ioctls::VfioDeviceFd;
-use vm::DataMatch;
 #[cfg(feature = "sev_snp")]
 mod snp_constants;
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
+#[cfg(target_arch = "x86_64")]
+use std::fs::File;
+use std::os::unix::io::AsRawFd;
+
+#[cfg(feature = "sev_snp")]
+use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
+#[cfg(feature = "sev_snp")]
+use snp_constants::*;
+use vmm_sys_util::eventfd::EventFd;
+#[cfg(target_arch = "x86_64")]
+pub use x86_64::*;
+#[cfg(target_arch = "x86_64")]
+pub use x86_64::{emulator, VcpuMshvState};
+///
+/// Export generically-named wrappers of mshv-bindings for Unix-based platforms
+///
+pub use {
+    mshv_bindings::mshv_create_device as CreateDevice,
+    mshv_bindings::mshv_device_attr as DeviceAttr, mshv_ioctls, mshv_ioctls::DeviceFd,
+};
+
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
 #[cfg(target_arch = "x86_64")]
@@ -32,26 +55,6 @@ use crate::{
     CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
     USER_MEMORY_REGION_ADJUSTABLE, USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ,
     USER_MEMORY_REGION_WRITE,
-};
-#[cfg(feature = "sev_snp")]
-use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
-#[cfg(feature = "sev_snp")]
-use snp_constants::*;
-#[cfg(target_arch = "x86_64")]
-use std::fs::File;
-use std::os::unix::io::AsRawFd;
-use vmm_sys_util::eventfd::EventFd;
-#[cfg(target_arch = "x86_64")]
-pub use x86_64::*;
-#[cfg(target_arch = "x86_64")]
-pub use x86_64::{emulator, VcpuMshvState};
-
-///
-/// Export generically-named wrappers of mshv-bindings for Unix-based platforms
-///
-pub use {
-    mshv_bindings::mshv_create_device as CreateDevice,
-    mshv_bindings::mshv_device_attr as DeviceAttr, mshv_ioctls, mshv_ioctls::DeviceFd,
 };
 
 pub const PAGE_SHIFT: usize = 12;

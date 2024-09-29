@@ -6,17 +6,18 @@
 #[macro_use]
 extern crate event_monitor;
 
+use std::fs::File;
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::sync::mpsc::channel;
+use std::sync::Mutex;
+use std::{env, io};
+
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use libc::EFD_NONBLOCK;
 use log::{warn, LevelFilter};
 use option_parser::OptionParser;
 use seccompiler::SeccompAction;
 use signal_hook::consts::SIGSYS;
-use std::fs::File;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::sync::mpsc::channel;
-use std::sync::Mutex;
-use std::{env, io};
 use thiserror::Error;
 #[cfg(feature = "dbus_api")]
 use vmm::api::dbus::{dbus_api_graceful_shutdown, DBusApiOptions};
@@ -957,15 +958,17 @@ fn main() {
 
 #[cfg(test)]
 mod unit_tests {
-    use crate::config::HotplugMethod;
-    use crate::{create_app, prepare_default_values};
     use std::path::PathBuf;
+
     use vmm::config::{
         ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpusConfig, MemoryConfig, PayloadConfig,
         RngConfig, VmConfig, VmParams,
     };
     #[cfg(target_arch = "x86_64")]
     use vmm::vm_config::DebugConsoleConfig;
+
+    use crate::config::HotplugMethod;
+    use crate::{create_app, prepare_default_values};
 
     fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {
         let (default_vcpus, default_memory, default_rng) = prepare_default_values();

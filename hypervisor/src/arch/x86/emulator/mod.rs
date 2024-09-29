@@ -4,6 +4,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use anyhow::Context;
+use iced_x86::*;
+
 use crate::arch::emulator::{EmulationError, EmulationResult, PlatformEmulator, PlatformError};
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::{CR0_PE, EFER_LMA};
@@ -11,8 +14,6 @@ use crate::arch::x86::{
     segment_type_expand_down, segment_type_ro, Exception, SegmentRegister, SpecialRegisters,
 };
 use crate::StandardRegisters;
-use anyhow::Context;
-use iced_x86::*;
 
 #[macro_use]
 mod instructions;
@@ -653,11 +654,12 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
 
 #[cfg(test)]
 mod mock_vmm {
+    use std::sync::{Arc, Mutex};
+
     use super::*;
     use crate::arch::x86::emulator::EmulatorCpuState as CpuState;
     use crate::arch::x86::gdt::{gdt_entry, segment_from_gdt};
     use crate::StandardRegisters;
-    use std::sync::{Arc, Mutex};
 
     #[derive(Debug, Clone)]
     pub struct MockVmm {

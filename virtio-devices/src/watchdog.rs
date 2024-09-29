@@ -5,6 +5,23 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
+use std::fs::File;
+use std::io::{self, Read};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::result;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Barrier, Mutex};
+use std::time::Instant;
+
+use anyhow::anyhow;
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use virtio_queue::{Queue, QueueT};
+use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic};
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vmm_sys_util::eventfd::EventFd;
+
 use super::Error as DeviceError;
 use super::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon,
@@ -14,21 +31,6 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::GuestMemoryMmap;
 use crate::{VirtioInterrupt, VirtioInterruptType};
-use anyhow::anyhow;
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
-use std::fs::File;
-use std::io::{self, Read};
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::result;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Barrier, Mutex};
-use std::time::Instant;
-use thiserror::Error;
-use virtio_queue::{Queue, QueueT};
-use vm_memory::{Bytes, GuestAddressSpace, GuestMemoryAtomic};
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
-use vmm_sys_util::eventfd::EventFd;
 
 const QUEUE_SIZE: u16 = 8;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];

@@ -2,11 +2,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::{vnet_hdr_len, MacAddr, Tap, TapError};
 use std::net::Ipv4Addr;
 use std::path::Path;
 use std::{fs, io};
+
 use thiserror::Error;
+
+use super::{vnet_hdr_len, MacAddr, Tap, TapError};
 
 #[derive(Error, Debug)]
 pub enum Error {

@@ -8,6 +8,7 @@
 use std::io;
 use std::io::Write;
 use std::sync::{Arc, Barrier};
+
 use vm_device::BusDevice;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 

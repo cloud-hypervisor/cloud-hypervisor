@@ -2,14 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use crate::coredump::GuestDebuggableError;
-use crate::{config::VmConfig, vm::VmSnapshot};
-use anyhow::anyhow;
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
+
+use anyhow::anyhow;
 use vm_migration::{MigratableError, Snapshot};
+
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use crate::coredump::GuestDebuggableError;
+use crate::{config::VmConfig, vm::VmSnapshot};
 
 pub const SNAPSHOT_STATE_FILE: &str = "state.json";
 pub const SNAPSHOT_CONFIG_FILE: &str = "config.json";

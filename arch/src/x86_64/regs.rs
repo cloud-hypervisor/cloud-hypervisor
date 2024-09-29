@@ -6,17 +6,19 @@
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
+use std::sync::Arc;
+use std::{mem, result};
+
+use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
+use hypervisor::arch::x86::regs::CR0_PE;
+use hypervisor::arch::x86::{FpuState, SpecialRegisters};
+use thiserror::Error;
+use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError};
+
 use crate::layout::{
     BOOT_GDT_START, BOOT_IDT_START, BOOT_STACK_POINTER, PVH_INFO_START, ZERO_PAGE_START,
 };
 use crate::{EntryPoint, GuestMemoryMmap};
-use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
-use hypervisor::arch::x86::regs::CR0_PE;
-use hypervisor::arch::x86::{FpuState, SpecialRegisters};
-use std::sync::Arc;
-use std::{mem, result};
-use thiserror::Error;
-use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -186,8 +188,9 @@ pub fn configure_segments_and_sregs(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vm_memory::GuestAddress;
+
+    use super::*;
 
     fn create_guest_mem() -> GuestMemoryMmap {
         GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x10000)]).unwrap()
