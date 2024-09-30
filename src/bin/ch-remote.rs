@@ -14,6 +14,11 @@ use api_client::{
 };
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use option_parser::{ByteSized, ByteSizedParseError};
+use vmm::config::RestoreConfig;
+use vmm::vm_config::{
+    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
+    VsockConfig,
+};
 #[cfg(feature = "dbus_api")]
 use zbus::{proxy, zvariant::Optional};
 
@@ -773,15 +778,14 @@ fn resize_zone_config(id: &str, size: &str) -> Result<String, Error> {
 }
 
 fn add_device_config(config: &str) -> Result<String, Error> {
-    let device_config = vmm::config::DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
+    let device_config = DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
     let device_config = serde_json::to_string(&device_config).unwrap();
 
     Ok(device_config)
 }
 
 fn add_user_device_config(config: &str) -> Result<String, Error> {
-    let device_config =
-        vmm::config::UserDeviceConfig::parse(config).map_err(Error::AddUserDeviceConfig)?;
+    let device_config = UserDeviceConfig::parse(config).map_err(Error::AddUserDeviceConfig)?;
     let device_config = serde_json::to_string(&device_config).unwrap();
 
     Ok(device_config)
@@ -794,28 +798,28 @@ fn remove_device_config(id: &str) -> String {
 }
 
 fn add_disk_config(config: &str) -> Result<String, Error> {
-    let disk_config = vmm::config::DiskConfig::parse(config).map_err(Error::AddDiskConfig)?;
+    let disk_config = DiskConfig::parse(config).map_err(Error::AddDiskConfig)?;
     let disk_config = serde_json::to_string(&disk_config).unwrap();
 
     Ok(disk_config)
 }
 
 fn add_fs_config(config: &str) -> Result<String, Error> {
-    let fs_config = vmm::config::FsConfig::parse(config).map_err(Error::AddFsConfig)?;
+    let fs_config = FsConfig::parse(config).map_err(Error::AddFsConfig)?;
     let fs_config = serde_json::to_string(&fs_config).unwrap();
 
     Ok(fs_config)
 }
 
 fn add_pmem_config(config: &str) -> Result<String, Error> {
-    let pmem_config = vmm::config::PmemConfig::parse(config).map_err(Error::AddPmemConfig)?;
+    let pmem_config = PmemConfig::parse(config).map_err(Error::AddPmemConfig)?;
     let pmem_config = serde_json::to_string(&pmem_config).unwrap();
 
     Ok(pmem_config)
 }
 
 fn add_net_config(config: &str) -> Result<(String, Vec<i32>), Error> {
-    let mut net_config = vmm::config::NetConfig::parse(config).map_err(Error::AddNetConfig)?;
+    let mut net_config = NetConfig::parse(config).map_err(Error::AddNetConfig)?;
 
     // NetConfig is modified on purpose here by taking the list of file
     // descriptors out. Keeping the list and send it to the server side
@@ -828,14 +832,14 @@ fn add_net_config(config: &str) -> Result<(String, Vec<i32>), Error> {
 }
 
 fn add_vdpa_config(config: &str) -> Result<String, Error> {
-    let vdpa_config = vmm::config::VdpaConfig::parse(config).map_err(Error::AddVdpaConfig)?;
+    let vdpa_config = VdpaConfig::parse(config).map_err(Error::AddVdpaConfig)?;
     let vdpa_config = serde_json::to_string(&vdpa_config).unwrap();
 
     Ok(vdpa_config)
 }
 
 fn add_vsock_config(config: &str) -> Result<String, Error> {
-    let vsock_config = vmm::config::VsockConfig::parse(config).map_err(Error::AddVsockConfig)?;
+    let vsock_config = VsockConfig::parse(config).map_err(Error::AddVsockConfig)?;
     let vsock_config = serde_json::to_string(&vsock_config).unwrap();
 
     Ok(vsock_config)
@@ -850,7 +854,7 @@ fn snapshot_config(url: &str) -> String {
 }
 
 fn restore_config(config: &str) -> Result<(String, Vec<i32>), Error> {
-    let mut restore_config = vmm::config::RestoreConfig::parse(config).map_err(Error::Restore)?;
+    let mut restore_config = RestoreConfig::parse(config).map_err(Error::Restore)?;
     // RestoreConfig is modified on purpose to take out the file descriptors.
     // These fds are passed to the server side process via SCM_RIGHTS
     let fds = match &mut restore_config.net_fds {
@@ -936,15 +940,13 @@ fn main() {
             Command::new("add-device").about("Add VFIO device").arg(
                 Arg::new("device_config")
                     .index(1)
-                    .help(vmm::config::DeviceConfig::SYNTAX),
+                    .help(DeviceConfig::SYNTAX),
             ),
         )
         .subcommand(
-            Command::new("add-disk").about("Add block device").arg(
-                Arg::new("disk_config")
-                    .index(1)
-                    .help(vmm::config::DiskConfig::SYNTAX),
-            ),
+            Command::new("add-disk")
+                .about("Add block device")
+                .arg(Arg::new("disk_config").index(1).help(DiskConfig::SYNTAX)),
         )
         .subcommand(
             Command::new("add-fs")
@@ -952,7 +954,7 @@ fn main() {
                 .arg(
                     Arg::new("fs_config")
                         .index(1)
-                        .help(vmm::config::FsConfig::SYNTAX),
+                        .help(vmm::vm_config::FsConfig::SYNTAX),
                 ),
         )
         .subcommand(
@@ -961,15 +963,13 @@ fn main() {
                 .arg(
                     Arg::new("pmem_config")
                         .index(1)
-                        .help(vmm::config::PmemConfig::SYNTAX),
+                        .help(vmm::vm_config::PmemConfig::SYNTAX),
                 ),
         )
         .subcommand(
-            Command::new("add-net").about("Add network device").arg(
-                Arg::new("net_config")
-                    .index(1)
-                    .help(vmm::config::NetConfig::SYNTAX),
-            ),
+            Command::new("add-net")
+                .about("Add network device")
+                .arg(Arg::new("net_config").index(1).help(NetConfig::SYNTAX)),
         )
         .subcommand(
             Command::new("add-user-device")
@@ -977,22 +977,18 @@ fn main() {
                 .arg(
                     Arg::new("device_config")
                         .index(1)
-                        .help(vmm::config::UserDeviceConfig::SYNTAX),
+                        .help(UserDeviceConfig::SYNTAX),
                 ),
         )
         .subcommand(
-            Command::new("add-vdpa").about("Add vDPA device").arg(
-                Arg::new("vdpa_config")
-                    .index(1)
-                    .help(vmm::config::VdpaConfig::SYNTAX),
-            ),
+            Command::new("add-vdpa")
+                .about("Add vDPA device")
+                .arg(Arg::new("vdpa_config").index(1).help(VdpaConfig::SYNTAX)),
         )
         .subcommand(
-            Command::new("add-vsock").about("Add vsock device").arg(
-                Arg::new("vsock_config")
-                    .index(1)
-                    .help(vmm::config::VsockConfig::SYNTAX),
-            ),
+            Command::new("add-vsock")
+                .about("Add vsock device")
+                .arg(Arg::new("vsock_config").index(1).help(VsockConfig::SYNTAX)),
         )
         .subcommand(
             Command::new("remove-device")
@@ -1061,7 +1057,7 @@ fn main() {
                 .arg(
                     Arg::new("restore_config")
                         .index(1)
-                        .help(vmm::config::RestoreConfig::SYNTAX),
+                        .help(RestoreConfig::SYNTAX),
                 ),
         )
         .subcommand(

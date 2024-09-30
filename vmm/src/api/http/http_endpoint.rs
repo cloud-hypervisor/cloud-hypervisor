@@ -15,12 +15,12 @@ use crate::api::http::{error_response, EndpointHandler, HttpError};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::api::VmCoredump;
 use crate::api::{
-    AddDisk, ApiAction, ApiRequest, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem, VmAddUserDevice,
-    VmAddVdpa, VmAddVsock, VmBoot, VmConfig, VmCounters, VmDelete, VmNmi, VmPause, VmPowerButton,
-    VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume,
-    VmSendMigration, VmShutdown, VmSnapshot,
+    AddDisk, ApiAction, ApiRequest, NetConfig, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem,
+    VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBoot, VmConfig, VmCounters, VmDelete, VmNmi, VmPause,
+    VmPowerButton, VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore,
+    VmResume, VmSendMigration, VmShutdown, VmSnapshot,
 };
-use crate::config::{NetConfig, RestoreConfig};
+use crate::config::RestoreConfig;
 
 // /api/v1/vm.create handler
 pub struct VmCreate {}

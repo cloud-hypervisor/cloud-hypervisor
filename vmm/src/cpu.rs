@@ -77,7 +77,6 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 use zerocopy::AsBytes;
 
-use crate::config::CpusConfig;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
     CpuElf64Writable, CpuSegment, CpuState as DumpCpusState, DumpState, Elf64Writable,
@@ -91,7 +90,9 @@ use crate::memory_manager::MemoryManager;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 #[cfg(target_arch = "x86_64")]
 use crate::vm::physical_bits;
+use crate::vm_config::CpusConfig;
 use crate::{GuestMemoryMmap, CPU_MANAGER_SNAPSHOT_ID};
+
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 /// Extract the specified bits of a 64-bit integer.
 /// For example, to extrace 2 bits from offset 1 (zero based) of `6u64`,

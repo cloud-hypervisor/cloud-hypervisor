@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -46,14 +47,14 @@ use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,
 };
 
-#[cfg(target_arch = "x86_64")]
-use crate::config::SgxEpcConfig;
-use crate::config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
     CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
 };
 use crate::migration::url_to_path;
+#[cfg(target_arch = "x86_64")]
+use crate::vm_config::SgxEpcConfig;
+use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID};
 
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;

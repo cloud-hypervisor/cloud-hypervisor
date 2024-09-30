@@ -48,10 +48,7 @@ use crate::api::{
     ApiRequest, ApiResponse, RequestHandler, VmInfoResponse, VmReceiveMigrationData,
     VmSendMigrationData, VmmPingResponse,
 };
-use crate::config::{
-    add_to_config, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig,
-    UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
-};
+use crate::config::{add_to_config, RestoreConfig};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggable;
 use crate::landlock::Landlock;
@@ -61,6 +58,10 @@ use crate::migration::get_vm_snapshot;
 use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::vm::{Error as VmError, Vm, VmState};
+use crate::vm_config::{
+    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
+    VmConfig, VsockConfig,
+};
 
 mod acpi;
 pub mod api;
@@ -2143,14 +2144,13 @@ const DEVICE_MANAGER_SNAPSHOT_ID: &str = "device-manager";
 
 #[cfg(test)]
 mod unit_tests {
-    use config::{
-        ConsoleConfig, ConsoleOutputMode, CpusConfig, HotplugMethod, MemoryConfig, PayloadConfig,
-        RngConfig,
-    };
-
     use super::*;
     #[cfg(target_arch = "x86_64")]
-    use crate::config::DebugConsoleConfig;
+    use crate::vm_config::DebugConsoleConfig;
+    use crate::vm_config::{
+        ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpusConfig, HotplugMethod, MemoryConfig,
+        PayloadConfig, RngConfig,
+    };
 
     fn create_dummy_vmm() -> Vmm {
         Vmm::new(
@@ -2176,7 +2176,7 @@ mod unit_tests {
                 kvm_hyperv: false,
                 max_phys_bits: 46,
                 affinity: None,
-                features: config::CpuFeatures::default(),
+                features: CpuFeatures::default(),
             },
             memory: MemoryConfig {
                 size: 536_870_912,

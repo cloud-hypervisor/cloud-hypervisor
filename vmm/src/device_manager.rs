@@ -91,10 +91,6 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 use {devices::debug_console, devices::legacy::Serial};
 
-use crate::config::{
-    ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
-    VdpaConfig, VhostMode, VmConfig, VsockConfig,
-};
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo, ConsoleOutput};
 use crate::cpu::{CpuManager, CPU_MANAGER_ACPI_SIZE};
 use crate::device_tree::{DeviceNode, DeviceTree};
@@ -102,7 +98,10 @@ use crate::interrupt::{LegacyUserspaceInterruptManager, MsiInterruptManager};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager, MEMORY_MANAGER_ACPI_SIZE};
 use crate::pci_segment::PciSegment;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
-use crate::vm_config::DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT;
+use crate::vm_config::{
+    ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
+    VdpaConfig, VhostMode, VmConfig, VsockConfig, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
+};
 use crate::{device_node, GuestRegionMmap, PciDeviceInfo, DEVICE_MANAGER_SNAPSHOT_ID};
 
 #[cfg(target_arch = "aarch64")]

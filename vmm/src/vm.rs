@@ -67,11 +67,7 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
-use crate::config::{
-    add_to_config, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, NumaConfig,
-    PayloadConfig, PmemConfig, UserDeviceConfig, ValidationError, VdpaConfig, VmConfig,
-    VsockConfig,
-};
+use crate::config::{add_to_config, ValidationError};
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
@@ -92,6 +88,10 @@ use crate::migration::get_vm_snapshot;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::migration::url_to_file;
 use crate::migration::{url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
+use crate::vm_config::{
+    DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, NumaConfig, PayloadConfig,
+    PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
+};
 use crate::{
     cpu, GuestMemoryMmap, PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID,
     MEMORY_MANAGER_SNAPSHOT_ID,
