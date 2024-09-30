@@ -35,34 +35,34 @@ jobs:
           target: ${{ matrix.target }}
 
       - name: Build (default features)
-        run: cargo rustc --locked --bin cloud-hypervisor -- -D warnings -D clippy::undocumented_unsafe_blocks
+        run: cargo rustc --locked --bin cloud-hypervisor -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Build (kvm)
-        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "kvm"  -- -D warnings -D clippy::undocumented_unsafe_blocks
+        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "kvm"  -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Build (default features + tdx)
-        run: cargo rustc --locked --bin cloud-hypervisor --features "tdx" -- -D warnings -D clippy::undocumented_unsafe_blocks
+        run: cargo rustc --locked --bin cloud-hypervisor --features "tdx" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Build (default features + dbus_api)
-        run: cargo rustc --locked --bin cloud-hypervisor --features "dbus_api" -- -D warnings -D clippy::undocumented_unsafe_blocks
+        run: cargo rustc --locked --bin cloud-hypervisor --features "dbus_api" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Build (default features + guest_debug)
-        run: cargo rustc --locked --bin cloud-hypervisor --features "guest_debug" -- -D warnings -D clippy::undocumented_unsafe_blocks
+        run: cargo rustc --locked --bin cloud-hypervisor --features "guest_debug" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Build (default features + pvmemcontrol)
-        run: cargo rustc --locked --bin cloud-hypervisor --features "pvmemcontrol" -- -D warnings -D clippy::undocumented_unsafe_blocks
+        run: cargo rustc --locked --bin cloud-hypervisor --features "pvmemcontrol" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Build (mshv)
-        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "mshv"  -- -D warnings -D clippy::undocumented_unsafe_blocks
+        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "mshv"  -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Build (sev_snp)
-        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "sev_snp"  -- -D warnings -D clippy::undocumented_unsafe_blocks
+        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "sev_snp"  -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Build (igvm)
-        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "igvm"  -- -D warnings -D clippy::undocumented_unsafe_blocks
+        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "igvm"  -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Build (mshv + kvm)
-        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "mshv,kvm"  -- -D warnings -D clippy::undocumented_unsafe_blocks
+        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "mshv,kvm"  -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Release Build (default features)
         run: cargo build --locked --all --release --target=${{ matrix.target }}
