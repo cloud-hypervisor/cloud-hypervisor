@@ -434,7 +434,7 @@ mod tests {
 
         // write 1 to the interrupt event fd, so that read doesn't block in case the event fd
         // counter doesn't change (for 0 it blocks)
-        assert!(intr_evt.write(1).is_ok());
+        intr_evt.write(1).unwrap();
         serial.write(0, IER as u64, &[IER_RECV_BIT]);
         serial.queue_input_bytes(b"abc").unwrap();
 
@@ -471,7 +471,7 @@ mod tests {
 
         // write 1 to the interrupt event fd, so that read doesn't block in case the event fd
         // counter doesn't change (for 0 it blocks)
-        assert!(intr_evt.write(1).is_ok());
+        intr_evt.write(1).unwrap();
         serial.write(0, IER as u64, &[IER_THR_BIT]);
         serial.write(0, DATA as u64, b"a");
 

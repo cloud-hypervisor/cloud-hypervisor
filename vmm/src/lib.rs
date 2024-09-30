@@ -2280,9 +2280,7 @@ mod unit_tests {
             .devices
             .is_none());
 
-        let result = vmm.vm_add_device(device_config.clone());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(vmm.vm_add_device(device_config.clone()).unwrap().is_none());
         assert_eq!(
             vmm.vm_config
                 .as_ref()
@@ -2329,9 +2327,10 @@ mod unit_tests {
             .user_devices
             .is_none());
 
-        let result = vmm.vm_add_user_device(user_device_config.clone());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(vmm
+            .vm_add_user_device(user_device_config.clone())
+            .unwrap()
+            .is_none());
         assert_eq!(
             vmm.vm_config
                 .as_ref()
@@ -2377,9 +2376,7 @@ mod unit_tests {
             .disks
             .is_none());
 
-        let result = vmm.vm_add_disk(disk_config.clone());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(vmm.vm_add_disk(disk_config.clone()).unwrap().is_none());
         assert_eq!(
             vmm.vm_config
                 .as_ref()
@@ -2418,9 +2415,7 @@ mod unit_tests {
         let _ = vmm.vm_create(create_dummy_vm_config());
         assert!(vmm.vm_config.as_ref().unwrap().lock().unwrap().fs.is_none());
 
-        let result = vmm.vm_add_fs(fs_config.clone());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(vmm.vm_add_fs(fs_config.clone()).unwrap().is_none());
         assert_eq!(
             vmm.vm_config
                 .as_ref()
@@ -2466,9 +2461,7 @@ mod unit_tests {
             .pmem
             .is_none());
 
-        let result = vmm.vm_add_pmem(pmem_config.clone());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(vmm.vm_add_pmem(pmem_config.clone()).unwrap().is_none());
         assert_eq!(
             vmm.vm_config
                 .as_ref()
@@ -2517,9 +2510,7 @@ mod unit_tests {
             .net
             .is_none());
 
-        let result = vmm.vm_add_net(net_config.clone());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(vmm.vm_add_net(net_config.clone()).unwrap().is_none());
         assert_eq!(
             vmm.vm_config
                 .as_ref()
@@ -2565,9 +2556,7 @@ mod unit_tests {
             .vdpa
             .is_none());
 
-        let result = vmm.vm_add_vdpa(vdpa_config.clone());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(vmm.vm_add_vdpa(vdpa_config.clone()).unwrap().is_none());
         assert_eq!(
             vmm.vm_config
                 .as_ref()
@@ -2613,9 +2602,7 @@ mod unit_tests {
             .vsock
             .is_none());
 
-        let result = vmm.vm_add_vsock(vsock_config.clone());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(vmm.vm_add_vsock(vsock_config.clone()).unwrap().is_none());
         assert_eq!(
             vmm.vm_config
                 .as_ref()

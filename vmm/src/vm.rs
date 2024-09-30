@@ -2850,43 +2850,43 @@ mod tests {
         match state {
             VmState::Created => {
                 // Check the transitions from Created
-                assert!(state.valid_transition(VmState::Created).is_err());
-                assert!(state.valid_transition(VmState::Running).is_ok());
-                assert!(state.valid_transition(VmState::Shutdown).is_ok());
-                assert!(state.valid_transition(VmState::Paused).is_ok());
-                assert!(state.valid_transition(VmState::BreakPoint).is_ok());
+                state.valid_transition(VmState::Created).unwrap_err();
+                state.valid_transition(VmState::Running).unwrap();
+                state.valid_transition(VmState::Shutdown).unwrap();
+                state.valid_transition(VmState::Paused).unwrap();
+                state.valid_transition(VmState::BreakPoint).unwrap();
             }
             VmState::Running => {
                 // Check the transitions from Running
-                assert!(state.valid_transition(VmState::Created).is_err());
-                assert!(state.valid_transition(VmState::Running).is_err());
-                assert!(state.valid_transition(VmState::Shutdown).is_ok());
-                assert!(state.valid_transition(VmState::Paused).is_ok());
-                assert!(state.valid_transition(VmState::BreakPoint).is_ok());
+                state.valid_transition(VmState::Created).unwrap_err();
+                state.valid_transition(VmState::Running).unwrap_err();
+                state.valid_transition(VmState::Shutdown).unwrap();
+                state.valid_transition(VmState::Paused).unwrap();
+                state.valid_transition(VmState::BreakPoint).unwrap();
             }
             VmState::Shutdown => {
                 // Check the transitions from Shutdown
-                assert!(state.valid_transition(VmState::Created).is_err());
-                assert!(state.valid_transition(VmState::Running).is_ok());
-                assert!(state.valid_transition(VmState::Shutdown).is_err());
-                assert!(state.valid_transition(VmState::Paused).is_err());
-                assert!(state.valid_transition(VmState::BreakPoint).is_err());
+                state.valid_transition(VmState::Created).unwrap_err();
+                state.valid_transition(VmState::Running).unwrap();
+                state.valid_transition(VmState::Shutdown).unwrap_err();
+                state.valid_transition(VmState::Paused).unwrap_err();
+                state.valid_transition(VmState::BreakPoint).unwrap_err();
             }
             VmState::Paused => {
                 // Check the transitions from Paused
-                assert!(state.valid_transition(VmState::Created).is_err());
-                assert!(state.valid_transition(VmState::Running).is_ok());
-                assert!(state.valid_transition(VmState::Shutdown).is_ok());
-                assert!(state.valid_transition(VmState::Paused).is_err());
-                assert!(state.valid_transition(VmState::BreakPoint).is_err());
+                state.valid_transition(VmState::Created).unwrap_err();
+                state.valid_transition(VmState::Running).unwrap();
+                state.valid_transition(VmState::Shutdown).unwrap();
+                state.valid_transition(VmState::Paused).unwrap_err();
+                state.valid_transition(VmState::BreakPoint).unwrap_err();
             }
             VmState::BreakPoint => {
                 // Check the transitions from Breakpoint
-                assert!(state.valid_transition(VmState::Created).is_ok());
-                assert!(state.valid_transition(VmState::Running).is_ok());
-                assert!(state.valid_transition(VmState::Shutdown).is_err());
-                assert!(state.valid_transition(VmState::Paused).is_err());
-                assert!(state.valid_transition(VmState::BreakPoint).is_err());
+                state.valid_transition(VmState::Created).unwrap();
+                state.valid_transition(VmState::Running).unwrap();
+                state.valid_transition(VmState::Shutdown).unwrap_err();
+                state.valid_transition(VmState::Paused).unwrap_err();
+                state.valid_transition(VmState::BreakPoint).unwrap_err();
             }
         }
     }
@@ -3169,7 +3169,7 @@ mod tests {
         let gic = vm
             .create_vgic(Gic::create_default_config(1))
             .expect("Cannot create gic");
-        assert!(create_fdt(
+        create_fdt(
             &mem,
             "console=tty0",
             vec![0],
@@ -3182,7 +3182,7 @@ mod tests {
             None,
             true,
         )
-        .is_ok())
+        .unwrap();
     }
 }
 

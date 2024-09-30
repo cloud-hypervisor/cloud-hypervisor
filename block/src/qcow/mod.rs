@@ -2051,8 +2051,7 @@ mod tests {
             .expect("Failed to write header to shm.");
         disk_file.rewind().unwrap();
         // The maximum nesting depth is 0, which means backing file is not allowed.
-        let res = QcowFile::from_with_nesting_depth(disk_file, 0);
-        assert!(res.is_ok());
+        QcowFile::from_with_nesting_depth(disk_file, 0).unwrap();
     }
 
     #[test]
@@ -2068,7 +2067,6 @@ mod tests {
         disk_file.rewind().unwrap();
         // The maximum nesting depth is 0, which means backing file is not allowed.
         let res = QcowFile::from_with_nesting_depth(disk_file, 0);
-        assert!(res.is_err());
         assert!(matches!(res.unwrap_err(), Error::MaxNestingDepthExceeded));
     }
 

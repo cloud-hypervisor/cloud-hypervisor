@@ -362,13 +362,13 @@ fn _test_api_pause_resume(target_api: TargetApi, guest: Guest) {
         thread::sleep(std::time::Duration::new(2, 0));
 
         // SSH into the VM should fail
-        assert!(ssh_command_ip(
+        ssh_command_ip(
             "grep -c processor /proc/cpuinfo",
             &guest.network.guest_ip,
             2,
-            5
+            5,
         )
-        .is_err());
+        .unwrap_err();
 
         // Resume the VM
         assert!(target_api.remote_command("resume", None));
@@ -6580,7 +6580,7 @@ mod common_parallel {
             thread::sleep(std::time::Duration::new(5, 0));
 
             // Check the connection fails this time
-            assert!(guest2.ssh_command("nc -vz 172.100.0.1 12345").is_err());
+            guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap_err();
 
             // Add the OVS port back
             assert!(exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1").success());

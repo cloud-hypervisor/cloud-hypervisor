@@ -549,7 +549,7 @@ mod tests {
 
         // write 1 to the interrupt event fd, so that read doesn't block in case the event fd
         // counter doesn't change (for 0 it blocks)
-        assert!(intr_evt.write(1).is_ok());
+        intr_evt.write(1).unwrap();
         pl011.queue_input_bytes(b"abc").unwrap();
 
         assert_eq!(intr_evt.read().unwrap(), 2);

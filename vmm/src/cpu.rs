@@ -2817,9 +2817,9 @@ mod tests {
     fn test_setlint() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
-        assert!(hv.check_required_extensions().is_ok());
+        hv.check_required_extensions().unwrap();
         // Calling get_lapic will fail if there is no irqchip before hand.
-        assert!(vm.create_irq_chip().is_ok());
+        vm.create_irq_chip().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
         let klapic_before: LapicState = vcpu.get_lapic().unwrap();
 
@@ -2961,15 +2961,14 @@ mod tests {
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
 
-        let res = vcpu.setup_regs(0, 0x0, layout::FDT_START.0);
         // Must fail when vcpu is not initialized yet.
-        assert!(res.is_err());
+        vcpu.setup_regs(0, 0x0, layout::FDT_START.0).unwrap_err();
 
         let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
         vm.get_preferred_target(&mut kvi).unwrap();
         vcpu.vcpu_init(&kvi).unwrap();
 
-        assert!(vcpu.setup_regs(0, 0x0, layout::FDT_START.0).is_ok());
+        vcpu.setup_regs(0, 0x0, layout::FDT_START.0).unwrap();
     }
 
     #[test]
@@ -2981,7 +2980,7 @@ mod tests {
         vm.get_preferred_target(&mut kvi).unwrap();
 
         // Must fail when vcpu is not initialized yet.
-        assert!(vcpu.get_sys_reg(regs::MPIDR_EL1).is_err());
+        vcpu.get_sys_reg(regs::MPIDR_EL1).unwrap_err();
 
         vcpu.vcpu_init(&kvi).unwrap();
         assert_eq!(vcpu.get_sys_reg(regs::MPIDR_EL1).unwrap(), 0x80000000);
@@ -3005,28 +3004,22 @@ mod tests {
         vm.get_preferred_target(&mut kvi).unwrap();
 
         // Must fail when vcpu is not initialized yet.
-        let res = vcpu.get_regs();
-        assert!(res.is_err());
         assert_eq!(
-            format!("{}", res.unwrap_err()),
+            format!("{}", vcpu.get_regs().unwrap_err()),
             "Failed to get aarch64 core register: Exec format error (os error 8)"
         );
 
         let mut state = vcpu.create_standard_regs();
-        let res = vcpu.set_regs(&state);
-        assert!(res.is_err());
         assert_eq!(
-            format!("{}", res.unwrap_err()),
+            format!("{}", vcpu.set_regs(&state).unwrap_err()),
             "Failed to set aarch64 core register: Exec format error (os error 8)"
         );
 
         vcpu.vcpu_init(&kvi).unwrap();
-        let res = vcpu.get_regs();
-        assert!(res.is_ok());
-        state = res.unwrap();
+        state = vcpu.get_regs().unwrap();
         assert_eq!(state.get_pstate(), 0x3C5);
 
-        assert!(vcpu.set_regs(&state).is_ok());
+        vcpu.set_regs(&state).unwrap();
     }
 
     #[test]
@@ -3037,8 +3030,7 @@ mod tests {
         let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
         vm.get_preferred_target(&mut kvi).unwrap();
 
-        let res = vcpu.get_mp_state();
-        assert!(res.is_ok());
-        assert!(vcpu.set_mp_state(res.unwrap()).is_ok());
+        let state = vcpu.get_mp_state().unwrap();
+        vcpu.set_mp_state(state).unwrap();
     }
 }

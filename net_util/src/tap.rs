@@ -605,10 +605,8 @@ mod tests {
         let ip_addr: net::Ipv4Addr = (*tap_ip_guard).parse().unwrap();
         let netmask: net::Ipv4Addr = SUBNET_MASK.parse().unwrap();
 
-        let ret = tap.set_ip_addr(ip_addr);
-        assert!(ret.is_ok());
-        let ret = tap.set_netmask(netmask);
-        assert!(ret.is_ok());
+        tap.set_ip_addr(ip_addr).unwrap();
+        tap.set_netmask(netmask).unwrap();
     }
 
     #[test]
@@ -626,8 +624,7 @@ mod tests {
         let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
 
         let tap = Tap::new(1).unwrap();
-        let ret = tap.enable();
-        assert!(ret.is_ok());
+        tap.enable().unwrap();
     }
 
     #[test]
@@ -657,10 +654,7 @@ mod tests {
         // In theory, this could actually loop forever if something keeps sending data through the
         // tap interface, but it's highly unlikely.
         while found_packet_sz.is_none() {
-            let result = tap.read(&mut buf);
-            assert!(result.is_ok());
-
-            let size = result.unwrap();
+            let size = tap.read(&mut buf).unwrap();
 
             // We skip the first 10 bytes because the IFF_VNET_HDR flag is set when the interface
             // is created, and the legacy header is 10 bytes long without a certain flag which
@@ -719,8 +713,8 @@ mod tests {
         // leave the vnet hdr as is
         pnet_build_packet(&mut buf[10..], mac, payload);
 
-        assert!(tap.write(&buf[..]).is_ok());
-        assert!(tap.flush().is_ok());
+        tap.write_all(&buf).unwrap();
+        tap.flush().unwrap();
 
         let (channel_tx, channel_rx) = mpsc::channel();
 
