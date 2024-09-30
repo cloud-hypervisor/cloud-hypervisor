@@ -9,10 +9,10 @@ use std::path::PathBuf;
 use anyhow::anyhow;
 use vm_migration::{MigratableError, Snapshot};
 
-use crate::config::VmConfig;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggableError;
 use crate::vm::VmSnapshot;
+use crate::vm_config::VmConfig;
 
 pub const SNAPSHOT_STATE_FILE: &str = "state.json";
 pub const SNAPSHOT_CONFIG_FILE: &str = "config.json";

@@ -17,7 +17,7 @@ use thiserror::Error;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
 
 use crate::landlock::LandlockAccess;
-pub use crate::vm_config::*;
+use crate::vm_config::*;
 
 const MAX_NUM_PCI_SEGMENTS: u16 = 96;
 
