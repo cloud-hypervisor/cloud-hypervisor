@@ -280,7 +280,7 @@ mod tests {
         let cpu_id = 0;
         let insn = [0x48, 0x89, 0xd8];
         let mut vmm = MockVmm::new(ip, vec![(Register::RBX, rbx)], None);
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let rax: u64 = vmm
             .cpu_state(cpu_id)
@@ -298,7 +298,7 @@ mod tests {
         let cpu_id = 0;
         let insn = [0x48, 0xb8, 0x44, 0x33, 0x22, 0x11, 0x44, 0x33, 0x22, 0x11];
         let mut vmm = MockVmm::new(ip, vec![], None);
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let rax: u64 = vmm
             .cpu_state(cpu_id)
@@ -318,7 +318,7 @@ mod tests {
         let memory: [u8; 8] = target_rax.to_le_bytes();
         let insn = [0x48, 0x8b, 0x04, 0x00];
         let mut vmm = MockVmm::new(ip, vec![(Register::RAX, rax)], Some((rax + rax, &memory)));
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         rax = vmm
             .cpu_state(cpu_id)
@@ -336,7 +336,7 @@ mod tests {
         let cpu_id = 0;
         let insn = [0xb0, 0x11];
         let mut vmm = MockVmm::new(ip, vec![], None);
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let al = vmm
             .cpu_state(cpu_id)
@@ -354,7 +354,7 @@ mod tests {
         let cpu_id = 0;
         let insn = [0xb8, 0x11, 0x00, 0x00, 0x00];
         let mut vmm = MockVmm::new(ip, vec![], None);
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let eax = vmm
             .cpu_state(cpu_id)
@@ -372,7 +372,7 @@ mod tests {
         let cpu_id = 0;
         let insn = [0x48, 0xc7, 0xc0, 0x44, 0x33, 0x22, 0x11];
         let mut vmm = MockVmm::new(ip, vec![], None);
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let rax: u64 = vmm
             .cpu_state(cpu_id)
@@ -395,7 +395,7 @@ mod tests {
             vec![(Register::RAX, rax), (Register::DH, dh.into())],
             None,
         );
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let mut memory: [u8; 1] = [0; 1];
         vmm.read_memory(rax, &mut memory).unwrap();
@@ -416,7 +416,7 @@ mod tests {
             vec![(Register::RAX, rax), (Register::ESI, esi.into())],
             None,
         );
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let mut memory: [u8; 4] = [0; 4];
         vmm.read_memory(rax, &mut memory).unwrap();
@@ -438,7 +438,7 @@ mod tests {
             vec![(Register::RAX, rax), (Register::EDI, edi.into())],
             None,
         );
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let mut memory: [u8; 4] = [0; 4];
         vmm.read_memory(rax + displacement, &mut memory).unwrap();
@@ -461,7 +461,7 @@ mod tests {
             vec![(Register::RAX, rax)],
             Some((rax + displacement, &memory)),
         );
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let new_eax = vmm
             .cpu_state(cpu_id)
@@ -486,7 +486,7 @@ mod tests {
             vec![(Register::RAX, rax)],
             Some((rax + displacement, &memory)),
         );
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let new_al = vmm
             .cpu_state(cpu_id)
@@ -511,7 +511,7 @@ mod tests {
             0x48, 0x8b, 0x58, 0x10, // mov rbx, qword ptr [rax+10h]
         ];
         let mut vmm = MockVmm::new(ip, vec![], Some((rax + displacement, &memory)));
-        assert!(vmm.emulate_insn(cpu_id, &insn, Some(2)).is_ok());
+        vmm.emulate_insn(cpu_id, &insn, Some(2)).unwrap();
 
         let rbx: u64 = vmm
             .cpu_state(cpu_id)
@@ -538,7 +538,7 @@ mod tests {
 
         let mut vmm = MockVmm::new(ip, vec![], Some((rax + displacement, &memory)));
         // Only run the first instruction.
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         assert_eq!(ip + 7, vmm.cpu_state(cpu_id).unwrap().ip());
 
@@ -569,7 +569,7 @@ mod tests {
 
         let mut vmm = MockVmm::new(ip, vec![], Some((rax + displacement, &memory)));
         // Run the 2 first instructions.
-        assert!(vmm.emulate_insn(cpu_id, &insn, Some(2)).is_ok());
+        vmm.emulate_insn(cpu_id, &insn, Some(2)).unwrap();
 
         assert_eq!(ip + 7 + 4, vmm.cpu_state(cpu_id).unwrap().ip());
 
@@ -597,7 +597,7 @@ mod tests {
         let cpu_id = 0;
         let insn = [0x0f, 0xb6, 0xc3];
         let mut vmm = MockVmm::new(ip, vec![(Register::BX, bx as u64)], None);
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let eax: u64 = vmm
             .cpu_state(cpu_id)
@@ -615,7 +615,7 @@ mod tests {
         let cpu_id = 0;
         let insn = [0x0f, 0xb6, 0xc7];
         let mut vmm = MockVmm::new(ip, vec![(Register::BX, bx as u64)], None);
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let eax: u64 = vmm
             .cpu_state(cpu_id)
@@ -635,7 +635,7 @@ mod tests {
         let insn = [0x0f, 0xb7, 0x03];
         let memory: [u8; 1] = value.to_le_bytes();
         let mut vmm = MockVmm::new(ip, vec![(Register::RBX, rbx)], Some((rbx, &memory)));
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let eax: u64 = vmm
             .cpu_state(cpu_id)
@@ -680,7 +680,7 @@ mod tests {
 
             let memory: [u8; 8] = mem_value.to_le_bytes();
             let mut vmm = MockVmm::new(ip, vec![], Some((mem_addr, &memory)));
-            assert!(vmm.emulate_first_insn(cpu_id, &instruction_bytes).is_ok());
+            vmm.emulate_first_insn(cpu_id, &instruction_bytes).unwrap();
 
             let ax: u64 = vmm.cpu_state(cpu_id).unwrap().read_reg(register).unwrap();
 
@@ -737,7 +737,7 @@ mod tests {
             ]);
 
             let mut vmm = MockVmm::new(ip, vec![(Register::RAX, ax)], None);
-            assert!(vmm.emulate_first_insn(cpu_id, &instruction_bytes).is_ok());
+            vmm.emulate_first_insn(cpu_id, &instruction_bytes).unwrap();
 
             match register {
                 Register::AX => {

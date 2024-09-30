@@ -1581,7 +1581,7 @@ mod tests {
             None,
             None,
         );
-        assert!(config_err.is_err());
+        config_err.unwrap_err();
 
         // Now assigning some memory that falls before the 32bit memory hole.
         let arch_mem_regions = arch_memory_regions();
@@ -1686,13 +1686,13 @@ mod tests {
         // Exercise the scenario where the field storing the length of the e820 entry table is
         // is bigger than the allocated memory.
         params.e820_entries = params.e820_table.len() as u8 + 1;
-        assert!(add_e820_entry(
+        add_e820_entry(
             &mut params,
             e820_table[0].addr,
             e820_table[0].size,
-            e820_table[0].type_
+            e820_table[0].type_,
         )
-        .is_err());
+        .unwrap_err();
     }
 
     #[test]

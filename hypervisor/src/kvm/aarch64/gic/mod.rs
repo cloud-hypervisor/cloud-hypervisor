@@ -491,7 +491,7 @@ mod tests {
         let hv = crate::new().unwrap();
         let vm = hv.create_vm().unwrap();
 
-        assert!(KvmGicV3Its::new(&*vm, create_test_vgic_config()).is_ok());
+        KvmGicV3Its::new(&*vm, create_test_vgic_config()).unwrap();
     }
 
     #[test]
@@ -501,13 +501,10 @@ mod tests {
         let _ = vm.create_vcpu(0, None).unwrap();
         let gic = KvmGicV3Its::new(&*vm, create_test_vgic_config()).expect("Cannot create gic");
 
-        let res = get_dist_regs(&gic.device);
-        assert!(res.is_ok());
-        let state = res.unwrap();
+        let state = get_dist_regs(&gic.device).unwrap();
         assert_eq!(state.len(), 568);
 
-        let res = set_dist_regs(&gic.device, &state);
-        assert!(res.is_ok());
+        set_dist_regs(&gic.device, &state).unwrap();
     }
 
     #[test]
@@ -518,13 +515,11 @@ mod tests {
         let gic = KvmGicV3Its::new(&*vm, create_test_vgic_config()).expect("Cannot create gic");
 
         let gicr_typer = vec![123];
-        let res = get_redist_regs(&gic.device, &gicr_typer);
-        assert!(res.is_ok());
-        let state = res.unwrap();
+        let state = get_redist_regs(&gic.device, &gicr_typer).unwrap();
         println!("{}", state.len());
         assert!(state.len() == 24);
 
-        assert!(set_redist_regs(&gic.device, &gicr_typer, &state).is_ok());
+        set_redist_regs(&gic.device, &gicr_typer, &state).unwrap();
     }
 
     #[test]
@@ -535,13 +530,11 @@ mod tests {
         let gic = KvmGicV3Its::new(&*vm, create_test_vgic_config()).expect("Cannot create gic");
 
         let gicr_typer = vec![123];
-        let res = get_icc_regs(&gic.device, &gicr_typer);
-        assert!(res.is_ok());
-        let state = res.unwrap();
+        let state = get_icc_regs(&gic.device, &gicr_typer).unwrap();
         println!("{}", state.len());
         assert!(state.len() == 9);
 
-        assert!(set_icc_regs(&gic.device, &gicr_typer, &state).is_ok());
+        set_icc_regs(&gic.device, &gicr_typer, &state).unwrap();
     }
 
     #[test]
@@ -553,6 +546,6 @@ mod tests {
             .create_vgic(create_test_vgic_config())
             .expect("Cannot create gic");
 
-        assert!(gic.lock().unwrap().save_data_tables().is_ok());
+        gic.lock().unwrap().save_data_tables().unwrap();
     }
 }

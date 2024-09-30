@@ -336,7 +336,7 @@ mod tests {
         let mem = GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus) - 1)])
             .unwrap();
 
-        assert!(setup_mptable(MPTABLE_START, &mem, num_cpus, None).is_err());
+        setup_mptable(MPTABLE_START, &mem, num_cpus, None).unwrap_err();
     }
 
     #[test]
@@ -433,6 +433,6 @@ mod tests {
             GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(cpus as u8))]).unwrap();
 
         let result = setup_mptable(MPTABLE_START, &mem, cpus as u8, None);
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 }

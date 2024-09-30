@@ -381,42 +381,44 @@ mod tests {
             .add("topology")
             .add("cmdline");
 
-        assert!(parser.parse("size=128M,hanging_param").is_err());
-        assert!(parser.parse("size=128M,too_many_equals=foo=bar").is_err());
-        assert!(parser.parse("size=128M,file=/dev/shm").is_err());
+        parser.parse("size=128M,hanging_param").unwrap_err();
+        parser
+            .parse("size=128M,too_many_equals=foo=bar")
+            .unwrap_err();
+        parser.parse("size=128M,file=/dev/shm").unwrap_err();
 
-        assert!(parser.parse("size=128M").is_ok());
+        parser.parse("size=128M").unwrap();
         assert_eq!(parser.get("size"), Some("128M".to_owned()));
         assert!(!parser.is_set("mergeable"));
         assert!(parser.is_set("size"));
 
-        assert!(parser.parse("size=128M,mergeable=on").is_ok());
+        parser.parse("size=128M,mergeable=on").unwrap();
         assert_eq!(parser.get("size"), Some("128M".to_owned()));
         assert_eq!(parser.get("mergeable"), Some("on".to_owned()));
 
-        assert!(parser
+        parser
             .parse("size=128M,mergeable=on,topology=[1,2]")
-            .is_ok());
+            .unwrap();
         assert_eq!(parser.get("size"), Some("128M".to_owned()));
         assert_eq!(parser.get("mergeable"), Some("on".to_owned()));
         assert_eq!(parser.get("topology"), Some("[1,2]".to_owned()));
 
-        assert!(parser
+        parser
             .parse("size=128M,mergeable=on,topology=[[1,2],[3,4]]")
-            .is_ok());
+            .unwrap();
         assert_eq!(parser.get("size"), Some("128M".to_owned()));
         assert_eq!(parser.get("mergeable"), Some("on".to_owned()));
         assert_eq!(parser.get("topology"), Some("[[1,2],[3,4]]".to_owned()));
 
-        assert!(parser.parse("topology=[").is_err());
-        assert!(parser.parse("topology=[[[]]]]").is_err());
+        parser.parse("topology=[").unwrap_err();
+        parser.parse("topology=[[[]]]]").unwrap_err();
 
-        assert!(parser.parse("cmdline=\"console=ttyS0,9600n8\"").is_ok());
+        parser.parse("cmdline=\"console=ttyS0,9600n8\"").unwrap();
         assert_eq!(
             parser.get("cmdline"),
             Some("console=ttyS0,9600n8".to_owned())
         );
-        assert!(parser.parse("cmdline=\"").is_err());
-        assert!(parser.parse("cmdline=\"\"\"").is_err());
+        parser.parse("cmdline=\"").unwrap_err();
+        parser.parse("cmdline=\"\"\"").unwrap_err();
     }
 }

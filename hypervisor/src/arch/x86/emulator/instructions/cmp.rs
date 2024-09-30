@@ -220,7 +220,7 @@ mod tests {
         let cpu_id = 0;
         let insn = [0x38, 0xc4]; // cmp ah,al
         let mut vmm = MockVmm::new(ip, vec![(Register::RAX, rax)], None);
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let rflags: u64 = vmm.cpu_state(cpu_id).unwrap().flags() & FLAGS_MASK;
         assert_eq!(0b1000100, rflags);
@@ -234,7 +234,7 @@ mod tests {
         let cpu_id = 0;
         let insn = [0x83, 0xf8, 0x64]; // cmp eax,100
         let mut vmm = MockVmm::new(ip, vec![(Register::RAX, rax)], None);
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let rflags: u64 = vmm.cpu_state(cpu_id).unwrap().flags() & FLAGS_MASK;
         assert_eq!(0b100, rflags);
@@ -248,7 +248,7 @@ mod tests {
         let cpu_id = 0;
         let insn = [0x83, 0xf8, 0xff]; // cmp eax,-1
         let mut vmm = MockVmm::new(ip, vec![(Register::RAX, rax)], None);
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let rflags: u64 = vmm.cpu_state(cpu_id).unwrap().flags() & FLAGS_MASK;
         assert_eq!(0b101, rflags);
@@ -263,7 +263,7 @@ mod tests {
         let cpu_id = 0;
         let insn = [0x48, 0x39, 0xd8, 0x00, 0xc3]; // cmp rax,rbx + two bytes garbage
         let mut vmm = MockVmm::new(ip, vec![(Register::RAX, rax), (Register::RBX, rbx)], None);
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let rflags: u64 = vmm.cpu_state(cpu_id).unwrap().flags() & FLAGS_MASK;
         assert_eq!(0b100, rflags);
@@ -290,7 +290,7 @@ mod tests {
                 vec![(Register::RAX, rax), (Register::RBX, rbx)],
                 None,
             );
-            assert!(vmm.emulate_first_insn(0, &insn).is_ok());
+            vmm.emulate_first_insn(0, &insn).unwrap();
 
             let rflags: u64 = vmm.cpu_state(0).unwrap().flags() & FLAGS_MASK;
             assert_eq!(d.2, rflags);
@@ -318,7 +318,7 @@ mod tests {
                 vec![(Register::RAX, rax), (Register::RBX, rbx)],
                 None,
             );
-            assert!(vmm.emulate_first_insn(0, &insn).is_ok());
+            vmm.emulate_first_insn(0, &insn).unwrap();
 
             let rflags: u64 = vmm.cpu_state(0).unwrap().flags() & FLAGS_MASK;
             assert_eq!(d.2, rflags);

@@ -388,7 +388,7 @@ pub(crate) mod tests {
         // wait the other half of the timer period
         thread::sleep(Duration::from_millis(REFILL_TIMER_INTERVAL_MS / 2));
         // the timer_fd should have an event on it by now
-        assert!(h.event_handler().is_ok());
+        h.event_handler().unwrap();
         // limiter should now be unblocked
         assert!(!h.is_blocked());
         // try and succeed on another 100 bytes this time
@@ -424,7 +424,7 @@ pub(crate) mod tests {
         // wait the other half of the timer period
         thread::sleep(Duration::from_millis(REFILL_TIMER_INTERVAL_MS / 2));
         // the timer_fd should have an event on it by now
-        assert!(h.event_handler().is_ok());
+        h.event_handler().unwrap();
         // limiter should now be unblocked
         assert!(!h.is_blocked());
         // try and succeed on another 100 ops this time
@@ -461,7 +461,7 @@ pub(crate) mod tests {
         // wait the other half of the timer period
         thread::sleep(Duration::from_millis(REFILL_TIMER_INTERVAL_MS / 2));
         // the timer_fd should have an event on it by now
-        assert!(h.event_handler().is_ok());
+        h.event_handler().unwrap();
         // limiter should now be unblocked
         assert!(!h.is_blocked());
         // try and succeed on another 100 ops this time
@@ -491,7 +491,7 @@ pub(crate) mod tests {
         // after 1.5x the replenish time has passed, the rate limiter
         // is available again
         thread::sleep(Duration::from_millis(500));
-        assert!(h.event_handler().is_ok());
+        h.event_handler().unwrap();
         assert!(!h.is_blocked());
 
         // reset the rate limiter
@@ -525,7 +525,7 @@ pub(crate) mod tests {
         // after waiting out the full duration, rate limiter should be
         // available again
         thread::sleep(Duration::from_millis(200));
-        assert!(h.event_handler().is_ok());
+        h.event_handler().unwrap();
         assert!(!h.is_blocked());
         assert!(h.consume(100, TokenType::Bytes));
     }

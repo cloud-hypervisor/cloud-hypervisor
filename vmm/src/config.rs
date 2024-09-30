@@ -3148,8 +3148,8 @@ mod tests {
             }
         );
 
-        assert!(CpusConfig::parse("boot=8,topology=2:2:1").is_err());
-        assert!(CpusConfig::parse("boot=8,topology=2:2:1:x").is_err());
+        CpusConfig::parse("boot=8,topology=2:2:1").unwrap_err();
+        CpusConfig::parse("boot=8,topology=2:2:1:x").unwrap_err();
         assert_eq!(
             CpusConfig::parse("boot=1,kvm_hyperv=on")?,
             CpusConfig {
@@ -3560,9 +3560,9 @@ mod tests {
     #[test]
     fn test_parse_fs() -> Result<()> {
         // "tag" and "socket" must be supplied
-        assert!(FsConfig::parse("").is_err());
-        assert!(FsConfig::parse("tag=mytag").is_err());
-        assert!(FsConfig::parse("socket=/tmp/sock").is_err());
+        FsConfig::parse("").unwrap_err();
+        FsConfig::parse("tag=mytag").unwrap_err();
+        FsConfig::parse("socket=/tmp/sock").unwrap_err();
         assert_eq!(FsConfig::parse("tag=mytag,socket=/tmp/sock")?, fs_fixture());
         assert_eq!(
             FsConfig::parse("tag=mytag,socket=/tmp/sock,num_queues=4,queue_size=1024")?,
@@ -3590,8 +3590,8 @@ mod tests {
     #[test]
     fn test_pmem_parsing() -> Result<()> {
         // Must always give a file and size
-        assert!(PmemConfig::parse("").is_err());
-        assert!(PmemConfig::parse("size=128M").is_err());
+        PmemConfig::parse("").unwrap_err();
+        PmemConfig::parse("size=128M").unwrap_err();
         assert_eq!(
             PmemConfig::parse("file=/tmp/pmem,size=128M")?,
             pmem_fixture()
@@ -3617,8 +3617,8 @@ mod tests {
 
     #[test]
     fn test_console_parsing() -> Result<()> {
-        assert!(ConsoleConfig::parse("").is_err());
-        assert!(ConsoleConfig::parse("badmode").is_err());
+        ConsoleConfig::parse("").unwrap_err();
+        ConsoleConfig::parse("badmode").unwrap_err();
         assert_eq!(
             ConsoleConfig::parse("off")?,
             ConsoleConfig {
@@ -3707,7 +3707,7 @@ mod tests {
     #[test]
     fn test_device_parsing() -> Result<()> {
         // Device must have a path provided
-        assert!(DeviceConfig::parse("").is_err());
+        DeviceConfig::parse("").unwrap_err();
         assert_eq!(
             DeviceConfig::parse("path=/path/to/device")?,
             device_fixture()
@@ -3746,7 +3746,7 @@ mod tests {
     #[test]
     fn test_vdpa_parsing() -> Result<()> {
         // path is required
-        assert!(VdpaConfig::parse("").is_err());
+        VdpaConfig::parse("").unwrap_err();
         assert_eq!(VdpaConfig::parse("path=/dev/vhost-vdpa")?, vdpa_fixture());
         assert_eq!(
             VdpaConfig::parse("path=/dev/vhost-vdpa,num_queues=2,id=my_vdpa")?,
@@ -3762,7 +3762,7 @@ mod tests {
     #[test]
     fn test_tpm_parsing() -> Result<()> {
         // path is required
-        assert!(TpmConfig::parse("").is_err());
+        TpmConfig::parse("").unwrap_err();
         assert_eq!(
             TpmConfig::parse("socket=/var/run/tpm.sock")?,
             TpmConfig {
@@ -3775,7 +3775,7 @@ mod tests {
     #[test]
     fn test_vsock_parsing() -> Result<()> {
         // socket and cid is required
-        assert!(VsockConfig::parse("").is_err());
+        VsockConfig::parse("").unwrap_err();
         assert_eq!(
             VsockConfig::parse("socket=/tmp/sock,cid=3")?,
             VsockConfig {
@@ -3831,7 +3831,7 @@ mod tests {
             }
         );
         // Parsing should fail as source_url is a required field
-        assert!(RestoreConfig::parse("prefault=off").is_err());
+        RestoreConfig::parse("prefault=off").unwrap_err();
         Ok(())
     }
 
@@ -3909,7 +3909,7 @@ mod tests {
                 },
             ]),
         };
-        assert!(valid_config.validate(&snapshot_vm_config).is_ok());
+        valid_config.validate(&snapshot_vm_config).unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.net_fds = Some(vec![RestoredNetConfig {
@@ -3977,7 +3977,7 @@ mod tests {
             fds: None,
             ..net_fixture()
         }]);
-        assert!(another_valid_config.validate(&snapshot_vm_config).is_ok());
+        another_valid_config.validate(&snapshot_vm_config).unwrap();
     }
 
     fn platform_fixture() -> PlatformConfig {
@@ -4085,12 +4085,12 @@ mod tests {
             landlock_rules: None,
         };
 
-        assert!(valid_config.validate().is_ok());
+        valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.serial.mode = ConsoleOutputMode::Tty;
         invalid_config.console.mode = ConsoleOutputMode::Tty;
-        assert!(valid_config.validate().is_ok());
+        valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.payload = None;
@@ -4172,7 +4172,7 @@ mod tests {
             ..disk_fixture()
         }]);
         still_valid_config.memory.shared = true;
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.net = Some(vec![NetConfig {
@@ -4191,7 +4191,7 @@ mod tests {
             ..net_fixture()
         }]);
         still_valid_config.memory.shared = true;
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.net = Some(vec![NetConfig {
@@ -4222,16 +4222,16 @@ mod tests {
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.memory.shared = true;
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.memory.hugepages = true;
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.memory.hugepages = true;
         still_valid_config.memory.hugepage_size = Some(2 << 20);
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.memory.hugepages = false;
@@ -4251,7 +4251,7 @@ mod tests {
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(platform_fixture());
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
@@ -4270,7 +4270,7 @@ mod tests {
             iommu_segments: Some(vec![1, 2, 3]),
             ..platform_fixture()
         });
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
@@ -4292,7 +4292,7 @@ mod tests {
             pci_segment: 1,
             ..disk_fixture()
         }]);
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
@@ -4304,7 +4304,7 @@ mod tests {
             pci_segment: 1,
             ..net_fixture()
         }]);
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
@@ -4316,7 +4316,7 @@ mod tests {
             pci_segment: 1,
             ..pmem_fixture()
         }]);
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
@@ -4328,7 +4328,7 @@ mod tests {
             pci_segment: 1,
             ..device_fixture()
         }]);
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
@@ -4342,7 +4342,7 @@ mod tests {
             iommu: true,
             pci_segment: 1,
         });
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
@@ -4568,7 +4568,7 @@ mod tests {
                 ..device_fixture()
             },
         ]);
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.devices = Some(vec![
@@ -4581,7 +4581,7 @@ mod tests {
                 ..device_fixture()
             },
         ]);
-        assert!(invalid_config.validate().is_err());
+        invalid_config.validate().unwrap_err();
         #[cfg(feature = "sev_snp")]
         {
             // Payload with empty host data
@@ -4596,7 +4596,7 @@ mod tests {
                 #[cfg(feature = "sev_snp")]
                 host_data: Some("".to_string()),
             });
-            assert!(config_with_no_host_data.validate().is_err());
+            config_with_no_host_data.validate().unwrap_err();
 
             // Payload with no host data provided
             let mut valid_config_with_no_host_data = valid_config.clone();
@@ -4610,7 +4610,7 @@ mod tests {
                 #[cfg(feature = "sev_snp")]
                 host_data: None,
             });
-            assert!(valid_config_with_no_host_data.validate().is_ok());
+            valid_config_with_no_host_data.validate().unwrap();
 
             // Payload with invalid host data length i.e less than 64
             let mut config_with_invalid_host_data = valid_config.clone();
@@ -4626,7 +4626,7 @@ mod tests {
                     "243eb7dc1a21129caa91dcbb794922b933baecb5823a377eb43118867328".to_string(),
                 ),
             });
-            assert!(config_with_invalid_host_data.validate().is_err());
+            config_with_invalid_host_data.validate().unwrap_err();
         }
 
         let mut still_valid_config = valid_config;
@@ -4643,10 +4643,10 @@ mod tests {
     #[test]
     fn test_landlock_parsing() -> Result<()> {
         // should not be empty
-        assert!(LandlockConfig::parse("").is_err());
+        LandlockConfig::parse("").unwrap_err();
         // access should not be empty
-        assert!(LandlockConfig::parse("path=/dir/path1").is_err());
-        assert!(LandlockConfig::parse("path=/dir/path1,access=rwr").is_err());
+        LandlockConfig::parse("path=/dir/path1").unwrap_err();
+        LandlockConfig::parse("path=/dir/path1,access=rwr").unwrap_err();
         assert_eq!(
             LandlockConfig::parse("path=/dir/path1,access=rw")?,
             LandlockConfig {

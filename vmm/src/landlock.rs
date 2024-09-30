@@ -36,6 +36,7 @@ pub enum LandlockError {
 // https://docs.rs/landlock/latest/landlock/enum.ABI.html for more info on ABI
 static ABI: ABI = ABI::V3;
 
+#[derive(Debug)]
 pub(crate) struct LandlockAccess {
     access: BitFlags<AccessFs>,
 }
@@ -150,5 +151,5 @@ fn test_try_from_access() {
     let landlock_access = LandlockAccess::try_from("w").unwrap();
     assert!(landlock_access.access == write_access);
 
-    assert!(LandlockAccess::try_from("").is_err());
+    LandlockAccess::try_from("").unwrap_err();
 }

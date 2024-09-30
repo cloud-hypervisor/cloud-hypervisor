@@ -628,7 +628,7 @@ mod tests {
             let ctx = test_ctx.create_epoll_handler_context();
 
             let _queue: Queue = Queue::new(256).unwrap();
-            assert!(ctx.handler.signal_used_queue(0).is_ok());
+            ctx.handler.signal_used_queue(0).unwrap();
         }
     }
 
@@ -711,10 +711,9 @@ mod tests {
             let mut epoll_helper =
                 EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
 
-            assert!(
-                ctx.handler.handle_event(&mut epoll_helper, &event).is_err(),
-                "handle_event() should have failed"
-            );
+            ctx.handler
+                .handle_event(&mut epoll_helper, &event)
+                .expect_err("handle_event() should have failed");
         }
     }
 
@@ -764,7 +763,7 @@ mod tests {
             ctx.guest_rxvq.dtable[0].len.set(0);
 
             // The chain should've been processed, without employing the backend.
-            assert!(ctx.handler.process_rx().is_ok());
+            ctx.handler.process_rx().unwrap();
             assert_eq!(ctx.guest_rxvq.used.idx.get(), 1);
             assert_eq!(ctx.handler.backend.read().unwrap().rx_ok_cnt, 0);
         }
@@ -781,10 +780,9 @@ mod tests {
                 EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
 
             assert_eq!(ctx.guest_rxvq.used.idx.get(), 0);
-            assert!(
-                ctx.handler.handle_event(&mut epoll_helper, &event).is_err(),
-                "handle_event() should have failed"
-            );
+            ctx.handler
+                .handle_event(&mut epoll_helper, &event)
+                .expect_err("handle_event() should have failed");
         }
     }
 
@@ -802,10 +800,10 @@ mod tests {
                 EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
 
             assert_eq!(ctx.guest_evvq.used.idx.get(), 0);
-            assert!(
-                ctx.handler.handle_event(&mut epoll_helper, &event).is_err(),
-                "handle_event() should have failed"
-            );
+
+            ctx.handler
+                .handle_event(&mut epoll_helper, &event)
+                .expect_err("handle_event() should have failed");
         }
     }
 
@@ -824,7 +822,7 @@ mod tests {
             let event = epoll::Event::new(events, BACKEND_EVENT as u64);
             let mut epoll_helper =
                 EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
-            assert!(ctx.handler.handle_event(&mut epoll_helper, &event).is_ok());
+            ctx.handler.handle_event(&mut epoll_helper, &event).unwrap();
 
             // The backend should've received this event.
             assert_eq!(
@@ -850,7 +848,7 @@ mod tests {
             let event = epoll::Event::new(events, BACKEND_EVENT as u64);
             let mut epoll_helper =
                 EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
-            assert!(ctx.handler.handle_event(&mut epoll_helper, &event).is_ok());
+            ctx.handler.handle_event(&mut epoll_helper, &event).unwrap();
 
             // The backend should've received this event.
             assert_eq!(
@@ -874,9 +872,8 @@ mod tests {
         let mut epoll_helper =
             EpollHelper::new(&ctx.handler.kill_evt, &ctx.handler.pause_evt).unwrap();
 
-        assert!(
-            ctx.handler.handle_event(&mut epoll_helper, &event).is_err(),
-            "handle_event() should have failed"
-        );
+        ctx.handler
+            .handle_event(&mut epoll_helper, &event)
+            .expect_err("handle_event() should have failed");
     }
 }
