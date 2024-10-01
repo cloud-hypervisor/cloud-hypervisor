@@ -48,7 +48,7 @@ tracer = { path = "tracer" }
 vm-memory = { workspace = true }
 vmm = { path = "vmm" }
 vmm-sys-util = { workspace = true }
-zbus = { version = "4.1.2", optional = true }
+zbus = { version = "4.4.0", optional = true }
 
 [dev-dependencies]
 dirs = "5.0.1"
