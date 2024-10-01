@@ -781,26 +781,26 @@ pub struct AcpiPlatformAddresses {
     pub sleep_status_reg_address: Option<GenericAddress>,
 }
 
-#[cfg(all(feature = "mshv", feature = "sev_snp"))]
+#[cfg(feature = "sev_snp")]
 struct SevSnpPageAccessProxy {
     vm: Arc<dyn hypervisor::Vm>,
 }
 
-#[cfg(all(feature = "mshv", feature = "sev_snp"))]
+#[cfg(feature = "sev_snp")]
 impl std::fmt::Debug for SevSnpPageAccessProxy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "SNP Page access proxy")
     }
 }
 
-#[cfg(all(feature = "mshv", feature = "sev_snp"))]
+#[cfg(feature = "sev_snp")]
 impl SevSnpPageAccessProxy {
     fn new(vm: Arc<dyn hypervisor::Vm>) -> SevSnpPageAccessProxy {
         SevSnpPageAccessProxy { vm }
     }
 }
 
-#[cfg(all(feature = "mshv", feature = "sev_snp"))]
+#[cfg(feature = "sev_snp")]
 impl AccessPlatform for SevSnpPageAccessProxy {
     fn translate_gpa(&self, base: u64, _size: u64) -> std::result::Result<u64, std::io::Error> {
         Ok(base)
