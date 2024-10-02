@@ -1,0 +1,54 @@
+name: Cloud Hypervisor Tests (ARM64)
+on: [pull_request, merge_group]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    timeout-minutes: 60
+    name: Tests (ARM64)
+    runs-on: bookworm-arm64
+    steps:
+      - name: Fix workspace permissions
+        run: sudo chown -R runner:runner ${GITHUB_WORKSPACE}
+      - name: Code checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run unit tests (musl)
+        run: scripts/dev_cli.sh tests --unit --libc musl
+      - name: Load openvswitch module
+        run: sudo modprobe openvswitch
+      - name: Run integration tests (musl)
+        timeout-minutes: 30
+        run: scripts/dev_cli.sh tests --integration --libc musl
+      - name: Install Azure CLI
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg
+          curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
+          echo "deb [arch=arm64] https://packages.microsoft.com/repos/azure-cli/ bookworm main" | sudo tee /etc/apt/sources.list.d/azure-cli.list
+          sudo apt update
+          sudo apt install -y azure-cli
+      - name: Download Windows image
+        if: ${{ github.event_name != 'pull_request' }}
+        shell: bash
+        run: |
+          IMG_BASENAME=windows-11-iot-enterprise-aarch64.raw
+          IMG_PATH=$HOME/workloads/$IMG_BASENAME
+          IMG_GZ_PATH=$HOME/workloads/$IMG_BASENAME.gz
+          IMG_GZ_BLOB_NAME=windows-11-iot-enterprise-aarch64-9-min.raw.gz
+          cp "scripts/$IMG_BASENAME.sha1" "$HOME/workloads/"
+          pushd "$HOME/workloads"
+          if sha1sum "$IMG_BASENAME.sha1" --check; then
+              exit
+          fi
+          popd
+          mkdir -p "$HOME/workloads"
+          az storage blob download --container-name private-images --file "$IMG_GZ_PATH" --name "$IMG_GZ_BLOB_NAME" --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
+          gzip -d $IMG_GZ_PATH
+      - name: Run Windows guest integration tests
+        if: ${{ github.event_name != 'pull_request' }}
+        timeout-minutes: 30
+        run: scripts/dev_cli.sh tests --integration-windows --libc musl
