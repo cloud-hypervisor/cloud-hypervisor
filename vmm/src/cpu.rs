@@ -3009,7 +3009,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(
             format!("{}", res.unwrap_err()),
-            "Failed to get core register: Exec format error (os error 8)"
+            "Failed to get aarch64 core register: Exec format error (os error 8)"
         );
 
         let mut state = vcpu.create_standard_regs();
@@ -3017,7 +3017,7 @@ mod tests {
         assert!(res.is_err());
         assert_eq!(
             format!("{}", res.unwrap_err()),
-            "Failed to set core register: Exec format error (os error 8)"
+            "Failed to set aarch64 core register: Exec format error (os error 8)"
         );
 
         vcpu.vcpu_init(&kvi).unwrap();
