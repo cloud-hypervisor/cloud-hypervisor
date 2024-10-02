@@ -418,6 +418,13 @@ impl KvmVm {
 /// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
 /// ```
 impl vm::Vm for KvmVm {
+    #[cfg(feature = "sev_snp")]
+    fn sev_snp_init(&self, guest_policy: igvm_defs::SnpPolicy) -> vm::Result<()> {
+        info!("Calling KVM_SEV_SNP_LAUNCH_START");
+        self.sev_fd
+            .launch_start(&self.fd, guest_policy)
+            .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
+    }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the address of the one-page region in the VM's address space.
@@ -1082,7 +1089,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
                 #[cfg(feature = "sev_snp")]
                 sev_fd: x86_64::sev::SevFd::new(&std::env::var("SEV_DEVICE_PATH").unwrap())
-                    .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilitis(e.into()))?,
+                    .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilities(e.into()))?,
             }))
         }
 

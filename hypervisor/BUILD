@@ -56,6 +56,7 @@ rust_library(
         "@crates//:thiserror",
         "@crates//:vm-memory",
         "@crates//:vmm-sys-util",
+        "@crates//:igvm_defs",
         "@vfio//crates/vfio-ioctls",
     ],
 )
@@ -104,6 +105,7 @@ rust_test(
         "@crates//:log",
         "@crates//:serde",
         "@crates//:serde_with",
+        "@crates//:igvm_defs",
         "@crates//:thiserror",
         "@crates//:vm-memory",
         "@crates//:vmm-sys-util",

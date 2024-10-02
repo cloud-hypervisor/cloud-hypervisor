@@ -1918,7 +1918,8 @@ impl vm::Vm for MshvVm {
 
     /// Initialize the SEV-SNP VM
     #[cfg(feature = "sev_snp")]
-    fn sev_snp_init(&self) -> vm::Result<()> {
+    fn sev_snp_init(&self, guest_policy: igvm_defs::SnpPolicy) -> vm::Result<()> {
+
         self.fd
             .set_partition_property(
                 hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_STATE,

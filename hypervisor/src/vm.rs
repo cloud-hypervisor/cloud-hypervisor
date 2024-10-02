@@ -20,7 +20,7 @@ use crate::ClockData;
 use crate::UserMemoryRegion;
 use crate::{IoEventAddress, IrqRoutingEntry};
 #[cfg(feature = "sev_snp")]
-use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
+use igvm_defs::{SnpPolicy, IGVM_VHS_SNP_ID_BLOCK};
 use std::any::Any;
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
@@ -354,7 +354,7 @@ pub trait Vm: Send + Sync + Any {
     fn get_dirty_log(&self, slot: u32, base_gpa: u64, memory_size: u64) -> Result<Vec<u64>>;
     #[cfg(feature = "sev_snp")]
     /// Initialize SEV-SNP on this VM
-    fn sev_snp_init(&self) -> Result<()> {
+    fn sev_snp_init(&self, guest_policy: SnpPolicy) -> Result<()> {
         unimplemented!()
     }
     #[cfg(feature = "tdx")]

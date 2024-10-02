@@ -59,6 +59,8 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 use hypervisor::{HypervisorVmError, VmOps};
+#[cfg(feature = "sev_snp")]
+use igvm_defs::SnpPolicy;
 use libc::{termios, SIGWINCH};
 use linux_loader::cmdline::Cmdline;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -480,6 +482,15 @@ pub struct Vm {
 impl Vm {
     pub const HANDLED_SIGNALS: [i32; 1] = [SIGWINCH];
 
+    #[cfg(feature = "sev_snp")]
+    pub fn get_default_sev_snp_guest_policy() -> igvm_defs::SnpPolicy {
+        SnpPolicy::new().with_abi_minor(0)
+        .with_abi_major(0)
+        .with_smt(1)
+        .with_reserved_must_be_one(1)
+        .with_migrate_ma(0)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
@@ -615,9 +626,10 @@ impl Vm {
         // This initial SEV-SNP configuration must be done immediately after
         // vCPUs are created. As part of this initialization we are
         // transitioning the guest into secure state.
-        #[cfg(feature = "sev_snp")]
+        // TODO(b/123456) Add logic to either read from igvm or get the default (for now just default)
+        #[cfg(all(feature = "sev_snp"))]
         if sev_snp_enabled {
-            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
+            vm.sev_snp_init(Vm::get_default_sev_snp_guest_policy()).map_err(Error::InitializeSevSnpVm)?;
         }
 
         #[cfg(feature = "tdx")]
