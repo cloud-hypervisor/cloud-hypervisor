@@ -143,7 +143,7 @@ download_linux() {
     fi
     pushd "$WORKLOADS_DIR" || exit
     for url in $KERNEL_URLS; do
-        wget --quiet "$url" || exit 1
+        wget -N --quiet "$url" || exit 1
     done
 
     popd || exit
