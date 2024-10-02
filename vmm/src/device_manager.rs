@@ -3857,29 +3857,33 @@ impl DeviceManager {
     ) -> DeviceManagerResult<(u16, PciBdf, Option<Vec<Resource>>)> {
         // Look for the id in the device tree. If it can be found, that means
         // the device is being restored, otherwise it's created from scratch.
-        Ok(
+        let (pci_device_bdf, resources) =
             if let Some(node) = self.device_tree.lock().unwrap().get(id) {
                 info!("Restoring virtio-pci {} resources", id);
                 let pci_device_bdf: PciBdf = node
                     .pci_bdf
                     .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
-                let pci_segment_id = pci_device_bdf.segment();
-
-                self.pci_segments[pci_segment_id as usize]
-                    .pci_bus
-                    .lock()
-                    .unwrap()
-                    .get_device_id(pci_device_bdf.device() as usize)
-                    .map_err(DeviceManagerError::GetPciDeviceId)?;
-
-                (pci_segment_id, pci_device_bdf, Some(node.resources.clone()))
+                (Some(pci_device_bdf), Some(node.resources.clone()))
             } else {
-                let pci_device_bdf =
-                    self.pci_segments[pci_segment_id as usize].next_device_bdf()?;
+                (None, None)
+            };
 
-                (pci_segment_id, pci_device_bdf, None)
-            },
-        )
+        Ok(if let Some(pci_device_bdf) = pci_device_bdf {
+            let pci_segment_id = pci_device_bdf.segment();
+
+            self.pci_segments[pci_segment_id as usize]
+                .pci_bus
+                .lock()
+                .unwrap()
+                .get_device_id(pci_device_bdf.device() as usize)
+                .map_err(DeviceManagerError::GetPciDeviceId)?;
+
+            (pci_segment_id, pci_device_bdf, resources)
+        } else {
+            let pci_device_bdf = self.pci_segments[pci_segment_id as usize].next_device_bdf()?;
+
+            (pci_segment_id, pci_device_bdf, None)
+        })
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -4098,30 +4102,34 @@ impl DeviceManager {
             .put_device_id(device_id as usize)
             .map_err(DeviceManagerError::PutPciDeviceId)?;
 
-        // Remove the device from the device tree along with its children.
-        let mut device_tree = self.device_tree.lock().unwrap();
-        let pci_device_node = device_tree
-            .remove_node_by_pci_bdf(pci_device_bdf)
-            .ok_or(DeviceManagerError::MissingPciDevice)?;
+        let (pci_device_handle, id) = {
+            // Remove the device from the device tree along with its children.
+            let mut device_tree = self.device_tree.lock().unwrap();
+            let pci_device_node = device_tree
+                .remove_node_by_pci_bdf(pci_device_bdf)
+                .ok_or(DeviceManagerError::MissingPciDevice)?;
 
-        // For VFIO and vfio-user the PCI device id is the id.
-        // For virtio we overwrite it later as we want the id of the
-        // underlying device.
-        let mut id = pci_device_node.id;
-        let pci_device_handle = pci_device_node
-            .pci_device_handle
-            .ok_or(DeviceManagerError::MissingPciDevice)?;
-        if matches!(pci_device_handle, PciDeviceHandle::Virtio(_)) {
-            // The virtio-pci device has a single child
-            if !pci_device_node.children.is_empty() {
-                assert_eq!(pci_device_node.children.len(), 1);
-                let child_id = &pci_device_node.children[0];
-                id.clone_from(child_id);
+            // For VFIO and vfio-user the PCI device id is the id.
+            // For virtio we overwrite it later as we want the id of the
+            // underlying device.
+            let mut id = pci_device_node.id;
+            let pci_device_handle = pci_device_node
+                .pci_device_handle
+                .ok_or(DeviceManagerError::MissingPciDevice)?;
+            if matches!(pci_device_handle, PciDeviceHandle::Virtio(_)) {
+                // The virtio-pci device has a single child
+                if !pci_device_node.children.is_empty() {
+                    assert_eq!(pci_device_node.children.len(), 1);
+                    let child_id = &pci_device_node.children[0];
+                    id.clone_from(child_id);
+                }
             }
-        }
-        for child in pci_device_node.children.iter() {
-            device_tree.remove(child);
-        }
+            for child in pci_device_node.children.iter() {
+                device_tree.remove(child);
+            }
+
+            (pci_device_handle, id)
+        };
 
         let mut iommu_attached = false;
         if let Some((_, iommu_attached_devices)) = &self.iommu_attached_devices {
