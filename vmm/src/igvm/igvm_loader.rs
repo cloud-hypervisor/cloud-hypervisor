@@ -3,6 +3,7 @@
 // Copyright © 2023, Microsoft Corporation
 //
 use crate::cpu::CpuManager;
+use igvm::IgvmInitializationHeader;
 use zerocopy::AsBytes;
 
 use crate::igvm::{
@@ -125,6 +126,31 @@ fn import_parameter(
 
     parameter_area[offset..end_of_parameter].copy_from_slice(parameter);
     Ok(())
+}
+
+#[cfg(feature = "sev_snp")]
+///
+/// This gets the sev_snp guest policy from the IGVM configuration file
+///
+pub fn get_sev_snp_guest_policy(
+    mut file: &std::fs::File,
+    guest_compatibility_mask: u32,
+) -> Result<igvm_defs::SnpPolicy, Error> {
+    let mut file_contents = Vec::new();
+    file.seek(SeekFrom::Start(0)).map_err(Error::Igvm)?;
+    file.read_to_end(&mut file_contents).map_err(Error::Igvm)?;
+
+    let igvm_file = IgvmFile::new_from_binary(&file_contents, Some(IsolationType::Snp))
+        .map_err(Error::InvalidIgvmFile)?;
+
+    for init in igvm_file.initializations() {
+        if let IgvmInitializationHeader::GuestPolicy {policy, compatibility_mask} = init {
+            if guest_compatibility_mask == *compatibility_mask {
+                return Ok(igvm_defs::SnpPolicy::from_bits(*policy));
+            }
+        }
+    }
+    Err(Error::Igvm(std::io::Error::last_os_error()))
 }
 
 ///
