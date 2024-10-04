@@ -47,6 +47,8 @@ use std::sync::Mutex;
 use std::sync::{Arc, RwLock};
 use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
+#[cfg(feature = "sev_snp")]
+use x86_64::sev;
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
@@ -485,6 +487,42 @@ impl vm::Vm for KvmVm {
             .launch_start(&self.fd, guest_policy)
             .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
     }
+
+    #[cfg(feature = "sev_snp")]
+    fn import_isolated_pages(
+        &self,
+        page_type: u32,
+        page_size: u32,
+        // host page frame numbers
+        pfns: &[u64],
+        uaddrs: &[u64],
+    ) -> vm::Result<()> {
+        assert_eq!(pfns.len(), uaddrs.len());
+        if pfns.is_empty() {
+            return Ok(());
+        }
+        // VMSA pages are not supported by launch_update (https://tinyurl.com/vmsa-page-type)
+        if page_type == sev::SEV_VMSA_PAGE_TYPE {
+            // TODO(): investigate where vmsa pages are encrypted
+            return Ok(());
+        }
+        for (pfn, uaddr) in pfns.iter().zip(uaddrs.iter()) {
+            self.fd
+                .set_memory_attributes(kvm_bindings::kvm_memory_attributes {
+                    address: *pfn << sev::GPA_METADATA_PADDING,
+                    size: page_size as u64,
+                    attributes: kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
+                    ..Default::default()
+                })
+                .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
+            self.sev_fd
+                .launch_update(&self.fd, *uaddr, page_size as u64, *pfn, page_type)
+                .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
+        }
+
+        Ok(())
+    }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the address of the one-page region in the VM's address space.
