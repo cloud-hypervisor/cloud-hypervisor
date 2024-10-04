@@ -2,7 +2,7 @@
 //
 // Copyright © 2023, Microsoft Corporation
 //
-use crate::igvm::{BootPageAcceptance, StartupMemoryType, HV_PAGE_SIZE};
+use crate::igvm::{BootPageAcceptance, StartupMemoryType};
 use range_map_vec::{Entry, RangeMap};
 use thiserror::Error;
 use vm_memory::bitmap::AtomicBitmap;
@@ -10,6 +10,7 @@ use vm_memory::{
     Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestMemoryMmap,
     GuestMemoryRegion,
 };
+use crate::HV_PAGE_SIZE;
 
 /// Structure to hold the guest memory info/layout to check
 /// the if the memory is accepted within the layout.

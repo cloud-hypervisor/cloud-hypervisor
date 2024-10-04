@@ -62,6 +62,8 @@ pub use vm::{
     Vm, VmOps,
 };
 
+pub const HV_PAGE_SIZE: u64 = 4096;
+
 #[derive(Debug, Copy, Clone)]
 pub enum HypervisorType {
     #[cfg(feature = "kvm")]

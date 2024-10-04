@@ -858,7 +858,8 @@ impl CpuManager {
         if self.sev_snp_enabled {
             if let Some((kernel_entry_point, _)) = boot_setup {
                 vcpu.set_sev_control_register(
-                    kernel_entry_point.entry_addr.0 / crate::igvm::HV_PAGE_SIZE,
+                    // TODO(b/372004040) Implement support for different page sizes
+                    kernel_entry_point.entry_addr.0 / crate::HV_PAGE_SIZE,
                 )?;
             }
 

@@ -354,7 +354,7 @@ pub trait Vm: Send + Sync + Any {
     fn get_dirty_log(&self, slot: u32, base_gpa: u64, memory_size: u64) -> Result<Vec<u64>>;
     #[cfg(feature = "sev_snp")]
     /// Initialize SEV-SNP on this VM
-    fn sev_snp_init(&self, guest_policy: SnpPolicy) -> Result<()> {
+    fn sev_snp_init(&self, _guest_policy: SnpPolicy) -> Result<()> {
         unimplemented!()
     }
     #[cfg(feature = "tdx")]

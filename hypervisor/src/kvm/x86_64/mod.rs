@@ -8,6 +8,7 @@
 //
 //
 
+#[cfg(feature = "sev_snp")]
 pub(crate) mod sev;
 
 use crate::arch::x86::{

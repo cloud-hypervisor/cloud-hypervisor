@@ -6,7 +6,7 @@ use crate::cpu::CpuManager;
 use zerocopy::AsBytes;
 
 use crate::igvm::{
-    loader::Loader, BootPageAcceptance, IgvmLoadedInfo, StartupMemoryType, HV_PAGE_SIZE,
+    loader::Loader, BootPageAcceptance, IgvmLoadedInfo, StartupMemoryType,
 };
 use crate::memory_manager::MemoryManager;
 use igvm::{snp_defs::SevVmsa, IgvmDirectiveHeader, IgvmFile, IgvmPlatformHeader, IsolationType};
@@ -22,6 +22,8 @@ use std::io::SeekFrom;
 use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
+
+use crate::HV_PAGE_SIZE;
 
 #[cfg(feature = "sev_snp")]
 use crate::GuestMemoryMmap;
