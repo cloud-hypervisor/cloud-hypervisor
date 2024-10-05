@@ -7016,7 +7016,7 @@ mod common_parallel {
         let mut guest_cmd = GuestCommand::new(&guest);
         guest_cmd
             .args(["--cpus", "boot=1"])
-            .args(["--memory", "size=512M"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args(["--tpm", &format!("socket={swtpm_socket_path}")])
             .capture_output()
