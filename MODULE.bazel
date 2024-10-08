@@ -128,11 +128,11 @@ crate.spec(
 crate.spec(
     package = "kvm-bindings",
     features = ["serde"],
-    version = "0.8.1",
+    version = "0.9.1",
 )
 crate.spec(
     package = "kvm-ioctls",
-    version = "0.17.0",
+    version = "0.18.0",
 )
 crate.spec(
     package = "landlock",
