@@ -216,6 +216,16 @@ pub enum HypervisorCpuError {
     #[error("Failed to set aarch64 core register: {0}")]
     SetAarchCoreRegister(#[source] anyhow::Error),
     ///
+    /// Getting RISC-V 64-bit core register error
+    ///
+    #[error("Failed to get riscv64 core register: {0}")]
+    GetRiscvCoreRegister(#[source] anyhow::Error),
+    ///
+    /// Setting RISC-V 64-bit core register error
+    ///
+    #[error("Failed to set riscv64 core register: {0}")]
+    SetRiscvCoreRegister(#[source] anyhow::Error),
+    ///
     /// Getting registers list error
     ///
     #[error("Failed to retrieve list of registers: {0}")]
@@ -230,6 +240,16 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to set system register: {0}")]
     SetSysRegister(#[source] anyhow::Error),
+    ///
+    /// Getting RISC-V 64-bit non-core register error
+    ///
+    #[error("Failed to get non-core register: {0}")]
+    GetNonCoreRegister(#[source] anyhow::Error),
+    ///
+    /// Setting RISC-V 64-bit non-core register error
+    ///
+    #[error("Failed to set non-core register: {0}")]
+    SetNonCoreRegister(#[source] anyhow::Error),
     ///
     /// GVA translation error
     ///
