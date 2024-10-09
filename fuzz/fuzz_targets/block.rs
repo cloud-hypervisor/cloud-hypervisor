@@ -11,6 +11,7 @@
 use block::{async_io::DiskFile, raw_sync::RawFileDiskSync};
 use libfuzzer_sys::fuzz_target;
 use seccompiler::SeccompAction;
+use std::collections::BTreeMap;
 use std::ffi;
 use std::fs::File;
 use std::io;
@@ -21,7 +22,6 @@ use virtio_devices::{Block, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{bitmap::AtomicBitmap, Bytes, GuestAddress, GuestMemoryAtomic};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
-use std::collections::BTreeMap;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 

@@ -3,12 +3,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #![no_main]
+use block::vhdx::Vhdx;
 use libfuzzer_sys::fuzz_target;
 use std::ffi;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::io::{FromRawFd, RawFd};
-use block::vhdx::Vhdx;
 
 // Populate the corpus directory with a test file:
 // truncate -s 16M /tmp/source

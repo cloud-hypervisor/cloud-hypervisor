@@ -25,10 +25,7 @@ use crate::HypervisorType;
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset_of};
 #[cfg(feature = "sev_snp")]
-use kvm_bindings::{
-    KVM_MEMORY_ATTRIBUTE_PRIVATE,
-    kvm_memory_attributes
-};
+use kvm_bindings::{kvm_memory_attributes, KVM_MEMORY_ATTRIBUTE_PRIVATE};
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use std::any::Any;
 use std::collections::HashMap;
@@ -805,14 +802,14 @@ impl vm::Vm for KvmVm {
         #[cfg(feature = "sev_snp")]
         // TODO(b/369607475): check if all pages have to be private for SNP guests, including VFIO
         if self.kvm_guest_memfd_supported {
-            self.fd.set_memory_attributes(
-                kvm_memory_attributes {
+            self.fd
+                .set_memory_attributes(kvm_memory_attributes {
                     address: region.guest_phys_addr,
                     size: region.memory_size,
                     attributes: KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
                     flags: 0,
-                }
-            ).map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
+                })
+                .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
         }
         Ok(())
     }

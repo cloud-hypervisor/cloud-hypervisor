@@ -47,6 +47,7 @@ rust_library(
     deps = [
         "@crates//:anyhow",
         "@crates//:byteorder",
+        "@crates//:igvm_defs",
         "@crates//:kvm-bindings",
         "@crates//:kvm-ioctls",
         "@crates//:libc",
@@ -56,7 +57,6 @@ rust_library(
         "@crates//:thiserror",
         "@crates//:vm-memory",
         "@crates//:vmm-sys-util",
-        "@crates//:igvm_defs",
         "@vfio//crates/vfio-ioctls",
     ],
 )
@@ -100,13 +100,13 @@ rust_test(
     deps = [
         "@crates//:anyhow",
         "@crates//:byteorder",
+        "@crates//:igvm_defs",
         "@crates//:kvm-bindings",
         "@crates//:kvm-ioctls",
         "@crates//:libc",
         "@crates//:log",
         "@crates//:serde",
         "@crates//:serde_with",
-        "@crates//:igvm_defs",
         "@crates//:thiserror",
         "@crates//:vm-memory",
         "@crates//:vmm-sys-util",

@@ -7,9 +7,7 @@ use igvm::IgvmInitializationHeader;
 use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory};
 use zerocopy::AsBytes;
 
-use crate::igvm::{
-    loader::Loader, BootPageAcceptance, IgvmLoadedInfo, StartupMemoryType,
-};
+use crate::igvm::{loader::Loader, BootPageAcceptance, IgvmLoadedInfo, StartupMemoryType};
 use crate::memory_manager::MemoryManager;
 use igvm::{snp_defs::SevVmsa, IgvmDirectiveHeader, IgvmFile, IgvmPlatformHeader, IsolationType};
 use igvm_defs::{
@@ -145,7 +143,11 @@ pub fn get_sev_snp_guest_policy(
         .map_err(Error::InvalidIgvmFile)?;
 
     for init in igvm_file.initializations() {
-        if let IgvmInitializationHeader::GuestPolicy {policy, compatibility_mask} = init {
+        if let IgvmInitializationHeader::GuestPolicy {
+            policy,
+            compatibility_mask,
+        } = init
+        {
             if guest_compatibility_mask == *compatibility_mask {
                 return Ok(igvm_defs::SnpPolicy::from_bits(*policy));
             }
@@ -484,13 +486,16 @@ pub fn load_igvm(
                 .map(|gpa| gpa.gpa >> HV_HYP_PAGE_SHIFT)
                 .collect();
             let guest_memory = memory_manager.lock().unwrap().guest_memory().memory();
-            let uaddrs: Vec<_> = group.iter().map(|gpa| {
-                let guest_region_mmap = guest_memory.to_region_addr(GuestAddress(gpa.gpa));
-                let uaddr_base = guest_region_mmap.unwrap().0.as_ptr() as u64;
-                let uaddr_offset: u64 = guest_region_mmap.unwrap().1.0;
-                let uaddr = uaddr_base + uaddr_offset;
-                uaddr
-            }).collect();
+            let uaddrs: Vec<_> = group
+                .iter()
+                .map(|gpa| {
+                    let guest_region_mmap = guest_memory.to_region_addr(GuestAddress(gpa.gpa));
+                    let uaddr_base = guest_region_mmap.unwrap().0.as_ptr() as u64;
+                    let uaddr_offset: u64 = guest_region_mmap.unwrap().1 .0;
+                    let uaddr = uaddr_base + uaddr_offset;
+                    uaddr
+                })
+                .collect();
             memory_manager
                 .lock()
                 .unwrap()

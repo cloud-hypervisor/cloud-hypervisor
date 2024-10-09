@@ -57,7 +57,6 @@ http_archive(
 )
 
 crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate")
-
 crate.spec(
     package = "anyhow",
     version = "1.0.86",
@@ -79,7 +78,6 @@ crate.spec(
     version = "1.0.0",
 )
 crate.spec(
-    package = "clap",
     features = [
         "color",
         "derive",
@@ -91,6 +89,7 @@ crate.spec(
         "suggestions",
         "usage",
     ],
+    package = "clap",
     version = "4.5.16",
 )
 crate.spec(
@@ -126,8 +125,8 @@ crate.spec(
     version = "0.2.9",
 )
 crate.spec(
-    package = "kvm-bindings",
     features = ["serde"],
+    package = "kvm-bindings",
     version = "0.9.1",
 )
 crate.spec(
@@ -143,12 +142,12 @@ crate.spec(
     version = "0.2.153",
 )
 crate.spec(
-    package = "linux-loader",
     features = [
         "bzimage",
         "elf",
         "pe",
     ],
+    package = "linux-loader",
     version = "0.11.0",
 )
 crate.spec(
@@ -168,11 +167,11 @@ crate.spec(
     version = "0.3.0",
 )
 crate.spec(
-    package = "serde",
     features = [
         "derive",
         "rc",
     ],
+    package = "serde",
     version = "1.0.208",
 )
 crate.spec(
@@ -204,13 +203,13 @@ crate.spec(
     version = "1.0.63",
 )
 crate.spec(
-    package = "uuid",
     features = [
         "getrandom",
         "rng",
         "std",
         "v4",
     ],
+    package = "uuid",
     version = "1.4.0",
 )
 crate.spec(
@@ -218,7 +217,6 @@ crate.spec(
     version = "0.3.1",
 )
 crate.spec(
-    package = "vhost",
     features = [
         "test-utils",
         "vhost-kern",
@@ -228,6 +226,7 @@ crate.spec(
         "vhost-user-frontend",
         "vhost-vdpa",
     ],
+    package = "vhost",
     version = "0.11.0",
 )
 crate.spec(
@@ -247,28 +246,27 @@ crate.spec(
     version = "0.2.0",
 )
 crate.spec(
-    package = "vm-memory",
     features = [
         "arc-swap",
         "backend-atomic",
         "backend-mmap",
         "backend-bitmap",
     ],
+    package = "vm-memory",
     version = "0.14.0",
 )
 crate.spec(
-    package = "vmm-sys-util",
     features = ["with-serde"],
+    package = "vmm-sys-util",
     version = "0.12.0",
 )
 crate.spec(
-    package = "zerocopy",
     features = [
         "alloc",
         "derive",
     ],
+    package = "zerocopy",
     version = "0.7.0",
 )
-
 crate.from_specs()
 use_repo(crate, "crates")
