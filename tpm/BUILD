@@ -21,6 +21,7 @@ rust_library(
 
 rust_test(
     name = "tpm_test",
+    size = "small",
     srcs = glob(["src/*.rs"]),
     visibility = ["//visibility:public"],
     deps = [

@@ -63,6 +63,7 @@ rust_library(
 
 rust_test(
     name = "hypervisor_test",
+    size = "small",
     srcs = [
         "src/arch/aarch64/gic.rs",
         "src/arch/aarch64/mod.rs",

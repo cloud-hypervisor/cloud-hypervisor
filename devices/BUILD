@@ -31,6 +31,7 @@ rust_library(
 
 rust_test(
     name = "devices_test",
+    size = "small",
     srcs = glob([
         "src/*.rs",
         "src/legacy/*.rs",

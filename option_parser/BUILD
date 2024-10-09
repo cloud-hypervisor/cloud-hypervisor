@@ -12,6 +12,7 @@ rust_library(
 
 rust_test(
     name = "option_parser_test",
+    size = "small",
     srcs = glob(["src/*.rs"]),
     visibility = ["//visibility:public"],
 )

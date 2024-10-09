@@ -13,6 +13,7 @@ rust_library(
 
 rust_test(
     name = "vm-allocator_test",
+    size = "small",
     srcs = glob(["src/*.rs"]),
     visibility = ["//visibility:public"],
     deps = [

@@ -41,6 +41,7 @@ rust_library(
 
 rust_test(
     name = "virtio-devices_test",
+    size = "small",
     srcs = glob([
         "src/*.rs",
         "src/**/*.rs",

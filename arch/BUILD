@@ -57,6 +57,7 @@ rust_library(
 
 rust_test(
     name = "arch_test",
+    size = "small",
     srcs = [
         "src/lib.rs",
     ] + selects.with_or({

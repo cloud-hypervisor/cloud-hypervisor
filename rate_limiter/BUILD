@@ -19,6 +19,7 @@ rust_library(
 
 rust_test(
     name = "rate_limiter_test",
+    size = "small",
     srcs = glob(["src/*.rs"]),
     visibility = ["//visibility:public"],
     deps = [

@@ -21,6 +21,7 @@ rust_library(
 
 rust_test(
     name = "vm-device_test",
+    size = "small",
     srcs = glob([
         "src/*.rs",
         "src/**/*.rs",

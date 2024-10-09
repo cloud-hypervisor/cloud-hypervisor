@@ -26,6 +26,7 @@ rust_library(
 
 rust_test(
     name = "pci_test",
+    size = "small",
     srcs = glob(["src/*.rs"]),
     crate_features = ["kvm"],
     visibility = ["//visibility:public"],

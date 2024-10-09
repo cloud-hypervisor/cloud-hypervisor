@@ -34,6 +34,7 @@ rust_library(
 
 rust_test(
     name = "block_test",
+    size = "small",
     srcs = glob([
         "src/*.rs",
         "src/qcow/*.rs",
