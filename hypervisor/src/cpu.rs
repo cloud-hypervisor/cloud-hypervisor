@@ -1,3 +1,5 @@
+// Copyright © 2024 Institute of Software, CAS. All rights reserved.
+//
 // Copyright © 2019 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
@@ -9,6 +11,7 @@
 //
 
 use thiserror::Error;
+#[cfg(not(target_arch = "riscv64"))]
 use vm_memory::GuestAddress;
 
 #[cfg(target_arch = "aarch64")]
@@ -17,6 +20,8 @@ use crate::aarch64::{RegList, VcpuInit};
 use crate::arch::x86::{CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters};
 #[cfg(feature = "tdx")]
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
+#[cfg(target_arch = "riscv64")]
+use crate::riscv64::RegList;
 use crate::{CpuState, MpState, StandardRegisters};
 
 #[cfg(target_arch = "x86_64")]
@@ -432,6 +437,7 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Sets debug registers to set hardware breakpoints and/or enable single step.
     ///
+    #[cfg(not(target_arch = "riscv64"))]
     fn set_guest_debug(&self, _addrs: &[GuestAddress], _singlestep: bool) -> Result<()> {
         Err(HypervisorCpuError::SetDebugRegs(anyhow!("unimplemented")))
     }
@@ -448,7 +454,7 @@ pub trait Vcpu: Send + Sync {
     /// Gets a list of the guest registers that are supported for the
     /// KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.
     ///
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     fn get_reg_list(&self, reg_list: &mut RegList) -> Result<()>;
     ///
     /// Gets the value of a system register
@@ -456,9 +462,14 @@ pub trait Vcpu: Send + Sync {
     #[cfg(target_arch = "aarch64")]
     fn get_sys_reg(&self, sys_reg: u32) -> Result<u64>;
     ///
+    /// Gets the value of a non-core register on RISC-V 64-bit
+    ///
+    #[cfg(target_arch = "riscv64")]
+    fn get_non_core_reg(&self, non_core_reg: u32) -> Result<u64>;
+    ///
     /// Configure core registers for a given CPU.
     ///
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> Result<()>;
     ///
     /// Check if the CPU supports PMU
