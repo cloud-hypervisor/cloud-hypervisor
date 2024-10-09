@@ -1,3 +1,5 @@
+// Copyright © 2024 Institute of Software, CAS. All rights reserved.
+//
 // Copyright © 2019 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
@@ -33,10 +35,21 @@ pub use crate::aarch64::{
 };
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
+#[cfg(target_arch = "riscv64")]
+use crate::arch::riscv64::aia::{Vaia, VaiaConfig};
+#[cfg(target_arch = "riscv64")]
+use crate::riscv64::aia::KvmAiaImsics;
+#[cfg(target_arch = "riscv64")]
+pub use crate::riscv64::{
+    aia::AiaImsicsState as AiaState, check_required_kvm_extensions, is_non_core_register,
+    VcpuKvmState,
+};
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset_of};
 use crate::{cpu, hypervisor, vec_with_array_field, HypervisorType};
+#[cfg(target_arch = "riscv64")]
+use crate::{offset_of, riscv64_reg_id};
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
@@ -47,6 +60,8 @@ use kvm_bindings::{
     kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP,
     KVM_GUESTDBG_USE_HW_BP,
 };
+#[cfg(target_arch = "riscv64")]
+use riscv64::{RegList, Register};
 #[cfg(target_arch = "x86_64")]
 use x86_64::check_required_kvm_extensions;
 #[cfg(target_arch = "x86_64")]
@@ -71,9 +86,15 @@ pub mod riscv64;
 #[cfg(target_arch = "aarch64")]
 use std::mem;
 
+///
+/// Export generically-named wrappers of kvm-bindings for Unix-based platforms
+///
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+pub use kvm_bindings::kvm_vcpu_events as VcpuEvents;
 pub use kvm_bindings::{
-    kvm_clock_data, kvm_create_device, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug,
-    kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state, kvm_userspace_memory_region,
+    kvm_clock_data, kvm_create_device, kvm_create_device as CreateDevice,
+    kvm_device_attr as DeviceAttr, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug,
+    kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state, kvm_run, kvm_userspace_memory_region,
     KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI,
     KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
 };
@@ -84,21 +105,16 @@ use kvm_bindings::{
     KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK,
     KVM_REG_ARM_CORE, KVM_REG_SIZE_U128, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
 };
+#[cfg(target_arch = "riscv64")]
+use kvm_bindings::{kvm_riscv_core, user_regs_struct, KVM_REG_RISCV_CORE};
 #[cfg(feature = "tdx")]
 use kvm_bindings::{kvm_run__bindgen_ty_1, KVMIO};
-pub use kvm_ioctls::{Cap, Kvm};
+pub use kvm_ioctls::{Cap, Kvm, VcpuExit};
 use thiserror::Error;
 use vfio_ioctls::VfioDeviceFd;
 #[cfg(feature = "tdx")]
 use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_ioc_nr, ioctl_iowr_nr};
 pub use {kvm_bindings, kvm_ioctls};
-///
-/// Export generically-named wrappers of kvm-bindings for Unix-based platforms
-///
-pub use {
-    kvm_bindings::kvm_create_device as CreateDevice, kvm_bindings::kvm_device_attr as DeviceAttr,
-    kvm_bindings::kvm_run, kvm_bindings::kvm_vcpu_events as VcpuEvents, kvm_ioctls::VcpuExit,
-};
 
 #[cfg(target_arch = "x86_64")]
 const KVM_CAP_SGX_ATTRIBUTE: u32 = 196;
@@ -337,13 +353,34 @@ impl From<ClockData> for kvm_clock_data {
     }
 }
 
+#[cfg(not(target_arch = "riscv64"))]
 impl From<kvm_bindings::kvm_regs> for crate::StandardRegisters {
     fn from(s: kvm_bindings::kvm_regs) -> Self {
         crate::StandardRegisters::Kvm(s)
     }
 }
 
+#[cfg(not(target_arch = "riscv64"))]
 impl From<crate::StandardRegisters> for kvm_bindings::kvm_regs {
+    fn from(e: crate::StandardRegisters) -> Self {
+        match e {
+            crate::StandardRegisters::Kvm(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("StandardRegisters are not valid"),
+        }
+    }
+}
+
+#[cfg(target_arch = "riscv64")]
+impl From<kvm_bindings::kvm_riscv_core> for crate::StandardRegisters {
+    fn from(s: kvm_bindings::kvm_riscv_core) -> Self {
+        crate::StandardRegisters::Kvm(s)
+    }
+}
+
+#[cfg(target_arch = "riscv64")]
+impl From<crate::StandardRegisters> for kvm_bindings::kvm_riscv_core {
     fn from(e: crate::StandardRegisters) -> Self {
         match e {
             crate::StandardRegisters::Kvm(e) => e,
@@ -436,6 +473,7 @@ impl vm::Vm for KvmVm {
             .map_err(|e| vm::HypervisorVmError::SetTssAddress(e.into()))
     }
 
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     ///
     /// Creates an in-kernel interrupt controller.
     ///
@@ -494,6 +532,16 @@ impl vm::Vm for KvmVm {
         let gic_device = KvmGicV3Its::new(self, config)
             .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {:?}", e)))?;
         Ok(Arc::new(Mutex::new(gic_device)))
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    ///
+    /// Creates a virtual AIA device.
+    ///
+    fn create_vaia(&self, config: VaiaConfig) -> vm::Result<Arc<Mutex<dyn Vaia>>> {
+        let aia_device = KvmAiaImsics::new(self, config)
+            .map_err(|e| vm::HypervisorVmError::CreateVaia(anyhow!("Vaia error {:?}", e)))?;
+        Ok(Arc::new(Mutex::new(aia_device)))
     }
 
     ///
@@ -1081,7 +1129,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             }))
         }
 
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         {
             Ok(Arc::new(KvmVm {
                 fd: vm_fd,
@@ -1164,6 +1212,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         Ok(data)
     }
 
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     ///
     /// Get the number of supported hardware breakpoints
     ///
@@ -1352,6 +1401,315 @@ impl cpu::Vcpu for KvmVcpu {
         Ok(state.into())
     }
 
+    #[cfg(target_arch = "riscv64")]
+    ///
+    /// Returns the RISC-V vCPU core registers.
+    /// The `KVM_GET_REGS` ioctl is not available on RISC-V 64-bit,
+    /// `KVM_GET_ONE_REG` is used to get registers one by one.
+    ///
+    fn get_regs(&self) -> cpu::Result<StandardRegisters> {
+        let mut state = kvm_riscv_core::default();
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, pc);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.pc = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, ra);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.ra = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, sp);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.sp = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, gp);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.gp = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, tp);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.tp = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t0);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.t0 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t1);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.t1 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t2);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.t2 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s0);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.s0 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s1);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.s1 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a0);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.a0 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a1);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.a1 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a2);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.a2 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a3);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.a3 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a4);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.a4 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a5);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.a5 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a6);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.a6 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a7);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.a7 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s2);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.s2 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s3);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.s3 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s4);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.s4 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s5);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.s5 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s6);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.s6 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s7);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.s7 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s8);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.s8 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s9);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.s9 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s10);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.s10 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s11);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.s11 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t3);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.t3 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t4);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.t4 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t5);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.t5 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t6);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.regs.t6 = u64::from_le_bytes(bytes);
+
+        let off = offset_of!(kvm_riscv_core, mode);
+        let mut bytes = [0_u8; 8];
+        self.fd
+            .lock()
+            .unwrap()
+            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+        state.mode = u64::from_le_bytes(bytes);
+
+        Ok(state.into())
+    }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the vCPU general purpose registers using the `KVM_SET_REGS` ioctl.
@@ -1483,6 +1841,350 @@ impl cpu::Vcpu for KvmVcpu {
                 &kvm_regs_state.fp_regs.fpcr.to_le_bytes(),
             )
             .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
+        Ok(())
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    ///
+    /// Sets the RISC-V vCPU core registers.
+    /// The `KVM_SET_REGS` ioctl is not available on RISC-V 64-bit,
+    /// `KVM_SET_ONE_REG` is used to set registers one by one.
+    ///
+    fn set_regs(&self, state: &StandardRegisters) -> cpu::Result<()> {
+        // The function follows the exact identical order from `state`. Look there
+        // for some additional info on registers.
+        let kvm_regs_state: kvm_riscv_core = (*state).into();
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, pc);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.pc.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, ra);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.ra.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, sp);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.sp.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, gp);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.gp.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, tp);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.tp.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t0);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.t0.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t1);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.t1.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t2);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.t2.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s0);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.s0.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s1);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.s1.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a0);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.a0.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a1);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.a1.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a2);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.a2.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a3);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.a3.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a4);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.a4.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a5);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.a5.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a6);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.a6.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a7);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.a7.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s2);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.s2.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s3);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.s3.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s4);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.s4.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s5);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.s5.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s6);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.s6.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s7);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.s7.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s8);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.s8.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s9);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.s9.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s10);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.s10.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s11);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.s11.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t3);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.t3.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t4);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.t4.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t5);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.t5.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t6);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.regs.t6.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        let off = offset_of!(kvm_riscv_core, mode);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                &kvm_regs_state.mode.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
         Ok(())
     }
 
@@ -1815,6 +2517,7 @@ impl cpu::Vcpu for KvmVcpu {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "riscv64"))]
     ///
     /// Sets debug registers to set hardware breakpoints and/or enable single step.
     ///
@@ -1889,11 +2592,11 @@ impl cpu::Vcpu for KvmVcpu {
             .map_err(|e| cpu::HypervisorCpuError::VcpuFinalize(e.into()))
     }
 
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     ///
     /// Gets a list of the guest registers that are supported for the
     /// KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.
     ///
-    #[cfg(target_arch = "aarch64")]
     fn get_reg_list(&self, reg_list: &mut RegList) -> cpu::Result<()> {
         self.fd
             .lock()
@@ -1935,6 +2638,14 @@ impl cpu::Vcpu for KvmVcpu {
             .get_one_reg(id, &mut bytes)
             .map_err(|e| cpu::HypervisorCpuError::GetSysRegister(e.into()))?;
         Ok(u64::from_le_bytes(bytes))
+    }
+
+    ///
+    /// Gets the value of a non-core register
+    ///
+    #[cfg(target_arch = "riscv64")]
+    fn get_non_core_reg(&self, _non_core_reg: u32) -> cpu::Result<u64> {
+        unimplemented!()
     }
 
     ///
@@ -1994,6 +2705,53 @@ impl cpu::Vcpu for KvmVcpu {
                 )
                 .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
         }
+        Ok(())
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    ///
+    /// Configure registers for a given RISC-V CPU.
+    ///
+    fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
+        // Setting the A0 () to the hartid of this CPU.
+        let a0 = offset_of!(kvm_riscv_core, regs, user_regs_struct, a0);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, a0),
+                &u64::from(cpu_id).to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+        // Other vCPUs are powered off initially awaiting wakeup.
+        if cpu_id == 0 {
+            // Setting the PC (Processor Counter) to the current program address (kernel address).
+            let pc = offset_of!(kvm_riscv_core, regs, user_regs_struct, pc);
+            self.fd
+                .lock()
+                .unwrap()
+                .set_one_reg(
+                    riscv64_reg_id!(KVM_REG_RISCV_CORE, pc),
+                    &boot_ip.to_le_bytes(),
+                )
+                .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+
+            // Last mandatory thing to set -> the address pointing to the FDT (also called DTB).
+            // "The device tree blob (dtb) must be placed on an 8-byte boundary and must
+            // not exceed 2 megabytes in size." -> https://www.kernel.org/doc/Documentation/arch/riscv/boot.txt.
+            // We are choosing to place it the end of DRAM. See `get_fdt_addr`.
+            let a1 = offset_of!(kvm_riscv_core, regs, user_regs_struct, a1);
+            self.fd
+                .lock()
+                .unwrap()
+                .set_one_reg(
+                    riscv64_reg_id!(KVM_REG_RISCV_CORE, a1),
+                    &fdt_start.to_le_bytes(),
+                )
+                .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+        }
+
         Ok(())
     }
 
@@ -2174,6 +2932,66 @@ impl cpu::Vcpu for KvmVcpu {
         Ok(state.into())
     }
 
+    #[cfg(target_arch = "riscv64")]
+    ///
+    /// Get the current RISC-V 64-bit CPU state
+    ///
+    fn state(&self) -> cpu::Result<CpuState> {
+        let mut state = VcpuKvmState {
+            mp_state: self.get_mp_state()?.into(),
+            ..Default::default()
+        };
+        // Get core registers
+        state.core_regs = self.get_regs()?.into();
+
+        // Get non-core register
+        // Call KVM_GET_REG_LIST to get all registers available to the guest.
+        // For RISC-V 64-bit there are around 200 registers.
+        let mut sys_regs: Vec<Register> = Vec::new();
+        let mut reg_list = RegList::new(200).unwrap();
+        self.fd
+            .lock()
+            .unwrap()
+            .get_reg_list(&mut reg_list)
+            .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))?;
+
+        // At this point reg_list should contain:
+        // - core registers
+        // - config registers
+        // - timer registers
+        // - control and status registers
+        // - AIA control and status registers
+        // - smstateen control and status registers
+        // - sbi_sta control and status registers.
+        //
+        // The register list contains the number of registers and their ids. We
+        // will be needing to call KVM_GET_ONE_REG on each id in order to save
+        // all of them. We carve out from the list the core registers which are
+        // represented in the kernel by `kvm_riscv_core` structure and for which
+        // we can calculate the id based on the offset in the structure.
+        reg_list.retain(|regid| is_non_core_register(*regid));
+
+        // Now, for the rest of the registers left in the previously fetched
+        // register list, we are simply calling KVM_GET_ONE_REG.
+        let indices = reg_list.as_slice();
+        for index in indices.iter() {
+            let mut bytes = [0_u8; 8];
+            self.fd
+                .lock()
+                .unwrap()
+                .get_one_reg(*index, &mut bytes)
+                .map_err(|e| cpu::HypervisorCpuError::GetSysRegister(e.into()))?;
+            sys_regs.push(kvm_bindings::kvm_one_reg {
+                id: *index,
+                addr: u64::from_le_bytes(bytes),
+            });
+        }
+
+        state.non_core_regs = sys_regs;
+
+        Ok(state.into())
+    }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Restore the previously saved CPU state
@@ -2274,6 +3092,28 @@ impl cpu::Vcpu for KvmVcpu {
         self.set_regs(&state.core_regs.into())?;
         // Set system registers
         for reg in &state.sys_regs {
+            self.fd
+                .lock()
+                .unwrap()
+                .set_one_reg(reg.id, &reg.addr.to_le_bytes())
+                .map_err(|e| cpu::HypervisorCpuError::SetSysRegister(e.into()))?;
+        }
+
+        self.set_mp_state(state.mp_state.into())?;
+
+        Ok(())
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    ///
+    /// Restore the previously saved RISC-V 64-bit CPU state
+    ///
+    fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+        let state: VcpuKvmState = state.clone().into();
+        // Set core registers
+        self.set_regs(&state.core_regs.into())?;
+        // Set system registers
+        for reg in &state.non_core_regs {
             self.fd
                 .lock()
                 .unwrap()
