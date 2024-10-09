@@ -1260,7 +1260,14 @@ impl cpu::Vcpu for KvmVcpu {
     /// Returns StandardRegisters with default value set
     ///
     fn create_standard_regs(&self) -> StandardRegisters {
-        kvm_bindings::kvm_regs::default().into()
+        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+        {
+            kvm_bindings::kvm_regs::default().into()
+        }
+        #[cfg(target_arch = "riscv64")]
+        {
+            kvm_bindings::kvm_riscv_core::default().into()
+        }
     }
     #[cfg(target_arch = "x86_64")]
     ///
