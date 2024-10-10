@@ -148,15 +148,15 @@ The following command can be run on the guest to verify that GPUDirect P2P is
 correctly enabled.
 ```
 nvidia-smi topo -p2p r
- 	GPU0	GPU1	GPU2	GPU3	GPU4	GPU5	GPU6	GPU7	
- GPU0	X	OK	OK	OK	OK	OK	OK	OK	
- GPU1	OK	X	OK	OK	OK	OK	OK	OK	
- GPU2	OK	OK	X	OK	OK	OK	OK	OK	
- GPU3	OK	OK	OK	X	OK	OK	OK	OK	
- GPU4	OK	OK	OK	OK	X	OK	OK	OK	
- GPU5	OK	OK	OK	OK	OK	X	OK	OK	
- GPU6	OK	OK	OK	OK	OK	OK	X	OK	
- GPU7	OK	OK	OK	OK	OK	OK	OK	X	
+ 	GPU0	GPU1	GPU2	GPU3	GPU4	GPU5	GPU6	GPU7
+ GPU0	X	OK	OK	OK	OK	OK	OK	OK
+ GPU1	OK	X	OK	OK	OK	OK	OK	OK
+ GPU2	OK	OK	X	OK	OK	OK	OK	OK
+ GPU3	OK	OK	OK	X	OK	OK	OK	OK
+ GPU4	OK	OK	OK	OK	X	OK	OK	OK
+ GPU5	OK	OK	OK	OK	OK	X	OK	OK
+ GPU6	OK	OK	OK	OK	OK	OK	X	OK
+ GPU7	OK	OK	OK	OK	OK	OK	OK	X
 ```
 
 Some VFIO devices have a 32-bit mmio BAR. When using many such devices, it is

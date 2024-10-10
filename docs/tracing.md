@@ -17,7 +17,7 @@ And then run Cloud Hypervisor as you wish, the trace will be written to the curr
 Alternatively you can use the provided script in
 `scripts/ch-trace-visualiser.py` to generate an SVG:
 
-For example: 
+For example:
 
 ```bash
 scripts/ch-trace-visualiser.py cloud-hypervisor-39466.trace output.svg
@@ -39,4 +39,3 @@ narrow part of the code base.
 A `tracer::trace_point!()` macro is also provided for an instantaneous trace
 point however this is neither in use in the code base currently nor is handled by
 the visualisation script due to the difficulty in representation in the SVG.
-

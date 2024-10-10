@@ -12,10 +12,10 @@ The table below depicts the well known CID values:
 
 | CID | Description |
 |-----|-------------|
-| -1  | Random CID | 
-|  0  | Hypervisor | 
-|  1  | Loopback | 
-|  2  | Host | 
+| -1  | Random CID |
+|  0  | Hypervisor |
+|  1  | Loopback |
+|  2  | Host |
 
 ## Prerequisites
 
@@ -81,4 +81,3 @@ From the guest:
 - [VSOCK man page](https://manpages.ubuntu.com/manpages/focal/man7/vsock.7.html)
 - [https://stefano-garzarella.github.io/posts/2020-02-20-vsock-nested-vms-loopback/](https://stefano-garzarella.github.io/posts/2020-02-20-vsock-nested-vms-loopback/)
 - [https://github.com/firecracker-microvm/firecracker/blob/main/docs/vsock.md](https://github.com/firecracker-microvm/firecracker/blob/main/docs/vsock.md)
-

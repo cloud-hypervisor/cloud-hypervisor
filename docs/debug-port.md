@@ -1,8 +1,8 @@
 # `cloud-hypervisor` debug IO ports
 
 When running x86 guests, `cloud-hypervisor` provides different kinds of debug ports:
-- [`0x80` debug port](https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html) 
-- Debug console (by default at `0xe9`). 
+- [`0x80` debug port](https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html)
+- Debug console (by default at `0xe9`).
 - Firmware debug port at `0x402`.
 
 All of them can be used to trace user-defined guest events and all of them can
@@ -71,8 +71,8 @@ cloud-hypervisor: 403.499628ms: DEBUG:vmm/src/vm.rs:510 -- [Debug I/O port: Firm
 
 ### Debug console port
 
-The debug console is inspired by QEMU and Bochs, which have a similar feature. 
-By default, the I/O port `0xe9` is used. This port can be configured like a 
+The debug console is inspired by QEMU and Bochs, which have a similar feature.
+By default, the I/O port `0xe9` is used. This port can be configured like a
 console. Thus, it can print to a tty, a file, or a pty, for example.
 
 ### Firmware debug port
@@ -83,7 +83,7 @@ it. The firmware debug port only prints to stdout.
 ## When do I need these ports?
 
 The ports are on the one hand interesting for firmware or kernel developers, as
-they provide an easy way to print debug information from within a guest. 
+they provide an easy way to print debug information from within a guest.
 Furthermore, you can patch "normal" software to measure certain events, such as
 the boot time of a guest.
 
@@ -91,6 +91,6 @@ the boot time of a guest.
 
 The `0x80` debug port and the port of the firmware debug device are always
 available. The debug console must be activated via the command line, but
-provides more configuration options. 
+provides more configuration options.
 
-You can use different ports for different aspect of your logging messages. 
+You can use different ports for different aspect of your logging messages.

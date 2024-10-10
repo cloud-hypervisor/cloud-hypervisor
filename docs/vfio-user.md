@@ -29,7 +29,7 @@ target/debug/cloud-hypervisor \
     --disk path=~/images/focal-server-cloudimg-amd64.raw \
     --kernel ~/src/linux/vmlinux \
     --cmdline "root=/dev/vda1 console=hvc0" \
-    --user-device socket=/tmp/vfio-user.sock 
+    --user-device socket=/tmp/vfio-user.sock
 ```
 
 Inside the VM you can test the device with:
@@ -75,5 +75,5 @@ target/debug/cloud-hypervisor \
     --disk path=~/images/focal-server-cloudimg-amd64.raw \
     --kernel ~/src/linux/vmlinux \
     --cmdline "root=/dev/vda1 console=hvc0" \
-    --user-device socket=/tmp/nvme-vfio-user/cntrl 
+    --user-device socket=/tmp/nvme-vfio-user/cntrl
 ```

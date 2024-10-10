@@ -61,8 +61,8 @@ sudo mount -o loop,offset=$((227328 * 512)) focal-server-cloudimg-amd64.raw /mnt
 
 ### Set up DNS
 
-The next step describes changing the root directory to the rootfs contained by 
-the cloud image. For DNS to work in the root directory, you will need to first bind-mount 
+The next step describes changing the root directory to the rootfs contained by
+the cloud image. For DNS to work in the root directory, you will need to first bind-mount
 the host `/etc/resolv.conf` onto the mounted linux partition of the cloud image.
 
 ```bash
@@ -242,7 +242,7 @@ partition that we have previously resized.
 	--memory size=4G \
 	--net fd=3,mac=$mac 3<>$"$tapdevice"
 ```
-	
+
 ### Bring up connectivity
 
 If your network has a DHCP server, run the following from your VM

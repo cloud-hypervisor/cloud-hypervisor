@@ -38,4 +38,3 @@ dhat: The data has been saved to dhat-heap.json, and is viewable with dhat/dh_vi
 ```
 
 The JSON output can then be uploaded to [the dh_view tool](https://nnethercote.github.io/dh_view/dh_view.html) for analysis.
-

@@ -1,6 +1,6 @@
 # UEFI Boot
 
-Cloud Hypervisor supports UEFI boot through the utilization of the EDK II based UEFI firmware. 
+Cloud Hypervisor supports UEFI boot through the utilization of the EDK II based UEFI firmware.
 
 ## Building UEFI Firmware for x86-64
 
@@ -66,5 +66,5 @@ To make Cloud Hypervisor use UEFI boot, pass the `CLOUDHV.fd` (for x86-64) / `CL
 
 # Links
 
-- [OVMF wiki](https://github.com/tianocore/tianocore.github.io/wiki/OVMF) 
+- [OVMF wiki](https://github.com/tianocore/tianocore.github.io/wiki/OVMF)
 - [Cloud Hypervisor specific tree](https://github.com/cloud-hypervisor/edk2/tree/ch)

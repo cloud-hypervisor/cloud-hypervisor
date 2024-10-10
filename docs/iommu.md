@@ -262,4 +262,3 @@ e.g.
 
 Devices that cannot be placed behind an IOMMU (e.g. lacking an `iommu=` option)
 cannot be placed on the IOMMU segments.
-
