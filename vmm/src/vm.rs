@@ -627,8 +627,7 @@ impl Vm {
         // This initial SEV-SNP configuration must be done immediately after
         // vCPUs are created. As part of this initialization we are
         // transitioning the guest into secure state.
-        // TODO(b/123456) Add logic to either read from igvm or get the default (for now just default)
-        #[cfg(all(feature = "sev_snp"))]
+        #[cfg(all(feature = "sev_snp", feature = "igvm"))]
         if sev_snp_enabled {
             vm.sev_snp_init(Vm::get_default_sev_snp_guest_policy())
                 .map_err(Error::InitializeSevSnpVm)?;

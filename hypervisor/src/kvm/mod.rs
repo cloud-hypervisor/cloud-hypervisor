@@ -253,7 +253,7 @@ impl From<kvm_userspace_memory_region2> for UserMemoryRegion {
             guest_phys_addr: region.guest_phys_addr,
             memory_size: region.memory_size,
             userspace_addr: region.userspace_addr,
-            flags: flags,
+            flags,
             guest_memfd: region.guest_memfd,
             guest_memfd_offset: region.guest_memfd_offset,
             pad1: region.pad1,
@@ -285,7 +285,7 @@ impl From<UserMemoryRegion> for kvm_userspace_memory_region2 {
             guest_phys_addr: region.guest_phys_addr,
             memory_size: region.memory_size,
             userspace_addr: region.userspace_addr,
-            flags: flags,
+            flags,
             guest_memfd: region.guest_memfd,
             guest_memfd_offset: region.guest_memfd_offset,
             ..Default::default()
@@ -754,7 +754,7 @@ impl vm::Vm for KvmVm {
             guest_phys_addr,
             memory_size,
             userspace_addr,
-            guest_memfd: guest_memfd,
+            guest_memfd,
             guest_memfd_offset: guest_phys_addr,
             ..Default::default()
         }

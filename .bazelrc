@@ -3,6 +3,10 @@ build --verbose_failures
 test --test_output=errors
 
 build --config=rustfmt
+build --config=clippy
 
 build:rustfmt --aspects=@rules_rust//rust:defs.bzl%rustfmt_aspect
 build:rustfmt --output_groups=+rustfmt_checks
+
+build:clippy --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
+build:clippy --output_groups=+clippy_checks
