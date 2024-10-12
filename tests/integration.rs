@@ -32,7 +32,8 @@ const MAX_NUM_PCI_SEGMENTS: u16 = 96;
 #[cfg(target_arch = "x86_64")]
 mod x86_64 {
     pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
-    pub const JAMMY_NVIDIA_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-nvidia.raw";
+    pub const JAMMY_VFIO_IMAGE_NAME: &str =
+        "jammy-server-cloudimg-amd64-custom-vfio-20241012-0.raw";
     pub const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom-20210609-0.qcow2";
     pub const FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE: &str =
         "focal-server-cloudimg-amd64-custom-20210609-0-backing.qcow2";
@@ -8997,9 +8998,10 @@ mod sgx {
 #[cfg(target_arch = "x86_64")]
 mod vfio {
     use crate::*;
+    const NVIDIA_VFIO_DEVICE: &str = "/sys/bus/pci/devices/0002:00:01.0";
 
     fn test_nvidia_card_memory_hotplug(hotplug_method: &str) {
-        let jammy = UbuntuDiskConfig::new(JAMMY_NVIDIA_IMAGE_NAME.to_string());
+        let jammy = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(jammy));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -9010,7 +9012,7 @@ mod vfio {
                 format!("size=4G,hotplug_size=4G,hotplug_method={hotplug_method}").as_str(),
             ])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
-            .args(["--device", "path=/sys/bus/pci/devices/0000:31:00.0/"])
+            .args(["--device", format!("path={NVIDIA_VFIO_DEVICE}").as_str()])
             .args(["--api-socket", &api_socket])
             .default_disks()
             .default_net()
@@ -9053,7 +9055,7 @@ mod vfio {
 
     #[test]
     fn test_nvidia_card_pci_hotplug() {
-        let jammy = UbuntuDiskConfig::new(JAMMY_NVIDIA_IMAGE_NAME.to_string());
+        let jammy = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(jammy));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -9075,7 +9077,7 @@ mod vfio {
             let (cmd_success, cmd_output) = remote_command_w_output(
                 &api_socket,
                 "add-device",
-                Some("id=vfio0,path=/sys/bus/pci/devices/0000:31:00.0/"),
+                Some(format!("id=vfio0,path={NVIDIA_VFIO_DEVICE}").as_str()),
             );
             assert!(cmd_success);
             assert!(String::from_utf8_lossy(&cmd_output)
@@ -9095,7 +9097,7 @@ mod vfio {
 
     #[test]
     fn test_nvidia_card_reboot() {
-        let jammy = UbuntuDiskConfig::new(JAMMY_NVIDIA_IMAGE_NAME.to_string());
+        let jammy = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(jammy));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -9103,7 +9105,7 @@ mod vfio {
             .args(["--cpus", "boot=4"])
             .args(["--memory", "size=4G"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
-            .args(["--device", "path=/sys/bus/pci/devices/0000:31:00.0/"])
+            .args(["--device", format!("path={NVIDIA_VFIO_DEVICE}").as_str()])
             .args(["--api-socket", &api_socket])
             .default_disks()
             .default_net()
