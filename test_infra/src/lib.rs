@@ -1128,7 +1128,10 @@ impl Guest {
 
     #[cfg(target_arch = "x86_64")]
     pub fn check_nvidia_gpu(&self) {
-        assert!(self.ssh_command("nvidia-smi").unwrap().contains("Tesla T4"));
+        assert!(self
+            .ssh_command("nvidia-smi")
+            .unwrap()
+            .contains("NVIDIA L40S"));
     }
 
     pub fn reboot_linux(&self, current_reboot_count: u32, custom_timeout: Option<i32>) {
