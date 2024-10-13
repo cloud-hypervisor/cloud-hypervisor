@@ -33,7 +33,11 @@ serde_with = { version = "3.9.0", default-features = false, features = [
 ] }
 thiserror = "1.0.62"
 vfio-ioctls = { workspace = true, default-features = false }
-vm-memory = { workspace = true, features = ["backend-atomic", "backend-mmap"] }
+vm-memory = { workspace = true, features = [
+  "backend-atomic",
+  "backend-bitmap",
+  "backend-mmap",
+] }
 vmm-sys-util = { workspace = true, features = ["with-serde"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
