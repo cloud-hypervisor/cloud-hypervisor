@@ -521,6 +521,24 @@ impl vm::Vm for KvmVm {
         Ok(())
     }
 
+    #[cfg(feature = "sev_snp")]
+    fn complete_isolated_import(
+        &self,
+        snp_id_block: igvm_defs::IGVM_VHS_SNP_ID_BLOCK,
+        host_data: [u8; 32],
+        id_block_enabled: u8,
+    ) -> vm::Result<()> {
+        self.sev_fd
+            .launch_finish(
+                &self.fd,
+                host_data,
+                id_block_enabled,
+                snp_id_block.author_key_enabled,
+            )
+            .map_err(|e| vm::HypervisorVmError::CompleteIsolatedImport(e.into()))?;
+        Ok(())
+    }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the address of the one-page region in the VM's address space.

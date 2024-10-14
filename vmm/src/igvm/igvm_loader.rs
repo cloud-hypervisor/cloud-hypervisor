@@ -517,6 +517,7 @@ pub fn load_igvm(
 
         now = Instant::now();
         // Call Complete Isolated Import since we are done importing isolated pages
+        // TODO(b/371268173) Extract id block and sig block addresses to be used in launch finish
         memory_manager
             .lock()
             .unwrap()
