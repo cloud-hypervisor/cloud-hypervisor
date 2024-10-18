@@ -734,7 +734,7 @@ impl PciConfiguration {
             return Err(Error::BarInUse(bar_idx));
         }
 
-        if config.size.count_ones() != 1 {
+        if !config.size.is_power_of_two() {
             return Err(Error::BarSizeInvalid(config.size));
         }
 
@@ -806,7 +806,7 @@ impl PciConfiguration {
             return Err(Error::RomBarInUse(bar_idx));
         }
 
-        if config.size.count_ones() != 1 {
+        if !config.size.is_power_of_two() {
             return Err(Error::RomBarSizeInvalid(config.size));
         }
 

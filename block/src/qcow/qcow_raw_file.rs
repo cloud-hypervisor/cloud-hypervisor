@@ -24,7 +24,7 @@ impl QcowRawFile {
     /// Creates a `QcowRawFile` from the given `File`, `None` is returned if `cluster_size` is not
     /// a power of two.
     pub fn from(file: RawFile, cluster_size: u64) -> Option<Self> {
-        if cluster_size.count_ones() != 1 {
+        if !cluster_size.is_power_of_two() {
             return None;
         }
         Some(QcowRawFile {
