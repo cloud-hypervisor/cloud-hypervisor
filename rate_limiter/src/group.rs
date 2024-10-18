@@ -309,12 +309,12 @@ pub(crate) mod tests {
     use crate::{TokenBucket, TokenType, REFILL_TIMER_INTERVAL_MS};
 
     impl RateLimiterGroupHandle {
-        pub fn bandwidth(&self) -> Option<TokenBucket> {
+        fn bandwidth(&self) -> Option<TokenBucket> {
             let guard = self.inner.rate_limiter.inner.lock().unwrap();
             guard.bandwidth.clone()
         }
 
-        pub fn ops(&self) -> Option<TokenBucket> {
+        fn ops(&self) -> Option<TokenBucket> {
             let guard = self.inner.rate_limiter.inner.lock().unwrap();
             guard.ops.clone()
         }
