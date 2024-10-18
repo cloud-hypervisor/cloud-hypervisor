@@ -36,7 +36,7 @@ pub type Result<T> = std::result::Result<T, VhdxIoError>;
 
 macro_rules! align {
     ($n:expr, $align:expr) => {{
-        (($n + $align - 1) / $align) * $align
+        $n.div_ceil($align) * $align
     }};
 }
 

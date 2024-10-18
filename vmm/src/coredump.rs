@@ -50,13 +50,6 @@ pub trait GuestDebuggable: vm_migration::Pausable {
     }
 }
 
-#[macro_export]
-macro_rules! div_round_up {
-    ($n:expr,$d:expr) => {
-        ($n + $d - 1) / $d
-    };
-}
-
 #[repr(C)]
 #[derive(Default, Copy, Clone)]
 pub struct X86_64UserRegs {
@@ -314,7 +307,7 @@ pub trait Elf64Writable {
     }
 
     fn elf_note_size(&self, hdr_size: u32, name_size: u32, desc_size: u32) -> u32 {
-        (div_round_up!(hdr_size, 4) + div_round_up!(name_size, 4) + div_round_up!(desc_size, 4)) * 4
+        (hdr_size.div_ceil(4) + name_size.div_ceil(4) + desc_size.div_ceil(4)) * 4
     }
 
     fn get_note_size(&self, desc_type: NoteDescType, nr_cpus: u32) -> u32 {
