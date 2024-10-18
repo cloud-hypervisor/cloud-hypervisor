@@ -62,7 +62,7 @@ pub struct PciBdf(u32);
 
 struct PciBdfVisitor;
 
-impl<'de> Visitor<'de> for PciBdfVisitor {
+impl Visitor<'_> for PciBdfVisitor {
     type Value = PciBdf;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
