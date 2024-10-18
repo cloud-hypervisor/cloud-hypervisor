@@ -5,12 +5,16 @@
 
 use std::any::Any;
 use std::collections::HashMap;
+#[cfg(feature = "sev_snp")]
+use std::num::NonZeroUsize;
 use std::sync::{Arc, RwLock};
 
 use mshv_bindings::*;
 use mshv_ioctls::{set_registers_64, InterruptRequest, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
+#[cfg(feature = "sev_snp")]
+use vm_memory::bitmap::AtomicBitmap;
 
 use crate::arch::emulator::PlatformEmulator;
 #[cfg(target_arch = "x86_64")]
@@ -55,6 +59,8 @@ use crate::{
 };
 
 pub const PAGE_SHIFT: usize = 12;
+#[cfg(feature = "sev_snp")]
+const ONE_GB: usize = 1024 * 1024 * 1024;
 
 impl From<mshv_user_mem_region> for UserMemoryRegion {
     fn from(region: mshv_user_mem_region) -> Self {
@@ -205,48 +211,12 @@ impl MshvHypervisor {
             .get_msr_index_list()
             .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))
     }
-}
 
-impl MshvHypervisor {
-    /// Create a hypervisor based on Mshv
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> hypervisor::Result<Arc<dyn hypervisor::Hypervisor>> {
-        let mshv_obj =
-            Mshv::new().map_err(|e| hypervisor::HypervisorError::HypervisorCreate(e.into()))?;
-        Ok(Arc::new(MshvHypervisor { mshv: mshv_obj }))
-    }
-    /// Check if the hypervisor is available
-    pub fn is_available() -> hypervisor::Result<bool> {
-        match std::fs::metadata("/dev/mshv") {
-            Ok(_) => Ok(true),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(err) => Err(hypervisor::HypervisorError::HypervisorAvailableCheck(
-                err.into(),
-            )),
-        }
-    }
-}
-
-/// Implementation of Hypervisor trait for Mshv
-///
-/// # Examples
-///
-/// ```
-/// # use hypervisor::mshv::MshvHypervisor;
-/// # use std::sync::Arc;
-/// let mshv = MshvHypervisor::new().unwrap();
-/// let hypervisor = Arc::new(mshv);
-/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
-/// ```
-impl hypervisor::Hypervisor for MshvHypervisor {
-    ///
-    /// Returns the type of the hypervisor
-    ///
-    fn hypervisor_type(&self) -> HypervisorType {
-        HypervisorType::Mshv
-    }
-
-    fn create_vm_with_type(&self, vm_type: u64) -> hypervisor::Result<Arc<dyn crate::Vm>> {
+    fn create_vm_with_type_and_memory_int(
+        &self,
+        vm_type: u64,
+        #[cfg(feature = "sev_snp")] _mem_size: Option<u64>,
+    ) -> hypervisor::Result<Arc<dyn crate::Vm>> {
         let mshv_vm_type: VmType = match VmType::try_from(vm_type) {
             Ok(vm_type) => vm_type,
             Err(_) => return Err(hypervisor::HypervisorError::UnsupportedVmType()),
@@ -333,12 +303,27 @@ impl hypervisor::Hypervisor for MshvHypervisor {
                 msrs[pos].index = *index;
             }
 
+            #[cfg(feature = "sev_snp")]
+            let mem_size = _mem_size.unwrap_or_default();
+
+            #[cfg(feature = "sev_snp")]
+            let mem_size_for_bitmap = if mem_size as usize > 3 * ONE_GB {
+                mem_size as usize + ONE_GB
+            } else {
+                mem_size as usize
+            };
+
             Ok(Arc::new(MshvVm {
                 fd: vm_fd,
                 msrs,
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
                 #[cfg(feature = "sev_snp")]
                 sev_snp_enabled: mshv_vm_type == VmType::Snp,
+                #[cfg(feature = "sev_snp")]
+                host_access_pages: Arc::new(AtomicBitmap::new(
+                    mem_size_for_bitmap,
+                    NonZeroUsize::new(HV_PAGE_SIZE).unwrap(),
+                )),
             }))
         }
 
@@ -349,6 +334,78 @@ impl hypervisor::Hypervisor for MshvHypervisor {
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
             }))
         }
+    }
+}
+
+impl MshvHypervisor {
+    /// Create a hypervisor based on Mshv
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new() -> hypervisor::Result<Arc<dyn hypervisor::Hypervisor>> {
+        let mshv_obj =
+            Mshv::new().map_err(|e| hypervisor::HypervisorError::HypervisorCreate(e.into()))?;
+        Ok(Arc::new(MshvHypervisor { mshv: mshv_obj }))
+    }
+    /// Check if the hypervisor is available
+    pub fn is_available() -> hypervisor::Result<bool> {
+        match std::fs::metadata("/dev/mshv") {
+            Ok(_) => Ok(true),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(hypervisor::HypervisorError::HypervisorAvailableCheck(
+                err.into(),
+            )),
+        }
+    }
+}
+
+/// Implementation of Hypervisor trait for Mshv
+///
+/// # Examples
+///
+/// ```
+/// # use hypervisor::mshv::MshvHypervisor;
+/// # use std::sync::Arc;
+/// let mshv = MshvHypervisor::new().unwrap();
+/// let hypervisor = Arc::new(mshv);
+/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
+/// ```
+impl hypervisor::Hypervisor for MshvHypervisor {
+    ///
+    /// Returns the type of the hypervisor
+    ///
+    fn hypervisor_type(&self) -> HypervisorType {
+        HypervisorType::Mshv
+    }
+
+    ///
+    /// Create a Vm of a specific type using the underlying hypervisor, passing memory size
+    /// Return a hypervisor-agnostic Vm trait object
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use hypervisor::kvm::KvmHypervisor;
+    /// use hypervisor::kvm::KvmVm;
+    /// let hypervisor = KvmHypervisor::new().unwrap();
+    /// let vm = hypervisor.create_vm_with_type(0, 512*1024*1024).unwrap();
+    /// ```
+    fn create_vm_with_type_and_memory(
+        &self,
+        vm_type: u64,
+        #[cfg(feature = "sev_snp")] _mem_size: u64,
+    ) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+        self.create_vm_with_type_and_memory_int(
+            vm_type,
+            #[cfg(feature = "sev_snp")]
+            Some(_mem_size),
+        )
+    }
+
+    fn create_vm_with_type(&self, vm_type: u64) -> hypervisor::Result<Arc<dyn crate::Vm>> {
+        self.create_vm_with_type_and_memory_int(
+            vm_type,
+            #[cfg(feature = "sev_snp")]
+            None,
+        )
     }
 
     /// Create a mshv vm object and return the object as Vm trait object
@@ -405,6 +462,8 @@ pub struct MshvVcpu {
     msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
     vm_fd: Arc<VmFd>,
+    #[cfg(feature = "sev_snp")]
+    host_access_pages: Arc<AtomicBitmap>,
 }
 
 /// Implementation of Vcpu trait for Microsoft Hypervisor
@@ -732,6 +791,9 @@ impl cpu::Vcpu for MshvVcpu {
                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(anyhow!(
                             "Unhandled VCPU exit: attribute intercept - couldn't modify host access {}", e
                         )))?;
+                    // Guest is revoking the shared access, so we need to update the bitmap
+                    self.host_access_pages
+                        .reset_addr_range(gpa_start as usize, gfn_count as usize);
                     Ok(cpu::VmExit::Ignore)
                 }
                 #[cfg(target_arch = "x86_64")]
@@ -1558,6 +1620,8 @@ pub struct MshvVm {
     dirty_log_slots: Arc<RwLock<HashMap<u64, MshvDirtyLogSlot>>>,
     #[cfg(feature = "sev_snp")]
     sev_snp_enabled: bool,
+    #[cfg(feature = "sev_snp")]
+    host_access_pages: Arc<AtomicBitmap>,
 }
 
 impl MshvVm {
@@ -1658,6 +1722,8 @@ impl vm::Vm for MshvVm {
             msrs: self.msrs.clone(),
             vm_ops,
             vm_fd: self.fd.clone(),
+            #[cfg(feature = "sev_snp")]
+            host_access_pages: self.host_access_pages.clone(),
         };
         Ok(Arc::new(vcpu))
     }
@@ -2058,7 +2124,10 @@ impl vm::Vm for MshvVm {
         let start_gpfn: u64 = gpa >> PAGE_SHIFT;
         let end_gpfn: u64 = (gpa + size as u64 - 1) >> PAGE_SHIFT;
 
-        let gpas: Vec<u64> = (start_gpfn..=end_gpfn).map(|x| x << PAGE_SHIFT).collect();
+        let gpas: Vec<u64> = (start_gpfn..=end_gpfn)
+            .filter(|x| !self.host_access_pages.is_bit_set(*x as usize))
+            .map(|x| x << PAGE_SHIFT)
+            .collect();
 
         if !gpas.is_empty() {
             let mut gpa_list = vec_with_array_field::<mshv_modify_gpa_host_access, u64>(gpas.len());
@@ -2081,6 +2150,11 @@ impl vm::Vm for MshvVm {
             self.fd
                 .modify_gpa_host_access(&gpa_list[0])
                 .map_err(|e| vm::HypervisorVmError::ModifyGpaHostAccess(e.into()))?;
+
+            for acquired_gpa in gpas {
+                self.host_access_pages
+                    .set_bit((acquired_gpa >> PAGE_SHIFT) as usize);
+            }
         }
 
         Ok(())
