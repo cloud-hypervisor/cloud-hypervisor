@@ -186,14 +186,18 @@ impl VfioUserPciDevice {
 
                     mmio_region.user_memory_regions.push(user_memory_region);
 
-                    let mem_region = self.vm.make_user_memory_region(
-                        user_memory_region.slot,
-                        user_memory_region.start,
-                        user_memory_region.size,
-                        user_memory_region.host_addr,
-                        false,
-                        false,
-                    );
+                    // SAFETY: make_user_memory_region called with valid params:
+                    // slot, guest_phys_addr, memory_size, userspace_addr
+                    let mem_region = unsafe {
+                        self.vm.make_user_memory_region(
+                            user_memory_region.slot,
+                            user_memory_region.start,
+                            user_memory_region.size,
+                            user_memory_region.host_addr,
+                            false,
+                            false,
+                        )
+                    };
 
                     self.vm
                         .create_user_memory_region(mem_region)
@@ -209,14 +213,18 @@ impl VfioUserPciDevice {
         for mmio_region in self.common.mmio_regions.iter() {
             for user_memory_region in mmio_region.user_memory_regions.iter() {
                 // Remove region
-                let r = self.vm.make_user_memory_region(
-                    user_memory_region.slot,
-                    user_memory_region.start,
-                    user_memory_region.size,
-                    user_memory_region.host_addr,
-                    false,
-                    false,
-                );
+                // SAFETY: make_user_memory_region called with valid params:
+                // slot, guest_phys_addr, memory_size, userspace_addr
+                let r = unsafe {
+                    self.vm.make_user_memory_region(
+                        user_memory_region.slot,
+                        user_memory_region.start,
+                        user_memory_region.size,
+                        user_memory_region.host_addr,
+                        false,
+                        false,
+                    )
+                };
 
                 if let Err(e) = self.vm.remove_user_memory_region(r) {
                     error!("Could not remove the userspace memory region: {}", e);
@@ -462,14 +470,18 @@ impl PciDevice for VfioUserPciDevice {
 
                 for user_memory_region in mmio_region.user_memory_regions.iter_mut() {
                     // Remove old region
-                    let old_region = self.vm.make_user_memory_region(
-                        user_memory_region.slot,
-                        user_memory_region.start,
-                        user_memory_region.size,
-                        user_memory_region.host_addr,
-                        false,
-                        false,
-                    );
+                    // SAFETY: make_user_memory_region called with valid params:
+                    // slot, guest_phys_addr, memory_size, userspace_addr
+                    let old_region = unsafe {
+                        self.vm.make_user_memory_region(
+                            user_memory_region.slot,
+                            user_memory_region.start,
+                            user_memory_region.size,
+                            user_memory_region.host_addr,
+                            false,
+                            false,
+                        )
+                    };
 
                     self.vm
                         .remove_user_memory_region(old_region)
@@ -483,14 +495,18 @@ impl PciDevice for VfioUserPciDevice {
                     }
 
                     // Insert new region
-                    let new_region = self.vm.make_user_memory_region(
-                        user_memory_region.slot,
-                        user_memory_region.start,
-                        user_memory_region.size,
-                        user_memory_region.host_addr,
-                        false,
-                        false,
-                    );
+                    // SAFETY: make_user_memory_region called with valid params:
+                    // slot, guest_phys_addr, memory_size, userspace_addr
+                    let new_region = unsafe {
+                        self.vm.make_user_memory_region(
+                            user_memory_region.slot,
+                            user_memory_region.start,
+                            user_memory_region.size,
+                            user_memory_region.host_addr,
+                            false,
+                            false,
+                        )
+                    };
 
                     self.vm
                         .create_user_memory_region(new_region)
