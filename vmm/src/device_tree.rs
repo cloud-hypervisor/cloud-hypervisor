@@ -145,7 +145,7 @@ impl<'a> Iterator for BftIter<'a> {
     }
 }
 
-impl<'a> DoubleEndedIterator for BftIter<'a> {
+impl DoubleEndedIterator for BftIter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.nodes.pop()
     }

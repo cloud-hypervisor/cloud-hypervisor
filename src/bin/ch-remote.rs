@@ -258,7 +258,7 @@ impl<'a> DBusApi1ProxyBlocking<'a> {
     }
 }
 
-impl<'a> TargetApi<'a> {
+impl TargetApi<'_> {
     fn do_command(&mut self, matches: &ArgMatches) -> ApiResult {
         match self {
             Self::HttpApi(api_socket, _) => rest_api_do_command(matches, api_socket),

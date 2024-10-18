@@ -349,7 +349,7 @@ mod tests {
         pub guest_evvq: GuestQ<'a>,
     }
 
-    impl<'a> EpollHandlerContext<'a> {
+    impl EpollHandlerContext<'_> {
         pub fn signal_txq_event(&mut self) {
             self.handler.queue_evts[1].write(1).unwrap();
             let events = epoll::Events::EPOLLIN;

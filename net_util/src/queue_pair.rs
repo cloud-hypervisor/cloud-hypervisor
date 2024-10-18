@@ -320,7 +320,7 @@ impl IovecBuffer {
 
 struct IovecBufferBorrowed<'a>(&'a mut Vec<libc::iovec>);
 
-impl<'a> std::ops::Deref for IovecBufferBorrowed<'a> {
+impl std::ops::Deref for IovecBufferBorrowed<'_> {
     type Target = Vec<libc::iovec>;
 
     fn deref(&self) -> &Self::Target {
@@ -328,7 +328,7 @@ impl<'a> std::ops::Deref for IovecBufferBorrowed<'a> {
     }
 }
 
-impl<'a> std::ops::DerefMut for IovecBufferBorrowed<'a> {
+impl std::ops::DerefMut for IovecBufferBorrowed<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.0
     }
