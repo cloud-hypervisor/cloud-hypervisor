@@ -90,7 +90,7 @@ pub fn new() -> std::result::Result<Arc<dyn Hypervisor>, HypervisorError> {
 
 // Returns a `Vec<T>` with a size in bytes at least as large as `size_in_bytes`.
 fn vec_with_size_in_bytes<T: Default>(size_in_bytes: usize) -> Vec<T> {
-    let rounded_size = (size_in_bytes + size_of::<T>() - 1) / size_of::<T>();
+    let rounded_size = size_in_bytes.div_ceil(size_of::<T>());
     let mut v = Vec::with_capacity(rounded_size);
     v.resize_with(rounded_size, T::default);
     v

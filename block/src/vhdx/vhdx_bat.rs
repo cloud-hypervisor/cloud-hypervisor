@@ -78,7 +78,7 @@ impl BatEntry {
 
     // Calculate the number of entries in the BAT
     fn calculate_entries(block_size: u32, virtual_disk_size: u64, chunk_ratio: u64) -> u64 {
-        let data_blocks_count = div_round_up!(virtual_disk_size, block_size as u64);
+        let data_blocks_count = virtual_disk_size.div_ceil(block_size as u64);
         data_blocks_count + (data_blocks_count - 1) / chunk_ratio
     }
 

@@ -120,7 +120,7 @@ impl VirtioInterrupt for NoopVirtioInterrupt {
 
 macro_rules! align {
     ($n:expr, $align:expr) => {{
-        (($n + $align - 1) / $align) * $align
+        $n.div_ceil($align) * $align
     }};
 }
 

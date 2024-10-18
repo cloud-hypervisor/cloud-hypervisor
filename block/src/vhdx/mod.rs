@@ -17,12 +17,6 @@ use crate::vhdx::vhdx_io::VhdxIoError;
 use crate::vhdx::vhdx_metadata::{DiskSpec, VhdxMetadataError};
 use crate::BlockBackend;
 
-macro_rules! div_round_up {
-    ($n:expr,$d:expr) => {
-        ($n + $d - 1) / $d
-    };
-}
-
 mod vhdx_bat;
 mod vhdx_header;
 mod vhdx_io;
@@ -105,8 +99,7 @@ impl Read for Vhdx {
     /// Wrapper function to satisfy Read trait implementation for VHDx disk.
     /// Convert the offset to sector index and buffer length to sector count.
     fn read(&mut self, buf: &mut [u8]) -> std::result::Result<usize, std::io::Error> {
-        let sector_count =
-            div_round_up!(buf.len() as u64, self.disk_spec.logical_sector_size as u64);
+        let sector_count = (buf.len() as u64).div_ceil(self.disk_spec.logical_sector_size as u64);
         let sector_index = self.current_offset / self.disk_spec.logical_sector_size as u64;
 
         vhdx_io::read(
@@ -136,8 +129,7 @@ impl Write for Vhdx {
     /// Wrapper function to satisfy Write trait implementation for VHDx disk.
     /// Convert the offset to sector index and buffer length to sector count.
     fn write(&mut self, buf: &[u8]) -> std::result::Result<usize, std::io::Error> {
-        let sector_count =
-            div_round_up!(buf.len() as u64, self.disk_spec.logical_sector_size as u64);
+        let sector_count = (buf.len() as u64).div_ceil(self.disk_spec.logical_sector_size as u64);
         let sector_index = self.current_offset / self.disk_spec.logical_sector_size as u64;
 
         if self.first_write {

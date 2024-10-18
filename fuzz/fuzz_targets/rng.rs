@@ -19,7 +19,7 @@ type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 macro_rules! align {
     ($n:expr, $align:expr) => {{
-        (($n + $align - 1) / $align) * $align
+        $n.div_ceil($align) * $align
     }};
 }
 
