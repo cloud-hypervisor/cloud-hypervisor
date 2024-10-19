@@ -395,6 +395,20 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     }
 }
 
+#[cfg(feature = "sev_snp")]
+struct Ghcb(*mut svm_ghcb_base);
+
+#[cfg(feature = "sev_snp")]
+// SAFETY: struct is based on GHCB page in the hypervisor,
+// safe to Send across threads
+unsafe impl Send for Ghcb {}
+
+#[cfg(feature = "sev_snp")]
+// SAFETY: struct is based on GHCB page in the hypervisor,
+// safe to Sync across threads as this is only required for Vcpu trait
+// functionally not used anyway
+unsafe impl Sync for Ghcb {}
+
 /// Vcpu struct for Microsoft Hypervisor
 pub struct MshvVcpu {
     fd: VcpuFd,
@@ -405,6 +419,8 @@ pub struct MshvVcpu {
     msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
     vm_fd: Arc<VmFd>,
+    #[cfg(feature = "sev_snp")]
+    ghcb: Option<Ghcb>,
 }
 
 /// Implementation of Vcpu trait for Microsoft Hypervisor
@@ -1649,6 +1665,34 @@ impl vm::Vm for MshvVm {
             .fd
             .create_vcpu(id)
             .map_err(|e| vm::HypervisorVmError::CreateVcpu(e.into()))?;
+
+        /* Map the GHCB page to the VMM(root) address space
+         * The map is available after the vcpu creation. This address is mapped
+         * to the overlay ghcb page of the Microsoft Hypervisor, don't have
+         * to worry about the scenario when a guest changes the GHCB mapping.
+         */
+        #[cfg(feature = "sev_snp")]
+        let ghcb = if self.sev_snp_enabled {
+            // SAFETY: Safe to call as VCPU has this map already available upon creation
+            let addr = unsafe {
+                libc::mmap(
+                    std::ptr::null_mut(),
+                    HV_PAGE_SIZE,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_SHARED,
+                    vcpu_fd.as_raw_fd(),
+                    MSHV_VP_MMAP_OFFSET_GHCB as i64 * libc::sysconf(libc::_SC_PAGE_SIZE),
+                )
+            };
+            if addr == libc::MAP_FAILED {
+                // No point of continuing, without this mmap VMGEXIT will fail anyway
+                // Return error
+                return Err(vm::HypervisorVmError::MmapToRoot);
+            }
+            Some(Ghcb(addr as *mut svm_ghcb_base))
+        } else {
+            None
+        };
         let vcpu = MshvVcpu {
             fd: vcpu_fd,
             vp_index: id,
@@ -1658,6 +1702,8 @@ impl vm::Vm for MshvVm {
             msrs: self.msrs.clone(),
             vm_ops,
             vm_fd: self.fd.clone(),
+            #[cfg(feature = "sev_snp")]
+            ghcb,
         };
         Ok(Arc::new(vcpu))
     }
