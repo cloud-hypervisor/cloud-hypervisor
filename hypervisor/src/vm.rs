@@ -251,6 +251,12 @@ pub enum HypervisorVmError {
     #[cfg(feature = "sev_snp")]
     #[error("Failed to modify GPA host access: {0}")]
     ModifyGpaHostAccess(#[source] anyhow::Error),
+    ///
+    /// Failed to mmap
+    ///
+    #[cfg(feature = "sev_snp")]
+    #[error("Failed to mmap:")]
+    MmapToRoot,
 }
 ///
 /// Result type for returning from a function
