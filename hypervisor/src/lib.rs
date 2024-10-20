@@ -1,3 +1,5 @@
+// Copyright © 2024 Institute of Software, CAS. All rights reserved.
+//
 // Copyright © 2019 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
@@ -16,6 +18,7 @@
 //!
 //! - x86_64
 //! - arm64
+//! - riscv64 (experimental)
 //!
 
 #[macro_use]
@@ -57,6 +60,8 @@ pub use cpu::{HypervisorCpuError, Vcpu, VmExit};
 pub use device::HypervisorDeviceError;
 #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
 pub use kvm::{aarch64, GicState};
+#[cfg(all(feature = "kvm", target_arch = "riscv64"))]
+pub use kvm::{riscv64, AiaState};
 pub use vm::{
     DataMatch, HypervisorVmError, InterruptSourceConfig, LegacyIrqSourceConfig, MsiIrqSourceConfig,
     Vm, VmOps,
@@ -193,8 +198,10 @@ pub enum IrqRoutingEntry {
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum StandardRegisters {
-    #[cfg(feature = "kvm")]
+    #[cfg(all(feature = "kvm", not(target_arch = "riscv64")))]
     Kvm(kvm_bindings::kvm_regs),
+    #[cfg(all(feature = "kvm", target_arch = "riscv64"))]
+    Kvm(kvm_bindings::kvm_riscv_core),
     #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
     Mshv(mshv_bindings::StandardRegisters),
 }
@@ -314,3 +321,125 @@ get_aarch64_reg!(regs, [u64; 31usize]);
 get_aarch64_reg!(sp, u64);
 get_aarch64_reg!(pc, u64);
 get_aarch64_reg!(pstate, u64);
+
+macro_rules! set_riscv64_reg {
+    (mode) => {
+        #[cfg(target_arch = "riscv64")]
+        impl StandardRegisters {
+            pub fn set_mode(&mut self, val: u64) {
+                match self {
+                    #[cfg(feature = "kvm")]
+                    StandardRegisters::Kvm(s) => s.mode = val,
+                }
+            }
+        }
+    };
+    ($reg_name:ident) => {
+        concat_idents!(method_name = "set_", $reg_name {
+            #[cfg(target_arch = "riscv64")]
+            impl StandardRegisters {
+                pub fn method_name(&mut self, val: u64) {
+                    match self {
+                        #[cfg(feature = "kvm")]
+                        StandardRegisters::Kvm(s) => s.regs.$reg_name = val,
+                    }
+                }
+            }
+        });
+    }
+}
+
+macro_rules! get_riscv64_reg {
+    (mode) => {
+        #[cfg(target_arch = "riscv64")]
+        impl StandardRegisters {
+            pub fn get_mode(&self) -> u64 {
+                match self {
+                    #[cfg(feature = "kvm")]
+                    StandardRegisters::Kvm(s) => s.mode,
+                }
+            }
+        }
+    };
+    ($reg_name:ident) => {
+        concat_idents!(method_name = "get_", $reg_name {
+            #[cfg(target_arch = "riscv64")]
+            impl StandardRegisters {
+                pub fn method_name(&self) -> u64 {
+                    match self {
+                        #[cfg(feature = "kvm")]
+                        StandardRegisters::Kvm(s) => s.regs.$reg_name,
+                    }
+                }
+            }
+        });
+    }
+}
+
+set_riscv64_reg!(pc);
+set_riscv64_reg!(ra);
+set_riscv64_reg!(sp);
+set_riscv64_reg!(gp);
+set_riscv64_reg!(tp);
+set_riscv64_reg!(t0);
+set_riscv64_reg!(t1);
+set_riscv64_reg!(t2);
+set_riscv64_reg!(s0);
+set_riscv64_reg!(s1);
+set_riscv64_reg!(a0);
+set_riscv64_reg!(a1);
+set_riscv64_reg!(a2);
+set_riscv64_reg!(a3);
+set_riscv64_reg!(a4);
+set_riscv64_reg!(a5);
+set_riscv64_reg!(a6);
+set_riscv64_reg!(a7);
+set_riscv64_reg!(s2);
+set_riscv64_reg!(s3);
+set_riscv64_reg!(s4);
+set_riscv64_reg!(s5);
+set_riscv64_reg!(s6);
+set_riscv64_reg!(s7);
+set_riscv64_reg!(s8);
+set_riscv64_reg!(s9);
+set_riscv64_reg!(s10);
+set_riscv64_reg!(s11);
+set_riscv64_reg!(t3);
+set_riscv64_reg!(t4);
+set_riscv64_reg!(t5);
+set_riscv64_reg!(t6);
+set_riscv64_reg!(mode);
+
+get_riscv64_reg!(pc);
+get_riscv64_reg!(ra);
+get_riscv64_reg!(sp);
+get_riscv64_reg!(gp);
+get_riscv64_reg!(tp);
+get_riscv64_reg!(t0);
+get_riscv64_reg!(t1);
+get_riscv64_reg!(t2);
+get_riscv64_reg!(s0);
+get_riscv64_reg!(s1);
+get_riscv64_reg!(a0);
+get_riscv64_reg!(a1);
+get_riscv64_reg!(a2);
+get_riscv64_reg!(a3);
+get_riscv64_reg!(a4);
+get_riscv64_reg!(a5);
+get_riscv64_reg!(a6);
+get_riscv64_reg!(a7);
+get_riscv64_reg!(s2);
+get_riscv64_reg!(s3);
+get_riscv64_reg!(s4);
+get_riscv64_reg!(s5);
+get_riscv64_reg!(s6);
+get_riscv64_reg!(s7);
+get_riscv64_reg!(s8);
+get_riscv64_reg!(s9);
+get_riscv64_reg!(s10);
+get_riscv64_reg!(s11);
+get_riscv64_reg!(t3);
+get_riscv64_reg!(t4);
+get_riscv64_reg!(t5);
+get_riscv64_reg!(t6);
+get_riscv64_reg!(mode);
