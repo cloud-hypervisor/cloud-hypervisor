@@ -518,6 +518,7 @@ pub fn performance_restore_latency(control: &PerformanceTestControl) -> f64 {
         ));
 
         let _ = child.kill();
+        child.wait().unwrap();
 
         let event_path = String::from(guest.tmp_dir.as_path().join("event.json").to_str().unwrap());
         let mut cmd = GuestCommand::new(&guest);
