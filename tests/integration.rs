@@ -4255,6 +4255,7 @@ mod common_parallel {
         });
 
         let _ = socat_child.kill();
+        let _ = socat_child.wait();
 
         let r = std::panic::catch_unwind(|| {
             guest.ssh_command("sudo shutdown -h now").unwrap();
@@ -6664,7 +6665,7 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
-    fn setup_spdk_nvme(nvme_dir: &std::path::Path) {
+    fn setup_spdk_nvme(nvme_dir: &std::path::Path) -> Child {
         cleanup_spdk_nvme();
 
         assert!(exec_host_command_status(&format!(
@@ -6684,7 +6685,7 @@ mod common_parallel {
         .success());
 
         // Start the SPDK nvmf_tgt daemon to present NVMe device as a VFIO user device
-        Command::new("/usr/local/bin/spdk-nvme/nvmf_tgt")
+        let child = Command::new("/usr/local/bin/spdk-nvme/nvmf_tgt")
             .args(["-i", "0", "-m", "0x1"])
             .spawn()
             .unwrap();
@@ -6713,6 +6714,8 @@ mod common_parallel {
                 nvme_dir.join("nvme-vfio-user").to_str().unwrap()
             ))
             .success());
+
+        child
     }
 
     fn cleanup_spdk_nvme() {
@@ -6726,7 +6729,7 @@ mod common_parallel {
         let guest = Guest::new(Box::new(jammy));
 
         let spdk_nvme_dir = guest.tmp_dir.as_path().join("test-vfio-user");
-        setup_spdk_nvme(spdk_nvme_dir.as_path());
+        let mut spdk_child = setup_spdk_nvme(spdk_nvme_dir.as_path());
 
         let api_socket = temp_api_path(&guest.tmp_dir);
         let mut child = GuestCommand::new(&guest)
@@ -6797,7 +6800,8 @@ mod common_parallel {
             );
         });
 
-        cleanup_spdk_nvme();
+        let _ = spdk_child.kill();
+        let _ = spdk_child.wait();
 
         kill_child(&mut child);
         let output = child.wait_with_output().unwrap();
