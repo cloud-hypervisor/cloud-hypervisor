@@ -69,10 +69,7 @@ RUN update-alternatives --set ovs-vswitchd /usr/lib/openvswitch-switch-dpdk/ovs-
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
         apt-get update \
         && apt-get -yq upgrade \
-        && apt-get install --no-install-recommends -yq gcc-multilib gawk \
-        libtool expect gnutls-dev gnutls-bin libfuse-dev \
-        libjson-glib-dev libgmp-dev libtasn1-dev python3-twisted \
-        net-tools softhsm2 \
+        && apt-get install --no-install-recommends -yq swtpm \
         && apt-get clean \
         && rm -rf /var/lib/apt/lists/* /var/log/*log  /var/log/apt/* /var/lib/dpkg/*-old /var/cache/debconf/*-old; fi
 
@@ -144,26 +141,6 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
        && cp -f ./scripts/rpc.py /usr/local/bin/spdk-nvme \
        && cp -rf ./python /usr/local/bin \
        && cd .. && rm -rf spdk; fi
-
-# install swtpm only for x86_64 arch
-# hadolint ignore=DL3003
-RUN if [ "$TARGETARCH" = "amd64" ]; then \
-    git clone https://github.com/stefanberger/libtpms libtpms_build \
-    && cd libtpms_build \
-    && git checkout v0.8.8 \
-    && ./autogen.sh \
-    && make \
-    && make install \
-    && cd .. \
-    && git clone  https://github.com/stefanberger/swtpm swtpm_build \
-    && cd swtpm_build \
-    && git checkout v0.8.0 \
-    && ./autogen.sh \
-    && make \
-    && make install \
-    && cd .. \
-    && ldconfig \
-    && rm -rf swtpm_build libtpms_build; fi
 
 # install ethr tool for performance tests
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
