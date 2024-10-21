@@ -6,7 +6,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::{fmt, result};
+use std::{fmt, fs, result};
 
 use clap::ArgMatches;
 use option_parser::{
@@ -42,6 +42,10 @@ pub enum Error {
     ParseCpus(OptionParserError),
     /// Invalid CPU features
     InvalidCpuFeatures(String),
+    /// Invalid Ivshmem backend file size
+    InvalidIvshmemSize(u64),
+    /// Invalid Ivshmem backend file path
+    InvalidIvshmemPath(std::io::Error),
     /// Error parsing memory options
     ParseMemory(OptionParserError),
     /// Error parsing memory zone options
@@ -110,8 +114,12 @@ pub enum Error {
     ParseVdpaPathMissing,
     /// Failed parsing TPM device
     ParseTpm(OptionParserError),
+    /// Failed parsing ivsmem device
+    ParseIvshmem(OptionParserError),
     /// Missing path for TPM device
     ParseTpmPathMissing,
+    /// Missing path for ivsmem device
+    ParseIvshmemPathMissing,
     /// Error parsing Landlock rules
     ParseLandlockRules(OptionParserError),
     /// Missing fields in Landlock rules
@@ -393,6 +401,8 @@ impl fmt::Display for Error {
             ParseCpus(o) => write!(f, "Error parsing --cpus: {o}"),
             InvalidCpuFeatures(o) => write!(f, "Invalid feature in --cpus features list: {o}"),
             ParseDevice(o) => write!(f, "Error parsing --device: {o}"),
+            InvalidIvshmemSize(o) => write!(f, "Invalid ivshmem backend file size: {o}"),
+            InvalidIvshmemPath(o) => write!(f, "Invalid ivshmem backend file path: {o}"),
             ParseDevicePathMissing => write!(f, "Error parsing --device: path missing"),
             ParseFileSystem(o) => write!(f, "Error parsing --fs: {o}"),
             ParseFsSockMissing => write!(f, "Error parsing --fs: socket missing"),
@@ -440,12 +450,14 @@ impl fmt::Display for Error {
             ParseVdpa(o) => write!(f, "Error parsing --vdpa: {o}"),
             ParseVdpaPathMissing => write!(f, "Error parsing --vdpa: path missing"),
             ParseTpm(o) => write!(f, "Error parsing --tpm: {o}"),
+            ParseIvshmem(o) => write!(f, "Error parsing --ivshmem: {o}"),
             ParseTpmPathMissing => write!(f, "Error parsing --tpm: path missing"),
             ParseLandlockRules(o) => write!(f, "Error parsing --landlock-rules: {o}"),
             ParseLandlockMissingFields => write!(
                 f,
                 "Error parsing --landlock-rules: path/access field missing"
             ),
+            ParseIvshmemPathMissing => write!(f, "Error parsing --ivshmem: path missing"),
         }
     }
 }
@@ -501,6 +513,7 @@ pub struct VmParams<'a> {
     pub host_data: Option<&'a str>,
     pub landlock_enable: bool,
     pub landlock_rules: Option<Vec<&'a str>>,
+    pub ivshmem: Option<&'a str>,
 }
 
 impl<'a> VmParams<'a> {
@@ -572,7 +585,7 @@ impl<'a> VmParams<'a> {
         let landlock_rules: Option<Vec<&str>> = args
             .get_many::<String>("landlock-rules")
             .map(|x| x.map(|y| y as &str).collect());
-
+        let ivshmem: Option<&str> = args.get_one::<String>("ivshmem").map(|x| x as &str);
         VmParams {
             cpus,
             memory,
@@ -614,6 +627,7 @@ impl<'a> VmParams<'a> {
             host_data,
             landlock_enable,
             landlock_rules,
+            ivshmem,
         }
     }
 }
@@ -2380,6 +2394,40 @@ impl LandlockConfig {
     }
 }
 
+impl IvshmemConfig {
+    pub const SYNTAX: &'static str = "Ivshmem device \
+        \"(backend file) path=</path/to/a/file>,size=<file_size/must=2^n>\"";
+    pub fn parse(ivshmem: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser.add("path").add("size");
+        parser.parse(ivshmem).map_err(Error::ParseIvshmem)?;
+        let path = parser
+            .get("path")
+            .map(PathBuf::from)
+            .ok_or(Error::ParseIvshmemPathMissing)?;
+
+        let size = parser
+            .convert::<ByteSized>("size")
+            .map_err(Error::ParseIvshmem)?
+            .unwrap_or(ByteSized((DEFAULT_IVSHMEM_SIZE << 20) as u64))
+            .0;
+
+        // size must = 2^n
+        if size == 0 || (size & (size - 1)) != 0 {
+            return Err(Error::InvalidIvshmemSize(size));
+        }
+        let metadata = fs::metadata(path.to_str().unwrap()).map_err(Error::InvalidIvshmemPath)?;
+        if metadata.len() < size {
+            return Err(Error::InvalidIvshmemSize(size));
+        }
+
+        Ok(IvshmemConfig {
+            path,
+            size: size as usize,
+        })
+    }
+}
+
 impl VmConfig {
     fn validate_identifier(
         id_list: &mut BTreeSet<String>,
@@ -2910,6 +2958,12 @@ impl VmConfig {
             });
         }
 
+        let mut ivshmem: Option<IvshmemConfig> = None;
+        if let Some(iv) = vm_params.ivshmem {
+            let ivshmem_conf = IvshmemConfig::parse(iv)?;
+            ivshmem = Some(ivshmem_conf);
+        }
+
         #[cfg(feature = "guest_debug")]
         let gdb = vm_params.gdb;
 
@@ -2958,6 +3012,7 @@ impl VmConfig {
             preserved_fds: None,
             landlock_enable: vm_params.landlock_enable,
             landlock_rules,
+            ivshmem,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -3087,6 +3142,7 @@ impl Clone for VmConfig {
                 // SAFETY: FFI call with valid FDs
                 .map(|fds| fds.iter().map(|fd| unsafe { libc::dup(*fd) }).collect()),
             landlock_rules: self.landlock_rules.clone(),
+            ivshmem: self.ivshmem.clone(),
             ..*self
         }
     }
@@ -3891,6 +3947,7 @@ mod tests {
             ]),
             landlock_enable: false,
             landlock_rules: None,
+            ivshmem: None,
         };
 
         let valid_config = RestoreConfig {
@@ -4083,6 +4140,7 @@ mod tests {
             preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
+            ivshmem: None,
         };
 
         valid_config.validate().unwrap();
