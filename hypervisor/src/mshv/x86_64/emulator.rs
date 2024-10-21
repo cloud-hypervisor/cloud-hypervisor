@@ -16,7 +16,7 @@ pub struct MshvEmulatorContext<'a> {
     pub map: (u64, u64), // Initial GVA to GPA mapping provided by the hypervisor
 }
 
-impl<'a> MshvEmulatorContext<'a> {
+impl MshvEmulatorContext<'_> {
     // Do the actual gva -> gpa translation
     #[allow(non_upper_case_globals)]
     fn translate(&self, gva: u64, flags: u32) -> Result<u64, PlatformError> {
@@ -62,7 +62,7 @@ impl<'a> MshvEmulatorContext<'a> {
 }
 
 /// Platform emulation for Hyper-V
-impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
+impl PlatformEmulator for MshvEmulatorContext<'_> {
     type CpuState = EmulatorCpuState;
 
     fn read_memory(&self, gva: u64, data: &mut [u8]) -> Result<(), PlatformError> {
