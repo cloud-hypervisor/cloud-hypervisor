@@ -6,7 +6,7 @@ modification of an official Ubuntu cloud image.
 
 ## Image generation script
 
-This [script](scripts/build-custom-image.sh) can be used to generate a custom image (needs to be modified per architecture/distribution image)
+This [script](../scripts/build-custom-image.sh) can be used to generate a custom image (needs to be modified per architecture/distribution image)
 
 ## Switch CI to use the new image
 
