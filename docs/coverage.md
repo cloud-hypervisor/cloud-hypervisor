@@ -65,17 +65,17 @@ the data processing from within the container if you don't want to fight the
 tool chain.
 
 ```shell
-# Get a shell
-./scripts/dev_cli.sh shell
+# Set env to enable code coverage
+export RUSTFLAGS="-Cinstrument-coverage"
+export LLVM_PROFILE_FILE="ch-%p-%m.profraw"
 
-# Install llvm-tools-preview for llvm-profdata
-rustup component add llvm-tools-preview
-# Merge data files by using the following command
-find . -name '*.profraw' -exec `rustc --print sysroot`/lib/rustlib/x86_64-unknown-linux-gnu/bin/llvm-profdata merge -sparse {} -o coverage.profdata \;
+# Run unit tests
+scripts/dev_cli.sh tests --unit --libc gnu
 
-# As of writing, the container has Rust 1.67.1. It is too old for grcov.
-rustup install stable
-cargo +stable install grcov
-# Run grcov as usual
-grcov . --binary-path ./target/x86_64-unknown-linux-gnu/release -s . -t html --branch --ignore-not-existing -o coverage-html-output/
+# Run integration tests
+scripts/dev_cli.sh tests --integration --libc gnu
+scripts/dev_cli.sh tests --integration-live-migration --libc gnu
+
+# Export code coverage report
+scripts/dev_cli.sh tests --coverage -- -- html
 ```
