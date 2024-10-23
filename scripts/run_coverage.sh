@@ -4,6 +4,9 @@ set -x
 
 # shellcheck source=/dev/null
 source "$HOME"/.cargo/env
+source "$(dirname "$0")/test-util.sh"
+
+process_common_args "$@"
 
 PROJECT_DIR="/cloud-hypervisor"
 TARGET_DIR="$PROJECT_DIR/target"
@@ -47,17 +50,19 @@ export_html() {
     find . -type f -name 'ch-*.profraw' -exec rm {} \;
 }
 
-# $1 is now a command name. Check if it is a valid command and, if so,
+# test_binary_args is now a command name. Check if it is a valid command and, if so,
 # run it.
 #
-declare -f "export_$1" >/dev/null
+# shellcheck disable=SC2154
+type=${test_binary_args[*]}
+declare -f "export_$type" >/dev/null
 code=$?
-[[ $code == 0 ]] || echo "Unknown command: $1. Only support \"lcov\" and \"html\". Change to default command: html"
-type=${1-html}
+if [[ $code != 0 ]]; then
+    echo "Unknown command: $type. Only support \"lcov\" and \"html\". Change to default command: html"
+    type="html"
+fi
 
 func=export_$type
-shift
-
-$func "$@"
+$func
 
 popd || exit 1
