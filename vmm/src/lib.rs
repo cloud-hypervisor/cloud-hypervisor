@@ -1404,8 +1404,6 @@ impl RequestHandler for Vmm {
         self.vm_check_cpuid_compatibility(&vm_config, &vm_snapshot.common_cpuid)
             .map_err(VmError::Restore)?;
 
-        self.vm_config = Some(Arc::clone(&vm_config));
-
         // console_info is set to None in vm_snapshot. re-populate here if empty
         if self.console_info.is_none() {
             self.console_info =
@@ -1424,8 +1422,8 @@ impl RequestHandler for Vmm {
             .try_clone()
             .map_err(VmError::EventFdClone)?;
 
-        let vm = Vm::new(
-            vm_config,
+        let mut vm = Vm::new(
+            vm_config.clone(),
             exit_evt,
             reset_evt,
             #[cfg(feature = "guest_debug")]
@@ -1440,26 +1438,16 @@ impl RequestHandler for Vmm {
             Some(source_url),
             Some(restore_cfg.prefault),
         )?;
+
+        if vm_config.lock().unwrap().landlock_enable {
+            apply_landlock(vm_config.clone()).map_err(VmError::ApplyLandlock)?;
+        }
+
+        vm.restore()?;
+        // hold vm_conifg/vm if restore is successful.
+        self.vm_config = Some(vm_config);
         self.vm = Some(vm);
-
-        if self
-            .vm_config
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .landlock_enable
-        {
-            apply_landlock(self.vm_config.as_ref().unwrap().clone())
-                .map_err(VmError::ApplyLandlock)?;
-        }
-
-        // Now we can restore the rest of the VM.
-        if let Some(ref mut vm) = self.vm {
-            vm.restore()
-        } else {
-            Err(VmError::VmNotCreated)
-        }
+        Ok(())
     }
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
