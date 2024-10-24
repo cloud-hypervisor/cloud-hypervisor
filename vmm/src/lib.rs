@@ -786,6 +786,8 @@ impl Vmm {
             false,
             #[cfg(feature = "sev_snp")]
             false,
+            #[cfg(feature = "sev_snp")]
+            config.lock().unwrap().memory.total_size(),
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!(
