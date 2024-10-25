@@ -421,7 +421,7 @@ checksum = "1462739cb27611015575c0c11df5df7601141071f07518d56fcc1be504cbec97"
 
 [[package]]
 name = "cloud-hypervisor"
-version = "41.0.0"
+version = "42.0.0"
 dependencies = [
  "anyhow",
  "api_client",
