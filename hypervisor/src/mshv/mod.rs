@@ -950,7 +950,7 @@ impl cpu::Vcpu for MshvVcpu {
                                             )?;
 
                                             // Clear the SW_EXIT_INFO1 register to indicate no error
-                                            self.clear_swexit_info1(ghcb_gpa)?;
+                                            self.clear_swexit_info1()?;
                                         }
                                         SVM_NAE_HV_DOORBELL_PAGE_QUERY => {
                                             let mut reg_assocs = [ hv_register_assoc {
@@ -967,7 +967,7 @@ impl cpu::Vcpu for MshvVcpu {
                                             )?;
 
                                             // Clear the SW_EXIT_INFO1 register to indicate no error
-                                            self.clear_swexit_info1(ghcb_gpa)?;
+                                            self.clear_swexit_info1()?;
                                         }
                                         SVM_NAE_HV_DOORBELL_PAGE_CLEAR => {
                                             self.gpa_write(
@@ -1030,7 +1030,7 @@ impl cpu::Vcpu for MshvVcpu {
                                     }
 
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
-                                    self.clear_swexit_info1(ghcb_gpa)?;
+                                    self.clear_swexit_info1()?;
                                 }
                                 SVM_EXITCODE_MMIO_READ => {
                                     let src_gpa =
@@ -1052,7 +1052,7 @@ impl cpu::Vcpu for MshvVcpu {
                                     self.gpa_write(dst_gpa, &data)?;
 
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
-                                    self.clear_swexit_info1(ghcb_gpa)?;
+                                    self.clear_swexit_info1()?;
                                 }
                                 SVM_EXITCODE_MMIO_WRITE => {
                                     let dst_gpa =
@@ -1074,7 +1074,7 @@ impl cpu::Vcpu for MshvVcpu {
                                     }
 
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
-                                    self.clear_swexit_info1(ghcb_gpa)?;
+                                    self.clear_swexit_info1()?;
                                 }
                                 SVM_EXITCODE_SNP_GUEST_REQUEST
                                 | SVM_EXITCODE_SNP_EXTENDED_GUEST_REQUEST => {
@@ -1133,7 +1133,7 @@ impl cpu::Vcpu for MshvVcpu {
                                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
 
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
-                                    self.clear_swexit_info1(ghcb_gpa)?;
+                                    self.clear_swexit_info1()?;
                                 }
                                 _ => panic!(
                                     "GHCB_INFO_NORMAL: Unhandled exit code: {:0x}",
@@ -1511,12 +1511,12 @@ impl MshvVcpu {
     /// Clear SW_EXIT_INFO1 register for SEV-SNP guests.
     ///
     #[cfg(feature = "sev_snp")]
-    fn clear_swexit_info1(
-        &self,
-        ghcb_gpa: u64,
-    ) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
+    fn clear_swexit_info1(&self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
         // Clear the SW_EXIT_INFO1 register to indicate no error
-        self.gpa_write(ghcb_gpa + GHCB_SW_EXITINFO1_OFFSET, &[0; 4])?;
+        // Safe to use unwrap, for sev_snp guest we already have the
+        // GHCB pointer wrapped in the option, otherwise this place is not reached.
+        let ghcb = self.ghcb.as_ref().unwrap().0;
+        set_svm_field_u64_ptr!(ghcb, exit_info1, 0);
 
         Ok(cpu::VmExit::Ignore)
     }
