@@ -1758,7 +1758,14 @@ impl vm::Vm for MshvVm {
         Ok(())
     }
 
-    fn make_user_memory_region(
+    /// Creates a memory region structure that can be used with {create/remove}_user_memory_region
+    ///
+    /// # Safety
+    ///         
+    /// The caller must guarantee the validity of the following parameters:
+    /// slot, guest_phys_addr, memory_size, userspace_addr.
+    ///
+    unsafe fn make_user_memory_region(
         &self,
         _slot: u32,
         guest_phys_addr: u64,
