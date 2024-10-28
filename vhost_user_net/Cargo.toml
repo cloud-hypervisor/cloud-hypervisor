@@ -14,7 +14,7 @@ log = "0.4.22"
 net_util = { path = "../net_util" }
 option_parser = { path = "../option_parser" }
 vhost = { workspace = true, features = ["vhost-user-backend"] }
-vhost-user-backend = "0.16.0"
+vhost-user-backend = { workspace = true }
 virtio-bindings = { workspace = true }
 vm-memory = { workspace = true }
 vmm-sys-util = { workspace = true }
