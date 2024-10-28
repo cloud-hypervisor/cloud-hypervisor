@@ -14,7 +14,7 @@ libc = "0.2.158"
 log = "0.4.22"
 option_parser = { path = "../option_parser" }
 vhost = { workspace = true, features = ["vhost-user-backend"] }
-vhost-user-backend = "0.16.0"
+vhost-user-backend = { workspace = true }
 virtio-bindings = { workspace = true }
 virtio-queue = { workspace = true }
 vm-memory = { workspace = true }
