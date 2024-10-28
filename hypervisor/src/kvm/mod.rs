@@ -509,7 +509,8 @@ impl vm::Vm for KvmVm {
                     address: *pfn << sev::GPA_METADATA_PADDING,
                     size: page_size as u64,
                     attributes: kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
-                    ..Default::default()
+                    // Flags must be zero o/w error (flags aren't being used here yet)
+                    flags: 0,
                 })
                 .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
             self.sev_fd
@@ -1230,16 +1231,38 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 None
             };
 
-            Ok(Arc::new(KvmVm {
-                fd: vm_fd,
-                msrs,
-                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
-                #[cfg(feature = "sev_snp")]
-                sev_fd: x86_64::sev::SevFd::new(&std::env::var("SEV_DEVICE_PATH").unwrap())
-                    .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilities(e.into()))?,
-                memfd,
-                kvm_guest_memfd_supported,
-            }))
+            #[cfg(feature = "sev_snp")]
+            {
+                // TODO: Fix sev device path flag as setting the environment variable is not working
+                let sev_fd = x86_64::sev::SevFd::new(&"/dev/sev".to_string())
+                    .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilities(e.into()))?;
+
+                // This ioctl initializes the sev context and must be called right after opening the sev device.
+                sev_fd
+                    .init2(&vm_fd)
+                    .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
+
+                Ok(Arc::new(KvmVm {
+                    fd: vm_fd,
+                    msrs,
+                    dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                    #[cfg(feature = "sev_snp")]
+                    sev_fd,
+                    memfd,
+                    kvm_guest_memfd_supported,
+                }))
+            }
+
+            #[cfg(not(feature = "sev_snp"))]
+            {
+                Ok(Arc::new(KvmVm {
+                    fd: vm_fd,
+                    msrs,
+                    dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                    memfd,
+                    kvm_guest_memfd_supported,
+                }))
+            }
         }
 
         #[cfg(target_arch = "aarch64")]

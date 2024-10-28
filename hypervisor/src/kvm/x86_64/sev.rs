@@ -9,6 +9,7 @@ use std::os::unix::fs::OpenOptionsExt;
 
 pub(crate) type Result<T> = std::result::Result<T, errno::Error>;
 
+const KVM_SEV_INIT2: u32 = 22;
 const KVM_SEV_SNP_LAUNCH_START: u32 = 100;
 const KVM_SEV_SNP_LAUNCH_UPDATE: u32 = 101;
 // See AMD Spec Section 8.17 - SNP_LAUNCH_UPDATE
@@ -20,6 +21,16 @@ pub const SEV_VMSA_PAGE_TYPE: u32 = 2;
 #[derive(Debug)]
 pub struct SevFd {
     pub fd: OwnedFd,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Default)]
+pub(crate) struct KvmSevInit {
+    pub vmsa_features: u64,
+    pub flags: u32,
+    pub ghcb_version: u16,
+    pub pad1: u16,
+    pub pad2: [u32; 8],
 }
 
 #[repr(C)]
@@ -61,6 +72,18 @@ impl SevFd {
             Err(errno::Error::last())
         }
     }
+
+    pub(crate) fn init2(&self, vm: &VmFd) -> Result<()> {
+        let mut init = KvmSevInit::default();
+        let mut sev_cmd = kvm_sev_cmd {
+            id: KVM_SEV_INIT2,
+            data: &mut init as *mut KvmSevInit as _,
+            sev_fd: self.fd.as_raw_fd() as _,
+            ..Default::default()
+        };
+        vm.encrypt_op_sev(&mut sev_cmd)
+    }
+
     pub(crate) fn launch_start(&self, vm: &VmFd, guest_policy: SnpPolicy) -> Result<()> {
         // See AMD Spec Section 4.3 - Guest Policy
         // Bit 17 is reserved and has to be one.
