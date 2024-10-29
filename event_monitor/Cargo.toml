@@ -5,7 +5,7 @@ name = "event_monitor"
 version = "0.1.0"
 
 [dependencies]
-flume = "0.11.0"
+flume = "0.11.1"
 libc = "0.2.158"
 once_cell = "1.20.2"
 serde = { version = "1.0.208", features = ["derive", "rc"] }
