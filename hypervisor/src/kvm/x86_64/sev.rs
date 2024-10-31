@@ -156,7 +156,7 @@ impl SevFd {
             sev_fd: self.fd.as_raw_fd() as _,
             ..Default::default()
         };
-        debug!("CALLING KVM_SEV_LAUNCH_FINISH");
+        debug!("CALLING KVM_SEV_SNP_LAUNCH_FINISH");
         debug!("flags: {}", finish.flags);
         vm.encrypt_op_sev(&mut sev_cmd)
     }

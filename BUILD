@@ -11,7 +11,7 @@ CLOUD_HYPERVISOR_RUSTC_ENV = {
 rust_binary(
     name = "bin/cloud-hypervisor",
     srcs = ["src/main.rs"],
-    crate_features = ["kvm"],
+    crate_features = ["kvm", "sev_snp"],
     proc_macro_deps = [
         "@crates//:clap_derive",
     ],

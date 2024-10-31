@@ -58,6 +58,10 @@ use devices::AcpiNotificationFlags;
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
+#[cfg(all(feature = "kvm", feature = "sev_snp"))]
+use hypervisor::kvm::{
+    KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE, KVM_X86_SNP_VM, STAGE0_SIZE, STAGE0_START_ADDRESS,
+};
 use hypervisor::{HypervisorVmError, VmOps};
 #[cfg(feature = "sev_snp")]
 use igvm_defs::SnpPolicy;
@@ -879,6 +883,18 @@ impl Vm {
             .map_err(Error::MemoryManager)?
         };
 
+        #[cfg(target_arch = "x86_64")]
+        // Note: For x86, always call this function before invoking start boot vcpus.
+        // Otherwise guest would fail to boot because we haven't created the
+        // userspace mappings to update the hypervisor about the memory mappings.
+        // These mappings must be created before we start the vCPU threads for
+        // the very first time.
+        memory_manager
+            .lock()
+            .unwrap()
+            .allocate_address_space()
+            .map_err(Error::MemoryManager)?;
+
         Vm::new_from_memory_manager(
             vm_config,
             memory_manager,
@@ -916,10 +932,17 @@ impl Vm {
             } else if #[cfg(feature = "sev_snp")] {
                 // Passing SEV_SNP_ENABLED: 1 if sev_snp_enabled is true
                 // Otherwise SEV_SNP_DISABLED: 0
+                let vm = if sev_snp_enabled {
+                // vm type KVM_X86_SNP_VM = 4 in Kernel 6.11
+                hypervisor
+                    .create_vm_with_type(KVM_X86_SNP_VM.into())
+                    .unwrap()
+                } else {
                 // value of sev_snp_enabled is mapped to SEV_SNP_ENABLED for true or SEV_SNP_DISABLED for false
-                let vm = hypervisor
-                    .create_vm_with_type(u64::from(sev_snp_enabled))
-                    .unwrap();
+                hypervisor
+                    .create_vm_with_type(0)
+                    .unwrap()
+                };
             } else {
                 let vm = hypervisor.create_vm().unwrap();
             }
@@ -1021,6 +1044,20 @@ impl Vm {
         Ok(EntryPoint { entry_addr })
     }
 
+    #[cfg(all(feature = "sev_snp", feature = "kvm"))]
+    fn reserve_region_for_stage0(memory_manager: &Arc<Mutex<MemoryManager>>) -> Result<()> {
+        let mut memory_manager = memory_manager.lock().unwrap();
+        // Region for loading Stage 0;
+        memory_manager
+            .add_ram_region(STAGE0_START_ADDRESS, STAGE0_SIZE)
+            .map_err(|e| Error::MemoryManager(e))?;
+        // Region for loading the VMSA page
+        memory_manager
+            .add_ram_region(KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE)
+            .map_err(|e| Error::MemoryManager(e))?;
+        Ok(())
+    }
+
     #[cfg(feature = "igvm")]
     fn load_igvm(
         igvm: File,
@@ -1028,6 +1065,9 @@ impl Vm {
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
     ) -> Result<EntryPoint> {
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
+        Self::reserve_region_for_stage0(&memory_manager)?;
+
         let res = igvm_loader::load_igvm(
             &igvm,
             memory_manager,
@@ -2085,7 +2125,7 @@ impl Vm {
                     // In case of SEV-SNP guest ACPI tables are provided via
                     // IGVM. So skip the creation of ACPI tables and set the
                     // rsdp addr to None.
-                    None
+                    self.create_acpi_tables()
                 } else {
                     self.create_acpi_tables()
                 };
@@ -2142,18 +2182,6 @@ impl Vm {
                 self.configure_system(rsdp_addr.unwrap(), entry_point)
             })
             .transpose()?;
-
-        #[cfg(target_arch = "x86_64")]
-        // Note: For x86, always call this function before invoking start boot vcpus.
-        // Otherwise guest would fail to boot because we haven't created the
-        // userspace mappings to update the hypervisor about the memory mappings.
-        // These mappings must be created before we start the vCPU threads for
-        // the very first time.
-        self.memory_manager
-            .lock()
-            .unwrap()
-            .allocate_address_space()
-            .map_err(Error::MemoryManager)?;
 
         #[cfg(feature = "tdx")]
         if let Some(hob_address) = hob_address {

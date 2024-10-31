@@ -529,7 +529,11 @@ pub trait Vcpu: Send + Sync {
         unimplemented!()
     }
     #[cfg(feature = "sev_snp")]
-    fn set_sev_control_register(&self, _reg: u64) -> Result<()> {
+    fn set_sev_control_register(
+        &self,
+        _reg: u64,
+        #[cfg(feature = "kvm")] _vmsa: igvm::snp_defs::SevVmsa,
+    ) -> Result<()> {
         unimplemented!()
     }
 

@@ -25,7 +25,7 @@ use crate::HypervisorType;
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset_of};
 #[cfg(feature = "sev_snp")]
-use kvm_bindings::{kvm_memory_attributes, KVM_MEMORY_ATTRIBUTE_PRIVATE};
+use kvm_bindings::{kvm_memory_attributes, kvm_segment as Segment, KVM_MEMORY_ATTRIBUTE_PRIVATE};
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use std::any::Any;
 use std::collections::HashMap;
@@ -42,6 +42,7 @@ use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::sync::{Arc, RwLock};
+use vm_memory::GuestAddress;
 use vmm_sys_util::errno;
 use vmm_sys_util::eventfd::EventFd;
 #[cfg(feature = "sev_snp")]
@@ -230,8 +231,58 @@ pub struct KvmTdxExitVmcall {
     pub out_rdx: u64,
 }
 
+#[cfg(feature = "sev_snp")]
+bitfield::bitfield! {
+    /// Guest segment register access right.
+    ///
+    /// See Intel Architecture Software Developer's Manual, Vol.3, Table 24-2.
+    #[derive(Copy, Clone, Default, PartialEq, Eq, Hash)]
+    pub struct SegAccess(u32);
+    impl Debug;
+    pub seg_type, _ : 3, 0;
+    pub s_code_data, _ : 4;
+    pub priv_level, _ : 6, 5;
+    pub present, _ : 7;
+    pub available, _ : 12;
+    pub l_64bit, _ : 13;
+    pub db_size_32, _: 14;
+    pub granularity, _: 15;
+    pub unusable, _: 16;
+}
+
+#[cfg(feature = "sev_snp")]
+fn make_segment(sev_selector: igvm::snp_defs::SevSelector) -> Segment {
+    let flags = SegAccess(sev_selector.attrib.into());
+    Segment {
+        base: sev_selector.base,
+        limit: sev_selector.limit,
+        selector: sev_selector.selector,
+        type_: flags.seg_type() as u8,
+        s: flags.s_code_data() as u8,
+        dpl: flags.priv_level() as u8,
+        present: flags.present() as u8,
+        avl: flags.available() as u8,
+        db: flags.db_size_32() as u8,
+        g: flags.granularity() as u8,
+        l: flags.l_64bit() as u8,
+        unusable: flags.unusable() as u8,
+        ..Default::default()
+    }
+}
+
 // TODO(b/369607475): The following VM types are defined in latest linux kernel arch/x86/include/uapi/asm/kvm.h but doesn't exist in kvm binding yet.
-const KVM_X86_SNP_VM: u32 = 4;
+#[cfg(feature = "kvm")]
+pub const KVM_X86_SNP_VM: u32 = 4;
+// Hardcoded GPA of VMSA page for KVM
+#[cfg(feature = "kvm")]
+pub const KVM_VMSA_PAGE_ADDRESS: GuestAddress = GuestAddress(0xffff_ffff_f000);
+#[cfg(feature = "kvm")]
+pub const KVM_VMSA_PAGE_SIZE: usize = 0x1000;
+#[cfg(feature = "kvm")]
+pub const STAGE0_START_ADDRESS: GuestAddress = GuestAddress(0xffe0_0000);
+#[cfg(feature = "kvm")]
+pub const STAGE0_SIZE: usize = 0x20_0000;
+
 // Maximum Virtual address space.
 const VIRTUTAL_ADDRESS_SIZE_IN_BITS: usize = 1 << 48;
 
@@ -1256,6 +1307,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                     .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilities(e.into()))?;
 
                 // This ioctl initializes the sev context and must be called right after opening the sev device.
+                info!("Calling KVM_SEV_INIT2");
                 sev_fd
                     .init2(&vm_fd)
                     .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
@@ -2673,6 +2725,56 @@ impl cpu::Vcpu for KvmVcpu {
             }
             Ok(_) => Ok(()),
         }
+    }
+
+    #[cfg(feature = "sev_snp")]
+    fn set_sev_control_register(
+        &self,
+        _vmsa_pfn: u64,
+        vmsa: igvm::snp_defs::SevVmsa,
+    ) -> cpu::Result<()> {
+        let vcpu = self.fd.lock().unwrap();
+
+        let mut sregs = vcpu
+            .get_sregs()
+            .map_err(|e| cpu::HypervisorCpuError::GetSpecialRegs(e.into()))?;
+        sregs.cs = make_segment(vmsa.cs);
+        info!("CS: {:?}", sregs.cs);
+        sregs.ds = make_segment(vmsa.ds);
+        sregs.es = make_segment(vmsa.es);
+        sregs.fs = make_segment(vmsa.fs);
+        sregs.gs = make_segment(vmsa.gs);
+        sregs.ss = make_segment(vmsa.ss);
+        sregs.tr = make_segment(vmsa.tr);
+        sregs.ldt = make_segment(vmsa.ldtr);
+
+        sregs.cr0 = vmsa.cr0;
+        sregs.cr4 = vmsa.cr4;
+        sregs.efer = vmsa.efer;
+
+        sregs.idt.base = vmsa.idtr.base;
+        sregs.idt.limit = vmsa.idtr.limit.try_into().unwrap();
+        info!("idt limit: {}", sregs.idt.limit);
+        sregs.gdt.base = vmsa.gdtr.base;
+        sregs.gdt.limit = vmsa.gdtr.limit.try_into().unwrap();
+        info!("gdt limit: {}", sregs.gdt.limit);
+        let _ = vcpu
+            .set_sregs(&sregs)
+            .map_err(|e| cpu::HypervisorCpuError::SetSpecialRegs(e.into()))?;
+
+        let mut regs = vcpu
+            .get_regs()
+            .map_err(|e| cpu::HypervisorCpuError::GetRegister(e.into()))?;
+        regs.rip = vmsa.rip;
+        info!("rds: {}", vmsa.rdx);
+        regs.rdx = vmsa.rdx;
+        regs.rflags = vmsa.rflags;
+
+        let _ = vcpu
+            .set_regs(&regs)
+            .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+
+        Ok(())
     }
 }
 
