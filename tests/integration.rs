@@ -7153,6 +7153,85 @@ mod common_parallel {
 
         handle_child_output(r, &output);
     }
+
+    #[test]
+    fn test_ivshmem() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let kernel_path = direct_kernel_boot_path();
+
+        let ivshmem_file_path = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("ivshmem.data")
+                .to_str()
+                .unwrap(),
+        );
+        let file_size = "1M";
+
+        // Create a file to be used as the shared memory
+        Command::new("dd")
+            .args([
+                "if=/dev/zero",
+                format!("of={ivshmem_file_path}").as_str(),
+                format!("bs={file_size}").as_str(),
+                "count=1",
+            ])
+            .status()
+            .unwrap();
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .default_net()
+            .args([
+                "--ivshmem",
+                format!("path={ivshmem_file_path},size={file_size}").as_str(),
+            ])
+            .args(["--api-socket", &api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            let device_id_line = String::from(
+                guest
+                    .ssh_command("lspci | grep \"Inter-VM shared memory\"")
+                    .unwrap()
+                    .trim(),
+            );
+            // Check if ivshmem exists
+            assert!(!device_id_line.is_empty());
+            let device_id = device_id_line.split(" ").next().unwrap();
+            // Check shard memory size
+            assert_eq!(
+                guest
+                    .ssh_command(
+                        format!(
+                            "lspci -vv -s {device_id} | grep -c \"Region 2.*size={file_size}\""
+                        )
+                        .as_str(),
+                    )
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+        });
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
 }
 
 mod dbus_api {
