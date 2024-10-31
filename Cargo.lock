@@ -7,7 +7,7 @@ name = "acpi_tables"
 version = "0.1.0"
 source = "git+https://github.com/rust-vmm/acpi_tables?branch=main#e268627630839bd22f1c13e7e81ec70c7e9b73d6"
 dependencies = [
- "zerocopy",
+ "zerocopy 0.7.35",
 ]
 
 [[package]]
@@ -970,8 +970,8 @@ dependencies = [
  "kvm-ioctls",
  "libc",
  "log",
- "mshv-bindings",
- "mshv-ioctls",
+ "mshv-bindings 0.3.1",
+ "mshv-ioctls 0.3.1",
  "serde",
  "serde_with",
  "thiserror",
@@ -1009,7 +1009,7 @@ dependencies = [
  "range_map_vec",
  "thiserror",
  "tracing",
- "zerocopy",
+ "zerocopy 0.7.35",
 ]
 
 [[package]]
@@ -1021,7 +1021,7 @@ dependencies = [
  "bitfield-struct",
  "open-enum",
  "static_assertions",
- "zerocopy",
+ "zerocopy 0.7.35",
 ]
 
 [[package]]
@@ -1091,7 +1091,7 @@ checksum = "2efe3f1a4437bffe000e6297a593b98184213cd27486776c335f95ab53d48e3a"
 dependencies = [
  "serde",
  "vmm-sys-util",
- "zerocopy",
+ "zerocopy 0.7.35",
 ]
 
 [[package]]
@@ -1251,7 +1251,21 @@ dependencies = [
  "serde",
  "serde_derive",
  "vmm-sys-util",
- "zerocopy",
+ "zerocopy 0.7.35",
+]
+
+[[package]]
+name = "mshv-bindings"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "576504619272a742fa7b75e69c9cd92520df5b4b66181c55e0d3eeb10d8341f8"
+dependencies = [
+ "libc",
+ "num_enum",
+ "serde",
+ "serde_derive",
+ "vmm-sys-util",
+ "zerocopy 0.8.7",
 ]
 
 [[package]]
@@ -1260,7 +1274,19 @@ version = "0.3.0"
 source = "git+https://github.com/rust-vmm/mshv?tag=v0.3.0#fda05380ea4c68b807996299d5ffb2854ca6d01d"
 dependencies = [
  "libc",
- "mshv-bindings",
+ "mshv-bindings 0.3.0",
+ "thiserror",
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "mshv-ioctls"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ccd62dfa7e0448b49700744f4d23e28ed7a49e83087ba6d7c06c4ee18b8821c"
+dependencies = [
+ "libc",
+ "mshv-bindings 0.3.1",
  "thiserror",
  "vmm-sys-util",
 ]
@@ -1665,7 +1691,7 @@ version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77957b295656769bb8ad2b6a6b09d897d94f05c41b069aede1fcdaa675eaea04"
 dependencies = [
- "zerocopy",
+ "zerocopy 0.7.35",
 ]
 
 [[package]]
@@ -2232,8 +2258,8 @@ dependencies = [
  "kvm-ioctls",
  "libc",
  "log",
- "mshv-bindings",
- "mshv-ioctls",
+ "mshv-bindings 0.3.0",
+ "mshv-ioctls 0.3.0",
  "thiserror",
  "vfio-bindings",
  "vm-memory 0.15.0",
@@ -2340,7 +2366,7 @@ dependencies = [
  "event_monitor",
  "libc",
  "log",
- "mshv-ioctls",
+ "mshv-ioctls 0.3.1",
  "net_gen",
  "net_util",
  "pci",
@@ -2475,7 +2501,7 @@ dependencies = [
  "linux-loader",
  "log",
  "micro_http",
- "mshv-bindings",
+ "mshv-bindings 0.3.1",
  "net_util",
  "once_cell",
  "option_parser",
@@ -2501,7 +2527,7 @@ dependencies = [
  "vm-virtio",
  "vmm-sys-util",
  "zbus",
- "zerocopy",
+ "zerocopy 0.7.35",
 ]
 
 [[package]]
@@ -2827,7 +2853,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b9b4fd18abc82b8136838da5d50bae7bdea537c574d8dc1a34ed098d6c166f0"
 dependencies = [
  "byteorder",
- "zerocopy-derive",
+ "zerocopy-derive 0.7.35",
+]
+
+[[package]]
+name = "zerocopy"
+version = "0.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb3da5f7220f919a6c7af7c856435a68ee1582fd7a77aa72936257d8335bd6f6"
+dependencies = [
+ "zerocopy-derive 0.8.7",
 ]
 
 [[package]]
@@ -2835,6 +2870,17 @@ name = "zerocopy-derive"
 version = "0.7.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fa4f8080344d4671fb4e831a13ad1e68092748387dfc4f55e356242fae12ce3e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e5f54f3cc93cd80745404626681b4b9fca9a867bad5a8424b618eb0db1ae6ea"
 dependencies = [
  "proc-macro2",
  "quote",

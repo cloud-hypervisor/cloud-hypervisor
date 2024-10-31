@@ -106,8 +106,8 @@ acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main"
 kvm-bindings = "0.9.1"
 kvm-ioctls = "0.18.0"
 linux-loader = "0.12.0"
-mshv-bindings = { git = "https://github.com/rust-vmm/mshv", tag = "v0.3.0" }
-mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", tag = "v0.3.0" }
+mshv-bindings = "0.3.1"
+mshv-ioctls = "0.3.1"
 seccompiler = "0.4.0"
 vfio-bindings = { git = "https://github.com/rust-vmm/vfio", branch = "main" }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
