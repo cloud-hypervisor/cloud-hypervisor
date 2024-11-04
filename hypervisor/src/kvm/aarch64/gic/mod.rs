@@ -49,13 +49,10 @@ fn gicv3_its_attr_get(its_device: &DeviceFd, group: u32, attr: u32) -> Result<u6
         flags: 0,
     };
 
-    // get_device_attr should be marked as unsafe, and will be in future.
     // SAFETY: gicv3_its_attr.addr is safe to write to.
-    its_device
-        .get_device_attr(&mut gicv3_its_attr)
-        .map_err(|e| {
-            Error::GetDeviceAttribute(HypervisorDeviceError::GetDeviceAttribute(e.into()))
-        })?;
+    unsafe { its_device.get_device_attr(&mut gicv3_its_attr) }.map_err(|e| {
+        Error::GetDeviceAttribute(HypervisorDeviceError::GetDeviceAttribute(e.into()))
+    })?;
 
     Ok(val)
 }

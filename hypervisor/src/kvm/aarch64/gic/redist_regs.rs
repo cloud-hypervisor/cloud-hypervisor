@@ -121,9 +121,8 @@ fn redist_attr_get(gic: &DeviceFd, offset: u32, typer: u64) -> Result<u32> {
         flags: 0,
     };
 
-    // get_device_attr should be marked as unsafe, and will be in future.
     // SAFETY: gic_redist_attr.addr is safe to write to.
-    gic.get_device_attr(&mut gic_redist_attr).map_err(|e| {
+    unsafe { gic.get_device_attr(&mut gic_redist_attr) }.map_err(|e| {
         Error::GetDeviceAttribute(HypervisorDeviceError::GetDeviceAttribute(e.into()))
     })?;
 
