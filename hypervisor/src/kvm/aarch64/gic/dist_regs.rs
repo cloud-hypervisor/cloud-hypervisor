@@ -103,9 +103,8 @@ fn dist_attr_get(gic: &DeviceFd, offset: u32) -> Result<u32> {
         flags: 0,
     };
 
-    // get_device_attr should be marked as unsafe, and will be in future.
     // SAFETY: gic_dist_attr.addr is safe to write to.
-    gic.get_device_attr(&mut gic_dist_attr).map_err(|e| {
+    unsafe { gic.get_device_attr(&mut gic_dist_attr) }.map_err(|e| {
         Error::GetDeviceAttribute(HypervisorDeviceError::GetDeviceAttribute(e.into()))
     })?;
 
@@ -131,9 +130,8 @@ fn get_interrupts_num(gic: &DeviceFd) -> Result<u32> {
         addr: &mut num_irq as *mut u32 as u64,
         flags: 0,
     };
-    // get_device_attr should be marked as unsafe, and will be in future.
     // SAFETY: nr_irqs_attr.addr is safe to write to.
-    gic.get_device_attr(&mut nr_irqs_attr).map_err(|e| {
+    unsafe { gic.get_device_attr(&mut nr_irqs_attr) }.map_err(|e| {
         Error::GetDeviceAttribute(HypervisorDeviceError::GetDeviceAttribute(e.into()))
     })?;
     Ok(num_irq)
