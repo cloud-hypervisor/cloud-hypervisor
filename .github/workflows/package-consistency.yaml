@@ -22,5 +22,11 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Check Rust VMM Package Consistency
+      - name: Check Rust VMM Package Consistency of root Workspace
         run: python3 scripts/package-consistency-check.py github.com/rust-vmm
+
+      - name: Check Rust VMM Package Consistency of fuzz Workspace
+        run: |
+          pushd fuzz
+          python3 ../scripts/package-consistency-check.py github.com/rust-vmm
+          popd
