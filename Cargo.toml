@@ -103,19 +103,19 @@ members = [
 
 [workspace.dependencies]
 acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main" }
-kvm-bindings = "0.9.1"
-kvm-ioctls = "0.18.0"
-linux-loader = "0.12.0"
-mshv-bindings = { git = "https://github.com/rust-vmm/mshv", tag = "v0.3.0" }
-mshv-ioctls = { git = "https://github.com/rust-vmm/mshv", tag = "v0.3.0" }
+kvm-bindings = "0.10.0"
+kvm-ioctls = "0.19.0"
+linux-loader = "0.13.0"
+mshv-bindings = "0.3.1"
+mshv-ioctls = "0.3.1"
 seccompiler = "0.4.0"
 vfio-bindings = { git = "https://github.com/rust-vmm/vfio", branch = "main" }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
 vfio_user = { git = "https://github.com/rust-vmm/vfio-user", branch = "main" }
-vhost = "0.12.0"
-vhost-user-backend = "0.16.0"
-virtio-bindings = "0.2.2"
-virtio-queue = "0.13.0"
+vhost = { git = "https://github.com/rust-vmm/vhost", rev = "d983ae0" }
+vhost-user-backend = { git = "https://github.com/rust-vmm/vhost", rev = "d983ae0" }
+virtio-bindings = "0.2.4"
+virtio-queue = "0.14.0"
 vm-fdt = { git = "https://github.com/rust-vmm/vm-fdt", branch = "main" }
-vm-memory = "0.15.0"
+vm-memory = "0.16.0"
 vmm-sys-util = "0.12.1"
