@@ -1,0 +1,30 @@
+name: Cloud Hypervisor RISC-V 64-bit Preview
+on: [pull_request, merge_group]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Cargo
+    runs-on: riscv64-qemu-host
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        run: /opt/scripts/exec-in-qemu.sh rustup default 1.77.0
+
+      - name: Build hypervisor Module (kvm)
+        run: /opt/scripts/exec-in-qemu.sh cargo rustc --locked -p hypervisor --no-default-features --features "kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+
+      - name: Clippy hypervisor Module (kvm)
+        run: /opt/scripts/exec-in-qemu.sh cargo clippy --locked -p hypervisor --no-default-features --features "kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+
+      - name: Test hypervisor Module (kvm)
+        run: /opt/scripts/exec-in-qemu.sh cargo test --locked -p hypervisor --no-default-features --features "kvm"
+
+      - name: Check no files were modified
+        run: test -z "$(git status --porcelain)"
