@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
 use virtio_bindings::virtio_config::*;
-use virtio_bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
+use virtio_bindings::virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC};
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -627,8 +627,8 @@ impl Block {
                     | (1u64 << VIRTIO_BLK_F_CONFIG_WCE)
                     | (1u64 << VIRTIO_BLK_F_BLK_SIZE)
                     | (1u64 << VIRTIO_BLK_F_TOPOLOGY)
-                    | (1u64 << VIRTIO_RING_F_EVENT_IDX);
-
+                    | (1u64 << VIRTIO_RING_F_EVENT_IDX)
+                    | (1u64 << VIRTIO_RING_F_INDIRECT_DESC);
                 if iommu {
                     avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
                 }
