@@ -3398,3 +3398,58 @@ impl KvmVcpu {
             .map_err(|e| cpu::HypervisorCpuError::SetVcpuEvents(e.into()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[cfg(target_arch = "riscv64")]
+    fn test_get_and_set_regs() {
+        use super::*;
+
+        let kvm = KvmHypervisor::new().unwrap();
+        let hypervisor = Arc::new(kvm);
+        let vm = hypervisor.create_vm().expect("new VM fd creation failed");
+        let vcpu0 = vm.create_vcpu(0, None).unwrap();
+
+        let core_regs = StandardRegisters::from(kvm_riscv_core {
+            regs: user_regs_struct {
+                pc: 0x00,
+                ra: 0x01,
+                sp: 0x02,
+                gp: 0x03,
+                tp: 0x04,
+                t0: 0x05,
+                t1: 0x06,
+                t2: 0x07,
+                s0: 0x08,
+                s1: 0x09,
+                a0: 0x0a,
+                a1: 0x0b,
+                a2: 0x0c,
+                a3: 0x0d,
+                a4: 0x0e,
+                a5: 0x0f,
+                a6: 0x10,
+                a7: 0x11,
+                s2: 0x12,
+                s3: 0x13,
+                s4: 0x14,
+                s5: 0x15,
+                s6: 0x16,
+                s7: 0x17,
+                s8: 0x18,
+                s9: 0x19,
+                s10: 0x1a,
+                s11: 0x1b,
+                t3: 0x1c,
+                t4: 0x1d,
+                t5: 0x1e,
+                t6: 0x1f,
+            },
+            mode: 0x00,
+        });
+
+        vcpu0.set_regs(&core_regs).unwrap();
+        assert_eq!(vcpu0.get_regs().unwrap(), core_regs);
+    }
+}
