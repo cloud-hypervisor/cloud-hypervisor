@@ -1003,9 +1003,8 @@ impl cpu::Vcpu for MshvVcpu {
                                     let is_write =
                                         // SAFETY: Accessing a union element from bindgen generated bindings.
                                         unsafe { port_info.__bindgen_anon_1.access_type() == 0 };
-
-                                    let mut data = [0; 8];
-                                    self.gpa_read(ghcb_gpa + GHCB_RAX_OFFSET, &mut data)?;
+                                    // SAFETY: Accessing the field from a mapped address
+                                    let mut data = unsafe { (*ghcb).rax.to_le_bytes() };
 
                                     if is_write {
                                         if let Some(vm_ops) = &self.vm_ops {
@@ -1021,8 +1020,7 @@ impl cpu::Vcpu for MshvVcpu {
                                                     cpu::HypervisorCpuError::RunVcpu(e.into())
                                                 })?;
                                         }
-
-                                        self.gpa_write(ghcb_gpa + GHCB_RAX_OFFSET, &data)?;
+                                        set_svm_field_u64_ptr!(ghcb, rax, u64::from_le_bytes(data));
                                     }
 
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
