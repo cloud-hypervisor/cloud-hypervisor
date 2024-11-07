@@ -184,9 +184,10 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("Launch a cloud-hypervisor VMM.")
         .arg_required_else_help(true)
-        .group(ArgGroup::new("vm-config").multiple(true))
+        .group(ArgGroup::new("vm-config").multiple(true).requires("vm-payload"))
         .group(ArgGroup::new("vmm-config").multiple(true))
         .group(ArgGroup::new("logging").multiple(true))
+        .group(ArgGroup::new("vm-payload").multiple(true))
         .arg(
             Arg::new("cpus")
                 .long("cpus")
@@ -243,7 +244,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 .long("firmware")
                 .help("Path to firmware that is loaded in an architectural specific way")
                 .num_args(1)
-                .group("vm-config"),
+                .group("vm-payload"),
         )
         .arg(
             Arg::new("kernel")
@@ -253,7 +254,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 entry point (e.g. vmlinux) or architecture equivalent",
                 )
                 .num_args(1)
-                .group("vm-config"),
+                .group("vm-payload"),
         )
         .arg(
             Arg::new("initramfs")
@@ -519,7 +520,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
             .long("igvm")
             .help("Path to IGVM file to load.")
             .num_args(1)
-            .group("vm-config"),
+            .group("vm-payload"),
     );
     #[cfg(feature = "sev_snp")]
     let app = app.arg(
