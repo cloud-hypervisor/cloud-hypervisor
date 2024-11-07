@@ -805,6 +805,10 @@ impl cpu::Vcpu for MshvVcpu {
                     let ghcb_msr = svm_ghcb_msr {
                         as_uint64: info.ghcb_msr,
                     };
+                    // Safe to use unwrap, for sev_snp guest we already have the
+                    // GHCB pointer wrapped in the option, otherwise this place is not reached.
+                    let ghcb = self.ghcb.as_ref().unwrap().0;
+
                     // SAFETY: Accessing a union element from bindgen generated bindings.
                     let ghcb_op = unsafe { ghcb_msr.__bindgen_anon_2.ghcb_info() as u32 };
                     // Sanity check on the header fields before handling other operations.
@@ -914,10 +918,11 @@ impl cpu::Vcpu for MshvVcpu {
                                         SVM_NAE_HV_DOORBELL_PAGE_GET_PREFERRED => {
                                             // Hypervisor does not have any preference for doorbell GPA.
                                             let preferred_doorbell_gpa: u64 = 0xFFFFFFFFFFFFFFFF;
-                                            self.gpa_write(
-                                                ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
-                                                &preferred_doorbell_gpa.to_le_bytes(),
-                                            )?;
+                                            set_svm_field_u64_ptr!(
+                                                ghcb,
+                                                exit_info2,
+                                                preferred_doorbell_gpa
+                                            );
                                         }
                                         SVM_NAE_HV_DOORBELL_PAGE_SET => {
                                             let exit_info2 = info
@@ -944,10 +949,7 @@ impl cpu::Vcpu for MshvVcpu {
                                                 cpu::HypervisorCpuError::SetRegister(e.into())
                                             })?;
 
-                                            self.gpa_write(
-                                                ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
-                                                &exit_info2.to_le_bytes(),
-                                            )?;
+                                            set_svm_field_u64_ptr!(ghcb, exit_info2, exit_info2);
 
                                             // Clear the SW_EXIT_INFO1 register to indicate no error
                                             self.clear_swexit_info1()?;
@@ -961,19 +963,13 @@ impl cpu::Vcpu for MshvVcpu {
                                             // SAFETY: Accessing a union element from bindgen generated bindings.
                                             let doorbell_gpa = unsafe { reg_assocs[0].value.reg64 };
 
-                                            self.gpa_write(
-                                                ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
-                                                &doorbell_gpa.to_le_bytes(),
-                                            )?;
+                                            set_svm_field_u64_ptr!(ghcb, exit_info2, doorbell_gpa);
 
                                             // Clear the SW_EXIT_INFO1 register to indicate no error
                                             self.clear_swexit_info1()?;
                                         }
                                         SVM_NAE_HV_DOORBELL_PAGE_CLEAR => {
-                                            self.gpa_write(
-                                                ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
-                                                &[0; 8],
-                                            )?;
+                                            set_svm_field_u64_ptr!(ghcb, exit_info2, 0);
                                         }
                                         _ => {
                                             panic!(
