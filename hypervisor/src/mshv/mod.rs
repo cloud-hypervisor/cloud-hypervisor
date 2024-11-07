@@ -904,9 +904,7 @@ impl cpu::Vcpu for MshvVcpu {
                         GHCB_INFO_NORMAL => {
                             let exit_code =
                                 info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_code as u32;
-                            // SAFETY: Accessing a union element from bindgen generated bindings.
-                            let pfn = unsafe { ghcb_msr.__bindgen_anon_2.gpa_page_number() };
-                            let ghcb_gpa = pfn << GHCB_INFO_BIT_WIDTH;
+
                             match exit_code {
                                 SVM_EXITCODE_HV_DOORBELL_PAGE => {
                                     let exit_info1 =
@@ -1057,7 +1055,7 @@ impl cpu::Vcpu for MshvVcpu {
                                     assert!(data_len <= 0x8);
 
                                     let mut data = vec![0; data_len];
-                                    // SAFETY: Accessing the field from a mapped address
+                                    // SAFETY: Accessing data from a mapped address
                                     let bytes_shared_ghcb =
                                         unsafe { (*ghcb).shared[0].to_le_bytes() };
                                     data.copy_from_slice(&bytes_shared_ghcb[..data_len]);
@@ -1078,15 +1076,16 @@ impl cpu::Vcpu for MshvVcpu {
                                         // We don't support extended guest request, so we just write empty data.
                                         // This matches the behavior of KVM in Linux 6.11.
 
-                                        // Read RAX & RBX from the GHCB.
-                                        let mut data = [0; 8];
-                                        self.gpa_read(ghcb_gpa + GHCB_RAX_OFFSET, &mut data)?;
-                                        let data_gpa = u64::from_le_bytes(data);
-                                        self.gpa_read(ghcb_gpa + GHCB_RBX_OFFSET, &mut data)?;
-                                        let data_npages = u64::from_le_bytes(data);
+                                        // Read RBX from the GHCB.
+                                        // SAFETY: Accessing data from a mapped address
+                                        let data_gpa = unsafe { (*ghcb).rax };
+                                        // SAFETY: Accessing data from a mapped address
+                                        let data_npages = unsafe { (*ghcb).rbx };
 
                                         if data_npages > 0 {
                                             // The certificates are terminated by 24 zero bytes.
+                                            // TODO: Need to check if data_gpa is the address of the shared buffer in the GHCB page
+                                            // in that case we should clear the shared buffer(24 bytes)
                                             self.gpa_write(data_gpa, &[0; 24])?;
                                         }
                                     }
@@ -1107,7 +1106,7 @@ impl cpu::Vcpu for MshvVcpu {
                                         req_gpa, rsp_gpa
                                     );
 
-                                    self.gpa_write(ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET, &[0; 8])?;
+                                    set_svm_field_u64_ptr!(ghcb, exit_info2, 0);
                                 }
                                 SVM_EXITCODE_SNP_AP_CREATION => {
                                     let vmsa_gpa =
@@ -1515,6 +1514,7 @@ impl MshvVcpu {
     }
 
     #[cfg(feature = "sev_snp")]
+    #[allow(dead_code)]
     fn gpa_read(&self, gpa: u64, data: &mut [u8]) -> cpu::Result<()> {
         for (gpa, chunk) in (gpa..)
             .step_by(HV_READ_WRITE_GPA_MAX_SIZE as usize)
