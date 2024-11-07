@@ -1026,7 +1026,6 @@ impl cpu::Vcpu for MshvVcpu {
                                 SVM_EXITCODE_MMIO_READ => {
                                     let src_gpa =
                                         info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1;
-                                    let dst_gpa = info.__bindgen_anon_2.__bindgen_anon_1.sw_scratch;
                                     let data_len =
                                         info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info2
                                             as usize;
@@ -1039,8 +1038,11 @@ impl cpu::Vcpu for MshvVcpu {
                                             cpu::HypervisorCpuError::RunVcpu(e.into())
                                         })?;
                                     }
-
-                                    self.gpa_write(dst_gpa, &data)?;
+                                    // Copy the data to the shared buffer of the GHCB page
+                                    let mut buffer_data = [0; 8];
+                                    buffer_data[..data_len].copy_from_slice(&data[..data_len]);
+                                    // SAFETY: Updating the value of mapped area
+                                    unsafe { (*ghcb).shared[0] = u64::from_le_bytes(buffer_data) };
 
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
                                     self.clear_swexit_info1()?;
@@ -1048,7 +1050,6 @@ impl cpu::Vcpu for MshvVcpu {
                                 SVM_EXITCODE_MMIO_WRITE => {
                                     let dst_gpa =
                                         info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1;
-                                    let src_gpa = info.__bindgen_anon_2.__bindgen_anon_1.sw_scratch;
                                     let data_len =
                                         info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info2
                                             as usize;
@@ -1056,7 +1057,10 @@ impl cpu::Vcpu for MshvVcpu {
                                     assert!(data_len <= 0x8);
 
                                     let mut data = vec![0; data_len];
-                                    self.gpa_read(src_gpa, &mut data)?;
+                                    // SAFETY: Accessing the field from a mapped address
+                                    let bytes_shared_ghcb =
+                                        unsafe { (*ghcb).shared[0].to_le_bytes() };
+                                    data.copy_from_slice(&bytes_shared_ghcb[..data_len]);
 
                                     if let Some(vm_ops) = &self.vm_ops {
                                         vm_ops.mmio_write(dst_gpa, &data).map_err(|e| {
