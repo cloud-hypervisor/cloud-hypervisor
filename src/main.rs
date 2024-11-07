@@ -460,7 +460,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 .long("tpm")
                 .num_args(1)
                 .help(TpmConfig::SYNTAX)
-                .group("vmm-config"),
+                .group("vm-config"),
         );
 
     #[cfg(target_arch = "x86_64")]
