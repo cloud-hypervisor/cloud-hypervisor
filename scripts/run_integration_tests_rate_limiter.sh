@@ -44,8 +44,8 @@ if ! grep focal sha1sums-x86_64 | sha1sum --check; then
 fi
 popd || exit
 
-# Download prebuild linux binaries
-download_linux
+# Prepare linux image (build from source or download pre-built)
+prepare_linux
 
 CFLAGS=""
 if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then

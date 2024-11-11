@@ -80,8 +80,8 @@ if [ "${TEST_ARCH}" == "aarch64" ]; then
     guestunmount "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR"
 fi
 
-# Download prebuild linux binaries
-download_linux
+# Prepare linux image (build from source or download pre-built)
+prepare_linux
 
 CFLAGS=""
 if [[ "${BUILD_TARGET}" == "${TEST_ARCH}-unknown-linux-musl" ]]; then
