@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 hypervisor="kvm"
 test_filter=""
+build_kernel=false
 
 # Checkout source code of a GIT repo with specified branch and commit
 # Args:
@@ -75,11 +76,13 @@ cmd_help() {
     echo ""
     echo "    --hypervisor  Underlying hypervisor. Options kvm, mshv"
     echo "    --test-filter Tests to run"
+    echo "    --build-guest-kernel Build guest kernel from source instead of downloading pre-built"
     echo ""
     echo "    --help        Display this help message."
     echo ""
 }
 
+# shellcheck disable=SC2034
 process_common_args() {
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -93,8 +96,10 @@ process_common_args() {
             ;;
         "--test-filter")
             shift
-            # shellcheck disable=SC2034
             test_filter="$1"
+            ;;
+        "--build-guest-kernel")
+            build_kernel=true
             ;;
         "--") {
             shift
@@ -147,6 +152,18 @@ download_linux() {
     done
 
     popd || exit
+}
+
+prepare_linux() {
+    if [ "$build_kernel" = true ]; then
+        echo "Building kernel from source"
+        build_custom_linux
+        echo "Using kernel built from source"
+    else
+        echo "Downloading pre-built kernel from GitHub"
+        download_linux
+        echo "Using kernel downloaded from GitHub"
+    fi
 }
 
 download_ovmf() {
