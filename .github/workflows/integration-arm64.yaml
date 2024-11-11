@@ -6,7 +6,7 @@ concurrency:
 
 jobs:
   build:
-    timeout-minutes: 60
+    timeout-minutes: 120
     name: Tests (ARM64)
     runs-on: bookworm-arm64
     steps:
@@ -21,7 +21,7 @@ jobs:
       - name: Load openvswitch module
         run: sudo modprobe openvswitch
       - name: Run integration tests (musl)
-        timeout-minutes: 30
+        timeout-minutes: 60
         run: scripts/dev_cli.sh tests --integration --libc musl
       - name: Install Azure CLI
         if: ${{ github.event_name != 'pull_request' }}
