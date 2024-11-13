@@ -301,6 +301,10 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to inject NMI")]
     Nmi(#[source] anyhow::Error),
+    /// Error injecting NMI
+    ///
+    #[error("Failed to open kvm device")]
+    OpenKvm(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]

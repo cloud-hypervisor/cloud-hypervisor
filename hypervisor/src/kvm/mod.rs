@@ -25,6 +25,8 @@ use crate::HypervisorType;
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset_of};
 #[cfg(feature = "sev_snp")]
+use igvm_defs::PAGE_SIZE_4K;
+#[cfg(feature = "sev_snp")]
 use kvm_bindings::{kvm_memory_attributes, kvm_segment as Segment, KVM_MEMORY_ATTRIBUTE_PRIVATE};
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use std::any::Any;
@@ -656,6 +658,8 @@ impl vm::Vm for KvmVm {
             vm_ops,
             #[cfg(target_arch = "x86_64")]
             hyperv_synic: AtomicBool::new(false),
+            #[cfg(feature = "sev_snp")]
+            vm_fd: self.fd.clone(),
         };
         Ok(Arc::new(vcpu))
     }
@@ -1302,6 +1306,15 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 
             #[cfg(feature = "sev_snp")]
             {
+                let mask = self.kvm.check_extension_int(crate::kvm::Cap::ExitHypercall);
+                let cap = kvm_bindings::kvm_enable_cap {
+                    cap: kvm_bindings::KVM_CAP_EXIT_HYPERCALL,
+                    args: [mask as _, 0, 0, 0],
+                    ..Default::default()
+                };
+                vm_fd
+                    .enable_cap(&cap)
+                    .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
                 // TODO: Fix sev device path flag as setting the environment variable is not working
                 let sev_fd = x86_64::sev::SevFd::new(&"/dev/sev".to_string())
                     .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilities(e.into()))?;
@@ -1446,6 +1459,8 @@ pub struct KvmVcpu {
     vm_ops: Option<Arc<dyn vm::VmOps>>,
     #[cfg(target_arch = "x86_64")]
     hyperv_synic: AtomicBool,
+    #[cfg(feature = "sev_snp")]
+    vm_fd: Arc<VmFd>,
 }
 
 /// Implementation of Vcpu trait for KVM
@@ -2035,6 +2050,40 @@ impl cpu::Vcpu for KvmVcpu {
                 #[cfg(feature = "tdx")]
                 VcpuExit::Unsupported(KVM_EXIT_TDX) => Ok(cpu::VmExit::Tdx),
                 VcpuExit::Debug(_) => Ok(cpu::VmExit::Debug),
+                #[cfg(feature = "sev_snp")]
+                VcpuExit::Hypercall(hypercall) => {
+                    // https://tinyurl.com/kvm-hypercall-map-gpa
+                    info!("VcpuExit::Hypercall");
+                    const KVM_HC_MAP_GPA_RANGE: u64 = 12;
+                    // 4th bit of attributes argument is encrypted page bit
+                    match hypercall.nr {
+                        KVM_HC_MAP_GPA_RANGE => {
+                            info!("Handling KVM_HC_MAP_GPA_RANGE hyper call");
+                            // guest physical address of start page
+                            let address = hypercall.args[0];
+                            // num pages to map from start address
+                            let num_pages = hypercall.args[1];
+                            let size = num_pages * PAGE_SIZE_4K;
+                            let kvm_obj = Kvm::new()
+                                .map_err(|e| cpu::HypervisorCpuError::OpenKvm(e.into()))?;
+                            let mem_attr =
+                                kvm_obj.check_extension_int(crate::kvm::Cap::VmAttributes);
+                            let set_private_attr =
+                                mem_attr & kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE as i32;
+                            let mem_attributes = kvm_bindings::kvm_memory_attributes {
+                                address,
+                                size,
+                                attributes: set_private_attr as u64,
+                                ..Default::default()
+                            };
+                            self.vm_fd
+                                .set_memory_attributes(mem_attributes)
+                                .map(|_| cpu::VmExit::Ignore)
+                                .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))
+                        }
+                        _ => Ok(cpu::VmExit::Ignore),
+                    }
+                }
 
                 r => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
                     "Unexpected exit reason on vcpu run: {:?}",
