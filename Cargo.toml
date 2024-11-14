@@ -117,5 +117,5 @@ vhost-user-backend = { git = "https://github.com/rust-vmm/vhost", rev = "d983ae0
 virtio-bindings = "0.2.4"
 virtio-queue = "0.14.0"
 vm-fdt = { git = "https://github.com/rust-vmm/vm-fdt", branch = "main" }
-vm-memory = "0.16.0"
+vm-memory = "0.16.1"
 vmm-sys-util = "0.12.1"
