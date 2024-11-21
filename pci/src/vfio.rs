@@ -1416,7 +1416,8 @@ pub struct VfioPciDevice {
     container: Arc<VfioContainer>,
     common: VfioCommon,
     iommu_attached: bool,
-    memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
+    get_memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
+    put_memory_slot: Arc<dyn Fn(u32) + Send + Sync>,
 }
 
 impl VfioPciDevice {
@@ -1431,7 +1432,8 @@ impl VfioPciDevice {
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         iommu_attached: bool,
         bdf: PciBdf,
-        memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
+        get_memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
+        put_memory_slot: Arc<dyn Fn(u32) + Send + Sync>,
         snapshot: Option<Snapshot>,
         x_nv_gpudirect_clique: Option<u8>,
     ) -> Result<Self, VfioPciError> {
@@ -1457,7 +1459,8 @@ impl VfioPciDevice {
             container,
             common,
             iommu_attached,
-            memory_slot,
+            get_memory_slot,
+            put_memory_slot,
         };
 
         Ok(vfio_pci_device)
@@ -1635,7 +1638,7 @@ impl VfioPciDevice {
                     }
 
                     let user_memory_region = UserMemoryRegion {
-                        slot: (self.memory_slot)(),
+                        slot: (self.get_memory_slot)(),
                         start: region.start.0 + area.offset,
                         size: area.size,
                         host_addr: host_addr as u64,
@@ -1698,6 +1701,8 @@ impl VfioPciDevice {
                 if let Err(e) = self.vm.remove_user_memory_region(r) {
                     error!("Could not remove the userspace memory region: {}", e);
                 }
+
+                (self.put_memory_slot)(user_memory_region.slot);
 
                 // SAFETY: FFI call with correct arguments
                 let ret = unsafe {

@@ -163,6 +163,7 @@ pub struct MemoryManager {
     boot_guest_memory: GuestMemoryMmap,
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     next_memory_slot: u32,
+    memory_slots: Vec<u32>,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
     end_of_ram_area: GuestAddress,
@@ -1206,6 +1207,7 @@ impl MemoryManager {
             boot_guest_memory,
             guest_memory,
             next_memory_slot,
+            memory_slots: Vec::new(),
             start_of_device_area,
             end_of_device_area,
             end_of_ram_area,
@@ -1729,10 +1731,27 @@ impl MemoryManager {
         self.end_of_device_area
     }
 
+    pub fn get_available_memory_slot(&self) -> u32 {
+        for i in &self.memory_slots {
+            if !self.memory_slots.contains(&(i + 1)) {
+                return *i + 1;
+            }
+        }
+
+        *self.memory_slots.last().unwrap_or(&0)
+    }
+
     pub fn allocate_memory_slot(&mut self) -> u32 {
-        let slot_id = self.next_memory_slot;
-        self.next_memory_slot += 1;
+        let slot_id = self.get_available_memory_slot();
+        debug!("got memory slot id {}", slot_id);
+        self.memory_slots.push(slot_id);
+        self.memory_slots.sort();
         slot_id
+    }
+
+    pub fn free_memory_slot(&mut self, slot: u32) {
+        debug!("free memory slot {:?}", slot);
+        self.memory_slots.retain(|&x| x != slot);
     }
 
     pub fn create_userspace_mapping(

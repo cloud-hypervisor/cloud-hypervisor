@@ -3422,6 +3422,7 @@ impl DeviceManager {
             };
 
         let memory_manager = self.memory_manager.clone();
+        let memory_manager2 = self.memory_manager.clone();
 
         let vfio_pci_device = VfioPciDevice::new(
             vfio_name.clone(),
@@ -3433,6 +3434,7 @@ impl DeviceManager {
             device_cfg.iommu,
             pci_device_bdf,
             Arc::new(move || memory_manager.lock().unwrap().allocate_memory_slot()),
+            Arc::new(move |x| memory_manager2.lock().unwrap().free_memory_slot(x)),
             vm_migration::snapshot_from_id(self.snapshot.as_ref(), vfio_name.as_str()),
             device_cfg.x_nv_gpudirect_clique,
         )
