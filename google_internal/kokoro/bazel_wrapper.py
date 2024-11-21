@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+
 """bazel_wrapper.py helps user populate configs for BES and foundry.
 
 This is a modified copy of google3/devtools/kokoro/scripts/bazel_wrapper.py
