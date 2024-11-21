@@ -23,7 +23,7 @@ use vfio_ioctls::{
 use vm_allocator::page_size::{
     align_page_size_down, align_page_size_up, is_4k_aligned, is_4k_multiple, is_page_size_aligned,
 };
-use vm_allocator::{AddressAllocator, SystemAllocator};
+use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
@@ -1416,7 +1416,7 @@ pub struct VfioPciDevice {
     container: Arc<VfioContainer>,
     common: VfioCommon,
     iommu_attached: bool,
-    memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
+    memory_slot_allocator: MemorySlotAllocator,
 }
 
 impl VfioPciDevice {
@@ -1431,7 +1431,7 @@ impl VfioPciDevice {
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         iommu_attached: bool,
         bdf: PciBdf,
-        memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
+        memory_slot_allocator: MemorySlotAllocator,
         snapshot: Option<Snapshot>,
         x_nv_gpudirect_clique: Option<u8>,
     ) -> Result<Self, VfioPciError> {
@@ -1457,7 +1457,7 @@ impl VfioPciDevice {
             container,
             common,
             iommu_attached,
-            memory_slot,
+            memory_slot_allocator,
         };
 
         Ok(vfio_pci_device)
@@ -1635,7 +1635,7 @@ impl VfioPciDevice {
                     }
 
                     let user_memory_region = UserMemoryRegion {
-                        slot: (self.memory_slot)(),
+                        slot: self.memory_slot_allocator.next_memory_slot(),
                         start: region.start.0 + area.offset,
                         size: area.size,
                         host_addr: host_addr as u64,
