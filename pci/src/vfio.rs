@@ -1699,6 +1699,9 @@ impl VfioPciDevice {
                     error!("Could not remove the userspace memory region: {}", e);
                 }
 
+                self.memory_slot_allocator
+                    .free_memory_slot(user_memory_region.slot);
+
                 // SAFETY: FFI call with correct arguments
                 let ret = unsafe {
                     libc::munmap(
