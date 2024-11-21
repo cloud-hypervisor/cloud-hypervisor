@@ -19,6 +19,10 @@ mod serial;
 #[cfg(target_arch = "aarch64")]
 mod uart_pl011;
 
+mod fw_cfg;
+
+pub use self::fw_cfg::FwCfg;
+
 pub use self::cmos::Cmos;
 #[cfg(target_arch = "x86_64")]
 pub use self::debug_port::DebugPort;

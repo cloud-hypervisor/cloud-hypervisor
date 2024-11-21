@@ -26,6 +26,9 @@ rust_library(
         "@crates//:thiserror",
         "@crates//:vm-memory",
         "@crates//:vmm-sys-util",
+        "@crates//:linux-loader",
+        "@crates//:bitfield",
+        "@crates//:zerocopy",
     ],
 )
 
@@ -56,5 +59,8 @@ rust_test(
         "@crates//:thiserror",
         "@crates//:vm-memory",
         "@crates//:vmm-sys-util",
+        "@crates//:linux-loader",
+        "@crates//:bitfield",
+        "@crates//:zerocopy",
     ],
 )
