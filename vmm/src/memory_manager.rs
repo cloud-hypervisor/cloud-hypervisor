@@ -13,6 +13,7 @@ use std::ops::{BitAnd, Deref, Not, Sub};
 use std::os::fd::AsFd;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{ffi, result, thread};
 
@@ -33,7 +34,7 @@ use tracer::trace_scoped;
 use virtio_devices::BlocksState;
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
-use vm_allocator::{AddressAllocator, SystemAllocator};
+use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
 use vm_device::BusDevice;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
@@ -162,7 +163,8 @@ struct ArchMemRegion {
 pub struct MemoryManager {
     boot_guest_memory: GuestMemoryMmap,
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
-    next_memory_slot: u32,
+    next_memory_slot: Arc<AtomicU32>,
+    memory_slot_free_list: Arc<Mutex<Vec<u32>>>,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
     end_of_ram_area: GuestAddress,
@@ -1205,7 +1207,8 @@ impl MemoryManager {
         let mut memory_manager = MemoryManager {
             boot_guest_memory,
             guest_memory,
-            next_memory_slot,
+            next_memory_slot: Arc::new(AtomicU32::new(next_memory_slot)),
+            memory_slot_free_list: Arc::new(Mutex::new(Vec::new())),
             start_of_device_area,
             end_of_device_area,
             end_of_ram_area,
@@ -1729,10 +1732,14 @@ impl MemoryManager {
         self.end_of_device_area
     }
 
+    pub fn memory_slot_allocator(&mut self) -> MemorySlotAllocator {
+        let memory_slot_free_list = Arc::clone(&self.memory_slot_free_list);
+        let next_memory_slot = Arc::clone(&self.next_memory_slot);
+        MemorySlotAllocator::new(next_memory_slot, memory_slot_free_list)
+    }
+
     pub fn allocate_memory_slot(&mut self) -> u32 {
-        let slot_id = self.next_memory_slot;
-        self.next_memory_slot += 1;
-        slot_id
+        self.memory_slot_allocator().next_memory_slot()
     }
 
     pub fn create_userspace_mapping(
@@ -2120,7 +2127,7 @@ impl MemoryManager {
             current_ram: self.current_ram,
             arch_mem_regions: self.arch_mem_regions.clone(),
             hotplug_slots: self.hotplug_slots.clone(),
-            next_memory_slot: self.next_memory_slot,
+            next_memory_slot: self.next_memory_slot.load(Ordering::SeqCst),
             selected_slot: self.selected_slot,
             next_hotplug_slot: self.next_hotplug_slot,
         }
