@@ -3432,7 +3432,7 @@ impl DeviceManager {
             legacy_interrupt_group,
             device_cfg.iommu,
             pci_device_bdf,
-            Arc::new(move || memory_manager.lock().unwrap().allocate_memory_slot()),
+            memory_manager.lock().unwrap().memory_slot_allocator(),
             vm_migration::snapshot_from_id(self.snapshot.as_ref(), vfio_name.as_str()),
             device_cfg.x_nv_gpudirect_clique,
         )
@@ -3596,7 +3596,7 @@ impl DeviceManager {
             self.msi_interrupt_manager.clone(),
             legacy_interrupt_group,
             pci_device_bdf,
-            Arc::new(move || memory_manager.lock().unwrap().allocate_memory_slot()),
+            memory_manager.lock().unwrap().memory_slot_allocator(),
             vm_migration::snapshot_from_id(self.snapshot.as_ref(), vfio_user_name.as_str()),
         )
         .map_err(DeviceManagerError::VfioUserCreate)?;

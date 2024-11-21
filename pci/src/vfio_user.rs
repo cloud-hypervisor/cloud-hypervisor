@@ -13,7 +13,7 @@ use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::VfioIrq;
 use vfio_user::{Client, Error as VfioUserError};
-use vm_allocator::{AddressAllocator, SystemAllocator};
+use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig};
 use vm_device::{BusDevice, Resource};
@@ -35,7 +35,7 @@ pub struct VfioUserPciDevice {
     vm: Arc<dyn hypervisor::Vm>,
     client: Arc<Mutex<Client>>,
     common: VfioCommon,
-    memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
+    memory_slot_allocator: MemorySlotAllocator,
 }
 
 #[derive(Error, Debug)]
@@ -74,7 +74,7 @@ impl VfioUserPciDevice {
         msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         bdf: PciBdf,
-        memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
+        memory_slot_allocator: MemorySlotAllocator,
         snapshot: Option<Snapshot>,
     ) -> Result<Self, VfioUserPciDeviceError> {
         let resettable = client.lock().unwrap().resettable();
@@ -106,7 +106,7 @@ impl VfioUserPciDevice {
             vm: vm.clone(),
             client,
             common,
-            memory_slot,
+            memory_slot_allocator,
         })
     }
 
@@ -178,7 +178,7 @@ impl VfioUserPciDevice {
                     }
 
                     let user_memory_region = UserMemoryRegion {
-                        slot: (self.memory_slot)(),
+                        slot: self.memory_slot_allocator.next_memory_slot(),
                         start: mmio_region.start.0 + s.offset,
                         size: s.size,
                         host_addr: host_addr as u64,
