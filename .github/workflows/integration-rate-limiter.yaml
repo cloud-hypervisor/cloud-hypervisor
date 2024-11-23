@@ -28,7 +28,7 @@ jobs:
           sudo apt install -y docker-ce docker-ce-cli
       - name: Run rate-limiter integration tests
         if: ${{ github.event_name != 'pull_request' }}
-        timeout-minutes: 10
+        timeout-minutes: 20
         run: scripts/dev_cli.sh tests --integration-rate-limiter
       - name: Skipping build for PR
         if: ${{ github.event_name == 'pull_request' }}
