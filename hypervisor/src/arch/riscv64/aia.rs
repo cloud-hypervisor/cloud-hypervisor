@@ -26,11 +26,9 @@ pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug)]
 pub struct VaiaConfig {
-    pub vcpu_count: u64,
+    pub vcpu_count: u32,
     pub aplic_addr: u64,
-    pub aplic_size: u64,
     pub imsic_addr: u64,
-    pub imsic_size: u64,
     pub nr_irqs: u32,
 }
 
@@ -40,16 +38,16 @@ pub trait Vaia: Send + Sync {
     fn aplic_compatibility(&self) -> &str;
 
     /// Returns an array with APLIC device properties
-    fn aplic_properties(&self) -> [u64; 4];
+    fn aplic_properties(&self) -> [u32; 4];
 
     /// Returns the compatibility property of IMSIC
     fn imsic_compatibility(&self) -> &str;
 
     /// Returns an array with IMSIC device properties
-    fn imsic_properties(&self) -> [u64; 4];
+    fn imsic_properties(&self) -> [u32; 4];
 
     /// Returns the number of vCPUs this AIA handles
-    fn vcpu_count(&self) -> u64;
+    fn vcpu_count(&self) -> u32;
 
     /// Returns whether the AIA device is MSI compatible or not
     fn msi_compatible(&self) -> bool;
