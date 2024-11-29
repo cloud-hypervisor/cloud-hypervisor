@@ -19,17 +19,11 @@ pub struct KvmAiaImsics {
     /// AIA APLIC address
     aplic_addr: u64,
 
-    /// AIA APLIC size
-    aplic_size: u64,
-
     /// AIA IMSIC address
     imsic_addr: u64,
 
-    /// AIA IMSIC size
-    imsic_size: u64,
-
     /// Number of CPUs handled by the device
-    vcpu_count: u64,
+    vcpu_count: u32,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -80,7 +74,7 @@ impl KvmAiaImsics {
         // Report NR_IDS
 
         // Setting up hart_bits
-        let max_hart_index = self.vcpu_count - 1;
+        let max_hart_index = self.vcpu_count as u64 - 1;
         let hart_bits = std::cmp::max(64 - max_hart_index.leading_zeros(), 1);
         Self::set_device_attribute(
             &self.device,
@@ -102,9 +96,10 @@ impl KvmAiaImsics {
         )?;
 
         // Helpers to calculate address and attribute of IMSIC of each vCPU
-        let riscv_imsic_addr_of =
-            |cpu_index: u64| -> u64 { self.imsic_addr + cpu_index * self.imsic_size };
-        let riscv_imsic_attr_of = |cpu_index: u64| -> u64 { cpu_index };
+        let riscv_imsic_addr_of = |cpu_index: u32| -> u64 {
+            self.imsic_addr + (cpu_index * kvm_bindings::KVM_DEV_RISCV_IMSIC_SIZE) as u64
+        };
+        let riscv_imsic_attr_of = |cpu_index: u32| -> u64 { cpu_index as u64 };
 
         // Setting up RISC-V IMSICs
         for cpu_index in 0..self.vcpu_count {
@@ -196,9 +191,7 @@ impl KvmAiaImsics {
             device: vaia,
             vcpu_count: config.vcpu_count,
             aplic_addr: config.aplic_addr,
-            aplic_size: config.aplic_size,
             imsic_addr: config.imsic_addr,
-            imsic_size: config.imsic_size,
         };
 
         aia_device.init_device_attributes(config.nr_irqs)?;
@@ -212,19 +205,29 @@ impl Vaia for KvmAiaImsics {
         "riscv,aplic"
     }
 
-    fn aplic_properties(&self) -> [u64; 4] {
-        [0, self.aplic_addr, 0, self.aplic_size]
+    fn aplic_properties(&self) -> [u32; 4] {
+        [
+            0,
+            self.aplic_addr as u32,
+            0,
+            kvm_bindings::KVM_DEV_RISCV_APLIC_SIZE,
+        ]
     }
 
     fn imsic_compatibility(&self) -> &str {
         "riscv,imsics"
     }
 
-    fn imsic_properties(&self) -> [u64; 4] {
-        [0, self.imsic_addr, 0, self.imsic_size * self.vcpu_count]
+    fn imsic_properties(&self) -> [u32; 4] {
+        [
+            0,
+            self.imsic_addr as u32,
+            0,
+            kvm_bindings::KVM_DEV_RISCV_IMSIC_SIZE * self.vcpu_count,
+        ]
     }
 
-    fn vcpu_count(&self) -> u64 {
+    fn vcpu_count(&self) -> u32 {
         self.vcpu_count
     }
 
@@ -256,9 +259,7 @@ mod tests {
         VaiaConfig {
             vcpu_count: 1,
             aplic_addr: 0xd000000,
-            aplic_size: 0x4000,
             imsic_addr: 0x2800000,
-            imsic_size: 0x1000,
             nr_irqs: 256,
         }
     }
