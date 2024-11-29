@@ -201,7 +201,7 @@ impl NetEpollHandler {
             .net
             .rx_rate_limiter
             .as_ref()
-            .map_or(false, |r| r.is_blocked());
+            .is_some_and(|r| r.is_blocked());
 
         // Start to listen on RX_TAP_EVENT only when the rate limit is not reached
         if !self.net.rx_tap_listening && !rate_limit_reached {
@@ -238,7 +238,7 @@ impl NetEpollHandler {
             .net
             .tx_rate_limiter
             .as_ref()
-            .map_or(false, |r| r.is_blocked());
+            .is_some_and(|r| r.is_blocked());
 
         if !rate_limit_reached {
             self.process_tx()?;

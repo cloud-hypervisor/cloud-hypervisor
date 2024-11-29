@@ -489,8 +489,7 @@ impl EpollHelperHandler for BlockEpollHandler {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
                 })?;
 
-                let rate_limit_reached =
-                    self.rate_limiter.as_ref().map_or(false, |r| r.is_blocked());
+                let rate_limit_reached = self.rate_limiter.as_ref().is_some_and(|r| r.is_blocked());
 
                 // Process the queue only when the rate limit is not reached
                 if !rate_limit_reached {
@@ -509,8 +508,7 @@ impl EpollHelperHandler for BlockEpollHandler {
                     ))
                 })?;
 
-                let rate_limit_reached =
-                    self.rate_limiter.as_ref().map_or(false, |r| r.is_blocked());
+                let rate_limit_reached = self.rate_limiter.as_ref().is_some_and(|r| r.is_blocked());
 
                 // Process the queue only when the rate limit is not reached
                 if !rate_limit_reached {
