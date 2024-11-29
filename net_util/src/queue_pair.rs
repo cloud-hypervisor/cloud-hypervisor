@@ -468,7 +468,7 @@ impl NetQueuePair {
         let rate_limit_reached = self
             .rx_rate_limiter
             .as_ref()
-            .map_or(false, |r| r.is_blocked());
+            .is_some_and(|r| r.is_blocked());
 
         // Stop listening on the `RX_TAP_EVENT` when:
         // 1) there is no available describes, or
