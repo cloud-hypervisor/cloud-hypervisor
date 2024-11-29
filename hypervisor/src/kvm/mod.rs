@@ -2731,33 +2731,29 @@ impl cpu::Vcpu for KvmVcpu {
             )
             .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
 
-        // Other vCPUs are powered off initially awaiting wakeup.
-        if cpu_id == 0 {
-            // Setting the PC (Processor Counter) to the current program address (kernel address).
-            let pc = offset_of!(kvm_riscv_core, regs, user_regs_struct, pc);
-            self.fd
-                .lock()
-                .unwrap()
-                .set_one_reg(
-                    riscv64_reg_id!(KVM_REG_RISCV_CORE, pc),
-                    &boot_ip.to_le_bytes(),
-                )
-                .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+        // Setting the PC (Processor Counter) to the current program address (kernel address).
+        let pc = offset_of!(kvm_riscv_core, regs, user_regs_struct, pc);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, pc),
+                &boot_ip.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
 
-            // Last mandatory thing to set -> the address pointing to the FDT (also called DTB).
-            // "The device tree blob (dtb) must be placed on an 8-byte boundary and must
-            // not exceed 2 megabytes in size." -> https://www.kernel.org/doc/Documentation/arch/riscv/boot.txt.
-            // We are choosing to place it the end of DRAM. See `get_fdt_addr`.
-            let a1 = offset_of!(kvm_riscv_core, regs, user_regs_struct, a1);
-            self.fd
-                .lock()
-                .unwrap()
-                .set_one_reg(
-                    riscv64_reg_id!(KVM_REG_RISCV_CORE, a1),
-                    &fdt_start.to_le_bytes(),
-                )
-                .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
-        }
+        // Last mandatory thing to set -> the address pointing to the FDT (also called DTB).
+        // "The device tree blob (dtb) must be placed on an 8-byte boundary and must
+        // not exceed 64 kilobytes in size." -> https://www.kernel.org/doc/Documentation/arch/riscv/boot.txt.
+        let a1 = offset_of!(kvm_riscv_core, regs, user_regs_struct, a1);
+        self.fd
+            .lock()
+            .unwrap()
+            .set_one_reg(
+                riscv64_reg_id!(KVM_REG_RISCV_CORE, a1),
+                &fdt_start.to_le_bytes(),
+            )
+            .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
 
         Ok(())
     }
