@@ -120,14 +120,17 @@ process_common_args() {
 }
 
 download_hypervisor_fw() {
+    FW_TAG="0.5.0"
     if [ -n "$AUTH_DOWNLOAD_TOKEN" ]; then
         echo "Using authenticated download from GitHub"
-        FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest \
+        FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/tags/${FW_TAG} \
             --header "Authorization: Token $AUTH_DOWNLOAD_TOKEN" \
-            --header "X-GitHub-Api-Version: 2022-11-28" | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+            --header "X-GitHub-Api-Version: 2022-11-28" | grep "browser_download_url" |
+            grep -oP '"https://[^"]*hypervisor-fw"' | sed -e 's/^"//' -e 's/"$//')
     else
         echo "Using anonymous download from GitHub"
-        FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+        FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/tags/${FW_TAG} |
+            grep "browser_download_url" | grep -oP '"https://[^"]*hypervisor-fw"' | sed -e 's/^"//' -e 's/"$//')
     fi
     FW="$WORKLOADS_DIR/hypervisor-fw"
     pushd "$WORKLOADS_DIR" || exit
