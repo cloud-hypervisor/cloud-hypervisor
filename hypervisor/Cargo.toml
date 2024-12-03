@@ -20,7 +20,7 @@ igvm = { version = "0.3.3", optional = true }
 igvm_defs = { version = "0.3.1", optional = true }
 kvm-bindings = { workspace = true, optional = true, features = ["serde"] }
 kvm-ioctls = { workspace = true, optional = true }
-libc = "0.2.158"
+libc = "0.2.167"
 log = "0.4.22"
 mshv-bindings = { workspace = true, features = [
   "fam-wrappers",

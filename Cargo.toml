@@ -36,7 +36,7 @@ dhat = { version = "0.3.3", optional = true }
 epoll = "4.3.3"
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
-libc = "0.2.158"
+libc = "0.2.167"
 log = { version = "0.4.22", features = ["std"] }
 option_parser = { path = "option_parser" }
 seccompiler = { workspace = true }
