@@ -5,7 +5,7 @@ name = "vm-allocator"
 version = "0.1.0"
 
 [dependencies]
-libc = "0.2.158"
+libc = "0.2.167"
 vm-memory = { workspace = true }
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]
