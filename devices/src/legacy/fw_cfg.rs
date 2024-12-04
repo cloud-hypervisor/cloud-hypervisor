@@ -16,11 +16,30 @@
 /// We implement the functionality necessary to use Oak's Stage0 Firmware
 /// (This includes most of the functinality, besides adding additional
 /// items to the fw_cfg device for the firmware)
+use arch::{
+    layout::{
+        EBDA_START, HIGH_RAM_START, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START,
+        MEM_32BIT_RESERVED_START, PCI_MMCONFIG_SIZE, PCI_MMCONFIG_START, RAM_64BIT_START,
+    },
+    RegionType,
+};
 use bitfield::bitfield;
-use std::sync::{Arc, Barrier};
+use std::{
+    fs::File,
+    io::Result,
+    mem::size_of_val,
+    os::unix::fs::FileExt,
+    sync::{Arc, Barrier},
+};
 use vm_device::BusDevice;
+use vm_memory::GuestAddress;
 use vmm_sys_util::sock_ctrl_msg::IntoIovec;
-use zerocopy::AsBytes;
+use zerocopy::{AsBytes, FromBytes, FromZeroes};
+
+const STAGE0_START_ADDRESS: GuestAddress = GuestAddress(0xffe0_0000);
+const STAGE0_SIZE: usize = 0x20_0000;
+const E820_RAM: u32 = 1;
+const E820_RESERVED: u32 = 2;
 
 pub const PORT_FW_CFG_SELECTOR: u16 = 0x510;
 pub const PORT_FW_CFG_DATA: u16 = 0x511;
@@ -41,6 +60,8 @@ pub const FW_CFG_FEATURE: [u8; 4] = [0b11, 0, 0, 0];
 pub enum FwCfgContent {
     Bytes(Vec<u8>),
     Slice(&'static [u8]),
+    File(u64, File),
+    U32(u32),
 }
 
 impl Default for FwCfgContent {
@@ -49,8 +70,21 @@ impl Default for FwCfgContent {
     }
 }
 
+impl FwCfgContent {
+    fn size(&self) -> Result<u32> {
+        let ret = match self {
+            FwCfgContent::Bytes(v) => v.len(),
+            FwCfgContent::File(offset, f) => (f.metadata()?.len() - offset) as usize,
+            FwCfgContent::Slice(s) => s.len(),
+            FwCfgContent::U32(n) => size_of_val(n),
+        };
+        u32::try_from(ret).map_err(|_| std::io::ErrorKind::InvalidInput.into())
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct FwCfgItem {
+    pub name: String,
     pub content: FwCfgContent,
 }
 
@@ -80,6 +114,33 @@ struct FwCfgFilesHeader {
     count_be: u32,
 }
 
+pub const FILE_NAME_SIZE: usize = 56;
+
+fn create_file_name(name: &str) -> [u8; FILE_NAME_SIZE] {
+    let mut c_name = [0u8; FILE_NAME_SIZE];
+    let c_len = std::cmp::min(FILE_NAME_SIZE - 1, name.len());
+    c_name[0..c_len].copy_from_slice(&name.as_bytes()[0..c_len]);
+    c_name
+}
+
+#[allow(dead_code)]
+#[repr(C, packed)]
+#[derive(Debug, AsBytes, FromBytes, FromZeroes)]
+pub struct BootE820Entry {
+    pub addr: u64,
+    pub size: u64,
+    pub type_: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, AsBytes)]
+struct FwCfgFile {
+    size_be: u32,
+    select_be: u16,
+    _reserved: u16,
+    name: [u8; FILE_NAME_SIZE],
+}
+
 impl FwCfg {
     pub fn new() -> FwCfg {
         const DEFAULT_ITEM: FwCfgContent = FwCfgContent::Slice(&[]);
@@ -97,10 +158,101 @@ impl FwCfg {
         }
     }
 
+    #[cfg(target_arch = "x86_64")]
+    pub fn add_e820(&mut self, mem_size: usize) -> Result<()> {
+        let mut mem_regions = vec![
+            (GuestAddress(0), EBDA_START.0 as usize, RegionType::Ram),
+            (
+                HIGH_RAM_START,
+                MEM_32BIT_RESERVED_START.0 as usize - HIGH_RAM_START.0 as usize,
+                RegionType::Ram,
+            ),
+            (
+                MEM_32BIT_DEVICES_START,
+                MEM_32BIT_DEVICES_SIZE as usize,
+                RegionType::Reserved,
+            ),
+            (
+                PCI_MMCONFIG_START,
+                PCI_MMCONFIG_SIZE as usize,
+                RegionType::Reserved,
+            ),
+            (STAGE0_START_ADDRESS, STAGE0_SIZE, RegionType::Reserved),
+        ];
+        if mem_size > RAM_64BIT_START.0 as usize {
+            mem_regions.push((
+                RAM_64BIT_START,
+                mem_size - RAM_64BIT_START.0 as usize,
+                RegionType::Ram,
+            ));
+        }
+        let mut bytes = vec![];
+        for (addr, size, region) in mem_regions.iter() {
+            let type_ = match region {
+                RegionType::Ram => E820_RAM,
+                RegionType::Reserved => E820_RESERVED,
+                RegionType::SubRegion => continue,
+            };
+            let entry = BootE820Entry {
+                addr: addr.0,
+                size: *size as u64,
+                type_,
+            };
+            bytes.extend_from_slice(entry.as_bytes());
+        }
+        let item = FwCfgItem {
+            name: "etc/e820".to_owned(),
+            content: FwCfgContent::Bytes(bytes),
+        };
+        self.add_item(item)
+    }
+
+    fn get_file_dir_mut(&mut self) -> &mut Vec<u8> {
+        let FwCfgContent::Bytes(file_buf) = &mut self.known_items[FW_CFG_FILE_DIR as usize] else {
+            unreachable!("fw_cfg: selector {FW_CFG_FILE_DIR:#x} should be FwCfgContent::Byte!")
+        };
+        file_buf
+    }
+
+    fn update_count(&mut self) {
+        let header = FwCfgFilesHeader {
+            count_be: (self.items.len() as u32).to_be(),
+        };
+        self.get_file_dir_mut()[0..4].copy_from_slice(header.as_bytes());
+    }
+
+    pub fn add_item(&mut self, item: FwCfgItem) -> Result<()> {
+        let index = self.items.len();
+        let c_name = create_file_name(&item.name);
+        let size = item.content.size()?;
+        let cfg_file = FwCfgFile {
+            size_be: size.to_be(),
+            select_be: (FW_CFG_FILE_FIRST + index as u16).to_be(),
+            _reserved: 0,
+            name: c_name,
+        };
+        self.get_file_dir_mut()
+            .extend_from_slice(cfg_file.as_bytes());
+        self.items.push(item);
+        self.update_count();
+        Ok(())
+    }
+
     fn read_content(content: &FwCfgContent, offset: u32) -> Option<u8> {
         match content {
             FwCfgContent::Bytes(b) => b.get(offset as usize).copied(),
             FwCfgContent::Slice(s) => s.get(offset as usize).copied(),
+            FwCfgContent::File(o, f) => {
+                let mut buf = [0u8];
+                match f.read_exact_at(&mut buf, o + offset as u64) {
+                    Ok(_) => Some(buf[0]),
+                    Err(e) => {
+                        log::error!("fw_cfg: reading {f:?}: {e:?}");
+                        None
+                    }
+                }
+            }
+            FwCfgContent::U32(n) => n.to_le_bytes().get(offset as usize).copied(),
         }
     }
 

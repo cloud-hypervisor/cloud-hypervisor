@@ -669,6 +669,17 @@ impl Vm {
             .create_devices(console_info, console_resize_pipe, original_termios)
             .map_err(Error::DeviceManager)?;
 
+        #[cfg(all(feature = "sev_snp", feature = "kvm"))]
+        {
+            let _ = device_manager
+                .lock()
+                .unwrap()
+                .fw_cfg()
+                .lock()
+                .unwrap()
+                .add_e820(config.lock().unwrap().memory.size as usize);
+        }
+
         #[cfg(feature = "tdx")]
         let kernel = config
             .lock()

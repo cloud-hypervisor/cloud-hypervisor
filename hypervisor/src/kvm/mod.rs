@@ -2063,13 +2063,21 @@ impl cpu::Vcpu for KvmVcpu {
                             let address = hypercall.args[0];
                             // num pages to map from start address
                             let num_pages = hypercall.args[1];
+                            // bits[0-3]  = page size encoding
+                            // bits [4]   = 1 if private, 0 if shared
+                            // bits[5-63] = zero
+                            let attributes = hypercall.args[2];
+                            // TODO: b/394610854 - Add 2mb page support
                             let size = num_pages * PAGE_SIZE_4K;
-                            let kvm_obj = Kvm::new()
-                                .map_err(|e| cpu::HypervisorCpuError::OpenKvm(e.into()))?;
-                            let mem_attr =
-                                kvm_obj.check_extension_int(crate::kvm::Cap::VmAttributes);
-                            let set_private_attr =
-                                mem_attr & kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE as i32;
+                            let private_encoding_bitmask = 0b10000;
+                            info!("hypercall attributes: {:#b}", attributes);
+                            let set_private_attr = if attributes & private_encoding_bitmask > 0 {
+                                KVM_MEMORY_ATTRIBUTE_PRIVATE as u64
+                            } else {
+                                // the only attribute available is private, o/w 0
+                                // https://docs.kernel.org/virt/kvm/api.html#kvm-set-memory-attributes
+                                0u64
+                            };
                             let mem_attributes = kvm_bindings::kvm_memory_attributes {
                                 address,
                                 size,
