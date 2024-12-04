@@ -8,5 +8,5 @@ version = "0.1.0"
 libc = "0.2.167"
 vm-memory = { workspace = true }
 
-[target.'cfg(target_arch = "aarch64")'.dependencies]
+[target.'cfg(any(target_arch = "aarch64", target_arch = "riscv64"))'.dependencies]
 arch = { path = "../arch" }
