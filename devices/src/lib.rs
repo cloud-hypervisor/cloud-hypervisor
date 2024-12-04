@@ -28,6 +28,8 @@ pub mod legacy;
 #[cfg(feature = "pvmemcontrol")]
 pub mod pvmemcontrol;
 pub mod pvpanic;
+// TODO: TPM is not yet supported
+#[cfg(not(target_arch = "riscv64"))]
 pub mod tpm;
 
 pub use self::acpi::{AcpiGedDevice, AcpiPmTimerDevice, AcpiShutdownDevice};
