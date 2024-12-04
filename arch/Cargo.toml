@@ -11,7 +11,7 @@ sev_snp = []
 tdx = []
 
 [dependencies]
-anyhow = "1.0.87"
+anyhow = "1.0.94"
 byteorder = "1.5.0"
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.167"
