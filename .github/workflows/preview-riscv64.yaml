@@ -15,6 +15,7 @@ jobs:
           - hypervisor
           - arch
           - vm-allocator
+          - devices
 
     steps:
       - name: Code checkout
