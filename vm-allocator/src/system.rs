@@ -22,7 +22,7 @@ use crate::page_size::get_page_size;
 /// ```
 /// # #[cfg(target_arch = "x86_64")]
 /// # use vm_allocator::{GsiApic, SystemAllocator};
-/// # #[cfg(target_arch = "aarch64")]
+/// # #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 /// # use vm_allocator::SystemAllocator;
 /// # use vm_memory::{Address, GuestAddress, GuestUsize};
 ///   let mut allocator = SystemAllocator::new(
@@ -34,10 +34,14 @@ use crate::page_size::get_page_size;
 ///   assert_eq!(allocator.allocate_irq(), Some(5));
 ///   #[cfg(target_arch = "aarch64")]
 ///   assert_eq!(allocator.allocate_irq(), Some(32));
+///   #[cfg(target_arch = "riscv64")]
+///   assert_eq!(allocator.allocate_irq(), Some(0));
 ///   #[cfg(target_arch = "x86_64")]
 ///   assert_eq!(allocator.allocate_irq(), Some(6));
 ///   #[cfg(target_arch = "aarch64")]
 ///   assert_eq!(allocator.allocate_irq(), Some(33));
+///   #[cfg(target_arch = "riscv64")]
+///   assert_eq!(allocator.allocate_irq(), Some(1));
 ///   assert_eq!(allocator.allocate_platform_mmio_addresses(None, 0x1000, Some(0x1000)), Some(GuestAddress(0x1fff_f000)));
 ///
 /// ```
@@ -74,7 +78,7 @@ impl SystemAllocator {
             )?,
             #[cfg(target_arch = "x86_64")]
             gsi_allocator: GsiAllocator::new(apics),
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
             gsi_allocator: GsiAllocator::new(),
         })
     }
