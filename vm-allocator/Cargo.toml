@@ -4,6 +4,10 @@ edition = "2021"
 name = "vm-allocator"
 version = "0.1.0"
 
+[features]
+default = []
+kvm = ["arch/kvm"]
+
 [dependencies]
 libc = "0.2.167"
 vm-memory = { workspace = true }
