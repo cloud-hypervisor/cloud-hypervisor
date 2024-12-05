@@ -23,7 +23,7 @@ use libc::{cfmakeraw, isatty, tcgetattr, tcsetattr, termios, TCSANOW};
 use thiserror::Error;
 
 use crate::sigwinch_listener::listen_for_sigwinch_on_tty;
-use crate::vm_config::ConsoleOutputMode;
+use crate::vm_config::{ConsoleOutputMode, VmConfig};
 use crate::Vmm;
 
 const TIOCSPTLCK: libc::c_int = 0x4004_5431;
@@ -176,8 +176,15 @@ fn dup_stdout() -> vmm_sys_util::errno::Result<File> {
     Ok(unsafe { File::from_raw_fd(stdout) })
 }
 
-pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<ConsoleInfo> {
-    let vm_config = vmm.vm_config.as_mut().unwrap().clone();
+pub(crate) fn pre_create_console_devices(
+    vmm: &mut Vmm,
+    new_vm_config: Option<Arc<Mutex<VmConfig>>>,
+) -> ConsoleDeviceResult<ConsoleInfo> {
+    let vm_config = if let Some(vm_config) = new_vm_config {
+        vm_config
+    } else {
+        vmm.vm_config.clone().unwrap()
+    };
     let mut vmconfig = vm_config.lock().unwrap();
 
     let console_info = ConsoleInfo {
