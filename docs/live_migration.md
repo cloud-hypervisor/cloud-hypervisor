@@ -1,7 +1,7 @@
 # Live Migration
 
-This document gives two examples of how to use the live migration
-support in Cloud Hypervisor:
+This document gives examples of how to use the live migration support
+in Cloud Hypervisor:
 
 1. local migration - migrating a VM from one Cloud Hypervisor instance to another on the same machine;
 1. remote migration - migrating a VM between two machines;
@@ -50,9 +50,6 @@ In this example, we will migrate a VM from one machine (`src`) to
 another (`dst`) across the network. To keep it simple, we will use a
 minimal VM setup without storage.
 
-Because Cloud Hypervisor does not natively support migrating via TCP
-connections, we will tunnel traffic through `socat`.
-
 ### Preparation
 
 Make sure that `src` and `dst` can reach each other via the
@@ -75,7 +72,11 @@ src $ curl $DEBIAN/initrd.gz > /var/images/initrd
 
 Repeat the above steps on the destination host.
 
-### Starting the Receiver VM
+### Unix Socket Migration
+
+If TCP socket is selected for migration, we can tunnel traffic through "socat".
+
+#### Starting the Receiver VM
 
 On the receiver side, we prepare an empty VM:
 
@@ -95,7 +96,7 @@ In yet another terminal, forward TCP connections to the Unix domain socket:
 dst $ socat TCP-LISTEN:6000,reuseaddr UNIX-CLIENT:/tmp/sock
 ```
 
-### Starting the Sender VM
+#### Starting the Sender VM
 
 Let's start the VM on the source machine:
 
@@ -111,7 +112,7 @@ src $ cloud-hypervisor \
 
 After a few seconds the VM should be up and you can interact with it.
 
-### Performing the Migration
+#### Performing the Migration
 
 First, we start `socat`:
 
@@ -127,3 +128,54 @@ src $ ch-remote --api-socket=/tmp/api send-migration unix:/tmp/sock
 
 When the above commands completed, the VM should be successfully
 migrated to the destination machine without interrupting the workload.
+
+### TCP Socket Migration
+
+If TCP socket is selected for migration, the cross-host migration
+performance will be further improved, but it is necessary to consider
+migrating in a trusted network.
+
+#### Starting the Receiver VM
+
+On the receiver side, we prepare an empty VM:
+
+```console
+dst $ cloud-hypervisor --api-socket /tmp/api
+```
+
+In a different terminal, prepare to receive the migration:
+
+```console
+dst $ ch-remote --api-socket=/tmp/api receive-migration tcp:0.0.0.0:6000
+```
+
+#### Starting the Sender VM
+
+Let's start the VM on the source machine:
+
+```console
+src $ cloud-hypervisor \
+        --serial tty --console off \
+        --cpus boot=2 --memory size=4G \
+        --kernel /var/images/linux \
+        --initramfs /var/images/initrd \
+        --cmdline "console=ttyS0" \
+        --api-socket /tmp/api
+```
+
+After a few seconds the VM should be up and you can interact with it.
+
+#### Performing the Migration
+
+Initiate the Migration over TCP:
+
+```console
+src $ ch-remote --api-socket=/tmp/api send-migration tcp:192.168.1.2:6000
+```
+
+> Replace `192.168.1.2` with the actual IP address of your destination host.
+
+After completing the above commands, the source VM will be migrated to
+the destination host and continue running there. The source VM instance
+will terminate normally. All ongoing processes and connections within
+the VM should remain intact after the migration.

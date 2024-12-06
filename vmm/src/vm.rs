@@ -2472,6 +2472,7 @@ impl Pausable for Vm {
         self.vm
             .pause()
             .map_err(|e| MigratableError::Pause(anyhow!("Could not pause the VM: {}", e)))?;
+        info!("VM has been paused");
 
         *state = new_state;
 
