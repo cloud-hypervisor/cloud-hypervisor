@@ -24,15 +24,16 @@ use arch::{
     RegionType,
 };
 use bitfield::bitfield;
+use linux_loader::bootparam::boot_params;
 use std::{
     fs::File,
     io::Result,
-    mem::size_of_val,
+    mem::{size_of, size_of_val},
     os::unix::fs::FileExt,
     sync::{Arc, Barrier},
 };
 use vm_device::BusDevice;
-use vm_memory::GuestAddress;
+use vm_memory::{ByteValued, GuestAddress};
 use vmm_sys_util::sock_ctrl_msg::IntoIovec;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 
@@ -48,6 +49,14 @@ pub const PORT_FW_CFG_DMA_LO: u16 = 0x518;
 
 pub const FW_CFG_SIGNATURE: u16 = 0x00;
 pub const FW_CFG_ID: u16 = 0x01;
+pub const FW_CFG_KERNEL_SIZE: u16 = 0x08;
+pub const FW_CFG_INITRD_SIZE: u16 = 0x0b;
+pub const FW_CFG_KERNEL_DATA: u16 = 0x11;
+pub const FW_CFG_INITRD_DATA: u16 = 0x12;
+pub const FW_CFG_CMDLINE_SIZE: u16 = 0x14;
+pub const FW_CFG_CMDLINE_DATA: u16 = 0x15;
+pub const FW_CFG_SETUP_SIZE: u16 = 0x17;
+pub const FW_CFG_SETUP_DATA: u16 = 0x18;
 pub const FW_CFG_FILE_DIR: u16 = 0x19;
 pub const FW_CFG_KNOWN_ITEMS: usize = 0x20;
 
@@ -235,6 +244,37 @@ impl FwCfg {
             .extend_from_slice(cfg_file.as_bytes());
         self.items.push(item);
         self.update_count();
+        Ok(())
+    }
+
+    pub fn add_kernel_data(&mut self, file: File) -> Result<()> {
+        let mut buffer = vec![0u8; size_of::<boot_params>()];
+        file.read_exact_at(&mut buffer, 0)?;
+        let bp = boot_params::from_mut_slice(&mut buffer).unwrap();
+        if bp.hdr.setup_sects == 0 {
+            bp.hdr.setup_sects = 4;
+        }
+        bp.hdr.type_of_loader = 0xff;
+        let kernel_start = (bp.hdr.setup_sects as usize + 1) * 512;
+        self.known_items[FW_CFG_SETUP_SIZE as usize] = FwCfgContent::U32(buffer.len() as u32);
+        self.known_items[FW_CFG_SETUP_DATA as usize] = FwCfgContent::Bytes(buffer);
+        self.known_items[FW_CFG_KERNEL_SIZE as usize] =
+            FwCfgContent::U32(file.metadata()?.len() as u32 - kernel_start as u32);
+        self.known_items[FW_CFG_KERNEL_DATA as usize] =
+            FwCfgContent::File(kernel_start as u64, file);
+        Ok(())
+    }
+
+    pub fn add_kernel_cmdline(&mut self, s: std::ffi::CString) {
+        let bytes = s.into_bytes_with_nul();
+        self.known_items[FW_CFG_CMDLINE_SIZE as usize] = FwCfgContent::U32(bytes.len() as u32);
+        self.known_items[FW_CFG_CMDLINE_DATA as usize] = FwCfgContent::Bytes(bytes);
+    }
+
+    pub fn add_initramfs_data(&mut self, file: File) -> Result<()> {
+        let initramfs_size = file.metadata()?.len();
+        self.known_items[FW_CFG_INITRD_SIZE as usize] = FwCfgContent::U32(initramfs_size as _);
+        self.known_items[FW_CFG_INITRD_DATA as usize] = FwCfgContent::File(0, file);
         Ok(())
     }
 
