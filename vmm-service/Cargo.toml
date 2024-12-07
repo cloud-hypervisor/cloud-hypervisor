@@ -1,0 +1,26 @@
+[package]
+name = "vmm-service"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thiserror = "2.0.3"
+serde = { version = "1.0.215", features = [ "derive" ] }
+serde_json = "1.0.133"
+uuid = { version = "1.11.0", features = [ "fast-rng", "v4", "serde" ] }
+log = "0.4.22"
+vmm-sys-util = "0.12.1" 
+libc = "0.2.158" 
+seccompiler = "0.4.0" 
+tokio = { version = "1.42.0", features = [ "full" ] }
+vmm = { path = "../vmm" }
+hypervisor = { path = "../hypervisor" }
+arch = { path = "../arch" }
+async-trait = "0.1.80"
+base64 = "0.21.7"
+tempfile = "3.10.0"
+serde_yaml = "0.9.33"
+rand = "0.8.5"
+gabble = "0.1.1"
+conductor = { git = "https://github.com/versatus/conductor" }
+form-types = { path = "../../form-types" }

@@ -1,7 +1,6 @@
 [package]
 authors = ["The Cloud Hypervisor Authors"]
 build = "build.rs"
-default-run = "cloud-hypervisor"
 description = "Open source Virtual Machine Monitor (VMM) that runs on top of KVM & MSHV"
 edition = "2021"
 homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
@@ -16,6 +15,18 @@ version = "42.0.0"
 # b.) If we want to use a new feature and that MSRV is at least 6 months old,
 # c.) There is a security issue that is addressed by the toolchain update.
 rust-version = "1.77.0"
+
+[[bin]]
+name = "cloud-hypervisor"
+path = "src/main.rs"
+
+[[bin]]
+name = "ch-remote"
+path = "src/bin/ch-remote.rs"
+
+[[bin]]
+name = "vmm-service"
+path = "src/bin/vmm-service.rs"
 
 [profile.release]
 codegen-units = 1
@@ -33,6 +44,7 @@ anyhow = "1.0.87"
 api_client = { path = "api_client" }
 clap = { version = "4.5.13", features = ["string"] }
 dhat = { version = "0.3.3", optional = true }
+env_logger = "0.10"
 epoll = "4.3.3"
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
@@ -47,8 +59,14 @@ tpm = { path = "tpm" }
 tracer = { path = "tracer" }
 vm-memory = { workspace = true }
 vmm = { path = "vmm" }
+vmm-service = { path = "vmm-service" }
 vmm-sys-util = { workspace = true }
+tokio = { version = "1.42.0", features = [ "full" ] }
 zbus = { version = "4.4.0", optional = true }
+conductor = { git = "https://github.com/versatus/conductor" }
+async-trait = "0.1.80"
+form-types = { path = "../form-types" }
+form-traits = { path = "../form-traits" }
 
 [dev-dependencies]
 dirs = "5.0.1"
@@ -99,6 +117,7 @@ members = [
   "vm-migration",
   "vm-virtio",
   "vmm",
+  "vmm-service",
 ]
 
 [workspace.dependencies]

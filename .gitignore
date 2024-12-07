@@ -7,3 +7,8 @@
 /rpm/SOURCES
 /.vscode
 /vendor
+/tags
+/vm-images
+user-data
+meta-data
+create-cloud-init.sh
