@@ -405,6 +405,8 @@ pub struct MshvVcpu {
     msrs: Vec<MsrEntry>,
     vm_ops: Option<Arc<dyn vm::VmOps>>,
     vm_fd: Arc<VmFd>,
+    #[cfg(feature = "sev_snp")]
+    ghcb_addr: Option<u64>,
 }
 
 /// Implementation of Vcpu trait for Microsoft Hypervisor
@@ -789,6 +791,8 @@ impl cpu::Vcpu for MshvVcpu {
                     let ghcb_msr = svm_ghcb_msr {
                         as_uint64: info.ghcb_msr,
                     };
+                    let ghcb_page: *mut svm_ghcb_base =
+                        self.ghcb_addr.unwrap() as *mut svm_ghcb_base;
                     // SAFETY: Accessing a union element from bindgen generated bindings.
                     let ghcb_op = unsafe { ghcb_msr.__bindgen_anon_2.ghcb_info() as u32 };
                     // Sanity check on the header fields before handling other operations.
@@ -887,9 +891,7 @@ impl cpu::Vcpu for MshvVcpu {
                         GHCB_INFO_NORMAL => {
                             let exit_code =
                                 info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_code as u32;
-                            // SAFETY: Accessing a union element from bindgen generated bindings.
-                            let pfn = unsafe { ghcb_msr.__bindgen_anon_2.gpa_page_number() };
-                            let ghcb_gpa = pfn << GHCB_INFO_BIT_WIDTH;
+
                             match exit_code {
                                 SVM_EXITCODE_HV_DOORBELL_PAGE => {
                                     let exit_info1 =
@@ -898,10 +900,11 @@ impl cpu::Vcpu for MshvVcpu {
                                         SVM_NAE_HV_DOORBELL_PAGE_GET_PREFERRED => {
                                             // Hypervisor does not have any preference for doorbell GPA.
                                             let preferred_doorbell_gpa: u64 = 0xFFFFFFFFFFFFFFFF;
-                                            self.gpa_write(
-                                                ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
-                                                &preferred_doorbell_gpa.to_le_bytes(),
-                                            )?;
+                                            set_svm_field_u64_ptr!(
+                                                ghcb_page,
+                                                exit_info2,
+                                                preferred_doorbell_gpa
+                                            );
                                         }
                                         SVM_NAE_HV_DOORBELL_PAGE_SET => {
                                             let exit_info2 = info
@@ -928,13 +931,12 @@ impl cpu::Vcpu for MshvVcpu {
                                                 cpu::HypervisorCpuError::SetRegister(e.into())
                                             })?;
 
-                                            self.gpa_write(
-                                                ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
-                                                &exit_info2.to_le_bytes(),
-                                            )?;
+                                            set_svm_field_u64_ptr!(
+                                                ghcb_page, exit_info2, exit_info2
+                                            );
 
                                             // Clear the SW_EXIT_INFO1 register to indicate no error
-                                            self.clear_swexit_info1(ghcb_gpa)?;
+                                            self.clear_swexit_info1()?;
                                         }
                                         SVM_NAE_HV_DOORBELL_PAGE_QUERY => {
                                             let mut reg_assocs = [ hv_register_assoc {
@@ -945,19 +947,17 @@ impl cpu::Vcpu for MshvVcpu {
                                             // SAFETY: Accessing a union element from bindgen generated bindings.
                                             let doorbell_gpa = unsafe { reg_assocs[0].value.reg64 };
 
-                                            self.gpa_write(
-                                                ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
-                                                &doorbell_gpa.to_le_bytes(),
-                                            )?;
+                                            set_svm_field_u64_ptr!(
+                                                ghcb_page,
+                                                exit_info2,
+                                                doorbell_gpa
+                                            );
 
                                             // Clear the SW_EXIT_INFO1 register to indicate no error
-                                            self.clear_swexit_info1(ghcb_gpa)?;
+                                            self.clear_swexit_info1()?;
                                         }
                                         SVM_NAE_HV_DOORBELL_PAGE_CLEAR => {
-                                            self.gpa_write(
-                                                ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET,
-                                                &[0; 8],
-                                            )?;
+                                            set_svm_field_u64_ptr!(ghcb_page, exit_info2, 0);
                                         }
                                         _ => {
                                             panic!(
@@ -991,9 +991,8 @@ impl cpu::Vcpu for MshvVcpu {
                                     let is_write =
                                         // SAFETY: Accessing a union element from bindgen generated bindings.
                                         unsafe { port_info.__bindgen_anon_1.access_type() == 0 };
-
-                                    let mut data = [0; 8];
-                                    self.gpa_read(ghcb_gpa + GHCB_RAX_OFFSET, &mut data)?;
+                                    // SAFETY: Accessing the field from a mapped address
+                                    let mut data = unsafe { (*ghcb_page).rax.to_le_bytes() };
 
                                     if is_write {
                                         if let Some(vm_ops) = &self.vm_ops {
@@ -1009,17 +1008,19 @@ impl cpu::Vcpu for MshvVcpu {
                                                     cpu::HypervisorCpuError::RunVcpu(e.into())
                                                 })?;
                                         }
-
-                                        self.gpa_write(ghcb_gpa + GHCB_RAX_OFFSET, &data)?;
+                                        set_svm_field_u64_ptr!(
+                                            ghcb_page,
+                                            rax,
+                                            u64::from_le_bytes(data)
+                                        );
                                     }
 
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
-                                    self.clear_swexit_info1(ghcb_gpa)?;
+                                    self.clear_swexit_info1()?;
                                 }
                                 SVM_EXITCODE_MMIO_READ => {
                                     let src_gpa =
                                         info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1;
-                                    let dst_gpa = info.__bindgen_anon_2.__bindgen_anon_1.sw_scratch;
                                     let data_len =
                                         info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info2
                                             as usize;
@@ -1032,16 +1033,20 @@ impl cpu::Vcpu for MshvVcpu {
                                             cpu::HypervisorCpuError::RunVcpu(e.into())
                                         })?;
                                     }
-
-                                    self.gpa_write(dst_gpa, &data)?;
+                                    // Copy the data to the shared buffer of the GHCB page
+                                    let mut buffer_data = [0; 8];
+                                    buffer_data[..data_len].copy_from_slice(&data[..data_len]);
+                                    // SAFETY: Updating the value of mapped area
+                                    unsafe {
+                                        (*ghcb_page).shared[0] = u64::from_le_bytes(buffer_data)
+                                    };
 
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
-                                    self.clear_swexit_info1(ghcb_gpa)?;
+                                    self.clear_swexit_info1()?;
                                 }
                                 SVM_EXITCODE_MMIO_WRITE => {
                                     let dst_gpa =
                                         info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1;
-                                    let src_gpa = info.__bindgen_anon_2.__bindgen_anon_1.sw_scratch;
                                     let data_len =
                                         info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info2
                                             as usize;
@@ -1049,7 +1054,10 @@ impl cpu::Vcpu for MshvVcpu {
                                     assert!(data_len <= 0x8);
 
                                     let mut data = vec![0; data_len];
-                                    self.gpa_read(src_gpa, &mut data)?;
+                                    // SAFETY: Accessing data from a mapped address
+                                    let bytes_shared_ghcb =
+                                        unsafe { (*ghcb_page).shared[0].to_le_bytes() };
+                                    data.copy_from_slice(&bytes_shared_ghcb[..data_len]);
 
                                     if let Some(vm_ops) = &self.vm_ops {
                                         vm_ops.mmio_write(dst_gpa, &data).map_err(|e| {
@@ -1058,7 +1066,7 @@ impl cpu::Vcpu for MshvVcpu {
                                     }
 
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
-                                    self.clear_swexit_info1(ghcb_gpa)?;
+                                    self.clear_swexit_info1()?;
                                 }
                                 SVM_EXITCODE_SNP_GUEST_REQUEST
                                 | SVM_EXITCODE_SNP_EXTENDED_GUEST_REQUEST => {
@@ -1067,15 +1075,16 @@ impl cpu::Vcpu for MshvVcpu {
                                         // We don't support extended guest request, so we just write empty data.
                                         // This matches the behavior of KVM in Linux 6.11.
 
-                                        // Read RAX & RBX from the GHCB.
-                                        let mut data = [0; 8];
-                                        self.gpa_read(ghcb_gpa + GHCB_RAX_OFFSET, &mut data)?;
-                                        let data_gpa = u64::from_le_bytes(data);
-                                        self.gpa_read(ghcb_gpa + GHCB_RBX_OFFSET, &mut data)?;
-                                        let data_npages = u64::from_le_bytes(data);
+                                        // Read RBX from the GHCB.
+                                        // SAFETY: Accessing data from a mapped address
+                                        let data_gpa = unsafe { (*ghcb_page).rax };
+                                        // SAFETY: Accessing data from a mapped address
+                                        let data_npages = unsafe { (*ghcb_page).rbx };
 
                                         if data_npages > 0 {
                                             // The certificates are terminated by 24 zero bytes.
+                                            // TODO: Need to check if data_gpa is the address of the shared buffer in the GHCB page
+                                            // in that case we should clear the shared buffer(24 bytes)
                                             self.gpa_write(data_gpa, &[0; 24])?;
                                         }
                                     }
@@ -1096,7 +1105,7 @@ impl cpu::Vcpu for MshvVcpu {
                                         req_gpa, rsp_gpa
                                     );
 
-                                    self.gpa_write(ghcb_gpa + GHCB_SW_EXITINFO2_OFFSET, &[0; 8])?;
+                                    set_svm_field_u64_ptr!(ghcb_page, exit_info2, 0);
                                 }
                                 SVM_EXITCODE_SNP_AP_CREATION => {
                                     let vmsa_gpa =
@@ -1117,7 +1126,7 @@ impl cpu::Vcpu for MshvVcpu {
                                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
 
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
-                                    self.clear_swexit_info1(ghcb_gpa)?;
+                                    self.clear_swexit_info1()?;
                                 }
                                 _ => panic!(
                                     "GHCB_INFO_NORMAL: Unhandled exit code: {:0x}",
@@ -1495,17 +1504,16 @@ impl MshvVcpu {
     /// Clear SW_EXIT_INFO1 register for SEV-SNP guests.
     ///
     #[cfg(feature = "sev_snp")]
-    fn clear_swexit_info1(
-        &self,
-        ghcb_gpa: u64,
-    ) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
+    fn clear_swexit_info1(&self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
         // Clear the SW_EXIT_INFO1 register to indicate no error
-        self.gpa_write(ghcb_gpa + GHCB_SW_EXITINFO1_OFFSET, &[0; 4])?;
+        let ghcb_page: *mut svm_ghcb_base = self.ghcb_addr.unwrap() as *mut svm_ghcb_base;
+        set_svm_field_u64_ptr!(ghcb_page, exit_info1, 0);
 
         Ok(cpu::VmExit::Ignore)
     }
 
     #[cfg(feature = "sev_snp")]
+    #[allow(dead_code)]
     fn gpa_read(&self, gpa: u64, data: &mut [u8]) -> cpu::Result<()> {
         for (gpa, chunk) in (gpa..)
             .step_by(HV_READ_WRITE_GPA_MAX_SIZE as usize)
@@ -1649,6 +1657,34 @@ impl vm::Vm for MshvVm {
             .fd
             .create_vcpu(id)
             .map_err(|e| vm::HypervisorVmError::CreateVcpu(e.into()))?;
+
+        /* Map the GHCB page to the VMM(root) address space
+         * The map is available after the vcpu creation. This address is mapped
+         * to the overlay ghcb page of the Microsoft Hypervisor, don't have
+         * to worry about the scenario when a guest changes the GHCB mapping.
+         */
+        #[cfg(feature = "sev_snp")]
+        let ghcb_addr = if self.sev_snp_enabled {
+            // SAFETY: Safe to call as VCPU has this map already available upon creation
+            let addr = unsafe {
+                libc::mmap(
+                    std::ptr::null_mut(),
+                    HV_PAGE_SIZE,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_SHARED,
+                    vcpu_fd.as_raw_fd(),
+                    // TODO change it to hv_vp_state_page_type_HV_VP_STATE_PAGE_GHCB once a release is available
+                    2 * libc::sysconf(libc::_SC_PAGE_SIZE),
+                )
+            };
+            if addr == libc::MAP_FAILED {
+                // No point of continuing, without this mmap VMGEXIT will fail anyway
+                panic!("Failed to mmap GHCB page to user space");
+            }
+            Some(addr as u64)
+        } else {
+            None
+        };
         let vcpu = MshvVcpu {
             fd: vcpu_fd,
             vp_index: id,
@@ -1658,6 +1694,8 @@ impl vm::Vm for MshvVm {
             msrs: self.msrs.clone(),
             vm_ops,
             vm_fd: self.fd.clone(),
+            #[cfg(feature = "sev_snp")]
+            ghcb_addr,
         };
         Ok(Arc::new(vcpu))
     }
