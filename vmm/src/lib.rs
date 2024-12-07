@@ -763,7 +763,7 @@ impl Vmm {
 
         let config = vm_migration_config.vm_config.clone();
         self.vm_config = Some(vm_migration_config.vm_config);
-        self.console_info = Some(pre_create_console_devices(self).map_err(|e| {
+        self.console_info = Some(pre_create_console_devices(self, None).map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error creating console devices: {:?}", e))
         })?);
 
@@ -1244,21 +1244,17 @@ impl RequestHandler for Vmm {
         // We only store the passed VM config.
         // The VM will be created when being asked to boot it.
         if self.vm_config.is_none() {
-            self.vm_config = Some(Arc::new(Mutex::new(*config)));
-            self.console_info =
-                Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
+            let vm_config = Arc::new(Mutex::new(*config));
 
-            if self
-                .vm_config
-                .as_ref()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .landlock_enable
-            {
-                apply_landlock(self.vm_config.as_ref().unwrap().clone())
-                    .map_err(VmError::ApplyLandlock)?;
+            self.console_info = Some(
+                pre_create_console_devices(self, Some(vm_config.clone()))
+                    .map_err(VmError::CreateConsoleDevices)?,
+            );
+
+            if vm_config.lock().unwrap().landlock_enable {
+                apply_landlock(vm_config.clone()).map_err(VmError::ApplyLandlock)?;
             }
+            self.vm_config = Some(vm_config);
             Ok(())
         } else {
             Err(VmError::VmAlreadyCreated)
@@ -1278,8 +1274,10 @@ impl RequestHandler for Vmm {
 
             // console_info is set to None in vm_shutdown. re-populate here if empty
             if self.console_info.is_none() {
-                self.console_info =
-                    Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
+                self.console_info = Some(
+                    pre_create_console_devices(self, None)
+                        .map_err(VmError::CreateConsoleDevices)?,
+                );
             }
 
             // Create a new VM if we don't have one yet.
@@ -1404,12 +1402,12 @@ impl RequestHandler for Vmm {
         self.vm_check_cpuid_compatibility(&vm_config, &vm_snapshot.common_cpuid)
             .map_err(VmError::Restore)?;
 
-        self.vm_config = Some(Arc::clone(&vm_config));
-
         // console_info is set to None in vm_snapshot. re-populate here if empty
         if self.console_info.is_none() {
-            self.console_info =
-                Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
+            self.console_info = Some(
+                pre_create_console_devices(self, Some(vm_config.clone()))
+                    .map_err(VmError::CreateConsoleDevices)?,
+            );
         }
 
         let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
@@ -1424,8 +1422,8 @@ impl RequestHandler for Vmm {
             .try_clone()
             .map_err(VmError::EventFdClone)?;
 
-        let vm = Vm::new(
-            vm_config,
+        let mut vm = Vm::new(
+            vm_config.clone(),
             exit_evt,
             reset_evt,
             #[cfg(feature = "guest_debug")]
@@ -1440,26 +1438,15 @@ impl RequestHandler for Vmm {
             Some(source_url),
             Some(restore_cfg.prefault),
         )?;
+
+        if vm_config.lock().unwrap().landlock_enable {
+            apply_landlock(vm_config.clone()).map_err(VmError::ApplyLandlock)?;
+        }
+
+        vm.restore()?;
         self.vm = Some(vm);
-
-        if self
-            .vm_config
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .landlock_enable
-        {
-            apply_landlock(self.vm_config.as_ref().unwrap().clone())
-                .map_err(VmError::ApplyLandlock)?;
-        }
-
-        // Now we can restore the rest of the VM.
-        if let Some(ref mut vm) = self.vm {
-            vm.restore()
-        } else {
-            Err(VmError::VmNotCreated)
-        }
+        self.vm_config = Some(vm_config);
+        Ok(())
     }
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -1523,7 +1510,7 @@ impl RequestHandler for Vmm {
         }
 
         self.console_info =
-            Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
+            Some(pre_create_console_devices(self, None).map_err(VmError::CreateConsoleDevices)?);
 
         // Then we create the new VM
         let mut vm = Vm::new(
