@@ -93,7 +93,7 @@ checksum = "c1fd03a028ef38ba2276dce7e33fcd6369c158a1bca17946c4b1b701891c1ff7"
 name = "api_client"
 version = "0.1.0"
 dependencies = [
- "thiserror",
+ "thiserror 1.0.62",
  "vmm-sys-util",
 ]
 
@@ -115,7 +115,7 @@ dependencies = [
  "linux-loader",
  "log",
  "serde",
- "thiserror",
+ "thiserror 1.0.62",
  "uuid",
  "vm-fdt",
  "vm-memory",
@@ -329,7 +329,7 @@ dependencies = [
  "remain",
  "serde",
  "smallvec",
- "thiserror",
+ "thiserror 1.0.62",
  "uuid",
  "virtio-bindings",
  "virtio-queue",
@@ -439,7 +439,7 @@ dependencies = [
  "serde_json",
  "signal-hook",
  "test_infra",
- "thiserror",
+ "thiserror 1.0.62",
  "tpm",
  "tracer",
  "vm-memory",
@@ -574,7 +574,7 @@ dependencies = [
  "num_enum",
  "pci",
  "serde",
- "thiserror",
+ "thiserror 1.0.62",
  "tpm",
  "vm-allocator",
  "vm-device",
@@ -973,7 +973,7 @@ dependencies = [
  "mshv-ioctls",
  "serde",
  "serde_with",
- "thiserror",
+ "thiserror 1.0.62",
  "vfio-ioctls",
  "vm-memory",
  "vmm-sys-util",
@@ -1006,7 +1006,7 @@ dependencies = [
  "igvm_defs",
  "open-enum",
  "range_map_vec",
- "thiserror",
+ "thiserror 1.0.62",
  "tracing",
  "zerocopy 0.7.35",
 ]
@@ -1113,7 +1113,7 @@ checksum = "dafb8a4afee64f167eb2b52d32f0eea002e41a7a6450e68c799c8ec3a81a634c"
 dependencies = [
  "enumflags2",
  "libc",
- "thiserror",
+ "thiserror 1.0.62",
 ]
 
 [[package]]
@@ -1242,9 +1242,9 @@ checksum = "9bec4598fddb13cc7b528819e697852653252b760f1228b7642679bf2ff2cd07"
 
 [[package]]
 name = "mshv-bindings"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "576504619272a742fa7b75e69c9cd92520df5b4b66181c55e0d3eeb10d8341f8"
+checksum = "1e0cb5031f3243a7459b7c13d960d25420980874eebda816db24ce6077e21d43"
 dependencies = [
  "libc",
  "num_enum",
@@ -1256,13 +1256,13 @@ dependencies = [
 
 [[package]]
 name = "mshv-ioctls"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ccd62dfa7e0448b49700744f4d23e28ed7a49e83087ba6d7c06c4ee18b8821c"
+checksum = "89abe853221fa6f14ad4066affb9abda241a03d65622887d5794e1422d0bd75a"
 dependencies = [
  "libc",
  "mshv-bindings",
- "thiserror",
+ "thiserror 2.0.6",
  "vmm-sys-util",
 ]
 
@@ -1297,7 +1297,7 @@ dependencies = [
  "rate_limiter",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.62",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -1501,7 +1501,7 @@ dependencies = [
  "libc",
  "log",
  "serde",
- "thiserror",
+ "thiserror 1.0.62",
  "vfio-bindings",
  "vfio-ioctls",
  "vfio_user",
@@ -1521,7 +1521,7 @@ dependencies = [
  "serde",
  "serde_json",
  "test_infra",
- "thiserror",
+ "thiserror 1.0.62",
  "wait-timeout",
 ]
 
@@ -1739,7 +1739,7 @@ dependencies = [
  "epoll",
  "libc",
  "log",
- "thiserror",
+ "thiserror 1.0.62",
  "vmm-sys-util",
 ]
 
@@ -1769,7 +1769,7 @@ checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
 dependencies = [
  "getrandom",
  "libredox",
- "thiserror",
+ "thiserror 1.0.62",
 ]
 
 [[package]]
@@ -2060,7 +2060,16 @@ version = "1.0.62"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2675633b1499176c2dff06b0856a27976a8f9d436737b4cf4f312d4d91d8bbb"
 dependencies = [
- "thiserror-impl",
+ "thiserror-impl 1.0.62",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fec2a1820ebd077e2b90c4df007bebf344cd394098a13c563957d0afc83ea47"
+dependencies = [
+ "thiserror-impl 2.0.6",
 ]
 
 [[package]]
@@ -2068,6 +2077,17 @@ name = "thiserror-impl"
 version = "1.0.62"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d20468752b09f49e909e55a5d338caa8bedf615594e9d80bc4c565d30faf798c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d65750cab40f4ff1929fb1ba509e9914eb756131cef4210da8d5d700d26f6312"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2106,7 +2126,7 @@ dependencies = [
  "libc",
  "log",
  "net_gen",
- "thiserror",
+ "thiserror 1.0.62",
  "vmm-sys-util",
 ]
 
@@ -2218,7 +2238,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "vfio-bindings"
 version = "0.4.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#b135b8305c2cc8ec333e0cf77a780445cc98dcee"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#e71efe41d59adf23377f7066a49903c6c19f5ac3"
 dependencies = [
  "vmm-sys-util",
 ]
@@ -2226,7 +2246,7 @@ dependencies = [
 [[package]]
 name = "vfio-ioctls"
 version = "0.2.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#b135b8305c2cc8ec333e0cf77a780445cc98dcee"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#e71efe41d59adf23377f7066a49903c6c19f5ac3"
 dependencies = [
  "byteorder",
  "kvm-bindings",
@@ -2235,7 +2255,7 @@ dependencies = [
  "log",
  "mshv-bindings",
  "mshv-ioctls",
- "thiserror",
+ "thiserror 1.0.62",
  "vfio-bindings",
  "vm-memory",
  "vmm-sys-util",
@@ -2252,7 +2272,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.62",
  "vfio-bindings",
  "vm-memory",
  "vmm-sys-util",
@@ -2349,7 +2369,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "serial_buffer",
- "thiserror",
+ "thiserror 1.0.62",
  "vhost",
  "virtio-bindings",
  "virtio-queue",
@@ -2389,7 +2409,7 @@ dependencies = [
  "anyhow",
  "hypervisor",
  "serde",
- "thiserror",
+ "thiserror 1.0.62",
  "vfio-ioctls",
  "vm-memory",
  "vmm-sys-util",
@@ -2408,7 +2428,7 @@ checksum = "e2919f87420b6998a131eb7c78843890295e91a3f8f786ccc925c8d387b75121"
 dependencies = [
  "arc-swap",
  "libc",
- "thiserror",
+ "thiserror 1.0.62",
  "winapi",
 ]
 
@@ -2419,7 +2439,7 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 1.0.62",
  "vm-memory",
 ]
 
@@ -2474,7 +2494,7 @@ dependencies = [
  "serde_json",
  "serial_buffer",
  "signal-hook",
- "thiserror",
+ "thiserror 1.0.62",
  "tracer",
  "uuid",
  "vfio-ioctls",
