@@ -1076,6 +1076,26 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         HypervisorType::Kvm
     }
 
+    ///
+    /// Create a Vm of a specific type using the underlying hypervisor, passing memory size
+    /// Return a hypervisor-agnostic Vm trait object
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use hypervisor::kvm::KvmHypervisor;
+    /// use hypervisor::kvm::KvmVm;
+    /// let hypervisor = KvmHypervisor::new().unwrap();
+    /// let vm = hypervisor.create_vm_with_type_and_memory(0).unwrap();
+    /// ```
+    fn create_vm_with_type_and_memory(
+        &self,
+        vm_type: u64,
+        #[cfg(feature = "sev_snp")] _mem_size: u64,
+    ) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+        self.create_vm_with_type(vm_type)
+    }
+
     /// Create a KVM vm object of a specific VM type and return the object as Vm trait object
     ///
     /// # Examples
