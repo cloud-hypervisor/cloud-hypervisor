@@ -4372,6 +4372,7 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
+    #[ignore = "See #6872"]
     #[test]
     #[cfg(target_arch = "x86_64")]
     #[cfg(not(feature = "mshv"))]
