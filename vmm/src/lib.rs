@@ -1558,11 +1558,9 @@ impl RequestHandler for Vmm {
 
         self.vm_config = Some(Arc::clone(&vm_config));
 
-        // console_info is set to None in vm_snapshot. re-populate here if empty
-        if self.console_info.is_none() {
-            self.console_info =
-                Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
-        }
+        // Always re-populate the 'console_info' based on the new 'vm_config'
+        self.console_info =
+            Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
 
         let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
         let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
