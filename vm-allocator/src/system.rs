@@ -26,8 +26,8 @@ use crate::page_size::get_page_size;
 /// # use vm_allocator::SystemAllocator;
 /// # use vm_memory::{Address, GuestAddress, GuestUsize};
 ///   let mut allocator = SystemAllocator::new(
-///           #[cfg(target_arch = "x86_64")] GuestAddress(0x1000),
-///           #[cfg(target_arch = "x86_64")] 0x10000,
+///           GuestAddress(0x1000),
+///           0x10000,
 ///           GuestAddress(0x10000000), 0x10000000,
 ///           #[cfg(target_arch = "x86_64")] vec![GsiApic::new(5, 19)]).unwrap();
 ///   #[cfg(target_arch = "x86_64")]
@@ -46,7 +46,6 @@ use crate::page_size::get_page_size;
 ///
 /// ```
 pub struct SystemAllocator {
-    #[cfg(target_arch = "x86_64")]
     io_address_space: AddressAllocator,
     platform_mmio_address_space: AddressAllocator,
     gsi_allocator: GsiAllocator,
@@ -63,14 +62,13 @@ impl SystemAllocator {
     /// * `apics` - (X86) Vector of APIC's.
     ///
     pub fn new(
-        #[cfg(target_arch = "x86_64")] io_base: GuestAddress,
-        #[cfg(target_arch = "x86_64")] io_size: GuestUsize,
+        io_base: GuestAddress,
+        io_size: GuestUsize,
         platform_mmio_base: GuestAddress,
         platform_mmio_size: GuestUsize,
         #[cfg(target_arch = "x86_64")] apics: Vec<GsiApic>,
     ) -> Option<Self> {
         Some(SystemAllocator {
-            #[cfg(target_arch = "x86_64")]
             io_address_space: AddressAllocator::new(io_base, io_size)?,
             platform_mmio_address_space: AddressAllocator::new(
                 platform_mmio_base,
@@ -93,7 +91,6 @@ impl SystemAllocator {
         self.gsi_allocator.allocate_gsi().ok()
     }
 
-    #[cfg(target_arch = "x86_64")]
     /// Reserves a section of `size` bytes of IO address space.
     pub fn allocate_io_addresses(
         &mut self,
@@ -119,7 +116,6 @@ impl SystemAllocator {
         )
     }
 
-    #[cfg(target_arch = "x86_64")]
     /// Free an IO address range.
     /// We can only free a range if it matches exactly an already allocated range.
     pub fn free_io_addresses(&mut self, address: GuestAddress, size: GuestUsize) {
