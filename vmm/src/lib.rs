@@ -1275,6 +1275,76 @@ impl Vmm {
         })
     }
 
+    fn vm_restore(
+        &mut self,
+        source_url: &str,
+        vm_config: Arc<Mutex<VmConfig>>,
+        prefault: bool,
+    ) -> std::result::Result<(), VmError> {
+        let snapshot = recv_vm_state(source_url).map_err(VmError::Restore)?;
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        let vm_snapshot = get_vm_snapshot(&snapshot).map_err(VmError::Restore)?;
+
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        self.vm_check_cpuid_compatibility(&vm_config, &vm_snapshot.common_cpuid)
+            .map_err(VmError::Restore)?;
+
+        self.vm_config = Some(Arc::clone(&vm_config));
+
+        // Always re-populate the 'console_info' based on the new 'vm_config'
+        self.console_info =
+            Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
+
+        let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
+        let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
+        #[cfg(feature = "guest_debug")]
+        let debug_evt = self
+            .vm_debug_evt
+            .try_clone()
+            .map_err(VmError::EventFdClone)?;
+        let activate_evt = self
+            .activate_evt
+            .try_clone()
+            .map_err(VmError::EventFdClone)?;
+
+        let vm = Vm::new(
+            vm_config,
+            exit_evt,
+            reset_evt,
+            #[cfg(feature = "guest_debug")]
+            debug_evt,
+            &self.seccomp_action,
+            self.hypervisor.clone(),
+            activate_evt,
+            self.console_info.clone(),
+            self.console_resize_pipe.clone(),
+            Arc::clone(&self.original_termios_opt),
+            Some(snapshot),
+            Some(source_url),
+            Some(prefault),
+        )?;
+        self.vm = Some(vm);
+
+        if self
+            .vm_config
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .landlock_enable
+        {
+            apply_landlock(self.vm_config.as_ref().unwrap().clone())
+                .map_err(VmError::ApplyLandlock)?;
+        }
+
+        // Now we can restore the rest of the VM.
+        if let Some(ref mut vm) = self.vm {
+            vm.restore()
+        } else {
+            Err(VmError::VmNotCreated)
+        }
+    }
+
     fn control_loop(
         &mut self,
         api_receiver: Rc<Receiver<ApiRequest>>,
@@ -1548,68 +1618,17 @@ impl RequestHandler for Vmm {
             }
         }
 
-        let snapshot = recv_vm_state(source_url).map_err(VmError::Restore)?;
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        let vm_snapshot = get_vm_snapshot(&snapshot).map_err(VmError::Restore)?;
+        self.vm_restore(source_url, vm_config, restore_cfg.prefault)
+            .map_err(|vm_restore_err| {
+                error!("VM Restore failed: {:?}", vm_restore_err);
 
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        self.vm_check_cpuid_compatibility(&vm_config, &vm_snapshot.common_cpuid)
-            .map_err(VmError::Restore)?;
+                // Cleanup the VM being created while vm restore
+                if let Err(e) = self.vm_delete() {
+                    return e;
+                }
 
-        self.vm_config = Some(Arc::clone(&vm_config));
-
-        // Always re-populate the 'console_info' based on the new 'vm_config'
-        self.console_info =
-            Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
-
-        let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
-        let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
-        #[cfg(feature = "guest_debug")]
-        let debug_evt = self
-            .vm_debug_evt
-            .try_clone()
-            .map_err(VmError::EventFdClone)?;
-        let activate_evt = self
-            .activate_evt
-            .try_clone()
-            .map_err(VmError::EventFdClone)?;
-
-        let vm = Vm::new(
-            vm_config,
-            exit_evt,
-            reset_evt,
-            #[cfg(feature = "guest_debug")]
-            debug_evt,
-            &self.seccomp_action,
-            self.hypervisor.clone(),
-            activate_evt,
-            self.console_info.clone(),
-            self.console_resize_pipe.clone(),
-            Arc::clone(&self.original_termios_opt),
-            Some(snapshot),
-            Some(source_url),
-            Some(restore_cfg.prefault),
-        )?;
-        self.vm = Some(vm);
-
-        if self
-            .vm_config
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .landlock_enable
-        {
-            apply_landlock(self.vm_config.as_ref().unwrap().clone())
-                .map_err(VmError::ApplyLandlock)?;
-        }
-
-        // Now we can restore the rest of the VM.
-        if let Some(ref mut vm) = self.vm {
-            vm.restore()
-        } else {
-            Err(VmError::VmNotCreated)
-        }
+                vm_restore_err
+            })
     }
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
