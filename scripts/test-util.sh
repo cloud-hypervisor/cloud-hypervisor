@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 hypervisor="kvm"
 test_filter=""
-build_kernel=false
+build_kernel=true
 
 # Checkout source code of a GIT repo with specified branch and commit
 # Args:
