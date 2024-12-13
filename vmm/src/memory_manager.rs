@@ -1159,14 +1159,8 @@ impl MemoryManager {
 
         let allocator = Arc::new(Mutex::new(
             SystemAllocator::new(
-                #[cfg(target_arch = "x86_64")]
-                {
-                    GuestAddress(0)
-                },
-                #[cfg(target_arch = "x86_64")]
-                {
-                    1 << 16
-                },
+                GuestAddress(0),
+                1 << 16,
                 start_of_platform_device_area,
                 PLATFORM_DEVICE_AREA_SIZE,
                 #[cfg(target_arch = "x86_64")]

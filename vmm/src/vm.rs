@@ -531,7 +531,6 @@ impl Vm {
         let stop_on_boot = false;
 
         let memory = memory_manager.lock().unwrap().guest_memory();
-        #[cfg(target_arch = "x86_64")]
         let io_bus = Arc::new(Bus::new());
         let mmio_bus = Arc::new(Bus::new());
 
@@ -622,7 +621,6 @@ impl Vm {
         let dynamic = true;
 
         let device_manager = DeviceManager::new(
-            #[cfg(target_arch = "x86_64")]
             io_bus,
             mmio_bus,
             vm.clone(),

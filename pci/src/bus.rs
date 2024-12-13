@@ -125,19 +125,16 @@ impl PciBus {
     pub fn register_mapping(
         &self,
         dev: Arc<dyn BusDeviceSync>,
-        #[cfg(target_arch = "x86_64")] io_bus: &Bus,
+        io_bus: &Bus,
         mmio_bus: &Bus,
         bars: Vec<PciBarConfiguration>,
     ) -> Result<()> {
         for bar in bars {
             match bar.region_type() {
                 PciBarRegionType::IoRegion => {
-                    #[cfg(target_arch = "x86_64")]
                     io_bus
                         .insert(dev.clone(), bar.addr(), bar.size())
                         .map_err(PciRootError::PioInsert)?;
-                    #[cfg(not(target_arch = "x86_64"))]
-                    error!("I/O region is not supported");
                 }
                 PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
                     mmio_bus
