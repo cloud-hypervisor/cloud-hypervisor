@@ -1157,7 +1157,6 @@ impl MemoryManager {
 
         let guest_memory = GuestMemoryAtomic::new(guest_memory);
 
-        // Both MMIO and PIO address spaces start at address 0.
         let allocator = Arc::new(Mutex::new(
             SystemAllocator::new(
                 #[cfg(target_arch = "x86_64")]
