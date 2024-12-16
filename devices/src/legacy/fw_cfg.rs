@@ -16,6 +16,7 @@
 /// We implement the functionality necessary to use Oak's Stage0 Firmware
 /// (This includes most of the functinality, besides adding additional
 /// items to the fw_cfg device for the firmware)
+use crate::acpi::{create_acpi_loader, AcpiTable};
 use arch::{
     layout::{
         EBDA_START, HIGH_RAM_START, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START,
@@ -125,7 +126,7 @@ struct FwCfgFilesHeader {
 
 pub const FILE_NAME_SIZE: usize = 56;
 
-fn create_file_name(name: &str) -> [u8; FILE_NAME_SIZE] {
+pub fn create_file_name(name: &str) -> [u8; FILE_NAME_SIZE] {
     let mut c_name = [0u8; FILE_NAME_SIZE];
     let c_len = std::cmp::min(FILE_NAME_SIZE - 1, name.len());
     c_name[0..c_len].copy_from_slice(&name.as_bytes()[0..c_len]);
@@ -134,7 +135,7 @@ fn create_file_name(name: &str) -> [u8; FILE_NAME_SIZE] {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Debug, AsBytes, FromBytes, FromZeroes)]
+#[derive(Debug, AsBytes, FromBytes, FromZeroes, Clone, Copy)]
 pub struct BootE820Entry {
     pub addr: u64,
     pub size: u64,
@@ -269,6 +270,14 @@ impl FwCfg {
         let bytes = s.into_bytes_with_nul();
         self.known_items[FW_CFG_CMDLINE_SIZE as usize] = FwCfgContent::U32(bytes.len() as u32);
         self.known_items[FW_CFG_CMDLINE_DATA as usize] = FwCfgContent::Bytes(bytes);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn add_acpi(&mut self, acpi_table: AcpiTable) -> Result<()> {
+        let [table_loader, acpi_rsdp, apci_tables] = create_acpi_loader(acpi_table);
+        self.add_item(table_loader)?;
+        self.add_item(acpi_rsdp)?;
+        self.add_item(apci_tables)
     }
 
     pub fn add_initramfs_data(&mut self, file: File) -> Result<()> {

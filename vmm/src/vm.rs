@@ -2155,6 +2155,15 @@ impl Vm {
         if self.config.lock().unwrap().is_tdx_enabled() {
             return None;
         }
+        #[cfg(feature = "sev_snp")]
+        if self.config.lock().unwrap().is_sev_snp_enabled() {
+            let rsdp_addr = crate::acpi::create_acpi_tables_sev_snp(
+                &self.device_manager,
+                &self.cpu_manager,
+                &self.memory_manager,
+            );
+            return Some(rsdp_addr);
+        }
         let mem = self.memory_manager.lock().unwrap().guest_memory().memory();
         let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
         let rsdp_addr = crate::acpi::create_acpi_tables(
