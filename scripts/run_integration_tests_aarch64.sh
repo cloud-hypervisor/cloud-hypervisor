@@ -237,7 +237,7 @@ echo "$PAGE_NUM" | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`
-time cargo test "common_parallel::$test_filter" --target "$BUILD_TARGET" -- --test-threads=$(($(nproc) / 4)) ${test_binary_args[*]}
+time cargo test "common_parallel::$test_filter" --target "$BUILD_TARGET" -- --test-threads=$(($(nproc) / 8)) ${test_binary_args[*]}
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
