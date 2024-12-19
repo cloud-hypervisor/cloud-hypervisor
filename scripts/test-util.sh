@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 hypervisor="kvm"
 test_filter=""
-build_kernel=false
+build_kernel=true
 
 # Checkout source code of a GIT repo with specified branch and commit
 # Args:
@@ -48,7 +48,7 @@ build_custom_linux() {
     ARCH=$(uname -m)
     SRCDIR=$PWD
     LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
-    LINUX_CUSTOM_BRANCH="ch-6.2"
+    LINUX_CUSTOM_BRANCH="ch-6.12"
     LINUX_CUSTOM_URL="https://github.com/cloud-hypervisor/linux.git"
 
     checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH"
