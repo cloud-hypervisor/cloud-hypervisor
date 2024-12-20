@@ -59,9 +59,7 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::{aio, ioctl_io_nr, ioctl_ioc_nr};
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
-use crate::fixed_vhd::FixedVhd;
-use crate::qcow::{QcowFile, RawFile};
-use crate::vhdx::{Vhdx, VhdxError};
+use crate::vhdx::VhdxError;
 
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
@@ -791,25 +789,6 @@ pub fn detect_image_type(f: &mut File) -> std::io::Result<ImageType> {
 
 pub trait BlockBackend: Read + Write + Seek + Send + Debug {
     fn size(&self) -> Result<u64, Error>;
-}
-
-/// Inspect the image file type and create an appropriate disk file to match it.
-pub fn create_disk_file(mut file: File, direct_io: bool) -> Result<Box<dyn BlockBackend>, Error> {
-    let image_type = detect_image_type(&mut file).map_err(Error::DetectImageType)?;
-
-    Ok(match image_type {
-        ImageType::Qcow2 => {
-            Box::new(QcowFile::from(RawFile::new(file, direct_io)).map_err(Error::QcowError)?)
-                as Box<dyn BlockBackend>
-        }
-        ImageType::FixedVhd => {
-            Box::new(FixedVhd::new(file).map_err(Error::FixedVhdError)?) as Box<dyn BlockBackend>
-        }
-        ImageType::Vhdx => {
-            Box::new(Vhdx::new(file).map_err(Error::VhdxError)?) as Box<dyn BlockBackend>
-        }
-        ImageType::Raw => Box::new(RawFile::new(file, direct_io)) as Box<dyn BlockBackend>,
-    })
 }
 
 #[derive(Debug)]
