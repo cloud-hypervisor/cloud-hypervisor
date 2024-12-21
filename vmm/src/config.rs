@@ -14,6 +14,7 @@ use option_parser::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use virtio_devices::block::MINIMUM_BLOCK_QUEUE_SIZE;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
 
 use crate::landlock::LandlockAccess;
@@ -168,6 +169,8 @@ pub enum ValidationError {
     TdxFirmwareMissing,
     /// Insufficient vCPUs for queues
     TooManyQueues,
+    /// Invalid queue size
+    InvalidQueueSize(u16),
     /// Need shared memory for vfio-user
     UserDevicesRequireSharedMemory,
     /// VSOCK Context Identifier has a special meaning, unsuitable for a VM.
@@ -272,6 +275,12 @@ impl fmt::Display for ValidationError {
             }
             TooManyQueues => {
                 write!(f, "Number of vCPUs is insufficient for number of queues")
+            }
+            InvalidQueueSize(s) => {
+                write!(
+                    f,
+                    "Queue size is smaller than {MINIMUM_BLOCK_QUEUE_SIZE}: {s}"
+                )
             }
             UserDevicesRequireSharedMemory => {
                 write!(
@@ -1305,6 +1314,10 @@ impl DiskConfig {
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
         if self.num_queues > vm_config.cpus.boot_vcpus as usize {
             return Err(ValidationError::TooManyQueues);
+        }
+
+        if self.queue_size <= MINIMUM_BLOCK_QUEUE_SIZE {
+            return Err(ValidationError::InvalidQueueSize(self.queue_size));
         }
 
         if self.vhost_user && self.iommu {
