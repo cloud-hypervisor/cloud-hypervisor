@@ -160,7 +160,7 @@ impl Header {
     }
 
     /// Creates and returns new updated header from the provided current header
-    pub fn update_header(
+    fn update_header(
         f: &mut File,
         current_header: &Header,
         change_data_guid: bool,
