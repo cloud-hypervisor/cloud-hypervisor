@@ -93,7 +93,7 @@ checksum = "c1fd03a028ef38ba2276dce7e33fcd6369c158a1bca17946c4b1b701891c1ff7"
 name = "api_client"
 version = "0.1.0"
 dependencies = [
- "thiserror 1.0.62",
+ "thiserror 2.0.6",
  "vmm-sys-util",
 ]
 
@@ -115,7 +115,7 @@ dependencies = [
  "linux-loader",
  "log",
  "serde",
- "thiserror 1.0.62",
+ "thiserror 2.0.6",
  "uuid",
  "vm-fdt",
  "vm-memory",
@@ -329,7 +329,7 @@ dependencies = [
  "remain",
  "serde",
  "smallvec",
- "thiserror 1.0.62",
+ "thiserror 2.0.6",
  "uuid",
  "virtio-bindings",
  "virtio-queue",
@@ -439,7 +439,7 @@ dependencies = [
  "serde_json",
  "signal-hook",
  "test_infra",
- "thiserror 1.0.62",
+ "thiserror 2.0.6",
  "tpm",
  "tracer",
  "vm-memory",
@@ -574,7 +574,7 @@ dependencies = [
  "num_enum",
  "pci",
  "serde",
- "thiserror 1.0.62",
+ "thiserror 2.0.6",
  "tpm",
  "vm-allocator",
  "vm-device",
@@ -974,7 +974,7 @@ dependencies = [
  "mshv-ioctls",
  "serde",
  "serde_with",
- "thiserror 1.0.62",
+ "thiserror 2.0.6",
  "vfio-ioctls",
  "vm-memory",
  "vmm-sys-util",
@@ -1007,7 +1007,7 @@ dependencies = [
  "igvm_defs",
  "open-enum",
  "range_map_vec",
- "thiserror 1.0.62",
+ "thiserror 1.0.69",
  "tracing",
  "zerocopy 0.7.35",
 ]
@@ -1114,7 +1114,7 @@ checksum = "dafb8a4afee64f167eb2b52d32f0eea002e41a7a6450e68c799c8ec3a81a634c"
 dependencies = [
  "enumflags2",
  "libc",
- "thiserror 1.0.62",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1298,7 +1298,7 @@ dependencies = [
  "rate_limiter",
  "serde",
  "serde_json",
- "thiserror 1.0.62",
+ "thiserror 2.0.6",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -1502,7 +1502,7 @@ dependencies = [
  "libc",
  "log",
  "serde",
- "thiserror 1.0.62",
+ "thiserror 2.0.6",
  "vfio-bindings",
  "vfio-ioctls",
  "vfio_user",
@@ -1522,7 +1522,7 @@ dependencies = [
  "serde",
  "serde_json",
  "test_infra",
- "thiserror 1.0.62",
+ "thiserror 2.0.6",
  "wait-timeout",
 ]
 
@@ -1740,7 +1740,7 @@ dependencies = [
  "epoll",
  "libc",
  "log",
- "thiserror 1.0.62",
+ "thiserror 2.0.6",
  "vmm-sys-util",
 ]
 
@@ -1770,7 +1770,7 @@ checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
 dependencies = [
  "getrandom",
  "libredox",
- "thiserror 1.0.62",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2057,11 +2057,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.62"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2675633b1499176c2dff06b0856a27976a8f9d436737b4cf4f312d4d91d8bbb"
+checksum = "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52"
 dependencies = [
- "thiserror-impl 1.0.62",
+ "thiserror-impl 1.0.69",
 ]
 
 [[package]]
@@ -2075,9 +2075,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.62"
+version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d20468752b09f49e909e55a5d338caa8bedf615594e9d80bc4c565d30faf798c"
+checksum = "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2127,7 +2127,7 @@ dependencies = [
  "libc",
  "log",
  "net_gen",
- "thiserror 1.0.62",
+ "thiserror 1.0.69",
  "vmm-sys-util",
 ]
 
@@ -2256,7 +2256,7 @@ dependencies = [
  "log",
  "mshv-bindings",
  "mshv-ioctls",
- "thiserror 1.0.62",
+ "thiserror 1.0.69",
  "vfio-bindings",
  "vm-memory",
  "vmm-sys-util",
@@ -2273,7 +2273,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "thiserror 1.0.62",
+ "thiserror 1.0.69",
  "vfio-bindings",
  "vm-memory",
  "vmm-sys-util",
@@ -2370,7 +2370,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "serial_buffer",
- "thiserror 1.0.62",
+ "thiserror 2.0.6",
  "vhost",
  "virtio-bindings",
  "virtio-queue",
@@ -2410,7 +2410,7 @@ dependencies = [
  "anyhow",
  "hypervisor",
  "serde",
- "thiserror 1.0.62",
+ "thiserror 2.0.6",
  "vfio-ioctls",
  "vm-memory",
  "vmm-sys-util",
@@ -2429,7 +2429,7 @@ checksum = "f1720e7240cdc739f935456eb77f370d7e9b2a3909204da1e2b47bef1137a013"
 dependencies = [
  "arc-swap",
  "libc",
- "thiserror 1.0.62",
+ "thiserror 1.0.69",
  "winapi",
 ]
 
@@ -2440,7 +2440,7 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_json",
- "thiserror 1.0.62",
+ "thiserror 2.0.6",
  "vm-memory",
 ]
 
@@ -2495,7 +2495,7 @@ dependencies = [
  "serde_json",
  "serial_buffer",
  "signal-hook",
- "thiserror 1.0.62",
+ "thiserror 2.0.6",
  "tracer",
  "uuid",
  "vfio-ioctls",
