@@ -32,7 +32,7 @@ serde = { version = "1.0.208", features = ["derive", "rc"] }
 serde_with = { version = "3.9.0", default-features = false, features = [
   "macros",
 ] }
-thiserror = "1.0.62"
+thiserror = "2.0.6"
 vfio-ioctls = { workspace = true, default-features = false }
 vm-memory = { workspace = true, features = [
   "backend-atomic",
