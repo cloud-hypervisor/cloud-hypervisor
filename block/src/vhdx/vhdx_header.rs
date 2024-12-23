@@ -371,22 +371,10 @@ pub struct VhdxHeader {
 impl VhdxHeader {
     /// Creates a VhdxHeader from a reference to a file
     pub fn new(f: &mut File) -> Result<VhdxHeader> {
-        let _file_type_identifier: FileTypeIdentifier = FileTypeIdentifier::new(f)?;
-        let header_1 = Header::new(f, HEADER_1_START);
-        let header_2 = Header::new(f, HEADER_2_START);
-
-        let mut file_write_guid: u128 = 0;
-        let metadata = f.metadata().map_err(VhdxHeaderError::ReadMetadata)?;
-        if !metadata.permissions().readonly() {
-            file_write_guid = Uuid::new_v4().as_u128();
-        }
-
-        let (header_1, header_2) =
-            VhdxHeader::update_headers(f, header_1, header_2, file_write_guid)?;
         Ok(VhdxHeader {
-            _file_type_identifier,
-            header_1,
-            header_2,
+            _file_type_identifier: FileTypeIdentifier::new(f)?,
+            header_1: Header::new(f, HEADER_1_START)?,
+            header_2: Header::new(f, HEADER_2_START)?,
             region_table_1: RegionTableHeader::new(f, REGION_TABLE_1_START)?,
             _region_table_2: RegionTableHeader::new(f, REGION_TABLE_2_START)?,
         })
