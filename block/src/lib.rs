@@ -218,6 +218,8 @@ fn sector<B: Bitmap + 'static>(
     mem.read_obj(addr).map_err(Error::GuestMemory)
 }
 
+const DEFAULT_DESCRIPTOR_VEC_SIZE: usize = 32;
+
 #[derive(Debug)]
 pub struct AlignedOperation {
     origin_ptr: u64,
@@ -230,10 +232,10 @@ pub struct AlignedOperation {
 pub struct Request {
     pub request_type: RequestType,
     pub sector: u64,
-    pub data_descriptors: SmallVec<[(GuestAddress, u32); 1]>,
+    pub data_descriptors: SmallVec<[(GuestAddress, u32); DEFAULT_DESCRIPTOR_VEC_SIZE]>,
     pub status_addr: GuestAddress,
     pub writeback: bool,
-    pub aligned_operations: SmallVec<[AlignedOperation; 1]>,
+    pub aligned_operations: SmallVec<[AlignedOperation; DEFAULT_DESCRIPTOR_VEC_SIZE]>,
     pub start: Instant,
 }
 
@@ -261,10 +263,10 @@ impl Request {
         let mut req = Request {
             request_type: request_type(desc_chain.memory(), hdr_desc_addr)?,
             sector: sector(desc_chain.memory(), hdr_desc_addr)?,
-            data_descriptors: SmallVec::with_capacity(1),
+            data_descriptors: SmallVec::with_capacity(DEFAULT_DESCRIPTOR_VEC_SIZE),
             status_addr: GuestAddress(0),
             writeback: true,
-            aligned_operations: SmallVec::with_capacity(1),
+            aligned_operations: SmallVec::with_capacity(DEFAULT_DESCRIPTOR_VEC_SIZE),
             start: Instant::now(),
         };
 
@@ -396,7 +398,7 @@ impl Request {
         let request_type = self.request_type;
         let offset = (sector << SECTOR_SHIFT) as libc::off_t;
 
-        let mut iovecs: SmallVec<[libc::iovec; 1]> =
+        let mut iovecs: SmallVec<[libc::iovec; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
             SmallVec::with_capacity(self.data_descriptors.len());
         for (data_addr, data_len) in &self.data_descriptors {
             if *data_len == 0 {
@@ -651,7 +653,8 @@ where
         completion_list: &mut VecDeque<(u64, i32)>,
     ) -> AsyncIoResult<()> {
         // Convert libc::iovec into IoSliceMut
-        let mut slices: SmallVec<[IoSliceMut; 1]> = SmallVec::with_capacity(iovecs.len());
+        let mut slices: SmallVec<[IoSliceMut; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
+            SmallVec::with_capacity(iovecs.len());
         for iovec in iovecs.iter() {
             // SAFETY: on Linux IoSliceMut wraps around libc::iovec
             slices.push(IoSliceMut::new(unsafe {
@@ -688,7 +691,8 @@ where
         completion_list: &mut VecDeque<(u64, i32)>,
     ) -> AsyncIoResult<()> {
         // Convert libc::iovec into IoSlice
-        let mut slices: SmallVec<[IoSlice; 1]> = SmallVec::with_capacity(iovecs.len());
+        let mut slices: SmallVec<[IoSlice; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
+            SmallVec::with_capacity(iovecs.len());
         for iovec in iovecs.iter() {
             // SAFETY: on Linux IoSlice wraps around libc::iovec
             slices.push(IoSlice::new(unsafe {

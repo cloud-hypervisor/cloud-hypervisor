@@ -625,6 +625,7 @@ impl Block {
                     | (1u64 << VIRTIO_BLK_F_CONFIG_WCE)
                     | (1u64 << VIRTIO_BLK_F_BLK_SIZE)
                     | (1u64 << VIRTIO_BLK_F_TOPOLOGY)
+                    | (1u64 << VIRTIO_BLK_F_SEG_MAX)
                     | (1u64 << VIRTIO_RING_F_EVENT_IDX)
                     | (1u64 << VIRTIO_RING_F_INDIRECT_DESC);
                 if iommu {
@@ -660,6 +661,7 @@ impl Block {
                     physical_block_exp,
                     min_io_size: (topology.minimum_io_size / logical_block_size) as u16,
                     opt_io_size: (topology.optimal_io_size / logical_block_size) as u32,
+                    seg_max: std::cmp::max(queue_size as u32, 3) - 2,
                     ..Default::default()
                 };
 
