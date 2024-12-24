@@ -192,9 +192,7 @@ impl Header {
         };
 
         new_header.get_header_as_buffer(&mut buffer);
-        let mut crc = crc_any::CRC::crc32c();
-        crc.digest(&buffer);
-        new_header.checksum = crc.get_crc() as u32;
+        new_header.checksum = calculate_checksum(&mut buffer, size_of::<u32>());
         new_header.get_header_as_buffer(&mut buffer);
 
         f.seek(SeekFrom::Start(start))
