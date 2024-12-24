@@ -102,7 +102,7 @@ impl Read for Vhdx {
         let sector_count = (buf.len() as u64).div_ceil(self.disk_spec.logical_sector_size as u64);
         let sector_index = self.current_offset / self.disk_spec.logical_sector_size as u64;
 
-        vhdx_io::read(
+        let result = vhdx_io::read(
             &mut self.file,
             buf,
             &self.disk_spec,
@@ -117,7 +117,11 @@ impl Read for Vhdx {
                     "Failed reading {sector_count} sectors from VHDx at index {sector_index}: {e}"
                 ),
             )
-        })
+        })?;
+
+        self.current_offset += result as u64;
+
+        Ok(result)
     }
 }
 
@@ -142,7 +146,7 @@ impl Write for Vhdx {
             })?;
         }
 
-        vhdx_io::write(
+        let result = vhdx_io::write(
             &mut self.file,
             buf,
             &mut self.disk_spec,
@@ -158,7 +162,11 @@ impl Write for Vhdx {
                     "Failed writing {sector_count} sectors on VHDx at index {sector_index}: {e}"
                 ),
             )
-        })
+        })?;
+
+        self.current_offset += result as u64;
+
+        Ok(result)
     }
 }
 
