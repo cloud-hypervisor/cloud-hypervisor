@@ -457,12 +457,10 @@ impl VhdxHeader {
 /// corresponding field is made zero. After the calculation, the existing checksum
 /// is put back to the buffer.
 pub fn calculate_checksum(buffer: &mut [u8], csum_offset: usize) -> Result<u32> {
-    // Read the checksum into a mutable slice
-    let csum_buf = &mut buffer[csum_offset..csum_offset + 4];
-    // Convert the checksum chunk into a u32 integer
-    let orig_csum = LittleEndian::read_u32(csum_buf);
+    // Read the original checksum from the buffer
+    let orig_csum = LittleEndian::read_u32(&buffer[csum_offset..csum_offset + 4]);
     // Zero the checksum in the buffer
-    LittleEndian::write_u32(csum_buf, 0);
+    LittleEndian::write_u32(&mut buffer[csum_offset..csum_offset + 4], 0);
     // Calculate the checksum on the resulting buffer
     let mut crc = crc_any::CRC::crc32c();
     crc.digest(&buffer);
