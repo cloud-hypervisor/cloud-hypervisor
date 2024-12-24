@@ -142,7 +142,7 @@ impl Header {
             return Err(VhdxHeaderError::InvalidHeaderSign);
         }
 
-        let new_checksum = calculate_checksum(&mut buffer, size_of::<u32>())?;
+        let new_checksum = calculate_checksum(&mut buffer, size_of::<u32>());
         if header.checksum != new_checksum {
             return Err(VhdxHeaderError::InvalidChecksum(String::from("Header")));
         }
@@ -231,7 +231,7 @@ impl RegionTableHeader {
             return Err(VhdxHeaderError::InvalidRegionSign);
         }
 
-        let new_checksum = calculate_checksum(&mut buffer, size_of::<u32>())?;
+        let new_checksum = calculate_checksum(&mut buffer, size_of::<u32>());
         if region_table_header.checksum != new_checksum {
             return Err(VhdxHeaderError::InvalidChecksum(String::from("Region")));
         }
@@ -456,7 +456,7 @@ impl VhdxHeader {
 /// Therefore, before calculating, the existing checksum is retrieved and the
 /// corresponding field is made zero. After the calculation, the existing checksum
 /// is put back to the buffer.
-pub fn calculate_checksum(buffer: &mut [u8], csum_offset: usize) -> Result<u32> {
+fn calculate_checksum(buffer: &mut [u8], csum_offset: usize) -> u32 {
     // Read the original checksum from the buffer
     let orig_csum = LittleEndian::read_u32(&buffer[csum_offset..csum_offset + 4]);
     // Zero the checksum in the buffer
@@ -469,5 +469,5 @@ pub fn calculate_checksum(buffer: &mut [u8], csum_offset: usize) -> Result<u32> 
     // Put back the original checksum in the buffer
     LittleEndian::write_u32(&mut buffer[csum_offset..csum_offset + 4], orig_csum);
 
-    Ok(new_csum)
+    new_csum
 }
