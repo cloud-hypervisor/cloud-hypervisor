@@ -151,7 +151,7 @@ impl Header {
     }
 
     /// Converts the header structure into a buffer
-    fn get_header_as_buffer(&self, buffer: &mut [u8; HEADER_SIZE as usize]) {
+    fn write_to_buffer(&self, buffer: &mut [u8; HEADER_SIZE as usize]) {
         // SAFETY: self is a valid header.
         let reference = unsafe {
             std::slice::from_raw_parts(self as *const Header as *const u8, HEADER_SIZE as usize)
@@ -191,9 +191,9 @@ impl Header {
             log_offset: current_header.log_offset,
         };
 
-        new_header.get_header_as_buffer(&mut buffer);
+        new_header.write_to_buffer(&mut buffer);
         new_header.checksum = calculate_checksum(&mut buffer, size_of::<u32>());
-        new_header.get_header_as_buffer(&mut buffer);
+        new_header.write_to_buffer(&mut buffer);
 
         f.seek(SeekFrom::Start(start))
             .map_err(VhdxHeaderError::SeekHeader)?;
