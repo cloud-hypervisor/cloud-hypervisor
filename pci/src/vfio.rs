@@ -48,10 +48,10 @@ pub(crate) const VFIO_COMMON_ID: &str = "vfio_common";
 pub enum VfioPciError {
     #[error("Failed to create user memory region: {0}")]
     CreateUserMemoryRegion(#[source] HypervisorVmError),
-    #[error("Failed to DMA map: {0}")]
-    DmaMap(#[source] vfio_ioctls::VfioError),
-    #[error("Failed to DMA unmap: {0}")]
-    DmaUnmap(#[source] vfio_ioctls::VfioError),
+    #[error("{1}: Failed to DMA map: {0}")]
+    DmaMap(#[source] vfio_ioctls::VfioError, String),
+    #[error("{1} Failed to DMA unmap: {0}")]
+    DmaUnmap(#[source] vfio_ioctls::VfioError, String),
     #[error("Failed to enable INTx: {0}")]
     EnableIntx(#[source] VfioError),
     #[error("Failed to enable MSI: {0}")]
@@ -1410,6 +1410,7 @@ pub struct VfioPciDevice {
     common: VfioCommon,
     iommu_attached: bool,
     memory_slot_allocator: MemorySlotAllocator,
+    bdf: PciBdf,
 }
 
 impl VfioPciDevice {
@@ -1451,6 +1452,7 @@ impl VfioPciDevice {
             common,
             iommu_attached,
             memory_slot_allocator,
+            bdf,
         };
 
         Ok(vfio_pci_device)
@@ -1656,7 +1658,7 @@ impl VfioPciDevice {
                                 user_memory_region.size,
                                 user_memory_region.host_addr,
                             )
-                            .map_err(VfioPciError::DmaMap)?;
+                            .map_err(|e| VfioPciError::DmaMap(e, self.bdf.to_string()))?;
                     }
                 }
             }
@@ -1717,7 +1719,7 @@ impl VfioPciDevice {
         if !self.iommu_attached {
             self.container
                 .vfio_dma_map(iova, size, user_addr)
-                .map_err(VfioPciError::DmaMap)?;
+                .map_err(|e| VfioPciError::DmaMap(e, self.bdf.to_string()))?;
         }
 
         Ok(())
@@ -1727,7 +1729,7 @@ impl VfioPciDevice {
         if !self.iommu_attached {
             self.container
                 .vfio_dma_unmap(iova, size)
-                .map_err(VfioPciError::DmaUnmap)?;
+                .map_err(|e| VfioPciError::DmaUnmap(e, self.bdf.to_string()))?;
         }
 
         Ok(())
