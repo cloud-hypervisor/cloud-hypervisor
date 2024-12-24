@@ -108,7 +108,7 @@ kvm-ioctls = "0.19.1"
 linux-loader = "0.13.0"
 mshv-bindings = "0.3.2"
 mshv-ioctls = "0.3.2"
-seccompiler = "0.4.0"
+seccompiler = { git = "https://github.com/TimePrinciple/seccompiler", branch = "update-to-6.12" }
 vfio-bindings = { git = "https://github.com/rust-vmm/vfio", branch = "main" }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
 vfio_user = { git = "https://github.com/rust-vmm/vfio-user", branch = "main" }
