@@ -9,7 +9,7 @@ use std::io::Write;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::Arc;
 
-use libfuzzer_sys::fuzz_target;
+use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
@@ -54,12 +54,12 @@ const QUEUE_BYTES_SIZE: usize = align!(
     DESC_TABLE_ALIGN_SIZE
 ) as usize;
 
-fuzz_target!(|bytes| {
+fuzz_target!(|bytes: &[u8]| -> Corpus {
     if bytes.len() < (QUEUE_DATA_SIZE + QUEUE_BYTES_SIZE) * QUEUE_NUM + CONSOLE_INPUT_SIZE
         || bytes.len()
             > (QUEUE_DATA_SIZE + QUEUE_BYTES_SIZE) * QUEUE_NUM + CONSOLE_INPUT_SIZE + MEM_SIZE
     {
-        return;
+        return Corpus::Reject;
     }
 
     let (pipe_rx, mut pipe_tx) = create_pipe().unwrap();
@@ -108,10 +108,10 @@ fuzz_target!(|bytes| {
         .write_slice(queue_bytes, GuestAddress(BASE_VIRT_QUEUE_ADDR))
         .is_err()
     {
-        return;
+        return Corpus::Reject;
     }
     if mem.write_slice(mem_bytes, GuestAddress(0 as u64)).is_err() {
-        return;
+        return Corpus::Reject;
     }
     let guest_memory = GuestMemoryAtomic::new(mem);
 
@@ -137,6 +137,8 @@ fuzz_target!(|bytes| {
 
     // Wait for the events to finish and console device worker thread to return
     console.wait_for_epoll_threads();
+
+    Corpus::Keep
 });
 
 pub struct NoopVirtioInterrupt {}

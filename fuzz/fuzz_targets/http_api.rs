@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver};
 use std::thread;
 
-use libfuzzer_sys::fuzz_target;
+use libfuzzer_sys::{fuzz_target, Corpus};
 use micro_http::Request;
 use once_cell::sync::Lazy;
 use vm_migration::MigratableError;
@@ -27,9 +27,9 @@ use vmm_sys_util::eventfd::EventFd;
 static ROUTES: Lazy<Vec<&Box<dyn EndpointHandler + Sync + Send>>> =
     Lazy::new(|| HTTP_ROUTES.routes.values().collect());
 
-fuzz_target!(|bytes| {
+fuzz_target!(|bytes: &[u8]| -> Corpus {
     if bytes.len() < 2 {
-        return;
+        return Corpus::Reject;
     }
 
     let route = ROUTES[bytes[0] as usize % ROUTES.len()];
@@ -53,6 +53,8 @@ fuzz_target!(|bytes| {
         exit_evt.write(1).ok();
         http_receiver_thread.join().unwrap();
     };
+
+    Corpus::Keep
 });
 
 fn generate_request(bytes: &[u8]) -> Option<Request> {

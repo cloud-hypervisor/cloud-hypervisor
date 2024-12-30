@@ -7,7 +7,7 @@
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::sync::Arc;
 
-use libfuzzer_sys::fuzz_target;
+use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
@@ -37,11 +37,11 @@ const AVAIL_RING_SIZE: u64 = 6_u64 + 2 * QUEUE_SIZE as u64;
 // Used ring size
 const USED_RING_SIZE: u64 = 6_u64 + 8 * QUEUE_SIZE as u64;
 
-fuzz_target!(|bytes| {
+fuzz_target!(|bytes: &[u8]| -> Corpus {
     if bytes.len() < QUEUE_DATA_SIZE * QUEUE_NUM
         || bytes.len() > (QUEUE_DATA_SIZE * QUEUE_NUM + MEM_SIZE)
     {
-        return;
+        return Corpus::Reject;
     }
 
     let mut balloon = virtio_devices::Balloon::new(
@@ -61,7 +61,7 @@ fuzz_target!(|bytes| {
     // Setup the guest memory with the input bytes
     let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap();
     if mem.write_slice(mem_bytes, GuestAddress(0 as u64)).is_err() {
-        return;
+        return Corpus::Reject;
     }
     let guest_memory = GuestMemoryAtomic::new(mem);
 
@@ -108,6 +108,8 @@ fuzz_target!(|bytes| {
 
     // Wait for the events to finish and balloon device worker thread to return
     balloon.wait_for_epoll_threads();
+
+    Corpus::Keep
 });
 
 pub struct NoopVirtioInterrupt {}

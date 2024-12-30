@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::{ffi, io};
 
 use libc::{MAP_NORESERVE, MAP_PRIVATE, PROT_READ, PROT_WRITE};
-use libfuzzer_sys::fuzz_target;
+use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{Pmem, UserspaceMapping, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
@@ -35,9 +35,9 @@ const AVAIL_RING_SIZE: u64 = 6_u64 + 2 * QUEUE_SIZE as u64;
 // Guest physical address for used ring (requires to 4-bytes aligned)
 const USED_RING_ADDR: u64 = (AVAIL_RING_ADDR + AVAIL_RING_SIZE + 3) & !3_u64;
 
-fuzz_target!(|bytes| {
+fuzz_target!(|bytes: &[u8]| -> Corpus {
     if bytes.len() < QUEUE_DATA_SIZE || bytes.len() > (QUEUE_DATA_SIZE + MEM_SIZE) {
-        return;
+        return Corpus::Reject;
     }
 
     let mut pmem = create_dummy_pmem();
@@ -50,7 +50,7 @@ fuzz_target!(|bytes| {
     // Setup the guest memory with the input bytes
     let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(0), MEM_SIZE)]).unwrap();
     if mem.write_slice(mem_bytes, GuestAddress(0 as u64)).is_err() {
-        return;
+        return Corpus::Reject;
     }
     let guest_memory = GuestMemoryAtomic::new(mem);
 
@@ -69,6 +69,8 @@ fuzz_target!(|bytes| {
 
     // Wait for the events to finish and pmem device worker thread to return
     pmem.wait_for_epoll_threads();
+
+    Corpus::Keep
 });
 
 fn memfd_create_with_size(name: &ffi::CStr, flags: u32, size: usize) -> Result<RawFd, io::Error> {
