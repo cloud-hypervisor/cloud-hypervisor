@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::sync::Arc;
 
-use libfuzzer_sys::fuzz_target;
+use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
@@ -55,12 +55,12 @@ const QUEUE_BYTES_SIZE: usize = align!(
     DESC_TABLE_ALIGN_SIZE
 ) as usize;
 
-fuzz_target!(|bytes| {
+fuzz_target!(|bytes: &[u8]| -> Corpus {
     if bytes.len() < TAP_INPUT_SIZE + (QUEUE_DATA_SIZE + QUEUE_BYTES_SIZE) * QUEUE_NUM
         || bytes.len()
             > TAP_INPUT_SIZE + (QUEUE_DATA_SIZE + QUEUE_BYTES_SIZE) * QUEUE_NUM + MEM_SIZE
     {
-        return;
+        return Corpus::Reject;
     }
 
     let (dummy_tap_frontend, dummy_tap_backend) = create_socketpair().unwrap();
@@ -111,10 +111,10 @@ fuzz_target!(|bytes| {
         .write_slice(queue_bytes, GuestAddress(BASE_VIRT_QUEUE_ADDR))
         .is_err()
     {
-        return;
+        return Corpus::Reject;
     }
     if mem.write_slice(mem_bytes, GuestAddress(0 as u64)).is_err() {
-        return;
+        return Corpus::Reject;
     }
     let guest_memory = GuestMemoryAtomic::new(mem);
 
@@ -155,6 +155,8 @@ fuzz_target!(|bytes| {
     // Terminate the thread for the dummy tap backend
     exit_evt.write(1).ok();
     tap_backend_thread.join().unwrap();
+
+    return Corpus::Keep;
 });
 
 pub struct NoopVirtioInterrupt {}

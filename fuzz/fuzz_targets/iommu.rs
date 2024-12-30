@@ -7,7 +7,7 @@
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::sync::Arc;
 
-use libfuzzer_sys::fuzz_target;
+use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
@@ -54,11 +54,11 @@ const USED_RING_ADDR: u64 = align!(AVAIL_RING_ADDR + AVAIL_RING_SIZE, USED_RING_
 // Virtio-queue size in bytes
 const QUEUE_BYTES_SIZE: usize = (USED_RING_ADDR + USED_RING_SIZE - DESC_TABLE_ADDR) as usize;
 
-fuzz_target!(|bytes| {
+fuzz_target!(|bytes: &[u8]| -> Corpus {
     if bytes.len() < (QUEUE_DATA_SIZE + QUEUE_BYTES_SIZE)
         || bytes.len() > (QUEUE_DATA_SIZE + QUEUE_BYTES_SIZE + MEM_SIZE)
     {
-        return;
+        return Corpus::Reject;
     }
 
     let (mut iommu, _) = virtio_devices::Iommu::new(
@@ -91,10 +91,10 @@ fuzz_target!(|bytes| {
         .write_slice(queue_bytes, GuestAddress(DESC_TABLE_ADDR))
         .is_err()
     {
-        return;
+        return Corpus::Reject;
     }
     if mem.write_slice(mem_bytes, GuestAddress(0 as u64)).is_err() {
-        return;
+        return Corpus::Reject;
     }
     let guest_memory = GuestMemoryAtomic::new(mem);
 
@@ -118,6 +118,8 @@ fuzz_target!(|bytes| {
 
     // Wait for the events to finish and vIOMMU device worker thread to return
     iommu.wait_for_epoll_threads();
+
+    Corpus::Keep
 });
 
 pub struct NoopVirtioInterrupt {}
