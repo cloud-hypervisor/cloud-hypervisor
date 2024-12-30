@@ -3,5 +3,5 @@ ethernets:
   ens4:
     match:
        macaddress: 12:34:56:78:90:ab
-    addresses: [192.168.249.2/24]
-    gateway4: 192.168.249.1
+    addresses: [10.99.128.44/16]
+    gateway4: 10.99.128.1 

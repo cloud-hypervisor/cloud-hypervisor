@@ -1,6 +1,8 @@
+use std::net::Ipv4Addr;
 // vmm-service/src/instance/config.rs
 use std::str::FromStr;
 use std::path::PathBuf;
+use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
 use crate::error::VmmError;
 use crate::Distro;
@@ -10,17 +12,20 @@ use form_types::VmmEvent;
 use rand::{thread_rng, Rng};
 use gabble::Gab;
 
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VmInstanceConfig {
     pub kernel_path: PathBuf,
     pub rootfs_path: PathBuf,
+    pub tap_device: String,
+    pub ip_addr: String,
     pub cloud_init_path: Option<PathBuf>,
     pub memory_mb: u64,
     pub vcpu_count: u8,
     pub name: String,
     pub custom_cmdline: Option<String>,
     pub rng_source: Option<String>,
-    pub console_type: ConsoleType
+    pub console_type: ConsoleType,
 }
 
 impl Default for VmInstanceConfig {
@@ -28,12 +33,14 @@ impl Default for VmInstanceConfig {
         let mut rng = thread_rng();
         let name: Gab = rng.gen();
         Self {
-            kernel_path: PathBuf::from("/var/lib/form/kernel/vmlinuz"),
+            kernel_path: PathBuf::from("/var/lib/form/kernel/hypervisor-fw"),
             rootfs_path: PathBuf::from("/var/lib/form/images/ubuntu/22.04/disk.raw"),
+            tap_device: "vnet0".to_string(),
+            ip_addr: "10.99.0.44".to_string(),
             cloud_init_path: None,
             memory_mb: 1024,
             vcpu_count: 2,
-            name: name.to_string(), 
+            name: name.to_string(),
             custom_cmdline: None,
             rng_source: None,
             console_type: ConsoleType::Virtio,
@@ -70,7 +77,14 @@ impl VmInstanceConfig {
 
     pub fn generate_cmdline(&self) -> String {
         self.custom_cmdline.clone().unwrap_or_else(|| {
-            "console=ttyS0 root=/dev/vda1 rw".to_string()
+            match self.console_type {
+                ConsoleType::Serial => {
+                    "console=ttyS0,115200n8 earlyprintk=serial,tty0,115200 console=tty0 root=/dev/vdb1 rw virtio_pci.disable_legacy=0"
+                },
+                ConsoleType::Virtio => {
+                    "console=hvc0 root=/dev/vdb1 rw virtio_pci.disable_legacy=0"
+                },
+            }.to_string()
         })
     }
 }
@@ -130,7 +144,12 @@ impl TryFrom<(VmmEvent, ServiceConfig)> for VmInstanceConfig {
                     ConsoleType::Virtio
                 };
 
-                let cloud_init = CloudInit::from_base64(distro, user_data.as_deref(), meta_data.as_deref(), &event.1).map_err(|e| {
+                let cloud_init = CloudInit::from_base64(
+                    distro,
+                    user_data.as_deref(),
+                    meta_data.as_deref(),
+                    &event.1,
+                ).map_err(|e| {
                     VmmError::Config(e.to_string())
                 })?;
 
@@ -197,12 +216,18 @@ impl TryFrom<(&VmmEvent, &ServiceConfig)> for VmInstanceConfig {
                     ConsoleType::Virtio
                 };
 
-                let cloud_init = CloudInit::from_base64(distro, user_data.as_deref(), meta_data.as_deref(), event.1).map_err(|e| {
+                let cloud_init = CloudInit::from_base64(
+                    distro,
+                    user_data.as_deref(),
+                    meta_data.as_deref(), 
+                    event.1,
+                ).map_err(|e| {
                     VmmError::Config(e.to_string())
                 })?;
 
-                let output_path = PathBuf::from(Self::CLOUD_INIT_BASE)
-                    .join(owner).join(name);
+                let output_path = PathBuf::from(
+                    Self::CLOUD_INIT_BASE
+                ).join(owner).join(name);
 
                 cloud_init.create_image(&output_path).map_err(|e| {
                     VmmError::Config(e.to_string())
@@ -230,3 +255,29 @@ impl TryFrom<(&VmmEvent, &ServiceConfig)> for VmInstanceConfig {
         }
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkConfig {
+    pub ip: Option<Ipv4Addr>,
+    pub mac_addr: Option<MacAddr>,
+    pub mtu: Option<u16>,
+    pub tap_name: Option<String>,
+    pub offload_tso: bool,
+    pub offload_ufo: bool,
+    pub offload_csum: bool,
+}
+
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        Self {
+            ip: None,  // Will be assigned by DHCP
+            mac_addr: None,  // Will be generated if not provided
+            mtu: Some(1500),
+            tap_name: None,
+            offload_tso: true,
+            offload_ufo: true,
+            offload_csum: true,
+        }
+    }
+}
+

@@ -27,7 +27,7 @@ pub enum CloudInitError {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct NetworkConfig {
+pub struct InitNetworkConfig {
     pub version: u8,
     pub config: Vec<NetworkConfigEntry>,
 }
@@ -36,6 +36,8 @@ pub struct NetworkConfig {
 pub struct NetworkConfigEntry {
     pub type_: String,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mac_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dhcp4: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -72,13 +74,35 @@ pub struct UserData {
 
 impl UserData {
     pub fn default_from_distro(distro: Distro) -> Self {
-        todo!()
+        match distro {
+            Distro::Ubuntu => Self {
+                hostname: "ubuntu-vm".to_string(),
+                users: Some(vec![User {
+                    name: "ubuntu".to_string(),
+                    sudo: Some("ALL=(ALL) NOPASSWD:ALL".to_string()),
+                    groups: Some("sudo".to_string()),
+                    shell: Some("/bin/bash".to_string()),
+                    ssh_authorized_keys: None,
+                }]),
+                chpasswd: Some(ChPasswd {
+                    expire: false,
+                    list: vec!["ubuntu:ubuntu".to_string()],
+                }),
+                ssh_pwauth: Some(true),
+                disable_root: Some(true),
+                package_update: Some(true),
+                package_upgrade: Some(true),
+                packages: None,
+            },
+            // For now, use Ubuntu defaults for other distros
+            // We can customize these later for each distro
+            _ => Self::default()
+        }
     }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct User {
-    pub name: String,
+pub struct User { pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sudo: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -103,7 +127,30 @@ pub struct MetaData {
 
 impl MetaData {
     pub fn default_from_distro(distro: Distro) -> Self {
-        todo!()
+        // Generate a unique instance ID
+        let instance_id = uuid::Uuid::new_v4().to_string();
+        
+        // Create a distribution-specific hostname prefix
+        // This helps identify what kind of VM this is when looking at network traffic
+        // or system logs
+        let prefix = match distro {
+            Distro::Ubuntu => "ubuntu",
+            Distro::Fedora => "fedora",
+            Distro::Debian => "debian",
+            Distro::CentOS => "centos",
+            Distro::Arch => "arch",
+            Distro::Alpine => "alpine",
+        };
+        
+        // Create a hostname that includes both the distro and part of the UUID
+        // for uniqueness. We'll use the first 8 characters of the UUID.
+        let short_id = &instance_id[..8];
+        let local_hostname = format!("{prefix}-{short_id}");
+
+        Self {
+            instance_id,
+            local_hostname,
+        }
     }
 }
 
@@ -111,7 +158,7 @@ pub struct CloudInit {
     temp_dir: TempDir,
     user_data: UserData,
     meta_data: MetaData,
-    network_config: Option<NetworkConfig>,
+    network_config: Option<InitNetworkConfig>,
 }
 
 impl CloudInit {
@@ -137,11 +184,12 @@ impl CloudInit {
         };
 
         // Decode and deserialize network config if provided
-        let network_config = NetworkConfig {
+        let network_config = InitNetworkConfig {
             version: 2,
             config: vec![NetworkConfigEntry {
                 type_: "physical".to_string(),
                 name: "eth0".to_string(),
+                mac_address: None,
                 dhcp4: Some(true),
                 addresses: None,
                 gateway4: Some(service_config.network.gateway.clone()),
@@ -198,6 +246,14 @@ impl CloudInit {
 
     /// Create a cloud-init ISO image
     pub fn create_image(&self, output_path: &PathBuf) -> Result<PathBuf, CloudInitError> {
+        // Create parent directories if they don't exist
+        if let Some(parent) = output_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                CloudInitError::ImageCreation(
+                    format!("Failed to create directory structure: {e}")
+                )
+            })?;
+        }
         // Write the cloud-init files
         self.write_files()?;
 
@@ -238,7 +294,7 @@ impl CloudInit {
 }
 
 // Default implementations for common configurations
-impl Default for NetworkConfig {
+impl Default for InitNetworkConfig {
     fn default() -> Self {
         Self {
             version: 2,
@@ -249,6 +305,7 @@ impl Default for NetworkConfig {
                 addresses: None,
                 gateway4: None,
                 nameservers: None,
+                mac_address: None,
             }],
         }
     }
@@ -298,7 +355,7 @@ mod tests {
         // Create default configurations
         let user_data = UserData::default();
         let meta_data = MetaData::default();
-        let network_config = NetworkConfig::default();
+        let network_config = InitNetworkConfig::default();
 
         // Serialize to YAML and encode as base64
         let user_data_yaml = serde_yaml::to_string(&user_data).unwrap();
@@ -307,13 +364,14 @@ mod tests {
 
         let user_data_b64 = BASE64.encode(user_data_yaml);
         let meta_data_b64 = BASE64.encode(meta_data_yaml);
-        let network_config_b64 = BASE64.encode(network_config_yaml);
+        let _network_config_b64 = BASE64.encode(network_config_yaml);
 
         // Create CloudInit instance
         let cloud_init = CloudInit::from_base64(
-            &user_data_b64,
-            &meta_data_b64,
-            Some(&network_config_b64)
+            Distro::Ubuntu,
+            Some(&user_data_b64),
+            Some(&meta_data_b64),
+            &ServiceConfig::default()
         ).unwrap();
 
         // Verify the files can be written
@@ -336,7 +394,7 @@ mod tests {
         let _: MetaData = serde_yaml::from_str(&meta_data_content).unwrap();
 
         let network_config_content = fs::read_to_string(network_config_path).unwrap();
-        let _: NetworkConfig = serde_yaml::from_str(&network_config_content).unwrap();
+        let _: InitNetworkConfig = serde_yaml::from_str(&network_config_content).unwrap();
     }
 
     #[test]
@@ -344,16 +402,14 @@ mod tests {
         // Create default configurations
         let user_data = UserData::default();
         let meta_data = MetaData::default();
-        let network_config = NetworkConfig::default();
+        let _network_config = InitNetworkConfig::default();
 
         // Serialize to YAML and encode as base64
         let user_data_yaml = serde_yaml::to_string(&user_data).unwrap();
         let meta_data_yaml = serde_yaml::to_string(&meta_data).unwrap();
-        let network_config_yaml = serde_yaml::to_string(&network_config).unwrap();
 
         let user_data_b64 = BASE64.encode(user_data_yaml);
         let meta_data_b64 = BASE64.encode(meta_data_yaml);
-        let network_config_b64 = BASE64.encode(network_config_yaml);
 
         // Create temporary directory for output
         let temp_dir = tempdir().unwrap();
@@ -361,9 +417,10 @@ mod tests {
 
         // Create CloudInit instance and generate image
         let cloud_init = CloudInit::from_base64(
-            &user_data_b64,
-            &meta_data_b64,
-            Some(&network_config_b64)
+            Distro::Ubuntu,
+            Some(&user_data_b64),
+            Some(&meta_data_b64),
+            &ServiceConfig::default()
         ).unwrap();
 
         // Only run this test if cloud-localds is available

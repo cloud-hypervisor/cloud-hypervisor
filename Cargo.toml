@@ -28,6 +28,14 @@ path = "src/bin/ch-remote.rs"
 name = "vmm-service"
 path = "src/bin/vmm-service.rs"
 
+[[bin]]
+name = "vmm-service-test"
+path = "src/bin/vmm-service-test.rs"
+
+[[bin]]
+name = "sdn-test"
+path = "src/bin/sdn-test.rs"
+
 [profile.release]
 codegen-units = 1
 lto = true
@@ -45,6 +53,7 @@ api_client = { path = "api_client" }
 clap = { version = "4.5.13", features = ["string"] }
 dhat = { version = "0.3.3", optional = true }
 env_logger = "0.10"
+simple_logger = "4.3.0"
 epoll = "4.3.3"
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
@@ -65,6 +74,8 @@ tokio = { version = "1.42.0", features = [ "full" ] }
 zbus = { version = "4.4.0", optional = true }
 conductor = { git = "https://github.com/versatus/conductor" }
 async-trait = "0.1.80"
+dialoguer = "0.11.0"
+# TODO: Use github or deploy these to crates.io for proper use
 form-types = { path = "../form-types" }
 form-traits = { path = "../form-traits" }
 
@@ -91,6 +102,7 @@ pvmemcontrol = ["vmm/pvmemcontrol"]
 sev_snp = ["igvm", "mshv", "vmm/sev_snp"]
 tdx = ["vmm/tdx"]
 tracing = ["tracer/tracing", "vmm/tracing"]
+dev = ["vmm-service/dev"]
 
 [workspace]
 members = [

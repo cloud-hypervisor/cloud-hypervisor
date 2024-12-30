@@ -1,9 +1,16 @@
+pub mod wizard;
+
+//#[cfg(feature = "dev")]
+use form_types::VmmEvent;
+use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::io::{Read, Write};
+use crate::VmmError;
+
 use super::{VmInstanceConfig, ConsoleType};  // Our config type
 use vmm::vm_config::{
-    CpusConfig, DiskConfig, MemoryConfig, PayloadConfig, VmConfig,
-    ConsoleConfig, ConsoleOutputMode, CpuFeatures, RngConfig
+    ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpusConfig, DiskConfig, MemoryConfig, NetConfig, PayloadConfig, RngConfig, VhostMode, VmConfig
 };
 
 pub fn create_vm_config(config: &VmInstanceConfig) -> VmConfig {
@@ -54,7 +61,7 @@ pub fn create_vm_config(config: &VmInstanceConfig) -> VmConfig {
         ConsoleType::Serial => (
             ConsoleConfig {
                 file: None,
-                mode: ConsoleOutputMode::Tty,
+                mode: ConsoleOutputMode::Null,
                 iommu: false,
                 socket: None,
             },
@@ -62,8 +69,8 @@ pub fn create_vm_config(config: &VmInstanceConfig) -> VmConfig {
                 file: None,
                 mode: ConsoleOutputMode::Off,
                 iommu: false,
-                socket: None,
-            },
+                socket: None
+            }
         ),
         ConsoleType::Virtio => (
             ConsoleConfig {
@@ -74,12 +81,34 @@ pub fn create_vm_config(config: &VmInstanceConfig) -> VmConfig {
             },
             ConsoleConfig {
                 file: None,
-                mode: ConsoleOutputMode::Tty,
+                mode: ConsoleOutputMode::Null,
                 iommu: false,
                 socket: None,
             },
         ),
     };
+
+    let net = Some(vec![NetConfig {
+        tap: Some(config.tap_device.to_string()),
+        ip: config.ip_addr.parse().unwrap(),  // Use our bridge IP as gateway
+        mask: "255.255.255.0".parse().unwrap(),
+        mac: MacAddr::local_random(),  // Default MAC, can be configured
+        host_mac: None,
+        mtu: Some(1500),
+        iommu: false,
+        num_queues: 2,
+        queue_size: 256,
+        vhost_user: false,
+        vhost_socket: None,
+        vhost_mode: VhostMode::Client,
+        id: Some(format!("net_{}", config.name)),
+        fds: None,
+        rate_limiter_config: None,
+        pci_segment: 0,
+        offload_tso: true,
+        offload_ufo: true,
+        offload_csum: true,
+    }]);
     
     VmConfig {
         cpus: CpusConfig {
@@ -110,7 +139,7 @@ pub fn create_vm_config(config: &VmInstanceConfig) -> VmConfig {
         payload: Some(PayloadConfig {
             kernel: Some(config.kernel_path.clone()),
             initramfs: None,
-            cmdline: Some(config.generate_cmdline()),
+            cmdline: None,
             firmware: None,
         }),
         disks: Some(vec![DiskConfig {
@@ -131,7 +160,7 @@ pub fn create_vm_config(config: &VmInstanceConfig) -> VmConfig {
             disable_io_uring: false,  // New field
             disable_aio: false,       // New field
         }]),
-        net: None,
+        net,
         rng: RngConfig {
             src: config.rng_source.clone().unwrap_or_else(|| "/dev/urandom".to_string()).into(),
             iommu: false,
@@ -198,6 +227,82 @@ pub struct ServiceConfig {
     pub default_vm_params: DefaultVmParams,
 }
 
+impl ServiceConfig {
+    /// Loads a ServiceConfig from a file. This method reads a TOML, YAML or
+    /// JSON configuration file and deserializes it into a ServiceConfig instance.
+    ///
+    /// # Arguments
+    /// * `path` - the path to the config file
+    ///
+    /// # Returns
+    /// * `Result<ServiceConfig, VmmError>` - the loaded configuration or an error
+    ///
+    /// # Example
+    /// ```rust
+    /// let config = ServiceConfig::from_file("/etc/vmm/config.toml")?;
+    /// ```
+    pub fn from_file(path: &str) -> Result<Self, VmmError> {
+        // Open the configuration file
+        let mut file = std::fs::File::open(path).map_err(|e| {
+            VmmError::Config(format!("Failed to open config file `{path}`: {e}"))
+        })?;
+
+        // Read the file contents into a string
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).map_err(|e| {
+            VmmError::Config(format!("Failed to read config file `{path}`: {e}"))
+        })?;
+
+        toml::from_str(&contents).map_err(|e| {
+            VmmError::Config(format!("failed to parse config file `{path}`: {e}"))
+        })
+
+    }
+
+    /// Saves the current `ServiceConfig` to a file in TOML format. This method handles 
+    /// serialization serialization of the config and ensures the file is written
+    /// atomically by writing to a temporary file first then renaming it.
+    ///
+    /// # Arguments
+    /// * `path` - The path where the configuration should be saved
+    ///
+    /// # Returns
+    /// * `Result<(), VmmError>` - Success or an error
+    ///
+    /// # Example
+    /// ```rust
+    /// config.save_to_file("/tec/vmm/config.toml")?;
+    /// ```
+    pub fn save_to_file(&self, path: &str) -> Result<(), VmmError> {
+        // Serialize to TOML
+        let toml_content = toml::to_string_pretty(self).map_err(|e| {
+            VmmError::Config(format!("Failed to serialize config: {}", e))
+        })?;
+
+        // Create a temporary file in the same directory
+        let path = PathBuf::from(path);
+        let parent = path.parent().ok_or_else(|| {
+            VmmError::Config("Invalid config file path".to_string())
+        })?;
+
+        let mut temp_file = tempfile::NamedTempFile::new_in(parent).map_err(|e| {
+            VmmError::Config(format!("Failed to create temporary file: {e}"))
+        })?;
+
+        // Write the configuration to a temporary file
+        temp_file.write_all(toml_content.as_bytes()).map_err(|e| {
+            VmmError::Config(format!("Failed to write config: {e}"))
+        })?;
+
+        // Persist the file by moving it to the target location
+        temp_file.persist(&path).map_err(|e| {
+            VmmError::Config(format!("Failed to save config file `{path:?}`: {e}"))
+        })?;
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DirectoryConfig {
     /// Directory for kernel images
@@ -224,6 +329,10 @@ pub struct NetworkConfig {
     pub netmask: String,
     /// DNS Servers
     pub nameservers: Vec<String>,
+    /// Domain suffix
+    pub domain_suffix: String,
+    /// DNS listen addr
+    pub dns_listener_addr: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -267,6 +376,8 @@ impl Default for NetworkConfig {
             gateway: "192.168.122.1".to_string(),
             netmask: "255.255.255.0".to_string(),
             nameservers: vec!["1.1.1.1".to_string(), "8.8.8.8".to_string()],
+            dns_listener_addr: "0.0.0.0:53".to_string(),
+            domain_suffix: "dev.formation.cloud".to_string() 
         }
     }
 }

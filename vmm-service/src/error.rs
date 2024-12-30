@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -23,6 +22,9 @@ pub enum VmmError {
     
     #[error("System error: {0}")]
     SystemError(String),
+
+    #[error("Network error: {0}")]
+    NetworkError(String),
 }
 
 // Instead of using #[from], we'll implement the From trait manually

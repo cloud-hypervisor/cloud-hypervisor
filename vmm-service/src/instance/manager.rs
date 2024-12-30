@@ -93,7 +93,15 @@ impl InstanceManager {
     /// current instances it owns
     /// TODO: persist to backing DB or file.
     pub async fn add_instance(&mut self, runtime: VmRuntime) -> Result<(), VmmError> {
-        self.instances.lock().await.insert(runtime.id().to_string(), runtime);
+        let runtime_id = runtime.id().to_string();
+        log::info!(
+            "Adding new VM instance: id={}, name={}",
+            runtime.id(),
+            runtime.config().name
+        );
+
+        self.instances.lock().await.insert(runtime_id.to_string(), runtime);
+        log::info!("Successfully added VM instance {}", runtime_id.clone());
 
         Ok(())
     }
