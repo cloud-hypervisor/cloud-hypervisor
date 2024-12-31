@@ -22,8 +22,12 @@ use mshv_bindings::*;
 #[cfg(feature = "mshv")]
 use mshv_bindings::*;
 use thiserror::Error;
+#[cfg(feature = "sev_snp")]
+use vm_memory::Bytes;
 use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory};
 use zerocopy::AsBytes;
+#[cfg(feature = "sev_snp")]
+use zerocopy::{FromBytes, FromZeroes};
 
 use crate::cpu::CpuManager;
 use crate::igvm::loader::Loader;
@@ -60,6 +64,30 @@ enum IsolatedPageType {
 const ISOLATED_PAGE_SIZE_4KB: u32 = 0x1000;
 const ISOLATED_PAGE_SHIFT: u32 = 12;
     }
+}
+
+// see section 7.1 https://tinyurl.com/sev-snp-spec
+#[repr(C)]
+#[derive(Debug, Clone, PartialEq, Eq, AsBytes, FromBytes, FromZeroes)]
+pub struct SnpCpuidFunc {
+    pub eax_in: u32,
+    pub ecx_in: u32,
+    pub xcr0_in: u64,
+    pub xss_in: u64,
+    pub eax: u32,
+    pub ebx: u32,
+    pub ecx: u32,
+    pub edx: u32,
+    pub reserved: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, FromBytes, AsBytes, FromZeroes)]
+pub struct SnpCpuidInfo {
+    pub count: u32,
+    pub _reserved1: u32,
+    pub _reserved2: u64,
+    pub entries: [SnpCpuidFunc; 64],
 }
 
 #[derive(Debug, Error)]
@@ -316,10 +344,43 @@ pub fn load_igvm(
                     // TODO: other data types SNP / TDX only, unsupported
                     _ => todo!("unsupported IgvmPageDataType"),
                 };
+                if *data_type == IgvmPageDataType::CPUID_DATA {
+                    let mut new_cp = SnpCpuidInfo::new_zeroed();
 
-                loader
-                    .import_pages(gpa / HV_PAGE_SIZE, 1, acceptance, data)
-                    .map_err(Error::Loader)?;
+                    let entries = cpu_manager.lock().unwrap().common_cpuid();
+
+                    for (i, entry) in entries.iter().enumerate() {
+                        new_cp.entries[i].eax_in = entry.function;
+                        new_cp.entries[i].ecx_in = entry.index;
+                        new_cp.entries[i].eax = entry.eax;
+                        new_cp.entries[i].ebx = entry.ebx;
+                        new_cp.entries[i].ecx = entry.ecx;
+                        new_cp.entries[i].edx = entry.edx;
+                        /*
+                         * Guest kernels will calculate EBX themselves using the 0xD
+                         * subfunctions corresponding to the individual XSAVE areas, so only
+                         * encode the base XSAVE size in the initial leaves, corresponding
+                         * to the initial XCR0=1 state. (https://tinyurl.com/qemu-cpuid)
+                         */
+                        if new_cp.entries[i].eax_in == 0xd
+                            && (new_cp.entries[i].ecx_in == 0x0 || new_cp.entries[i].ecx_in == 0x1)
+                        {
+                            new_cp.entries[i].ebx = 0x240;
+                            new_cp.entries[i].xcr0_in = 1;
+                            new_cp.entries[i].xss_in = 0;
+                        }
+                    }
+                    new_cp.count = entries.len() as u32;
+                    assert_eq!(new_cp.count, entries.len() as u32);
+                    info!("gpa: {:#x}", *gpa);
+                    loader
+                        .import_pages(gpa / HV_PAGE_SIZE, 1, acceptance, new_cp.as_bytes())
+                        .map_err(Error::Loader)?;
+                } else {
+                    loader
+                        .import_pages(gpa / HV_PAGE_SIZE, 1, acceptance, data)
+                        .map_err(Error::Loader)?;
+                }
             }
             IgvmDirectiveHeader::ParameterArea {
                 number_of_bytes,
@@ -545,12 +606,58 @@ pub fn load_igvm(
                 })
                 .collect();
             info!("Calling KVM_SEV_SNP_LAUNCH_UPDATE");
-            memory_manager
-                .lock()
-                .unwrap()
-                .vm
-                .import_isolated_pages(group[0].page_type, ISOLATED_PAGE_SIZE_4KB, &pfns, &uaddrs)
-                .map_err(Error::ImportIsolatedPages)?;
+            if group[0].page_type == IsolatedPageType::Cpuid as u32 {
+                let mut new_cp = SnpCpuidInfo::new_zeroed();
+                let _ = guest_memory.read(new_cp.as_bytes_mut(), GuestAddress(group[0].gpa));
+                let import = memory_manager
+                    .lock()
+                    .unwrap()
+                    .vm
+                    .import_isolated_pages(
+                        group[0].page_type,
+                        ISOLATED_PAGE_SIZE_4KB,
+                        &pfns,
+                        &uaddrs,
+                    )
+                    .map_err(Error::ImportIsolatedPages);
+                if import.is_err() {
+                    // When we import the CPUID page, the firmware will change any cpuid fns that
+                    // could lead to an insecure guest, we must then make sure to import the updated cpuid
+                    let mut updated_cp = SnpCpuidInfo::new_zeroed();
+                    let _ =
+                        guest_memory.read(updated_cp.as_bytes_mut(), GuestAddress(group[0].gpa));
+                    for (set, got) in
+                        std::iter::zip(new_cp.entries.iter(), updated_cp.entries.iter())
+                    {
+                        if set != got {
+                            error!("Set cpuid fn: {set:#x?}, but firmware expects: {got:#x?}");
+                        }
+                    }
+                    memory_manager
+                        .lock()
+                        .unwrap()
+                        .vm
+                        .import_isolated_pages(
+                            group[0].page_type,
+                            ISOLATED_PAGE_SIZE_4KB,
+                            &pfns,
+                            &uaddrs,
+                        )
+                        .map_err(Error::ImportIsolatedPages)?
+                }
+            } else {
+                memory_manager
+                    .lock()
+                    .unwrap()
+                    .vm
+                    .import_isolated_pages(
+                        group[0].page_type,
+                        ISOLATED_PAGE_SIZE_4KB,
+                        &pfns,
+                        &uaddrs,
+                    )
+                    .map_err(Error::ImportIsolatedPages)?
+            }
         }
 
         info!(
