@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let vmm_service = VmmService::new(service_config, tx.clone()).await?;
 
     // Create a VM configuration
-    let vm_config = VmInstanceConfig {
+    let mut vm_config = VmInstanceConfig {
         // Path to our kernel built with cloud-hypervisor-builder
         kernel_path: PathBuf::from("/home/ans/projects/vrrb/protocol/compute/formation/form-vmm/vm-images/hypervisor-fw"),
         // Path to our converted Ubuntu cloud image
@@ -39,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("Creating and starting VM...");
-    let vm_instance = vmm_service.create_vm(vm_config).await?;
+    let vm_instance = vmm_service.create_vm(&mut vm_config).await?;
     
     println!("Successfully created VM with ID: {}", vm_instance.id());
     println!("VM State: {:?}", vm_instance.state());

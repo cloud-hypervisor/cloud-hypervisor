@@ -2,163 +2,26 @@ use std::fs;
 use std::path::PathBuf; 
 use std::process::Command;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use serde::{Deserialize, Serialize};
+use shared::interface_config::InterfaceConfig;
 use tempfile::TempDir;
-use thiserror::Error;
-use crate::ServiceConfig;
-use super::Distro;
+use crate::{
+    UserData,
+    MetaData,
+    InitNetworkConfig,
+    CloudInitError,
+    NetworkConfigEntry,
+    ChPasswd,
+    User
+};
+use crate::Distro;
 
-#[derive(Debug, Error)]
-pub enum CloudInitError {
-    #[error("Failed to decode base64 data: {0}")]
-    Base64Decode(#[from] base64::DecodeError),
-    
-    #[error("Failed to create temp directory: {0}")]
-    TempDir(#[from] std::io::Error),
-    
-    #[error("Failed to serialize cloud-init data: {0}")]
-    Serialize(#[from] serde_yaml::Error),
-    
-    #[error("Failed to create cloud-init image: {0}")]
-    ImageCreation(String),
-    
-    #[error("Failed to write cloud-init file: {0}")]
-    FileWrite(String),
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InitNetworkConfig {
-    pub version: u8,
-    pub config: Vec<NetworkConfigEntry>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct NetworkConfigEntry {
-    pub type_: String,
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mac_address: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dhcp4: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub addresses: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub gateway4: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub nameservers: Option<NameServers>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct NameServers {
-    pub addresses: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UserData {
-    pub hostname: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub users: Option<Vec<User>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub chpasswd: Option<ChPasswd>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ssh_pwauth: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub disable_root: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub package_update: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub package_upgrade: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub packages: Option<Vec<String>>,
-}
-
-impl UserData {
-    pub fn default_from_distro(distro: Distro) -> Self {
-        match distro {
-            Distro::Ubuntu => Self {
-                hostname: "ubuntu-vm".to_string(),
-                users: Some(vec![User {
-                    name: "ubuntu".to_string(),
-                    sudo: Some("ALL=(ALL) NOPASSWD:ALL".to_string()),
-                    groups: Some("sudo".to_string()),
-                    shell: Some("/bin/bash".to_string()),
-                    ssh_authorized_keys: None,
-                }]),
-                chpasswd: Some(ChPasswd {
-                    expire: false,
-                    list: vec!["ubuntu:ubuntu".to_string()],
-                }),
-                ssh_pwauth: Some(true),
-                disable_root: Some(true),
-                package_update: Some(true),
-                package_upgrade: Some(true),
-                packages: None,
-            },
-            // For now, use Ubuntu defaults for other distros
-            // We can customize these later for each distro
-            _ => Self::default()
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct User { pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sudo: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub groups: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub shell: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ssh_authorized_keys: Option<Vec<String>>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ChPasswd {
-    pub expire: bool,
-    pub list: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MetaData {
-    pub instance_id: String,
-    pub local_hostname: String,
-}
-
-impl MetaData {
-    pub fn default_from_distro(distro: Distro) -> Self {
-        // Generate a unique instance ID
-        let instance_id = uuid::Uuid::new_v4().to_string();
-        
-        // Create a distribution-specific hostname prefix
-        // This helps identify what kind of VM this is when looking at network traffic
-        // or system logs
-        let prefix = match distro {
-            Distro::Ubuntu => "ubuntu",
-            Distro::Fedora => "fedora",
-            Distro::Debian => "debian",
-            Distro::CentOS => "centos",
-            Distro::Arch => "arch",
-            Distro::Alpine => "alpine",
-        };
-        
-        // Create a hostname that includes both the distro and part of the UUID
-        // for uniqueness. We'll use the first 8 characters of the UUID.
-        let short_id = &instance_id[..8];
-        let local_hostname = format!("{prefix}-{short_id}");
-
-        Self {
-            instance_id,
-            local_hostname,
-        }
-    }
-}
+use super::runcmd::generate_default_runcmds;
+use super::write_files::generate_invite_file;
 
 pub struct CloudInit {
     temp_dir: TempDir,
     user_data: UserData,
     meta_data: MetaData,
-    network_config: Option<InitNetworkConfig>,
 }
 
 impl CloudInit {
@@ -167,36 +30,36 @@ impl CloudInit {
         distro: Distro,
         user_data: Option<&str>,
         meta_data: Option<&str>,
-        service_config:  &ServiceConfig,
+        invitation: InterfaceConfig,
     ) -> Result<Self, CloudInitError> {
         // Decode and deserialize user data
-        let user_data = if let Some(ud) = user_data {
+        let mut user_data = if let Some(ud) = user_data {
             serde_yaml::from_slice(&BASE64.decode(ud)?)?
         } else {
             UserData::default_from_distro(distro.clone())
         };
+
+        if let Some(ref mut runcmd) = user_data.run_cmd {
+            runcmd.extend(generate_default_runcmds())
+        } else {
+            user_data.run_cmd = Some(generate_default_runcmds());
+        }
+
+        if let Some(ref mut write_files) = user_data.write_files {
+            write_files.push(
+                generate_invite_file(invitation).map_err(|e| {
+                    CloudInitError::FileWrite(
+                        format!("Unable to generate formnet invite file: {e}")
+                    )
+                })?
+            );
+        }
 
         // Decode and deserialize meta data
         let meta_data = if let Some(md) = meta_data { 
             serde_yaml::from_slice(&BASE64.decode(md)?)? 
         } else {
             MetaData::default_from_distro(distro.clone())
-        };
-
-        // Decode and deserialize network config if provided
-        let network_config = InitNetworkConfig {
-            version: 2,
-            config: vec![NetworkConfigEntry {
-                type_: "physical".to_string(),
-                name: "eth0".to_string(),
-                mac_address: None,
-                dhcp4: Some(true),
-                addresses: None,
-                gateway4: Some(service_config.network.gateway.clone()),
-                nameservers: Some(NameServers {
-                    addresses: service_config.network.nameservers.clone()
-                })
-            }],
         };
 
         // Create temporary directory for cloud-init files
@@ -206,7 +69,6 @@ impl CloudInit {
             temp_dir,
             user_data,
             meta_data,
-            network_config: Some(network_config),
         })
     }
 
@@ -218,7 +80,6 @@ impl CloudInit {
             temp_dir: TempDir::new()?,
             user_data,
             meta_data,
-            network_config: None,
         })
     }
 
@@ -233,13 +94,6 @@ impl CloudInit {
         let meta_data_path = self.temp_dir.path().join("meta-data");
         let meta_data_yaml = serde_yaml::to_string(&self.meta_data)?;
         fs::write(meta_data_path, meta_data_yaml)?;
-
-        // Write network-config if present
-        if let Some(ref network_config) = self.network_config {
-            let network_config_path = self.temp_dir.path().join("network-config");
-            let network_config_yaml = serde_yaml::to_string(network_config)?;
-            fs::write(network_config_path, network_config_yaml)?;
-        }
 
         Ok(())
     }
@@ -269,10 +123,14 @@ impl CloudInit {
         let mut command = Command::new("cloud-localds");
         
         // Add network-config if present
+        /*
+         * Networking via cloud-init is unreliable right now. revisit in 
+         * future.
         if self.network_config.is_some() {
             command.arg("--network-config")
                 .arg(format!("{}/network-config", temp_dir_str));
         }
+        */
 
         // Add output path and cloud-init files
         command.arg(output_path_str)
@@ -331,6 +189,9 @@ impl Default for UserData {
             package_update: Some(true),
             package_upgrade: Some(true),
             packages: None,
+            write_files: None,
+            run_cmd: None,
+            boot_cmd: None,
         }
     }
 }
@@ -347,8 +208,28 @@ impl Default for MetaData {
 
 #[cfg(test)]
 mod tests {
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
     use super::*;
+    use ipnet::{IpNet, Ipv4Net};
+    use shared::{interface_config::{InterfaceInfo, ServerInfo}, Endpoint};
     use tempfile::tempdir;
+
+    fn generate_mock_interface_config() -> InterfaceConfig {
+        InterfaceConfig {
+            interface: InterfaceInfo {
+                network_name: "test-network".to_string(),
+                address: IpNet::V4(Ipv4Net::new(Ipv4Addr::new(10, 0, 0, 22),  8).unwrap()),
+                private_key: "Some-Private-Key".to_string(),
+                listen_port: None 
+            },
+            server: ServerInfo {
+                public_key: "Some-Public-Key".to_string(),
+                external_endpoint: Endpoint::from(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 51820)),
+                internal_endpoint: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 51820)
+            }
+        }
+    }
 
     #[test]
     fn test_cloud_init_defaults() {
@@ -371,7 +252,7 @@ mod tests {
             Distro::Ubuntu,
             Some(&user_data_b64),
             Some(&meta_data_b64),
-            &ServiceConfig::default()
+            generate_mock_interface_config()
         ).unwrap();
 
         // Verify the files can be written
@@ -420,7 +301,7 @@ mod tests {
             Distro::Ubuntu,
             Some(&user_data_b64),
             Some(&meta_data_b64),
-            &ServiceConfig::default()
+            generate_mock_interface_config()
         ).unwrap();
 
         // Only run this test if cloud-localds is available

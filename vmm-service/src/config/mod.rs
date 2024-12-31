@@ -1,7 +1,4 @@
 pub mod wizard;
-
-//#[cfg(feature = "dev")]
-use form_types::VmmEvent;
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

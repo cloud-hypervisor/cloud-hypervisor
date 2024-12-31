@@ -8,7 +8,7 @@ pub mod cli;
 pub mod handlers;
 pub mod api;
 pub mod sdn;
-mod util;
+pub mod util;
 
 pub use config::{NetworkConfig, DirectoryConfig, DefaultVmParams, ResourceLimits, ServicePaths, ServiceConfig};
 pub use service::*;
@@ -16,4 +16,3 @@ pub use instance::*;
 pub use error::*;
 pub use cli::*;
 pub use handlers::*;
-pub use sdn::*;

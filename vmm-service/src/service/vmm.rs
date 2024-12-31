@@ -1,8 +1,15 @@
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::SocketAddr;
 // src/service/vmm.rs
 #[cfg(feature = "dev")]
 use std::net::SocketAddr;
 use std::sync::Arc;
+use form_types::GenericPublisher;
+use form_types::{NetworkTopic, Event, FormnetMessage, PeerType};
+use shared::interface_config::InterfaceConfig;
 use tokio::io::unix::AsyncFd;
+use tokio::net::TcpListener;
 #[cfg(feature = "dev")]
 use tokio::sync::mpsc::{self, Receiver};
 use std::sync::mpsc::{Sender, channel};
@@ -24,6 +31,8 @@ use crate::{
     instance::{config::VmInstanceConfig, manager::{InstanceManager, VmInstance}},
     ServiceConfig,
 };
+use conductor::publisher::PubStream;
+use tokio::io::AsyncReadExt;
 
 pub struct VmmService {
     pub hypervisor: Arc<dyn hypervisor::Hypervisor>,
@@ -241,12 +250,10 @@ impl VmmService {
         Ok(())
     }
     /// Creates a new VM instance
-    pub async fn create_vm(&self, config: VmInstanceConfig) -> Result<VmInstance, VmmError> {
+    pub async fn create_vm(&self, config: &mut VmInstanceConfig) -> Result<VmInstance, VmmError> {
         config.validate()?;
 
-        // Set up networking for the VM
         let vm_config = create_vm_config(&config);
-
 
         if let Some(api_sender) = &self.api_sender {
             vmm::api::VmCreate.send(
@@ -261,7 +268,7 @@ impl VmmService {
                 (),
             ).map_err(|e| VmmError::VmOperation(e))?;
 
-            let vmrt = VmRuntime::new(config);
+            let vmrt = VmRuntime::new(config.clone());
             let instance = vmrt.instance().clone(); 
             self.instance_manager.lock().await.add_instance(vmrt).await?;
 

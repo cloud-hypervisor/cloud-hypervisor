@@ -53,3 +53,8 @@ form-types = { path = "../../form-types" }
 bytes = "1.5.0"
 httparse = "1.8.0"
 sha1 = "0.10.6"
+shared = { path = "../../form-net/shared" }
+brctl = "1"
+
+[dev-dependencies]
+ipnet = "2.9"

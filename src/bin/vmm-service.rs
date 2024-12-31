@@ -11,6 +11,7 @@ use vmm_service::{
     handle_vmm_event
 };
 use conductor::subscriber::SubStream;
+use vmm_service::util::fetch_and_prepare_images;
 
 #[cfg(feature = "dev")]
 use tokio::sync::mpsc;
@@ -20,6 +21,10 @@ use form_types::VmmEvent;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // If we're unable to fetch and prepare the images we should panic and
+    // exit the program.
+    fetch_and_prepare_images().unwrap();
+
     // Setup the logger
     simple_logger::init_with_level(log::Level::Info)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;

@@ -1,13 +1,12 @@
 use std::net::Ipv4Addr;
-// vmm-service/src/instance/config.rs
 use std::str::FromStr;
 use std::path::PathBuf;
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
+use shared::interface_config::InterfaceConfig;
 use crate::error::VmmError;
 use crate::Distro;
 use crate::CloudInit;
-use crate::ServiceConfig;
 use form_types::VmmEvent;
 use rand::{thread_rng, Rng};
 use gabble::Gab;
@@ -112,81 +111,9 @@ impl FromStr for ConsoleType {
     }
 }
 
-impl TryFrom<(VmmEvent, ServiceConfig)> for VmInstanceConfig {
+impl TryFrom<(&VmmEvent, &InterfaceConfig)> for VmInstanceConfig {
     type Error = VmmError;
-    fn try_from(event: (VmmEvent, ServiceConfig)) -> Result<Self, Self::Error> {
-        match &event.0 {
-            VmmEvent::Create { 
-                owner,
-                recovery_id,
-                requestor,
-                distro,
-                version,
-                user_data,
-                meta_data,
-                memory_mb,
-                vcpu_count,
-                name,
-                custom_cmdline,
-                rng_source,
-                console_type 
-            } => { 
-
-                let distro = Distro::from_str(distro).map_err(|e| {
-                    VmmError::Config(e.to_string())
-                })?;
-
-                let rootfs_path = distro.rootfs_disk_path(&version);
-
-                let console_type = if let Some(ct) = console_type {
-                    ConsoleType::from_str(ct)?
-                } else {
-                    ConsoleType::Virtio
-                };
-
-                let cloud_init = CloudInit::from_base64(
-                    distro,
-                    user_data.as_deref(),
-                    meta_data.as_deref(),
-                    &event.1,
-                ).map_err(|e| {
-                    VmmError::Config(e.to_string())
-                })?;
-
-                let output_path = PathBuf::from(Self::CLOUD_INIT_BASE)
-                    .join(owner).join(name);
-
-                cloud_init.create_image(&output_path).map_err(|e| {
-                    VmmError::Config(e.to_string())
-                })?;
-
-                Ok(VmInstanceConfig {
-                    rootfs_path,
-                    memory_mb: *memory_mb,
-                    vcpu_count: *vcpu_count,
-                    cloud_init_path: Some(output_path.to_path_buf()),
-                    name: name.clone(),
-                    custom_cmdline: custom_cmdline.clone(),
-                    rng_source: rng_source.clone(),
-                    console_type,
-                    ..Default::default()
-                })
-            },
-            _ => {
-                return Err(
-                    VmmError::Config(
-                        format!("VmmEvent type: {event:?} cannot be converted into VmInstanceConfig")
-                    )
-                )
-            }
-        }
-    }
-}
-
-
-impl TryFrom<(&VmmEvent, &ServiceConfig)> for VmInstanceConfig {
-    type Error = VmmError;
-    fn try_from(event: (&VmmEvent, &ServiceConfig)) -> Result<Self, Self::Error> {
+    fn try_from(event: (&VmmEvent, &InterfaceConfig)) -> Result<Self, Self::Error> {
         match &event.0 {
             VmmEvent::Create { 
                 owner,
@@ -220,7 +147,7 @@ impl TryFrom<(&VmmEvent, &ServiceConfig)> for VmInstanceConfig {
                     distro,
                     user_data.as_deref(),
                     meta_data.as_deref(), 
-                    event.1,
+                    event.1.clone(),
                 ).map_err(|e| {
                     VmmError::Config(e.to_string())
                 })?;
