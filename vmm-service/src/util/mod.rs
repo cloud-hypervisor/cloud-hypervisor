@@ -1,5 +1,7 @@
 use std::{io::Write, path::{Path, PathBuf}, process::Command};
+use crate::Distro;
 
+pub const PREP_MOUNT_POINT: &str = "/mnt/cloudimg";
 pub const DEFAULT_NETPLAN: &str = "/var/lib/formation/netplan/01-custom-netplan.yaml";
 pub const FORMNET_BINARY: &str = "/var/lib/formation/formnet/formnet";
 pub const BASE_DIRECTORY: &str  = "/var/lib/formation/vm-images";
@@ -106,6 +108,10 @@ pub fn fetch_and_prepare_images() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+pub fn copy_disk_image(distro: Distro, version: &str) -> Result<(), Box<dyn std::error::Error>> {
+    todo!()
+}
+
 fn copy_default_netplan(to: &str) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::copy(
         DEFAULT_NETPLAN,
@@ -172,4 +178,29 @@ pub fn add_tap_to_bridge(tap: &str) -> Result<brctl::Bridge, Box<dyn std::error:
 
     Ok(bridge)
 
+}
+
+fn mount_image(image_path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let output = Command::new("losetup")
+        .args(["--partscan", "--find", "--show", image_path])
+        .output()?;
+    if !output.status.success() {
+        return Err(Box::new(std::io::Error::last_os_error()))
+    }
+    let loop_device = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(loop_device)
+}
+
+fn mount_partition(loop_device: &str, partition_idx: u8) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(PREP_MOUNT_POINT)?;
+    let partition = format!("{}p{}", loop_device, partition_idx);
+    let status = Command::new("mount")
+        .args([&partition, PREP_MOUNT_POINT])
+        .status()?;
+
+    if !status.success() {
+        return Err(Box::new(std::io::Error::last_os_error()));
+    }
+
+    Ok(())
 }
