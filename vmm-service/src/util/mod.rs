@@ -2,6 +2,7 @@ use std::{io::Write, path::{Path, PathBuf}, process::Command};
 use crate::Distro;
 
 pub const PREP_MOUNT_POINT: &str = "/mnt/cloudimg";
+pub const DEFAULT_NETPLAN_FILENAME: &str = "01-netplan-custom-config.yaml";
 pub const DEFAULT_NETPLAN: &str = "/var/lib/formation/netplan/01-custom-netplan.yaml";
 pub const FORMNET_BINARY: &str = "/var/lib/formation/formnet/formnet";
 pub const BASE_DIRECTORY: &str  = "/var/lib/formation/vm-images";
@@ -105,11 +106,65 @@ pub fn fetch_and_prepare_images() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Base images acquired and placed in /var/lib/formation/vm-images");
 
+    let base_imgs = [
+        base.join("ubuntu/22.04/base.raw"),
+        base.join("fedora/41/base.raw"),
+        base.join("debian/11/base.raw"),
+        base.join("centos/8/base.raw"),
+        base.join("arch/latest/base.raw"),
+        base.join("alpine/3.21/base.raw"),
+    ];
+
+    for img in base_imgs {
+        mount_partition(
+            &get_image_loop_device(&img.display().to_string())?,
+            1
+        )?; 
+        copy_default_netplan(
+            &PathBuf::from(
+                PREP_MOUNT_POINT
+            ).join("/etc/netplan/")
+            .join(DEFAULT_NETPLAN_FILENAME)
+            .display().to_string()
+        );
+        copy_formnet_client(
+            &PathBuf::from(
+                PREP_MOUNT_POINT
+            ).join("/usr/local/bin/")
+            .join("formnet")
+            .display().to_string()
+        )?;
+    }
+
     Ok(())
 }
 
-pub fn copy_disk_image(distro: Distro, version: &str) -> Result<(), Box<dyn std::error::Error>> {
-    todo!()
+pub fn copy_disk_image(
+    distro: Distro,
+    version: &str,
+    instance_id: &str,
+    node_id: &str
+) -> Result<(), Box<dyn std::error::Error>> {
+    let base_path = PathBuf::from(BASE_DIRECTORY).join(distro.to_string()).join(version).join("base.raw");
+    let dest_path = PathBuf::from(BASE_DIRECTORY).join(node_id).join(format!("{}.raw", instance_id));
+
+    ensure_directory(
+        dest_path.parent().ok_or(
+            Box::new(
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Destination path has no parent"
+                )
+            )
+        )?
+    )?;
+
+    std::fs::copy(
+        base_path,
+        dest_path
+    )?;
+
+    Ok(())
 }
 
 fn copy_default_netplan(to: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -144,10 +199,6 @@ fn write_default_netplan() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn get_formnet_client() -> Result<(), Box<dyn std::error::Error>> {
-    todo!()
-}
-
 fn copy_formnet_client(to: &str) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::copy(
         FORMNET_BINARY,
@@ -180,9 +231,9 @@ pub fn add_tap_to_bridge(tap: &str) -> Result<brctl::Bridge, Box<dyn std::error:
 
 }
 
-fn mount_image(image_path: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let output = Command::new("losetup")
-        .args(["--partscan", "--find", "--show", image_path])
+fn get_image_loop_device(image_path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let output = Command::new("sudo")
+        .args(["losetup", "--partscan", "--find", "--show", image_path])
         .output()?;
     if !output.status.success() {
         return Err(Box::new(std::io::Error::last_os_error()))
@@ -194,8 +245,8 @@ fn mount_image(image_path: &str) -> Result<String, Box<dyn std::error::Error>> {
 fn mount_partition(loop_device: &str, partition_idx: u8) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(PREP_MOUNT_POINT)?;
     let partition = format!("{}p{}", loop_device, partition_idx);
-    let status = Command::new("mount")
-        .args([&partition, PREP_MOUNT_POINT])
+    let status = Command::new("sudo")
+        .args(["mount", &partition, PREP_MOUNT_POINT])
         .status()?;
 
     if !status.success() {
