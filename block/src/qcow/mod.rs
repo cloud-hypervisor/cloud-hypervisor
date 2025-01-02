@@ -45,7 +45,7 @@ pub enum Error {
     CompressedBlocksNotSupported,
     #[error("Failed to evict cache: {0}")]
     EvictingCache(io::Error),
-    #[error("File larger than max of {}: {0}", MAX_QCOW_FILE_SIZE)]
+    #[error("File larger than max of {MAX_QCOW_FILE_SIZE}: {0}")]
     FileTooBig(u64),
     #[error("Failed to get file size: {0}")]
     GettingFileSize(io::Error),
