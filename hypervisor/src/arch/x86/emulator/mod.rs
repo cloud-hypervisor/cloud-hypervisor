@@ -185,7 +185,7 @@ pub trait CpuStateManager: Clone {
                     )));
                 }
 
-                Ok(logical_addr + segment_register.base)
+                Ok(logical_addr.wrapping_add(segment_register.base))
             }
 
             _ => Err(PlatformError::UnsupportedCpuMode(anyhow!("{:?}", mode))),
