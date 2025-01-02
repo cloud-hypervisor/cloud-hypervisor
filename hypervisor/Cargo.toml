@@ -43,7 +43,16 @@ vmm-sys-util = { workspace = true, features = ["with-serde"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
 default-features = false
-features = ["decoder", "fast_fmt", "instr_info", "op_code_info", "std"]
+features = [
+  "decoder",
+  "instr_info",
+  "no_d3now",
+  "no_evex",
+  "no_vex",
+  "no_xop",
+  "op_code_info",
+  "std",
+]
 optional = true
 version = "1.21.0"
 

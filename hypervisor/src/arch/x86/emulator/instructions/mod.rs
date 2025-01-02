@@ -140,16 +140,3 @@ pub trait InstructionHandler<T: CpuStateManager> {
         platform: &mut dyn PlatformEmulator<CpuState = T>,
     ) -> Result<(), EmulationError<Exception>>;
 }
-
-macro_rules! insn_format {
-    ($insn:ident) => {{
-        let mut output = String::new();
-        let mut formatter = FastFormatter::new();
-        formatter
-            .options_mut()
-            .set_space_after_operand_separator(true);
-        formatter.format(&$insn, &mut output);
-
-        output
-    }};
-}
