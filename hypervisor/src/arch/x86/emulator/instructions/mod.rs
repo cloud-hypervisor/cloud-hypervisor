@@ -116,14 +116,14 @@ fn memory_operand_address<T: CpuStateManager>(
 
     if insn.memory_base() != iced_x86::Register::None {
         let base: u64 = state.read_reg(insn.memory_base())?;
-        address += base;
+        address = address.wrapping_add(base);
     }
 
     if insn.memory_index() != iced_x86::Register::None {
         let mut index: u64 = state.read_reg(insn.memory_index())?;
-        index *= insn.memory_index_scale() as u64;
+        index = index.wrapping_mul(insn.memory_index_scale() as u64);
 
-        address += index;
+        address = address.wrapping_add(index);
     }
 
     address = address.wrapping_add(insn.memory_displacement64());
