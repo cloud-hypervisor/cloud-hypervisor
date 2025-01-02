@@ -599,8 +599,8 @@ impl<T: CpuStateManager> Emulator<'_, T> {
                 decoder.decode_out(&mut insn);
                 if decoder.last_error() != DecoderError::None {
                     return Err(EmulationError::InstructionFetchingError(anyhow!(
-                        "{:#x?}",
-                        insn_format!(insn)
+                        "{:?}",
+                        insn.code()
                     )));
                 }
             }
@@ -609,14 +609,17 @@ impl<T: CpuStateManager> Emulator<'_, T> {
             Emulator::get_handler(insn.code())
                 .ok_or_else(|| {
                     EmulationError::UnsupportedInstruction(anyhow!(
-                        "{:#x?} {:?} {:?}",
-                        insn_format!(insn),
-                        insn.mnemonic(),
-                        insn.code()
+                        "{:?} {:x?}",
+                        insn.code(),
+                        insn_stream
                     ))
                 })?
                 .emulate(&insn, &mut state, self.platform)
-                .context(anyhow!("Failed to emulate {:#x?}", insn_format!(insn)))?;
+                .context(anyhow!(
+                    "Failed to emulate {:?} {:x?}",
+                    insn.code(),
+                    insn_stream
+                ))?;
 
             last_decoded_ip = decoder.ip();
             num_insn_emulated += 1;
