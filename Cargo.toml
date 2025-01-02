@@ -32,10 +32,6 @@ path = "src/bin/vmm-service.rs"
 name = "vmm-service-test"
 path = "src/bin/vmm-service-test.rs"
 
-[[bin]]
-name = "sdn-test"
-path = "src/bin/sdn-test.rs"
-
 [profile.release]
 codegen-units = 1
 lto = true

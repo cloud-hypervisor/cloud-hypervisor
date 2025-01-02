@@ -126,7 +126,7 @@ pub fn fetch_and_prepare_images() -> Result<(), Box<dyn std::error::Error>> {
             ).join("/etc/netplan/")
             .join(DEFAULT_NETPLAN_FILENAME)
             .display().to_string()
-        );
+        )?;
         copy_formnet_client(
             &PathBuf::from(
                 PREP_MOUNT_POINT

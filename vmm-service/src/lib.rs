@@ -7,7 +7,6 @@ pub mod service;
 pub mod cli;
 pub mod handlers;
 pub mod api;
-pub mod sdn;
 pub mod util;
 
 pub use config::{NetworkConfig, DirectoryConfig, DefaultVmParams, ResourceLimits, ServicePaths, ServiceConfig};
