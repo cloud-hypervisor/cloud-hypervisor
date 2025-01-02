@@ -29,7 +29,7 @@ serde_with = { version = "3.9.0", default-features = false, features = [
   "macros",
 ] }
 serial_buffer = { path = "../serial_buffer" }
-thiserror = "1.0.62"
+thiserror = "2.0.6"
 vhost = { workspace = true, features = [
   "vhost-kern",
   "vhost-user-backend",

@@ -66,7 +66,7 @@ serde = { version = "1.0.208", features = ["derive", "rc"] }
 serde_json = "1.0.120"
 serial_buffer = { path = "../serial_buffer" }
 signal-hook = "0.3.17"
-thiserror = "1.0.62"
+thiserror = "2.0.6"
 tracer = { path = "../tracer" }
 uuid = "1.8.0"
 vfio-ioctls = { workspace = true, default-features = false }
