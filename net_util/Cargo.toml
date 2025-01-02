@@ -12,7 +12,7 @@ log = "0.4.22"
 net_gen = { path = "../net_gen" }
 rate_limiter = { path = "../rate_limiter" }
 serde = { version = "1.0.208", features = ["derive"] }
-thiserror = "1.0.62"
+thiserror = "2.0.6"
 virtio-bindings = { workspace = true }
 virtio-queue = { workspace = true }
 vm-memory = { workspace = true, features = [
