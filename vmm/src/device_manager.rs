@@ -3358,6 +3358,10 @@ impl DeviceManager {
             vfio_container
         };
 
+        if !self.has_vfio_device() {
+            needs_dma_mapping = true;
+        }
+
         let vfio_device = VfioDevice::new(&device_cfg.path, Arc::clone(&vfio_container))
             .map_err(DeviceManagerError::VfioCreate)?;
 
@@ -4485,6 +4489,18 @@ impl DeviceManager {
 
     pub(crate) fn acpi_platform_addresses(&self) -> &AcpiPlatformAddresses {
         &self.acpi_platform_addresses
+    }
+
+    fn has_vfio_device(&self) -> bool {
+        let device_tree = self.device_tree.lock().unwrap();
+        for pci_device_node in device_tree.pci_devices() {
+            let pci_device_handle = pci_device_node.pci_device_handle.as_ref().unwrap();
+            if matches!(pci_device_handle, PciDeviceHandle::Vfio(_)) {
+                return true;
+            }
+        }
+
+        false
     }
 }
 
