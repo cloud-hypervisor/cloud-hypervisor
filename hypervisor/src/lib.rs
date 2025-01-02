@@ -202,7 +202,10 @@ pub enum StandardRegisters {
     Kvm(kvm_bindings::kvm_regs),
     #[cfg(all(feature = "kvm", target_arch = "riscv64"))]
     Kvm(kvm_bindings::kvm_riscv_core),
-    #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
+    #[cfg(all(
+        any(feature = "mshv", feature = "mshv_emulator"),
+        target_arch = "x86_64"
+    ))]
     Mshv(mshv_bindings::StandardRegisters),
 }
 
@@ -215,7 +218,7 @@ macro_rules! set_x86_64_reg {
                     match self {
                         #[cfg(feature = "kvm")]
                         StandardRegisters::Kvm(s) => s.$reg_name = val,
-                        #[cfg(feature = "mshv")]
+                        #[cfg(any(feature = "mshv", feature = "mshv_emulator"))]
                         StandardRegisters::Mshv(s) => s.$reg_name = val,
                     }
                 }
@@ -233,7 +236,7 @@ macro_rules! get_x86_64_reg {
                     match self {
                         #[cfg(feature = "kvm")]
                         StandardRegisters::Kvm(s) => s.$reg_name,
-                        #[cfg(feature = "mshv")]
+                        #[cfg(any(feature = "mshv", feature = "mshv_emulator"))]
                         StandardRegisters::Mshv(s) => s.$reg_name,
                     }
                 }

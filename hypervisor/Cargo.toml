@@ -7,7 +7,8 @@ version = "0.1.0"
 
 [features]
 kvm = ["kvm-bindings", "kvm-ioctls", "vfio-ioctls/kvm"]
-mshv = ["iced-x86", "mshv-bindings", "mshv-ioctls", "vfio-ioctls/mshv"]
+mshv = ["mshv-bindings", "mshv-ioctls", "mshv_emulator", "vfio-ioctls/mshv"]
+mshv_emulator = ["iced-x86", "mshv-bindings"]
 sev_snp = ["igvm", "igvm_defs"]
 tdx = []
 
