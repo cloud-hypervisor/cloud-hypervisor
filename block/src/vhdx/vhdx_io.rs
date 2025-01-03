@@ -133,7 +133,7 @@ pub fn read(
             };
             sector_count -= sector.free_sectors;
             sector_index += sector.free_sectors;
-            read_count = sector.free_bytes as usize;
+            read_count += sector.free_bytes as usize;
         };
     }
     Ok(read_count)
@@ -219,7 +219,7 @@ pub fn write(
             };
             sector_count -= sector.free_sectors;
             sector_index += sector.free_sectors;
-            write_count = sector.free_bytes as usize;
+            write_count += sector.free_bytes as usize;
         };
     }
     Ok(write_count)
