@@ -119,7 +119,7 @@ impl Read for Vhdx {
             )
         })?;
 
-        self.current_offset += result as u64;
+        self.current_offset = self.current_offset.checked_add(result as u64).unwrap();
 
         Ok(result)
     }
@@ -164,7 +164,7 @@ impl Write for Vhdx {
             )
         })?;
 
-        self.current_offset += result as u64;
+        self.current_offset = self.current_offset.checked_add(result as u64).unwrap();
 
         Ok(result)
     }
