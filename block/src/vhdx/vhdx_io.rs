@@ -95,46 +95,45 @@ pub fn read(
     mut sector_index: u64,
     mut sector_count: u64,
 ) -> Result<usize> {
+    if disk_spec.has_parent {
+        return Err(VhdxIoError::UnsupportedMode);
+    }
+
     let mut read_count: usize = 0;
-
     while sector_count > 0 {
-        if disk_spec.has_parent {
-            return Err(VhdxIoError::UnsupportedMode);
-        } else {
-            let sector = Sector::new(disk_spec, bat, sector_index, sector_count)?;
+        let sector = Sector::new(disk_spec, bat, sector_index, sector_count)?;
 
-            let bat_entry = match bat.get(sector.bat_index as usize) {
-                Some(entry) => entry.0,
-                None => {
-                    return Err(VhdxIoError::InvalidBatIndex);
-                }
-            };
-
-            match bat_entry & vhdx_bat::BAT_STATE_BIT_MASK {
-                vhdx_bat::PAYLOAD_BLOCK_NOT_PRESENT
-                | vhdx_bat::PAYLOAD_BLOCK_UNDEFINED
-                | vhdx_bat::PAYLOAD_BLOCK_UNMAPPED
-                | vhdx_bat::PAYLOAD_BLOCK_ZERO => {}
-                vhdx_bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
-                    f.seek(SeekFrom::Start(sector.file_offset))
-                        .map_err(VhdxIoError::ReadSectorBlock)?;
-                    f.read_exact(
-                        &mut buf[read_count
-                            ..(read_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
-                    )
-                    .map_err(VhdxIoError::ReadSectorBlock)?;
-                }
-                vhdx_bat::PAYLOAD_BLOCK_PARTIALLY_PRESENT => {
-                    return Err(VhdxIoError::UnsupportedMode);
-                }
-                _ => {
-                    return Err(VhdxIoError::InvalidBatEntryState);
-                }
-            };
-            sector_count -= sector.free_sectors;
-            sector_index += sector.free_sectors;
-            read_count += sector.free_bytes as usize;
+        let bat_entry = match bat.get(sector.bat_index as usize) {
+            Some(entry) => entry.0,
+            None => {
+                return Err(VhdxIoError::InvalidBatIndex);
+            }
         };
+
+        match bat_entry & vhdx_bat::BAT_STATE_BIT_MASK {
+            vhdx_bat::PAYLOAD_BLOCK_NOT_PRESENT
+            | vhdx_bat::PAYLOAD_BLOCK_UNDEFINED
+            | vhdx_bat::PAYLOAD_BLOCK_UNMAPPED
+            | vhdx_bat::PAYLOAD_BLOCK_ZERO => {}
+            vhdx_bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
+                f.seek(SeekFrom::Start(sector.file_offset))
+                    .map_err(VhdxIoError::ReadSectorBlock)?;
+                f.read_exact(
+                    &mut buf
+                        [read_count..(read_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
+                )
+                .map_err(VhdxIoError::ReadSectorBlock)?;
+            }
+            vhdx_bat::PAYLOAD_BLOCK_PARTIALLY_PRESENT => {
+                return Err(VhdxIoError::UnsupportedMode);
+            }
+            _ => {
+                return Err(VhdxIoError::InvalidBatEntryState);
+            }
+        };
+        sector_count -= sector.free_sectors;
+        sector_index += sector.free_sectors;
+        read_count += sector.free_bytes as usize;
     }
     Ok(read_count)
 }
@@ -150,77 +149,73 @@ pub fn write(
     mut sector_index: u64,
     mut sector_count: u64,
 ) -> Result<usize> {
+    if disk_spec.has_parent {
+        return Err(VhdxIoError::UnsupportedMode);
+    }
+
     let mut write_count: usize = 0;
-
     while sector_count > 0 {
-        if disk_spec.has_parent {
-            return Err(VhdxIoError::UnsupportedMode);
-        } else {
-            let sector = Sector::new(disk_spec, bat, sector_index, sector_count)?;
+        let sector = Sector::new(disk_spec, bat, sector_index, sector_count)?;
 
-            let bat_entry = match bat.get(sector.bat_index as usize) {
-                Some(entry) => entry.0,
-                None => {
-                    return Err(VhdxIoError::InvalidBatIndex);
-                }
-            };
-
-            match bat_entry & vhdx_bat::BAT_STATE_BIT_MASK {
-                vhdx_bat::PAYLOAD_BLOCK_NOT_PRESENT
-                | vhdx_bat::PAYLOAD_BLOCK_UNDEFINED
-                | vhdx_bat::PAYLOAD_BLOCK_UNMAPPED
-                | vhdx_bat::PAYLOAD_BLOCK_ZERO => {
-                    let file_offset =
-                        align!(disk_spec.image_size, vhdx_metadata::BLOCK_SIZE_MIN as u64);
-                    let new_size = file_offset
-                        .checked_add(disk_spec.block_size as u64)
-                        .ok_or(VhdxIoError::InvalidDiskSize)?;
-
-                    f.set_len(new_size).map_err(VhdxIoError::ResizeFile)?;
-                    disk_spec.image_size = new_size;
-
-                    let new_bat_entry = file_offset
-                        | (vhdx_bat::PAYLOAD_BLOCK_FULLY_PRESENT & vhdx_bat::BAT_STATE_BIT_MASK);
-                    bat[sector.bat_index as usize] = BatEntry(new_bat_entry);
-                    BatEntry::write_bat_entries(f, bat_offset, bat)
-                        .map_err(VhdxIoError::WriteBat)?;
-
-                    if file_offset < vhdx_metadata::BLOCK_SIZE_MIN as u64 {
-                        break;
-                    }
-
-                    f.seek(SeekFrom::Start(file_offset))
-                        .map_err(VhdxIoError::ReadSectorBlock)?;
-                    f.write_all(
-                        &buf[write_count
-                            ..(write_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
-                    )
-                    .map_err(VhdxIoError::ReadSectorBlock)?;
-                }
-                vhdx_bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
-                    if sector.file_offset < vhdx_metadata::BLOCK_SIZE_MIN as u64 {
-                        break;
-                    }
-
-                    f.seek(SeekFrom::Start(sector.file_offset))
-                        .map_err(VhdxIoError::ReadSectorBlock)?;
-                    f.write_all(
-                        &buf[write_count
-                            ..(write_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
-                    )
-                    .map_err(VhdxIoError::ReadSectorBlock)?;
-                }
-                vhdx_bat::PAYLOAD_BLOCK_PARTIALLY_PRESENT => {
-                    return Err(VhdxIoError::UnsupportedMode);
-                }
-                _ => {
-                    return Err(VhdxIoError::InvalidBatEntryState);
-                }
-            };
-            sector_count -= sector.free_sectors;
-            sector_index += sector.free_sectors;
-            write_count += sector.free_bytes as usize;
+        let bat_entry = match bat.get(sector.bat_index as usize) {
+            Some(entry) => entry.0,
+            None => {
+                return Err(VhdxIoError::InvalidBatIndex);
+            }
         };
+
+        match bat_entry & vhdx_bat::BAT_STATE_BIT_MASK {
+            vhdx_bat::PAYLOAD_BLOCK_NOT_PRESENT
+            | vhdx_bat::PAYLOAD_BLOCK_UNDEFINED
+            | vhdx_bat::PAYLOAD_BLOCK_UNMAPPED
+            | vhdx_bat::PAYLOAD_BLOCK_ZERO => {
+                let file_offset =
+                    align!(disk_spec.image_size, vhdx_metadata::BLOCK_SIZE_MIN as u64);
+                let new_size = file_offset
+                    .checked_add(disk_spec.block_size as u64)
+                    .ok_or(VhdxIoError::InvalidDiskSize)?;
+
+                f.set_len(new_size).map_err(VhdxIoError::ResizeFile)?;
+                disk_spec.image_size = new_size;
+
+                let new_bat_entry = file_offset
+                    | (vhdx_bat::PAYLOAD_BLOCK_FULLY_PRESENT & vhdx_bat::BAT_STATE_BIT_MASK);
+                bat[sector.bat_index as usize] = BatEntry(new_bat_entry);
+                BatEntry::write_bat_entries(f, bat_offset, bat).map_err(VhdxIoError::WriteBat)?;
+
+                if file_offset < vhdx_metadata::BLOCK_SIZE_MIN as u64 {
+                    break;
+                }
+
+                f.seek(SeekFrom::Start(file_offset))
+                    .map_err(VhdxIoError::ReadSectorBlock)?;
+                f.write_all(
+                    &buf[write_count..(write_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
+                )
+                .map_err(VhdxIoError::ReadSectorBlock)?;
+            }
+            vhdx_bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
+                if sector.file_offset < vhdx_metadata::BLOCK_SIZE_MIN as u64 {
+                    break;
+                }
+
+                f.seek(SeekFrom::Start(sector.file_offset))
+                    .map_err(VhdxIoError::ReadSectorBlock)?;
+                f.write_all(
+                    &buf[write_count..(write_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
+                )
+                .map_err(VhdxIoError::ReadSectorBlock)?;
+            }
+            vhdx_bat::PAYLOAD_BLOCK_PARTIALLY_PRESENT => {
+                return Err(VhdxIoError::UnsupportedMode);
+            }
+            _ => {
+                return Err(VhdxIoError::InvalidBatEntryState);
+            }
+        };
+        sector_count -= sector.free_sectors;
+        sector_index += sector.free_sectors;
+        write_count += sector.free_bytes as usize;
     }
     Ok(write_count)
 }
