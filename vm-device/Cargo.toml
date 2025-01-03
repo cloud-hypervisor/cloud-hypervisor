@@ -13,7 +13,7 @@ mshv = ["vfio-ioctls/mshv"]
 anyhow = "1.0.94"
 hypervisor = { path = "../hypervisor" }
 serde = { version = "1.0.208", features = ["derive", "rc"] }
-thiserror = "1.0.62"
+thiserror = "2.0.6"
 vfio-ioctls = { workspace = true, default-features = false }
 vm-memory = { workspace = true, features = ["backend-mmap"] }
 vmm-sys-util = { workspace = true }
