@@ -12,13 +12,13 @@ pub enum Distro {
 }
 
 impl Distro {
-    pub const BASE_PATH: &str = "/var/lib/form/images/";
+    pub const BASE_PATH: &str = "/var/lib/formation/vm-images/";
 
     pub fn rootfs_disk_path(&self, version: &str) -> PathBuf {
         PathBuf::from(Self::BASE_PATH)
             .join(self.to_string())
             .join(version)
-            .join("disk.raw")
+            .join("base.raw")
     }
 }
 

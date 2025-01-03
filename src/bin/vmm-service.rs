@@ -1,8 +1,9 @@
 use clap::Parser;
 use log::{info, error};
 use tokio::signal::unix::{signal, SignalKind};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 use form_types::VmmSubscriber;
+use form_types::VmmEvent;
 use vmm_service::{CliArgs, CliCommand}; 
 use vmm_service::{
     VmmService,
@@ -13,17 +14,11 @@ use vmm_service::{
 use conductor::subscriber::SubStream;
 use vmm_service::util::fetch_and_prepare_images;
 
-#[cfg(feature = "dev")]
-use tokio::sync::mpsc;
-#[cfg(feature = "dev")]
-use form_types::VmmEvent;
-
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // If we're unable to fetch and prepare the images we should panic and
     // exit the program.
-    fetch_and_prepare_images().unwrap();
+    fetch_and_prepare_images().await.unwrap();
 
     // Setup the logger
     simple_logger::init_with_level(log::Level::Info)
@@ -36,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // TODO: Handle debug flag if set
     match args.command {
-        CliCommand::Run { config, sub_addr, pub_addr, wizard } => {
+        CliCommand::Run { config, sub_addr, pub_addr: _, wizard } => {
             let config = if wizard {
                 info!("Running configuration wizard");
                 run_config_wizard()?
@@ -48,14 +43,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ServiceConfig::default()
             };
 
-            run_service_with_config(config, &sub_addr, &pub_addr).await?;
+            run_service_with_config(config, &sub_addr).await?;
         }
         CliCommand::Configure {
             output,
             non_interactive,
             start,
             sub_addr,
-            pub_addr
+            pub_addr: _
         } => {
             // Create configuration
             let config = if non_interactive {
@@ -73,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Start service if requested
             if start {
                 info!("Starting service with new configuration");
-                run_service_with_config(config, &sub_addr, &pub_addr).await?;
+                run_service_with_config(config, &sub_addr).await?;
             }
         }
 
@@ -91,18 +86,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn run_service_with_config(
     config: ServiceConfig,
     sub_addr: &str,
-    pub_addr: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Create shutdown channel
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
-    #[cfg(feature = "dev")]
     let (event_tx, event_rx) = mpsc::channel(1024); 
 
     // Initialize VMM Service
-    #[cfg(not(feature = "dev"))]
-    let mut service = VmmService::new(config).await?;
-    #[cfg(feature = "dev")]
-    let mut service = VmmService::new(config, event_tx).await?;
+    let mut service = VmmService::new(config, event_tx.clone()).await?;
 
     // Build the subscriber
     let subscriber = VmmSubscriber::new(sub_addr).await?;
@@ -116,22 +106,6 @@ async fn run_service_with_config(
     let mut sigint = signal(SignalKind::interrupt())?;
 
     // Run the main service loop 
-    #[cfg(not(feature = "dev"))]
-    tokio::select! {
-        _ = sigterm.recv() => {
-            info!("Received SIGTERM signal");
-        }
-        _ = sigint.recv() => {
-            info!("Received SIGINT signal");
-        }
-        result = run_service(&mut service, shutdown_rx, subscriber) => {
-            if let Err(e) = result {
-                error!("Service error: {e}");
-            }
-        }
-    }
-
-    #[cfg(feature = "dev")]
     tokio::select! {
         _ = sigterm.recv() => {
             info!("Received SIGTERM signal");
@@ -146,7 +120,6 @@ async fn run_service_with_config(
         }
     }
 
-
     // Shutdown
     info!("Initiating service shutdown");
     shutdown_tx.send(())?;
@@ -156,13 +129,14 @@ async fn run_service_with_config(
     Ok(())
 }
 
-#[cfg(not(feature = "dev"))] 
 async fn run_service(
     service: &mut VmmService,
     mut shutdown_rx: broadcast::Receiver<()>,
     mut subscriber: VmmSubscriber,
+    mut event_rx: mpsc::Receiver<VmmEvent>,
 ) -> Result<(), VmmError> {
     // Main service event loop
+
     info!("Running VMM service main event handling loop...");
     loop {
         tokio::select! {
@@ -181,42 +155,9 @@ async fn run_service(
                     }
                 }
             }
-        }
-    }
-
-    Ok(())
-}
-
-#[cfg(feature = "dev")]
-async fn run_service(
-    service: &mut VmmService,
-    mut shutdown_rx: broadcast::Receiver<()>,
-    mut subscriber: VmmSubscriber,
-    mut event_receiver: mpsc::Receiver<VmmEvent>,
-) -> Result<(), VmmError> {
-    // Main service event loop
-    info!("Running VMM service main event handling loop...");
-    loop {
-        tokio::select! {
-            // Check shutdown signal
-            Ok(()) = shutdown_rx.recv() => {
-                info!("Shutdown signal received");
-                break;
-            }
-            Ok(events) = subscriber.receive() => {
-                for event in events {
-                    info!("Handling event: {event:?}");
-                    //TODO: Stash in a futures unordered, and handle as they
-                    //finish.
-                    if let Err(e) = handle_vmm_event(service, &event).await {
-                        error!("Error handling event {event:?}: {e}");
-                    }
-                }
-            }
-            Some(event) = event_receiver.recv() => {
-                log::info!("Received test API event: {:?}", event);
+            Some(event) = event_rx.recv() => {
                 if let Err(e) = handle_vmm_event(service, &event).await {
-                    log::error!("Error handling event {event:?}: {e}");
+                    error!("Error handing event {event:?}: {e}");
                 }
             }
         }

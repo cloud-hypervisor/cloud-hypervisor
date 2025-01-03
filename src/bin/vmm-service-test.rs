@@ -11,12 +11,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let service_config = ServiceConfig::default();
 
     // Initialize the VMM service
-    #[cfg(not(feature = "dev"))]
-    let vmm_service = VmmService::new(service_config).await?;
-
-    #[cfg(feature = "dev")]
-    let (tx, rx) = tokio::sync::mpsc::channel(1024); 
-    #[cfg(feature = "dev")]
+    let (tx, _rx) = tokio::sync::mpsc::channel(1024); 
     let vmm_service = VmmService::new(service_config, tx.clone()).await?;
 
     // Create a VM configuration

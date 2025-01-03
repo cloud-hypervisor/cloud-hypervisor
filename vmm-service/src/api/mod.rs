@@ -14,7 +14,7 @@ use crate::VmmError;
 use form_types::VmmEvent;
 
 /// Testing API server that allows direct interaction with the VMM service
-pub struct TestApi {
+pub struct VmmApi {
     /// Channel to send events to the service
     event_sender: mpsc::Sender<VmmEvent>,
     /// Server address
@@ -30,7 +30,9 @@ pub struct CreateVmRequest {
     pub vcpu_count: u8,
     pub name: String,
     pub user_data: Option<String>,
-    pub meta_data: Option<String>
+    pub meta_data: Option<String>,
+    pub signature: Option<String>,
+    pub recovery_id: u32,
 }
 
 /// Response containing VM information
@@ -41,7 +43,7 @@ pub struct VmResponse {
     pub state: String,
 }
 
-impl TestApi {
+impl VmmApi {
     pub fn new(event_sender: mpsc::Sender<VmmEvent>, addr: SocketAddr) -> Self {
         Self {
             event_sender, addr

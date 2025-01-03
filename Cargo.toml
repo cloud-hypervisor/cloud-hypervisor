@@ -98,7 +98,6 @@ pvmemcontrol = ["vmm/pvmemcontrol"]
 sev_snp = ["igvm", "mshv", "vmm/sev_snp"]
 tdx = ["vmm/tdx"]
 tracing = ["tracer/tracing", "vmm/tracing"]
-dev = ["vmm-service/dev"]
 
 [workspace]
 members = [

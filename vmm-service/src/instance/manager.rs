@@ -106,6 +106,7 @@ impl InstanceManager {
         Ok(())
     }
 
+    #[allow(unused)]
     /// Get's a single `VmInstance` by it's `id`
     pub async fn get_instance(&self, id: &str) -> Result<VmInstance, VmmError> {
         Ok(self.instances.lock().await
@@ -119,6 +120,7 @@ impl InstanceManager {
         )
     }
 
+    #[allow(unused)]
     /// Update an instance with a task handle with VM starts running
     pub async fn set_instance_task(&mut self, id:&str, task_handle: JoinHandle<()>) -> Result<(), VmmError> {
         if let Some(rt) = self.instances.lock().await.get_mut(id) {

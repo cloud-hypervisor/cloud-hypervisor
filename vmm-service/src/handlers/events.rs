@@ -1,7 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::io::AsyncReadExt;
 use crate::{VmmService, VmInstanceConfig, VmmError};
-use form_types::{FormnetMessage, GenericPublisher, NetworkTopic, PeerType, VmmEvent};
+use form_types::{FormnetMessage, FormnetTopic, GenericPublisher, PeerType, VmmEvent};
 use shared::interface_config::InterfaceConfig;
 use tokio::net::TcpListener;
 use conductor::publisher::PubStream;
@@ -30,6 +30,9 @@ pub async fn handle_vmm_event(service: &mut VmmService, event: &VmmEvent) -> Res
             let mut instance_config: VmInstanceConfig = (event, &invite).try_into().map_err(|e: VmmError| {
                 VmmError::Config(e.to_string())
             })?;
+
+            instance_config.tap_device = format!("vmnet{}", service.tap_counter);
+            service.tap_counter += 1;
             // TODO: return Future, and stash future in a `FuturesUnordered`
             // to be awaited asynchronously.
             service.create_vm(&mut instance_config).await?;
@@ -60,7 +63,7 @@ async fn request_formnet_invite_for_vm(name: String) -> Result<InterfaceConfig, 
     })?;
 
     publisher.publish(
-        Box::new(NetworkTopic),
+        Box::new(FormnetTopic),
         Box::new(FormnetMessage::AddPeer { 
             peer_id: name.clone(),
             peer_type: PeerType::Instance,

@@ -10,6 +10,7 @@ use crate::CloudInit;
 use form_types::VmmEvent;
 use rand::{thread_rng, Rng};
 use gabble::Gab;
+use crate::util::copy_distro_base;
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,8 +33,8 @@ impl Default for VmInstanceConfig {
         let mut rng = thread_rng();
         let name: Gab = rng.gen();
         Self {
-            kernel_path: PathBuf::from("/var/lib/form/kernel/hypervisor-fw"),
-            rootfs_path: PathBuf::from("/var/lib/form/images/ubuntu/22.04/disk.raw"),
+            kernel_path: PathBuf::from("/var/lib/formation/kernel/hypervisor-fw"),
+            rootfs_path: PathBuf::from("/var/lib/formation/vm-images/ubuntu/22.04/default/disk.raw"),
             tap_device: "vnet0".to_string(),
             ip_addr: "10.99.0.44".to_string(),
             cloud_init_path: None,
@@ -48,7 +49,7 @@ impl Default for VmInstanceConfig {
 }
 
 impl VmInstanceConfig {
-    pub const CLOUD_INIT_BASE: &str = "/var/lib/form/images/cloud_init";
+    pub const CLOUD_INIT_BASE: &str = "/var/lib/formation/vm-images/default/cloud_init";
 
     pub fn validate(&self) -> Result<(), VmmError> {
         // Validate paths exist
@@ -117,8 +118,8 @@ impl TryFrom<(&VmmEvent, &InterfaceConfig)> for VmInstanceConfig {
         match &event.0 {
             VmmEvent::Create { 
                 owner,
-                recovery_id,
-                requestor,
+                recovery_id: _,
+                requestor: _,
                 distro,
                 version,
                 user_data,
@@ -135,7 +136,11 @@ impl TryFrom<(&VmmEvent, &InterfaceConfig)> for VmInstanceConfig {
                     VmmError::Config(e.to_string())
                 })?;
 
-                let rootfs_path = distro.rootfs_disk_path(&version);
+                let rootfs_path = copy_distro_base(distro.clone(), version, name).map_err(|e| {
+                    VmmError::Config(
+                        format!("unable to create instance disk image for instance {}: {e}", name)
+                    )
+                })?;
 
                 let console_type = if let Some(ct) = console_type {
                     ConsoleType::from_str(ct)?
@@ -161,7 +166,7 @@ impl TryFrom<(&VmmEvent, &InterfaceConfig)> for VmInstanceConfig {
                 })?;
 
                 Ok(VmInstanceConfig {
-                    rootfs_path,
+                    rootfs_path: rootfs_path.into(),
                     memory_mb: *memory_mb,
                     vcpu_count: *vcpu_count,
                     cloud_init_path: Some(output_path.to_path_buf()),
@@ -207,4 +212,3 @@ impl Default for NetworkConfig {
         }
     }
 }
-

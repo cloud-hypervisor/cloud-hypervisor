@@ -5,15 +5,26 @@ use std::path::PathBuf;
 use std::io::{Read, Write};
 use crate::VmmError;
 
-use super::{VmInstanceConfig, ConsoleType};  // Our config type
+use super::{VmInstanceConfig, ConsoleType}; 
 use vmm::vm_config::{
-    ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpusConfig, DiskConfig, MemoryConfig, NetConfig, PayloadConfig, RngConfig, VhostMode, VmConfig
+    ConsoleConfig,
+    ConsoleOutputMode,
+    CpuFeatures, 
+    CpusConfig, 
+    DiskConfig, 
+    MemoryConfig, 
+    NetConfig, 
+    PayloadConfig, 
+    RngConfig, 
+    VhostMode, 
+    VmConfig
 };
 
 pub fn create_vm_config(config: &VmInstanceConfig) -> VmConfig {
 
     // Add cloud-init disk if provided
     let mut disks = vec![DiskConfig {
+        // This needs to be a copied disk, raw cannot use backing file
         path: Some(config.rootfs_path.clone()),
         readonly: false,
         direct: true,

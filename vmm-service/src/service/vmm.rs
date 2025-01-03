@@ -1,17 +1,8 @@
-use std::net::IpAddr;
-use std::net::Ipv4Addr;
-use std::net::SocketAddr;
 // src/service/vmm.rs
-#[cfg(feature = "dev")]
 use std::net::SocketAddr;
 use std::sync::Arc;
-use form_types::GenericPublisher;
-use form_types::{NetworkTopic, Event, FormnetMessage, PeerType};
-use shared::interface_config::InterfaceConfig;
 use tokio::io::unix::AsyncFd;
-use tokio::net::TcpListener;
-#[cfg(feature = "dev")]
-use tokio::sync::mpsc::{self, Receiver};
+use tokio::sync::mpsc;
 use std::sync::mpsc::{Sender, channel};
 use vmm::api::{ApiAction, ApiRequest};
 use vmm_sys_util::eventfd::EventFd;
@@ -19,10 +10,9 @@ use seccompiler::SeccompAction;
 use tokio::task::JoinHandle;
 use tokio::sync::Mutex;
 use tokio::sync::broadcast;
-#[cfg(feature = "dev")]
 use form_types::VmmEvent;
-#[cfg(feature = "dev")]
-use crate::api::TestApi;
+use crate::api::VmmApi;
+use crate::util::add_tap_to_bridge;
 use crate::VmRuntime;
 use crate::VmState;
 use crate::{
@@ -31,67 +21,22 @@ use crate::{
     instance::{config::VmInstanceConfig, manager::{InstanceManager, VmInstance}},
     ServiceConfig,
 };
-use conductor::publisher::PubStream;
-use tokio::io::AsyncReadExt;
 
 pub struct VmmService {
     pub hypervisor: Arc<dyn hypervisor::Hypervisor>,
     pub config: ServiceConfig,
+    pub tap_counter: u32,
     instance_manager: Arc<Mutex<InstanceManager>>,
     event_thread: Option<JoinHandle<Result<(), VmmError>>>, 
     api_sender: Option<Sender<ApiRequest>>,
     api_evt: EventFd,
     exit_evt: EventFd,
     shutdown_sender: broadcast::Sender<()>,
-    #[cfg(feature = "dev")]
-    test_api: Option<TestApi>,
-    #[cfg(feature = "dev")]
+    vmm_api: Option<VmmApi>,
     api_task: Option<JoinHandle<Result<(), VmmError>>>, 
 }
 
 impl VmmService {
-    #[cfg(not(feature = "dev"))]
-    pub async fn new(config: ServiceConfig) -> Result<Self, VmmError> {
-        let hypervisor = hypervisor::new()
-            .map_err(VmmError::HypervisorInit)?;
-
-        let api_evt = EventFd::new(libc::EFD_NONBLOCK)
-            .map_err(|e| VmmError::SystemError(format!("Failed to create API eventfd: {}", e)))?;
-            
-        let exit_evt = EventFd::new(libc::EFD_NONBLOCK)
-            .map_err(|e| VmmError::SystemError(format!("Failed to create exit eventfd: {}", e)))?;
-
-        let (api_sender, api_receiver) = channel();
-        let (shutdown_sender, _) = broadcast::channel(1);
-
-
-        vmm::start_vmm_thread(
-            vmm::VmmVersionInfo::new(env!("BUILD_VERSION"), env!("CARGO_PKG_VERSION")),
-            &None,
-            None,
-            api_evt.try_clone().unwrap(),
-            api_sender.clone(),
-            api_receiver,
-            exit_evt.try_clone().unwrap(),
-            &SeccompAction::Allow,
-            hypervisor.clone(),
-            false,
-        ).map_err(|e| VmmError::SystemError(format!("Failed to start VMM thread: {}", e)))?;
-
-        Ok(Self {
-            hypervisor,
-            config,
-            instance_manager: Arc::new(Mutex::new(InstanceManager::new())),
-            event_thread: None,
-            api_sender: Some(api_sender),
-            api_evt,
-            exit_evt,
-            shutdown_sender,
-            
-        })
-    }
-
-    #[cfg(feature = "dev")]
     pub async fn new(config: ServiceConfig, event_sender: mpsc::Sender<VmmEvent>) -> Result<Self, VmmError> {
         let hypervisor = hypervisor::new()
             .map_err(VmmError::HypervisorInit)?;
@@ -103,14 +48,7 @@ impl VmmService {
             .map_err(|e| VmmError::SystemError(format!("Failed to create exit eventfd: {}", e)))?;
 
         let (api_sender, api_receiver) = channel();
-
         let (shutdown_sender, _) = broadcast::channel(1);
-
-        // Create the test API instance
-        let test_api = TestApi::new(
-            event_sender,
-            SocketAddr::from(([127, 0, 0, 1], 8000))
-        );
 
         vmm::start_vmm_thread(
             vmm::VmmVersionInfo::new(env!("BUILD_VERSION"), env!("CARGO_PKG_VERSION")),
@@ -125,6 +63,13 @@ impl VmmService {
             false,
         ).map_err(|e| VmmError::SystemError(format!("Failed to start VMM thread: {}", e)))?;
 
+        let addr = SocketAddr::from(([127, 0, 0, 1], 3002));
+
+        let vmm_api = VmmApi::new(
+            event_sender,
+            addr
+        );
+
         Ok(Self {
             hypervisor,
             config,
@@ -134,12 +79,12 @@ impl VmmService {
             api_evt,
             exit_evt,
             shutdown_sender,
-            test_api: Some(test_api),
+            tap_counter: 0,
+            vmm_api: Some(vmm_api),
             api_task: None,
         })
     }
-    
-    #[cfg(not(feature = "dev"))]
+
     /// Start the VMM service
     pub async fn start(&mut self) -> Result<(), VmmError> {
         // Start DNS server
@@ -148,58 +93,7 @@ impl VmmService {
             .map_err(|e| VmmError::SystemError(format!("Failed to clone exit event: {e}")))?;
         let mut shutdown_receiver = self.shutdown_sender.subscribe();
 
-        // Start the event processing loop
-        let event_thread = tokio::spawn(async move {
-            // Create async wrapper for exit evt
-            let exit_evt = tokio::io::unix::AsyncFd::new(exit_evt)
-                .map_err(|e| {
-                    VmmError::SystemError(format!("Unable to convert exit_evt file descriptor to Async File Descriptor {e}"))
-                })?;
-
-            loop {
-                tokio::select! {
-                    // Handle shutdown signal
-                    Ok(()) = shutdown_receiver.recv() => {
-                        log::info!("Received shutdown signal, stopping event loop");
-                        break;
-                    }
-
-                    // Handle VM exit events
-                    Ok(mut guard) = exit_evt.readable() => {
-                        match guard.try_io(|inner: &AsyncFd<EventFd>| inner.get_ref().read()) {
-                            Ok(Ok(_)) => {
-                                log::info!("VM exit event received");
-                                break;
-                            }
-                            Ok(Err(e)) => {
-                                log::error!("Error reading exit event: {e}");
-                                break;
-                            }
-                            Err(_would_block) => continue,
-                        }
-                    }
-                    
-                    // Process VM lifecycle events
-                    _ = Self::process_vm_lifecycle(instance_manager.clone()) => {}
-                }
-            }
-            Ok::<(), VmmError>(())
-        });
-
-        self.event_thread = Some(event_thread);
-
-        Ok(())
-    }
-
-    #[cfg(feature = "dev")]
-    pub async fn start(&mut self) -> Result<(), VmmError> {
-        // Start DNS server
-        let instance_manager = self.instance_manager.clone();
-        let exit_evt = self.exit_evt.try_clone()
-            .map_err(|e| VmmError::SystemError(format!("Failed to clone exit event: {e}")))?;
-        let mut shutdown_receiver = self.shutdown_sender.subscribe();
-
-        if let Some(api) = self.test_api.take() {
+        if let Some(api) = self.vmm_api.take() {
             log::info!("Starting API server on {}", api.addr());
             let api_task = tokio::spawn(async move {
                 api.start().await
@@ -249,6 +143,7 @@ impl VmmService {
 
         Ok(())
     }
+
     /// Creates a new VM instance
     pub async fn create_vm(&self, config: &mut VmInstanceConfig) -> Result<VmInstance, VmmError> {
         config.validate()?;
@@ -262,15 +157,25 @@ impl VmmService {
                 Box::new(vm_config),
             ).map_err(|e| VmmError::VmOperation(e))?;
 
+            // Check if the creation of the TAP happens here or after Boot
+
             vmm::api::VmBoot.send(
                 self.api_evt.try_clone().unwrap(),
                 api_sender.clone(),
                 (),
             ).map_err(|e| VmmError::VmOperation(e))?;
 
+            add_tap_to_bridge(&config.tap_device.clone()).map_err(|e| {
+                VmmError::NetworkError(
+                    format!("Unable to attach tap device {} to bridge {e} for vm {}", config.tap_device, config.name)
+                )
+            })?;
+
             let vmrt = VmRuntime::new(config.clone());
             let instance = vmrt.instance().clone(); 
             self.instance_manager.lock().await.add_instance(vmrt).await?;
+
+            
 
             log::info!("Successfully created VM {}", instance.id());
 
@@ -322,7 +227,6 @@ impl VmmService {
             VmmError::SystemError(format!("Failed to send shutdown signal: {e}"))
         })?;
 
-        #[cfg(feature = "dev")]
         // Shutdown API server if running
         if let Some(handle) = self.api_task.take() {
             log::info!("Shutting down the API server");
@@ -350,7 +254,6 @@ impl Drop for VmmService {
                 handle.abort();
             }
 
-            #[cfg(feature = "dev")]
             if let Some(handle) = self.api_task.take() {
                 handle.abort();
             }
