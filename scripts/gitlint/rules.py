@@ -48,6 +48,7 @@ class TitleStartsWithComponent(LineRule):
             'net_util',
             'openapi',
             'option_parser',
+            'otel',
             'pci',
             'performance-metrics',
             'rate_limiter',
