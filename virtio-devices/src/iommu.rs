@@ -940,10 +940,10 @@ impl Iommu {
                     true,
                 )
             } else {
-                let avail_features = 1u64 << VIRTIO_F_VERSION_1
-                    | 1u64 << VIRTIO_IOMMU_F_MAP_UNMAP
-                    | 1u64 << VIRTIO_IOMMU_F_PROBE
-                    | 1u64 << VIRTIO_IOMMU_F_BYPASS_CONFIG;
+                let avail_features = (1u64 << VIRTIO_F_VERSION_1)
+                    | (1u64 << VIRTIO_IOMMU_F_MAP_UNMAP)
+                    | (1u64 << VIRTIO_IOMMU_F_PROBE)
+                    | (1u64 << VIRTIO_IOMMU_F_BYPASS_CONFIG);
 
                 (avail_features, 0, BTreeMap::new(), BTreeMap::new(), false)
             };

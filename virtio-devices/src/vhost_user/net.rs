@@ -118,10 +118,10 @@ impl Net {
             )
         } else {
             // Filling device and vring features VMM supports.
-            let mut avail_features = 1 << VIRTIO_NET_F_MRG_RXBUF
-                | 1 << VIRTIO_NET_F_CTRL_VQ
-                | 1 << VIRTIO_F_RING_EVENT_IDX
-                | 1 << VIRTIO_F_VERSION_1
+            let mut avail_features = (1 << VIRTIO_NET_F_MRG_RXBUF)
+                | (1 << VIRTIO_NET_F_CTRL_VQ)
+                | (1 << VIRTIO_F_RING_EVENT_IDX)
+                | (1 << VIRTIO_F_VERSION_1)
                 | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
 
             if mtu.is_some() {
@@ -130,19 +130,19 @@ impl Net {
 
             // Configure TSO/UFO features when hardware checksum offload is enabled.
             if offload_csum {
-                avail_features |= 1 << VIRTIO_NET_F_CSUM | 1 << VIRTIO_NET_F_GUEST_CSUM;
+                avail_features |= (1 << VIRTIO_NET_F_CSUM) | (1 << VIRTIO_NET_F_GUEST_CSUM);
 
                 if offload_tso {
-                    avail_features |= 1 << VIRTIO_NET_F_HOST_ECN
-                        | 1 << VIRTIO_NET_F_HOST_TSO4
-                        | 1 << VIRTIO_NET_F_HOST_TSO6
-                        | 1 << VIRTIO_NET_F_GUEST_ECN
-                        | 1 << VIRTIO_NET_F_GUEST_TSO4
-                        | 1 << VIRTIO_NET_F_GUEST_TSO6;
+                    avail_features |= (1 << VIRTIO_NET_F_HOST_ECN)
+                        | (1 << VIRTIO_NET_F_HOST_TSO4)
+                        | (1 << VIRTIO_NET_F_HOST_TSO6)
+                        | (1 << VIRTIO_NET_F_GUEST_ECN)
+                        | (1 << VIRTIO_NET_F_GUEST_TSO4)
+                        | (1 << VIRTIO_NET_F_GUEST_TSO6);
                 }
 
                 if offload_ufo {
-                    avail_features |= 1 << VIRTIO_NET_F_HOST_UFO | 1 << VIRTIO_NET_F_GUEST_UFO;
+                    avail_features |= (1 << VIRTIO_NET_F_HOST_UFO) | (1 << VIRTIO_NET_F_GUEST_UFO);
                 }
             }
 

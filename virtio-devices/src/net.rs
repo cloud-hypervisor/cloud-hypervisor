@@ -449,73 +449,75 @@ impl Net {
 
         let mtu = taps[0].mtu().map_err(Error::TapError)? as u16;
 
-        let (avail_features, acked_features, config, queue_sizes, paused) =
-            if let Some(state) = state {
-                info!("Restoring virtio-net {}", id);
-                (
-                    state.avail_features,
-                    state.acked_features,
-                    state.config,
-                    state.queue_size,
-                    true,
-                )
+        let (avail_features, acked_features, config, queue_sizes, paused) = if let Some(state) =
+            state
+        {
+            info!("Restoring virtio-net {}", id);
+            (
+                state.avail_features,
+                state.acked_features,
+                state.config,
+                state.queue_size,
+                true,
+            )
+        } else {
+            let mut avail_features = (1 << VIRTIO_NET_F_MTU)
+                | (1 << VIRTIO_RING_F_EVENT_IDX)
+                | (1 << VIRTIO_F_VERSION_1);
+
+            if iommu {
+                avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+            }
+
+            // Configure TSO/UFO features when hardware checksum offload is enabled.
+            if offload_csum {
+                avail_features |= (1 << VIRTIO_NET_F_CSUM)
+                    | (1 << VIRTIO_NET_F_GUEST_CSUM)
+                    | (1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS);
+
+                if offload_tso {
+                    avail_features |= (1 << VIRTIO_NET_F_HOST_ECN)
+                        | (1 << VIRTIO_NET_F_HOST_TSO4)
+                        | (1 << VIRTIO_NET_F_HOST_TSO6)
+                        | (1 << VIRTIO_NET_F_GUEST_ECN)
+                        | (1 << VIRTIO_NET_F_GUEST_TSO4)
+                        | (1 << VIRTIO_NET_F_GUEST_TSO6);
+                }
+
+                if offload_ufo {
+                    avail_features |= (1 << VIRTIO_NET_F_HOST_UFO) | (1 << VIRTIO_NET_F_GUEST_UFO);
+                }
+            }
+
+            avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
+            let queue_num = num_queues + 1;
+
+            let mut config = VirtioNetConfig::default();
+            if let Some(mac) = guest_mac {
+                build_net_config_space(
+                    &mut config,
+                    mac,
+                    num_queues,
+                    Some(mtu),
+                    &mut avail_features,
+                );
             } else {
-                let mut avail_features =
-                    1 << VIRTIO_NET_F_MTU | 1 << VIRTIO_RING_F_EVENT_IDX | 1 << VIRTIO_F_VERSION_1;
+                build_net_config_space_with_mq(
+                    &mut config,
+                    num_queues,
+                    Some(mtu),
+                    &mut avail_features,
+                );
+            }
 
-                if iommu {
-                    avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
-                }
-
-                // Configure TSO/UFO features when hardware checksum offload is enabled.
-                if offload_csum {
-                    avail_features |= 1 << VIRTIO_NET_F_CSUM
-                        | 1 << VIRTIO_NET_F_GUEST_CSUM
-                        | 1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS;
-
-                    if offload_tso {
-                        avail_features |= 1 << VIRTIO_NET_F_HOST_ECN
-                            | 1 << VIRTIO_NET_F_HOST_TSO4
-                            | 1 << VIRTIO_NET_F_HOST_TSO6
-                            | 1 << VIRTIO_NET_F_GUEST_ECN
-                            | 1 << VIRTIO_NET_F_GUEST_TSO4
-                            | 1 << VIRTIO_NET_F_GUEST_TSO6;
-                    }
-
-                    if offload_ufo {
-                        avail_features |= 1 << VIRTIO_NET_F_HOST_UFO | 1 << VIRTIO_NET_F_GUEST_UFO;
-                    }
-                }
-
-                avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
-                let queue_num = num_queues + 1;
-
-                let mut config = VirtioNetConfig::default();
-                if let Some(mac) = guest_mac {
-                    build_net_config_space(
-                        &mut config,
-                        mac,
-                        num_queues,
-                        Some(mtu),
-                        &mut avail_features,
-                    );
-                } else {
-                    build_net_config_space_with_mq(
-                        &mut config,
-                        num_queues,
-                        Some(mtu),
-                        &mut avail_features,
-                    );
-                }
-
-                (
-                    avail_features,
-                    0,
-                    config,
-                    vec![queue_size; queue_num],
-                    false,
-                )
-            };
+            (
+                avail_features,
+                0,
+                config,
+                vec![queue_size; queue_num],
+                false,
+            )
+        };
 
         Ok(Net {
             common: VirtioCommon {

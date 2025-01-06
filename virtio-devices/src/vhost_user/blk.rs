@@ -98,16 +98,16 @@ impl Blk {
             )
         } else {
             // Filling device and vring features VMM supports.
-            let mut avail_features = 1 << VIRTIO_BLK_F_SIZE_MAX
-                | 1 << VIRTIO_BLK_F_SEG_MAX
-                | 1 << VIRTIO_BLK_F_GEOMETRY
-                | 1 << VIRTIO_BLK_F_RO
-                | 1 << VIRTIO_BLK_F_BLK_SIZE
-                | 1 << VIRTIO_BLK_F_FLUSH
-                | 1 << VIRTIO_BLK_F_TOPOLOGY
-                | 1 << VIRTIO_BLK_F_CONFIG_WCE
-                | 1 << VIRTIO_BLK_F_DISCARD
-                | 1 << VIRTIO_BLK_F_WRITE_ZEROES
+            let mut avail_features = (1 << VIRTIO_BLK_F_SIZE_MAX)
+                | (1 << VIRTIO_BLK_F_SEG_MAX)
+                | (1 << VIRTIO_BLK_F_GEOMETRY)
+                | (1 << VIRTIO_BLK_F_RO)
+                | (1 << VIRTIO_BLK_F_BLK_SIZE)
+                | (1 << VIRTIO_BLK_F_FLUSH)
+                | (1 << VIRTIO_BLK_F_TOPOLOGY)
+                | (1 << VIRTIO_BLK_F_CONFIG_WCE)
+                | (1 << VIRTIO_BLK_F_DISCARD)
+                | (1 << VIRTIO_BLK_F_WRITE_ZEROES)
                 | DEFAULT_VIRTIO_FEATURES;
 
             if num_queues > 1 {

@@ -210,7 +210,7 @@ pub struct VirtioCommon {
 
 impl VirtioCommon {
     pub fn feature_acked(&self, feature: u64) -> bool {
-        self.acked_features & 1 << feature == 1 << feature
+        self.acked_features & (1 << feature) == 1 << feature
     }
 
     pub fn ack_features(&mut self, value: u64) {
