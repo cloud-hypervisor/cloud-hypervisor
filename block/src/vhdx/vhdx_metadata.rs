@@ -55,6 +55,8 @@ const METADATA_LENGTH_MAX: u32 = 1 << 20; // 1 MiB
 pub enum VhdxMetadataError {
     #[error("Invalid block size count")]
     InvalidBlockSize,
+    #[error("Invalid disk size {0}")]
+    InvalidDiskSize(u64),
     #[error("Invalid metadata entry count")]
     InvalidEntryCount,
     #[error("Invalid logical sector size")]
@@ -213,6 +215,14 @@ impl DiskSpec {
         // Check if all required metadata are present
         if metadata_presence != METADATA_ALL_PRESENT {
             return Err(VhdxMetadataError::MissingMetadata);
+        }
+        // Make sure virtual disk size is not zero
+        if (metadata_presence & METADATA_VIRTUAL_DISK_SIZE_PRESENT != 0)
+            && disk_spec.virtual_disk_size == 0
+        {
+            return Err(VhdxMetadataError::InvalidDiskSize(
+                disk_spec.virtual_disk_size,
+            ));
         }
         // Check if the virtual disk size is a multiple of the logical sector
         // size.
