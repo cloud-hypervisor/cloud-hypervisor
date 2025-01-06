@@ -16,6 +16,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::str::FromStr;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -32,7 +33,7 @@ use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
 use seccompiler::{apply_filter, SeccompAction};
 use serde::ser::{SerializeStruct, Serializer};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use signal_hook::iterator::{Handle, Signals};
 use thiserror::Error;
 use tracer::trace_scoped;
@@ -296,6 +297,7 @@ pub struct PciDeviceInfo {
     pub bdf: PciBdf,
 }
 
+
 impl Serialize for PciDeviceInfo {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
@@ -308,6 +310,31 @@ impl Serialize for PciDeviceInfo {
         state.serialize_field("id", &self.id)?;
         state.serialize_field("bdf", &bdf_str)?;
         state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for PciDeviceInfo {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // A small helper struct for intermediate deserialization.
+        // We'll store the "bdf" as a `String` temporarily,
+        // then parse it into `PciBdf` afterward.
+        #[derive(serde::Deserialize)]
+        struct Helper {
+            id: String,
+            bdf: String,
+        }
+
+        let helper = Helper::deserialize(deserializer)?;
+
+        let bdf_parsed = PciBdf::from_str(&helper.bdf).map_err(|e| serde::de::Error::custom(e.to_string()))?;
+
+        Ok(PciDeviceInfo {
+            id: helper.id,
+            bdf: bdf_parsed,
+        })
     }
 }
 
@@ -1272,17 +1299,20 @@ impl RequestHandler for Vmm {
         let r = {
             trace_scoped!("vm_boot");
             // If we don't have a config, we cannot boot a VM.
+            println!("Checking that config is Some");
             if self.vm_config.is_none() {
                 return Err(VmError::VmMissingConfig);
             };
 
             // console_info is set to None in vm_shutdown. re-populate here if empty
+            println!("Checking if console_info is set");
             if self.console_info.is_none() {
                 self.console_info =
                     Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
             }
 
             // Create a new VM if we don't have one yet.
+            println!("Checking if vm_info is some");
             if self.vm.is_none() {
                 let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
                 let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
@@ -1297,6 +1327,7 @@ impl RequestHandler for Vmm {
                     .map_err(VmError::EventFdClone)?;
 
                 if let Some(ref vm_config) = self.vm_config {
+                    println!("Creating new VM");
                     let vm = Vm::new(
                         Arc::clone(vm_config),
                         exit_evt,

@@ -804,6 +804,7 @@ impl Vm {
         prefault: Option<bool>,
     ) -> Result<Self> {
         trace_scoped!("Vm::new");
+        println!("New VM being created");
 
         let timestamp = Instant::now();
 

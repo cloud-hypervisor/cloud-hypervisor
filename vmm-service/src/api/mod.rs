@@ -4,7 +4,6 @@ use axum::{
     Json,
     extract::State,
 };
-
 use serde::{Serialize, Deserialize};
 use tokio::sync::mpsc;
 use std::sync::Arc;
@@ -13,7 +12,7 @@ use std::net::SocketAddr;
 use crate::VmmError;
 use form_types::VmmEvent;
 
-/// Testing API server that allows direct interaction with the VMM service
+/// API server that allows direct interaction with the VMM service
 pub struct VmmApi {
     /// Channel to send events to the service
     event_sender: mpsc::Sender<VmmEvent>,
@@ -22,7 +21,7 @@ pub struct VmmApi {
 }
 
 /// Request to create a new VM instance
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateVmRequest {
     pub distro: String,
     pub version: String,
@@ -54,7 +53,8 @@ impl VmmApi {
         let app_state = Arc::new(self.event_sender.clone());
 
         let app = Router::new()
-            .route("/vm", post(create_vm))
+            .route("/health", get(health_check))
+            .route("/vm", post(create))
             .route("/vm/:id/start", post(start_vm))
             .route("/vm/:id/stop", post(stop_vm))
             .route("/vm/:id/delete", post(delete_vm))
@@ -77,7 +77,11 @@ impl VmmApi {
     }
 }
 
-async fn create_vm(
+async fn health_check() -> &'static str {
+    "OK"
+}
+
+async fn create(
     State(sender): State<Arc<mpsc::Sender<VmmEvent>>>,
     Json(request): Json<CreateVmRequest>,
 ) -> Result<Json<VmResponse>, String> {
@@ -106,7 +110,7 @@ async fn create_vm(
 
     sender.send(event).await.map_err(|e| e.to_string())?;
 
-    log::info!("VM Creation requestt processed for {}", request.name);
+    log::info!("VM Creation request processed for {}", request.name);
 
     Ok(Json(VmResponse {
         id: "pending".to_string(),

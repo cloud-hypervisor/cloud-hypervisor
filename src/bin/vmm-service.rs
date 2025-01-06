@@ -16,13 +16,16 @@ use vmm_service::util::fetch_and_prepare_images;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Setup the logger
+    println!("Starting the logger...");
+    simple_logger::init_with_level(log::Level::Info)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
+    log::info!("Attempting to fetch and prepare cloud images for VMs");
+
     // If we're unable to fetch and prepare the images we should panic and
     // exit the program.
     fetch_and_prepare_images().await.unwrap();
-
-    // Setup the logger
-    simple_logger::init_with_level(log::Level::Info)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
 
 
@@ -39,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 info!("Loading configuration from {}", config_path.display());
                 ServiceConfig::from_file(&config_path.to_string_lossy())?
             } else {
-                info!("Using default conffiguration");
+                info!("Using default configuration");
                 ServiceConfig::default()
             };
 
@@ -156,8 +159,10 @@ async fn run_service(
                 }
             }
             Some(event) = event_rx.recv() => {
+                info!("Handling event: {event:?}");
+
                 if let Err(e) = handle_vmm_event(service, &event).await {
-                    error!("Error handing event {event:?}: {e}");
+                    error!("Error handling event {event:?}: {e}");
                 }
             }
         }

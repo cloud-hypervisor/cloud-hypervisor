@@ -44,6 +44,7 @@ pub fn ensure_directory<P: AsRef<Path>>(path: P) -> Result<(), UtilError> {
 }
 
 fn download_image(url: &str, dest: &str) -> Result<(), UtilError> {
+    log::info!("Attempting to download {url} and place in {dest}");
     let status = Command::new("wget")
         .arg("-q")
         .arg("-O")
@@ -55,7 +56,7 @@ fn download_image(url: &str, dest: &str) -> Result<(), UtilError> {
         return Err(Box::new(std::io::Error::last_os_error()));
     }
 
-    println!("Download of {url} completed successfully");
+    log::info!("Download of {url} completed successfully");
 
     Ok(())
 }
@@ -82,7 +83,7 @@ fn decompress_xz(src: &str, dest: &str) -> Result<(), UtilError> {
 }
 
 fn convert_qcow2_to_raw(qcow2_path: &str, raw_path: &str) -> Result<(), UtilError> {
-    println!("Attempting to convert {qcow2_path} from qcow to {raw_path} raw disk image");
+    log::info!("Attempting to convert {qcow2_path} from qcow to {raw_path} raw disk image");
 
     let status = Command::new("qemu-img")
         .args(&["convert", "-p", "-f", "qcow2", "-O", "raw", qcow2_path, raw_path])
@@ -96,6 +97,7 @@ fn convert_qcow2_to_raw(qcow2_path: &str, raw_path: &str) -> Result<(), UtilErro
 }
 
 pub async fn fetch_and_prepare_images() -> Result<(), UtilError> {
+    log::info!("Attempting to write base netplan");
     write_default_netplan()?;
     let base = PathBuf::from(BASE_DIRECTORY);
     let urls = [
@@ -159,7 +161,7 @@ pub async fn fetch_and_prepare_images() -> Result<(), UtilError> {
         let _ = handle.await?;
     }
 
-    println!("Base images acquired and placed in /var/lib/formation/vm-images");
+    log::info!("Base images acquired and placed in /var/lib/formation/vm-images");
 
     let base_imgs = [
         base.join("ubuntu/22.04/base.raw"),
@@ -175,7 +177,7 @@ pub async fn fetch_and_prepare_images() -> Result<(), UtilError> {
     for img in base_imgs {
         let loop_device = get_image_loop_device(&img.display().to_string())?;
         let netplan_to = PathBuf::from(PREP_MOUNT_POINT).join("etc/netplan").join(DEFAULT_NETPLAN_FILENAME);
-        println!("Where to copy netplan config to: {}", netplan_to.display());
+        log::info!("Where to copy netplan config to: {}", netplan_to.display());
 
         mount_partition(
             &loop_device,
@@ -229,7 +231,7 @@ pub fn copy_disk_image(
 }
 
 fn copy_default_netplan(to: impl AsRef<Path>) -> Result<(), UtilError> {
-    println!("Attempting to copy default netplan to {}", to.as_ref().display());
+    log::info!("Attempting to copy default netplan to {}", to.as_ref().display());
     let parent = to.as_ref().parent().ok_or(
         Box::new(
             std::io::Error::new(
@@ -245,13 +247,13 @@ fn copy_default_netplan(to: impl AsRef<Path>) -> Result<(), UtilError> {
         &to
     )?;
 
-    println!("Successfully copied default netplan to {}", to.as_ref().display());
+    log::info!("Successfully copied default netplan to {}", to.as_ref().display());
 
     Ok(())
 }
 
 fn write_default_netplan() -> Result<(), UtilError> {
-    println!("Attempting to write default netplan to {}", DEFAULT_NETPLAN);
+    log::info!("Attempting to write default netplan to {}", DEFAULT_NETPLAN);
     let netplan_string = r#"network:
   version: 2
   renderer: networkd
@@ -284,19 +286,19 @@ fn write_default_netplan() -> Result<(), UtilError> {
 
     file.write_all(netplan_string.as_bytes())?;
 
-    println!("Successfully wrote default netplan to {}", DEFAULT_NETPLAN);
+    log::info!("Successfully wrote default netplan to {}", DEFAULT_NETPLAN);
     Ok(())
 }
 
 fn copy_formnet_client(to: &str) -> Result<(), UtilError> {
-    println!("Attempting to copy formnet binary from {FORMNET_BINARY} to {to}");
+    log::info!("Attempting to copy formnet binary from {FORMNET_BINARY} to {to}");
 
     std::fs::copy(
         FORMNET_BINARY,
         to
     )?;
 
-    println!("Succesfully copied formnet binary from {FORMNET_BINARY} to {to}");
+    log::info!("Succesfully copied formnet binary from {FORMNET_BINARY} to {to}");
     Ok(())
 }
 
@@ -324,53 +326,53 @@ pub fn add_tap_to_bridge(tap: &str) -> Result<brctl::Bridge, UtilError> {
 }
 
 fn get_image_loop_device(image_path: &str) -> Result<String, UtilError> {
-    println!("Getting loop device from {image_path}");
-    let output = Command::new("sudo")
-        .args(["losetup", "--partscan", "--find", "--show", image_path])
+    log::info!("Getting loop device from {image_path}");
+    let output = Command::new("losetup")
+        .args(["--partscan", "--find", "--show", image_path])
         .output()?;
     if !output.status.success() {
         return Err(Box::new(std::io::Error::last_os_error()))
     }
     let loop_device = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    println!("Found {} is located at loop device {}", image_path, loop_device);
+    log::info!("Found {} is located at loop device {}", image_path, loop_device);
     Ok(loop_device)
 }
 
 fn mount_partition(loop_device: &str, partition_idx: u8) -> Result<(), UtilError> {
-    println!("Ensuring {} exists...", PREP_MOUNT_POINT);
+    log::info!("Ensuring {} exists...", PREP_MOUNT_POINT);
     std::fs::create_dir_all(PREP_MOUNT_POINT)?;
 
     let partition = format!("/dev/{}", get_fs_partition(loop_device)?);
-    println!("Using partition {}", partition);
+    log::info!("Using partition {}", partition);
 
-    let status = Command::new("sudo")
-        .args(["mount", &partition, PREP_MOUNT_POINT])
+    let status = Command::new("mount")
+        .args([&partition, PREP_MOUNT_POINT])
         .status()?;
 
     if !status.success() {
         return Err(Box::new(std::io::Error::last_os_error()));
     }
 
-    println!("Successfully mounted partition");
+    log::info!("Successfully mounted partition");
     Ok(())
 }
 
 fn unmount_partition() -> Result<(), UtilError> {
-    let status = Command::new("sudo")
-        .args(["umount", PREP_MOUNT_POINT])
+    let status = Command::new("umount")
+        .args([PREP_MOUNT_POINT])
         .status()?;
 
     if !status.success() {
         return Err(Box::new(std::io::Error::last_os_error()));
     }
 
-    println!("Successfully unmounted partition");
+    log::info!("Successfully unmounted partition");
     Ok(())
 }
 
 fn departition_loop_device(loop_device: &str) -> Result<(), UtilError> {
-    let status = std::process::Command::new("sudo")
-        .args(["losetup", "-d", loop_device])
+    let status = std::process::Command::new("losetup")
+        .args(["-d", loop_device])
         .stderr(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .status()?;
@@ -379,7 +381,7 @@ fn departition_loop_device(loop_device: &str) -> Result<(), UtilError> {
         return Err(Box::new(std::io::Error::last_os_error()));
     }
 
-    println!("Successfully departitioned loop device {loop_device}");
+    log::info!("Successfully departitioned loop device {loop_device}");
     Ok(())
 }
 
@@ -398,8 +400,8 @@ pub fn copy_distro_base(distro: Distro, version: &str, name: &str) -> Result<Str
 }
 
 pub fn get_fs_partition(loop_device: &str) -> Result<String, UtilError> {
-    let output = std::process::Command::new("sudo")
-        .args(["lsblk", "--json", loop_device])
+    let output = std::process::Command::new("lsblk")
+        .args(["--json", loop_device])
         .output()?;
 
     let lsblk_output: LsblkOutput = serde_json::from_slice(&output.stdout)?;
@@ -412,7 +414,7 @@ pub fn get_fs_partition(loop_device: &str) -> Result<String, UtilError> {
     for child in &root_device.children {
         let partition_name = &child.name;
         let size = child.size.as_deref().unwrap_or("unknown");
-        println!("Partition: {partition_name}, Size: {size}");
+        log::info!("Partition: {partition_name}, Size: {size}");
         let size_in_bytes = {
             if let Ok(n) = try_convert_size_to_bytes(size) {
                 Some(n)

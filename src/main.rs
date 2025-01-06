@@ -551,6 +551,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
 }
 
 fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
+    // Create the logger
     let log_level = match cmd_arguments.get_count("v") {
         0 => LevelFilter::Warn,
         1 => LevelFilter::Info,
@@ -558,6 +559,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         _ => LevelFilter::Trace,
     };
 
+    // Create the log file
     let log_file: Box<dyn std::io::Write + Send> = if let Some(ref file) =
         cmd_arguments.get_one::<String>("log-file")
     {
@@ -566,6 +568,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         Box::new(std::io::stderr())
     };
 
+    // Set the logger 
     log::set_boxed_logger(Box::new(Logger {
         output: Mutex::new(log_file),
         start: std::time::Instant::now(),
@@ -573,20 +576,25 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     .map(|()| log::set_max_level(log_level))
     .map_err(Error::LoggerSetup)?;
 
+    // Acquire API socket path and file descriptor
     let (api_socket_path, api_socket_fd) =
         if let Some(socket_config) = cmd_arguments.get_one::<String>("api-socket") {
+            // If an api-socket is provided, use it
             let mut parser = OptionParser::new();
             parser.add("path").add("fd");
             parser.parse(socket_config).unwrap_or_default();
 
+            // If a fd is provided use it
             if let Some(fd) = parser.get("fd") {
                 (
                     None,
                     Some(fd.parse::<RawFd>().map_err(Error::ParsingApiSocket)?),
                 )
             } else if let Some(path) = parser.get("path") {
+                // Otherwise check if there's a path
                 (Some(path), None)
             } else {
+                // Otherwise use api-socket arg, with no FD
                 (
                     cmd_arguments
                         .get_one::<String>("api-socket")
@@ -595,13 +603,18 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
                 )
             }
         } else {
+            // If no socket arg return None for both api_socket_path and fd
             (None, None)
         };
 
+    // Create channel for API request sender and receiver 
     let (api_request_sender, api_request_receiver) = channel();
+    // Create a new EventFD 
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
 
+    // Clone the API sender 
     let api_request_sender_clone = api_request_sender.clone();
+    // Check for seccomp action 
     let seccomp_action = if let Some(seccomp_value) = cmd_arguments.get_one::<String>("seccomp") {
         match seccomp_value as &str {
             "true" => SeccompAction::Trap,
@@ -613,6 +626,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
             }
         }
     } else {
+        // Default to SeccompAction::Trap
         SeccompAction::Trap
     };
 
@@ -678,6 +692,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     let landlock_enable = cmd_arguments.get_flag("landlock");
 
     #[allow(unused_mut)]
+    // Build the event_monitor
     let mut event_monitor = cmd_arguments
         .get_one::<String>("event-monitor")
         .as_ref()
@@ -741,6 +756,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         (None, None) => Ok(None),
     }?;
 
+    // Start the event monitor thread
     if let Some(monitor) = event_monitor {
         vmm::start_event_monitor_thread(
             monitor,

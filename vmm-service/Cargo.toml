@@ -46,16 +46,22 @@ webpki-roots = "0.25.2"
 reqwest = { version = "0.11", features = ["json"] }
 acme-lib = "0.5"
 tower = "0.4"
-hyper = { version = "1.0", features = ["full"] }
 neli = "0.6.4"
 nix = { version = "0.29.0", features = [ "sched" ] }
 conductor = { git = "https://github.com/versatus/conductor" }
 form-types = { path = "../../form-types" }
+formnet = { path = "../../form-net/formnet" }
 bytes = "1.5.0"
 httparse = "1.8.0"
 sha1 = "0.10.6"
 shared = { path = "../../form-net/shared" }
 brctl = "1"
+random_word = { version = "0.4.3", features = ["en"] }
+option_parser = { path = "../option_parser" }
+hyper = { version = "1.0", features = ["full"] }
+hyperlocal = "0.9.1"
+http-body-util = "0.1.2"
+hyper-util = "0.1.10"
 
 [dev-dependencies]
 ipnet = "2.9"

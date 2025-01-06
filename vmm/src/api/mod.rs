@@ -423,6 +423,7 @@ pub trait ApiAction: Send + Sync {
     ) -> ApiResult<Self::ResponseBody>;
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct VmAddDevice;
 
 impl ApiAction for VmAddDevice {
@@ -682,6 +683,7 @@ impl ApiAction for VmAddVsock {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct VmAddUserDevice;
 
 impl ApiAction for VmAddUserDevice {
@@ -791,6 +793,7 @@ impl ApiAction for VmCoredump {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct VmCounters;
 
 impl ApiAction for VmCounters {
@@ -896,6 +899,7 @@ impl ApiAction for VmDelete {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct VmInfo;
 
 impl ApiAction for VmInfo {
@@ -1066,6 +1070,7 @@ impl ApiAction for VmReceiveMigration {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct VmRemoveDevice;
 
 impl ApiAction for VmRemoveDevice {
@@ -1103,6 +1108,7 @@ impl ApiAction for VmRemoveDevice {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct VmResize;
 
 impl ApiAction for VmResize {
@@ -1144,6 +1150,7 @@ impl ApiAction for VmResize {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct VmResizeZone;
 
 impl ApiAction for VmResizeZone {

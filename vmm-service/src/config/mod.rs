@@ -43,39 +43,37 @@ pub fn create_vm_config(config: &VmInstanceConfig) -> VmConfig {
         disable_aio: false,       // New field
     }];
 
-    if let Some(cloud_init_path) = &config.cloud_init_path {
-        disks.push(DiskConfig {
-            path: Some(cloud_init_path.clone()),
-            readonly: true,
-            direct: true,
-            vhost_user: false,
-            vhost_socket: None,
-            rate_limiter_config: None,
-            queue_size: 256,
-            num_queues: 1,
-            queue_affinity: None,
-            id: None,
-            rate_limit_group: None,
-            pci_segment: 0,
-            iommu: false,
-            serial: None,
-            disable_io_uring: false,  // New field
-            disable_aio: false,       // New field
-        });
-    }
+    disks.push(DiskConfig {
+        path: config.cloud_init_path.clone(),
+        readonly: true,
+        direct: true,
+        vhost_user: false,
+        vhost_socket: None,
+        rate_limiter_config: None,
+        queue_size: 256,
+        num_queues: 1,
+        queue_affinity: None,
+        id: None,
+        rate_limit_group: None,
+        pci_segment: 0,
+        iommu: false,
+        serial: None,
+        disable_io_uring: false,  // New field
+        disable_aio: false,       // New field
+    });
 
     // Configure console based on type
     let (serial, console) = match config.console_type {
         ConsoleType::Serial => (
             ConsoleConfig {
                 file: None,
-                mode: ConsoleOutputMode::Null,
+                mode: ConsoleOutputMode::Tty,
                 iommu: false,
                 socket: None,
             },
             ConsoleConfig {
                 file: None,
-                mode: ConsoleOutputMode::Off,
+                mode: ConsoleOutputMode::Null,
                 iommu: false,
                 socket: None
             }
@@ -83,7 +81,7 @@ pub fn create_vm_config(config: &VmInstanceConfig) -> VmConfig {
         ConsoleType::Virtio => (
             ConsoleConfig {
                 file: None,
-                mode: ConsoleOutputMode::Off,
+                mode: ConsoleOutputMode::Tty,
                 iommu: false,
                 socket: None,
             },
@@ -150,24 +148,7 @@ pub fn create_vm_config(config: &VmInstanceConfig) -> VmConfig {
             cmdline: None,
             firmware: None,
         }),
-        disks: Some(vec![DiskConfig {
-            path: Some(config.rootfs_path.clone()),
-            readonly: false,
-            direct: true,
-            vhost_user: false,
-            vhost_socket: None,
-            rate_limiter_config: None,
-            queue_size: 256,
-            num_queues: 1,
-            queue_affinity: None,
-            id: None,
-            rate_limit_group: None,
-            pci_segment: 0,
-            iommu: false,
-            serial: None,
-            disable_io_uring: false,  // New field
-            disable_aio: false,       // New field
-        }]),
+        disks: Some(disks),
         net,
         rng: RngConfig {
             src: config.rng_source.clone().unwrap_or_else(|| "/dev/urandom".to_string()).into(),

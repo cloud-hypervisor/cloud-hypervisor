@@ -1,7 +1,8 @@
+use clap_derive::ValueEnum;
 use serde::{Serialize, Deserialize};
 use std::{path::PathBuf, str::FromStr};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ValueEnum)]
 pub enum Distro {
     Ubuntu,
     Fedora,
