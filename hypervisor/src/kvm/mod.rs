@@ -614,7 +614,7 @@ impl vm::Vm for KvmVm {
                     // different `devid` to all the devices. Limitation is that at
                     // most 256 segments can be supported.
                     //
-                    let modified_devid = (cfg.devid & 0x00ff_0000) >> 8 | cfg.devid & 0xff;
+                    let modified_devid = ((cfg.devid & 0x00ff_0000) >> 8) | cfg.devid & 0xff;
 
                     kvm_route.flags = KVM_MSI_VALID_DEVID;
                     kvm_route.u.msi.__bindgen_anon_1.devid = modified_devid;
