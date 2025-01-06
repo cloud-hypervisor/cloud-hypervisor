@@ -114,9 +114,9 @@ impl PciBdf {
 
     pub fn new(segment: u16, bus: u8, device: u8, function: u8) -> Self {
         Self(
-            (segment as u32) << 16
-                | (bus as u32) << 8
-                | ((device & 0x1f) as u32) << 3
+            ((segment as u32) << 16)
+                | ((bus as u32) << 8)
+                | (((device & 0x1f) as u32) << 3)
                 | (function & 0x7) as u32,
         )
     }

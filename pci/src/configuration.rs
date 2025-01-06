@@ -582,7 +582,7 @@ impl PciConfiguration {
         } else {
             let mut registers = [0u32; NUM_CONFIGURATION_REGISTERS];
             let mut writable_bits = [0u32; NUM_CONFIGURATION_REGISTERS];
-            registers[0] = u32::from(device_id) << 16 | u32::from(vendor_id);
+            registers[0] = (u32::from(device_id) << 16) | u32::from(vendor_id);
             // TODO(dverkamp): Status should be write-1-to-clear
             writable_bits[1] = 0x0000_ffff; // Status (r/o), command (r/w)
             let pi = if let Some(pi) = programming_interface {
@@ -590,9 +590,9 @@ impl PciConfiguration {
             } else {
                 0
             };
-            registers[2] = u32::from(class_code.get_register_value()) << 24
-                | u32::from(subclass.get_register_value()) << 16
-                | u32::from(pi) << 8
+            registers[2] = (u32::from(class_code.get_register_value()) << 24)
+                | (u32::from(subclass.get_register_value()) << 16)
+                | (u32::from(pi) << 8)
                 | u32::from(revision_id);
             writable_bits[3] = 0x0000_00ff; // Cacheline size (r/w)
             match header_type {
@@ -606,7 +606,7 @@ impl PciConfiguration {
                     writable_bits[15] = 0xffff_00ff; // Bridge control (r/w), interrupt line (r/w)
                 }
             };
-            registers[11] = u32::from(subsystem_id) << 16 | u32::from(subsystem_vendor_id);
+            registers[11] = (u32::from(subsystem_id) << 16) | u32::from(subsystem_vendor_id);
 
             (
                 registers,
@@ -933,7 +933,7 @@ impl PciConfiguration {
             1 => self.write_byte(reg_idx * 4 + offset as usize, data[0]),
             2 => self.write_word(
                 reg_idx * 4 + offset as usize,
-                u16::from(data[0]) | u16::from(data[1]) << 8,
+                u16::from(data[0]) | (u16::from(data[1]) << 8),
             ),
             4 => self.write_reg(reg_idx, LittleEndian::read_u32(data)),
             _ => (),
@@ -1009,9 +1009,9 @@ impl PciConfiguration {
                     "Detected BAR reprogramming: (BAR {}) 0x{:x}->0x{:x}",
                     reg_idx, self.registers[reg_idx], value
                 );
-                let old_base = u64::from(self.bars[bar_idx].addr & mask) << 32
+                let old_base = (u64::from(self.bars[bar_idx].addr & mask) << 32)
                     | u64::from(self.bars[bar_idx - 1].addr & self.writable_bits[reg_idx - 1]);
-                let new_base = u64::from(value & mask) << 32
+                let new_base = (u64::from(value & mask) << 32)
                     | u64::from(self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1]);
                 let len =
                     decode_64_bits_bar_size(self.bars[bar_idx].size, self.bars[bar_idx - 1].size)

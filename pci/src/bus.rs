@@ -291,7 +291,7 @@ impl PciConfigIo {
             ),
             2 => (
                 0x0000_ffff << (offset * 16),
-                (u32::from(data[1]) << 8 | u32::from(data[0])) << (offset * 16),
+                ((u32::from(data[1]) << 8) | u32::from(data[0])) << (offset * 16),
             ),
             4 => (0xffff_ffff, LittleEndian::read_u32(data)),
             _ => return,
