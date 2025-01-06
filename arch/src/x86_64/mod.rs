@@ -601,7 +601,7 @@ pub fn generate_common_cpuid(
     config: &CpuidConfig,
 ) -> super::Result<Vec<CpuIdEntry>> {
     // SAFETY: cpuid called with valid leaves
-    if unsafe { x86_64::__cpuid(1) }.ecx & 1 << HYPERVISOR_ECX_BIT == 1 << HYPERVISOR_ECX_BIT {
+    if unsafe { x86_64::__cpuid(1) }.ecx & (1 << HYPERVISOR_ECX_BIT) == 1 << HYPERVISOR_ECX_BIT {
         // SAFETY: cpuid called with valid leaves
         let hypervisor_cpuid = unsafe { x86_64::__cpuid(0x4000_0000) };
 
@@ -689,7 +689,7 @@ pub fn generate_common_cpuid(
             // Clear AMX related bits if the AMX feature is not enabled
             0x7 => {
                 if !config.amx && entry.index == 0 {
-                    entry.edx &= !(1 << AMX_BF16 | 1 << AMX_TILE | 1 << AMX_INT8)
+                    entry.edx &= !((1 << AMX_BF16) | (1 << AMX_TILE) | (1 << AMX_INT8))
                 }
             }
             0xd =>
@@ -801,10 +801,10 @@ pub fn generate_common_cpuid(
         });
         cpuid.push(CpuIdEntry {
             function: 0x4000_0003,
-            eax: 1 << 1 // AccessPartitionReferenceCounter
-                   | 1 << 2 // AccessSynicRegs
-                   | 1 << 3 // AccessSyntheticTimerRegs
-                   | 1 << 9, // AccessPartitionReferenceTsc
+            eax: (1 << 1) // AccessPartitionReferenceCounter
+                   | (1 << 2) // AccessSynicRegs
+                   | (1 << 3) // AccessSyntheticTimerRegs
+                   | (1 << 9), // AccessPartitionReferenceTsc
             edx: 1 << 3, // CPU dynamic partitioning
             ..Default::default()
         });
@@ -1380,7 +1380,7 @@ fn update_cpuid_topology(
 
     let mut cpu_ebx = CpuidPatch::get_cpuid_reg(cpuid, 0x1, None, CpuidReg::EBX).unwrap_or(0);
     cpu_ebx |= ((dies_per_package as u32) * (cores_per_die as u32) * (threads_per_core as u32))
-        & 0xff << 16;
+        & (0xff << 16);
     CpuidPatch::set_cpuid_reg(cpuid, 0x1, None, CpuidReg::EBX, cpu_ebx);
 
     let mut cpu_edx = CpuidPatch::get_cpuid_reg(cpuid, 0x1, None, CpuidReg::EDX).unwrap_or(0);
