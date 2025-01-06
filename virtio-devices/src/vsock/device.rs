@@ -344,7 +344,7 @@ where
             info!("Restoring virtio-vsock {}", id);
             (state.avail_features, state.acked_features, true)
         } else {
-            let mut avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_F_IN_ORDER;
+            let mut avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_IN_ORDER);
 
             if iommu {
                 avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
@@ -529,7 +529,7 @@ mod tests {
     #[test]
     fn test_virtio_device() {
         let mut ctx = TestContext::new();
-        let avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_F_IN_ORDER;
+        let avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_IN_ORDER);
         let device_features = avail_features;
         let driver_features: u64 = avail_features | 1 | (1 << 32);
         let device_pages = [
