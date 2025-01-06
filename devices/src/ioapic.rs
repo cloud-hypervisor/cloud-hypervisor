@@ -346,9 +346,9 @@ impl Ioapic {
 
         // Generate MSI message address
         let low_addr: u32 = self.apic_address.0 as u32
-            | u32::from(destination_id) << 12
-            | u32::from(redirection_hint) << 3
-            | u32::from(destination_mode) << 2;
+            | (u32::from(destination_id) << 12)
+            | (u32::from(redirection_hint) << 3)
+            | (u32::from(destination_mode) << 2);
 
         // Validate Trigger Mode value
         let trigger_mode = trigger_mode(entry);
@@ -372,9 +372,9 @@ impl Ioapic {
         }
 
         // Generate MSI message data
-        let data: u32 = u32::from(trigger_mode) << 15
-            | u32::from(remote_irr(entry)) << 14
-            | u32::from(delivery_mode) << 8
+        let data: u32 = (u32::from(trigger_mode) << 15)
+            | (u32::from(remote_irr(entry)) << 14)
+            | (u32::from(delivery_mode) << 8)
             | u32::from(vector(entry));
 
         let config = MsiIrqSourceConfig {
