@@ -682,7 +682,7 @@ impl VfioCommon {
                         .write_config_dword(upper_offset, 0xffff_ffff);
                     let upper = self.vfio_wrapper.read_config_dword(upper_offset);
 
-                    let mut combined_size = u64::from(upper) << 32 | u64::from(lower);
+                    let mut combined_size = (u64::from(upper) << 32) | u64::from(lower);
 
                     // Mask out flag bits (lowest 4 for memory bars)
                     combined_size &= !0b1111;
@@ -974,7 +974,7 @@ impl VfioCommon {
             reg_idx + 1,
             ConfigPatch {
                 mask: 0xffff_ffff,
-                patch: u32::from(clique_id) << 19 | 0x5032,
+                patch: (u32::from(clique_id) << 19) | 0x5032,
             },
         );
     }
