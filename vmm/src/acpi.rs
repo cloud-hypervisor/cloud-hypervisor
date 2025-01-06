@@ -236,7 +236,7 @@ fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Arc<Mutex<Devic
 
     // Architecture common fields
     // HW_REDUCED_ACPI, RESET_REG_SUP, TMR_VAL_EXT
-    let fadt_flags: u32 = 1 << 20 | 1 << 10 | 1 << 8;
+    let fadt_flags: u32 = (1 << 20) | (1 << 10) | (1 << 8);
     facp.write(112, fadt_flags);
     // FADT minor version
     facp.write(131, 3u8);

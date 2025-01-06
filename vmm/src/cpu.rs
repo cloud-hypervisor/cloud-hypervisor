@@ -1435,7 +1435,7 @@ impl CpuManager {
                         1 << MADT_CPU_ENABLE_FLAG
                     } else {
                         0
-                    } | 1 << MADT_CPU_ONLINE_CAPABLE_FLAG,
+                    } | (1 << MADT_CPU_ONLINE_CAPABLE_FLAG),
                     _reserved: 0,
                 };
                 madt.append(lapic);
