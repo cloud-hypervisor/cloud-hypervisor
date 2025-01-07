@@ -16,9 +16,9 @@ use std::num::Wrapping;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::PathBuf;
-use std::result;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use std::{fmt, result};
 
 use acpi_tables::sdt::GenericAddress;
 use acpi_tables::{aml, Aml};
@@ -507,6 +507,145 @@ pub enum DeviceManagerError {
 
     // Invalid console fd
     InvalidConsoleFd,
+}
+
+impl fmt::Display for DeviceManagerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DeviceManagerError::EventFd(_) => todo!(),
+            DeviceManagerError::Disk(_) => todo!(),
+            DeviceManagerError::CreateVhostUserNet(_) => todo!(),
+            DeviceManagerError::CreateVirtioBlock(_) => todo!(),
+            DeviceManagerError::CreateVirtioNet(_) => todo!(),
+            DeviceManagerError::CreateVirtioConsole(_) => todo!(),
+            DeviceManagerError::CreateVirtioRng(_) => todo!(),
+            DeviceManagerError::CreateVirtioFs(_) => todo!(),
+            DeviceManagerError::NoVirtioFsSock => todo!(),
+            DeviceManagerError::CreateVhostUserBlk(_) => todo!(),
+            DeviceManagerError::CreateVirtioPmem(_) => todo!(),
+            DeviceManagerError::CreateVdpa(_) => todo!(),
+            DeviceManagerError::CreateVirtioVsock(_) => todo!(),
+            DeviceManagerError::CreateTpmDevice(_) => todo!(),
+            DeviceManagerError::CreateVdpaConvertPath => todo!(),
+            DeviceManagerError::CreateVsockConvertPath => todo!(),
+            DeviceManagerError::CreateVsockBackend(_) => todo!(),
+            DeviceManagerError::CreateVirtioIommu(_) => todo!(),
+            DeviceManagerError::CreateVirtioBalloon(_) => todo!(),
+            DeviceManagerError::CreateVirtioWatchdog(_) => todo!(),
+            DeviceManagerError::DetectImageType(_) => todo!(),
+            DeviceManagerError::QcowDeviceCreate(_) => todo!(),
+            DeviceManagerError::CreateSerialManager(_) => todo!(),
+            DeviceManagerError::SpawnSerialManager(_) => todo!(),
+            DeviceManagerError::OpenTap(_) => todo!(),
+            DeviceManagerError::AllocateIrq => todo!(),
+            DeviceManagerError::Irq(_) => todo!(),
+            DeviceManagerError::AllocateBars(_) => todo!(),
+            DeviceManagerError::FreePciBars(_) => todo!(),
+            DeviceManagerError::RegisterIoevent(_) => todo!(),
+            DeviceManagerError::UnRegisterIoevent(_) => todo!(),
+            DeviceManagerError::VirtioDevice(virtio_pci_device_error) => {
+                write!(f, "{}", virtio_pci_device_error)
+            }
+            DeviceManagerError::AddPciDevice(_) => todo!(),
+            DeviceManagerError::PmemFileOpen(_) => todo!(),
+            DeviceManagerError::PmemFileSetLen(_) => todo!(),
+            DeviceManagerError::PmemRangeAllocation => todo!(),
+            DeviceManagerError::FsRangeAllocation => todo!(),
+            DeviceManagerError::SerialOutputFileOpen(_) => todo!(),
+            DeviceManagerError::DebugconOutputFileOpen(_) => todo!(),
+            DeviceManagerError::ConsoleOutputFileOpen(_) => todo!(),
+            DeviceManagerError::SerialPtyOpen(_) => todo!(),
+            DeviceManagerError::ConsolePtyOpen(_) => todo!(),
+            DeviceManagerError::DebugconPtyOpen(_) => todo!(),
+            DeviceManagerError::SetPtyRaw(_) => todo!(),
+            DeviceManagerError::GetPtyPeer(_) => todo!(),
+            DeviceManagerError::VfioCreate(vfio_error) => write!(f, "{}", vfio_error),
+            DeviceManagerError::VfioPciCreate(vfio_pci_error) => write!(f, "{}", vfio_pci_error),
+            DeviceManagerError::VfioMapRegion(vfio_pci_error) => write!(f, "{}", vfio_pci_error),
+            DeviceManagerError::VfioDmaMap(vfio_error) => write!(f, "{}", vfio_error),
+            DeviceManagerError::VfioDmaUnmap(vfio_pci_error) => write!(f, "{}", vfio_pci_error),
+            DeviceManagerError::CreatePassthroughDevice(_) => todo!(),
+            DeviceManagerError::Mmap(_) => todo!(),
+            DeviceManagerError::BusError(_) => todo!(),
+            DeviceManagerError::AllocateIoPort => todo!(),
+            DeviceManagerError::AllocateMmioAddress => todo!(),
+            DeviceManagerError::HotPlugNotification(_) => todo!(),
+            DeviceManagerError::MemoryManager(_) => todo!(),
+            DeviceManagerError::CreateInterruptGroup(_) => todo!(),
+            DeviceManagerError::UpdateInterruptGroup(_) => todo!(),
+            DeviceManagerError::CreateInterruptController(_) => todo!(),
+            DeviceManagerError::NewMmapRegion(_) => todo!(),
+            DeviceManagerError::CloneFile(_) => todo!(),
+            DeviceManagerError::CreateSocketFile(_) => todo!(),
+            DeviceManagerError::SpawnNetBackend(_) => todo!(),
+            DeviceManagerError::SpawnBlockBackend(_) => todo!(),
+            DeviceManagerError::NoPciBus => todo!(),
+            DeviceManagerError::NoAvailableDeviceName => todo!(),
+            DeviceManagerError::MissingPciDevice => todo!(),
+            DeviceManagerError::RemoveDeviceFromPciBus(_) => todo!(),
+            DeviceManagerError::RemoveDeviceFromIoBus(_) => todo!(),
+            DeviceManagerError::RemoveDeviceFromMmioBus(_) => todo!(),
+            DeviceManagerError::UnknownPciBdf(_) => todo!(),
+            DeviceManagerError::RemovalNotAllowed(_) => todo!(),
+            DeviceManagerError::UnknownDeviceId(_) => todo!(),
+            DeviceManagerError::NextPciDeviceId(_) => todo!(),
+            DeviceManagerError::GetPciDeviceId(_) => todo!(),
+            DeviceManagerError::PutPciDeviceId(_) => todo!(),
+            DeviceManagerError::NoDiskPath => todo!(),
+            DeviceManagerError::UpdateMemoryForVirtioDevice(_) => todo!(),
+            DeviceManagerError::CreateVirtioMem(_) => todo!(),
+            DeviceManagerError::VirtioMemRangeAllocation => todo!(),
+            DeviceManagerError::UpdateMemoryForVfioPciDevice(vfio_error) => {
+                write!(f, "{}", vfio_error)
+            }
+            DeviceManagerError::PmemWithDirectorySizeMissing => todo!(),
+            DeviceManagerError::PmemSizeNotAligned => todo!(),
+            DeviceManagerError::MissingNode => todo!(),
+            DeviceManagerError::ResourceAlreadyExists => todo!(),
+            DeviceManagerError::MissingVirtioPmemResources => todo!(),
+            DeviceManagerError::MissingDeviceNodePciBdf => todo!(),
+            DeviceManagerError::NoDevicePassthroughSupport => todo!(),
+            DeviceManagerError::NoSocketOptionSupportForConsoleDevice => todo!(),
+            DeviceManagerError::VirtioBalloonResize(_) => todo!(),
+            DeviceManagerError::MissingVirtioBalloon => todo!(),
+            DeviceManagerError::MissingVirtualIommu => todo!(),
+            DeviceManagerError::PowerButtonNotification(_) => todo!(),
+            DeviceManagerError::SetDirectIo => todo!(),
+            DeviceManagerError::CreateFixedVhdDiskAsync(_) => todo!(),
+            DeviceManagerError::CreateFixedVhdDiskSync(_) => todo!(),
+            DeviceManagerError::CreateQcowDiskSync(_) => todo!(),
+            DeviceManagerError::CreateFixedVhdxDiskSync(_) => todo!(),
+            DeviceManagerError::AddDmaMappingHandlerVirtioMem(_) => todo!(),
+            DeviceManagerError::RemoveDmaMappingHandlerVirtioMem(_) => todo!(),
+            DeviceManagerError::VfioUserCreateClient(_) => todo!(),
+            DeviceManagerError::VfioUserCreate(_) => todo!(),
+            DeviceManagerError::VfioUserMapRegion(vfio_user_pci_device_error) => {
+                write!(f, "{}", vfio_user_pci_device_error)
+            }
+            DeviceManagerError::VfioUserDmaMap(vfio_user_pci_device_error) => {
+                write!(f, "{}", vfio_user_pci_device_error)
+            }
+            DeviceManagerError::VfioUserDmaUnmap(vfio_user_pci_device_error) => {
+                write!(f, "{}", vfio_user_pci_device_error)
+            }
+            DeviceManagerError::UpdateMemoryForVfioUserPciDevice(vfio_user_pci_device_error) => {
+                write!(f, "{}", vfio_user_pci_device_error)
+            }
+            DeviceManagerError::DupFd(_) => todo!(),
+            DeviceManagerError::VirtioDmaMap(_) => todo!(),
+            DeviceManagerError::VirtioDmaUnmap(_) => todo!(),
+            DeviceManagerError::InvalidIommuHotplug => todo!(),
+            DeviceManagerError::IdentifierNotUnique(_) => todo!(),
+            DeviceManagerError::InvalidIdentifier(_) => todo!(),
+            DeviceManagerError::VirtioActivate(_) => todo!(),
+            DeviceManagerError::RestoreGetState(_) => todo!(),
+            DeviceManagerError::PvPanicCreate(_) => todo!(),
+            DeviceManagerError::RateLimiterGroupCreate(_) => todo!(),
+            DeviceManagerError::StartSigwinchListener(_) => todo!(),
+            DeviceManagerError::InvalidConsoleInfo => todo!(),
+            DeviceManagerError::InvalidConsoleFd => todo!(),
+        }
+    }
 }
 
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;

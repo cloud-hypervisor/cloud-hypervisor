@@ -138,7 +138,7 @@ pub enum Error {
     #[error("VM state is poisoned")]
     PoisonedState,
 
-    #[error("Error from device manager: {0:?}")]
+    #[error("Error from device manager: {0}")]
     DeviceManager(DeviceManagerError),
 
     #[error("No device with id {0:?} to remove")]

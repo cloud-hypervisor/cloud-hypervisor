@@ -48,10 +48,10 @@ pub(crate) const VFIO_COMMON_ID: &str = "vfio_common";
 pub enum VfioPciError {
     #[error("Failed to create user memory region: {0}")]
     CreateUserMemoryRegion(#[source] HypervisorVmError),
-    #[error("{1}: Failed to DMA map: {0}")]
-    DmaMap(#[source] vfio_ioctls::VfioError, String),
-    #[error("{1} Failed to DMA unmap: {0}")]
-    DmaUnmap(#[source] vfio_ioctls::VfioError, String),
+    #[error("Failed to DMA map: {0} for device: {1}")]
+    DmaMap(#[source] vfio_ioctls::VfioError, PciBdf),
+    #[error("Failed to DMA unmap: {0} for device {1}")]
+    DmaUnmap(#[source] vfio_ioctls::VfioError, PciBdf),
     #[error("Failed to enable INTx: {0}")]
     EnableIntx(#[source] VfioError),
     #[error("Failed to enable MSI: {0}")]
@@ -1658,7 +1658,7 @@ impl VfioPciDevice {
                                 user_memory_region.size,
                                 user_memory_region.host_addr,
                             )
-                            .map_err(|e| VfioPciError::DmaMap(e, self.bdf.to_string()))?;
+                            .map_err(|e| VfioPciError::DmaMap(e, self.bdf))?;
                     }
                 }
             }
@@ -1719,7 +1719,7 @@ impl VfioPciDevice {
         if !self.iommu_attached {
             self.container
                 .vfio_dma_map(iova, size, user_addr)
-                .map_err(|e| VfioPciError::DmaMap(e, self.bdf.to_string()))?;
+                .map_err(|e| VfioPciError::DmaMap(e, self.bdf))?;
         }
 
         Ok(())
@@ -1729,7 +1729,7 @@ impl VfioPciDevice {
         if !self.iommu_attached {
             self.container
                 .vfio_dma_unmap(iova, size)
-                .map_err(|e| VfioPciError::DmaUnmap(e, self.bdf.to_string()))?;
+                .map_err(|e| VfioPciError::DmaUnmap(e, self.bdf))?;
         }
 
         Ok(())
