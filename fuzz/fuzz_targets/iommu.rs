@@ -66,6 +66,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
         SeccompAction::Allow,
         EventFd::new(EFD_NONBLOCK).unwrap(),
         ((MEM_SIZE - IOVA_SPACE_SIZE) as u64, (MEM_SIZE - 1) as u64),
+        64,
         None,
     )
     .unwrap();

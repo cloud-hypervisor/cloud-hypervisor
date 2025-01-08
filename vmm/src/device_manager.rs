@@ -100,7 +100,8 @@ use crate::pci_segment::PciSegment;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 use crate::vm_config::{
     ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
-    VdpaConfig, VhostMode, VmConfig, VsockConfig, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
+    VdpaConfig, VhostMode, VmConfig, VsockConfig, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS,
+    DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
 };
 use crate::{device_node, GuestRegionMmap, PciDeviceInfo, DEVICE_MANAGER_SNAPSHOT_ID};
 
@@ -1365,6 +1366,13 @@ impl DeviceManager {
     ) -> DeviceManagerResult<()> {
         let iommu_id = String::from(IOMMU_DEVICE_NAME);
 
+        let iommu_address_width_bits =
+            if let Some(ref platform) = self.config.lock().unwrap().platform {
+                platform.iommu_address_width_bits
+            } else {
+                DEFAULT_IOMMU_ADDRESS_WIDTH_BITS
+            };
+
         let iommu_device = if self.config.lock().unwrap().iommu {
             let (device, mapping) = virtio_devices::Iommu::new(
                 iommu_id.clone(),
@@ -1373,6 +1381,7 @@ impl DeviceManager {
                     .try_clone()
                     .map_err(DeviceManagerError::EventFd)?,
                 self.get_msi_iova_space(),
+                iommu_address_width_bits,
                 state_from_id(self.snapshot.as_ref(), iommu_id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
