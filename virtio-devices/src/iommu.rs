@@ -906,9 +906,10 @@ impl Iommu {
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         msi_iova_space: (u64, u64),
+        address_width_bits: u8,
         state: Option<IommuState>,
     ) -> io::Result<(Self, Arc<IommuMapping>)> {
-        let (avail_features, acked_features, endpoints, domains, paused) =
+        let (mut avail_features, acked_features, endpoints, domains, paused) =
             if let Some(state) = state {
                 info!("Restoring virtio-iommu {}", id);
                 (
@@ -939,11 +940,19 @@ impl Iommu {
                 (avail_features, 0, BTreeMap::new(), BTreeMap::new(), false)
             };
 
-        let config = VirtioIommuConfig {
+        let mut config = VirtioIommuConfig {
             page_size_mask: VIRTIO_IOMMU_PAGE_SIZE_MASK,
             probe_size: PROBE_PROP_SIZE,
             ..Default::default()
         };
+
+        if address_width_bits < 64 {
+            avail_features |= 1u64 << VIRTIO_IOMMU_F_INPUT_RANGE;
+            config.input_range = VirtioIommuRange64 {
+                start: 0,
+                end: (1u64 << address_width_bits) - 1,
+            }
+        }
 
         let mapping = Arc::new(IommuMapping {
             endpoints: Arc::new(RwLock::new(endpoints)),
