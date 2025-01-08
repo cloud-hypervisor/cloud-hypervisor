@@ -88,12 +88,19 @@ pub fn default_platformconfig_num_pci_segments() -> u16 {
     DEFAULT_NUM_PCI_SEGMENTS
 }
 
+pub const DEFAULT_IOMMU_ADDRESS_WIDTH_BITS: u8 = 64;
+pub fn default_platformconfig_iommu_address_width_bits() -> u8 {
+    DEFAULT_IOMMU_ADDRESS_WIDTH_BITS
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PlatformConfig {
     #[serde(default = "default_platformconfig_num_pci_segments")]
     pub num_pci_segments: u16,
     #[serde(default)]
     pub iommu_segments: Option<Vec<u16>>,
+    #[serde(default = "default_platformconfig_iommu_address_width_bits")]
+    pub iommu_address_width_bits: u8,
     #[serde(default)]
     pub serial_number: Option<String>,
     #[serde(default)]

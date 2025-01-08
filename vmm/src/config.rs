@@ -21,6 +21,7 @@ use crate::landlock::LandlockAccess;
 use crate::vm_config::*;
 
 const MAX_NUM_PCI_SEGMENTS: u16 = 96;
+const MAX_IOMMU_ADDRESS_WIDTH_BITS: u8 = 64;
 
 /// Errors associated with VM configuration parameters.
 #[derive(Debug, Error)]
@@ -183,6 +184,8 @@ pub enum ValidationError {
     InvalidPciSegment(u16),
     /// Invalid PCI segment aperture weight
     InvalidPciSegmentApertureWeight(u32),
+    /// Invalid IOMMU address width in bits
+    InvalidIommuAddressWidthBits(u8),
     /// Balloon too big
     BalloonLargerThanRam(u64, u64),
     /// On a IOMMU segment but not behind IOMMU
@@ -308,6 +311,9 @@ impl fmt::Display for ValidationError {
             }
             InvalidPciSegmentApertureWeight(aperture_weight) => {
                 write!(f, "Invalid PCI segment aperture weight: {aperture_weight}")
+            }
+            InvalidIommuAddressWidthBits(iommu_address_width_bits) => {
+                write!(f, "IOMMU address width in bits ({iommu_address_width_bits}) should be less than or equal to {MAX_IOMMU_ADDRESS_WIDTH_BITS}")
             }
             BalloonLargerThanRam(balloon_size, ram_size) => {
                 write!(
@@ -817,6 +823,7 @@ impl PlatformConfig {
         parser
             .add("num_pci_segments")
             .add("iommu_segments")
+            .add("iommu_address_width")
             .add("serial_number")
             .add("uuid")
             .add("oem_strings");
@@ -834,6 +841,10 @@ impl PlatformConfig {
             .convert::<IntegerList>("iommu_segments")
             .map_err(Error::ParsePlatform)?
             .map(|v| v.0.iter().map(|e| *e as u16).collect());
+        let iommu_address_width_bits: u8 = parser
+            .convert("iommu_address_width")
+            .map_err(Error::ParsePlatform)?
+            .unwrap_or(MAX_IOMMU_ADDRESS_WIDTH_BITS);
         let serial_number = parser
             .convert("serial_number")
             .map_err(Error::ParsePlatform)?;
@@ -857,6 +868,7 @@ impl PlatformConfig {
         Ok(PlatformConfig {
             num_pci_segments,
             iommu_segments,
+            iommu_address_width_bits,
             serial_number,
             uuid,
             oem_strings,
@@ -880,6 +892,12 @@ impl PlatformConfig {
                     return Err(ValidationError::InvalidPciSegment(*segment));
                 }
             }
+        }
+
+        if self.iommu_address_width_bits > MAX_IOMMU_ADDRESS_WIDTH_BITS {
+            return Err(ValidationError::InvalidIommuAddressWidthBits(
+                self.iommu_address_width_bits,
+            ));
         }
 
         Ok(())
@@ -3998,6 +4016,7 @@ mod tests {
         PlatformConfig {
             num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: None,
+            iommu_address_width_bits: MAX_IOMMU_ADDRESS_WIDTH_BITS,
             serial_number: None,
             uuid: None,
             oem_strings: None,
@@ -4294,6 +4313,18 @@ mod tests {
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::InvalidPciSegment(MAX_NUM_PCI_SEGMENTS + 1))
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.platform = Some(PlatformConfig {
+            iommu_address_width_bits: MAX_IOMMU_ADDRESS_WIDTH_BITS + 1,
+            ..platform_fixture()
+        });
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidIommuAddressWidthBits(
+                MAX_IOMMU_ADDRESS_WIDTH_BITS + 1
+            ))
         );
 
         let mut still_valid_config = valid_config.clone();

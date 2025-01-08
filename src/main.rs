@@ -204,7 +204,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         .arg(
             Arg::new("platform")
                 .long("platform")
-                .help("num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,serial_number=<dmi_device_serial_number>,uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>")
+                .help("num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,iommu_address_width=<bits>,serial_number=<dmi_device_serial_number>,uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>")
                 .num_args(1)
                 .group("vm-config"),
         )
