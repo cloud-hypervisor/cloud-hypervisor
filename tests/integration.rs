@@ -9111,7 +9111,10 @@ mod vfio {
             .args(["--cpus", "boot=4"])
             .args(["--memory", "size=4G"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
-            .args(["--device", format!("path={NVIDIA_VFIO_DEVICE}").as_str()])
+            .args([
+                "--device",
+                format!("path={NVIDIA_VFIO_DEVICE},iommu=on").as_str(),
+            ])
             .args(["--api-socket", &api_socket])
             .default_disks()
             .default_net()
@@ -9129,6 +9132,43 @@ mod vfio {
 
             // Check the VFIO device works after reboot
             guest.check_nvidia_gpu();
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_nvidia_card_iommu_address_width() {
+        let jammy = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(jammy));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--device", format!("path={NVIDIA_VFIO_DEVICE}").as_str()])
+            .args([
+                "--platform",
+                "num_pci_segments=2,iommu_segments=1,iommu_address_width=42",
+            ])
+            .args(["--api-socket", &api_socket])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            assert!(guest
+                .ssh_command("sudo dmesg")
+                .unwrap()
+                .contains("input address: 42 bits"));
         });
 
         let _ = child.kill();
