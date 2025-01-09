@@ -221,7 +221,7 @@ pub fn construct_gicr_typers(vcpu_states: &[CpuState]) -> Vec<u64> {
         //calculate affinity
         let mut cpu_affid = mpidr[0].addr & 1095233437695;
         cpu_affid = ((cpu_affid & 0xFF00000000) >> 8) | (cpu_affid & 0xFFFFFF);
-        gicr_typers.push((cpu_affid << 32) | (1 << 24) | (index as u64) << 8 | (last << 4));
+        gicr_typers.push((cpu_affid << 32) | (1 << 24) | ((index as u64) << 8) | (last << 4));
     }
 
     gicr_typers
