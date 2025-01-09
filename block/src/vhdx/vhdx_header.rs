@@ -110,7 +110,7 @@ impl FileTypeIdentifier {
     }
 }
 
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Debug)]
 pub struct Header {
     pub signature: u32,
@@ -203,7 +203,7 @@ impl Header {
     }
 }
 
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Debug)]
 struct RegionTableHeader {
     pub signature: u32,
@@ -328,7 +328,7 @@ impl RegionInfo {
     }
 }
 
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Debug)]
 pub struct RegionTableEntry {
     pub guid: Uuid,
