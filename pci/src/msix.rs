@@ -456,7 +456,7 @@ impl Snapshottable for MsixConfig {
 }
 
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub struct MsixCap {
     // Message Control Register
