@@ -60,7 +60,7 @@ enum PciCapabilityType {
 const VIRTIO_PCI_CAP_OFFSET: usize = 2;
 
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Default)]
 struct VirtioPciCap {
     cap_len: u8,      // Generic PCI field: capability length
@@ -101,7 +101,7 @@ impl VirtioPciCap {
 }
 
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Default)]
 struct VirtioPciNotifyCap {
     cap: VirtioPciCap,
@@ -145,7 +145,7 @@ impl VirtioPciNotifyCap {
 }
 
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Default)]
 struct VirtioPciCap64 {
     cap: VirtioPciCap,
@@ -184,7 +184,7 @@ impl VirtioPciCap64 {
 }
 
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Default)]
 struct VirtioPciCfgCap {
     cap: VirtioPciCap,
