@@ -394,7 +394,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Attach request {:?}", req);
+                    debug!("Attach request 0x{:x?}", req);
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
@@ -449,7 +449,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Detach request {:?}", req);
+                    debug!("Detach request 0x{:x?}", req);
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
@@ -468,7 +468,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Map request {:?}", req);
+                    debug!("Map request 0x{:x?}", req);
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
@@ -531,7 +531,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Unmap request {:?}", req);
+                    debug!("Unmap request 0x{:x?}", req);
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
@@ -587,7 +587,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Probe request {:?}", req);
+                    debug!("Probe request 0x{:x?}", req);
 
                     let probe_prop = VirtioIommuProbeProperty {
                         type_: VIRTIO_IOMMU_PROBE_T_RESV_MEM,
