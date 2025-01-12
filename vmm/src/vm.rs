@@ -50,6 +50,8 @@ use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 #[cfg(target_arch = "aarch64")]
 use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
 use linux_loader::loader::KernelLoader;
+#[cfg(feature = "otel")]
+use opentelemetry::trace::{TraceContextExt, Tracer};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -495,11 +497,21 @@ impl Vm {
     ) -> Result<Self> {
         trace_scoped!("Vm::new_from_memory_manager");
 
+        #[cfg(feature = "otel")]
+        let tracer = otel::tracer::get("vmm");
+        #[cfg(feature = "otel")]
+        let span = tracer.start("Vm::new_from_memory_manager");
+
         let boot_id_list = config
             .lock()
             .unwrap()
             .validate()
             .map_err(Error::ConfigValidation)?;
+        #[cfg(feature = "otel")]
+        let span = tracer.start_with_context(
+            "config validate",
+            &opentelemetry::Context::current_with_span(span),
+        );
 
         #[cfg(not(feature = "igvm"))]
         let load_payload_handle = if snapshot.is_none() {
@@ -507,12 +519,22 @@ impl Vm {
         } else {
             None
         };
+        #[cfg(all(feature = "otel", feature = "igvm"))]
+        let span = tracer.start_with_context(
+            "loag igvm file",
+            &opentelemetry::Context::current_with_span(span),
+        );
 
         info!("Booting VM from config: {:?}", &config);
 
         // Create NUMA nodes based on NumaConfig.
         let numa_nodes =
             Self::create_numa_nodes(config.lock().unwrap().numa.clone(), &memory_manager)?;
+        #[cfg(feature = "otel")]
+        let span = tracer.start_with_context(
+            "numa nodes",
+            &opentelemetry::Context::current_with_span(span),
+        );
 
         #[cfg(feature = "tdx")]
         let tdx_enabled = config.lock().unwrap().is_tdx_enabled();
@@ -531,6 +553,11 @@ impl Vm {
         let stop_on_boot = false;
 
         let memory = memory_manager.lock().unwrap().guest_memory();
+        #[cfg(feature = "otel")]
+        let span = tracer.start_with_context(
+            "process configs",
+            &opentelemetry::Context::current_with_span(span),
+        );
         let io_bus = Arc::new(Bus::new());
         let mmio_bus = Arc::new(Bus::new());
 
@@ -540,6 +567,9 @@ impl Vm {
             io_bus: io_bus.clone(),
             mmio_bus: mmio_bus.clone(),
         });
+        #[cfg(feature = "otel")]
+        let span =
+            tracer.start_with_context("VM ops", &opentelemetry::Context::current_with_span(span));
 
         let cpus_config = { &config.lock().unwrap().cpus.clone() };
         let cpu_manager = cpu::CpuManager::new(
@@ -591,6 +621,11 @@ impl Vm {
         } else {
             None
         };
+        #[cfg(all(feature = "otel", feature = "igvm"))]
+        let span = tracer.start_with_context(
+            "load IGVM file",
+            &opentelemetry::Context::current_with_span(span),
+        );
         // The initial TDX configuration must be done before the vCPUs are
         // created
         #[cfg(feature = "tdx")]
@@ -606,6 +641,11 @@ impl Vm {
             .unwrap()
             .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
             .map_err(Error::CpuManager)?;
+        #[cfg(feature = "otel")]
+        let span = tracer.start_with_context(
+            "VCPUs setup",
+            &opentelemetry::Context::current_with_span(span),
+        );
 
         // This initial SEV-SNP configuration must be done immediately after
         // vCPUs are created. As part of this initialization we are
@@ -614,6 +654,11 @@ impl Vm {
         if sev_snp_enabled {
             vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
         }
+        #[cfg(all(feature = "otel", feature = "sev_snp"))]
+        let span = tracer.start_with_context(
+            "SEV-NSP setup",
+            &opentelemetry::Context::current_with_span(span),
+        );
 
         #[cfg(feature = "tdx")]
         let dynamic = !tdx_enabled;
@@ -656,6 +701,9 @@ impl Vm {
             .unwrap_or_default()
             .transpose()
             .map_err(Error::KernelFile)?;
+        #[cfg(all(feature = "otel", feature = "tdx"))]
+        let span =
+            tracer.start_with_context("kernel", &opentelemetry::Context::current_with_span(span));
 
         let initramfs = config
             .lock()
@@ -666,6 +714,11 @@ impl Vm {
             .unwrap_or_default()
             .transpose()
             .map_err(Error::InitramfsFile)?;
+        #[cfg(feature = "otel")]
+        let _span = tracer.start_with_context(
+            "initramfs",
+            &opentelemetry::Context::current_with_span(span),
+        );
 
         #[cfg(target_arch = "x86_64")]
         let saved_clock = if let Some(snapshot) = snapshot.as_ref() {
@@ -781,6 +834,11 @@ impl Vm {
                 numa_nodes.insert(config.guest_numa_id, node);
             }
         }
+        #[cfg(all(feature = "otel", feature = "tdx"))]
+        let span = tracer.start_with_context(
+            "TDX setup",
+            &opentelemetry::Context::current_with_span(span),
+        );
 
         Ok(numa_nodes)
     }
@@ -2103,6 +2161,15 @@ impl Vm {
         } else {
             (Vec::new(), false)
         };
+        #[cfg(feature = "otel")]
+        let tracer = otel::tracer::get("vmm");
+        #[cfg(feature = "otel")]
+        let span = tracer.start("Vm::boot");
+        #[cfg(all(feature = "otel", feature = "kvm", target_arch = "x86_64"))]
+        let _span = tracer.start_with_context(
+            "initramfs",
+            &opentelemetry::Context::current_with_span(span),
+        );
 
         // Configuring the TDX regions requires that the vCPUs are created.
         #[cfg(feature = "tdx")]
