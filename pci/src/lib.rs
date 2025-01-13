@@ -16,7 +16,7 @@ mod msix;
 mod vfio;
 mod vfio_user;
 
-use std::fmt::{self, Display};
+use std::fmt::{self, Debug, Display};
 use std::num::ParseIntError;
 use std::str::FromStr;
 
@@ -149,6 +149,19 @@ impl From<PciBdf> for u16 {
 impl From<&PciBdf> for u16 {
     fn from(bdf: &PciBdf) -> Self {
         (bdf.0 & 0xffff) as u16
+    }
+}
+
+impl Debug for PciBdf {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{:04x}:{:02x}:{:02x}.{:01x}",
+            self.segment(),
+            self.bus(),
+            self.device(),
+            self.function()
+        )
     }
 }
 
