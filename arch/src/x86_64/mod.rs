@@ -887,6 +887,10 @@ pub fn configure_vcpu(
         }
     }
 
+    for c in &cpuid {
+        info!("{}", c);
+    }
+
     vcpu.set_cpuid2(&cpuid)
         .map_err(|e| Error::SetSupportedCpusFailed(e.into()))?;
 
