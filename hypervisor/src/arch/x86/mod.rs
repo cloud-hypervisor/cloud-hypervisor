@@ -11,6 +11,8 @@
 // Copyright © 2020, Microsoft Corporation
 //
 
+use core::fmt;
+
 #[cfg(all(feature = "mshv_emulator", target_arch = "x86_64"))]
 pub mod emulator;
 pub mod gdt;
@@ -209,6 +211,22 @@ pub struct CpuIdEntry {
     pub ebx: u32,
     pub ecx: u32,
     pub edx: u32,
+}
+
+impl fmt::Display for CpuIdEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "function = 0x{:08x} \
+             index = 0x{:08x} \
+             eax = 0x{:08x} \
+             ebx = 0x{:08x} \
+             ecx = 0x{:08x} \
+             edx = 0x{:08x} \
+             flags = 0x{:08x}",
+            self.function, self.index, self.eax, self.ebx, self.ecx, self.edx, self.flags
+        )
+    }
 }
 
 pub const CPUID_FLAG_VALID_INDEX: u32 = 1;
