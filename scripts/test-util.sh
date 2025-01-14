@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 hypervisor="kvm"
 test_filter=""
-build_kernel=true
+build_kernel=false
 
 # Checkout source code of a GIT repo with specified branch and commit
 # Args:
@@ -140,14 +140,15 @@ download_hypervisor_fw() {
 }
 
 download_linux() {
+    KERNEL_TAG="ch-release-v6.12.8-20250114"
     if [ -n "$AUTH_DOWNLOAD_TOKEN" ]; then
         echo "Using authenticated download from GitHub"
-        KERNEL_URLS=$(curl --silent https://api.github.com/repos/cloud-hypervisor/linux/releases/latest \
+        KERNEL_URLS=$(curl --silent https://api.github.com/repos/cloud-hypervisor/linux/releases/tags/${KERNEL_TAG} \
             --header "Authorization: Token $AUTH_DOWNLOAD_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" | grep "browser_download_url" | grep -o 'https://.*[^ "]')
     else
         echo "Using anonymous download from GitHub"
-        KERNEL_URLS=$(curl --silent https://api.github.com/repos/cloud-hypervisor/linux/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+        KERNEL_URLS=$(curl --silent https://api.github.com/repos/cloud-hypervisor/linux/releases/tags/${KERNEL_TAG} | grep "browser_download_url" | grep -o 'https://.*[^ "]')
     fi
     pushd "$WORKLOADS_DIR" || exit
     for url in $KERNEL_URLS; do
