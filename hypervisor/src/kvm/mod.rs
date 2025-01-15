@@ -54,14 +54,14 @@ use crate::{offset_of, riscv64_reg_id};
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 #[cfg(target_arch = "aarch64")]
-use aarch64::{RegList, Register};
+use aarch64::RegList;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
     kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP,
     KVM_GUESTDBG_USE_HW_BP,
 };
 #[cfg(target_arch = "riscv64")]
-use riscv64::{RegList, Register};
+use riscv64::RegList;
 #[cfg(target_arch = "x86_64")]
 use x86_64::check_required_kvm_extensions;
 #[cfg(target_arch = "x86_64")]
@@ -349,6 +349,23 @@ impl From<ClockData> for kvm_clock_data {
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
             _ => panic!("CpuState is not valid"),
+        }
+    }
+}
+
+impl From<kvm_bindings::kvm_one_reg> for crate::Register {
+    fn from(s: kvm_bindings::kvm_one_reg) -> Self {
+        crate::Register::Kvm(s)
+    }
+}
+
+impl From<crate::Register> for kvm_bindings::kvm_one_reg {
+    fn from(e: crate::Register) -> Self {
+        match e {
+            crate::Register::Kvm(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("Register is not valid"),
         }
     }
 }
@@ -2917,7 +2934,7 @@ impl cpu::Vcpu for KvmVcpu {
         // Get systerm register
         // Call KVM_GET_REG_LIST to get all registers available to the guest.
         // For ArmV8 there are around 500 registers.
-        let mut sys_regs: Vec<Register> = Vec::new();
+        let mut sys_regs: Vec<kvm_bindings::kvm_one_reg> = Vec::new();
         let mut reg_list = RegList::new(500).unwrap();
         self.fd
             .lock()
@@ -2970,7 +2987,7 @@ impl cpu::Vcpu for KvmVcpu {
         // Get non-core register
         // Call KVM_GET_REG_LIST to get all registers available to the guest.
         // For RISC-V 64-bit there are around 200 registers.
-        let mut sys_regs: Vec<Register> = Vec::new();
+        let mut sys_regs: Vec<kvm_bindings::kvm_one_reg> = Vec::new();
         let mut reg_list = RegList::new(200).unwrap();
         self.fd
             .lock()
