@@ -53,15 +53,11 @@ use crate::{offset_of, riscv64_reg_id};
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
-#[cfg(target_arch = "aarch64")]
-use aarch64::RegList;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
     kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP,
     KVM_GUESTDBG_USE_HW_BP,
 };
-#[cfg(target_arch = "riscv64")]
-use riscv64::RegList;
 #[cfg(target_arch = "x86_64")]
 use x86_64::check_required_kvm_extensions;
 #[cfg(target_arch = "x86_64")]
@@ -115,6 +111,9 @@ use vfio_ioctls::VfioDeviceFd;
 #[cfg(feature = "tdx")]
 use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_ioc_nr, ioctl_iowr_nr};
 pub use {kvm_bindings, kvm_ioctls};
+
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+use crate::RegList;
 
 #[cfg(target_arch = "x86_64")]
 const KVM_CAP_SGX_ATTRIBUTE: u32 = 196;
@@ -366,6 +365,25 @@ impl From<crate::Register> for kvm_bindings::kvm_one_reg {
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
             _ => panic!("Register is not valid"),
+        }
+    }
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+impl From<kvm_bindings::RegList> for crate::RegList {
+    fn from(s: kvm_bindings::RegList) -> Self {
+        crate::RegList::Kvm(s)
+    }
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+impl From<crate::RegList> for kvm_bindings::RegList {
+    fn from(e: crate::RegList) -> Self {
+        match e {
+            crate::RegList::Kvm(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("RegList is not valid"),
         }
     }
 }
@@ -2642,11 +2660,14 @@ impl cpu::Vcpu for KvmVcpu {
     /// KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.
     ///
     fn get_reg_list(&self, reg_list: &mut RegList) -> cpu::Result<()> {
+        let mut kvm_reg_list: kvm_bindings::RegList = reg_list.clone().into();
         self.fd
             .lock()
             .unwrap()
-            .get_reg_list(reg_list)
-            .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))
+            .get_reg_list(&mut kvm_reg_list)
+            .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::GetRegList(e.into()))?;
+        *reg_list = kvm_reg_list.into();
+        Ok(())
     }
 
     ///
@@ -2935,7 +2956,7 @@ impl cpu::Vcpu for KvmVcpu {
         // Call KVM_GET_REG_LIST to get all registers available to the guest.
         // For ArmV8 there are around 500 registers.
         let mut sys_regs: Vec<kvm_bindings::kvm_one_reg> = Vec::new();
-        let mut reg_list = RegList::new(500).unwrap();
+        let mut reg_list = kvm_bindings::RegList::new(500).unwrap();
         self.fd
             .lock()
             .unwrap()
@@ -2988,7 +3009,7 @@ impl cpu::Vcpu for KvmVcpu {
         // Call KVM_GET_REG_LIST to get all registers available to the guest.
         // For RISC-V 64-bit there are around 200 registers.
         let mut sys_regs: Vec<kvm_bindings::kvm_one_reg> = Vec::new();
-        let mut reg_list = RegList::new(200).unwrap();
+        let mut reg_list = kvm_bindings::RegList::new(200).unwrap();
         self.fd
             .lock()
             .unwrap()

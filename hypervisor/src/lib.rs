@@ -196,6 +196,12 @@ pub enum IrqRoutingEntry {
     Mshv(mshv_bindings::mshv_user_irq_entry),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum RegList {
+    #[cfg(all(feature = "kvm", any(target_arch = "aarch64", target_arch = "riscv64")))]
+    Kvm(kvm_bindings::RegList),
+}
+
 pub enum Register {
     #[cfg(feature = "kvm")]
     Kvm(kvm_bindings::kvm_one_reg),
