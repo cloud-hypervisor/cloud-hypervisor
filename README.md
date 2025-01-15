@@ -181,14 +181,9 @@ To build the kernel:
 
 ```shell
 # Clone the Cloud Hypervisor Linux branch
-$ git clone --depth 1 https://github.com/cloud-hypervisor/linux.git -b ch-6.2 linux-cloud-hypervisor
+$ git clone --depth 1 https://github.com/cloud-hypervisor/linux.git -b ch-6.12.8 linux-cloud-hypervisor
 $ pushd linux-cloud-hypervisor
-# Use the x86-64 cloud-hypervisor kernel config to build your kernel for x86-64
-$ wget https://raw.githubusercontent.com/cloud-hypervisor/cloud-hypervisor/main/resources/linux-config-x86_64
-# Use the AArch64 cloud-hypervisor kernel config to build your kernel for AArch64
-$ wget https://raw.githubusercontent.com/cloud-hypervisor/cloud-hypervisor/main/resources/linux-config-aarch64
-$ cp linux-config-x86_64 .config  # x86-64
-$ cp linux-config-aarch64 .config # AArch64
+$ make ch_defconfig
 # Do native build of the x86-64 kernel
 $ KCFLAGS="-Wa,-mx86-used-note=no" make bzImage -j `nproc`
 # Do native build of the AArch64 kernel
