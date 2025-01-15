@@ -46,16 +46,14 @@ checkout_repo() {
 # Not actively used by CI
 build_custom_linux() {
     ARCH=$(uname -m)
-    SRCDIR=$PWD
     LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
-    LINUX_CUSTOM_BRANCH="ch-6.12"
+    LINUX_CUSTOM_BRANCH="ch-6.12.8"
     LINUX_CUSTOM_URL="https://github.com/cloud-hypervisor/linux.git"
 
     checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH"
 
-    cp "$SRCDIR"/resources/linux-config-"${ARCH}" "$LINUX_CUSTOM_DIR"/.config
-
     pushd "$LINUX_CUSTOM_DIR" || exit
+    make ch_defconfig
     make -j "$(nproc)"
     if [ "${ARCH}" == "x86_64" ]; then
         cp vmlinux "$WORKLOADS_DIR/" || exit 1
