@@ -16,6 +16,8 @@ use arch::aarch64::DeviceInfoForFdt;
 use arch::DeviceType;
 use arch::NumaNodes;
 use bitflags::bitflags;
+#[cfg(feature = "otel")]
+use opentelemetry::trace::{Span, TraceContextExt, Tracer};
 use pci::PciBdf;
 use tracer::trace_scoped;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryRegion};
@@ -179,6 +181,10 @@ pub fn create_dsdt_table(
     memory_manager: &Arc<Mutex<MemoryManager>>,
 ) -> Sdt {
     trace_scoped!("create_dsdt_table");
+    #[cfg(feature = "otel")]
+    let tracer = otel::tracer::get("vmm");
+    #[cfg(feature = "otel")]
+    let _span = tracer.start("create_dsdt_table");
     // DSDT
     let mut dsdt = Sdt::new(*b"DSDT", 36, 6, *b"CLOUDH", *b"CHDSDT  ", 1);
 
@@ -194,6 +200,10 @@ pub fn create_dsdt_table(
 
 fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Arc<Mutex<DeviceManager>>) -> Sdt {
     trace_scoped!("create_facp_table");
+    #[cfg(feature = "otel")]
+    let tracer = otel::tracer::get("vmm");
+    #[cfg(feature = "otel")]
+    let _span = tracer.start("create_facp_table");
 
     // Revision 6 of the ACPI FADT table is 276 bytes long
     let mut facp = Sdt::new(*b"FACP", 276, 6, *b"CLOUDH", *b"CHFACP  ", 1);
@@ -635,6 +645,10 @@ pub fn create_acpi_tables(
     tpm_enabled: bool,
 ) -> GuestAddress {
     trace_scoped!("create_acpi_tables");
+    #[cfg(feature = "otel")]
+    let tracer = otel::tracer::get("vmm");
+    #[cfg(feature = "otel")]
+    let span = tracer.start("create_acpi_tables");
 
     let start_time = Instant::now();
     let rsdp_offset = arch::layout::RSDP_POINTER;
@@ -646,6 +660,8 @@ pub fn create_acpi_tables(
     guest_mem
         .write_slice(dsdt.as_slice(), dsdt_offset)
         .expect("Error writing DSDT table");
+    #[cfg(feature = "otel")]
+    let span = tracer.start_with_context("DSDT", &opentelemetry::Context::current_with_span(span));
 
     // FACP aka FADT
     let facp = create_facp_table(dsdt_offset, device_manager);
@@ -654,6 +670,8 @@ pub fn create_acpi_tables(
         .write_slice(facp.as_slice(), facp_offset)
         .expect("Error writing FACP table");
     tables.push(facp_offset.0);
+    #[cfg(feature = "otel")]
+    let span = tracer.start_with_context("FACP", &opentelemetry::Context::current_with_span(span));
 
     // MADT
     let madt = cpu_manager.lock().unwrap().create_madt();
@@ -664,6 +682,8 @@ pub fn create_acpi_tables(
     tables.push(madt_offset.0);
     let mut prev_tbl_len = madt.len() as u64;
     let mut prev_tbl_off = madt_offset;
+    #[cfg(feature = "otel")]
+    let span = tracer.start_with_context("MADT", &opentelemetry::Context::current_with_span(span));
 
     // PPTT
     #[cfg(target_arch = "aarch64")]
@@ -677,6 +697,8 @@ pub fn create_acpi_tables(
         prev_tbl_len = pptt.len() as u64;
         prev_tbl_off = pptt_offset;
     }
+    #[cfg(all(feature = "otel", target_arch = "aarch64"))]
+    let span = tracer.start_with_context("PPTT", &opentelemetry::Context::current_with_span(span));
 
     // GTDT
     #[cfg(target_arch = "aarch64")]
@@ -690,6 +712,8 @@ pub fn create_acpi_tables(
         prev_tbl_len = gtdt.len() as u64;
         prev_tbl_off = gtdt_offset;
     }
+    #[cfg(all(feature = "otel", target_arch = "aarch64"))]
+    let span = tracer.start_with_context("GTDT", &opentelemetry::Context::current_with_span(span));
 
     // MCFG
     let mcfg = create_mcfg_table(device_manager.lock().unwrap().pci_segments());
@@ -700,6 +724,9 @@ pub fn create_acpi_tables(
     tables.push(mcfg_offset.0);
     prev_tbl_len = mcfg.len() as u64;
     prev_tbl_off = mcfg_offset;
+    #[cfg(feature = "otel")]
+    let mut span =
+        tracer.start_with_context("MCFG", &opentelemetry::Context::current_with_span(span));
 
     // SPCR and DBG2
     #[cfg(target_arch = "aarch64")]
@@ -744,6 +771,13 @@ pub fn create_acpi_tables(
         tables.push(dbg2_offset.0);
         prev_tbl_len = dbg2.len() as u64;
         prev_tbl_off = dbg2_offset;
+        #[cfg(feature = "otel")]
+        {
+            span = tracer.start_with_context(
+                "SPCR and DBG2",
+                &opentelemetry::Context::current_with_span(span),
+            );
+        }
     }
 
     if tpm_enabled {
@@ -757,6 +791,11 @@ pub fn create_acpi_tables(
 
         prev_tbl_len = tpm2.len() as u64;
         prev_tbl_off = tpm2_offset;
+        #[cfg(feature = "otel")]
+        {
+            span =
+                tracer.start_with_context("TPM2", &opentelemetry::Context::current_with_span(span));
+        }
     }
     // SRAT and SLIT
     // Only created if the NUMA nodes list is not empty.
@@ -785,6 +824,14 @@ pub fn create_acpi_tables(
 
         prev_tbl_len = slit.len() as u64;
         prev_tbl_off = slit_offset;
+
+        #[cfg(feature = "otel")]
+        {
+            span = tracer.start_with_context(
+                "SRAT and SLIT",
+                &opentelemetry::Context::current_with_span(span),
+            );
+        }
     };
 
     #[cfg(target_arch = "aarch64")]
@@ -798,6 +845,9 @@ pub fn create_acpi_tables(
         prev_tbl_len = iort.len() as u64;
         prev_tbl_off = iort_offset;
     }
+    #[cfg(all(feature = "otel", target_arch = "aarch64"))]
+    let mut span =
+        tracer.start_with_context("IORT", &opentelemetry::Context::current_with_span(span));
 
     // VIOT
     if let Some((iommu_bdf, devices_bdf)) = device_manager.lock().unwrap().iommu_attached_devices()
@@ -812,6 +862,8 @@ pub fn create_acpi_tables(
         prev_tbl_len = viot.len() as u64;
         prev_tbl_off = viot_offset;
     }
+    #[cfg(feature = "otel")]
+    let span = tracer.start_with_context("VIOT", &opentelemetry::Context::current_with_span(span));
 
     // XSDT
     let mut xsdt = Sdt::new(*b"XSDT", 36, 1, *b"CLOUDH", *b"CHXSDT  ", 1);
@@ -823,12 +875,19 @@ pub fn create_acpi_tables(
     guest_mem
         .write_slice(xsdt.as_slice(), xsdt_offset)
         .expect("Error writing XSDT table");
+    #[cfg(feature = "otel")]
+    let span = tracer.start_with_context("XSDT", &opentelemetry::Context::current_with_span(span));
 
     // RSDP
     let rsdp = Rsdp::new(*b"CLOUDH", xsdt_offset.0);
     guest_mem
         .write_slice(rsdp.as_bytes(), rsdp_offset)
         .expect("Error writing RSDP");
+    #[cfg(feature = "otel")]
+    let mut span =
+        tracer.start_with_context("RSDP", &opentelemetry::Context::current_with_span(span));
+    #[cfg(feature = "otel")]
+    span.end();
 
     info!(
         "Generated ACPI tables: took {}µs size = {}",
