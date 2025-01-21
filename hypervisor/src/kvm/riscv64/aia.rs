@@ -99,7 +99,7 @@ impl KvmAiaImsics {
         let riscv_imsic_addr_of = |cpu_index: u32| -> u64 {
             self.imsic_addr + (cpu_index * kvm_bindings::KVM_DEV_RISCV_IMSIC_SIZE) as u64
         };
-        let riscv_imsic_attr_of = |cpu_index: u32| -> u64 { cpu_index as u64 };
+        let riscv_imsic_attr_of = |cpu_index: u32| -> u64 { cpu_index as u64 + 1 };
 
         // Setting up RISC-V IMSICs
         for cpu_index in 0..self.vcpu_count {
