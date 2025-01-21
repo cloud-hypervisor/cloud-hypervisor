@@ -268,6 +268,7 @@ mod tests {
     fn test_create_aia() {
         let hv = crate::new().unwrap();
         let vm = hv.create_vm().unwrap();
+        let _vcpu = vm.create_vcpu(0, None).unwrap();
 
         assert!(KvmAiaImsics::new(&*vm, create_test_vaia_config()).is_ok());
     }
