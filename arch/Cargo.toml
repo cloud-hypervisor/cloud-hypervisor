@@ -19,7 +19,7 @@ linux-loader = { workspace = true, features = ["bzimage", "elf", "pe"] }
 log = "0.4.22"
 serde = { version = "1.0.208", features = ["derive", "rc"] }
 thiserror = "2.0.6"
-uuid = "1.8.0"
+uuid = "1.12.1"
 vm-memory = { workspace = true, features = ["backend-bitmap", "backend-mmap"] }
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = { workspace = true, features = ["with-serde"] }
