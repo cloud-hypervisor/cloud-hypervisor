@@ -132,7 +132,7 @@ fn create_cpu_nodes(fdt: &mut FdtWriter, num_cpus: u32) -> FdtWriterResult<()> {
         let intc_node = fdt.begin_node("interrupt-controller")?;
         fdt.property_string("compatible", "riscv,cpu-intc")?;
         fdt.property_u32("#interrupt-cells", 1u32)?;
-        fdt.property_null("#interrupt-controller")?;
+        fdt.property_null("interrupt-controller")?;
         fdt.property_u32("phandle", CPU_INTC_BASE_PHANDLE + cpu_index)?;
         fdt.end_node(intc_node)?;
 
