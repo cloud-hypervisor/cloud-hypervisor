@@ -1257,6 +1257,31 @@ impl cpu::Vcpu for MshvVcpu {
         unimplemented!()
     }
 
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_finalize(&self, _feature: i32) -> cpu::Result<()> {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_get_finalized_features(&self) -> i32 {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_set_processor_features(
+        &self,
+        _vm: &Arc<dyn crate::Vm>,
+        _kvi: &mut crate::VcpuInit,
+        _id: u8,
+    ) -> cpu::Result<()> {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn create_vcpu_init(&self) -> crate::VcpuInit {
+        unimplemented!();
+    }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// X86 specific call to setup the CPUID registers.
