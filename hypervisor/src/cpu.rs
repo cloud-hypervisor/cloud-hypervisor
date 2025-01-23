@@ -10,6 +10,9 @@
 //
 //
 
+#[cfg(target_arch = "aarch64")]
+use std::sync::Arc;
+
 use thiserror::Error;
 #[cfg(not(target_arch = "riscv64"))]
 use vm_memory::GuestAddress;
@@ -449,7 +452,26 @@ pub trait Vcpu: Send + Sync {
 
     #[cfg(target_arch = "aarch64")]
     fn vcpu_finalize(&self, feature: i32) -> Result<()>;
-
+    ///
+    /// Gets the features that have been finalized for a given CPU.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_get_finalized_features(&self) -> i32;
+    ///
+    /// Sets processor features for a given CPU.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_set_processor_features(
+        &self,
+        vm: &Arc<dyn crate::Vm>,
+        kvi: &mut VcpuInit,
+        id: u8,
+    ) -> Result<()>;
+    ///
+    /// Returns VcpuInit with default value set
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn create_vcpu_init(&self) -> VcpuInit;
     ///
     /// Gets a list of the guest registers that are supported for the
     /// KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.

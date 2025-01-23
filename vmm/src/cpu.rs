@@ -44,10 +44,6 @@ use hypervisor::arch::x86::CpuIdEntry;
 use hypervisor::arch::x86::MsrEntry;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use hypervisor::arch::x86::SpecialRegisters;
-#[cfg(target_arch = "aarch64")]
-use hypervisor::kvm::kvm_bindings;
-#[cfg(all(target_arch = "aarch64", feature = "kvm"))]
-use hypervisor::kvm::kvm_ioctls::Cap;
 #[cfg(feature = "tdx")]
 use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(target_arch = "x86_64")]
@@ -137,6 +133,10 @@ pub enum Error {
     #[cfg(target_arch = "aarch64")]
     #[error("Error fetching preferred target: {0}")]
     VcpuArmPreferredTarget(#[source] hypervisor::HypervisorVmError),
+
+    #[cfg(target_arch = "aarch64")]
+    #[error("Error setting vCPU processor features: {0}")]
+    VcpuSetProcessorFeatures(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(target_arch = "aarch64")]
     #[error("Error initialising vCPU: {0}")]
@@ -422,44 +422,25 @@ impl Vcpu {
     #[cfg(target_arch = "aarch64")]
     pub fn init(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         use std::arch::is_aarch64_feature_detected;
-        let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
         #[allow(clippy::nonminimal_bool)]
         let sve_supported =
             is_aarch64_feature_detected!("sve") || is_aarch64_feature_detected!("sve2");
+        let mut kvi = self.vcpu.create_vcpu_init();
+
         // This reads back the kernel's preferred target type.
-        vm.get_preferred_target(&mut kvi.into())
+        vm.get_preferred_target(&mut kvi)
             .map_err(Error::VcpuArmPreferredTarget)?;
-        // We already checked that the capability is supported.
-        kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
-        if vm
-            .as_any()
-            .downcast_ref::<hypervisor::kvm::KvmVm>()
-            .unwrap()
-            .check_extension(Cap::ArmPmuV3)
-        {
-            kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PMU_V3;
-        }
 
-        if sve_supported
-            && vm
-                .as_any()
-                .downcast_ref::<hypervisor::kvm::KvmVm>()
-                .unwrap()
-                .check_extension(Cap::ArmSve)
-        {
-            kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_SVE;
-        }
-
-        // Non-boot cpus are powered off initially.
-        if self.id > 0 {
-            kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_POWER_OFF;
-        }
         self.vcpu
-            .vcpu_init(&kvi.into())
-            .map_err(Error::VcpuArmInit)?;
+            .vcpu_set_processor_features(vm, &mut kvi, self.id)
+            .map_err(Error::VcpuSetProcessorFeatures)?;
+
+        self.vcpu.vcpu_init(&kvi).map_err(Error::VcpuArmInit)?;
+
         if sve_supported {
+            let finalized_features = self.vcpu.vcpu_get_finalized_features();
             self.vcpu
-                .vcpu_finalize(kvm_bindings::KVM_ARM_VCPU_SVE as i32)
+                .vcpu_finalize(finalized_features)
                 .map_err(Error::VcpuArmFinalize)?;
         }
         Ok(())
@@ -2952,8 +2933,7 @@ mod tests {
     use arch::layout;
     use hypervisor::kvm::aarch64::is_system_register;
     use hypervisor::kvm::kvm_bindings::{
-        kvm_vcpu_init, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM_CORE,
-        KVM_REG_SIZE_U64,
+        user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
     };
     use hypervisor::{arm64_core_reg_id, offset_of};
 
@@ -2966,9 +2946,9 @@ mod tests {
         // Must fail when vcpu is not initialized yet.
         vcpu.setup_regs(0, 0x0, layout::FDT_START.0).unwrap_err();
 
-        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
-        vm.get_preferred_target(&mut kvi.into()).unwrap();
-        vcpu.vcpu_init(&kvi.into()).unwrap();
+        let mut kvi = vcpu.create_vcpu_init();
+        vm.get_preferred_target(&mut kvi).unwrap();
+        vcpu.vcpu_init(&kvi).unwrap();
 
         vcpu.setup_regs(0, 0x0, layout::FDT_START.0).unwrap();
     }
@@ -2978,13 +2958,13 @@ mod tests {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
-        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
-        vm.get_preferred_target(&mut kvi.into()).unwrap();
+        let mut kvi = vcpu.create_vcpu_init();
+        vm.get_preferred_target(&mut kvi).unwrap();
 
         // Must fail when vcpu is not initialized yet.
         vcpu.get_sys_reg(regs::MPIDR_EL1).unwrap_err();
 
-        vcpu.vcpu_init(&kvi.into()).unwrap();
+        vcpu.vcpu_init(&kvi).unwrap();
         assert_eq!(vcpu.get_sys_reg(regs::MPIDR_EL1).unwrap(), 0x80000000);
     }
 
@@ -3002,8 +2982,8 @@ mod tests {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
-        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
-        vm.get_preferred_target(&mut kvi.into()).unwrap();
+        let mut kvi = vcpu.create_vcpu_init();
+        vm.get_preferred_target(&mut kvi).unwrap();
 
         // Must fail when vcpu is not initialized yet.
         assert_eq!(
@@ -3017,7 +2997,7 @@ mod tests {
             "Failed to set aarch64 core register: Exec format error (os error 8)"
         );
 
-        vcpu.vcpu_init(&kvi.into()).unwrap();
+        vcpu.vcpu_init(&kvi).unwrap();
         state = vcpu.get_regs().unwrap();
         assert_eq!(state.get_pstate(), 0x3C5);
 
@@ -3029,8 +3009,8 @@ mod tests {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
-        let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
-        vm.get_preferred_target(&mut kvi.into()).unwrap();
+        let mut kvi = vcpu.create_vcpu_init();
+        vm.get_preferred_target(&mut kvi).unwrap();
 
         let state = vcpu.get_mp_state().unwrap();
         vcpu.set_mp_state(state).unwrap();

@@ -2658,6 +2658,64 @@ impl cpu::Vcpu for KvmVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
+    fn vcpu_get_finalized_features(&self) -> i32 {
+        kvm_bindings::KVM_ARM_VCPU_SVE as i32
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_set_processor_features(
+        &self,
+        vm: &Arc<dyn crate::Vm>,
+        kvi: &mut crate::VcpuInit,
+        id: u8,
+    ) -> cpu::Result<()> {
+        use std::arch::is_aarch64_feature_detected;
+        #[allow(clippy::nonminimal_bool)]
+        let sve_supported =
+            is_aarch64_feature_detected!("sve") || is_aarch64_feature_detected!("sve2");
+
+        let mut kvm_kvi: kvm_bindings::kvm_vcpu_init = (*kvi).into();
+
+        // We already checked that the capability is supported.
+        kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
+        if vm
+            .as_any()
+            .downcast_ref::<crate::kvm::KvmVm>()
+            .unwrap()
+            .check_extension(Cap::ArmPmuV3)
+        {
+            kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PMU_V3;
+        }
+
+        if sve_supported
+            && vm
+                .as_any()
+                .downcast_ref::<crate::kvm::KvmVm>()
+                .unwrap()
+                .check_extension(Cap::ArmSve)
+        {
+            kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_SVE;
+        }
+
+        // Non-boot cpus are powered off initially.
+        if id > 0 {
+            kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_POWER_OFF;
+        }
+
+        *kvi = kvm_kvi.into();
+
+        Ok(())
+    }
+
+    ///
+    /// Return VcpuInit with default value set
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn create_vcpu_init(&self) -> crate::VcpuInit {
+        kvm_bindings::kvm_vcpu_init::default().into()
+    }
+
+    #[cfg(target_arch = "aarch64")]
     fn vcpu_init(&self, kvi: &crate::VcpuInit) -> cpu::Result<()> {
         let kvm_kvi: kvm_bindings::kvm_vcpu_init = (*kvi).into();
         self.fd
