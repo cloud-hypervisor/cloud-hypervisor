@@ -23,8 +23,6 @@ use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(target_arch = "aarch64")]
-use crate::aarch64::VcpuInit;
-#[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 #[cfg(target_arch = "riscv64")]
 use crate::arch::riscv64::aia::{Vaia, VaiaConfig};
@@ -351,7 +349,7 @@ pub trait Vm: Send + Sync + Any {
     fn remove_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> Result<()>;
     /// Returns the preferred CPU target type which can be emulated by KVM on underlying host.
     #[cfg(target_arch = "aarch64")]
-    fn get_preferred_target(&self, kvi: &mut VcpuInit) -> Result<()>;
+    fn get_preferred_target(&self, kvi: &mut crate::VcpuInit) -> Result<()>;
     /// Enable split Irq capability
     #[cfg(target_arch = "x86_64")]
     fn enable_split_irq(&self) -> Result<()>;

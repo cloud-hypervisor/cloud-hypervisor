@@ -427,7 +427,7 @@ impl Vcpu {
         let sve_supported =
             is_aarch64_feature_detected!("sve") || is_aarch64_feature_detected!("sve2");
         // This reads back the kernel's preferred target type.
-        vm.get_preferred_target(&mut kvi)
+        vm.get_preferred_target(&mut kvi.into())
             .map_err(Error::VcpuArmPreferredTarget)?;
         // We already checked that the capability is supported.
         kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
@@ -454,7 +454,9 @@ impl Vcpu {
         if self.id > 0 {
             kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_POWER_OFF;
         }
-        self.vcpu.vcpu_init(&kvi).map_err(Error::VcpuArmInit)?;
+        self.vcpu
+            .vcpu_init(&kvi.into())
+            .map_err(Error::VcpuArmInit)?;
         if sve_supported {
             self.vcpu
                 .vcpu_finalize(kvm_bindings::KVM_ARM_VCPU_SVE as i32)
@@ -2965,8 +2967,8 @@ mod tests {
         vcpu.setup_regs(0, 0x0, layout::FDT_START.0).unwrap_err();
 
         let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
-        vm.get_preferred_target(&mut kvi).unwrap();
-        vcpu.vcpu_init(&kvi).unwrap();
+        vm.get_preferred_target(&mut kvi.into()).unwrap();
+        vcpu.vcpu_init(&kvi.into()).unwrap();
 
         vcpu.setup_regs(0, 0x0, layout::FDT_START.0).unwrap();
     }
@@ -2977,12 +2979,12 @@ mod tests {
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
         let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
-        vm.get_preferred_target(&mut kvi).unwrap();
+        vm.get_preferred_target(&mut kvi.into()).unwrap();
 
         // Must fail when vcpu is not initialized yet.
         vcpu.get_sys_reg(regs::MPIDR_EL1).unwrap_err();
 
-        vcpu.vcpu_init(&kvi).unwrap();
+        vcpu.vcpu_init(&kvi.into()).unwrap();
         assert_eq!(vcpu.get_sys_reg(regs::MPIDR_EL1).unwrap(), 0x80000000);
     }
 
@@ -3001,7 +3003,7 @@ mod tests {
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
         let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
-        vm.get_preferred_target(&mut kvi).unwrap();
+        vm.get_preferred_target(&mut kvi.into()).unwrap();
 
         // Must fail when vcpu is not initialized yet.
         assert_eq!(
@@ -3015,7 +3017,7 @@ mod tests {
             "Failed to set aarch64 core register: Exec format error (os error 8)"
         );
 
-        vcpu.vcpu_init(&kvi).unwrap();
+        vcpu.vcpu_init(&kvi.into()).unwrap();
         state = vcpu.get_regs().unwrap();
         assert_eq!(state.get_pstate(), 0x3C5);
 
@@ -3028,7 +3030,7 @@ mod tests {
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
         let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
-        vm.get_preferred_target(&mut kvi).unwrap();
+        vm.get_preferred_target(&mut kvi.into()).unwrap();
 
         let state = vcpu.get_mp_state().unwrap();
         vcpu.set_mp_state(state).unwrap();

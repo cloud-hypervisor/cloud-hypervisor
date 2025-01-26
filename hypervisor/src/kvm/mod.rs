@@ -30,8 +30,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::aarch64::gic::KvmGicV3Its;
 #[cfg(target_arch = "aarch64")]
 pub use crate::aarch64::{
-    check_required_kvm_extensions, gic::Gicv3ItsState as GicState, is_system_register, VcpuInit,
-    VcpuKvmState,
+    check_required_kvm_extensions, gic::Gicv3ItsState as GicState, is_system_register, VcpuKvmState,
 };
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
@@ -365,6 +364,25 @@ impl From<crate::Register> for kvm_bindings::kvm_one_reg {
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
             _ => panic!("Register is not valid"),
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl From<kvm_bindings::kvm_vcpu_init> for crate::VcpuInit {
+    fn from(s: kvm_bindings::kvm_vcpu_init) -> Self {
+        crate::VcpuInit::Kvm(s)
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl From<crate::VcpuInit> for kvm_bindings::kvm_vcpu_init {
+    fn from(e: crate::VcpuInit) -> Self {
+        match e {
+            crate::VcpuInit::Kvm(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("VcpuInit is not valid"),
         }
     }
 }
@@ -789,10 +807,13 @@ impl vm::Vm for KvmVm {
     /// Returns the preferred CPU target type which can be emulated by KVM on underlying host.
     ///
     #[cfg(target_arch = "aarch64")]
-    fn get_preferred_target(&self, kvi: &mut VcpuInit) -> vm::Result<()> {
+    fn get_preferred_target(&self, kvi: &mut crate::VcpuInit) -> vm::Result<()> {
+        let mut kvm_kvi: kvm_bindings::kvm_vcpu_init = (*kvi).into();
         self.fd
-            .get_preferred_target(kvi)
-            .map_err(|e| vm::HypervisorVmError::GetPreferredTarget(e.into()))
+            .get_preferred_target(&mut kvm_kvi)
+            .map_err(|e| vm::HypervisorVmError::GetPreferredTarget(e.into()))?;
+        *kvi = kvm_kvi.into();
+        Ok(())
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -2637,11 +2658,12 @@ impl cpu::Vcpu for KvmVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn vcpu_init(&self, kvi: &VcpuInit) -> cpu::Result<()> {
+    fn vcpu_init(&self, kvi: &crate::VcpuInit) -> cpu::Result<()> {
+        let kvm_kvi: kvm_bindings::kvm_vcpu_init = (*kvi).into();
         self.fd
             .lock()
             .unwrap()
-            .vcpu_init(kvi)
+            .vcpu_init(&kvm_kvi)
             .map_err(|e| cpu::HypervisorCpuError::VcpuInit(e.into()))
     }
 

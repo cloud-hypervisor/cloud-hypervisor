@@ -14,14 +14,14 @@ use thiserror::Error;
 #[cfg(not(target_arch = "riscv64"))]
 use vm_memory::GuestAddress;
 
-#[cfg(target_arch = "aarch64")]
-use crate::aarch64::VcpuInit;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters};
 #[cfg(feature = "tdx")]
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use crate::RegList;
+#[cfg(target_arch = "aarch64")]
+use crate::VcpuInit;
 use crate::{CpuState, MpState, StandardRegisters};
 
 #[cfg(target_arch = "x86_64")]
