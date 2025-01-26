@@ -10,7 +10,6 @@
 
 pub mod gic;
 
-pub use kvm_bindings::kvm_vcpu_init as VcpuInit;
 use kvm_bindings::{
     kvm_mp_state, kvm_one_reg, kvm_regs, KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE,
     KVM_REG_SIZE_MASK, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
