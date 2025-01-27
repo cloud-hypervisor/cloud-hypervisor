@@ -2,8 +2,8 @@
 
 The target audience of this document is both:
 
-* Developers who want to understand what log level to use and when,
-* Users who want to debug issues with running their workloads in Cloud Hypervisor
+- Developers who want to understand what log level to use and when,
+- Users who want to debug issues with running their workloads in Cloud Hypervisor
 
 ## Control
 
@@ -28,7 +28,6 @@ A serious problem has occurred but the execution of the VM can continue although
 A typical example of where this level of message should be generated is during an API call request that cannot be fulfilled.
 
 The user should investigate the meaning of this warning and take steps to ensure the correct functionality.
-
 
 ### `info!()`
 
