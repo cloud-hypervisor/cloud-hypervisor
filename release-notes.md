@@ -2735,7 +2735,7 @@ a VM using passthrough (VFIO) devices. Issues with SMP have also been observed
 
 Included in this release is experimental support for running on ARM64.
 Currently only `virtio-mmio` devices and a serial port are supported. Full
-details can be found in the [ARM64 documentation](docs/arm64.md).
+details can be found in the [ARM64 documentation](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/8ab15b9a984a448006f97b1211498c1bb583de3b/docs/arm64.md).
 
 ### Support for Using 5-level Paging in Guests
 
