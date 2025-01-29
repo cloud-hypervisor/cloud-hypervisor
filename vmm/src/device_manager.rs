@@ -1708,7 +1708,9 @@ impl DeviceManager {
             let mem_below_4g = std::cmp::min(arch::layout::MEM_32BIT_RESERVED_START.0, mem_size);
             let mem_above_4g = mem_size.saturating_sub(arch::layout::RAM_64BIT_START.0);
 
-            let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new()));
+            let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new(
+                self.memory_manager.lock().as_ref().unwrap().guest_memory(),
+            )));
 
             self.bus_devices
                 .push(Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>);

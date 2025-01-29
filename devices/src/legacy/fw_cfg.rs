@@ -28,13 +28,16 @@ use bitfield::bitfield;
 use linux_loader::bootparam::boot_params;
 use std::{
     fs::File,
-    io::Result,
+    io::{ErrorKind, Read, Result, Seek, SeekFrom},
     mem::{size_of, size_of_val},
     os::unix::fs::FileExt,
     sync::{Arc, Barrier},
 };
 use vm_device::BusDevice;
-use vm_memory::{ByteValued, GuestAddress};
+use vm_memory::{
+    bitmap::AtomicBitmap, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
+    GuestMemoryMmap,
+};
 use vmm_sys_util::sock_ctrl_msg::IntoIovec;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 
@@ -74,6 +77,34 @@ pub enum FwCfgContent {
     U32(u32),
 }
 
+struct FwCfgContentAccess<'a> {
+    content: &'a FwCfgContent,
+    offset: u32,
+}
+
+impl Read for FwCfgContentAccess<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
+        match self.content {
+            FwCfgContent::File(offset, f) => {
+                Seek::seek(&mut (&*f), SeekFrom::Start(offset + self.offset as u64))?;
+                Read::read(&mut (&*f), buf)
+            }
+            FwCfgContent::Bytes(b) => match b.get(self.offset as usize..) {
+                Some(mut s) => s.read(buf),
+                None => Err(ErrorKind::UnexpectedEof)?,
+            },
+            FwCfgContent::Slice(b) => match b.get(self.offset as usize..) {
+                Some(mut s) => s.read(buf),
+                None => Err(ErrorKind::UnexpectedEof)?,
+            },
+            FwCfgContent::U32(n) => match n.to_le_bytes().get(self.offset as usize..) {
+                Some(mut s) => s.read(buf),
+                None => Err(ErrorKind::UnexpectedEof)?,
+            },
+        }
+    }
+}
+
 impl Default for FwCfgContent {
     fn default() -> Self {
         FwCfgContent::Slice(&[])
@@ -90,6 +121,12 @@ impl FwCfgContent {
         };
         u32::try_from(ret).map_err(|_| std::io::ErrorKind::InvalidInput.into())
     }
+    fn access(&self, offset: u32) -> FwCfgContentAccess {
+        FwCfgContentAccess {
+            content: self,
+            offset,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -99,12 +136,21 @@ pub struct FwCfgItem {
 }
 
 /// https://www.qemu.org/docs/master/specs/fw_cfg.html
-#[derive(Default)]
 pub struct FwCfg {
     selector: u16,
     data_offset: u32,
+    dma_address: u64,
     items: Vec<FwCfgItem>,                           // 0x20 and above
     known_items: [FwCfgContent; FW_CFG_KNOWN_ITEMS], // 0x0 to 0x19
+    memory: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>>,
+}
+
+#[repr(C)]
+#[derive(Debug, AsBytes, FromBytes, FromZeroes)]
+struct FwCfgDmaAccess {
+    control_be: u32,
+    length_be: u32,
+    address_be: u64,
 }
 
 bitfield! {
@@ -152,7 +198,7 @@ struct FwCfgFile {
 }
 
 impl FwCfg {
-    pub fn new() -> FwCfg {
+    pub fn new(memory: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>>) -> FwCfg {
         const DEFAULT_ITEM: FwCfgContent = FwCfgContent::Slice(&[]);
         let mut known_items = [DEFAULT_ITEM; FW_CFG_KNOWN_ITEMS];
         known_items[FW_CFG_SIGNATURE as usize] = FwCfgContent::Slice(&FW_CFG_DMA_SIGNATURE);
@@ -163,8 +209,10 @@ impl FwCfg {
         FwCfg {
             selector: 0,
             data_offset: 0,
+            dma_address: 0,
             items: vec![],
             known_items,
+            memory,
         }
     }
 
@@ -246,6 +294,91 @@ impl FwCfg {
         self.items.push(item);
         self.update_count();
         Ok(())
+    }
+
+    fn dma_read_content(
+        &self,
+        content: &FwCfgContent,
+        offset: u32,
+        len: u32,
+        address: u64,
+    ) -> Result<u32> {
+        let content_size = content.size()?.saturating_sub(offset);
+        let op_size = std::cmp::min(content_size, len);
+        let mut access = content.access(offset);
+        let mut buf = vec![0u8; op_size as usize];
+        access.read_exact(buf.as_bytes_mut())?;
+        let r = self
+            .memory
+            .memory()
+            .write(buf.as_bytes(), GuestAddress(address));
+        match r {
+            Err(e) => {
+                log::error!("fw_cfg: dma read error: {e:x?}");
+                Err(ErrorKind::InvalidInput.into())
+            }
+            Ok(size) => Ok(size as u32),
+        }
+    }
+
+    fn dma_read(&mut self, selector: u16, len: u32, address: u64) -> Result<()> {
+        let op_size = if let Some(content) = self.known_items.get(selector as usize) {
+            self.dma_read_content(content, self.data_offset, len, address)
+        } else if let Some(item) = self.items.get((selector - FW_CFG_FILE_FIRST) as usize) {
+            self.dma_read_content(&item.content, self.data_offset, len, address)
+        } else {
+            log::error!("fw_cfg: selector {selector:#x} does not exist.");
+            Err(ErrorKind::NotFound.into())
+        }?;
+        self.data_offset += op_size;
+        Ok(())
+    }
+
+    fn dma_write(&self, _selector: u16, _len: u32, _address: u64) -> Result<()> {
+        unimplemented!()
+    }
+
+    fn do_dma(&mut self) {
+        let dma_address = self.dma_address;
+        let mut access = FwCfgDmaAccess::new_zeroed();
+        let dma_access = match self
+            .memory
+            .memory()
+            .read(access.as_bytes_mut(), GuestAddress(dma_address))
+        {
+            Ok(_) => access,
+            Err(e) => {
+                log::error!("fw_cfg: invalid address of dma access {dma_address:#x}: {e:?}");
+                return;
+            }
+        };
+        let control = AccessControl(u32::from_be(dma_access.control_be));
+        if control.select() {
+            self.selector = control.select() as u16;
+        }
+        let len = u32::from_be(dma_access.length_be);
+        let addr = u64::from_be(dma_access.address_be);
+        let ret = if control.read() {
+            self.dma_read(self.selector, len, addr)
+        } else if control.write() {
+            self.dma_write(self.selector, len, addr)
+        } else if control.skip() {
+            self.data_offset += len;
+            Ok(())
+        } else {
+            Err(ErrorKind::InvalidData.into())
+        };
+        let mut access_resp = AccessControl(0);
+        if let Err(e) = ret {
+            log::error!("fw_cfg: dma operation {dma_access:x?}: {e:x?}");
+            access_resp.set_error(true);
+        }
+        if let Err(e) = self.memory.memory().write(
+            &access_resp.0.to_be_bytes(),
+            GuestAddress(dma_address + core::mem::offset_of!(FwCfgDmaAccess, control_be) as u64),
+        ) {
+            log::error!("fw_cfg: finishing dma: {e:?}")
+        }
     }
 
     pub fn add_kernel_data(&mut self, file: File) -> Result<()> {
@@ -333,10 +466,14 @@ impl BusDevice for FwCfg {
             }
             (PORT_FW_CFG_DATA, 1) => data[0] = self.read_data(),
             (PORT_FW_CFG_DMA_HI, 4) => {
-                unimplemented!()
+                let addr = self.dma_address;
+                let addr_hi = (addr >> 32) as u32;
+                data.copy_from_slice(&addr_hi.to_be_bytes());
             }
             (PORT_FW_CFG_DMA_LO, 4) => {
-                unimplemented!()
+                let addr = self.dma_address;
+                let addr_lo = (addr & 0xffff_ffff) as u32;
+                data.copy_from_slice(&addr_lo.to_be_bytes());
             }
             _ => {
                 log::error!("fw_cfg: read unknown port {port:#x} with size {size}.");
@@ -349,15 +486,27 @@ impl BusDevice for FwCfg {
         let size = data.size();
         match (port, size) {
             (PORT_FW_CFG_SELECTOR, 2) => {
-                self.selector = data[0] as u16;
+                let mut buf = [0u8; 2];
+                buf[..size].copy_from_slice(&data[..size]);
+                let val = u16::from_le_bytes(buf);
+                self.selector = val;
                 self.data_offset = 0;
             }
             (PORT_FW_CFG_DATA, 1) => log::error!("fw_cfg: data register is read-only."),
             (PORT_FW_CFG_DMA_HI, 4) => {
-                unimplemented!()
+                let mut buf = [0u8; 4];
+                buf[..size].copy_from_slice(&data[..size]);
+                let val = u32::from_be_bytes(buf);
+                self.dma_address &= 0xffff_ffff;
+                self.dma_address |= (val as u64) << 32;
             }
             (PORT_FW_CFG_DMA_LO, 4) => {
-                unimplemented!()
+                let mut buf = [0u8; 4];
+                buf[..size].copy_from_slice(&data[..size]);
+                let val = u32::from_be_bytes(buf);
+                self.dma_address &= !0xffff_ffff;
+                self.dma_address |= val as u64;
+                self.do_dma();
             }
             _ => log::error!(
                 "fw_cfg: write 0x{offset:0width$x} to unknown port {port:#x}.",
