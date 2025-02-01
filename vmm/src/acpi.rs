@@ -16,7 +16,7 @@ use arch::aarch64::DeviceInfoForFdt;
 use arch::DeviceType;
 use arch::NumaNodes;
 use bitflags::bitflags;
-#[cfg(feature = "sev_snp")]
+#[cfg(feature = "fw_cfg")]
 use devices::acpi::AcpiTable;
 use devices::acpi::{OEM_ID, OEM_REVISION, OEM_TABLE_ID};
 use pci::PciBdf;
@@ -837,7 +837,7 @@ pub fn create_acpi_tables(
         .expect("Error writing XSDT table");
 
     // RSDP
-    let rsdp = Rsdp::new(*b"CLOUDH", xsdt_offset.0);
+    let rsdp = Rsdp::new(OEM_ID, xsdt_offset.0);
     guest_mem
         .write_slice(rsdp.as_bytes(), rsdp_offset)
         .expect("Error writing RSDP");
@@ -851,7 +851,7 @@ pub fn create_acpi_tables(
 }
 
 #[cfg(feature = "sev_snp")]
-pub fn create_acpi_tables_sev_snp(
+pub fn create_acpi_tables_for_fw_cfg(
     device_manager: &Arc<Mutex<DeviceManager>>,
     cpu_manager: &Arc<Mutex<CpuManager>>,
     memory_manager: &Arc<Mutex<MemoryManager>>,

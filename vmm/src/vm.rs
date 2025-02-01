@@ -38,7 +38,7 @@ use devices::AcpiNotificationFlags;
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
-#[cfg(all(feature = "kvm", feature = "sev_snp"))]
+#[cfg(feature = "sev_snp")]
 use hypervisor::kvm::{
     KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE, KVM_X86_SNP_VM, STAGE0_SIZE, STAGE0_START_ADDRESS,
 };
@@ -672,7 +672,7 @@ impl Vm {
             .create_devices(console_info, console_resize_pipe, original_termios)
             .map_err(Error::DeviceManager)?;
 
-        #[cfg(all(feature = "sev_snp", feature = "kvm"))]
+        #[cfg(feature = "fw_cfg")]
         {
             let _ = device_manager
                 .lock()
@@ -1118,7 +1118,7 @@ impl Vm {
         Ok(EntryPoint { entry_addr })
     }
 
-    #[cfg(all(feature = "sev_snp", feature = "kvm"))]
+    #[cfg(feature = "fw_cfg")]
     fn reserve_region_for_stage0(memory_manager: &Arc<Mutex<MemoryManager>>) -> Result<()> {
         let mut memory_manager = memory_manager.lock().unwrap();
         // Region for loading Stage 0;
@@ -1139,7 +1139,7 @@ impl Vm {
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
     ) -> Result<EntryPoint> {
-        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
+        #[cfg(feature = "fw_cfg")]
         Self::reserve_region_for_stage0(&memory_manager)?;
 
         let res = igvm_loader::load_igvm(
@@ -1229,19 +1229,20 @@ impl Vm {
         payload: &PayloadConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
         #[cfg(feature = "igvm")] cpu_manager: Arc<Mutex<cpu::CpuManager>>,
-        #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
+        #[cfg(feature = "sev_snp")] _sev_snp_enabled: bool,
     ) -> Result<EntryPoint> {
         trace_scoped!("load_payload");
         #[cfg(feature = "igvm")]
         {
             if let Some(_igvm_file) = &payload.igvm {
                 let igvm = File::open(_igvm_file).map_err(Error::IgvmFile)?;
-                #[cfg(feature = "sev_snp")]
-                if sev_snp_enabled {
-                    return Self::load_igvm(igvm, memory_manager, cpu_manager, &payload.host_data);
-                }
-                #[cfg(not(feature = "sev_snp"))]
-                return Self::load_igvm(igvm, memory_manager, cpu_manager);
+                return Self::load_igvm(
+                    igvm,
+                    memory_manager,
+                    cpu_manager,
+                    #[cfg(feature = "sev_snp")]
+                    &payload.host_data,
+                );
             }
         }
         match (
@@ -2152,17 +2153,16 @@ impl Vm {
         if self.config.lock().unwrap().is_tdx_enabled() {
             return None;
         }
-        #[cfg(feature = "sev_snp")]
-        if self.config.lock().unwrap().is_sev_snp_enabled() {
-            let rsdp_addr = crate::acpi::create_acpi_tables_sev_snp(
+        let mem = self.memory_manager.lock().unwrap().guest_memory().memory();
+        let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
+        #[cfg(feature = "fw_cfg")]
+        {
+            let _ = crate::acpi::create_acpi_tables_for_fw_cfg(
                 &self.device_manager,
                 &self.cpu_manager,
                 &self.memory_manager,
             );
-            return Some(rsdp_addr);
         }
-        let mem = self.memory_manager.lock().unwrap().guest_memory().memory();
-        let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
         let rsdp_addr = crate::acpi::create_acpi_tables(
             &mem,
             &self.device_manager,

@@ -825,6 +825,7 @@ pub fn generate_common_cpuid(
     Ok(cpuid)
 }
 
+#[allow(unused_variables)]
 pub fn configure_vcpu(
     vcpu: &Arc<dyn hypervisor::Vcpu>,
     id: u8,

@@ -23,6 +23,7 @@ pvmemcontrol = ["devices/pvmemcontrol"]
 sev_snp = ["arch/sev_snp", "hypervisor/sev_snp", "virtio-devices/sev_snp", "igvm_defs"]
 tdx = ["arch/tdx", "hypervisor/tdx"]
 tracing = ["tracer/tracing"]
+fw_cfg = []
 
 [dependencies]
 acpi_tables = { workspace = true }

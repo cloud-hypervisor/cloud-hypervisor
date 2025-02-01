@@ -12,9 +12,7 @@ use igvm::snp_defs::SevVmsa;
 use igvm::{
     IgvmDirectiveHeader, IgvmFile, IgvmInitializationHeader, IgvmPlatformHeader, IsolationType,
 };
-use igvm_defs::{
-    IgvmPageDataType, IgvmPlatformType, IGVM_VHS_PARAMETER, IGVM_VHS_PARAMETER_INSERT,
-};
+use igvm_defs::{IgvmPageDataType, IGVM_VHS_PARAMETER, IGVM_VHS_PARAMETER_INSERT};
 #[cfg(feature = "sev_snp")]
 use igvm_defs::{MemoryMapEntryType, IGVM_VHS_MEMORY_MAP_ENTRY};
 #[cfg(feature = "mshv")]
@@ -39,7 +37,7 @@ use crate::GuestMemoryMmap;
 use crate::HV_PAGE_SIZE;
 
 cfg_if::cfg_if! {
-    if #[cfg(all(feature = "mshv", feature = "sev_snp"))] {
+    if #[cfg(feature = "mshv")] {
 #[derive(Debug)]
 #[repr(u32)]
 enum IsolatedPageType {
@@ -51,7 +49,7 @@ enum IsolatedPageType {
 }
 const ISOLATED_PAGE_SIZE_4KB: u32 = mshv_bindings::hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB;
 const ISOLATED_PAGE_SHIFT: u32 = mshv_bindings::HV_HYP_PAGE_SHIFT;
-    } else if #[cfg(all(feature = "kvm", feature = "sev_snp"))] {
+    } else if #[cfg(feature = "kvm")] {
         #[derive(Debug)]
         // https://tinyurl.com/sev-snp-page-types
 #[repr(u32)]
@@ -253,11 +251,9 @@ pub fn load_igvm(
     let igvm_file = IgvmFile::new_from_binary(&file_contents, Some(IsolationType::Snp))
         .map_err(Error::InvalidIgvmFile)?;
 
+    let sev_snp_enabled = cpu_manager.lock().unwrap().sev_snp_enabled();
     let mask = match &igvm_file.platforms()[0] {
-        IgvmPlatformHeader::SupportedPlatform(info) => {
-            debug_assert!(info.platform_type == IgvmPlatformType::SEV_SNP);
-            info.compatibility_mask
-        }
+        IgvmPlatformHeader::SupportedPlatform(info) => info.compatibility_mask,
     };
 
     let mut loader = Loader::new(memory);
@@ -414,15 +410,13 @@ pub fn load_igvm(
                 todo!("unsupported IgvmPageDataType");
             }
             IgvmDirectiveHeader::MemoryMap(_info) => {
-                #[cfg(feature = "sev_snp")]
-                {
+                if sev_snp_enabled {
                     let guest_mem = memory_manager.lock().unwrap().boot_guest_memory();
                     let memory_map = generate_memory_map(&guest_mem)?;
                     import_parameter(&mut parameter_areas, _info, memory_map.as_bytes())?;
+                } else {
+                    todo!("Not implemented");
                 }
-
-                #[cfg(not(feature = "sev_snp"))]
-                todo!("Not implemented");
             }
             IgvmDirectiveHeader::CommandLine(info) => {
                 import_parameter(&mut parameter_areas, info, command_line.as_bytes_with_nul())?;
@@ -562,8 +556,7 @@ pub fn load_igvm(
         }
     }
 
-    #[cfg(feature = "sev_snp")]
-    {
+    if sev_snp_enabled {
         use std::time::Instant;
 
         let mut now = Instant::now();

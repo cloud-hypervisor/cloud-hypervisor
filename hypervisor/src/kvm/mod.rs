@@ -522,7 +522,7 @@ pub struct KvmVm {
     msrs: Vec<MsrEntry>,
     dirty_log_slots: Arc<RwLock<HashMap<u32, KvmDirtyLogSlot>>>,
     #[cfg(feature = "sev_snp")]
-    sev_fd: x86_64::sev::SevFd,
+    sev_fd: Option<x86_64::sev::SevFd>,
     memfd: Option<OwnedFd>,
     kvm_guest_memfd_supported: bool,
 }
@@ -586,6 +586,8 @@ impl vm::Vm for KvmVm {
     fn sev_snp_init(&self, guest_policy: igvm_defs::SnpPolicy) -> vm::Result<()> {
         info!("Calling KVM_SEV_SNP_LAUNCH_START");
         self.sev_fd
+            .as_ref()
+            .unwrap()
             .launch_start(&self.fd, guest_policy)
             .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
     }
@@ -619,6 +621,8 @@ impl vm::Vm for KvmVm {
                 })
                 .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
             self.sev_fd
+                .as_ref()
+                .unwrap()
                 .launch_update(&self.fd, *uaddr, page_size as u64, *pfn, page_type)
                 .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
         }
@@ -634,6 +638,8 @@ impl vm::Vm for KvmVm {
         id_block_enabled: u8,
     ) -> vm::Result<()> {
         self.sev_fd
+            .as_ref()
+            .unwrap()
             .launch_finish(
                 &self.fd,
                 host_data,
@@ -1389,30 +1395,36 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 
             #[cfg(feature = "sev_snp")]
             {
-                let mask = self.kvm.check_extension_int(crate::kvm::Cap::ExitHypercall);
-                let cap = kvm_bindings::kvm_enable_cap {
-                    cap: kvm_bindings::KVM_CAP_EXIT_HYPERCALL,
-                    args: [mask as _, 0, 0, 0],
-                    ..Default::default()
+                let sev_snp_enabled = vm_type == KVM_X86_SNP_VM as u64;
+                if sev_snp_enabled {
+                    let mask = self.kvm.check_extension_int(crate::kvm::Cap::ExitHypercall);
+                    let cap = kvm_bindings::kvm_enable_cap {
+                        cap: kvm_bindings::KVM_CAP_EXIT_HYPERCALL,
+                        args: [mask as _, 0, 0, 0],
+                        ..Default::default()
+                    };
+                    vm_fd
+                        .enable_cap(&cap)
+                        .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
+                    // TODO: Fix sev device path flag as setting the environment variable is not working
+                }
+                let sev_fd = if sev_snp_enabled {
+                    let sev_dev = x86_64::sev::SevFd::new(&"/dev/sev".to_string())
+                        .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilities(e.into()))?;
+                    // This ioctl initializes the sev context and must be called right after opening the sev device.
+                    info!("Calling KVM_SEV_INIT2");
+                    sev_dev
+                        .init2(&vm_fd)
+                        .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
+                    Some(sev_dev)
+                } else {
+                    None
                 };
-                vm_fd
-                    .enable_cap(&cap)
-                    .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
-                // TODO: Fix sev device path flag as setting the environment variable is not working
-                let sev_fd = x86_64::sev::SevFd::new(&"/dev/sev".to_string())
-                    .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilities(e.into()))?;
-
-                // This ioctl initializes the sev context and must be called right after opening the sev device.
-                info!("Calling KVM_SEV_INIT2");
-                sev_fd
-                    .init2(&vm_fd)
-                    .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
 
                 Ok(Arc::new(KvmVm {
                     fd: vm_fd,
                     msrs,
                     dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
-                    #[cfg(feature = "sev_snp")]
                     sev_fd,
                     memfd,
                     kvm_guest_memfd_supported,
