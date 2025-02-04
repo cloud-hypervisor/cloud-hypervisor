@@ -29,10 +29,17 @@ mod snp_constants;
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
+// aarch64 dependencies
+#[cfg(target_arch = "aarch64")]
+pub mod aarch64;
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
+#[cfg(target_arch = "aarch64")]
+use std::sync::Mutex;
 
+#[cfg(target_arch = "aarch64")]
+pub use aarch64::VcpuMshvState;
 #[cfg(feature = "sev_snp")]
 use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
 #[cfg(feature = "sev_snp")]

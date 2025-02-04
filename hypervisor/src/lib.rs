@@ -163,7 +163,7 @@ pub enum IoEventAddress {
 pub enum CpuState {
     #[cfg(feature = "kvm")]
     Kvm(kvm::VcpuKvmState),
-    #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
+    #[cfg(feature = "mshv")]
     Mshv(mshv::VcpuMshvState),
 }
 
