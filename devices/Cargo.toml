@@ -9,10 +9,12 @@ acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main"
 anyhow = "1.0.87"
 arch = { path = "../arch" }
 bitflags = "2.6.0"
+bitfield = "0.16.1"
 byteorder = "1.5.0"
 event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.158"
+linux-loader = { version = "0.11.0", features = ["bzimage", "elf", "pe"] }
 log = "0.4.22"
 num_enum = "0.7.2"
 pci = { path = "../pci" }
@@ -28,6 +30,7 @@ vm-memory = { version = "0.14.1", features = [
 ] }
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = "0.12.1"
+zerocopy = { version = "0.7.35", features = ["alloc", "derive"] }
 
 [target.'cfg(target_arch = "aarch64")'.dependencies]
 arch = { path = "../arch" }

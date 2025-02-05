@@ -47,6 +47,7 @@ use devices::debug_console::DebugConsole;
 use devices::gic;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
+use devices::legacy::FwCfg;
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
 #[cfg(feature = "pvmemcontrol")]
@@ -962,6 +963,8 @@ pub struct DeviceManager {
     rate_limit_groups: HashMap<String, Arc<RateLimiterGroup>>,
 
     mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
+
+    fw_cfg: Option<Arc<Mutex<FwCfg>>>,
 }
 
 fn create_mmio_allocators(
@@ -1225,6 +1228,7 @@ impl DeviceManager {
             snapshot,
             rate_limit_groups,
             mmio_regions: Arc::new(Mutex::new(Vec::new())),
+            fw_cfg: None,
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -1708,6 +1712,20 @@ impl DeviceManager {
                 + 1;
             let mem_below_4g = std::cmp::min(arch::layout::MEM_32BIT_RESERVED_START.0, mem_size);
             let mem_above_4g = mem_size.saturating_sub(arch::layout::RAM_64BIT_START.0);
+
+            let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new()));
+
+            self.bus_devices
+                .push(Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>);
+
+            self.fw_cfg = Some(fw_cfg.clone());
+
+            log::info!("allocating address space for fw_cfg");
+
+            self.address_manager
+                .io_bus
+                .insert(fw_cfg, 0x510, 0x10)
+                .map_err(DeviceManagerError::BusError)?;
 
             let cmos = Arc::new(Mutex::new(devices::legacy::Cmos::new(
                 mem_below_4g,
@@ -3928,6 +3946,10 @@ impl DeviceManager {
 
     pub fn mmio_bus(&self) -> &Arc<Bus> {
         &self.address_manager.mmio_bus
+    }
+
+    pub fn fw_cfg(&self) -> Option<&Arc<Mutex<FwCfg>>> {
+        self.fw_cfg.as_ref()
     }
 
     pub fn allocator(&self) -> &Arc<Mutex<SystemAllocator>> {

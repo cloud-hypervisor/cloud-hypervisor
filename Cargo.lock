@@ -583,11 +583,13 @@ dependencies = [
  "acpi_tables",
  "anyhow",
  "arch",
+ "bitfield",
  "bitflags 2.6.0",
  "byteorder",
  "event_monitor",
  "hypervisor",
  "libc",
+ "linux-loader",
  "log",
  "num_enum",
  "pci",
@@ -599,6 +601,7 @@ dependencies = [
  "vm-memory",
  "vm-migration",
  "vmm-sys-util",
+ "zerocopy",
 ]
 
 [[package]]
