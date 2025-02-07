@@ -1190,7 +1190,7 @@ heap profiling using `dhat` gated by the `dhat-heap` feature.
 
 The documentation on Intel TDX is expanded with details of the building
 and using [TD-Shim](https://github.com/confidential-containers/td-shim),
-references to [TDX Tools](https://github.com/intel/tdx-tools), and
+references to [TDX Linux](https://github.com/intel/tdx-linux), and
 version information of guest/host kernel/TDVF/TDShim being tested. Also,
 a new 'heap profiling' documentation is added with improvements on the
 existing 'profiling' documentation.
