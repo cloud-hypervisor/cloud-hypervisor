@@ -1,7 +1,7 @@
 # I/O Throttling
 
 Cloud Hypervisor now supports I/O throttling on virtio-block and virtio-net
-devices. This support is based on the [`rate-limiter` module](https://github.com/firecracker-microvm/firecracker/tree/master/src/rate_limiter)
+devices. This support is based on the [`rate-limiter` module](https://github.com/firecracker-microvm/firecracker/tree/7a1231b141e958d15d5b2c079dd5e0880528b4b0/src/rate_limiter)
 from Firecracker. This document explains the user interface of this
 feature, and highlights some internal implementations that can help users
 better understand the expected behavior of I/O throttling in practice.
@@ -44,10 +44,12 @@ generally advisable to keep `bw/ops_refill_time` larger than `100 ms`
 expectation ("refill-rate").
 
 ## Rate Limit Groups
+
 It is possible to throttle the aggregate bandwidth or operations
 of multiple virtio-blk devices using a `rate_limit_group`. virtio-blk devices may be
 dynamically added and removed from a `rate_limit_group`. The following example
 demonstrates how to throttle the aggregate bandwidth of two disks to 10 MiB/s.
+
 ```
 --disk path=disk0.raw,rate_limit_group=group0 \
        path=disk1.raw,rate_limit_group=group0 \
