@@ -3216,7 +3216,7 @@ enabled by default.
 
 Based on the Firecracker idea of using a dedicated I/O port to measure guest
 boot times, we added support for logging guest events through the
-[0x80](https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html)
+[0x80](https://web.archive.org/web/20211028033025/https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html)
 PC debug port. This allows, among other things, for granular guest boot time
 measurements. See our [debug port documentation](docs/debug-port.md) for more
 details.
