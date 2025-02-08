@@ -13,7 +13,7 @@ License](https://opensource.org/licenses/Apache-2.0).
 
 ## Coding Style
 
-We follow the [Rust Style](https://github.com/rust-dev-tools/fmt-rfcs/blob/master/guide/guide.md)
+We follow the [Rust Style](https://github.com/rust-lang/rust/tree/HEAD/src/doc/style-guide/src)
 convention and enforce it through the Continuous Integration (CI) process calling into `rustfmt`
 for each submitted Pull Request (PR).
 
@@ -36,7 +36,7 @@ commit you make.
 
 ## Certificate of Origin
 
-In order to get a clear contribution chain of trust we use the [signed-off-by language](https://01.org/community/signed-process)
+In order to get a clear contribution chain of trust we use the [signed-off-by language](https://web.archive.org/web/20230406041855/https://01.org/community/signed-process)
 used by the Linux kernel project.
 
 ## Patch format
@@ -79,12 +79,12 @@ you want to merge your changes to `cloud-hypervisor`:
 
 1. Fork the [cloud-hypervisor](https://github.com/cloud-hypervisor/cloud-hypervisor) project
    into your github organization.
-2. Within your fork, create a branch for your contribution.
-3. [Create a pull request](https://help.github.com/articles/creating-a-pull-request-from-a-fork/)
+1. Within your fork, create a branch for your contribution.
+1. [Create a pull request](https://help.github.com/articles/creating-a-pull-request-from-a-fork/)
    against the main branch of the Cloud Hypervisor repository.
-4. To update your pull request amend existing commits whenever applicable and
+1. To update your pull request amend existing commits whenever applicable and
    then push the new changes to your pull request branch.
-5. Once the pull request is approved it can be integrated.
+1. Once the pull request is approved it can be integrated.
 
 ## Issue tracking
 
