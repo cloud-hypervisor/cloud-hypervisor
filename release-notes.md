@@ -362,9 +362,9 @@
 
 # v44.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v44.0. The following user visible changes have been made:
+This release has been tracked in [v44.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v44.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Configurable `virtio-iommu` Address Width
 
@@ -405,9 +405,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v43.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v43.0. The following user visible changes have been made:
+This release has been tracked in [v43.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v43.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Live Migration over TCP Connections
 
@@ -447,9 +447,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v42.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v42.0. The following user visible changes have been made:
+This release has been tracked in [v42.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v42.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### SVE/SVE2 Support on AArch64
 
@@ -496,9 +496,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v41.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v41.0. The following user visible changes have been made:
+This release has been tracked in [v41.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v41.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Experimental "Pvmemcontrol" Support
 
@@ -555,9 +555,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v40.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v40.0. The following user visible changes have been made:
+This release has been tracked in [v40.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v40.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Support for Restoring File Descriptor Backed Network Devices
 
@@ -606,9 +606,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v39.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v39.0. The following user visible changes have been made:
+This release has been tracked in [v39.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v39.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Variable Sizing of PCI Apertures for Segments
 
@@ -677,9 +677,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v38.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v38.0. The following user visible changes have been made:
+This release has been tracked in [v38.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v38.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Group Rate Limiter on Block Devices
 
@@ -747,9 +747,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v37.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v37.0. The following user visible changes have been made:
+This release has been tracked in [v37.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v37.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Long Term Support (LTS) Release
 
@@ -809,9 +809,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v36.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v36.0. The following user visible changes have been made:
+This release has been tracked in [v36.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v36.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Command Line Changes
 
@@ -884,9 +884,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v35.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v35.0. The following user visible changes have been made:
+This release has been tracked in [v35.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v35.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### `virtio-vsock` Support for Linux Guest Kernel v6.3+
 
@@ -937,9 +937,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v34.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v34.0. The following user visible changes have been made:
+This release has been tracked in [v34.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v34.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Paravirtualised Panic Device Support
 
@@ -997,9 +997,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v33.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v33.0. The following user visible changes have been made:
+This release has been tracked in [v33.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v33.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### D-Bus based API
 
@@ -1041,9 +1041,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v32.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v32.0. The following user visible changes have been made:
+This release has been tracked in [v32.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v32.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Increased PCI Segment Limit
 
@@ -1094,9 +1094,9 @@ This is a bug fix release. The following issues have been addressed:
 
 # v31.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v31.0. The following user visible changes have been made:
+This release has been tracked in [v31.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v31.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Update to Latest `acpi_tables`
 
@@ -1160,9 +1160,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v30.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v30.0. The following user visible changes have been made:
+This release has been tracked in [v30.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v30.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Command Line Changes for Reduced Binary Size
 
@@ -1233,9 +1233,9 @@ This is a bug fix release. The following issues have been addressed:
 
 # v29.0
 
-This release has been tracked in our [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v29.0. The following user visible changes have been made:
+This release has been tracked in [v29.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v29.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Release Binary Supports Both MSHV and KVM
 
@@ -1330,9 +1330,9 @@ addresses an infinite loop issue ([details](https://github.com/rust-vmm/linux-lo
 
 # v28.0
 
-This release has been tracked in our new [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v28.0.
+This release has been tracked in [v28.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v28.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Community Engagement (Reminder)
 
@@ -1406,9 +1406,9 @@ Many thanks to everyone who has contributed to our release:
 
 # v27.0
 
-This release has been tracked in our new [roadmap
-project](https://github.com/orgs/cloud-hypervisor/projects/6) as iteration
-v27.0.
+This release has been tracked in [v27.0
+group](https://github.com/orgs/cloud-hypervisor/projects/6/views/4?filterQuery=release%3A%22Release+v27.0%22)
+of our [roadmap project](https://github.com/orgs/cloud-hypervisor/projects/6/).
 
 ### Community Engagement
 
@@ -1497,9 +1497,6 @@ Many thanks to everyone who has contributed to our release:
 
 # v26.0
 
-This release has been tracked through the [v26.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/30).
-
 ### SMBIOS Improvements via `--platform`
 
 `--platform` and the appropriate API structure has gained support for supplying
@@ -1563,9 +1560,6 @@ Many thanks to everyone who has contributed to our release:
 
 # v25.0
 
-This release has been tracked through the [v25.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/29).
-
 ### `ch-remote` Improvements
 
 The `ch-remote` command has gained support for creating the VM from a JSON
@@ -1608,9 +1602,6 @@ Many thanks to everyone who has contributed to our release:
 * Yi Wang <wang.yi59@zte.com.cn>
 
 # v24.0
-
-This release has been tracked through the [v24.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/28).
 
 ### Bypass Mode for `virtio-iommu`
 
@@ -1697,9 +1688,6 @@ This is a bug fix release. The following issues have been addressed:
 
 # v23.0
 
-This release has been tracked through the [v23.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/27).
-
 ### vDPA Support
 
 A vDPA device has a datapath that complies with the virtio specification but
@@ -1767,9 +1755,6 @@ This is a bug fix release. The following issues have been addressed:
 * Fix `virtio-net` control queue (#3829)
 
 # v22.0
-
-This release has been tracked through the [v22.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/25).
 
 ### GDB Debug Stub Support
 
@@ -1851,9 +1836,6 @@ Many thanks to everyone who has contributed to our release:
 
 # v21.0
 
-This release has been tracked through the [v21.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/24).
-
 ### Efficient Local Live Migration (for Live Upgrade)
 
 In order to support fast live upgrade of the VMM an optimised path has been
@@ -1916,9 +1898,6 @@ This is a bug fix release. The following issues have been addressed:
 
 # v20.0
 
-This release has been tracked through the [v20.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/23).
-
 ### Multiple PCI segments support
 
 Cloud Hypervisor is no longer limited to 31 PCI devices. For both `x86_64` and
@@ -1973,9 +1952,6 @@ Many thanks to everyone who has contributed to our release:
 * Ziye Yang <ziye.yang@intel.com>
 
 # v19.0
-
-This release has been tracked through the [v19.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/22).
 
 ### Improved PTY handling for serial and `virtio-console`
 
@@ -2036,9 +2012,6 @@ Many thanks to everyone who has contributed to our release:
 * Yu Li <liyu.yukiteru@bytedance.com>
 
 # v18.0
-
-This release has been tracked through the [v18.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/21).
 
 ### Experimental User Device (`vfio-user`) support
 
@@ -2110,9 +2083,6 @@ Many thanks to everyone who has contributed to our release:
 
 # v17.0
 
-This release has been tracked through the [v17.0
-project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/20).
-
 ### ARM64 NUMA support using ACPI
 
 The support for ACPI on ARM64 has been enhanced to include support for
@@ -2168,8 +2138,6 @@ Many thanks to everyone who has contributed to our release:
 
 # v16.0
 
-This release has been tracked through the [v16.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/19).
-
 ### Improved live migration support
 
 The live migration support inside Cloud Hypervisor has been improved with the addition of the tracking of dirty pages written by the VMM to complement the tracking of dirty pages made by the guest itself. Further the internal state of the VMM now is versioned which allows the safe migration of VMs from one version of the VMM to a newer one. However further testing is required so this should be done with care. See the [live migration documentation](docs/live_migration.md) for more details.
@@ -2216,8 +2184,6 @@ Many thanks to everyone who has contributed to our release including some new fa
 * Yi Wang <wang.yi59@zte.com.cn>
 
 # v15.0
-
-This release has been tracked through the [v15.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/18).
 
 Highlights for `cloud-hypervisor` version v15.0 include:
 
@@ -2308,8 +2274,6 @@ in this release:
 
 # v0.14.0
 
-This release has been tracked through the [0.14.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/17).
-
 Highlights for `cloud-hypervisor` version 0.14.0 include:
 
 ### Structured event monitoring
@@ -2380,8 +2344,6 @@ some new faces.
 
 # v0.13.0
 
-This release has been tracked through the [0.13.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/16).
-
 Highlights for `cloud-hypervisor` version 0.13.0 include:
 
 ### Wider VFIO device support
@@ -2442,8 +2404,6 @@ some new faces.
 
 # v0.12.0
 
-This release has been tracked through the [0.12.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/15).
-
 Highlights for `cloud-hypervisor` version 0.12.0 include:
 
 ### ARM64 enhancements
@@ -2482,8 +2442,6 @@ Many thanks to everyone who has contributed to our 0.12.0 release:
 * Wei Liu <liuwe@microsoft.com>
 
 # v0.11.0
-
-This release has been tracked through the [0.11.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/14).
 
 Highlights for `cloud-hypervisor` version 0.11.0 include:
 
@@ -2585,8 +2543,6 @@ Many thanks to everyone who has contributed to our 0.11.0 release including some
 
 # v0.10.0
 
-This release has been tracked through the [0.10.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/13).
-
 Highlights for `cloud-hypervisor` version 0.10.0 include:
 
 ### `virtio-block` Support for Multiple Descriptors
@@ -2630,8 +2586,6 @@ Many thanks to everyone who has contributed to our 0.10.0 release including some
 * Wei Liu <liuwe@microsoft.com>
 
 # v0.9.0
-
-This release has been tracked through the [0.9.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/12).
 
 Highlights for `cloud-hypervisor` version 0.9.0 include:
 
@@ -2713,8 +2667,6 @@ Many thanks to everyone who has contributed to our 0.9.0 release including some 
 
 
 # v0.8.0
-
-This release has been tracked through the [0.8.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/10).
 
 Highlights for `cloud-hypervisor` version 0.8.0 include:
 
@@ -2803,8 +2755,6 @@ Many thanks to everyone who has contributed to our 0.8.0 release including some 
 * Sergio Lopez <slp@redhat.com>
 
 # v0.7.0
-
-This release has been tracked through the [0.7.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/7).
 
 Highlights for `cloud-hypervisor` version 0.7.0 include:
 
@@ -2903,8 +2853,6 @@ Many thanks to everyone who has contributed to our 0.7.0 release including some 
 
 # v0.6.0
 
-This release has been tracked through the [0.6.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/7).
-
 Highlights for `cloud-hypervisor` version 0.6.0 include:
 
 ### Directly Assigned Devices Hotplug
@@ -2981,8 +2929,6 @@ This is a bugfix release branched off v0.5.0. It contains the following fixes:
 
 # v0.5.0
 
-This release has been tracked through the [0.5.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/6).
-
 Highlights for `cloud-hypervisor` version 0.5.0 include:
 
 ### Virtual Machine Dynamic Resizing
@@ -3041,8 +2987,6 @@ Many thanks to everyone that contributed to the 0.5.0 release:
 * Yang Zhong <yang.zhong@intel.com>
 
 # v0.4.0
-
-This release has been tracked through the [0.4.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/4).
 
 Highlights for `cloud-hypervisor` version 0.4.0 include:
 
@@ -3121,8 +3065,6 @@ Many thanks to everyone that contributed to the 0.4.0 release:
 
 # v0.3.0
 
-This release has been tracked through the [0.3.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/3).
-
 Highlights for `cloud-hypervisor` version 0.3.0 include:
 
 ### Block device offloading
@@ -3190,8 +3132,6 @@ support guests with large amount of memory (more than 64GB).
 
 # v0.2.0
 
-This release has been tracked through the [0.2.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/2).
-
 Highlights for `cloud-hypervisor` version 0.2.0 include:
 
 ### Network device offloading
@@ -3243,8 +3183,6 @@ improvements, we are now able to boot Ubuntu bionic images. We added those to
 our CI pipeline.
 
 # v0.1.0
-
-This release has been tracked through the [0.1.0 project](https://github.com/cloud-hypervisor/cloud-hypervisor/projects/1).
 
 Highlights for `cloud-hypervisor` version 0.1.0 include:
 
