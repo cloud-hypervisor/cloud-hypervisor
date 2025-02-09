@@ -1,0 +1,24 @@
+[package]
+authors = ["Microsoft Authors"]
+edition = "2021"
+license = "Apache-2.0 OR BSD-3-Clause"
+name = "otel"
+version = "0.1.0"
+
+[dependencies]
+log = "0.4.20"
+opentelemetry = { version = "0.24.0", features = ["trace"] }
+opentelemetry-otlp = { version = "0.17.0", features = [
+  "http",
+  "http-proto",
+  "reqwest-blocking-client",
+  "trace",
+] }
+opentelemetry-semantic-conventions = "0.16.0"
+opentelemetry_sdk = { version = "0.24.1", default-features = false, features = [
+  "http",
+  "trace",
+] }
+
+[features]
+otel = []

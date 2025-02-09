@@ -38,7 +38,9 @@ event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
 libc = "0.2.167"
 log = { version = "0.4.22", features = ["std"] }
+opentelemetry = { version = "0.24.0", features = ["trace"] }
 option_parser = { path = "option_parser" }
+otel = { path = "otel" }
 seccompiler = { workspace = true }
 serde_json = "1.0.120"
 signal-hook = "0.3.17"
@@ -69,6 +71,7 @@ igvm = ["mshv", "vmm/igvm"]
 io_uring = ["vmm/io_uring"]
 kvm = ["vmm/kvm"]
 mshv = ["vmm/mshv"]
+otel = ["otel/otel", "vmm/otel"]
 pvmemcontrol = ["vmm/pvmemcontrol"]
 sev_snp = ["igvm", "mshv", "vmm/sev_snp"]
 tdx = ["vmm/tdx"]
@@ -85,6 +88,7 @@ members = [
   "net_gen",
   "net_util",
   "option_parser",
+  "otel",
   "pci",
   "performance-metrics",
   "rate_limiter",
