@@ -191,6 +191,25 @@ impl From<IrqRoutingEntry> for mshv_user_irq_entry {
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+impl From<mshv_bindings::MshvRegList> for crate::RegList {
+    fn from(s: mshv_bindings::MshvRegList) -> Self {
+        crate::RegList::Mshv(s)
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl From<crate::RegList> for mshv_bindings::MshvRegList {
+    fn from(e: crate::RegList) -> Self {
+        match e {
+            crate::RegList::Mshv(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("RegList is not valid"),
+        }
+    }
+}
+
 struct MshvDirtyLogSlot {
     guest_pfn: u64,
     memory_size: u64,

@@ -206,6 +206,8 @@ pub enum VcpuInit {
 pub enum RegList {
     #[cfg(all(feature = "kvm", any(target_arch = "aarch64", target_arch = "riscv64")))]
     Kvm(kvm_bindings::RegList),
+    #[cfg(all(feature = "mshv", target_arch = "aarch64"))]
+    Mshv(mshv_bindings::MshvRegList),
 }
 
 pub enum Register {
