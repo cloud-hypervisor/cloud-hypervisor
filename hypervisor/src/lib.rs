@@ -36,7 +36,7 @@ pub mod arch;
 pub mod kvm;
 
 /// Microsoft Hypervisor implementation module
-#[cfg(all(feature = "mshv", target_arch = "x86_64"))]
+#[cfg(feature = "mshv")]
 pub mod mshv;
 
 /// Hypervisor related module
@@ -148,7 +148,7 @@ pub const USER_MEMORY_REGION_ADJUSTABLE: u32 = 1 << 4;
 pub enum MpState {
     #[cfg(feature = "kvm")]
     Kvm(kvm_bindings::kvm_mp_state),
-    #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
+    #[cfg(feature = "mshv")]
     Mshv, /* MSHV does not support MpState yet */
 }
 
