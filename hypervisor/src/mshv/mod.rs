@@ -210,6 +210,25 @@ impl From<crate::RegList> for mshv_bindings::MshvRegList {
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+impl From<mshv_bindings::MshvVcpuInit> for crate::VcpuInit {
+    fn from(s: mshv_bindings::MshvVcpuInit) -> Self {
+        crate::VcpuInit::Mshv(s)
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl From<crate::VcpuInit> for mshv_bindings::MshvVcpuInit {
+    fn from(e: crate::VcpuInit) -> Self {
+        match e {
+            crate::VcpuInit::Mshv(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("VcpuInit is not valid"),
+        }
+    }
+}
+
 struct MshvDirtyLogSlot {
     guest_pfn: u64,
     memory_size: u64,

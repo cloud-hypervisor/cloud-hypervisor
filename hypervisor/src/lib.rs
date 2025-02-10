@@ -200,6 +200,8 @@ pub enum IrqRoutingEntry {
 pub enum VcpuInit {
     #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
     Kvm(kvm_bindings::kvm_vcpu_init),
+    #[cfg(all(feature = "mshv", target_arch = "aarch64"))]
+    Mshv(mshv_bindings::MshvVcpuInit),
 }
 
 #[derive(Debug, Clone, PartialEq)]
