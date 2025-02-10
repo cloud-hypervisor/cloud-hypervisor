@@ -2,3 +2,10 @@ build:rbecache --remote_cache=grpcs://remotebuildexecution.googleapis.com
 build:rbecache --remote_default_exec_properties=cache-silo-key=FirstCachedBuild
 build:rbecache --remote_instance_name=projects/kiwi-air-force-remote-build/instances/default_instance
 build:rbecache --remote_timeout=3600
+
+# Cleaner output: no cursor, slower progress bar update
+build:kokoro --curses=no
+build:kokoro --progress_report_interval=10
+build:kokoro --show_progress_rate_limit=10
+build:kokoro --show_result 100
+build:kokoro --show_timestamps

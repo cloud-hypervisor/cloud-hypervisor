@@ -43,6 +43,7 @@ args=(
   "${BAZEL_STARTUP_ARGS_ABSL}"
   test
   "${BAZEL_DIRECT_ARGS[@]}"
+  --config=kokoro
   --verbose_failures=true
   --experimental_convenience_symlinks=ignore
   --build_tag_filters=-nopresubmit

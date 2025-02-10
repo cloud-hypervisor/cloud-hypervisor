@@ -62,7 +62,7 @@ def main(argv):
   invocation_id = InjectInvocationId()
   cmd = BuildBazelCommand(argv, invocation_id)
   print('executing following commands:')
-  print(cmd)
+  print(cmd, flush=True)
   sys.exit(subprocess.call(cmd))
 
 

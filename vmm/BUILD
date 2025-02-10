@@ -58,6 +58,7 @@ rust_library(
 
 rust_test(
     name = "vmm_test",
+    size = "small",
     srcs = glob([
         "src/*.rs",
         "src/**/*.rs",
