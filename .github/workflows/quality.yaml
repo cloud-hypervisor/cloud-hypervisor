@@ -56,6 +56,20 @@ jobs:
           command: clippy
           args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
+      - name: Clippy (mshv)
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
+          command: clippy
+          args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "mshv" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+
+      - name: Clippy (mshv + kvm)
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
+          command: clippy
+          args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "mshv,kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+
       - name: Clippy (default features)
         uses: actions-rs/cargo@v1
         with:
