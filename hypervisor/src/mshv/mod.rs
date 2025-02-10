@@ -443,6 +443,23 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     fn get_guest_debug_hw_bps(&self) -> usize {
         0
     }
+
+    #[cfg(target_arch = "aarch64")]
+    ///
+    /// Retrieve AArch64 host maximum IPA size supported by MSHV.
+    ///
+    fn get_host_ipa_limit(&self) -> i32 {
+        let host_ipa = self.mshv.get_host_partition_property(
+            hv_partition_property_code_HV_PARTITION_PROPERTY_PHYSICAL_ADDRESS_WIDTH as u64,
+        );
+
+        match host_ipa {
+            Ok(ipa) => ipa,
+            Err(e) => {
+                panic!("Failed to get host IPA limit: {:?}", e);
+            }
+        }
+    }
 }
 
 #[cfg(feature = "sev_snp")]
