@@ -59,15 +59,15 @@ http_archive(
 crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate")
 crate.spec(
     package = "anyhow",
-    version = "1.0.86",
+    version = "1.0.94",
 )
 crate.spec(
     package = "arc-swap",
-    version = "1.5.0",
+    version = "1.7.1",
 )
 crate.spec(
     package = "bitflags",
-    version = "2.3.3",
+    version = "2.6.0",
 )
 crate.spec(
     package = "bitfield",
@@ -83,18 +83,12 @@ crate.spec(
 )
 crate.spec(
     features = [
-        "color",
-        "derive",
-        "env",
-        "error-context",
-        "help",
-        "std",
+        "cargo",
         "string",
-        "suggestions",
-        "usage",
+        "wrap_help",
     ],
     package = "clap",
-    version = "4.5.16",
+    version = "4.5.13",
 )
 crate.spec(
     package = "clap_derive",
@@ -102,19 +96,31 @@ crate.spec(
 )
 crate.spec(
     package = "concat-idents",
-    version = "*",
+    version = "1.1.5",
 )
 crate.spec(
     package = "crc-any",
-    version = "2.5.0",
+    version = "2.4.4",
 )
 crate.spec(
     package = "env_logger",
-    version = "*",
+    version = "0.11.3",
 )
 crate.spec(
     package = "epoll",
-    version = "4.3.1",
+    version = "4.3.3",
+)
+crate.spec(
+    package = "io-uring",
+    version = "0.6.4",
+)
+crate.spec(
+    package = "igvm",
+    version = "0.3.3",
+)
+crate.spec(
+    package = "igvm_defs",
+    version = "0.3.3",
 )
 crate.spec(
     package = "fdt",
@@ -122,20 +128,24 @@ crate.spec(
 )
 crate.spec(
     package = "flume",
-    version = "0.10.0",
+    version = "0.11.1",
 )
 crate.spec(
     package = "getrandom",
-    version = "0.2.9",
+    version = "0.3.1",
+)
+crate.spec(
+    package = "hex",
+    version = "0.4.3",
 )
 crate.spec(
     features = ["serde"],
     package = "kvm-bindings",
-    version = "0.9.1",
+    version = "0.10.0",
 )
 crate.spec(
     package = "kvm-ioctls",
-    version = "0.18.0",
+    version = "0.19.1",
 )
 crate.spec(
     package = "landlock",
@@ -143,15 +153,15 @@ crate.spec(
 )
 crate.spec(
     package = "syn",
-    version = "2",
+    version = "2.0.87",
 )
 crate.spec(
     package = "quote",
-    version = "1",
+    version = "1.0.36",
 )
 crate.spec(
     package = "libc",
-    version = "0.2.153",
+    version = "0.2.167",
 )
 crate.spec(
     features = [
@@ -160,23 +170,27 @@ crate.spec(
         "pe",
     ],
     package = "linux-loader",
-    version = "0.11.0",
+    version = "0.13.0",
 )
 crate.spec(
     package = "log",
-    version = "0.4.21",
+    version = "0.4.22",
 )
 crate.spec(
     package = "once_cell",
-    version = "1.19.0",
+    version = "1.20.2",
+)
+crate.spec(
+    package = "range_map_vec",
+    version = "0.2.0",
 )
 crate.spec(
     package = "remain",
-    version = "0.2.6",
+    version = "0.2.14",
 )
 crate.spec(
     package = "seccompiler",
-    version = "0.3.0",
+    version = "0.4.0",
 )
 crate.spec(
     features = [
@@ -188,74 +202,71 @@ crate.spec(
 )
 crate.spec(
     package = "serde_derive",
-    version = "1.0.194",
+    version = "1.0.208",
 )
 crate.spec(
     package = "serde_json",
-    version = "1.0.115",
+    version = "1.0.120",
 )
 crate.spec(
+    features = [
+        "macros",
+    ],
     package = "serde_with",
-    version = "3.0.0",
+    version = "3.9.0",
 )
 crate.spec(
     package = "signal-hook",
     version = "0.3.17",
 )
 crate.spec(
-    package = "igvm_defs",
-    version = "0.3.3",
-)
-crate.spec(
     package = "smallvec",
-    version = "1.11.0",
+    version = "1.13.2",
 )
 crate.spec(
     package = "thiserror",
-    version = "1.0.63",
+    version = "2.0.6",
 )
 crate.spec(
     features = [
-        "getrandom",
-        "rng",
-        "std",
         "v4",
     ],
     package = "uuid",
-    version = "1.4.0",
+    version = "1.12.1",
 )
 crate.spec(
+    features = ["vfio-v5_0_0"],
     package = "vfio-bindings",
     version = "0.3.1",
 )
 crate.spec(
     features = [
-        "test-utils",
         "vhost-kern",
-        "vhost-net",
-        "vhost-user",
         "vhost-user-backend",
         "vhost-user-frontend",
         "vhost-vdpa",
     ],
     package = "vhost",
-    version = "0.11.0",
+    version = "0.13.0",
 )
 crate.spec(
     package = "vhost-user-backend",
-    version = "0.15.0",
+    version = "0.17.0",
 )
 crate.spec(
+    features = [
+        "virtio-v5_0_0",
+    ],
     package = "virtio-bindings",
     version = "0.2.5",
 )
 crate.spec(
     package = "virtio-queue",
-    version = "0.12.0",
+    version = "0.14.0",
 )
 crate.spec(
     package = "vm-fdt",
-    version = "0.2.0",
+    version = "0.3.0",
 )
 crate.spec(
     features = [
@@ -265,12 +276,12 @@ crate.spec(
         "backend-bitmap",
     ],
     package = "vm-memory",
-    version = "0.14.0",
+    version = "0.16.1",
 )
 crate.spec(
     features = ["with-serde"],
     package = "vmm-sys-util",
-    version = "0.12.0",
+    version = "0.12.1",
 )
 crate.spec(
     features = [
@@ -278,7 +289,7 @@ crate.spec(
         "derive",
     ],
     package = "zerocopy",
-    version = "0.7.0",
+    version = "0.7.35",
 )
 crate.from_specs()
 use_repo(crate, "crates")
