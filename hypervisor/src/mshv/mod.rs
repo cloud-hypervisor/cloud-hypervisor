@@ -559,11 +559,9 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Returns StandardRegisters with default value set
     ///
-    #[cfg(target_arch = "x86_64")]
     fn create_standard_regs(&self) -> crate::StandardRegisters {
         mshv_bindings::StandardRegisters::default().into()
     }
-    #[cfg(target_arch = "x86_64")]
     ///
     /// Returns the vCPU general purpose registers.
     ///
@@ -575,7 +573,6 @@ impl cpu::Vcpu for MshvVcpu {
             .into())
     }
 
-    #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the vCPU general purpose registers.
     ///
@@ -1312,16 +1309,6 @@ impl cpu::Vcpu for MshvVcpu {
 
     #[cfg(target_arch = "aarch64")]
     fn vcpu_init(&self, _kvi: &crate::VcpuInit) -> cpu::Result<()> {
-        unimplemented!()
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    fn set_regs(&self, _regs: &crate::StandardRegisters) -> cpu::Result<()> {
-        unimplemented!()
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    fn get_regs(&self) -> cpu::Result<crate::StandardRegisters> {
         unimplemented!()
     }
 
