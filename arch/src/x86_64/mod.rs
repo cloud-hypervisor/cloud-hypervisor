@@ -12,21 +12,21 @@ pub mod layout;
 mod mpspec;
 mod mptable;
 pub mod regs;
-use crate::GuestMemoryMmap;
-use crate::InitramfsConfig;
-use crate::RegionType;
+use std::collections::BTreeMap;
+use std::mem;
+
 use hypervisor::arch::x86::{CpuIdEntry, CPUID_FLAG_VALID_INDEX};
 use hypervisor::{CpuVendor, HypervisorCpuError, HypervisorError};
 use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
 };
-use std::collections::BTreeMap;
-use std::mem;
 use thiserror::Error;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestMemory, GuestMemoryAtomic, GuestMemoryRegion, GuestUsize,
 };
+
+use crate::{GuestMemoryMmap, InitramfsConfig, RegionType};
 mod smbios;
 use std::arch::x86_64;
 #[cfg(feature = "tdx")]
@@ -602,7 +602,7 @@ pub fn generate_common_cpuid(
     config: &CpuidConfig,
 ) -> super::Result<Vec<CpuIdEntry>> {
     // SAFETY: cpuid called with valid leaves
-    if unsafe { x86_64::__cpuid(1) }.ecx & 1 << HYPERVISOR_ECX_BIT == 1 << HYPERVISOR_ECX_BIT {
+    if unsafe { x86_64::__cpuid(1) }.ecx & (1 << HYPERVISOR_ECX_BIT) == 1 << HYPERVISOR_ECX_BIT {
         // SAFETY: cpuid called with valid leaves
         let hypervisor_cpuid = unsafe { x86_64::__cpuid(0x4000_0000) };
 
@@ -690,7 +690,7 @@ pub fn generate_common_cpuid(
             // Clear AMX related bits if the AMX feature is not enabled
             0x7 => {
                 if !config.amx && entry.index == 0 {
-                    entry.edx &= !(1 << AMX_BF16 | 1 << AMX_TILE | 1 << AMX_INT8)
+                    entry.edx &= !((1 << AMX_BF16) | (1 << AMX_TILE) | (1 << AMX_INT8))
                 }
             }
             0xd =>
@@ -802,10 +802,10 @@ pub fn generate_common_cpuid(
         });
         cpuid.push(CpuIdEntry {
             function: 0x4000_0003,
-            eax: 1 << 1 // AccessPartitionReferenceCounter
-                   | 1 << 2 // AccessSynicRegs
-                   | 1 << 3 // AccessSyntheticTimerRegs
-                   | 1 << 9, // AccessPartitionReferenceTsc
+            eax: (1 << 1) // AccessPartitionReferenceCounter
+                   | (1 << 2) // AccessSynicRegs
+                   | (1 << 3) // AccessSyntheticTimerRegs
+                   | (1 << 9), // AccessPartitionReferenceTsc
             edx: 1 << 3, // CPU dynamic partitioning
             ..Default::default()
         });
@@ -913,6 +913,10 @@ pub fn configure_vcpu(
                 });
             };
         }
+    }
+
+    for c in &cpuid {
+        info!("{}", c);
     }
 
     vcpu.set_cpuid2(&cpuid)
@@ -1413,7 +1417,7 @@ fn update_cpuid_topology(
 
     let mut cpu_ebx = CpuidPatch::get_cpuid_reg(cpuid, 0x1, None, CpuidReg::EBX).unwrap_or(0);
     cpu_ebx |= ((dies_per_package as u32) * (cores_per_die as u32) * (threads_per_core as u32))
-        & 0xff << 16;
+        & (0xff << 16);
     CpuidPatch::set_cpuid_reg(cpuid, 0x1, None, CpuidReg::EBX, cpu_ebx);
 
     let mut cpu_edx = CpuidPatch::get_cpuid_reg(cpuid, 0x1, None, CpuidReg::EDX).unwrap_or(0);
@@ -1584,8 +1588,9 @@ fn update_cpuid_sgx(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use linux_loader::loader::bootparam::boot_e820_entry;
+
+    use super::*;
 
     #[test]
     fn regions_base_addr() {
@@ -1613,7 +1618,7 @@ mod tests {
             None,
             None,
         );
-        assert!(config_err.is_err());
+        config_err.unwrap_err();
 
         // Now assigning some memory that falls before the 32bit memory hole.
         let arch_mem_regions = arch_memory_regions();
@@ -1718,13 +1723,13 @@ mod tests {
         // Exercise the scenario where the field storing the length of the e820 entry table is
         // is bigger than the allocated memory.
         params.e820_entries = params.e820_table.len() as u8 + 1;
-        assert!(add_e820_entry(
+        add_e820_entry(
             &mut params,
             e820_table[0].addr,
             e820_table[0].size,
-            e820_table[0].type_
+            e820_table[0].type_,
         )
-        .is_err());
+        .unwrap_err();
     }
 
     #[test]

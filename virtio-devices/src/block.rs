@@ -8,44 +8,40 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::Error as DeviceError;
-use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon,
-    VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
-};
-use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
-use crate::GuestMemoryMmap;
-use crate::VirtioInterrupt;
-use anyhow::anyhow;
-use block::{
-    async_io::AsyncIo, async_io::AsyncIoError, async_io::DiskFile, build_serial, Request,
-    RequestType, VirtioBlockConfig,
-};
-use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
-use rate_limiter::TokenType;
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::collections::VecDeque;
-use std::io;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
-use std::result;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
+use std::{io, result};
+
+use anyhow::anyhow;
+use block::async_io::{AsyncIo, AsyncIoError, DiskFile};
+use block::{build_serial, Request, RequestType, VirtioBlockConfig};
+use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
+use rate_limiter::TokenType;
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
 use virtio_bindings::virtio_config::*;
-use virtio_bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
+use virtio_bindings::virtio_ring::{VIRTIO_RING_F_EVENT_IDX, VIRTIO_RING_F_INDIRECT_DESC};
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
+
+use super::{
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
+    Error as DeviceError, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
+    EPOLL_HELPER_EVENT_LAST,
+};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::{GuestMemoryMmap, VirtioInterrupt};
 
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
@@ -59,6 +55,8 @@ const RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 
 // latency scale, for reduce precision loss in calculate.
 const LATENCY_SCALE: u64 = 10000;
+
+pub const MINIMUM_BLOCK_QUEUE_SIZE: u16 = 2;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -493,8 +491,7 @@ impl EpollHelperHandler for BlockEpollHandler {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
                 })?;
 
-                let rate_limit_reached =
-                    self.rate_limiter.as_ref().map_or(false, |r| r.is_blocked());
+                let rate_limit_reached = self.rate_limiter.as_ref().is_some_and(|r| r.is_blocked());
 
                 // Process the queue only when the rate limit is not reached
                 if !rate_limit_reached {
@@ -513,8 +510,7 @@ impl EpollHelperHandler for BlockEpollHandler {
                     ))
                 })?;
 
-                let rate_limit_reached =
-                    self.rate_limiter.as_ref().map_or(false, |r| r.is_blocked());
+                let rate_limit_reached = self.rate_limiter.as_ref().is_some_and(|r| r.is_blocked());
 
                 // Process the queue only when the rate limit is not reached
                 if !rate_limit_reached {
@@ -631,8 +627,9 @@ impl Block {
                     | (1u64 << VIRTIO_BLK_F_CONFIG_WCE)
                     | (1u64 << VIRTIO_BLK_F_BLK_SIZE)
                     | (1u64 << VIRTIO_BLK_F_TOPOLOGY)
-                    | (1u64 << VIRTIO_RING_F_EVENT_IDX);
-
+                    | (1u64 << VIRTIO_BLK_F_SEG_MAX)
+                    | (1u64 << VIRTIO_RING_F_EVENT_IDX)
+                    | (1u64 << VIRTIO_RING_F_INDIRECT_DESC);
                 if iommu {
                     avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
                 }
@@ -666,6 +663,7 @@ impl Block {
                     physical_block_exp,
                     min_io_size: (topology.minimum_io_size / logical_block_size) as u16,
                     opt_io_size: (topology.optimal_io_size / logical_block_size) as u32,
+                    seg_max: (queue_size - MINIMUM_BLOCK_QUEUE_SIZE) as u32,
                     ..Default::default()
                 };
 

@@ -6,25 +6,24 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::collections::HashMap;
+use std::io::Write;
+use std::num::Wrapping;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier};
+use std::thread;
+
+use libc::EFD_NONBLOCK;
+use virtio_queue::Queue;
+use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestUsize};
+use vm_migration::{MigratableError, Pausable};
+use vm_virtio::{AccessPlatform, VirtioDeviceType};
+use vmm_sys_util::eventfd::EventFd;
+
 use crate::{
     ActivateError, ActivateResult, Error, GuestMemoryMmap, GuestRegionMmap,
     VIRTIO_F_RING_INDIRECT_DESC,
 };
-use libc::EFD_NONBLOCK;
-use std::collections::HashMap;
-use std::io::Write;
-use std::num::Wrapping;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Barrier,
-};
-use std::thread;
-use virtio_queue::Queue;
-use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestUsize};
-use vm_migration::{MigratableError, Pausable};
-use vm_virtio::AccessPlatform;
-use vm_virtio::VirtioDeviceType;
-use vmm_sys_util::eventfd::EventFd;
 
 pub enum VirtioInterruptType {
     Config,
@@ -211,7 +210,7 @@ pub struct VirtioCommon {
 
 impl VirtioCommon {
     pub fn feature_acked(&self, feature: u64) -> bool {
-        self.acked_features & 1 << feature == 1 << feature
+        self.acked_features & (1 << feature) == 1 << feature
     }
 
     pub fn ack_features(&mut self, value: u64) {

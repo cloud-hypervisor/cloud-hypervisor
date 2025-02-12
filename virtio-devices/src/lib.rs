@@ -15,8 +15,9 @@ extern crate event_monitor;
 #[macro_use]
 extern crate log;
 
-use serde::{Deserialize, Serialize};
 use std::io;
+
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[macro_use]
@@ -38,6 +39,10 @@ pub mod vhost_user;
 pub mod vsock;
 pub mod watchdog;
 
+use vm_memory::bitmap::AtomicBitmap;
+use vm_memory::{GuestAddress, GuestMemory};
+use vm_virtio::VirtioDeviceType;
+
 pub use self::balloon::Balloon;
 pub use self::block::{Block, BlockState};
 pub use self::console::{Console, ConsoleResizer, Endpoint};
@@ -56,8 +61,6 @@ pub use self::rng::Rng;
 pub use self::vdpa::{Vdpa, VdpaDmaMapping};
 pub use self::vsock::Vsock;
 pub use self::watchdog::Watchdog;
-use vm_memory::{bitmap::AtomicBitmap, GuestAddress, GuestMemory};
-use vm_virtio::VirtioDeviceType;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;

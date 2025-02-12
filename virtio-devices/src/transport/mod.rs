@@ -9,5 +9,5 @@ pub use pci_common_config::{VirtioPciCommonConfig, VIRTIO_PCI_COMMON_CONFIG_ID};
 pub use pci_device::{VirtioPciDevice, VirtioPciDeviceActivator, VirtioPciDeviceError};
 
 pub trait VirtioTransport {
-    fn ioeventfds(&self, base_addr: u64) -> Vec<(&EventFd, u64)>;
+    fn ioeventfds(&self, base_addr: u64) -> impl Iterator<Item = (&EventFd, u64)>;
 }

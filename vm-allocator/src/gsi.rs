@@ -62,7 +62,7 @@ impl GsiAllocator {
         allocator
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     /// New GSI allocator
     pub fn new() -> Self {
         GsiAllocator {
@@ -97,7 +97,7 @@ impl GsiAllocator {
         Ok(irq)
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     /// Allocate an IRQ
     pub fn allocate_irq(&mut self) -> Result<u32> {
         let irq = self.next_irq;
@@ -106,7 +106,7 @@ impl GsiAllocator {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 impl Default for GsiAllocator {
     fn default() -> Self {
         GsiAllocator::new()

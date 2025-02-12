@@ -15,6 +15,8 @@ extern crate event_monitor;
 extern crate log;
 
 pub mod acpi;
+#[cfg(target_arch = "riscv64")]
+pub mod aia;
 #[cfg(target_arch = "x86_64")]
 pub mod debug_console;
 #[cfg(target_arch = "aarch64")]
@@ -26,6 +28,8 @@ pub mod legacy;
 #[cfg(feature = "pvmemcontrol")]
 pub mod pvmemcontrol;
 pub mod pvpanic;
+// TODO: TPM is not yet supported
+#[cfg(not(target_arch = "riscv64"))]
 pub mod tpm;
 
 pub use self::acpi::{AcpiGedDevice, AcpiPmTimerDevice, AcpiShutdownDevice};

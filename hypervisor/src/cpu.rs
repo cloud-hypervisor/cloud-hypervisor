@@ -1,3 +1,5 @@
+// Copyright © 2024 Institute of Software, CAS. All rights reserved.
+//
 // Copyright © 2019 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
@@ -8,17 +10,19 @@
 //
 //
 
+use thiserror::Error;
+#[cfg(not(target_arch = "riscv64"))]
+use vm_memory::GuestAddress;
+
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::{RegList, VcpuInit};
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters};
 #[cfg(feature = "tdx")]
 use crate::kvm::{TdxExitDetails, TdxExitStatus};
-use crate::CpuState;
-use crate::MpState;
-use crate::StandardRegisters;
-use thiserror::Error;
-use vm_memory::GuestAddress;
+#[cfg(target_arch = "riscv64")]
+use crate::riscv64::RegList;
+use crate::{CpuState, MpState, StandardRegisters};
 
 #[cfg(target_arch = "x86_64")]
 #[derive(Copy, Clone, Default)]
@@ -165,12 +169,12 @@ pub enum HypervisorCpuError {
     ///
     /// Setting one reg error
     ///
-    #[error("Failed to init vcpu: {0}")]
+    #[error("Failed to set one reg: {0}")]
     SetRegister(#[source] anyhow::Error),
     ///
     /// Getting one reg error
     ///
-    #[error("Failed to init vcpu: {0}")]
+    #[error("Failed to get one reg: {0}")]
     GetRegister(#[source] anyhow::Error),
     ///
     /// Getting guest clock paused error
@@ -209,15 +213,25 @@ pub enum HypervisorCpuError {
     ///
     /// Getting AArch64 core register error
     ///
-    #[error("Failed to get core register: {0}")]
-    GetCoreRegister(#[source] anyhow::Error),
+    #[error("Failed to get aarch64 core register: {0}")]
+    GetAarchCoreRegister(#[source] anyhow::Error),
     ///
     /// Setting AArch64 core register error
     ///
-    #[error("Failed to set core register: {0}")]
-    SetCoreRegister(#[source] anyhow::Error),
+    #[error("Failed to set aarch64 core register: {0}")]
+    SetAarchCoreRegister(#[source] anyhow::Error),
     ///
-    /// Getting AArch64 registers list error
+    /// Getting RISC-V 64-bit core register error
+    ///
+    #[error("Failed to get riscv64 core register: {0}")]
+    GetRiscvCoreRegister(#[source] anyhow::Error),
+    ///
+    /// Setting RISC-V 64-bit core register error
+    ///
+    #[error("Failed to set riscv64 core register: {0}")]
+    SetRiscvCoreRegister(#[source] anyhow::Error),
+    ///
+    /// Getting registers list error
     ///
     #[error("Failed to retrieve list of registers: {0}")]
     GetRegList(#[source] anyhow::Error),
@@ -231,6 +245,16 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to set system register: {0}")]
     SetSysRegister(#[source] anyhow::Error),
+    ///
+    /// Getting RISC-V 64-bit non-core register error
+    ///
+    #[error("Failed to get non-core register: {0}")]
+    GetNonCoreRegister(#[source] anyhow::Error),
+    ///
+    /// Setting RISC-V 64-bit non-core register error
+    ///
+    #[error("Failed to set non-core register: {0}")]
+    SetNonCoreRegister(#[source] anyhow::Error),
     ///
     /// GVA translation error
     ///
@@ -417,6 +441,7 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Sets debug registers to set hardware breakpoints and/or enable single step.
     ///
+    #[cfg(not(target_arch = "riscv64"))]
     fn set_guest_debug(&self, _addrs: &[GuestAddress], _singlestep: bool) -> Result<()> {
         Err(HypervisorCpuError::SetDebugRegs(anyhow!("unimplemented")))
     }
@@ -433,7 +458,7 @@ pub trait Vcpu: Send + Sync {
     /// Gets a list of the guest registers that are supported for the
     /// KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.
     ///
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     fn get_reg_list(&self, reg_list: &mut RegList) -> Result<()>;
     ///
     /// Gets the value of a system register
@@ -441,9 +466,14 @@ pub trait Vcpu: Send + Sync {
     #[cfg(target_arch = "aarch64")]
     fn get_sys_reg(&self, sys_reg: u32) -> Result<u64>;
     ///
+    /// Gets the value of a non-core register on RISC-V 64-bit
+    ///
+    #[cfg(target_arch = "riscv64")]
+    fn get_non_core_reg(&self, non_core_reg: u32) -> Result<u64>;
+    ///
     /// Configure core registers for a given CPU.
     ///
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> Result<()>;
     ///
     /// Check if the CPU supports PMU

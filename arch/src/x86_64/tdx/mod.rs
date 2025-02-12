@@ -1,13 +1,15 @@
 // Copyright © 2021 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0
-use crate::GuestMemoryMmap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::str::FromStr;
+
 use thiserror::Error;
 use uuid::Uuid;
 use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryError};
+
+use crate::GuestMemoryMmap;
 
 #[derive(Error, Debug)]
 pub enum TdvfError {
@@ -33,7 +35,7 @@ const TABLE_FOOTER_GUID: &str = "96b582de-1fb2-45f7-baea-a366c55a082d";
 const TDVF_METADATA_OFFSET_GUID: &str = "e47a6535-984a-4798-865e-4685a7bf8ec2";
 
 // TDVF_DESCRIPTOR
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default)]
 pub struct TdvfDescriptor {
     signature: [u8; 4],
@@ -43,7 +45,7 @@ pub struct TdvfDescriptor {
 }
 
 // TDVF_SECTION
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Default, Debug)]
 pub struct TdvfSection {
     pub data_offset: u32,
@@ -207,7 +209,7 @@ enum HobType {
     EndOfHobList = 0xffff,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Copy, Clone, Default, Debug)]
 struct HobHeader {
     r#type: HobType,
@@ -215,7 +217,7 @@ struct HobHeader {
     reserved: u32,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Copy, Clone, Default, Debug)]
 struct HobHandoffInfoTable {
     header: HobHeader,
@@ -228,7 +230,7 @@ struct HobHandoffInfoTable {
     efi_end_of_hob_list: u64,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Copy, Clone, Default, Debug)]
 struct EfiGuid {
     data1: u32,
@@ -237,7 +239,7 @@ struct EfiGuid {
     data4: [u8; 8],
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Copy, Clone, Default, Debug)]
 struct HobResourceDescriptor {
     header: HobHeader,
@@ -248,7 +250,7 @@ struct HobResourceDescriptor {
     resource_length: u64,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Copy, Clone, Default, Debug)]
 struct HobGuidType {
     header: HobHeader,
@@ -264,14 +266,14 @@ pub enum PayloadImageType {
     RawVmLinux,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Copy, Clone, Default, Debug)]
 pub struct PayloadInfo {
     pub image_type: PayloadImageType,
     pub entry_point: u64,
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Copy, Clone, Default, Debug)]
 struct TdPayload {
     guid_type: HobGuidType,

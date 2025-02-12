@@ -11,46 +11,26 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::config::{
-    add_to_config, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig,
-    UserDeviceConfig, ValidationError, VdpaConfig, VmConfig, VsockConfig,
-};
-use crate::config::{NumaConfig, PayloadConfig};
-use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
+use std::collections::{BTreeMap, HashMap};
+use std::fs::{File, OpenOptions};
+use std::io::{self, Seek, SeekFrom, Write};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use crate::coredump::{
-    CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
-};
-use crate::cpu;
-use crate::device_manager::{DeviceManager, DeviceManagerError};
-use crate::device_tree::DeviceTree;
-#[cfg(feature = "guest_debug")]
-use crate::gdb::{Debuggable, DebuggableError, GdbRequestPayload, GdbResponsePayload};
-#[cfg(feature = "igvm")]
-use crate::igvm::igvm_loader;
-use crate::landlock::LandlockError;
-use crate::memory_manager::{
-    Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
-};
-#[cfg(target_arch = "x86_64")]
-use crate::migration::get_vm_snapshot;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use crate::migration::url_to_file;
-use crate::migration::{url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
-use crate::GuestMemoryMmap;
-use crate::{
-    PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, MEMORY_MANAGER_SNAPSHOT_ID,
-};
+use std::mem::size_of;
+use std::num::Wrapping;
+use std::ops::Deref;
+use std::os::unix::net::UnixStream;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::Instant;
+use std::{cmp, result, str, thread};
+
 use anyhow::anyhow;
-use arch::get_host_cpu_phys_bits;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{KVM_IDENTITY_MAP_START, KVM_TSS_START};
 #[cfg(feature = "tdx")]
 use arch::x86_64::tdx::TdvfSection;
-use arch::EntryPoint;
 #[cfg(target_arch = "aarch64")]
 use arch::PciSpaceInfo;
-use arch::{NumaNode, NumaNodes};
+use arch::{get_host_cpu_phys_bits, EntryPoint, NumaNode, NumaNodes};
 #[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller;
 use devices::AcpiNotificationFlags;
@@ -78,19 +58,6 @@ use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
 use linux_loader::loader::KernelLoader;
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
-use std::cmp;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::{self, Seek, SeekFrom, Write};
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use std::mem::size_of;
-use std::num::Wrapping;
-use std::ops::Deref;
-use std::os::unix::net::UnixStream;
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::Instant;
-use std::{result, str, thread};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::Bus;
@@ -99,13 +66,42 @@ use vm_memory::{Address, ByteValued, GuestMemoryRegion, ReadVolatile};
 use vm_memory::{
     Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, WriteVolatile,
 };
-use vm_migration::protocol::{Request, Response};
+use vm_migration::protocol::{MemoryRangeTable, Request, Response};
 use vm_migration::{
-    protocol::MemoryRangeTable, snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot,
-    Snapshottable, Transportable,
+    snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
+
+use crate::config::{add_to_config, ValidationError};
+use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use crate::coredump::{
+    CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
+};
+use crate::device_manager::{DeviceManager, DeviceManagerError};
+use crate::device_tree::DeviceTree;
+#[cfg(feature = "guest_debug")]
+use crate::gdb::{Debuggable, DebuggableError, GdbRequestPayload, GdbResponsePayload};
+#[cfg(feature = "igvm")]
+use crate::igvm::igvm_loader;
+use crate::landlock::LandlockError;
+use crate::memory_manager::{
+    Error as MemoryManagerError, MemoryManager, MemoryManagerSnapshotData,
+};
+#[cfg(target_arch = "x86_64")]
+use crate::migration::get_vm_snapshot;
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use crate::migration::url_to_file;
+use crate::migration::{url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
+use crate::vm_config::{
+    DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, NumaConfig, PayloadConfig,
+    PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
+};
+use crate::{
+    cpu, GuestMemoryMmap, PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID,
+    MEMORY_MANAGER_SNAPSHOT_ID,
+};
 
 /// Errors associated with VM management
 #[derive(Debug, Error)]
@@ -560,7 +556,6 @@ impl Vm {
         let stop_on_boot = false;
 
         let memory = memory_manager.lock().unwrap().guest_memory();
-        #[cfg(target_arch = "x86_64")]
         let io_bus = Arc::new(Bus::new());
         let mmio_bus = Arc::new(Bus::new());
 
@@ -652,7 +647,6 @@ impl Vm {
         let dynamic = true;
 
         let device_manager = DeviceManager::new(
-            #[cfg(target_arch = "x86_64")]
             io_bus,
             mmio_bus,
             vm.clone(),
@@ -925,6 +919,8 @@ impl Vm {
             tdx_enabled,
             #[cfg(feature = "sev_snp")]
             sev_snp_enabled,
+            #[cfg(feature = "sev_snp")]
+            vm_config.lock().unwrap().memory.total_size(),
         )?;
 
         let phys_bits = physical_bits(&hypervisor, vm_config.lock().unwrap().cpus.max_phys_bits);
@@ -995,6 +991,7 @@ impl Vm {
         hypervisor: &Arc<dyn hypervisor::Hypervisor>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
+        #[cfg(feature = "sev_snp")] mem_size: u64,
     ) -> Result<Arc<dyn hypervisor::Vm>> {
         hypervisor.check_required_extensions().unwrap();
 
@@ -1017,7 +1014,7 @@ impl Vm {
                 } else {
                 // value of sev_snp_enabled is mapped to SEV_SNP_ENABLED for true or SEV_SNP_DISABLED for false
                 hypervisor
-                    .create_vm_with_type(0)
+                    .create_vm_with_type_and_memory(u64::from(sev_snp_enabled), mem_size)
                     .unwrap()
                 };
             } else {
@@ -2981,43 +2978,43 @@ mod tests {
         match state {
             VmState::Created => {
                 // Check the transitions from Created
-                assert!(state.valid_transition(VmState::Created).is_err());
-                assert!(state.valid_transition(VmState::Running).is_ok());
-                assert!(state.valid_transition(VmState::Shutdown).is_ok());
-                assert!(state.valid_transition(VmState::Paused).is_ok());
-                assert!(state.valid_transition(VmState::BreakPoint).is_ok());
+                state.valid_transition(VmState::Created).unwrap_err();
+                state.valid_transition(VmState::Running).unwrap();
+                state.valid_transition(VmState::Shutdown).unwrap();
+                state.valid_transition(VmState::Paused).unwrap();
+                state.valid_transition(VmState::BreakPoint).unwrap();
             }
             VmState::Running => {
                 // Check the transitions from Running
-                assert!(state.valid_transition(VmState::Created).is_err());
-                assert!(state.valid_transition(VmState::Running).is_err());
-                assert!(state.valid_transition(VmState::Shutdown).is_ok());
-                assert!(state.valid_transition(VmState::Paused).is_ok());
-                assert!(state.valid_transition(VmState::BreakPoint).is_ok());
+                state.valid_transition(VmState::Created).unwrap_err();
+                state.valid_transition(VmState::Running).unwrap_err();
+                state.valid_transition(VmState::Shutdown).unwrap();
+                state.valid_transition(VmState::Paused).unwrap();
+                state.valid_transition(VmState::BreakPoint).unwrap();
             }
             VmState::Shutdown => {
                 // Check the transitions from Shutdown
-                assert!(state.valid_transition(VmState::Created).is_err());
-                assert!(state.valid_transition(VmState::Running).is_ok());
-                assert!(state.valid_transition(VmState::Shutdown).is_err());
-                assert!(state.valid_transition(VmState::Paused).is_err());
-                assert!(state.valid_transition(VmState::BreakPoint).is_err());
+                state.valid_transition(VmState::Created).unwrap_err();
+                state.valid_transition(VmState::Running).unwrap();
+                state.valid_transition(VmState::Shutdown).unwrap_err();
+                state.valid_transition(VmState::Paused).unwrap_err();
+                state.valid_transition(VmState::BreakPoint).unwrap_err();
             }
             VmState::Paused => {
                 // Check the transitions from Paused
-                assert!(state.valid_transition(VmState::Created).is_err());
-                assert!(state.valid_transition(VmState::Running).is_ok());
-                assert!(state.valid_transition(VmState::Shutdown).is_ok());
-                assert!(state.valid_transition(VmState::Paused).is_err());
-                assert!(state.valid_transition(VmState::BreakPoint).is_err());
+                state.valid_transition(VmState::Created).unwrap_err();
+                state.valid_transition(VmState::Running).unwrap();
+                state.valid_transition(VmState::Shutdown).unwrap();
+                state.valid_transition(VmState::Paused).unwrap_err();
+                state.valid_transition(VmState::BreakPoint).unwrap_err();
             }
             VmState::BreakPoint => {
                 // Check the transitions from Breakpoint
-                assert!(state.valid_transition(VmState::Created).is_ok());
-                assert!(state.valid_transition(VmState::Running).is_ok());
-                assert!(state.valid_transition(VmState::Shutdown).is_err());
-                assert!(state.valid_transition(VmState::Paused).is_err());
-                assert!(state.valid_transition(VmState::BreakPoint).is_err());
+                state.valid_transition(VmState::Created).unwrap();
+                state.valid_transition(VmState::Running).unwrap();
+                state.valid_transition(VmState::Shutdown).unwrap_err();
+                state.valid_transition(VmState::Paused).unwrap_err();
+                state.valid_transition(VmState::BreakPoint).unwrap_err();
             }
         }
     }
@@ -3251,11 +3248,12 @@ mod tests {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
-    use super::*;
     use arch::aarch64::fdt::create_fdt;
     use arch::aarch64::layout;
     use arch::{DeviceType, MmioDeviceInfo};
     use devices::gic::Gic;
+
+    use super::*;
 
     const LEN: u64 = 4096;
 
@@ -3299,7 +3297,7 @@ mod tests {
         let gic = vm
             .create_vgic(Gic::create_default_config(1))
             .expect("Cannot create gic");
-        assert!(create_fdt(
+        create_fdt(
             &mem,
             "console=tty0",
             vec![0],
@@ -3312,7 +3310,7 @@ mod tests {
             None,
             true,
         )
-        .is_ok())
+        .unwrap();
     }
 }
 

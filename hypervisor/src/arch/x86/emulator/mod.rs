@@ -4,6 +4,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use anyhow::Context;
+use iced_x86::*;
+
 use crate::arch::emulator::{EmulationError, EmulationResult, PlatformEmulator, PlatformError};
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::{CR0_PE, EFER_LMA};
@@ -11,8 +14,6 @@ use crate::arch::x86::{
     segment_type_expand_down, segment_type_ro, Exception, SegmentRegister, SpecialRegisters,
 };
 use crate::StandardRegisters;
-use anyhow::Context;
-use iced_x86::*;
 
 #[macro_use]
 mod instructions;
@@ -184,7 +185,7 @@ pub trait CpuStateManager: Clone {
                     )));
                 }
 
-                Ok(logical_addr + segment_register.base)
+                Ok(logical_addr.wrapping_add(segment_register.base))
             }
 
             _ => Err(PlatformError::UnsupportedCpuMode(anyhow!("{:?}", mode))),
@@ -488,7 +489,7 @@ macro_rules! gen_handler_match {
     };
 }
 
-impl<'a, T: CpuStateManager> Emulator<'a, T> {
+impl<T: CpuStateManager> Emulator<'_, T> {
     pub fn new(platform: &mut dyn PlatformEmulator<CpuState = T>) -> Emulator<T> {
         Emulator { platform }
     }
@@ -598,8 +599,8 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
                 decoder.decode_out(&mut insn);
                 if decoder.last_error() != DecoderError::None {
                     return Err(EmulationError::InstructionFetchingError(anyhow!(
-                        "{:#x?}",
-                        insn_format!(insn)
+                        "{:?}",
+                        insn.code()
                     )));
                 }
             }
@@ -608,14 +609,17 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
             Emulator::get_handler(insn.code())
                 .ok_or_else(|| {
                     EmulationError::UnsupportedInstruction(anyhow!(
-                        "{:#x?} {:?} {:?}",
-                        insn_format!(insn),
-                        insn.mnemonic(),
-                        insn.code()
+                        "{:?} {:x?}",
+                        insn.code(),
+                        insn_stream
                     ))
                 })?
                 .emulate(&insn, &mut state, self.platform)
-                .context(anyhow!("Failed to emulate {:#x?}", insn_format!(insn)))?;
+                .context(anyhow!(
+                    "Failed to emulate {:?} {:x?}",
+                    insn.code(),
+                    insn_stream
+                ))?;
 
             last_decoded_ip = decoder.ip();
             num_insn_emulated += 1;
@@ -653,11 +657,12 @@ impl<'a, T: CpuStateManager> Emulator<'a, T> {
 
 #[cfg(test)]
 mod mock_vmm {
+    use std::sync::{Arc, Mutex};
+
     use super::*;
     use crate::arch::x86::emulator::EmulatorCpuState as CpuState;
     use crate::arch::x86::gdt::{gdt_entry, segment_from_gdt};
     use crate::StandardRegisters;
-    use std::sync::{Arc, Mutex};
 
     #[derive(Debug, Clone)]
     pub struct MockVmm {
@@ -807,7 +812,7 @@ mod tests {
         ];
 
         let mut vmm = MockVmm::new(ip, vec![], Some((ip, &memory)));
-        assert!(vmm.emulate_insn(cpu_id, &[], Some(2)).is_ok());
+        vmm.emulate_insn(cpu_id, &[], Some(2)).unwrap();
 
         let rax: u64 = vmm
             .cpu_state(cpu_id)
@@ -845,7 +850,7 @@ mod tests {
         ];
 
         let mut vmm = MockVmm::new(ip, vec![], Some((ip, &memory)));
-        assert!(vmm.emulate_insn(cpu_id, &[], None).is_err());
+        vmm.emulate_insn(cpu_id, &[], None).unwrap_err();
     }
 
     #[test]
@@ -873,7 +878,7 @@ mod tests {
         ];
 
         let mut vmm = MockVmm::new(ip, vec![], Some((ip, &memory)));
-        assert!(vmm.emulate_insn(cpu_id, &insn, Some(2)).is_ok());
+        vmm.emulate_insn(cpu_id, &insn, Some(2)).unwrap();
 
         let rax: u64 = vmm
             .cpu_state(cpu_id)
@@ -908,7 +913,7 @@ mod tests {
         ];
 
         let mut vmm = MockVmm::new(ip, vec![], Some((ip, &memory)));
-        assert!(vmm.emulate_insn(cpu_id, &insn, Some(2)).is_ok());
+        vmm.emulate_insn(cpu_id, &insn, Some(2)).unwrap();
 
         let rbx: u64 = vmm
             .cpu_state(cpu_id)
@@ -943,7 +948,7 @@ mod tests {
         ];
 
         let mut vmm = MockVmm::new(ip, vec![], Some((ip, &memory)));
-        assert!(vmm.emulate_insn(cpu_id, &insn, Some(1)).is_ok());
+        vmm.emulate_insn(cpu_id, &insn, Some(1)).unwrap();
 
         let new_ip: u64 = vmm.cpu_state(cpu_id).unwrap().ip();
         assert_eq!(new_ip, ip + 0x7 /* length of mov rax,0x1000 */);
@@ -984,6 +989,6 @@ mod tests {
         ];
 
         let mut vmm = MockVmm::new(ip, vec![], Some((ip, &memory)));
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_err());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap_err();
     }
 }

@@ -5,6 +5,7 @@
 
 use std::io::{Read, Write};
 use std::os::unix::io::RawFd;
+
 use thiserror::Error;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
@@ -20,7 +21,7 @@ pub enum Error {
     MissingProtocol,
     #[error("Error parsing HTTP Content-Length field: {0}")]
     ContentLengthParsing(std::num::ParseIntError),
-    #[error("Server responded with an error: {0:?}")]
+    #[error("Server responded with an error: {0:?}: {1:?}")]
     ServerResponse(StatusCode, Option<String>),
 }
 

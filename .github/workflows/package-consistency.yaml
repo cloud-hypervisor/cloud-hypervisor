@@ -1,0 +1,32 @@
+name: Cloud Hypervisor Consistency
+on: [pull_request, merge_group]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Rust VMM Consistency Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: sudo apt install -y python3
+
+      - name: Install Rust toolchain stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Check Rust VMM Package Consistency of root Workspace
+        run: python3 scripts/package-consistency-check.py github.com/rust-vmm
+
+      - name: Check Rust VMM Package Consistency of fuzz Workspace
+        run: |
+          pushd fuzz
+          python3 ../scripts/package-consistency-check.py github.com/rust-vmm
+          popd

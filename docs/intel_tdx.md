@@ -4,21 +4,21 @@ Intel® Trust Domain Extensions (Intel® TDX) is an Intel technology designed to
 isolate virtual machines from the VMM, hypervisor and any other software on the
 host platform. Here are some useful links:
 
-* [TDX Homepage](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-trust-domain-extensions.html):
-more information about TDX technical aspects, design and specification
+- [TDX Homepage](https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html):
+  more information about TDX technical aspects, design and specification
 
-* [KVM TDX tree](https://github.com/intel/tdx/tree/kvm): the required
+- [KVM TDX tree](https://github.com/intel/tdx/tree/kvm): the required
   Linux kernel changes for the host side
 
-* [Guest TDX tree](https://github.com/intel/tdx/tree/guest): the Linux
+- [Guest TDX tree](https://github.com/intel/tdx/tree/guest): the Linux
   kernel changes for the guest side
 
-* [EDK2 project](https://github.com/tianocore/edk2): the TDVF firmware
+- [EDK2 project](https://github.com/tianocore/edk2): the TDVF firmware
 
-* [Confidential Containers project](https://github.com/confidential-containers/td-shim):
+- [Confidential Containers project](https://github.com/confidential-containers/td-shim):
   the TDShim firmware
 
-* [TDX Tools](https://github.com/intel/tdx-tools): a collection of tools
+- [TDX Linux](https://github.com/intel/tdx-linux): a collection of tools
   and scripts to setup TDX environment for testing purpose (such as
   installing required packages on the host, creating guest images, and
   building the custom Linux kernel for TDX host and guest)
@@ -27,17 +27,13 @@ more information about TDX technical aspects, design and specification
 
 It is required to use a machine with TDX enabled in hardware and
 with the host OS compiled from the [KVM TDX tree](https://github.com/intel/tdx/tree/kvm).
-The host environment can also be setup with the [TDX Tools](https://github.com/intel/tdx-tools).
+The host environment can also be setup with the [TDX Linux](https://github.com/intel/tdx-linux).
 
 Cloud Hypervisor can run TDX VM (Trust Domain) by loading a TD firmware ([TDVF](https://github.com/tianocore/edk2)),
 which will then load the guest kernel from the image. The image must be custom
 as it must include a kernel built from the [Guest TDX tree](https://github.com/intel/tdx/tree/guest).
 Cloud Hypervisor can also boot a TDX VM with direct kernel boot using [TDshim](https://github.com/confidential-containers/td-shim).
-The custom Linux kernel for the guest can be built with the [TDX Tools](https://github.com/intel/tdx-tools).
-
-> **Note**
-> The latest version of custom host and guest kernel being tested is
-> from [TDX Tools - 2023ww01](https://github.com/intel/tdx-tools/commits/2023ww01).
+The custom Linux kernel for the guest can be built with the [TDX Linux](https://github.com/intel/tdx-linux).
 
 ### TDVF
 
@@ -110,6 +106,7 @@ direct kernel boot, which is useful for containers use cases.
 
 To build TDShim from source, it is required to install `Rust`, `NASM`,
 and `LLVM` first. The TDshim can be build as follows:
+
 ```bash
 git clone https://github.com/confidential-containers/td-shim
 cd td-shim
@@ -126,13 +123,14 @@ cargo image --release
 
 If debug logs from the TDShim is needed, here are the alternative
 commands:
+
 ```bash
 cargo image
 ```
 
 And run a TDX VM by providing the firmware previously built, along with a guest
 kernel built from the [Guest TDX tree](https://github.com/intel/tdx/tree/guest)
-or the [TDX Tools](https://github.com/intel/tdx-tools).
+or the [TDX Linux](https://github.com/intel/tdx-linux).
 The appropriate kernel boot options must be provided through the `--cmdline`
 option as well.
 

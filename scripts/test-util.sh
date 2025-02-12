@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 hypervisor="kvm"
 test_filter=""
+build_kernel=false
 
 # Checkout source code of a GIT repo with specified branch and commit
 # Args:
@@ -45,16 +46,14 @@ checkout_repo() {
 # Not actively used by CI
 build_custom_linux() {
     ARCH=$(uname -m)
-    SRCDIR=$PWD
     LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
-    LINUX_CUSTOM_BRANCH="ch-6.2"
+    LINUX_CUSTOM_BRANCH="ch-6.12.8"
     LINUX_CUSTOM_URL="https://github.com/cloud-hypervisor/linux.git"
 
     checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH"
 
-    cp "$SRCDIR"/resources/linux-config-"${ARCH}" "$LINUX_CUSTOM_DIR"/.config
-
     pushd "$LINUX_CUSTOM_DIR" || exit
+    make ch_defconfig
     make -j "$(nproc)"
     if [ "${ARCH}" == "x86_64" ]; then
         cp vmlinux "$WORKLOADS_DIR/" || exit 1
@@ -75,11 +74,13 @@ cmd_help() {
     echo ""
     echo "    --hypervisor  Underlying hypervisor. Options kvm, mshv"
     echo "    --test-filter Tests to run"
+    echo "    --build-guest-kernel Build guest kernel from source instead of downloading pre-built"
     echo ""
     echo "    --help        Display this help message."
     echo ""
 }
 
+# shellcheck disable=SC2034
 process_common_args() {
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -93,8 +94,10 @@ process_common_args() {
             ;;
         "--test-filter")
             shift
-            # shellcheck disable=SC2034
             test_filter="$1"
+            ;;
+        "--build-guest-kernel")
+            build_kernel=true
             ;;
         "--") {
             shift
@@ -115,14 +118,17 @@ process_common_args() {
 }
 
 download_hypervisor_fw() {
+    FW_TAG="0.5.0"
     if [ -n "$AUTH_DOWNLOAD_TOKEN" ]; then
         echo "Using authenticated download from GitHub"
-        FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest \
+        FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/tags/${FW_TAG} \
             --header "Authorization: Token $AUTH_DOWNLOAD_TOKEN" \
-            --header "X-GitHub-Api-Version: 2022-11-28" | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+            --header "X-GitHub-Api-Version: 2022-11-28" | grep "browser_download_url" |
+            grep -oP '"https://[^"]*hypervisor-fw"' | sed -e 's/^"//' -e 's/"$//')
     else
         echo "Using anonymous download from GitHub"
-        FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+        FW_URL=$(curl --silent https://api.github.com/repos/cloud-hypervisor/rust-hypervisor-firmware/releases/tags/${FW_TAG} |
+            grep "browser_download_url" | grep -oP '"https://[^"]*hypervisor-fw"' | sed -e 's/^"//' -e 's/"$//')
     fi
     FW="$WORKLOADS_DIR/hypervisor-fw"
     pushd "$WORKLOADS_DIR" || exit
@@ -132,25 +138,38 @@ download_hypervisor_fw() {
 }
 
 download_linux() {
+    KERNEL_TAG="ch-release-v6.12.8-20250114"
     if [ -n "$AUTH_DOWNLOAD_TOKEN" ]; then
         echo "Using authenticated download from GitHub"
-        KERNEL_URLS=$(curl --silent https://api.github.com/repos/cloud-hypervisor/linux/releases/latest \
+        KERNEL_URLS=$(curl --silent https://api.github.com/repos/cloud-hypervisor/linux/releases/tags/${KERNEL_TAG} \
             --header "Authorization: Token $AUTH_DOWNLOAD_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" | grep "browser_download_url" | grep -o 'https://.*[^ "]')
     else
         echo "Using anonymous download from GitHub"
-        KERNEL_URLS=$(curl --silent https://api.github.com/repos/cloud-hypervisor/linux/releases/latest | grep "browser_download_url" | grep -o 'https://.*[^ "]')
+        KERNEL_URLS=$(curl --silent https://api.github.com/repos/cloud-hypervisor/linux/releases/tags/${KERNEL_TAG} | grep "browser_download_url" | grep -o 'https://.*[^ "]')
     fi
     pushd "$WORKLOADS_DIR" || exit
     for url in $KERNEL_URLS; do
-        wget --quiet "$url" || exit 1
+        wget -N --quiet "$url" || exit 1
     done
 
     popd || exit
 }
 
+prepare_linux() {
+    if [ "$build_kernel" = true ]; then
+        echo "Building kernel from source"
+        build_custom_linux
+        echo "Using kernel built from source"
+    else
+        echo "Downloading pre-built kernel from GitHub"
+        download_linux
+        echo "Using kernel downloaded from GitHub"
+    fi
+}
+
 download_ovmf() {
-    OVMF_FW_TAG="ch-6624aa331f"
+    OVMF_FW_TAG="ch-a54f262b09"
     OVMF_FW_URL="https://github.com/cloud-hypervisor/edk2/releases/download/$OVMF_FW_TAG/CLOUDHV.fd"
     OVMF_FW="$WORKLOADS_DIR/CLOUDHV.fd"
     pushd "$WORKLOADS_DIR" || exit

@@ -16,6 +16,12 @@ mod msix;
 mod vfio;
 mod vfio_user;
 
+use std::fmt::{self, Debug, Display};
+use std::num::ParseIntError;
+use std::str::FromStr;
+
+use serde::de::Visitor;
+
 pub use self::bus::{PciBus, PciConfigIo, PciConfigMmio, PciRoot, PciRootError};
 pub use self::configuration::{
     PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciCapability, PciCapabilityId,
@@ -30,10 +36,6 @@ pub use self::msi::{msi_num_enabled_vectors, MsiCap, MsiConfig};
 pub use self::msix::{MsixCap, MsixConfig, MsixTableEntry, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE};
 pub use self::vfio::{MmioRegion, VfioDmaMapping, VfioPciDevice, VfioPciError};
 pub use self::vfio_user::{VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError};
-use serde::de::Visitor;
-use std::fmt::{self, Display};
-use std::num::ParseIntError;
-use std::str::FromStr;
 
 /// PCI has four interrupt pins A->D.
 #[derive(Copy, Clone)]
@@ -60,7 +62,7 @@ pub struct PciBdf(u32);
 
 struct PciBdfVisitor;
 
-impl<'de> Visitor<'de> for PciBdfVisitor {
+impl Visitor<'_> for PciBdfVisitor {
     type Value = PciBdf;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -112,9 +114,9 @@ impl PciBdf {
 
     pub fn new(segment: u16, bus: u8, device: u8, function: u8) -> Self {
         Self(
-            (segment as u32) << 16
-                | (bus as u32) << 8
-                | ((device & 0x1f) as u32) << 3
+            ((segment as u32) << 16)
+                | ((bus as u32) << 8)
+                | (((device & 0x1f) as u32) << 3)
                 | (function & 0x7) as u32,
         )
     }
@@ -147,6 +149,19 @@ impl From<PciBdf> for u16 {
 impl From<&PciBdf> for u16 {
     fn from(bdf: &PciBdf) -> Self {
         (bdf.0 & 0xffff) as u16
+    }
+}
+
+impl Debug for PciBdf {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{:04x}:{:02x}:{:02x}.{:01x}",
+            self.segment(),
+            self.bus(),
+            self.device(),
+            self.function()
+        )
     }
 }
 

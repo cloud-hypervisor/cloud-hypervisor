@@ -2,18 +2,20 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::{register_listener, unregister_listener, vnet_hdr_len, Tap};
-use rate_limiter::{RateLimiter, TokenType};
 use std::io;
 use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+
+use rate_limiter::{RateLimiter, TokenType};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
 use vm_memory::bitmap::Bitmap;
 use vm_memory::{Bytes, GuestMemory};
 use vm_virtio::{AccessPlatform, Translatable};
+
+use super::{register_listener, unregister_listener, vnet_hdr_len, Tap};
 
 #[derive(Clone)]
 pub struct TxVirtio {
@@ -318,7 +320,7 @@ impl IovecBuffer {
 
 struct IovecBufferBorrowed<'a>(&'a mut Vec<libc::iovec>);
 
-impl<'a> std::ops::Deref for IovecBufferBorrowed<'a> {
+impl std::ops::Deref for IovecBufferBorrowed<'_> {
     type Target = Vec<libc::iovec>;
 
     fn deref(&self) -> &Self::Target {
@@ -326,7 +328,7 @@ impl<'a> std::ops::Deref for IovecBufferBorrowed<'a> {
     }
 }
 
-impl<'a> std::ops::DerefMut for IovecBufferBorrowed<'a> {
+impl std::ops::DerefMut for IovecBufferBorrowed<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.0
     }
@@ -466,7 +468,7 @@ impl NetQueuePair {
         let rate_limit_reached = self
             .rx_rate_limiter
             .as_ref()
-            .map_or(false, |r| r.is_blocked());
+            .is_some_and(|r| r.is_blocked());
 
         // Stop listening on the `RX_TAP_EVENT` when:
         // 1) there is no available describes, or

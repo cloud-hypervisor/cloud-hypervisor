@@ -1,16 +1,19 @@
 # Live Migration
 
-This document gives two examples of how to use the live migration
-support in Cloud Hypervisor:
+This document gives examples of how to use the live migration support
+in Cloud Hypervisor:
 
-1. local migration - migrating between two VMs running on the same
-   machine;
-1. nested-vm migration - migrating between two nested VMs whose host VMs
-   are running on the same machine.
+1. local migration - migrating a VM from one Cloud Hypervisor instance to another on the same machine;
+1. remote migration - migrating a VM between two machines;
+
+> :warning: These examples place sockets /tmp. This is done for
+> simplicity and should not be done in production.
 
 ## Local Migration (Suitable for Live Upgrade of VMM)
+
 Launch the source VM (on the host machine):
-```bash
+
+```console
 $ target/release/cloud-hypervisor
     --kernel ~/workloads/vmlinux \
     --disk path=~/workloads/focal.raw \
@@ -20,17 +23,20 @@ $ target/release/cloud-hypervisor
 ```
 
 Launch the destination VM from the same directory (on the host machine):
-```bash
+
+```console
 $ target/release/cloud-hypervisor --api-socket=/tmp/api2
 ```
 
 Get ready for receiving migration for the destination VM (on the host machine):
-```bash
+
+```console
 $ target/release/ch-remote --api-socket=/tmp/api2 receive-migration unix:/tmp/sock
 ```
 
 Start to send migration for the source VM (on the host machine):
-```bash
+
+```console
 $ target/release/ch-remote --api-socket=/tmp/api1 send-migration --local unix:/tmp/sock
 ```
 
@@ -38,102 +44,139 @@ When the above commands completed, the source VM should be successfully
 migrated to the destination VM. Now the destination VM is running while
 the source VM is terminated gracefully.
 
-## Nested-VM Migration
+## Remote Migration
 
-Launch VM 1 (on the host machine) with an extra virtio-blk device for
-exposing a guest image for the nested source VM:
-> Note: the example below also attached an additional virtio-blk device
-> with a dummy image for testing purpose (which is optional).
-```bash
-$ head -c 1M < /dev/urandom > tmp.img # create a dummy image for testing
-$ sudo /target/release/cloud-hypervisor \
+In this example, we will migrate a VM from one machine (`src`) to
+another (`dst`) across the network. To keep it simple, we will use a
+minimal VM setup without storage.
+
+### Preparation
+
+Make sure that `src` and `dst` can reach each other via the
+network. You should be able to ping each machine. Also each machine
+should have an open TCP port.
+
+You will need a kernel and initramfs for a minimal Linux system. For
+this example, we will use the Debian netboot image.
+
+Place the kernel and initramfs into the _same directory_ on both
+machines. This is important for the migration to succeed. We will use
+`/var/images`:
+
+```console
+src $ export DEBIAN=https://ftp.debian.org/debian/dists/stable/main/installer-amd64/current/images/netboot/debian-installer/amd64
+src $ mkdir -p /var/images
+src $ curl $DEBIAN/linux > /var/images/linux
+src $ curl $DEBIAN/initrd.gz > /var/images/initrd
+```
+
+Repeat the above steps on the destination host.
+
+### Unix Socket Migration
+
+If Unix socket is selected for migration, we can tunnel traffic through "socat".
+
+#### Starting the Receiver VM
+
+On the receiver side, we prepare an empty VM:
+
+```console
+dst $ cloud-hypervisor --api-socket /tmp/api
+```
+
+In a different terminal, configure the VM as a migration target:
+
+```console
+dst $ ch-remote --api-socket=/tmp/api receive-migration unix:/tmp/sock
+```
+
+In yet another terminal, forward TCP connections to the Unix domain socket:
+
+```console
+dst $ socat TCP-LISTEN:{port},reuseaddr UNIX-CLIENT:/tmp/sock
+```
+
+#### Starting the Sender VM
+
+Let's start the VM on the source machine:
+
+```console
+src $ cloud-hypervisor \
         --serial tty --console off \
-        --cpus boot=1 --memory size=512M \
-        --kernel vmlinux \
-        --cmdline "root=/dev/vda1 console=ttyS0"  \
-        --disk path=focal-1.raw path=focal-nested.raw path=tmp.img\
-        --net ip=192.168.101.1
+        --cpus boot=2 --memory size=4G \
+        --kernel /var/images/linux \
+        --initramfs /var/images/initrd \
+        --cmdline "console=ttyS0" \
+        --api-socket /tmp/api
 ```
 
-Launch VM 2 (on the host machine) with an extra virtio-blk device for
-exposing the same guest image for the nested destination VM:
-```bash
-$ sudo /target/release/cloud-hypervisor \
+After a few seconds the VM should be up and you can interact with it.
+
+#### Performing the Migration
+
+First, we start `socat`:
+
+```console
+src $ socat UNIX-LISTEN:/tmp/sock,reuseaddr TCP:{dst}:{port}
+```
+
+> Replace {dst}:{port} with the actual IP address and port of your destination host.
+
+Then we kick-off the migration itself:
+
+```console
+src $ ch-remote --api-socket=/tmp/api send-migration unix:/tmp/sock
+```
+
+When the above commands completed, the VM should be successfully
+migrated to the destination machine without interrupting the workload.
+
+### TCP Socket Migration
+
+If TCP socket is selected for migration, we need to consider migrating
+in a trusted network.
+
+#### Starting the Receiver VM
+
+On the receiver side, we prepare an empty VM:
+
+```console
+dst $ cloud-hypervisor --api-socket /tmp/api
+```
+
+In a different terminal, prepare to receive the migration:
+
+```console
+dst $ ch-remote --api-socket=/tmp/api receive-migration tcp:0.0.0.0:{port}
+```
+
+#### Starting the Sender VM
+
+Let's start the VM on the source machine:
+
+```console
+src $ cloud-hypervisor \
         --serial tty --console off \
-        --cpus boot=1 --memory size=512M \
-        --kernel vmlinux \
-        --cmdline "root=/dev/vda1 console=ttyS0"  \
-        --disk path=focal-2.raw path=focal-nested.raw path=tmp.img\
-        --net ip=192.168.102.1
+        --cpus boot=2 --memory size=4G \
+        --kernel /var/images/linux \
+        --initramfs /var/images/initrd \
+        --cmdline "console=ttyS0" \
+        --api-socket /tmp/api
 ```
 
-Launch the nested source VM (inside the guest OS of the VM 1) :
-```bash
-vm-1:~$ sudo ./cloud-hypervisor \
-        --serial tty --console off \
-        --memory size=128M \
-        --kernel vmlinux \
-        --cmdline "console=ttyS0 root=/dev/vda1" \
-        --disk path=/dev/vdb path=/dev/vdc \
-        --api-socket=/tmp/api1 \
-        --net ip=192.168.100.1
-vm-1:~$ # setup the guest network if needed
-vm-1:~$ sudo ip addr add 192.168.101.2/24 dev ens4
-vm-1:~$ sudo ip link set up dev ens4
-vm-1:~$ sudo ip r add default via 192.168.101.1
-```
-Optional: Run the guest workload below (on the guest OS of the nested source VM),
-which performs intensive virtio-blk operations. Now the console of the nested
-source VM should repeatedly print `"equal"`, and our goal is migrating
-this VM and the running workload without interruption.
-```bash
-#/bin/bash
+After a few seconds the VM should be up and you can interact with it.
 
-# On the guest OS of the nested source VM
+#### Performing the Migration
 
-input="/dev/vdb"
-result=$(md5sum $input)
-tmp=$(md5sum $input)
+Initiate the Migration over TCP:
 
-while  [[ "$result" == "$tmp" ]]
-do
-    echo "equal"
-    tmp=$(md5sum $input)
-done
-
-echo "not equal"
-echo "result = $result"
-echo "tmp = $tmp"
+```console
+src $ ch-remote --api-socket=/tmp/api send-migration  tcp:{dst}:{port}
 ```
 
-Launch the nested destination VM (inside the guest OS of the VM 2):
-```bash
-vm-2:~$ sudo ./cloud-hypervisor --api-socket=/tmp/api2
-vm-2:~$ # setup the guest network with the following commands if needed
-vm-2:~$ sudo ip addr add 192.168.102.2/24 dev ens4
-vm-2:~$ sudo ip link set up dev ens4
-vm-2:~$ sudo ip r add default via 192.168.102.1
-vm-2:~$ ping 192.168.101.2 # This should succeed
-```
-> Note: If the above ping failed, please check the iptables rule on the
-> host machine, e.g. whether the policy for the `FORWARD` chain is set
-> to `DROP` (which is the default setting configured by Docker).
+> Replace {dst}:{port} with the actual IP address and port of your destination host.
 
-Get ready for receiving migration for the nested destination VM (inside
-the guest OS of the VM 2):
-```bash
-vm-2:~$ sudo ./ch-remote --api-socket=/tmp/api2 receive-migration unix:/tmp/sock2
-vm-2:~$ sudo socat TCP-LISTEN:6000,reuseaddr UNIX-CLIENT:/tmp/sock2
-```
-
-Start to send migration for the nested source VM (inside the guest OS of
-the VM 1):
-```bash
-vm-1:~$ sudo socat UNIX-LISTEN:/tmp/sock1,reuseaddr TCP:192.168.102.2:6000
-vm-1:~$ sudo ./ch-remote --api-socket=/tmp/api1 send-migration unix:/tmp/sock1
-```
-
-When the above commands completed, the source VM should be successfully
-migrated to the destination VM without interrupting our testing guest
-workload. Now the destination VM is running the testing guest workload
-while the source VM is terminated gracefully.
+After completing the above commands, the source VM will be migrated to
+the destination host and continue running there. The source VM instance
+will terminate normally. All ongoing processes and connections within
+the VM should remain intact after the migration.

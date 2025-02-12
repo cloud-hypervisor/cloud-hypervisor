@@ -50,17 +50,12 @@ for more details about the API payloads and responses.
 
 #### REST API Location and availability
 
-The REST API is available as soon as the Cloud Hypervisor binary is started,
-through a local UNIX socket.
-By default, it is located at `/run/user/{user ID}/cloud-hypervisor.{Cloud Hypervisor PID}`.
-For example, if you launched Cloud Hypervisor as user ID 1000 and its PID is
-123456, the Cloud Hypervisor REST API will be available at `/run/user/1000/cloud-hypervisor.123456`.
-
-The REST API default URL can be overridden through the Cloud Hypervisor
-option `--api-socket`:
+The REST API, if enabled, is available as soon as the Cloud Hypervisor binary is started,
+through either a local UNIX socket as given in the Cloud Hypervisor option `--api-socket path=...`
+or a fd with `--api-socket fd=...`.
 
 ```
-$ ./target/debug/cloud-hypervisor --api-socket /tmp/cloud-hypervisor.sock
+$ ./target/debug/cloud-hypervisor --api-socket path=/tmp/cloud-hypervisor.sock
 Cloud Hypervisor Guest
     API server: /tmp/cloud-hypervisor.sock
     vCPUs: 1

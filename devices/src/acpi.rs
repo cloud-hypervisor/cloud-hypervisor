@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
+
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
 use vm_memory::GuestAddress;

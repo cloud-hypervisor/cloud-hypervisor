@@ -51,7 +51,6 @@ impl<T: CpuStateManager> InstructionHandler<T> for Or_rm8_r8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::arch::x86::emulator::mock_vmm::*;
 
     #[test]
@@ -70,7 +69,7 @@ mod tests {
             Some((0, &memory)),
         );
 
-        assert!(vmm.emulate_first_insn(cpu_id, &insn).is_ok());
+        vmm.emulate_first_insn(cpu_id, &insn).unwrap();
 
         let mut out: [u8; 1] = [0; 1];
 

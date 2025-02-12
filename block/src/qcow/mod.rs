@@ -9,27 +9,25 @@ mod raw_file;
 mod refcount;
 mod vec_cache;
 
-use crate::qcow::{
-    qcow_raw_file::QcowRawFile,
-    refcount::RefCount,
-    vec_cache::{CacheMap, Cacheable, VecCache},
-};
-use crate::BlockBackend;
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-use libc::{EINVAL, ENOSPC, ENOTSUP};
-use remain::sorted;
 use std::cmp::{max, min};
 use std::fs::OpenOptions;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::str;
-use thiserror::Error;
-use vmm_sys_util::{
-    file_traits::FileSetLen, file_traits::FileSync, seek_hole::SeekHole, write_zeroes::PunchHole,
-    write_zeroes::WriteZeroesAt,
-};
 
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use libc::{EINVAL, ENOSPC, ENOTSUP};
+use remain::sorted;
+use thiserror::Error;
+use vmm_sys_util::file_traits::{FileSetLen, FileSync};
+use vmm_sys_util::seek_hole::SeekHole;
+use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
+
+use crate::qcow::qcow_raw_file::QcowRawFile;
 pub use crate::qcow::raw_file::RawFile;
+use crate::qcow::refcount::RefCount;
+use crate::qcow::vec_cache::{CacheMap, Cacheable, VecCache};
+use crate::BlockBackend;
 
 /// Nesting depth limit for disk formats that can open other disk files.
 const MAX_NESTING_DEPTH: u32 = 10;
@@ -47,7 +45,7 @@ pub enum Error {
     CompressedBlocksNotSupported,
     #[error("Failed to evict cache: {0}")]
     EvictingCache(io::Error),
-    #[error("File larger than max of {}: {0}", MAX_QCOW_FILE_SIZE)]
+    #[error("File larger than max of {MAX_QCOW_FILE_SIZE}: {0}")]
     FileTooBig(u64),
     #[error("Failed to get file size: {0}")]
     GettingFileSize(io::Error),
@@ -1837,12 +1835,14 @@ pub fn detect_image_type(file: &mut RawFile) -> Result<ImageType> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs::File;
     use std::path::Path;
+
     use vmm_sys_util::tempdir::TempDir;
     use vmm_sys_util::tempfile::TempFile;
     use vmm_sys_util::write_zeroes::WriteZeroes;
+
+    use super::*;
 
     fn valid_header_v3() -> Vec<u8> {
         vec![
@@ -2051,8 +2051,7 @@ mod tests {
             .expect("Failed to write header to shm.");
         disk_file.rewind().unwrap();
         // The maximum nesting depth is 0, which means backing file is not allowed.
-        let res = QcowFile::from_with_nesting_depth(disk_file, 0);
-        assert!(res.is_ok());
+        QcowFile::from_with_nesting_depth(disk_file, 0).unwrap();
     }
 
     #[test]
@@ -2068,7 +2067,6 @@ mod tests {
         disk_file.rewind().unwrap();
         // The maximum nesting depth is 0, which means backing file is not allowed.
         let res = QcowFile::from_with_nesting_depth(disk_file, 0);
-        assert!(res.is_err());
         assert!(matches!(res.unwrap_err(), Error::MaxNestingDepthExceeded));
     }
 

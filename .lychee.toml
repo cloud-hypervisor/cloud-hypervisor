@@ -1,0 +1,14 @@
+verbose = "info"
+
+exclude = [
+    # Availability of links below should be manually verified.
+    # Page for intel SGX support, returns 403 while querying.
+    '^https://www.intel.com/content/www/us/en/developer/tools/software-guard-extensions/linux-overview.html',
+    # Page for intel TDX support, returns 403 while querying.
+    '^https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html',
+    # Page for TPM, returns 403 while querying.
+    '^https://trustedcomputinggroup.org/wp-content/uploads/PC-Client-Specific-Platform-TPM-Profile-for-TPM-2p0-v1p05p_r14_pub.pdf',
+
+    # GitHub user smibarber referenced in `CREDITS.md` no longer exist
+    '^https://github.com/smibarber',
+]

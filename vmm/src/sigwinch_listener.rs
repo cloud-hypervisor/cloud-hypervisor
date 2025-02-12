@@ -1,8 +1,16 @@
 // Copyright 2021, 2023 Alyssa Ross <hi@alyssa.is>
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::clone3::{clone3, clone_args, CLONE_CLEAR_SIGHAND};
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use std::cell::RefCell;
+use std::collections::BTreeSet;
+use std::fs::{read_dir, File};
+use std::io::{self, ErrorKind, Read, Write};
+use std::iter::once;
+use std::mem::{size_of, MaybeUninit};
+use std::os::unix::prelude::*;
+use std::process::exit;
+use std::ptr::null_mut;
+
 use arch::_NSIG;
 use hypervisor::HypervisorType;
 use libc::{
@@ -11,17 +19,10 @@ use libc::{
     ENOTTY, O_CLOEXEC, POLLERR, SIGCHLD, SIGWINCH, SIG_DFL, SIG_SETMASK, STDERR_FILENO, TIOCSCTTY,
 };
 use seccompiler::{apply_filter, BpfProgram, SeccompAction};
-use std::cell::RefCell;
-use std::collections::BTreeSet;
-use std::fs::{read_dir, File};
-use std::io::{self, ErrorKind, Read, Write};
-use std::iter::once;
-use std::mem::size_of;
-use std::mem::MaybeUninit;
-use std::os::unix::prelude::*;
-use std::process::exit;
-use std::ptr::null_mut;
 use vmm_sys_util::signal::register_signal_handler;
+
+use crate::clone3::{clone3, clone_args, CLONE_CLEAR_SIGHAND};
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
 
 thread_local! {
     // The tty file descriptor is stored in a global variable so it

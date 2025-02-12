@@ -4,14 +4,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::configuration::{self, PciBarRegionType};
-use crate::PciBarConfiguration;
 use std::any::Any;
 use std::fmt::{self, Display};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{io, result};
+
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::Resource;
+
+use crate::configuration::{self, PciBarRegionType};
+use crate::PciBarConfiguration;
 
 #[derive(Debug)]
 pub enum Error {
@@ -113,7 +115,7 @@ pub trait PciDevice: Send {
     }
     /// Provides a mutable reference to the Any trait. This is useful to let
     /// the caller have access to the underlying type behind the trait.
-    fn as_any(&mut self) -> &mut dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
 
     /// Optionally returns a unique identifier.
     fn id(&self) -> Option<String>;

@@ -2,13 +2,15 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::device_manager::PciDeviceHandle;
-use pci::PciBdf;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+use pci::PciBdf;
+use serde::{Deserialize, Serialize};
 use vm_device::Resource;
 use vm_migration::Migratable;
+
+use crate::device_manager::PciDeviceHandle;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DeviceNode {
@@ -143,7 +145,7 @@ impl<'a> Iterator for BftIter<'a> {
     }
 }
 
-impl<'a> DoubleEndedIterator for BftIter<'a> {
+impl DoubleEndedIterator for BftIter<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.nodes.pop()
     }

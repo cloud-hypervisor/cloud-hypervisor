@@ -5,8 +5,7 @@
 use std::io::Write;
 use std::num::Wrapping;
 
-use super::defs;
-use super::{Error, Result};
+use super::{defs, Error, Result};
 
 /// A simple ring-buffer implementation, used by vsock connections to buffer TX (guest -> host)
 /// data.  Memory for this buffer is allocated lazily, since buffering will only be needed when
@@ -144,10 +143,9 @@ impl TxBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Error as IoError, ErrorKind, Result as IoResult};
+
     use super::*;
-    use std::io::Error as IoError;
-    use std::io::ErrorKind;
-    use std::io::Result as IoResult;
 
     struct TestSink {
         data: Vec<u8>,

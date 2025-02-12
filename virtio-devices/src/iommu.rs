@@ -2,26 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::Error as DeviceError;
-use super::{
-    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon, VirtioDevice,
-    VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
-};
-use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
-use crate::GuestMemoryMmap;
-use crate::{DmaRemapping, VirtioInterrupt, VirtioInterruptType};
+use std::collections::BTreeMap;
+use std::mem::size_of;
+use std::os::unix::io::AsRawFd;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier, Mutex, RwLock};
+use std::{io, result};
+
 use anyhow::anyhow;
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::io;
-use std::mem::size_of;
-use std::ops::Bound::Included;
-use std::os::unix::io::AsRawFd;
-use std::result;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier, Mutex, RwLock};
 use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
@@ -32,6 +22,14 @@ use vm_memory::{
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
+
+use super::{
+    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Error as DeviceError,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
+};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::{DmaRemapping, GuestMemoryMmap, VirtioInterrupt, VirtioInterruptType};
 
 /// Queues sizes
 const QUEUE_SIZE: u16 = 256;
@@ -74,7 +72,7 @@ const VIRTIO_IOMMU_F_BYPASS_CONFIG: u32 = 6;
 const VIRTIO_IOMMU_PAGE_SIZE_MASK: u64 = (2 << 20) | (4 << 10);
 
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[allow(dead_code)]
 struct VirtioIommuRange32 {
     start: u32,
@@ -82,7 +80,7 @@ struct VirtioIommuRange32 {
 }
 
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[allow(dead_code)]
 struct VirtioIommuRange64 {
     start: u64,
@@ -90,7 +88,7 @@ struct VirtioIommuRange64 {
 }
 
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[allow(dead_code)]
 struct VirtioIommuConfig {
     page_size_mask: u64,
@@ -109,7 +107,7 @@ const VIRTIO_IOMMU_T_UNMAP: u8 = 4;
 const VIRTIO_IOMMU_T_PROBE: u8 = 5;
 
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 struct VirtioIommuReqHead {
     type_: u8,
     _reserved: [u8; 3],
@@ -135,7 +133,7 @@ const VIRTIO_IOMMU_S_FAULT: u8 = 7;
 const VIRTIO_IOMMU_S_NOMEM: u8 = 8;
 
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[allow(dead_code)]
 struct VirtioIommuReqTail {
     status: u8,
@@ -144,7 +142,7 @@ struct VirtioIommuReqTail {
 
 /// ATTACH request
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 struct VirtioIommuReqAttach {
     domain: u32,
     endpoint: u32,
@@ -156,7 +154,7 @@ const VIRTIO_IOMMU_ATTACH_F_BYPASS: u32 = 1;
 
 /// DETACH request
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 struct VirtioIommuReqDetach {
     domain: u32,
     endpoint: u32,
@@ -176,7 +174,7 @@ const VIRTIO_IOMMU_MAP_F_MASK: u32 =
 
 /// MAP request
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 struct VirtioIommuReqMap {
     domain: u32,
     virt_start: u64,
@@ -187,7 +185,7 @@ struct VirtioIommuReqMap {
 
 /// UNMAP request
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 struct VirtioIommuReqUnmap {
     domain: u32,
     virt_start: u64,
@@ -204,7 +202,7 @@ const VIRTIO_IOMMU_PROBE_T_MASK: u16 = 0xfff;
 
 /// PROBE request
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[allow(dead_code)]
 struct VirtioIommuReqProbe {
     endpoint: u32,
@@ -212,7 +210,7 @@ struct VirtioIommuReqProbe {
 }
 
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[allow(dead_code)]
 struct VirtioIommuProbeProperty {
     type_: u16,
@@ -225,7 +223,7 @@ const VIRTIO_IOMMU_RESV_MEM_T_RESERVED: u8 = 0;
 const VIRTIO_IOMMU_RESV_MEM_T_MSI: u8 = 1;
 
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[allow(dead_code)]
 struct VirtioIommuProbeResvMem {
     subtype: u8,
@@ -255,7 +253,7 @@ const VIRTIO_IOMMU_FAULT_R_MAPPING: u32 = 2;
 /// Fault reporting through eventq
 #[allow(unused)]
 #[derive(Copy, Clone, Debug, Default)]
-#[repr(packed)]
+#[repr(C, packed)]
 struct VirtioIommuFault {
     reason: u8,
     reserved: [u8; 3],
@@ -396,7 +394,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Attach request {:?}", req);
+                    debug!("Attach request 0x{:x?}", req);
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
@@ -451,7 +449,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Detach request {:?}", req);
+                    debug!("Detach request 0x{:x?}", req);
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
@@ -470,7 +468,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Map request {:?}", req);
+                    debug!("Map request 0x{:x?}", req);
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
@@ -533,7 +531,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Unmap request {:?}", req);
+                    debug!("Unmap request 0x{:x?}", req);
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
@@ -589,7 +587,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Probe request {:?}", req);
+                    debug!("Probe request 0x{:x?}", req);
 
                     let probe_prop = VirtioIommuProbeProperty {
                         type_: VIRTIO_IOMMU_PROBE_T_RESV_MEM,
@@ -812,15 +810,7 @@ impl DmaRemapping for IommuMapping {
                     return Ok(addr);
                 }
 
-                let range_start = if VIRTIO_IOMMU_PAGE_SIZE_MASK > addr {
-                    0
-                } else {
-                    addr - VIRTIO_IOMMU_PAGE_SIZE_MASK
-                };
-                for (&key, &value) in domain
-                    .mappings
-                    .range((Included(&range_start), Included(&addr)))
-                {
+                for (&key, &value) in domain.mappings.iter() {
                     if addr >= key && addr < key + value.size {
                         let new_addr = addr - key + value.gpa;
                         debug!("Into GPA addr 0x{:x}", new_addr);
@@ -916,9 +906,10 @@ impl Iommu {
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         msi_iova_space: (u64, u64),
+        address_width_bits: u8,
         state: Option<IommuState>,
     ) -> io::Result<(Self, Arc<IommuMapping>)> {
-        let (avail_features, acked_features, endpoints, domains, paused) =
+        let (mut avail_features, acked_features, endpoints, domains, paused) =
             if let Some(state) = state {
                 info!("Restoring virtio-iommu {}", id);
                 (
@@ -941,19 +932,27 @@ impl Iommu {
                     true,
                 )
             } else {
-                let avail_features = 1u64 << VIRTIO_F_VERSION_1
-                    | 1u64 << VIRTIO_IOMMU_F_MAP_UNMAP
-                    | 1u64 << VIRTIO_IOMMU_F_PROBE
-                    | 1u64 << VIRTIO_IOMMU_F_BYPASS_CONFIG;
+                let avail_features = (1u64 << VIRTIO_F_VERSION_1)
+                    | (1u64 << VIRTIO_IOMMU_F_MAP_UNMAP)
+                    | (1u64 << VIRTIO_IOMMU_F_PROBE)
+                    | (1u64 << VIRTIO_IOMMU_F_BYPASS_CONFIG);
 
                 (avail_features, 0, BTreeMap::new(), BTreeMap::new(), false)
             };
 
-        let config = VirtioIommuConfig {
+        let mut config = VirtioIommuConfig {
             page_size_mask: VIRTIO_IOMMU_PAGE_SIZE_MASK,
             probe_size: PROBE_PROP_SIZE,
             ..Default::default()
         };
+
+        if address_width_bits < 64 {
+            avail_features |= 1u64 << VIRTIO_IOMMU_F_INPUT_RANGE;
+            config.input_range = VirtioIommuRange64 {
+                start: 0,
+                end: (1u64 << address_width_bits) - 1,
+            }
+        }
 
         let mapping = Arc::new(IommuMapping {
             endpoints: Arc::new(RwLock::new(endpoints)),

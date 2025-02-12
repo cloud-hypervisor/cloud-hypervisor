@@ -3,10 +3,12 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::MigratableError;
-use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
+
+use serde::{Deserialize, Serialize};
 use vm_memory::ByteValued;
+
+use crate::MigratableError;
 
 // Migration protocol
 // 1: Source establishes communication with destination (file socket or TCP connection.)

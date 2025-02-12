@@ -51,6 +51,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
 use vmm_sys_util::timerfd::TimerFd;
 
 /// Module for group rate limiting.
@@ -519,9 +520,9 @@ impl Default for RateLimiter {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::{fmt, thread};
+
     use super::*;
-    use std::fmt;
-    use std::thread;
 
     impl TokenBucket {
         // Resets the token bucket: budget set to max capacity and last-updated set to now.
@@ -543,7 +544,8 @@ pub(crate) mod tests {
         }
 
         // After a restore, we cannot be certain that the last_update field has the same value.
-        pub fn partial_eq(&self, other: &TokenBucket) -> bool {
+        #[allow(dead_code)]
+        fn partial_eq(&self, other: &TokenBucket) -> bool {
             (other.capacity() == self.capacity())
                 && (other.one_time_burst() == self.one_time_burst())
                 && (other.refill_time_ms() == self.refill_time_ms())
@@ -552,12 +554,12 @@ pub(crate) mod tests {
     }
 
     impl RateLimiter {
-        pub fn bandwidth(&self) -> Option<TokenBucket> {
+        fn bandwidth(&self) -> Option<TokenBucket> {
             let guard = self.inner.lock().unwrap();
             guard.bandwidth.clone()
         }
 
-        pub fn ops(&self) -> Option<TokenBucket> {
+        fn ops(&self) -> Option<TokenBucket> {
             let guard = self.inner.lock().unwrap();
             guard.ops.clone()
         }
@@ -665,7 +667,7 @@ pub(crate) mod tests {
         assert!(l.consume(u64::MAX, TokenType::Ops));
         assert!(l.consume(u64::MAX, TokenType::Bytes));
         // calling the handler without there having been an event should error
-        assert!(l.event_handler().is_err());
+        l.event_handler().unwrap_err();
         assert_eq!(
             format!("{:?}", l.event_handler().err().unwrap()),
             "SpuriousRateLimiterEvent(\
@@ -736,7 +738,7 @@ pub(crate) mod tests {
         // wait the other half of the timer period
         thread::sleep(Duration::from_millis(REFILL_TIMER_INTERVAL_MS / 2));
         // the timer_fd should have an event on it by now
-        assert!(l.event_handler().is_ok());
+        l.event_handler().unwrap();
         // limiter should now be unblocked
         assert!(!l.is_blocked());
         // try and succeed on another 100 bytes this time
@@ -769,7 +771,7 @@ pub(crate) mod tests {
         // wait the other half of the timer period
         thread::sleep(Duration::from_millis(REFILL_TIMER_INTERVAL_MS / 2));
         // the timer_fd should have an event on it by now
-        assert!(l.event_handler().is_ok());
+        l.event_handler().unwrap();
         // limiter should now be unblocked
         assert!(!l.is_blocked());
         // try and succeed on another 100 ops this time
@@ -803,7 +805,7 @@ pub(crate) mod tests {
         // wait the other half of the timer period
         thread::sleep(Duration::from_millis(REFILL_TIMER_INTERVAL_MS / 2));
         // the timer_fd should have an event on it by now
-        assert!(l.event_handler().is_ok());
+        l.event_handler().unwrap();
         // limiter should now be unblocked
         assert!(!l.is_blocked());
         // try and succeed on another 100 ops this time
@@ -824,13 +826,13 @@ pub(crate) mod tests {
         // check that even after a whole second passes, the rate limiter
         // is still blocked
         thread::sleep(Duration::from_millis(1000));
-        assert!(l.event_handler().is_err());
+        l.event_handler().unwrap_err();
         assert!(l.is_blocked());
 
         // after 1.5x the replenish time has passed, the rate limiter
         // is available again
         thread::sleep(Duration::from_millis(500));
-        assert!(l.event_handler().is_ok());
+        l.event_handler().unwrap();
         assert!(!l.is_blocked());
 
         // reset the rate limiter
@@ -844,27 +846,27 @@ pub(crate) mod tests {
         // check that after more than the minimum refill time,
         // the rate limiter is still blocked
         thread::sleep(Duration::from_millis(200));
-        assert!(l.event_handler().is_err());
+        l.event_handler().unwrap_err();
         assert!(l.is_blocked());
 
         // try to consume some tokens, which should fail as the timer
         // is still active
         assert!(!l.consume(100, TokenType::Bytes));
-        assert!(l.event_handler().is_err());
+        l.event_handler().unwrap_err();
         assert!(l.is_blocked());
 
         // check that after the minimum refill time, the timer was not
         // overwritten and the rate limiter is still blocked from the
         // borrowing we performed earlier
         thread::sleep(Duration::from_millis(100));
-        assert!(l.event_handler().is_err());
+        l.event_handler().unwrap_err();
         assert!(l.is_blocked());
         assert!(!l.consume(100, TokenType::Bytes));
 
         // after waiting out the full duration, rate limiter should be
         // available again
         thread::sleep(Duration::from_millis(200));
-        assert!(l.event_handler().is_ok());
+        l.event_handler().unwrap();
         assert!(!l.is_blocked());
         assert!(l.consume(100, TokenType::Bytes));
     }

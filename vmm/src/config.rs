@@ -3,22 +3,25 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::landlock::LandlockAccess;
-pub use crate::vm_config::*;
+use std::collections::{BTreeSet, HashMap};
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::{fmt, result};
+
 use clap::ArgMatches;
 use option_parser::{
     ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeSet, HashMap};
-use std::fmt;
-use std::path::PathBuf;
-use std::result;
-use std::str::FromStr;
 use thiserror::Error;
+use virtio_devices::block::MINIMUM_BLOCK_QUEUE_SIZE;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
 
+use crate::landlock::LandlockAccess;
+use crate::vm_config::*;
+
 const MAX_NUM_PCI_SEGMENTS: u16 = 96;
+const MAX_IOMMU_ADDRESS_WIDTH_BITS: u8 = 64;
 
 /// Errors associated with VM configuration parameters.
 #[derive(Debug, Error)]
@@ -167,6 +170,8 @@ pub enum ValidationError {
     TdxFirmwareMissing,
     /// Insufficient vCPUs for queues
     TooManyQueues,
+    /// Invalid queue size
+    InvalidQueueSize(u16),
     /// Need shared memory for vfio-user
     UserDevicesRequireSharedMemory,
     /// VSOCK Context Identifier has a special meaning, unsuitable for a VM.
@@ -179,6 +184,8 @@ pub enum ValidationError {
     InvalidPciSegment(u16),
     /// Invalid PCI segment aperture weight
     InvalidPciSegmentApertureWeight(u32),
+    /// Invalid IOMMU address width in bits
+    InvalidIommuAddressWidthBits(u8),
     /// Balloon too big
     BalloonLargerThanRam(u64, u64),
     /// On a IOMMU segment but not behind IOMMU
@@ -272,6 +279,12 @@ impl fmt::Display for ValidationError {
             TooManyQueues => {
                 write!(f, "Number of vCPUs is insufficient for number of queues")
             }
+            InvalidQueueSize(s) => {
+                write!(
+                    f,
+                    "Queue size is smaller than {MINIMUM_BLOCK_QUEUE_SIZE}: {s}"
+                )
+            }
             UserDevicesRequireSharedMemory => {
                 write!(
                     f,
@@ -298,6 +311,9 @@ impl fmt::Display for ValidationError {
             }
             InvalidPciSegmentApertureWeight(aperture_weight) => {
                 write!(f, "Invalid PCI segment aperture weight: {aperture_weight}")
+            }
+            InvalidIommuAddressWidthBits(iommu_address_width_bits) => {
+                write!(f, "IOMMU address width in bits ({iommu_address_width_bits}) should be less than or equal to {MAX_IOMMU_ADDRESS_WIDTH_BITS}")
             }
             BalloonLargerThanRam(balloon_size, ram_size) => {
                 write!(
@@ -807,6 +823,7 @@ impl PlatformConfig {
         parser
             .add("num_pci_segments")
             .add("iommu_segments")
+            .add("iommu_address_width")
             .add("serial_number")
             .add("uuid")
             .add("oem_strings");
@@ -824,6 +841,10 @@ impl PlatformConfig {
             .convert::<IntegerList>("iommu_segments")
             .map_err(Error::ParsePlatform)?
             .map(|v| v.0.iter().map(|e| *e as u16).collect());
+        let iommu_address_width_bits: u8 = parser
+            .convert("iommu_address_width")
+            .map_err(Error::ParsePlatform)?
+            .unwrap_or(MAX_IOMMU_ADDRESS_WIDTH_BITS);
         let serial_number = parser
             .convert("serial_number")
             .map_err(Error::ParsePlatform)?;
@@ -847,6 +868,7 @@ impl PlatformConfig {
         Ok(PlatformConfig {
             num_pci_segments,
             iommu_segments,
+            iommu_address_width_bits,
             serial_number,
             uuid,
             oem_strings,
@@ -870,6 +892,12 @@ impl PlatformConfig {
                     return Err(ValidationError::InvalidPciSegment(*segment));
                 }
             }
+        }
+
+        if self.iommu_address_width_bits > MAX_IOMMU_ADDRESS_WIDTH_BITS {
+            return Err(ValidationError::InvalidIommuAddressWidthBits(
+                self.iommu_address_width_bits,
+            ));
         }
 
         Ok(())
@@ -1143,7 +1171,8 @@ impl DiskConfig {
          bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
          ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
          id=<device_id>,pci_segment=<segment_id>,rate_limit_group=<group_id>,\
-         queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>";
+         queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>,\
+         serial=<serial_number>";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1303,6 +1332,10 @@ impl DiskConfig {
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
         if self.num_queues > vm_config.cpus.boot_vcpus as usize {
             return Err(ValidationError::TooManyQueues);
+        }
+
+        if self.queue_size <= MINIMUM_BLOCK_QUEUE_SIZE {
+            return Err(ValidationError::InvalidQueueSize(self.queue_size));
         }
 
         if self.vhost_user && self.iommu {
@@ -3104,11 +3137,13 @@ impl Drop for VmConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use net_util::MacAddr;
     use std::fs::File;
     use std::net::Ipv4Addr;
     use std::os::unix::io::AsRawFd;
+
+    use net_util::MacAddr;
+
+    use super::*;
 
     #[test]
     fn test_cpu_parsing() -> Result<()> {
@@ -3145,8 +3180,8 @@ mod tests {
             }
         );
 
-        assert!(CpusConfig::parse("boot=8,topology=2:2:1").is_err());
-        assert!(CpusConfig::parse("boot=8,topology=2:2:1:x").is_err());
+        CpusConfig::parse("boot=8,topology=2:2:1").unwrap_err();
+        CpusConfig::parse("boot=8,topology=2:2:1:x").unwrap_err();
         assert_eq!(
             CpusConfig::parse("boot=1,kvm_hyperv=on")?,
             CpusConfig {
@@ -3557,9 +3592,9 @@ mod tests {
     #[test]
     fn test_parse_fs() -> Result<()> {
         // "tag" and "socket" must be supplied
-        assert!(FsConfig::parse("").is_err());
-        assert!(FsConfig::parse("tag=mytag").is_err());
-        assert!(FsConfig::parse("socket=/tmp/sock").is_err());
+        FsConfig::parse("").unwrap_err();
+        FsConfig::parse("tag=mytag").unwrap_err();
+        FsConfig::parse("socket=/tmp/sock").unwrap_err();
         assert_eq!(FsConfig::parse("tag=mytag,socket=/tmp/sock")?, fs_fixture());
         assert_eq!(
             FsConfig::parse("tag=mytag,socket=/tmp/sock,num_queues=4,queue_size=1024")?,
@@ -3587,8 +3622,8 @@ mod tests {
     #[test]
     fn test_pmem_parsing() -> Result<()> {
         // Must always give a file and size
-        assert!(PmemConfig::parse("").is_err());
-        assert!(PmemConfig::parse("size=128M").is_err());
+        PmemConfig::parse("").unwrap_err();
+        PmemConfig::parse("size=128M").unwrap_err();
         assert_eq!(
             PmemConfig::parse("file=/tmp/pmem,size=128M")?,
             pmem_fixture()
@@ -3614,8 +3649,8 @@ mod tests {
 
     #[test]
     fn test_console_parsing() -> Result<()> {
-        assert!(ConsoleConfig::parse("").is_err());
-        assert!(ConsoleConfig::parse("badmode").is_err());
+        ConsoleConfig::parse("").unwrap_err();
+        ConsoleConfig::parse("badmode").unwrap_err();
         assert_eq!(
             ConsoleConfig::parse("off")?,
             ConsoleConfig {
@@ -3704,7 +3739,7 @@ mod tests {
     #[test]
     fn test_device_parsing() -> Result<()> {
         // Device must have a path provided
-        assert!(DeviceConfig::parse("").is_err());
+        DeviceConfig::parse("").unwrap_err();
         assert_eq!(
             DeviceConfig::parse("path=/path/to/device")?,
             device_fixture()
@@ -3743,7 +3778,7 @@ mod tests {
     #[test]
     fn test_vdpa_parsing() -> Result<()> {
         // path is required
-        assert!(VdpaConfig::parse("").is_err());
+        VdpaConfig::parse("").unwrap_err();
         assert_eq!(VdpaConfig::parse("path=/dev/vhost-vdpa")?, vdpa_fixture());
         assert_eq!(
             VdpaConfig::parse("path=/dev/vhost-vdpa,num_queues=2,id=my_vdpa")?,
@@ -3759,7 +3794,7 @@ mod tests {
     #[test]
     fn test_tpm_parsing() -> Result<()> {
         // path is required
-        assert!(TpmConfig::parse("").is_err());
+        TpmConfig::parse("").unwrap_err();
         assert_eq!(
             TpmConfig::parse("socket=/var/run/tpm.sock")?,
             TpmConfig {
@@ -3772,7 +3807,7 @@ mod tests {
     #[test]
     fn test_vsock_parsing() -> Result<()> {
         // socket and cid is required
-        assert!(VsockConfig::parse("").is_err());
+        VsockConfig::parse("").unwrap_err();
         assert_eq!(
             VsockConfig::parse("socket=/tmp/sock,cid=3")?,
             VsockConfig {
@@ -3828,7 +3863,7 @@ mod tests {
             }
         );
         // Parsing should fail as source_url is a required field
-        assert!(RestoreConfig::parse("prefault=off").is_err());
+        RestoreConfig::parse("prefault=off").unwrap_err();
         Ok(())
     }
 
@@ -3906,7 +3941,7 @@ mod tests {
                 },
             ]),
         };
-        assert!(valid_config.validate(&snapshot_vm_config).is_ok());
+        valid_config.validate(&snapshot_vm_config).unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.net_fds = Some(vec![RestoredNetConfig {
@@ -3974,13 +4009,14 @@ mod tests {
             fds: None,
             ..net_fixture()
         }]);
-        assert!(another_valid_config.validate(&snapshot_vm_config).is_ok());
+        another_valid_config.validate(&snapshot_vm_config).unwrap();
     }
 
     fn platform_fixture() -> PlatformConfig {
         PlatformConfig {
             num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: None,
+            iommu_address_width_bits: MAX_IOMMU_ADDRESS_WIDTH_BITS,
             serial_number: None,
             uuid: None,
             oem_strings: None,
@@ -4082,12 +4118,12 @@ mod tests {
             landlock_rules: None,
         };
 
-        assert!(valid_config.validate().is_ok());
+        valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.serial.mode = ConsoleOutputMode::Tty;
         invalid_config.console.mode = ConsoleOutputMode::Tty;
-        assert!(valid_config.validate().is_ok());
+        valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.payload = None;
@@ -4169,7 +4205,7 @@ mod tests {
             ..disk_fixture()
         }]);
         still_valid_config.memory.shared = true;
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.net = Some(vec![NetConfig {
@@ -4188,7 +4224,7 @@ mod tests {
             ..net_fixture()
         }]);
         still_valid_config.memory.shared = true;
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.net = Some(vec![NetConfig {
@@ -4219,16 +4255,16 @@ mod tests {
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.memory.shared = true;
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.memory.hugepages = true;
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.memory.hugepages = true;
         still_valid_config.memory.hugepage_size = Some(2 << 20);
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.memory.hugepages = false;
@@ -4248,7 +4284,7 @@ mod tests {
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(platform_fixture());
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
@@ -4267,7 +4303,7 @@ mod tests {
             iommu_segments: Some(vec![1, 2, 3]),
             ..platform_fixture()
         });
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
@@ -4277,6 +4313,18 @@ mod tests {
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::InvalidPciSegment(MAX_NUM_PCI_SEGMENTS + 1))
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.platform = Some(PlatformConfig {
+            iommu_address_width_bits: MAX_IOMMU_ADDRESS_WIDTH_BITS + 1,
+            ..platform_fixture()
+        });
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidIommuAddressWidthBits(
+                MAX_IOMMU_ADDRESS_WIDTH_BITS + 1
+            ))
         );
 
         let mut still_valid_config = valid_config.clone();
@@ -4289,7 +4337,7 @@ mod tests {
             pci_segment: 1,
             ..disk_fixture()
         }]);
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
@@ -4301,7 +4349,7 @@ mod tests {
             pci_segment: 1,
             ..net_fixture()
         }]);
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
@@ -4313,7 +4361,7 @@ mod tests {
             pci_segment: 1,
             ..pmem_fixture()
         }]);
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
@@ -4325,7 +4373,7 @@ mod tests {
             pci_segment: 1,
             ..device_fixture()
         }]);
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut still_valid_config = valid_config.clone();
         still_valid_config.platform = Some(PlatformConfig {
@@ -4339,7 +4387,7 @@ mod tests {
             iommu: true,
             pci_segment: 1,
         });
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.platform = Some(PlatformConfig {
@@ -4565,7 +4613,7 @@ mod tests {
                 ..device_fixture()
             },
         ]);
-        assert!(still_valid_config.validate().is_ok());
+        still_valid_config.validate().unwrap();
 
         let mut invalid_config = valid_config.clone();
         invalid_config.devices = Some(vec![
@@ -4578,7 +4626,7 @@ mod tests {
                 ..device_fixture()
             },
         ]);
-        assert!(invalid_config.validate().is_err());
+        invalid_config.validate().unwrap_err();
         #[cfg(feature = "sev_snp")]
         {
             // Payload with empty host data
@@ -4593,7 +4641,7 @@ mod tests {
                 #[cfg(feature = "sev_snp")]
                 host_data: Some("".to_string()),
             });
-            assert!(config_with_no_host_data.validate().is_err());
+            config_with_no_host_data.validate().unwrap_err();
 
             // Payload with no host data provided
             let mut valid_config_with_no_host_data = valid_config.clone();
@@ -4607,7 +4655,7 @@ mod tests {
                 #[cfg(feature = "sev_snp")]
                 host_data: None,
             });
-            assert!(valid_config_with_no_host_data.validate().is_ok());
+            valid_config_with_no_host_data.validate().unwrap();
 
             // Payload with invalid host data length i.e less than 64
             let mut config_with_invalid_host_data = valid_config.clone();
@@ -4623,7 +4671,7 @@ mod tests {
                     "243eb7dc1a21129caa91dcbb794922b933baecb5823a377eb43118867328".to_string(),
                 ),
             });
-            assert!(config_with_invalid_host_data.validate().is_err());
+            config_with_invalid_host_data.validate().unwrap_err();
         }
 
         let mut still_valid_config = valid_config;
@@ -4640,10 +4688,10 @@ mod tests {
     #[test]
     fn test_landlock_parsing() -> Result<()> {
         // should not be empty
-        assert!(LandlockConfig::parse("").is_err());
+        LandlockConfig::parse("").unwrap_err();
         // access should not be empty
-        assert!(LandlockConfig::parse("path=/dir/path1").is_err());
-        assert!(LandlockConfig::parse("path=/dir/path1,access=rwr").is_err());
+        LandlockConfig::parse("path=/dir/path1").unwrap_err();
+        LandlockConfig::parse("path=/dir/path1,access=rwr").unwrap_err();
         assert_eq!(
             LandlockConfig::parse("path=/dir/path1,access=rw")?,
             LandlockConfig {

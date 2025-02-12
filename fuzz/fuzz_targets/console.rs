@@ -4,22 +4,24 @@
 
 #![no_main]
 
-use libfuzzer_sys::fuzz_target;
-use seccompiler::SeccompAction;
 use std::fs::File;
 use std::io::Write;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::Arc;
+
+use libfuzzer_sys::{fuzz_target, Corpus};
+use seccompiler::SeccompAction;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
-use vm_memory::{bitmap::AtomicBitmap, Bytes, GuestAddress, GuestMemoryAtomic};
+use vm_memory::bitmap::AtomicBitmap;
+use vm_memory::{Bytes, GuestAddress, GuestMemoryAtomic};
 use vmm_sys_util::eventfd::{EventFd, EFD_NONBLOCK};
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 macro_rules! align {
     ($n:expr, $align:expr) => {{
-        (($n + $align - 1) / $align) * $align
+        $n.div_ceil($align) * $align
     }};
 }
 
@@ -52,12 +54,12 @@ const QUEUE_BYTES_SIZE: usize = align!(
     DESC_TABLE_ALIGN_SIZE
 ) as usize;
 
-fuzz_target!(|bytes| {
+fuzz_target!(|bytes: &[u8]| -> Corpus {
     if bytes.len() < (QUEUE_DATA_SIZE + QUEUE_BYTES_SIZE) * QUEUE_NUM + CONSOLE_INPUT_SIZE
         || bytes.len()
             > (QUEUE_DATA_SIZE + QUEUE_BYTES_SIZE) * QUEUE_NUM + CONSOLE_INPUT_SIZE + MEM_SIZE
     {
-        return;
+        return Corpus::Reject;
     }
 
     let (pipe_rx, mut pipe_tx) = create_pipe().unwrap();
@@ -66,7 +68,7 @@ fuzz_target!(|bytes| {
             memfd_create(&std::ffi::CString::new("fuzz_console_output").unwrap()).unwrap(),
         )
     };
-    let endpoint = virtio_devices::Endpoint::FilePair(output, pipe_rx);
+    let endpoint = virtio_devices::Endpoint::FilePair(Arc::new(output), Arc::new(pipe_rx));
 
     let (mut console, _) = virtio_devices::Console::new(
         "fuzzer_console".to_owned(),
@@ -106,10 +108,10 @@ fuzz_target!(|bytes| {
         .write_slice(queue_bytes, GuestAddress(BASE_VIRT_QUEUE_ADDR))
         .is_err()
     {
-        return;
+        return Corpus::Reject;
     }
     if mem.write_slice(mem_bytes, GuestAddress(0 as u64)).is_err() {
-        return;
+        return Corpus::Reject;
     }
     let guest_memory = GuestMemoryAtomic::new(mem);
 
@@ -135,6 +137,8 @@ fuzz_target!(|bytes| {
 
     // Wait for the events to finish and console device worker thread to return
     console.wait_for_epoll_threads();
+
+    Corpus::Keep
 });
 
 pub struct NoopVirtioInterrupt {}

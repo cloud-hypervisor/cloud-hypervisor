@@ -4,10 +4,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use iced_x86::*;
+
 use crate::arch::emulator::{EmulationError, PlatformEmulator, PlatformError};
 use crate::arch::x86::emulator::CpuStateManager;
 use crate::arch::x86::Exception;
-use iced_x86::*;
 
 pub mod cmp;
 pub mod mov;
@@ -115,14 +116,14 @@ fn memory_operand_address<T: CpuStateManager>(
 
     if insn.memory_base() != iced_x86::Register::None {
         let base: u64 = state.read_reg(insn.memory_base())?;
-        address += base;
+        address = address.wrapping_add(base);
     }
 
     if insn.memory_index() != iced_x86::Register::None {
         let mut index: u64 = state.read_reg(insn.memory_index())?;
-        index *= insn.memory_index_scale() as u64;
+        index = index.wrapping_mul(insn.memory_index_scale() as u64);
 
-        address += index;
+        address = address.wrapping_add(index);
     }
 
     address = address.wrapping_add(insn.memory_displacement64());
@@ -138,17 +139,4 @@ pub trait InstructionHandler<T: CpuStateManager> {
         state: &mut T,
         platform: &mut dyn PlatformEmulator<CpuState = T>,
     ) -> Result<(), EmulationError<Exception>>;
-}
-
-macro_rules! insn_format {
-    ($insn:ident) => {{
-        let mut output = String::new();
-        let mut formatter = FastFormatter::new();
-        formatter
-            .options_mut()
-            .set_space_after_operand_separator(true);
-        formatter.format(&$insn, &mut output);
-
-        output
-    }};
 }

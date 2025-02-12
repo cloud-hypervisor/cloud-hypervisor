@@ -3,14 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::{
-    collections::VecDeque,
-    io::Write,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
+use std::collections::VecDeque;
+use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 const MAX_BUFFER_SIZE: usize = 1 << 20;
 

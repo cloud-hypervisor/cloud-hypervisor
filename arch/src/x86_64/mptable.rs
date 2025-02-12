@@ -5,15 +5,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
+use std::{mem, result, slice};
+
+use libc::c_uchar;
+use thiserror::Error;
+use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
+
 use crate::layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
 use crate::x86_64::{get_x2apic_id, mpspec};
 use crate::GuestMemoryMmap;
-use libc::c_uchar;
-use std::mem;
-use std::result;
-use std::slice;
-use thiserror::Error;
-use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
 // trait (in this case `ByteValued`) where:
@@ -304,11 +304,11 @@ pub fn setup_mptable(
 
 #[cfg(test)]
 mod tests {
+    use vm_memory::bitmap::BitmapSlice;
+    use vm_memory::{GuestUsize, VolatileMemoryError, VolatileSlice, WriteVolatile};
+
     use super::*;
     use crate::layout::MPTABLE_START;
-    use vm_memory::{
-        bitmap::BitmapSlice, GuestUsize, VolatileMemoryError, VolatileSlice, WriteVolatile,
-    };
 
     fn table_entry_size(type_: u8) -> usize {
         match type_ as u32 {
@@ -336,7 +336,7 @@ mod tests {
         let mem = GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(num_cpus) - 1)])
             .unwrap();
 
-        assert!(setup_mptable(MPTABLE_START, &mem, num_cpus, None).is_err());
+        setup_mptable(MPTABLE_START, &mem, num_cpus, None).unwrap_err();
     }
 
     #[test]
@@ -433,6 +433,6 @@ mod tests {
             GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(cpus as u8))]).unwrap();
 
         let result = setup_mptable(MPTABLE_START, &mem, cpus as u8, None);
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 }

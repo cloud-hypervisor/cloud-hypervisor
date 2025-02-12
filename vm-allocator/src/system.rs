@@ -13,7 +13,6 @@ use crate::address::AddressAllocator;
 use crate::gsi::GsiAllocator;
 #[cfg(target_arch = "x86_64")]
 use crate::gsi::GsiApic;
-
 use crate::page_size::get_page_size;
 
 /// Manages allocating system resources such as address space and interrupt numbers.
@@ -23,27 +22,30 @@ use crate::page_size::get_page_size;
 /// ```
 /// # #[cfg(target_arch = "x86_64")]
 /// # use vm_allocator::{GsiApic, SystemAllocator};
-/// # #[cfg(target_arch = "aarch64")]
+/// # #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 /// # use vm_allocator::SystemAllocator;
 /// # use vm_memory::{Address, GuestAddress, GuestUsize};
 ///   let mut allocator = SystemAllocator::new(
-///           #[cfg(target_arch = "x86_64")] GuestAddress(0x1000),
-///           #[cfg(target_arch = "x86_64")] 0x10000,
+///           GuestAddress(0x1000),
+///           0x10000,
 ///           GuestAddress(0x10000000), 0x10000000,
 ///           #[cfg(target_arch = "x86_64")] vec![GsiApic::new(5, 19)]).unwrap();
 ///   #[cfg(target_arch = "x86_64")]
 ///   assert_eq!(allocator.allocate_irq(), Some(5));
 ///   #[cfg(target_arch = "aarch64")]
 ///   assert_eq!(allocator.allocate_irq(), Some(32));
+///   #[cfg(target_arch = "riscv64")]
+///   assert_eq!(allocator.allocate_irq(), Some(0));
 ///   #[cfg(target_arch = "x86_64")]
 ///   assert_eq!(allocator.allocate_irq(), Some(6));
 ///   #[cfg(target_arch = "aarch64")]
 ///   assert_eq!(allocator.allocate_irq(), Some(33));
+///   #[cfg(target_arch = "riscv64")]
+///   assert_eq!(allocator.allocate_irq(), Some(1));
 ///   assert_eq!(allocator.allocate_platform_mmio_addresses(None, 0x1000, Some(0x1000)), Some(GuestAddress(0x1fff_f000)));
 ///
 /// ```
 pub struct SystemAllocator {
-    #[cfg(target_arch = "x86_64")]
     io_address_space: AddressAllocator,
     platform_mmio_address_space: AddressAllocator,
     gsi_allocator: GsiAllocator,
@@ -60,14 +62,13 @@ impl SystemAllocator {
     /// * `apics` - (X86) Vector of APIC's.
     ///
     pub fn new(
-        #[cfg(target_arch = "x86_64")] io_base: GuestAddress,
-        #[cfg(target_arch = "x86_64")] io_size: GuestUsize,
+        io_base: GuestAddress,
+        io_size: GuestUsize,
         platform_mmio_base: GuestAddress,
         platform_mmio_size: GuestUsize,
         #[cfg(target_arch = "x86_64")] apics: Vec<GsiApic>,
     ) -> Option<Self> {
         Some(SystemAllocator {
-            #[cfg(target_arch = "x86_64")]
             io_address_space: AddressAllocator::new(io_base, io_size)?,
             platform_mmio_address_space: AddressAllocator::new(
                 platform_mmio_base,
@@ -75,7 +76,7 @@ impl SystemAllocator {
             )?,
             #[cfg(target_arch = "x86_64")]
             gsi_allocator: GsiAllocator::new(apics),
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
             gsi_allocator: GsiAllocator::new(),
         })
     }
@@ -90,7 +91,6 @@ impl SystemAllocator {
         self.gsi_allocator.allocate_gsi().ok()
     }
 
-    #[cfg(target_arch = "x86_64")]
     /// Reserves a section of `size` bytes of IO address space.
     pub fn allocate_io_addresses(
         &mut self,
@@ -116,7 +116,6 @@ impl SystemAllocator {
         )
     }
 
-    #[cfg(target_arch = "x86_64")]
     /// Free an IO address range.
     /// We can only free a range if it matches exactly an already allocated range.
     pub fn free_io_addresses(&mut self, address: GuestAddress, size: GuestUsize) {

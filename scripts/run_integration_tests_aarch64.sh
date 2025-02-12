@@ -154,8 +154,8 @@ update_workloads() {
     fi
     popd || exit
 
-    # Download prebuild linux binaries
-    download_linux
+    # Prepare linux image (build from source or download pre-built)
+    prepare_linux
 
     # Update the kernel in the cloud image for some tests that requires recent kernel version
     FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME="focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw"
@@ -237,7 +237,7 @@ echo "$PAGE_NUM" | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`
-time cargo test "common_parallel::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
+time cargo test "common_parallel::$test_filter" --target "$BUILD_TARGET" -- --test-threads=$(($(nproc) / 8)) ${test_binary_args[*]}
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests

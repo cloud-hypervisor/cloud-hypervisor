@@ -14,19 +14,20 @@ mod open_tap;
 mod queue_pair;
 mod tap;
 
-use serde::{Deserialize, Serialize};
 use std::io::Error as IoError;
 use std::os::raw::c_uint;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::{io, mem, net};
-use thiserror::Error;
 
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use virtio_bindings::virtio_net::{
     virtio_net_hdr_v1, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN,
     VIRTIO_NET_F_GUEST_CSUM, VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4,
     VIRTIO_NET_F_GUEST_TSO6, VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_F_MAC, VIRTIO_NET_F_MQ,
 };
-use vm_memory::{bitmap::AtomicBitmap, ByteValued};
+use vm_memory::bitmap::AtomicBitmap;
+use vm_memory::ByteValued;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 

@@ -2,15 +2,17 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use std::fs::File;
+use std::os::unix::io::{AsRawFd, RawFd};
+
+use vmm_sys_util::eventfd::EventFd;
+
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::fixed_vhd::FixedVhd;
 use crate::raw_sync::RawFileSync;
 use crate::BlockBackend;
-use std::fs::File;
-use std::os::unix::io::{AsRawFd, RawFd};
-use vmm_sys_util::eventfd::EventFd;
 
 pub struct FixedVhdDiskSync(FixedVhd);
 

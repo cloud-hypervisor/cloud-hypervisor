@@ -14,26 +14,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::Error as DeviceError;
-use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon,
-    VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
-};
-use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
-use crate::{GuestMemoryMmap, GuestRegionMmap};
-use crate::{VirtioInterrupt, VirtioInterruptType};
+use std::collections::BTreeMap;
+use std::mem::size_of;
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::sync::atomic::AtomicBool;
+use std::sync::{mpsc, Arc, Barrier, Mutex};
+use std::{io, result};
+
 use anyhow::anyhow;
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::io;
-use std::mem::size_of;
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::result;
-use std::sync::atomic::AtomicBool;
-use std::sync::mpsc;
-use std::sync::{Arc, Barrier, Mutex};
 use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
@@ -44,6 +34,15 @@ use vm_memory::{
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
+
+use super::{
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
+    Error as DeviceError, VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST,
+    VIRTIO_F_VERSION_1,
+};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::{GuestMemoryMmap, GuestRegionMmap, VirtioInterrupt, VirtioInterruptType};
 
 const QUEUE_SIZE: u16 = 128;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
@@ -270,7 +269,7 @@ impl VirtioMemConfig {
         // in the usable region.
         if addr % self.block_size != 0
             || size == 0
-            || (addr < self.addr || addr + size >= self.addr + self.usable_region_size)
+            || (addr < self.addr || addr + size > self.addr + self.usable_region_size)
         {
             return false;
         }

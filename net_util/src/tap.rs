@@ -5,18 +5,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use super::{
-    create_inet_socket, create_sockaddr, create_unix_socket, vnet_hdr_len, Error as NetUtilError,
-    MacAddr,
-};
-use crate::mac::MAC_ADDR_LEN;
 use std::fs::File;
 use std::io::{Error as IoError, Read, Result as IoResult, Write};
 use std::net;
 use std::os::raw::*;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+
 use thiserror::Error;
 use vmm_sys_util::ioctl::{ioctl_with_mut_ref, ioctl_with_ref, ioctl_with_val};
+
+use super::{
+    create_inet_socket, create_sockaddr, create_unix_socket, vnet_hdr_len, Error as NetUtilError,
+    MacAddr,
+};
+use crate::mac::MAC_ADDR_LEN;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -122,7 +124,7 @@ impl Tap {
             // Open calls are safe because we give a constant null-terminated
             // string and verify the result.
             libc::open(
-                b"/dev/net/tun\0".as_ptr() as *const c_char,
+                c"/dev/net/tun".as_ptr() as *const c_char,
                 flags.unwrap_or(libc::O_RDWR | libc::O_NONBLOCK | libc::O_CLOEXEC),
             )
         };
@@ -422,13 +424,11 @@ impl AsRawFd for Tap {
 #[cfg(test)]
 mod tests {
     use std::net::Ipv4Addr;
-    use std::str;
     use std::sync::{mpsc, Mutex};
-    use std::thread;
     use std::time::Duration;
+    use std::{str, thread};
 
     use once_cell::sync::Lazy;
-
     use pnet::packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
     use pnet::packet::ip::IpNextHeaderProtocols;
     use pnet::packet::ipv4::{Ipv4Packet, MutableIpv4Packet};
@@ -605,10 +605,8 @@ mod tests {
         let ip_addr: net::Ipv4Addr = (*tap_ip_guard).parse().unwrap();
         let netmask: net::Ipv4Addr = SUBNET_MASK.parse().unwrap();
 
-        let ret = tap.set_ip_addr(ip_addr);
-        assert!(ret.is_ok());
-        let ret = tap.set_netmask(netmask);
-        assert!(ret.is_ok());
+        tap.set_ip_addr(ip_addr).unwrap();
+        tap.set_netmask(netmask).unwrap();
     }
 
     #[test]
@@ -626,8 +624,7 @@ mod tests {
         let _tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
 
         let tap = Tap::new(1).unwrap();
-        let ret = tap.enable();
-        assert!(ret.is_ok());
+        tap.enable().unwrap();
     }
 
     #[test]
@@ -657,10 +654,7 @@ mod tests {
         // In theory, this could actually loop forever if something keeps sending data through the
         // tap interface, but it's highly unlikely.
         while found_packet_sz.is_none() {
-            let result = tap.read(&mut buf);
-            assert!(result.is_ok());
-
-            let size = result.unwrap();
+            let size = tap.read(&mut buf).unwrap();
 
             // We skip the first 10 bytes because the IFF_VNET_HDR flag is set when the interface
             // is created, and the legacy header is 10 bytes long without a certain flag which
@@ -719,8 +713,8 @@ mod tests {
         // leave the vnet hdr as is
         pnet_build_packet(&mut buf[10..], mac, payload);
 
-        assert!(tap.write(&buf[..]).is_ok());
-        assert!(tap.flush().is_ok());
+        tap.write_all(&buf).unwrap();
+        tap.flush().unwrap();
 
         let (channel_tx, channel_rx) = mpsc::channel();
 

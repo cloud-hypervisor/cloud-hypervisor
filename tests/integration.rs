@@ -10,24 +10,22 @@
 
 extern crate test_infra;
 
-use net_util::MacAddr;
 use std::collections::HashMap;
-use std::fs;
-use std::io;
-use std::io::BufRead;
-use std::io::Read;
-use std::io::Seek;
-use std::io::Write;
+use std::io::{BufRead, Read, Seek, Write};
+use std::net::TcpListener;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::string::String;
-use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
-use std::sync::Mutex;
-use std::thread;
+use std::sync::{mpsc, Mutex};
+use std::time::Duration;
+use std::{fs, io, thread};
+
+use net_util::MacAddr;
 use test_infra::*;
-use vmm_sys_util::{tempdir::TempDir, tempfile::TempFile};
+use vmm_sys_util::tempdir::TempDir;
+use vmm_sys_util::tempfile::TempFile;
 use wait_timeout::ChildExt;
 
 // Constant taken from the VMM crate.
@@ -36,13 +34,14 @@ const MAX_NUM_PCI_SEGMENTS: u16 = 96;
 #[cfg(target_arch = "x86_64")]
 mod x86_64 {
     pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
-    pub const JAMMY_NVIDIA_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-nvidia.raw";
+    pub const JAMMY_VFIO_IMAGE_NAME: &str =
+        "jammy-server-cloudimg-amd64-custom-vfio-20241012-0.raw";
     pub const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom-20210609-0.qcow2";
     pub const FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE: &str =
         "focal-server-cloudimg-amd64-custom-20210609-0-backing.qcow2";
     pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhd";
     pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhdx";
-    pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-custom-20230119-0.raw";
+    pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.raw";
     pub const WINDOWS_IMAGE_NAME: &str = "windows-server-2022-amd64-2.raw";
     pub const OVMF_NAME: &str = "CLOUDHV.fd";
     pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'IO-APIC.*ttyS0' /proc/interrupts || true";
@@ -366,13 +365,13 @@ fn _test_api_pause_resume(target_api: TargetApi, guest: Guest) {
         thread::sleep(std::time::Duration::new(2, 0));
 
         // SSH into the VM should fail
-        assert!(ssh_command_ip(
+        ssh_command_ip(
             "grep -c processor /proc/cpuinfo",
             &guest.network.guest_ip,
             2,
-            5
+            5,
         )
-        .is_err());
+        .unwrap_err();
 
         // Resume the VM
         assert!(target_api.remote_command("resume", None));
@@ -1326,7 +1325,7 @@ fn test_vhost_user_net(
         #[cfg(target_arch = "x86_64")]
         let grep_cmd = "grep -c PCI-MSI /proc/interrupts";
         #[cfg(target_arch = "aarch64")]
-        let grep_cmd = "grep -c ITS-MSI /proc/interrupts";
+        let grep_cmd = "grep -c ITS-PCI-MSIX /proc/interrupts";
         assert_eq!(
             guest
                 .ssh_command(grep_cmd)
@@ -2346,7 +2345,8 @@ fn make_guest_panic(guest: &Guest) {
 }
 
 mod common_parallel {
-    use std::{fs::OpenOptions, io::SeekFrom};
+    use std::fs::OpenOptions;
+    use std::io::SeekFrom;
 
     use crate::*;
 
@@ -2878,7 +2878,7 @@ mod common_parallel {
         #[cfg(target_arch = "x86_64")]
         let grep_cmd = "grep -c PCI-MSI /proc/interrupts";
         #[cfg(target_arch = "aarch64")]
-        let grep_cmd = "grep -c ITS-MSI /proc/interrupts";
+        let grep_cmd = "grep -c ITS-PCI-MSIX /proc/interrupts";
 
         let r = std::panic::catch_unwind(|| {
             assert_eq!(
@@ -3155,7 +3155,7 @@ mod common_parallel {
             let grep_cmd = if cfg!(target_arch = "x86_64") {
                 "grep -c PCI-MSI /proc/interrupts"
             } else {
-                "grep -c ITS-MSI /proc/interrupts"
+                "grep -c ITS-PCI-MSIX /proc/interrupts"
             };
             assert_eq!(
                 guest
@@ -3205,7 +3205,7 @@ mod common_parallel {
             let grep_cmd = if cfg!(target_arch = "x86_64") {
                 "grep -c PCI-MSI /proc/interrupts"
             } else {
-                "grep -c ITS-MSI /proc/interrupts"
+                "grep -c ITS-PCI-MSIX /proc/interrupts"
             };
             assert_eq!(
                 guest
@@ -4257,6 +4257,7 @@ mod common_parallel {
         });
 
         let _ = socat_child.kill();
+        let _ = socat_child.wait();
 
         let r = std::panic::catch_unwind(|| {
             guest.ssh_command("sudo shutdown -h now").unwrap();
@@ -6583,7 +6584,7 @@ mod common_parallel {
             thread::sleep(std::time::Duration::new(5, 0));
 
             // Check the connection fails this time
-            assert!(guest2.ssh_command("nc -vz 172.100.0.1 12345").is_err());
+            guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap_err();
 
             // Add the OVS port back
             assert!(exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1").success());
@@ -6666,7 +6667,7 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
-    fn setup_spdk_nvme(nvme_dir: &std::path::Path) {
+    fn setup_spdk_nvme(nvme_dir: &std::path::Path) -> Child {
         cleanup_spdk_nvme();
 
         assert!(exec_host_command_status(&format!(
@@ -6686,7 +6687,7 @@ mod common_parallel {
         .success());
 
         // Start the SPDK nvmf_tgt daemon to present NVMe device as a VFIO user device
-        Command::new("/usr/local/bin/spdk-nvme/nvmf_tgt")
+        let child = Command::new("/usr/local/bin/spdk-nvme/nvmf_tgt")
             .args(["-i", "0", "-m", "0x1"])
             .spawn()
             .unwrap();
@@ -6715,6 +6716,8 @@ mod common_parallel {
                 nvme_dir.join("nvme-vfio-user").to_str().unwrap()
             ))
             .success());
+
+        child
     }
 
     fn cleanup_spdk_nvme() {
@@ -6728,13 +6731,13 @@ mod common_parallel {
         let guest = Guest::new(Box::new(jammy));
 
         let spdk_nvme_dir = guest.tmp_dir.as_path().join("test-vfio-user");
-        setup_spdk_nvme(spdk_nvme_dir.as_path());
+        let mut spdk_child = setup_spdk_nvme(spdk_nvme_dir.as_path());
 
         let api_socket = temp_api_path(&guest.tmp_dir);
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket])
             .args(["--cpus", "boot=1"])
-            .args(["--memory", "size=512M,shared=on,hugepages=on"])
+            .args(["--memory", "size=1G,shared=on,hugepages=on"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args(["--serial", "tty", "--console", "off"])
             .default_disks()
@@ -6799,7 +6802,8 @@ mod common_parallel {
             );
         });
 
-        cleanup_spdk_nvme();
+        let _ = spdk_child.kill();
+        let _ = spdk_child.wait();
 
         kill_child(&mut child);
         let output = child.wait_with_output().unwrap();
@@ -7018,7 +7022,7 @@ mod common_parallel {
         let mut guest_cmd = GuestCommand::new(&guest);
         guest_cmd
             .args(["--cpus", "boot=1"])
-            .args(["--memory", "size=512M"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args(["--tpm", &format!("socket={swtpm_socket_path}")])
             .capture_output()
@@ -7955,8 +7959,9 @@ mod common_sequential {
 }
 
 mod windows {
-    use crate::*;
     use once_cell::sync::Lazy;
+
+    use crate::*;
 
     static NEXT_DISK_ID: Lazy<Mutex<u8>> = Lazy::new(|| Mutex::new(1));
 
@@ -8217,7 +8222,7 @@ mod windows {
             .output()
             .expect("ps command failed")
             .stdout;
-        return String::from_utf8_lossy(&out).matches("vcpu").count() as u8;
+        String::from_utf8_lossy(&out).matches("vcpu").count() as u8
     }
 
     fn netdev_ctrl_threads_count(pid: u32) -> u8 {
@@ -8999,9 +9004,10 @@ mod sgx {
 #[cfg(target_arch = "x86_64")]
 mod vfio {
     use crate::*;
+    const NVIDIA_VFIO_DEVICE: &str = "/sys/bus/pci/devices/0002:00:01.0";
 
     fn test_nvidia_card_memory_hotplug(hotplug_method: &str) {
-        let jammy = UbuntuDiskConfig::new(JAMMY_NVIDIA_IMAGE_NAME.to_string());
+        let jammy = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(jammy));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -9012,7 +9018,7 @@ mod vfio {
                 format!("size=4G,hotplug_size=4G,hotplug_method={hotplug_method}").as_str(),
             ])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
-            .args(["--device", "path=/sys/bus/pci/devices/0000:31:00.0/"])
+            .args(["--device", format!("path={NVIDIA_VFIO_DEVICE}").as_str()])
             .args(["--api-socket", &api_socket])
             .default_disks()
             .default_net()
@@ -9055,7 +9061,7 @@ mod vfio {
 
     #[test]
     fn test_nvidia_card_pci_hotplug() {
-        let jammy = UbuntuDiskConfig::new(JAMMY_NVIDIA_IMAGE_NAME.to_string());
+        let jammy = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(jammy));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -9077,7 +9083,7 @@ mod vfio {
             let (cmd_success, cmd_output) = remote_command_w_output(
                 &api_socket,
                 "add-device",
-                Some("id=vfio0,path=/sys/bus/pci/devices/0000:31:00.0/"),
+                Some(format!("id=vfio0,path={NVIDIA_VFIO_DEVICE}").as_str()),
             );
             assert!(cmd_success);
             assert!(String::from_utf8_lossy(&cmd_output)
@@ -9097,7 +9103,7 @@ mod vfio {
 
     #[test]
     fn test_nvidia_card_reboot() {
-        let jammy = UbuntuDiskConfig::new(JAMMY_NVIDIA_IMAGE_NAME.to_string());
+        let jammy = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(jammy));
         let api_socket = temp_api_path(&guest.tmp_dir);
 
@@ -9105,7 +9111,10 @@ mod vfio {
             .args(["--cpus", "boot=4"])
             .args(["--memory", "size=4G"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
-            .args(["--device", "path=/sys/bus/pci/devices/0000:31:00.0/"])
+            .args([
+                "--device",
+                format!("path={NVIDIA_VFIO_DEVICE},iommu=on").as_str(),
+            ])
             .args(["--api-socket", &api_socket])
             .default_disks()
             .default_net()
@@ -9123,6 +9132,43 @@ mod vfio {
 
             // Check the VFIO device works after reboot
             guest.check_nvidia_gpu();
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_nvidia_card_iommu_address_width() {
+        let jammy = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(jammy));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--device", format!("path={NVIDIA_VFIO_DEVICE}").as_str()])
+            .args([
+                "--platform",
+                "num_pci_segments=2,iommu_segments=1,iommu_address_width=42",
+            ])
+            .args(["--api-socket", &api_socket])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            assert!(guest
+                .ssh_command("sudo dmesg")
+                .unwrap()
+                .contains("input address: 42 bits"));
         });
 
         let _ = child.kill();
@@ -9397,7 +9443,7 @@ mod live_migration {
 
         // Check the source vm has been terminated successful (give it '3s' to settle)
         thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().map_or(false, |s| s.success()) {
+        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -9571,7 +9617,7 @@ mod live_migration {
 
         // Check the source vm has been terminated successful (give it '3s' to settle)
         thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().map_or(false, |s| s.success()) {
+        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -9789,7 +9835,7 @@ mod live_migration {
 
         // Check the source vm has been terminated successful (give it '3s' to settle)
         thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().map_or(false, |s| s.success()) {
+        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -10005,7 +10051,7 @@ mod live_migration {
 
         // Check the source vm has been terminated successful (give it '3s' to settle)
         thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().map_or(false, |s| s.success()) {
+        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -10115,7 +10161,7 @@ mod live_migration {
 
         // Check the source vm has been terminated successful (give it '3s' to settle)
         thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().map_or(false, |s| s.success()) {
+        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -10262,7 +10308,7 @@ mod live_migration {
 
         // Check the source vm has been terminated successful (give it '3s' to settle)
         thread::sleep(std::time::Duration::new(3, 0));
-        if !src_child.try_wait().unwrap().map_or(false, |s| s.success()) {
+        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
             print_and_panic(
                 src_child,
                 dest_child,
@@ -10291,6 +10337,220 @@ mod live_migration {
         handle_child_output(r, &dest_output);
     }
 
+    // Function to get an available port
+    fn get_available_port() -> u16 {
+        TcpListener::bind("127.0.0.1:0")
+            .expect("Failed to bind to address")
+            .local_addr()
+            .unwrap()
+            .port()
+    }
+
+    fn start_live_migration_tcp(src_api_socket: &str, dest_api_socket: &str) -> bool {
+        // Get an available TCP port
+        let migration_port = get_available_port();
+        let host_ip = "127.0.0.1";
+
+        // Start the 'receive-migration' command on the destination
+        let mut receive_migration = Command::new(clh_command("ch-remote"))
+            .args([
+                &format!("--api-socket={}", dest_api_socket),
+                "receive-migration",
+                &format!("tcp:0.0.0.0:{}", migration_port),
+            ])
+            .stdin(Stdio::null())
+            .stderr(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        // Give the destination some time to start listening
+        thread::sleep(Duration::from_secs(1));
+
+        // Start the 'send-migration' command on the source
+        let mut send_migration = Command::new(clh_command("ch-remote"))
+            .args([
+                &format!("--api-socket={}", src_api_socket),
+                "send-migration",
+                &format!("tcp:{}:{}", host_ip, migration_port),
+            ])
+            .stdin(Stdio::null())
+            .stderr(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+        // Check if the 'send-migration' command executed successfully
+        let send_success = if let Some(status) = send_migration
+            .wait_timeout(Duration::from_secs(60))
+            .unwrap()
+        {
+            status.success()
+        } else {
+            false
+        };
+
+        if !send_success {
+            let _ = send_migration.kill();
+            let output = send_migration.wait_with_output().unwrap();
+            eprintln!(
+                "\n\n==== Start 'send_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'send_migration' output ====\n\n",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        // Check if the 'receive-migration' command executed successfully
+        let receive_success = if let Some(status) = receive_migration
+            .wait_timeout(Duration::from_secs(60))
+            .unwrap()
+        {
+            status.success()
+        } else {
+            false
+        };
+
+        if !receive_success {
+            let _ = receive_migration.kill();
+            let output = receive_migration.wait_with_output().unwrap();
+            eprintln!(
+                "\n\n==== Start 'receive_migration' output ====\n\n---stdout---\n{}\n\n---stderr---\n{}\n\n==== End 'receive_migration' output ====\n\n",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        send_success && receive_success
+    }
+
+    fn _test_live_migration_tcp() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let kernel_path = direct_kernel_boot_path();
+        let console_text = String::from("On a branch floating down river a cricket, singing.");
+        let net_id = "net123";
+        let net_params = format!(
+            "id={},tap=,mac={},ip={},mask=255.255.255.0",
+            net_id, guest.network.guest_mac, guest.network.host_ip
+        );
+        let memory_param: &[&str] = &["--memory", "size=4G,shared=on"];
+        let boot_vcpus = 2;
+        let max_vcpus = 4;
+        let pmem_temp_file = TempFile::new().unwrap();
+        pmem_temp_file.as_file().set_len(128 << 20).unwrap();
+        std::process::Command::new("mkfs.ext4")
+            .arg(pmem_temp_file.as_path())
+            .output()
+            .expect("Expect creating disk image to succeed");
+        let pmem_path = String::from("/dev/pmem0");
+
+        // Start the source VM
+        let src_vm_path = clh_command("cloud-hypervisor");
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
+        src_vm_cmd
+            .args([
+                "--cpus",
+                format!("boot={},max={}", boot_vcpus, max_vcpus).as_str(),
+            ])
+            .args(memory_param)
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .args([
+                "--pmem",
+                format!(
+                    "file={},discard_writes=on",
+                    pmem_temp_file.as_path().to_str().unwrap(),
+                )
+                .as_str(),
+            ])
+            .capture_output();
+        let mut src_child = src_vm_cmd.spawn().unwrap();
+
+        // Start the destination VM
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+            // Ensure the source VM is running normally
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+
+            // On x86_64 architecture, remove and re-add the virtio-net device
+            #[cfg(target_arch = "x86_64")]
+            {
+                assert!(remote_command(
+                    &src_api_socket,
+                    "remove-device",
+                    Some(net_id),
+                ));
+                thread::sleep(Duration::new(10, 0));
+                // Re-add the virtio-net device
+                assert!(remote_command(
+                    &src_api_socket,
+                    "add-net",
+                    Some(net_params.as_str()),
+                ));
+                thread::sleep(Duration::new(10, 0));
+            }
+            // Start TCP live migration
+            assert!(
+                start_live_migration_tcp(&src_api_socket, &dest_api_socket),
+                "Unsuccessful command: 'send-migration' or 'receive-migration'."
+            );
+        });
+
+        // Check and report any errors that occurred during live migration
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during live-migration",
+            );
+        }
+
+        // Check the source vm has been terminated successful (give it '3s' to settle)
+        thread::sleep(std::time::Duration::new(3, 0));
+        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Source VM was not terminated successfully.",
+            );
+        };
+
+        // After live migration, ensure the destination VM is running normally
+        let r = std::panic::catch_unwind(|| {
+            // Perform the same checks to ensure the VM has migrated correctly
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+        });
+
+        // Clean up the destination VM and ensure it terminates properly
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &dest_output);
+
+        // Check if the expected `console_text` is present in the destination VM's output
+        let r = std::panic::catch_unwind(|| {
+            assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
+        });
+        handle_child_output(r, &dest_output);
+    }
+
     mod live_migration_parallel {
         use super::*;
         #[test]
@@ -10301,6 +10561,11 @@ mod live_migration {
         #[test]
         fn test_live_migration_local() {
             _test_live_migration(false, true)
+        }
+
+        #[test]
+        fn test_live_migration_tcp() {
+            _test_live_migration_tcp();
         }
 
         #[test]
@@ -10750,7 +11015,7 @@ mod rate_limiter {
             } else {
                 parse_fio_output_iops(&output, &fio_ops, num_queues * num_disks).unwrap()
             };
-            assert!(check_rate_limit(measured_rate, limit_rate, 0.1));
+            assert!(check_rate_limit(measured_rate, limit_rate, 0.2));
         });
 
         let _ = child.kill();

@@ -3,10 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #![no_main]
+use std::sync::Arc;
+
 use devices::legacy::Serial;
 use libc::EFD_NONBLOCK;
 use libfuzzer_sys::fuzz_target;
-use std::sync::Arc;
 use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig, InterruptSourceGroup};
 use vm_device::BusDevice;
 use vmm_sys_util::eventfd::EventFd;

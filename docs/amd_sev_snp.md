@@ -1,6 +1,7 @@
 # AMD SEV-SNP
 
 ### WARNING
+
 This feature is only currently supported on MSHV.
 
 AMD Secure Encrypted Virtualization & Secure Nested Paging (SEV-SNP) is an AMD
@@ -9,8 +10,8 @@ malicious hypervisor-based attacks like data replay, memory-remapping and more
 in order to create an isolated execution environment. Here are some useful
 links:
 
-* [SNP Homepage] (https://www.amd.com/en/processors/amd-secure-encrypted-virtualization)
-more information about SEV-SNP technical aspects, design and specification.
+- [SNP Homepage](https://www.amd.com/content/dam/amd/en/documents/epyc-business-docs/solution-briefs/amd-secure-encrypted-virtualization-solution-brief.pdf):
+  more information about SEV-SNP technical aspects, design and specification.
 
 ## Cloud Hypervisor support
 

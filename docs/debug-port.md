@@ -1,7 +1,8 @@
 # `cloud-hypervisor` debug IO ports
 
 When running x86 guests, `cloud-hypervisor` provides different kinds of debug ports:
-- [`0x80` debug port](https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html)
+
+- [`0x80` debug port](https://web.archive.org/web/20211028033025/https://www.intel.com/content/www/us/en/support/articles/000005500/boards-and-kits.html)
 - Debug console (by default at `0xe9`).
 - Firmware debug port at `0x402`.
 
@@ -25,13 +26,13 @@ for debugging specific components of the guest software stack. When logging a
 write of one of those codes to the debug port, `cloud-hypervisor` adds a
 pre-defined string to the logs.
 
-| Code Range       | Component   | Log string   |
-| ---------------- | ----------- | ------------ |
-| `0x00` to `0x1f` | Firmware    | `Firmware`   |
-| `0x20` to `0x3f` | Bootloader  | `Bootloader` |
-| `0x40` to `0x5f` | Kernel      | `Kernel`     |
-| `0x60` to `0x7f` | Userspace   | `Userspace`  |
-| `0x80` to `0xff` | Custom      | `Custom`     |
+| Code Range       | Component  | Log string   |
+| ---------------- | ---------- | ------------ |
+| `0x00` to `0x1f` | Firmware   | `Firmware`   |
+| `0x20` to `0x3f` | Bootloader | `Bootloader` |
+| `0x40` to `0x5f` | Kernel     | `Kernel`     |
+| `0x60` to `0x7f` | Userspace  | `Userspace`  |
+| `0x80` to `0xff` | Custom     | `Custom`     |
 
 One typical use case is guest boot time measurement and tracing. By writing
 different values to the debug I/O port at different boot process steps, the

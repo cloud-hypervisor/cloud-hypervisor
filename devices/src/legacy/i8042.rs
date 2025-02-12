@@ -4,11 +4,10 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Barrier,
-};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier};
 use std::thread;
+
 use vm_device::BusDevice;
 use vmm_sys_util::eventfd::EventFd;
 

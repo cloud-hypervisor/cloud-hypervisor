@@ -13,6 +13,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
+
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 

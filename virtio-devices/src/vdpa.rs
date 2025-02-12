@@ -3,34 +3,31 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::{
-    ActivateError, ActivateResult, GuestMemoryMmap, VirtioCommon, VirtioDevice, VirtioInterrupt,
-    VirtioInterruptType, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FEATURES_OK,
-    VIRTIO_F_IOMMU_PLATFORM,
-};
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::{io, result};
+
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::BTreeMap,
-    io, result,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
-};
 use thiserror::Error;
-use vhost::{
-    vdpa::{VhostVdpa, VhostVdpaIovaRange},
-    vhost_kern::VhostKernFeatures,
-    vhost_kern::{vdpa::VhostKernVdpa, vhost_binding::VHOST_BACKEND_F_SUSPEND},
-    VhostBackend, VringConfigData,
-};
+use vhost::vdpa::{VhostVdpa, VhostVdpaIovaRange};
+use vhost::vhost_kern::vdpa::VhostKernVdpa;
+use vhost::vhost_kern::vhost_binding::VHOST_BACKEND_F_SUSPEND;
+use vhost::vhost_kern::VhostKernFeatures;
+use vhost::{VhostBackend, VringConfigData};
 use virtio_queue::{Descriptor, Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::{
+    ActivateError, ActivateResult, GuestMemoryMmap, VirtioCommon, VirtioDevice, VirtioInterrupt,
+    VirtioInterruptType, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FEATURES_OK,
+    VIRTIO_F_IOMMU_PLATFORM,
+};
 
 #[derive(Error, Debug)]
 pub enum Error {

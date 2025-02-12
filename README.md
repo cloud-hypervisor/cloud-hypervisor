@@ -181,14 +181,9 @@ To build the kernel:
 
 ```shell
 # Clone the Cloud Hypervisor Linux branch
-$ git clone --depth 1 https://github.com/cloud-hypervisor/linux.git -b ch-6.2 linux-cloud-hypervisor
+$ git clone --depth 1 https://github.com/cloud-hypervisor/linux.git -b ch-6.12.8 linux-cloud-hypervisor
 $ pushd linux-cloud-hypervisor
-# Use the x86-64 cloud-hypervisor kernel config to build your kernel for x86-64
-$ wget https://raw.githubusercontent.com/cloud-hypervisor/cloud-hypervisor/main/resources/linux-config-x86_64
-# Use the AArch64 cloud-hypervisor kernel config to build your kernel for AArch64
-$ wget https://raw.githubusercontent.com/cloud-hypervisor/cloud-hypervisor/main/resources/linux-config-aarch64
-$ cp linux-config-x86_64 .config  # x86-64
-$ cp linux-config-aarch64 .config # AArch64
+$ make ch_defconfig
 # Do native build of the x86-64 kernel
 $ KCFLAGS="-Wa,-mx86-used-note=no" make bzImage -j `nproc`
 # Do native build of the AArch64 kernel
@@ -303,7 +298,7 @@ As of 2023-01-03, the following cloud images are supported:
 
 - [Ubuntu Focal](https://cloud-images.ubuntu.com/focal/current/) (focal-server-cloudimg-{amd64,arm64}.img)
 - [Ubuntu Jammy](https://cloud-images.ubuntu.com/jammy/current/) (jammy-server-cloudimg-{amd64,arm64}.img )
-- [Fedora 36](https://fedora.mirrorservice.org/fedora/linux/releases/36/Cloud/) ([Fedora-Cloud-Base-36-1.5.x86_64.raw.xz](https://fedora.mirrorservice.org/fedora/linux/releases/36/Cloud/x86_64/images/) / [Fedora-Cloud-Base-36-1.5.aarch64.raw.xz](https://fedora.mirrorservice.org/fedora/linux/releases/36/Cloud/aarch64/images/))
+- [Fedora 36](https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/36/Cloud/) ([Fedora-Cloud-Base-36-1.5.x86_64.raw.xz](https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/36/Cloud/x86_64/images/) / [Fedora-Cloud-Base-36-1.5.aarch64.raw.xz](https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/36/Cloud/aarch64/images/))
 
 Direct kernel boot to userspace should work with a rootfs from most
 distributions although you may need to enable exotic filesystem types in the

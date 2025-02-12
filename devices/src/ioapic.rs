@@ -9,11 +9,11 @@
 // Implementation of an intel 82093AA Input/Output Advanced Programmable Interrupt Controller
 // See https://pdos.csail.mit.edu/6.828/2016/readings/ia32/ioapic.pdf for a specification.
 
-use super::interrupt_controller::{Error, InterruptController};
-use byteorder::{ByteOrder, LittleEndian};
-use serde::{Deserialize, Serialize};
 use std::result;
 use std::sync::{Arc, Barrier};
+
+use byteorder::{ByteOrder, LittleEndian};
+use serde::{Deserialize, Serialize};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
     MsiIrqGroupConfig, MsiIrqSourceConfig,
@@ -22,6 +22,8 @@ use vm_device::BusDevice;
 use vm_memory::GuestAddress;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
+
+use super::interrupt_controller::{Error, InterruptController};
 
 type Result<T> = result::Result<T, Error>;
 
@@ -344,9 +346,9 @@ impl Ioapic {
 
         // Generate MSI message address
         let low_addr: u32 = self.apic_address.0 as u32
-            | u32::from(destination_id) << 12
-            | u32::from(redirection_hint) << 3
-            | u32::from(destination_mode) << 2;
+            | (u32::from(destination_id) << 12)
+            | (u32::from(redirection_hint) << 3)
+            | (u32::from(destination_mode) << 2);
 
         // Validate Trigger Mode value
         let trigger_mode = trigger_mode(entry);
@@ -370,9 +372,9 @@ impl Ioapic {
         }
 
         // Generate MSI message data
-        let data: u32 = u32::from(trigger_mode) << 15
-            | u32::from(remote_irr(entry)) << 14
-            | u32::from(delivery_mode) << 8
+        let data: u32 = (u32::from(trigger_mode) << 15)
+            | (u32::from(remote_irr(entry)) << 14)
+            | (u32::from(delivery_mode) << 8)
             | u32::from(vector(entry));
 
         let config = MsiIrqSourceConfig {

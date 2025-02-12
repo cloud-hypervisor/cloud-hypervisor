@@ -3,26 +3,27 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::config::ConsoleOutputMode;
+use std::fs::File;
+use std::io::Read;
+use std::net::Shutdown;
+use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd};
+use std::os::unix::net::UnixStream;
+use std::panic::AssertUnwindSafe;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::{io, result, thread};
+
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
 #[cfg(target_arch = "x86_64")]
 use devices::legacy::Serial;
 use libc::EFD_NONBLOCK;
 use serial_buffer::SerialBuffer;
-use std::fs::File;
-use std::io::Read;
-use std::net::Shutdown;
-use std::os::fd::RawFd;
-use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd};
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::panic::AssertUnwindSafe;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::{io, result, thread};
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::console_devices::ConsoleOutput;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -92,6 +93,7 @@ pub enum EpollDispatch {
     Socket = 2,
     Unknown,
 }
+const EPOLL_EVENTS_LEN: usize = 4;
 
 impl From<u64> for EpollDispatch {
     fn from(v: u64) -> Self {
@@ -111,11 +113,10 @@ pub struct SerialManager {
     #[cfg(target_arch = "aarch64")]
     serial: Arc<Mutex<Pl011>>,
     epoll_file: File,
-    in_file: File,
+    in_file: ConsoleOutput,
     kill_evt: EventFd,
     handle: Option<thread::JoinHandle<()>>,
     pty_write_out: Option<Arc<AtomicBool>>,
-    mode: ConsoleOutputMode,
     socket_path: Option<PathBuf>,
 }
 
@@ -123,23 +124,14 @@ impl SerialManager {
     pub fn new(
         #[cfg(target_arch = "x86_64")] serial: Arc<Mutex<Serial>>,
         #[cfg(target_arch = "aarch64")] serial: Arc<Mutex<Pl011>>,
-        main_fd: Option<RawFd>,
-        mode: ConsoleOutputMode,
+        mut output: ConsoleOutput,
         socket: Option<PathBuf>,
     ) -> Result<Option<Self>> {
         let mut socket_path: Option<PathBuf> = None;
 
-        let in_file = match mode {
-            ConsoleOutputMode::Pty => {
-                if let Some(pty_main) = main_fd {
-                    // SAFETY: pty_main is guaranteed to be a valid fd from
-                    // pre_create_console_devices() in vmm/src/console_devices.rs
-                    unsafe { File::from_raw_fd(pty_main) }
-                } else {
-                    return Ok(None);
-                }
-            }
-            ConsoleOutputMode::Tty => {
+        let in_fd = match output {
+            ConsoleOutput::Pty(ref fd) => fd.as_raw_fd(),
+            ConsoleOutput::Tty(_) => {
                 // If running on an interactive TTY then accept input
                 // SAFETY: trivially safe
                 if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } {
@@ -161,22 +153,17 @@ impl SerialManager {
                         return Err(Error::SetNonBlocking(std::io::Error::last_os_error()));
                     }
 
-                    stdin_clone
+                    output = ConsoleOutput::Tty(Arc::new(stdin_clone));
+                    fd
                 } else {
                     return Ok(None);
                 }
             }
-            ConsoleOutputMode::Socket => {
-                if let Some(socket_fd) = main_fd {
-                    if let Some(path_in_socket) = socket {
-                        socket_path = Some(path_in_socket.clone());
-                    }
-                    // SAFETY: socke_fd is guaranteed to be a valid fd from
-                    // pre_create_console_devices() in vmm/src/console_devices.rs
-                    unsafe { File::from_raw_fd(socket_fd) }
-                } else {
-                    return Ok(None);
+            ConsoleOutput::Socket(ref fd) => {
+                if let Some(path_in_socket) = socket {
+                    socket_path = Some(path_in_socket.clone());
                 }
+                fd.as_raw_fd()
             }
             _ => return Ok(None),
         };
@@ -192,7 +179,7 @@ impl SerialManager {
         )
         .map_err(Error::Epoll)?;
 
-        let epoll_fd_data = if mode == ConsoleOutputMode::Socket {
+        let epoll_fd_data = if let ConsoleOutput::Socket(_) = output {
             EpollDispatch::Socket
         } else {
             EpollDispatch::File
@@ -201,16 +188,16 @@ impl SerialManager {
         epoll::ctl(
             epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
-            in_file.as_raw_fd(),
+            in_fd,
             epoll::Event::new(epoll::Events::EPOLLIN, epoll_fd_data as u64),
         )
         .map_err(Error::Epoll)?;
 
         let mut pty_write_out = None;
-        if mode == ConsoleOutputMode::Pty {
+        if let ConsoleOutput::Pty(ref file) = output {
             let write_out = Arc::new(AtomicBool::new(false));
             pty_write_out = Some(write_out.clone());
-            let writer = in_file.try_clone().map_err(Error::FileClone)?;
+            let writer = file.try_clone().map_err(Error::FileClone)?;
             let buffer = SerialBuffer::new(Box::new(writer), write_out);
             serial
                 .as_ref()
@@ -226,11 +213,10 @@ impl SerialManager {
         Ok(Some(SerialManager {
             serial,
             epoll_file,
-            in_file,
+            in_file: output,
             kill_evt,
             handle: None,
             pty_write_out,
-            mode,
             socket_path,
         }))
     }
@@ -269,15 +255,10 @@ impl SerialManager {
         }
 
         let epoll_fd = self.epoll_file.as_raw_fd();
-        let mut in_file = self.in_file.try_clone().map_err(Error::FileClone)?;
+        let in_file = self.in_file.clone();
         let serial = self.serial.clone();
         let pty_write_out = self.pty_write_out.clone();
-        // SAFETY: from_raw_fd is always called with a valid fd
-        let listener = unsafe {
-            UnixListener::from_raw_fd(in_file.try_clone().map_err(Error::FileClone)?.into_raw_fd())
-        };
         let mut reader: Option<UnixStream> = None;
-        let mode = self.mode.clone();
 
         // In case of PTY, we want to be able to detect a connection on the
         // other end of the PTY. This is done by detecting there's no event
@@ -291,9 +272,6 @@ impl SerialManager {
             .name("serial-manager".to_string())
             .spawn(move || {
                 std::panic::catch_unwind(AssertUnwindSafe(move || {
-                    // 3 for File, Kill, and Unknown
-                    const EPOLL_EVENTS_LEN: usize = 3;
-
                     let mut events =
                         [epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
 
@@ -316,7 +294,7 @@ impl SerialManager {
                             }
                         };
 
-                        if mode != ConsoleOutputMode::Socket && num_events == 0 {
+                        if matches!(in_file, ConsoleOutput::Socket(_)) && num_events == 0 {
                             // This very specific case happens when the serial is connected
                             // to a PTY. We know EPOLLHUP is always present when there's nothing
                             // connected at the other end of the PTY. That's why getting no event
@@ -340,6 +318,11 @@ impl SerialManager {
                                             .shutdown(Shutdown::Both)
                                             .map_err(Error::AcceptConnection)?;
                                     }
+
+                                    let ConsoleOutput::Socket(ref listener) = in_file else {
+                                        unreachable!();
+                                    };
+
                                     // Events on the listening socket will be connection requests.
                                     // Accept them, create a reader and a writer.
                                     let (unix_stream, _) =
@@ -365,8 +348,8 @@ impl SerialManager {
                                 EpollDispatch::File => {
                                     if event.events & libc::EPOLLIN as u32 != 0 {
                                         let mut input = [0u8; 64];
-                                        let count = match mode {
-                                            ConsoleOutputMode::Socket => {
+                                        let count = match &in_file {
+                                            ConsoleOutput::Socket(_) => {
                                                 if let Some(mut serial_reader) = reader.as_ref() {
                                                     let count = serial_reader
                                                         .read(&mut input)
@@ -388,9 +371,12 @@ impl SerialManager {
                                                     0
                                                 }
                                             }
-                                            _ => in_file
-                                                .read(&mut input)
-                                                .map_err(Error::ReadInput)?,
+                                            ConsoleOutput::Pty(file) | ConsoleOutput::Tty(file) => {
+                                                (&**file)
+                                                    .read(&mut input)
+                                                    .map_err(Error::ReadInput)?
+                                            }
+                                            _ => unreachable!(),
                                         };
 
                                         // Replace "\n" with "\r" to deal with Windows SAC (#1170)
@@ -446,7 +432,7 @@ impl Drop for SerialManager {
         if let Some(handle) = self.handle.take() {
             handle.join().ok();
         }
-        if self.mode == ConsoleOutputMode::Socket {
+        if let ConsoleOutput::Socket(_) = self.in_file {
             if let Some(socket_path) = self.socket_path.as_ref() {
                 std::fs::remove_file(socket_path.as_os_str())
                     .map_err(Error::RemoveUnixSocket)

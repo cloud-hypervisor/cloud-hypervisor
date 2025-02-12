@@ -2,11 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-use crate::{landlock::LandlockError, Landlock};
+use std::net::Ipv4Addr;
+use std::path::PathBuf;
+use std::{fs, result};
+
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
-use std::{fs, net::Ipv4Addr, path::PathBuf, result};
 use virtio_devices::RateLimiterConfig;
+
+use crate::landlock::LandlockError;
+use crate::Landlock;
 
 pub type LandlockResult<T> = result::Result<T, LandlockError>;
 
@@ -83,12 +88,19 @@ pub fn default_platformconfig_num_pci_segments() -> u16 {
     DEFAULT_NUM_PCI_SEGMENTS
 }
 
+pub const DEFAULT_IOMMU_ADDRESS_WIDTH_BITS: u8 = 64;
+pub fn default_platformconfig_iommu_address_width_bits() -> u8 {
+    DEFAULT_IOMMU_ADDRESS_WIDTH_BITS
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PlatformConfig {
     #[serde(default = "default_platformconfig_num_pci_segments")]
     pub num_pci_segments: u16,
     #[serde(default)]
     pub iommu_segments: Option<Vec<u16>>,
+    #[serde(default = "default_platformconfig_iommu_address_width_bits")]
+    pub iommu_address_width_bits: u8,
     #[serde(default)]
     pub serial_number: Option<String>,
     #[serde(default)]

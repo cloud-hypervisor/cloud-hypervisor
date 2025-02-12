@@ -2,13 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::vhdx::{vhdx_header::RegionTableEntry, vhdx_metadata::DiskSpec};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use remain::sorted;
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 use std::mem::size_of;
+
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use remain::sorted;
 use thiserror::Error;
+
+use crate::vhdx::vhdx_header::RegionTableEntry;
+use crate::vhdx::vhdx_metadata::DiskSpec;
 
 // Payload BAT Entry States
 pub const PAYLOAD_BLOCK_NOT_PRESENT: u64 = 0;
@@ -75,7 +78,7 @@ impl BatEntry {
 
     // Calculate the number of entries in the BAT
     fn calculate_entries(block_size: u32, virtual_disk_size: u64, chunk_ratio: u64) -> u64 {
-        let data_blocks_count = div_round_up!(virtual_disk_size, block_size as u64);
+        let data_blocks_count = virtual_disk_size.div_ceil(block_size as u64);
         data_blocks_count + (data_blocks_count - 1) / chunk_ratio
     }
 

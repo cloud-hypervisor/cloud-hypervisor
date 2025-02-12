@@ -2,10 +2,9 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::GuestMemoryMmap;
-use crate::Tap;
-use libc::c_uint;
 use std::sync::Arc;
+
+use libc::c_uint;
 use virtio_bindings::virtio_net::{
     VIRTIO_NET_CTRL_GUEST_OFFLOADS, VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET, VIRTIO_NET_CTRL_MQ,
     VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN,
@@ -16,6 +15,8 @@ use virtio_bindings::virtio_net::{
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestMemoryError};
 use vm_virtio::{AccessPlatform, Translatable};
+
+use crate::{GuestMemoryMmap, Tap};
 
 #[derive(Debug)]
 pub enum Error {

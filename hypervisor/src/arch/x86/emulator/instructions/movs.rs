@@ -131,7 +131,7 @@ mod tests {
 
         let mut vmm = MockVmm::new(ip, regs, Some((0, &memory)));
 
-        assert!(vmm.emulate_first_insn(0, &insn).is_ok());
+        vmm.emulate_first_insn(0, &insn).unwrap();
 
         vmm.read_memory(0x10, &mut data).unwrap();
         assert_eq!(0xaabbccdd12345678, <u64>::from_le_bytes(data));
@@ -159,7 +159,7 @@ mod tests {
 
         let mut vmm = MockVmm::new(ip, regs, Some((0, &memory)));
 
-        assert!(vmm.emulate_first_insn(0, &insn).is_ok());
+        vmm.emulate_first_insn(0, &insn).unwrap();
 
         vmm.read_memory(0xc, &mut data).unwrap();
         assert_eq!(0x12345678, <u32>::from_le_bytes(data));
@@ -184,7 +184,7 @@ mod tests {
 
         let mut vmm = MockVmm::new(ip, regs, Some((0, &memory)));
 
-        assert!(vmm.emulate_first_insn(0, &insn).is_ok());
+        vmm.emulate_first_insn(0, &insn).unwrap();
 
         vmm.read_memory(0x8, &mut data).unwrap();
         assert_eq!(0x12345678, <u32>::from_le_bytes(data));
@@ -212,7 +212,7 @@ mod tests {
 
         let mut vmm = MockVmm::new(ip, regs, Some((0, &memory)));
 
-        assert!(vmm.emulate_first_insn(0, &insn).is_ok());
+        vmm.emulate_first_insn(0, &insn).unwrap();
 
         vmm.read_memory(0xc, &mut data).unwrap();
         assert_eq!(0x5678, <u16>::from_le_bytes(data));
@@ -243,7 +243,7 @@ mod tests {
 
         let mut vmm = MockVmm::new(ip, regs, Some((0, &memory)));
 
-        assert!(vmm.emulate_first_insn(0, &insn).is_ok());
+        vmm.emulate_first_insn(0, &insn).unwrap();
 
         vmm.read_memory(0x8, &mut data).unwrap();
         assert_eq!(0x5678, <u16>::from_le_bytes(data));
@@ -269,7 +269,7 @@ mod tests {
 
         let mut vmm = MockVmm::new(ip, regs, Some((0, &memory)));
 
-        assert!(vmm.emulate_first_insn(0, &insn).is_ok());
+        vmm.emulate_first_insn(0, &insn).unwrap();
 
         vmm.read_memory(0x8, &mut data).unwrap();
         assert_eq!(0x78, data[0]);
@@ -299,7 +299,7 @@ mod tests {
 
         let mut vmm = MockVmm::new(ip, regs, Some((0, &memory)));
 
-        assert!(vmm.emulate_first_insn(0, &insn).is_ok());
+        vmm.emulate_first_insn(0, &insn).unwrap();
 
         vmm.read_memory(0x8, &mut data).unwrap();
         assert_eq!(0x78, data[0]);

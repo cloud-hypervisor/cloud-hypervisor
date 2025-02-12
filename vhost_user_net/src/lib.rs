@@ -6,29 +6,27 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
+use std::net::Ipv4Addr;
+use std::ops::Deref;
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::sync::{Arc, Mutex, RwLock};
+use std::{fmt, io, process};
+
 use libc::EFD_NONBLOCK;
 use log::*;
 use net_util::{
     open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio,
 };
-use option_parser::Toggle;
-use option_parser::{OptionParser, OptionParserError};
-use std::fmt;
-use std::io;
-use std::net::Ipv4Addr;
-use std::ops::Deref;
-use std::os::unix::io::{AsRawFd, RawFd};
-use std::process;
-use std::sync::{Arc, Mutex, RwLock};
+use option_parser::{OptionParser, OptionParserError, Toggle};
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
 use vhost_user_backend::bitmap::BitmapMmapRegion;
 use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringT};
 use virtio_bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};
 use virtio_bindings::virtio_net::*;
-use vm_memory::GuestAddressSpace;
-use vm_memory::GuestMemoryAtomic;
-use vmm_sys_util::{epoll::EventSet, eventfd::EventFd};
+use vm_memory::{GuestAddressSpace, GuestMemoryAtomic};
+use vmm_sys_util::epoll::EventSet;
+use vmm_sys_util::eventfd::EventFd;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<BitmapMmapRegion>;
 
@@ -171,22 +169,22 @@ impl VhostUserBackendMut for VhostUserNetBackend {
     }
 
     fn features(&self) -> u64 {
-        1 << VIRTIO_NET_F_GUEST_CSUM
-            | 1 << VIRTIO_NET_F_CSUM
-            | 1 << VIRTIO_NET_F_GUEST_TSO4
-            | 1 << VIRTIO_NET_F_GUEST_TSO6
-            | 1 << VIRTIO_NET_F_GUEST_ECN
-            | 1 << VIRTIO_NET_F_GUEST_UFO
-            | 1 << VIRTIO_NET_F_HOST_TSO4
-            | 1 << VIRTIO_NET_F_HOST_TSO6
-            | 1 << VIRTIO_NET_F_HOST_ECN
-            | 1 << VIRTIO_NET_F_HOST_UFO
-            | 1 << VIRTIO_NET_F_CTRL_VQ
-            | 1 << VIRTIO_NET_F_MQ
-            | 1 << VIRTIO_NET_F_MAC
-            | 1 << VIRTIO_NET_F_MTU
-            | 1 << VIRTIO_F_NOTIFY_ON_EMPTY
-            | 1 << VIRTIO_F_VERSION_1
+        (1 << VIRTIO_NET_F_GUEST_CSUM)
+            | (1 << VIRTIO_NET_F_CSUM)
+            | (1 << VIRTIO_NET_F_GUEST_TSO4)
+            | (1 << VIRTIO_NET_F_GUEST_TSO6)
+            | (1 << VIRTIO_NET_F_GUEST_ECN)
+            | (1 << VIRTIO_NET_F_GUEST_UFO)
+            | (1 << VIRTIO_NET_F_HOST_TSO4)
+            | (1 << VIRTIO_NET_F_HOST_TSO6)
+            | (1 << VIRTIO_NET_F_HOST_ECN)
+            | (1 << VIRTIO_NET_F_HOST_UFO)
+            | (1 << VIRTIO_NET_F_CTRL_VQ)
+            | (1 << VIRTIO_NET_F_MQ)
+            | (1 << VIRTIO_NET_F_MAC)
+            | (1 << VIRTIO_NET_F_MTU)
+            | (1 << VIRTIO_F_NOTIFY_ON_EMPTY)
+            | (1 << VIRTIO_F_VERSION_1)
             | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits()
     }
 

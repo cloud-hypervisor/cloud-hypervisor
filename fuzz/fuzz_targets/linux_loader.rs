@@ -8,14 +8,15 @@
 
 #![no_main]
 
-use libfuzzer_sys::fuzz_target;
-use linux_loader::loader::KernelLoader;
-use std::ffi;
 use std::fs::File;
-use std::io;
 use std::io::{Seek, SeekFrom, Write};
 use std::os::unix::io::{FromRawFd, RawFd};
-use vm_memory::{bitmap::AtomicBitmap, GuestAddress};
+use std::{ffi, io};
+
+use libfuzzer_sys::fuzz_target;
+use linux_loader::loader::KernelLoader;
+use vm_memory::bitmap::AtomicBitmap;
+use vm_memory::GuestAddress;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 

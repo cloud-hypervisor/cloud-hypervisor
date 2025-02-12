@@ -1,0 +1,16 @@
+name: Link Check (lychee)
+on:
+  pull_request
+
+jobs:
+  link_check:
+    name: Link Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v4
+
+      - name: Link Availability Check
+        uses: lycheeverse/lychee-action@master
+        with:
+          args: --verbose --config .lychee.toml .

@@ -6,29 +6,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use crate::{NumaNodes, PciSpaceInfo};
-use byteorder::{BigEndian, ByteOrder};
-use hypervisor::arch::aarch64::gic::Vgic;
-use std::cmp;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;
-use std::result;
-use std::str;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::{cmp, fs, result, str};
 
-use super::super::DeviceType;
-use super::super::GuestMemoryMmap;
-use super::super::InitramfsConfig;
+use byteorder::{BigEndian, ByteOrder};
+use hypervisor::arch::aarch64::gic::Vgic;
+use thiserror::Error;
+use vm_fdt::{FdtWriter, FdtWriterResult};
+use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryRegion};
+
+use super::super::{DeviceType, GuestMemoryMmap, InitramfsConfig};
 use super::layout::{
     IRQ_BASE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, MEM_PCI_IO_SIZE, MEM_PCI_IO_START,
     PCI_HIGH_BASE, PCI_MMIO_CONFIG_SIZE_PER_SEGMENT,
 };
-use std::fs;
-use std::path::Path;
-use thiserror::Error;
-use vm_fdt::{FdtWriter, FdtWriterResult};
-use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryRegion};
+use crate::{NumaNodes, PciSpaceInfo};
 
 // This is a value for uniquely identifying the FDT node declaring the interrupt controller.
 const GIC_PHANDLE: u32 = 1;

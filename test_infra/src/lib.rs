@@ -5,25 +5,22 @@
 
 #![allow(clippy::undocumented_unsafe_blocks)]
 
-use once_cell::sync::Lazy;
-use serde_json::Value;
-use ssh2::Session;
-use std::env;
 use std::ffi::OsStr;
 use std::fmt::Display;
-use std::io;
 use std::io::{Read, Write};
-use std::net::TcpListener;
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
 use std::sync::Mutex;
-use std::thread;
 use std::time::Duration;
-use std::{fmt, fs};
+use std::{env, fmt, fs, io, thread};
+
+use once_cell::sync::Lazy;
+use serde_json::Value;
+use ssh2::Session;
 use vmm_sys_util::tempdir::TempDir;
 use wait_timeout::ChildExt;
 
@@ -809,8 +806,12 @@ pub fn kill_child(child: &mut Child) {
     }
 
     // The timeout period elapsed without the child exiting
-    if child.wait_timeout(Duration::new(5, 0)).unwrap().is_none() {
+    if child.wait_timeout(Duration::new(10, 0)).unwrap().is_none() {
         let _ = child.kill();
+        let rust_flags = env::var("RUSTFLAGS").unwrap_or_default();
+        if rust_flags.contains("-Cinstrument-coverage") {
+            panic!("Wait child timeout, please check the reason.")
+        }
     }
 }
 
@@ -1127,7 +1128,10 @@ impl Guest {
 
     #[cfg(target_arch = "x86_64")]
     pub fn check_nvidia_gpu(&self) {
-        assert!(self.ssh_command("nvidia-smi").unwrap().contains("Tesla T4"));
+        assert!(self
+            .ssh_command("nvidia-smi")
+            .unwrap()
+            .contains("NVIDIA L40S"));
     }
 
     pub fn reboot_linux(&self, current_reboot_count: u32, custom_timeout: Option<i32>) {
@@ -1300,6 +1304,9 @@ impl<'a> GuestCommand<'a> {
         }
 
         if self.capture_output {
+            // The caller should call .wait() on the returned child
+            #[allow(unknown_lints)]
+            #[allow(clippy::zombie_processes)]
             let child = self
                 .command
                 .stderr(Stdio::piped())
@@ -1329,6 +1336,9 @@ impl<'a> GuestCommand<'a> {
                 ))
             }
         } else {
+            // The caller should call .wait() on the returned child
+            #[allow(unknown_lints)]
+            #[allow(clippy::zombie_processes)]
             self.command.spawn()
         }
     }

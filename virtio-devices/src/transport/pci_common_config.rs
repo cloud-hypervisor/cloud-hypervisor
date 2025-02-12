@@ -6,14 +6,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::VirtioDevice;
-use byteorder::{ByteOrder, LittleEndian};
-use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
+
+use byteorder::{ByteOrder, LittleEndian};
+use serde::{Deserialize, Serialize};
 use virtio_queue::{Queue, QueueT};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
 use vm_virtio::AccessPlatform;
+
+use crate::VirtioDevice;
 
 pub const VIRTIO_PCI_COMMON_CONFIG_ID: &str = "virtio_pci_common_config";
 
@@ -404,11 +406,11 @@ impl Snapshottable for VirtioPciCommonConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::GuestMemoryMmap;
-    use crate::{ActivateResult, VirtioInterrupt};
     use vm_memory::GuestMemoryAtomic;
     use vmm_sys_util::eventfd::EventFd;
+
+    use super::*;
+    use crate::{ActivateResult, GuestMemoryMmap, VirtioInterrupt};
 
     struct DummyDevice(u32);
     const QUEUE_SIZE: u16 = 256;

@@ -8,14 +8,17 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::BlockBackend;
-use libc::c_void;
 use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::slice;
-use vmm_sys_util::{seek_hole::SeekHole, write_zeroes::PunchHole, write_zeroes::WriteZeroesAt};
+
+use libc::c_void;
+use vmm_sys_util::seek_hole::SeekHole;
+use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
+
+use crate::BlockBackend;
 
 #[derive(Debug)]
 pub struct RawFile {
@@ -71,7 +74,7 @@ impl RawFile {
 
     fn round_up(&self, offset: u64) -> u64 {
         let align: u64 = self.alignment.try_into().unwrap();
-        ((offset + align - 1) / align) * align
+        offset.div_ceil(align) * align
     }
 
     fn round_down(&self, offset: u64) -> u64 {

@@ -5,10 +5,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
-use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::{Arc, Barrier};
 use std::{io, result};
+
+use serde::{Deserialize, Serialize};
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -340,10 +341,12 @@ impl Migratable for Serial {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::Mutex;
+
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
     use vmm_sys_util::eventfd::EventFd;
+
+    use super::*;
 
     const SERIAL_NAME: &str = "serial";
 
@@ -431,7 +434,7 @@ mod tests {
 
         // write 1 to the interrupt event fd, so that read doesn't block in case the event fd
         // counter doesn't change (for 0 it blocks)
-        assert!(intr_evt.write(1).is_ok());
+        intr_evt.write(1).unwrap();
         serial.write(0, IER as u64, &[IER_RECV_BIT]);
         serial.queue_input_bytes(b"abc").unwrap();
 
@@ -468,7 +471,7 @@ mod tests {
 
         // write 1 to the interrupt event fd, so that read doesn't block in case the event fd
         // counter doesn't change (for 0 it blocks)
-        assert!(intr_evt.write(1).is_ok());
+        intr_evt.write(1).unwrap();
         serial.write(0, IER as u64, &[IER_THR_BIT]);
         serial.write(0, DATA as u64, b"a");
 

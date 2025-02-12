@@ -6,16 +6,18 @@ mod dist_regs;
 mod icc_regs;
 mod redist_regs;
 
-use crate::arch::aarch64::gic::{Error, Result, Vgic, VgicConfig};
-use crate::device::HypervisorDeviceError;
-use crate::kvm::KvmVm;
-use crate::{CpuState, Vm};
+use std::any::Any;
+
 use dist_regs::{get_dist_regs, read_ctlr, set_dist_regs, write_ctlr};
 use icc_regs::{get_icc_regs, set_icc_regs};
 use kvm_ioctls::DeviceFd;
 use redist_regs::{construct_gicr_typers, get_redist_regs, set_redist_regs};
 use serde::{Deserialize, Serialize};
-use std::any::Any;
+
+use crate::arch::aarch64::gic::{Error, Result, Vgic, VgicConfig};
+use crate::device::HypervisorDeviceError;
+use crate::kvm::KvmVm;
+use crate::{CpuState, Vm};
 
 const GITS_CTLR: u32 = 0x0000;
 const GITS_IIDR: u32 = 0x0004;
@@ -47,13 +49,10 @@ fn gicv3_its_attr_get(its_device: &DeviceFd, group: u32, attr: u32) -> Result<u6
         flags: 0,
     };
 
-    // get_device_attr should be marked as unsafe, and will be in future.
     // SAFETY: gicv3_its_attr.addr is safe to write to.
-    its_device
-        .get_device_attr(&mut gicv3_its_attr)
-        .map_err(|e| {
-            Error::GetDeviceAttribute(HypervisorDeviceError::GetDeviceAttribute(e.into()))
-        })?;
+    unsafe { its_device.get_device_attr(&mut gicv3_its_attr) }.map_err(|e| {
+        Error::GetDeviceAttribute(HypervisorDeviceError::GetDeviceAttribute(e.into()))
+    })?;
 
     Ok(val)
 }
@@ -489,7 +488,7 @@ mod tests {
         let hv = crate::new().unwrap();
         let vm = hv.create_vm().unwrap();
 
-        assert!(KvmGicV3Its::new(&*vm, create_test_vgic_config()).is_ok());
+        KvmGicV3Its::new(&*vm, create_test_vgic_config()).unwrap();
     }
 
     #[test]
@@ -499,13 +498,10 @@ mod tests {
         let _ = vm.create_vcpu(0, None).unwrap();
         let gic = KvmGicV3Its::new(&*vm, create_test_vgic_config()).expect("Cannot create gic");
 
-        let res = get_dist_regs(&gic.device);
-        assert!(res.is_ok());
-        let state = res.unwrap();
+        let state = get_dist_regs(&gic.device).unwrap();
         assert_eq!(state.len(), 568);
 
-        let res = set_dist_regs(&gic.device, &state);
-        assert!(res.is_ok());
+        set_dist_regs(&gic.device, &state).unwrap();
     }
 
     #[test]
@@ -516,13 +512,11 @@ mod tests {
         let gic = KvmGicV3Its::new(&*vm, create_test_vgic_config()).expect("Cannot create gic");
 
         let gicr_typer = vec![123];
-        let res = get_redist_regs(&gic.device, &gicr_typer);
-        assert!(res.is_ok());
-        let state = res.unwrap();
+        let state = get_redist_regs(&gic.device, &gicr_typer).unwrap();
         println!("{}", state.len());
         assert!(state.len() == 24);
 
-        assert!(set_redist_regs(&gic.device, &gicr_typer, &state).is_ok());
+        set_redist_regs(&gic.device, &gicr_typer, &state).unwrap();
     }
 
     #[test]
@@ -533,13 +527,11 @@ mod tests {
         let gic = KvmGicV3Its::new(&*vm, create_test_vgic_config()).expect("Cannot create gic");
 
         let gicr_typer = vec![123];
-        let res = get_icc_regs(&gic.device, &gicr_typer);
-        assert!(res.is_ok());
-        let state = res.unwrap();
+        let state = get_icc_regs(&gic.device, &gicr_typer).unwrap();
         println!("{}", state.len());
         assert!(state.len() == 9);
 
-        assert!(set_icc_regs(&gic.device, &gicr_typer, &state).is_ok());
+        set_icc_regs(&gic.device, &gicr_typer, &state).unwrap();
     }
 
     #[test]
@@ -551,6 +543,6 @@ mod tests {
             .create_vgic(create_test_vgic_config())
             .expect("Cannot create gic");
 
-        assert!(gic.lock().unwrap().save_data_tables().is_ok());
+        gic.lock().unwrap().save_data_tables().unwrap();
     }
 }

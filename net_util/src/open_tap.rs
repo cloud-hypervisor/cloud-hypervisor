@@ -2,11 +2,13 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::{vnet_hdr_len, MacAddr, Tap, TapError};
 use std::net::Ipv4Addr;
 use std::path::Path;
 use std::{fs, io};
+
 use thiserror::Error;
+
+use super::{vnet_hdr_len, MacAddr, Tap, TapError};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -73,9 +75,7 @@ pub fn open_tap(
     let mut ifname: String = String::new();
     let vnet_hdr_size = vnet_hdr_len() as i32;
     // Check if the given interface exists before we create it.
-    let tap_existed = if_name.map_or(false, |n| {
-        Path::new(&format!("/sys/class/net/{n}")).exists()
-    });
+    let tap_existed = if_name.is_some_and(|n| Path::new(&format!("/sys/class/net/{n}")).exists());
 
     // In case the tap interface already exists, check if the number of
     // queues is appropriate. The tap might not support multiqueue while

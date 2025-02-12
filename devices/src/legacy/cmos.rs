@@ -4,18 +4,17 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use libc::{clock_gettime, gmtime_r, timespec, tm, CLOCK_REALTIME};
 use std::cmp::min;
-use std::mem;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
-use std::thread;
-use vm_device::BusDevice;
-use vmm_sys_util::eventfd::EventFd;
+use std::{mem, thread};
 
 // https://github.com/rust-lang/libc/issues/1848
 #[cfg_attr(target_env = "musl", allow(deprecated))]
 use libc::time_t;
+use libc::{clock_gettime, gmtime_r, timespec, tm, CLOCK_REALTIME};
+use vm_device::BusDevice;
+use vmm_sys_util::eventfd::EventFd;
 
 const INDEX_MASK: u8 = 0x7f;
 const INDEX_OFFSET: u64 = 0x0;
@@ -153,7 +152,7 @@ impl BusDevice for Cmos {
                     0x08 => to_bcd(month as u8),
                     0x09 => to_bcd((year % 100) as u8),
                     // Bit 5 for 32kHz clock. Bit 7 for Update in Progress
-                    0x0a => 1 << 5 | (update_in_progress as u8) << 7,
+                    0x0a => (1 << 5) | ((update_in_progress as u8) << 7),
                     // Bit 0-6 are reserved and must be 0.
                     // Bit 7 must be 1 (CMOS has power)
                     0x0d => 1 << 7,

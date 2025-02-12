@@ -3,19 +3,20 @@
 // Copyright © 2024, Microsoft Corporation
 //
 
+use iced_x86::Register;
+use mshv_bindings::*;
+
 use crate::arch::emulator::{PlatformEmulator, PlatformError};
 use crate::arch::x86::emulator::{CpuStateManager, EmulatorCpuState};
 use crate::cpu::Vcpu;
 use crate::mshv::MshvVcpu;
-use iced_x86::Register;
-use mshv_bindings::*;
 
 pub struct MshvEmulatorContext<'a> {
     pub vcpu: &'a MshvVcpu,
     pub map: (u64, u64), // Initial GVA to GPA mapping provided by the hypervisor
 }
 
-impl<'a> MshvEmulatorContext<'a> {
+impl MshvEmulatorContext<'_> {
     // Do the actual gva -> gpa translation
     #[allow(non_upper_case_globals)]
     fn translate(&self, gva: u64, flags: u32) -> Result<u64, PlatformError> {
@@ -61,7 +62,7 @@ impl<'a> MshvEmulatorContext<'a> {
 }
 
 /// Platform emulation for Hyper-V
-impl<'a> PlatformEmulator for MshvEmulatorContext<'a> {
+impl PlatformEmulator for MshvEmulatorContext<'_> {
     type CpuState = EmulatorCpuState;
 
     fn read_memory(&self, gva: u64, data: &mut [u8]) -> Result<(), PlatformError> {

@@ -3,25 +3,18 @@
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 
-use crate::msi::{MsiConfigState, MSI_CONFIG_ID};
-use crate::msix::MsixConfigState;
-use crate::{
-    msi_num_enabled_vectors, BarReprogrammingParams, MsiCap, MsiConfig, MsixCap, MsixConfig,
-    PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciBdf, PciCapabilityId,
-    PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciExpressCapabilityId,
-    PciHeaderType, PciSubclass, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, PCI_CONFIGURATION_ID,
-};
-use anyhow::anyhow;
-use byteorder::{ByteOrder, LittleEndian};
-use hypervisor::HypervisorVmError;
-use libc::{sysconf, _SC_PAGESIZE};
-use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::os::unix::io::AsRawFd;
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
+
+use anyhow::anyhow;
+use byteorder::{ByteOrder, LittleEndian};
+use hypervisor::HypervisorVmError;
+use libc::{sysconf, _SC_PAGESIZE};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::{
@@ -30,7 +23,7 @@ use vfio_ioctls::{
 use vm_allocator::page_size::{
     align_page_size_down, align_page_size_up, is_4k_aligned, is_4k_multiple, is_page_size_aligned,
 };
-use vm_allocator::{AddressAllocator, SystemAllocator};
+use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig,
@@ -40,16 +33,25 @@ use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestUsiz
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::msi::{MsiConfigState, MSI_CONFIG_ID};
+use crate::msix::MsixConfigState;
+use crate::{
+    msi_num_enabled_vectors, BarReprogrammingParams, MsiCap, MsiConfig, MsixCap, MsixConfig,
+    PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciBdf, PciCapabilityId,
+    PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciExpressCapabilityId,
+    PciHeaderType, PciSubclass, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, PCI_CONFIGURATION_ID,
+};
+
 pub(crate) const VFIO_COMMON_ID: &str = "vfio_common";
 
 #[derive(Debug, Error)]
 pub enum VfioPciError {
     #[error("Failed to create user memory region: {0}")]
     CreateUserMemoryRegion(#[source] HypervisorVmError),
-    #[error("Failed to DMA map: {0}")]
-    DmaMap(#[source] vfio_ioctls::VfioError),
-    #[error("Failed to DMA unmap: {0}")]
-    DmaUnmap(#[source] vfio_ioctls::VfioError),
+    #[error("Failed to DMA map: {0} for device {1}")]
+    DmaMap(#[source] vfio_ioctls::VfioError, PciBdf),
+    #[error("Failed to DMA unmap: {0} for device {1}")]
+    DmaUnmap(#[source] vfio_ioctls::VfioError, PciBdf),
     #[error("Failed to enable INTx: {0}")]
     EnableIntx(#[source] VfioError),
     #[error("Failed to enable MSI: {0}")]
@@ -680,7 +682,7 @@ impl VfioCommon {
                         .write_config_dword(upper_offset, 0xffff_ffff);
                     let upper = self.vfio_wrapper.read_config_dword(upper_offset);
 
-                    let mut combined_size = u64::from(upper) << 32 | u64::from(lower);
+                    let mut combined_size = (u64::from(upper) << 32) | u64::from(lower);
 
                     // Mask out flag bits (lowest 4 for memory bars)
                     combined_size &= !0b1111;
@@ -711,11 +713,7 @@ impl VfioCommon {
 
             let bar_addr = match region_type {
                 PciBarRegionType::IoRegion => {
-                    #[cfg(target_arch = "aarch64")]
-                    unimplemented!();
-
                     // The address needs to be 4 bytes aligned.
-                    #[cfg(not(target_arch = "aarch64"))]
                     allocator
                         .lock()
                         .unwrap()
@@ -793,10 +791,7 @@ impl VfioCommon {
         for region in self.mmio_regions.iter() {
             match region.type_ {
                 PciBarRegionType::IoRegion => {
-                    #[cfg(target_arch = "x86_64")]
                     allocator.free_io_addresses(region.start, region.length);
-                    #[cfg(target_arch = "aarch64")]
-                    error!("I/O region is not supported");
                 }
                 PciBarRegionType::Memory32BitRegion => {
                     mmio32_allocator.free(region.start, region.length);
@@ -979,7 +974,7 @@ impl VfioCommon {
             reg_idx + 1,
             ConfigPatch {
                 mask: 0xffff_ffff,
-                patch: u32::from(clique_id) << 19 | 0x5032,
+                patch: (u32::from(clique_id) << 19) | 0x5032,
             },
         );
     }
@@ -1414,7 +1409,8 @@ pub struct VfioPciDevice {
     container: Arc<VfioContainer>,
     common: VfioCommon,
     iommu_attached: bool,
-    memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
+    memory_slot_allocator: MemorySlotAllocator,
+    bdf: PciBdf,
 }
 
 impl VfioPciDevice {
@@ -1429,7 +1425,7 @@ impl VfioPciDevice {
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         iommu_attached: bool,
         bdf: PciBdf,
-        memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
+        memory_slot_allocator: MemorySlotAllocator,
         snapshot: Option<Snapshot>,
         x_nv_gpudirect_clique: Option<u8>,
     ) -> Result<Self, VfioPciError> {
@@ -1455,7 +1451,8 @@ impl VfioPciDevice {
             container,
             common,
             iommu_attached,
-            memory_slot,
+            memory_slot_allocator,
+            bdf,
         };
 
         Ok(vfio_pci_device)
@@ -1633,7 +1630,7 @@ impl VfioPciDevice {
                     }
 
                     let user_memory_region = UserMemoryRegion {
-                        slot: (self.memory_slot)(),
+                        slot: self.memory_slot_allocator.next_memory_slot(),
                         start: region.start.0 + area.offset,
                         size: area.size,
                         host_addr: host_addr as u64,
@@ -1661,7 +1658,7 @@ impl VfioPciDevice {
                                 user_memory_region.size,
                                 user_memory_region.host_addr,
                             )
-                            .map_err(VfioPciError::DmaMap)?;
+                            .map_err(|e| VfioPciError::DmaMap(e, self.bdf))?;
                     }
                 }
             }
@@ -1697,6 +1694,9 @@ impl VfioPciDevice {
                     error!("Could not remove the userspace memory region: {}", e);
                 }
 
+                self.memory_slot_allocator
+                    .free_memory_slot(user_memory_region.slot);
+
                 // SAFETY: FFI call with correct arguments
                 let ret = unsafe {
                     libc::munmap(
@@ -1719,7 +1719,7 @@ impl VfioPciDevice {
         if !self.iommu_attached {
             self.container
                 .vfio_dma_map(iova, size, user_addr)
-                .map_err(VfioPciError::DmaMap)?;
+                .map_err(|e| VfioPciError::DmaMap(e, self.bdf))?;
         }
 
         Ok(())
@@ -1729,7 +1729,7 @@ impl VfioPciDevice {
         if !self.iommu_attached {
             self.container
                 .vfio_dma_unmap(iova, size)
-                .map_err(VfioPciError::DmaUnmap)?;
+                .map_err(|e| VfioPciError::DmaUnmap(e, self.bdf))?;
         }
 
         Ok(())
@@ -1895,7 +1895,7 @@ impl PciDevice for VfioPciDevice {
         Ok(())
     }
 
-    fn as_any(&mut self) -> &mut dyn Any {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 

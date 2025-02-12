@@ -11,15 +11,17 @@ pub mod regs;
 /// Module for loading UEFI binary.
 pub mod uefi;
 
-pub use self::fdt::DeviceInfoForFdt;
-use crate::{DeviceType, GuestMemoryMmap, NumaNodes, PciSpaceInfo, RegionType};
-use hypervisor::arch::aarch64::gic::Vgic;
-use log::{log_enabled, Level};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
+
+use hypervisor::arch::aarch64::gic::Vgic;
+use log::{log_enabled, Level};
 use thiserror::Error;
 use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryAtomic};
+
+pub use self::fdt::DeviceInfoForFdt;
+use crate::{DeviceType, GuestMemoryMmap, NumaNodes, PciSpaceInfo, RegionType};
 
 pub const _NSIG: i32 = 65;
 

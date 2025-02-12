@@ -1,42 +1,31 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Barrier, Mutex};
+use std::{result, thread};
+
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, Bytes};
+use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
+use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
+use virtio_queue::Queue;
+use vm_memory::{ByteValued, GuestMemoryAtomic};
+use vm_migration::protocol::MemoryRangeTable;
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vmm_sys_util::eventfd::EventFd;
+
 use super::vu_common_ctrl::VhostUserHandle;
 use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::VhostUserCommon;
 use crate::{
-    ActivateError, ActivateResult, UserspaceMapping, VirtioCommon, VirtioDevice, VirtioDeviceType,
-    VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_IOMMU_PLATFORM,
+    ActivateResult, GuestMemoryMmap, GuestRegionMmap, MmapRegion, UserspaceMapping, VirtioCommon,
+    VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList,
+    VIRTIO_F_IOMMU_PLATFORM,
 };
-use crate::{GuestMemoryMmap, GuestRegionMmap, MmapRegion};
-use libc::{c_void, off64_t, pread64, pwrite64};
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, Bytes};
-use std::io;
-use std::os::unix::io::AsRawFd;
-use std::result;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Barrier, Mutex};
-use std::thread;
-use vhost::vhost_user::message::{
-    VhostUserFSBackendMsg, VhostUserFSBackendMsgFlags, VhostUserProtocolFeatures,
-    VhostUserVirtioFeatures, VHOST_USER_FS_BACKEND_ENTRIES,
-};
-use vhost::vhost_user::{
-    FrontendReqHandler, HandlerResult, VhostUserFrontend, VhostUserFrontendReqHandler,
-};
-use virtio_queue::Queue;
-use vm_memory::{
-    Address, ByteValued, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
-};
-use vm_migration::{
-    protocol::MemoryRangeTable, Migratable, MigratableError, Pausable, Snapshot, Snapshottable,
-    Transportable,
-};
-use vmm_sys_util::eventfd::EventFd;
 
 const NUM_QUEUE_OFFSET: usize = 1;
 const DEFAULT_QUEUE_NUMBER: usize = 2;
@@ -51,223 +40,8 @@ pub struct State {
     pub backend_req_support: bool,
 }
 
-struct BackendReqHandler {
-    cache_offset: GuestAddress,
-    cache_size: u64,
-    mmap_cache_addr: u64,
-    mem: GuestMemoryAtomic<GuestMemoryMmap>,
-}
-
-impl BackendReqHandler {
-    // Make sure request is within cache range
-    fn is_req_valid(&self, offset: u64, len: u64) -> bool {
-        let end = match offset.checked_add(len) {
-            Some(n) => n,
-            None => return false,
-        };
-
-        !(offset >= self.cache_size || end > self.cache_size)
-    }
-}
-
-impl VhostUserFrontendReqHandler for BackendReqHandler {
-    fn handle_config_change(&self) -> HandlerResult<u64> {
-        debug!("handle_config_change");
-        Ok(0)
-    }
-
-    fn fs_backend_map(&self, fs: &VhostUserFSBackendMsg, fd: &dyn AsRawFd) -> HandlerResult<u64> {
-        debug!("fs_backend_map");
-
-        for i in 0..VHOST_USER_FS_BACKEND_ENTRIES {
-            let offset = fs.cache_offset[i];
-            let len = fs.len[i];
-
-            // Ignore if the length is 0.
-            if len == 0 {
-                continue;
-            }
-
-            if !self.is_req_valid(offset, len) {
-                return Err(io::Error::from_raw_os_error(libc::EINVAL));
-            }
-
-            let addr = self.mmap_cache_addr + offset;
-            let flags = fs.flags[i];
-            // SAFETY: FFI call with valid arguments
-            let ret = unsafe {
-                libc::mmap(
-                    addr as *mut libc::c_void,
-                    len as usize,
-                    flags.bits() as i32,
-                    libc::MAP_SHARED | libc::MAP_FIXED,
-                    fd.as_raw_fd(),
-                    fs.fd_offset[i] as libc::off_t,
-                )
-            };
-            if ret == libc::MAP_FAILED {
-                return Err(io::Error::last_os_error());
-            }
-        }
-
-        Ok(0)
-    }
-
-    fn fs_backend_unmap(&self, fs: &VhostUserFSBackendMsg) -> HandlerResult<u64> {
-        debug!("fs_backend_unmap");
-
-        for i in 0..VHOST_USER_FS_BACKEND_ENTRIES {
-            let mut len = fs.len[i];
-
-            // Ignore if the length is 0.
-            if len == 0 {
-                continue;
-            }
-
-            // Need to handle a special case where the backend ask for the unmapping
-            // of the entire mapping.
-            let offset = if len == 0xffff_ffff_ffff_ffff {
-                len = self.cache_size;
-                0
-            } else {
-                fs.cache_offset[i]
-            };
-
-            if !self.is_req_valid(offset, len) {
-                return Err(io::Error::from_raw_os_error(libc::EINVAL));
-            }
-
-            let addr = self.mmap_cache_addr + offset;
-            // SAFETY: FFI call with valid arguments
-            let ret = unsafe {
-                libc::mmap(
-                    addr as *mut libc::c_void,
-                    len as usize,
-                    libc::PROT_NONE,
-                    libc::MAP_ANONYMOUS | libc::MAP_PRIVATE | libc::MAP_FIXED,
-                    -1,
-                    0,
-                )
-            };
-            if ret == libc::MAP_FAILED {
-                return Err(io::Error::last_os_error());
-            }
-        }
-
-        Ok(0)
-    }
-
-    fn fs_backend_sync(&self, fs: &VhostUserFSBackendMsg) -> HandlerResult<u64> {
-        debug!("fs_backend_sync");
-
-        for i in 0..VHOST_USER_FS_BACKEND_ENTRIES {
-            let offset = fs.cache_offset[i];
-            let len = fs.len[i];
-
-            // Ignore if the length is 0.
-            if len == 0 {
-                continue;
-            }
-
-            if !self.is_req_valid(offset, len) {
-                return Err(io::Error::from_raw_os_error(libc::EINVAL));
-            }
-
-            let addr = self.mmap_cache_addr + offset;
-            let ret =
-                // SAFETY: FFI call with valid arguments
-                unsafe { libc::msync(addr as *mut libc::c_void, len as usize, libc::MS_SYNC) };
-            if ret == -1 {
-                return Err(io::Error::last_os_error());
-            }
-        }
-
-        Ok(0)
-    }
-
-    fn fs_backend_io(&self, fs: &VhostUserFSBackendMsg, fd: &dyn AsRawFd) -> HandlerResult<u64> {
-        debug!("fs_backend_io");
-
-        let mut done: u64 = 0;
-        for i in 0..VHOST_USER_FS_BACKEND_ENTRIES {
-            // Ignore if the length is 0.
-            if fs.len[i] == 0 {
-                continue;
-            }
-
-            let mut foffset = fs.fd_offset[i];
-            let mut len = fs.len[i] as usize;
-            let gpa = fs.cache_offset[i];
-            let cache_end = self.cache_offset.raw_value() + self.cache_size;
-            let efault = libc::EFAULT;
-
-            let mut ptr = if gpa >= self.cache_offset.raw_value() && gpa < cache_end {
-                let offset = gpa
-                    .checked_sub(self.cache_offset.raw_value())
-                    .ok_or_else(|| io::Error::from_raw_os_error(efault))?;
-                let end = gpa
-                    .checked_add(fs.len[i])
-                    .ok_or_else(|| io::Error::from_raw_os_error(efault))?;
-
-                if end >= cache_end {
-                    return Err(io::Error::from_raw_os_error(efault));
-                }
-
-                self.mmap_cache_addr + offset
-            } else {
-                self.mem
-                    .memory()
-                    .get_host_address(GuestAddress(gpa))
-                    .map_err(|e| {
-                        error!(
-                            "Failed to find RAM region associated with guest physical address 0x{:x}: {:?}",
-                            gpa, e
-                        );
-                        io::Error::from_raw_os_error(efault)
-                    })? as u64
-            };
-
-            while len > 0 {
-                let ret = if (fs.flags[i] & VhostUserFSBackendMsgFlags::MAP_W)
-                    == VhostUserFSBackendMsgFlags::MAP_W
-                {
-                    debug!("write: foffset={}, len={}", foffset, len);
-                    // SAFETY: FFI call with valid arguments
-                    unsafe {
-                        pwrite64(
-                            fd.as_raw_fd(),
-                            ptr as *const c_void,
-                            len,
-                            foffset as off64_t,
-                        )
-                    }
-                } else {
-                    debug!("read: foffset={}, len={}", foffset, len);
-                    // SAFETY: FFI call with valid arguments
-                    unsafe { pread64(fd.as_raw_fd(), ptr as *mut c_void, len, foffset as off64_t) }
-                };
-
-                if ret < 0 {
-                    return Err(io::Error::last_os_error());
-                }
-
-                if ret == 0 {
-                    // EOF
-                    return Err(io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        "failed to access whole buffer",
-                    ));
-                }
-                len -= ret as usize;
-                foffset += ret as u64;
-                ptr += ret as u64;
-                done += ret as u64;
-            }
-        }
-
-        Ok(done)
-    }
-}
+struct BackendReqHandler {}
+impl VhostUserFrontendReqHandler for BackendReqHandler {}
 
 pub const VIRTIO_FS_TAG_LEN: usize = 36;
 #[serde_as]
@@ -299,7 +73,6 @@ pub struct Fs {
     // Hold ownership of the memory that is allocated for the device
     // which will be automatically dropped when the device is dropped
     cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
-    backend_req_support: bool,
     seccomp_action: SeccompAction,
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     epoll_thread: Option<thread::JoinHandle<()>>,
@@ -322,8 +95,6 @@ impl Fs {
         iommu: bool,
         state: Option<State>,
     ) -> Result<Fs> {
-        let mut backend_req_support = false;
-
         // Calculate the actual number of queues needed.
         let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
 
@@ -336,7 +107,6 @@ impl Fs {
             acked_protocol_features,
             vu_num_queues,
             config,
-            backend_req_support,
             paused,
         ) = if let Some(state) = state {
             info!("Restoring vhost-user-fs {}", id);
@@ -352,23 +122,17 @@ impl Fs {
                 state.acked_protocol_features,
                 state.vu_num_queues,
                 state.config,
-                state.backend_req_support,
                 true,
             )
         } else {
             // Filling device and vring features VMM supports.
             let avail_features = DEFAULT_VIRTIO_FEATURES;
 
-            let mut avail_protocol_features = VhostUserProtocolFeatures::MQ
+            let avail_protocol_features = VhostUserProtocolFeatures::MQ
                 | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
                 | VhostUserProtocolFeatures::REPLY_ACK
                 | VhostUserProtocolFeatures::INFLIGHT_SHMFD
                 | VhostUserProtocolFeatures::LOG_SHMFD;
-            let backend_protocol_features =
-                VhostUserProtocolFeatures::BACKEND_REQ | VhostUserProtocolFeatures::BACKEND_SEND_FD;
-            if cache.is_some() {
-                avail_protocol_features |= backend_protocol_features;
-            }
 
             let (acked_features, acked_protocol_features) =
                 vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
@@ -388,12 +152,6 @@ impl Fs {
                 num_queues, backend_num_queues
             );
                 return Err(Error::BadQueueNum);
-            }
-
-            if acked_protocol_features & backend_protocol_features.bits()
-                == backend_protocol_features.bits()
-            {
-                backend_req_support = true;
             }
 
             // Create virtio-fs device configuration.
@@ -417,7 +175,6 @@ impl Fs {
                 acked_protocol_features,
                 num_queues,
                 config,
-                backend_req_support,
                 false,
             )
         };
@@ -443,7 +200,6 @@ impl Fs {
             id,
             config,
             cache,
-            backend_req_support,
             seccomp_action,
             guest_memory: None,
             epoll_thread: None,
@@ -459,7 +215,7 @@ impl Fs {
             config: self.config,
             acked_protocol_features: self.vu_common.acked_protocol_features,
             vu_num_queues: self.vu_common.vu_num_queues,
-            backend_req_support: self.backend_req_support,
+            backend_req_support: false,
         }
     }
 }
@@ -513,36 +269,7 @@ impl VirtioDevice for Fs {
         self.common.activate(&queues, &interrupt_cb)?;
         self.guest_memory = Some(mem.clone());
 
-        // Initialize backend communication.
-        let backend_req_handler = if self.backend_req_support {
-            if let Some(cache) = self.cache.as_ref() {
-                let vu_frontend_req_handler = Arc::new(BackendReqHandler {
-                    cache_offset: cache.0.addr,
-                    cache_size: cache.0.len,
-                    mmap_cache_addr: cache.0.host_addr,
-                    mem: mem.clone(),
-                });
-
-                let mut req_handler =
-                    FrontendReqHandler::new(vu_frontend_req_handler).map_err(|e| {
-                        ActivateError::VhostUserFsSetup(Error::FrontendReqHandlerCreation(e))
-                    })?;
-
-                if self.vu_common.acked_protocol_features
-                    & VhostUserProtocolFeatures::REPLY_ACK.bits()
-                    != 0
-                {
-                    req_handler.set_reply_ack_flag(true);
-                }
-
-                Some(req_handler)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
+        let backend_req_handler: Option<FrontendReqHandler<BackendReqHandler>> = None;
         // Run a dedicated thread for handling potential reconnections with
         // the backend.
         let (kill_evt, pause_evt) = self.common.dup_eventfds();

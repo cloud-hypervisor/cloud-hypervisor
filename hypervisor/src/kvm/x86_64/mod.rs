@@ -17,7 +17,6 @@ use crate::arch::x86::{
 };
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 use serde::{Deserialize, Serialize};
-
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///

@@ -30,17 +30,7 @@ pub mod vhd;
 pub mod vhdx;
 pub mod vhdx_sync;
 
-use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
-use crate::fixed_vhd::FixedVhd;
-use crate::qcow::{QcowFile, RawFile};
-use crate::vhdx::{Vhdx, VhdxError};
-#[cfg(feature = "io_uring")]
-use io_uring::{opcode, IoUring, Probe};
-use libc::{ioctl, S_IFBLK, S_IFMT};
-use serde::{Deserialize, Serialize};
-use smallvec::SmallVec;
 use std::alloc::{alloc_zeroed, dealloc, Layout};
-use std::cmp;
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::fs::File;
@@ -48,21 +38,28 @@ use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
-use std::result;
-use std::sync::Arc;
-use std::sync::MutexGuard;
+use std::sync::{Arc, MutexGuard};
 use std::time::Instant;
+use std::{cmp, result};
+
+#[cfg(feature = "io_uring")]
+use io_uring::{opcode, IoUring, Probe};
+use libc::{ioctl, S_IFBLK, S_IFMT};
+use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
 use virtio_queue::DescriptorChain;
+use vm_memory::bitmap::Bitmap;
 use vm_memory::{
-    bitmap::Bitmap, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError,
-    GuestMemoryLoadGuard,
+    ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryLoadGuard,
 };
 use vm_virtio::{AccessPlatform, Translatable};
-use vmm_sys_util::aio;
 use vmm_sys_util::eventfd::EventFd;
-use vmm_sys_util::{ioctl_io_nr, ioctl_ioc_nr};
+use vmm_sys_util::{aio, ioctl_io_nr, ioctl_ioc_nr};
+
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
+use crate::vhdx::VhdxError;
 
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
@@ -221,6 +218,8 @@ fn sector<B: Bitmap + 'static>(
     mem.read_obj(addr).map_err(Error::GuestMemory)
 }
 
+const DEFAULT_DESCRIPTOR_VEC_SIZE: usize = 32;
+
 #[derive(Debug)]
 pub struct AlignedOperation {
     origin_ptr: u64,
@@ -233,10 +232,10 @@ pub struct AlignedOperation {
 pub struct Request {
     pub request_type: RequestType,
     pub sector: u64,
-    pub data_descriptors: SmallVec<[(GuestAddress, u32); 1]>,
+    pub data_descriptors: SmallVec<[(GuestAddress, u32); DEFAULT_DESCRIPTOR_VEC_SIZE]>,
     pub status_addr: GuestAddress,
     pub writeback: bool,
-    pub aligned_operations: SmallVec<[AlignedOperation; 1]>,
+    pub aligned_operations: SmallVec<[AlignedOperation; DEFAULT_DESCRIPTOR_VEC_SIZE]>,
     pub start: Instant,
 }
 
@@ -264,10 +263,10 @@ impl Request {
         let mut req = Request {
             request_type: request_type(desc_chain.memory(), hdr_desc_addr)?,
             sector: sector(desc_chain.memory(), hdr_desc_addr)?,
-            data_descriptors: SmallVec::with_capacity(1),
+            data_descriptors: SmallVec::with_capacity(DEFAULT_DESCRIPTOR_VEC_SIZE),
             status_addr: GuestAddress(0),
             writeback: true,
-            aligned_operations: SmallVec::with_capacity(1),
+            aligned_operations: SmallVec::with_capacity(DEFAULT_DESCRIPTOR_VEC_SIZE),
             start: Instant::now(),
         };
 
@@ -399,7 +398,7 @@ impl Request {
         let request_type = self.request_type;
         let offset = (sector << SECTOR_SHIFT) as libc::off_t;
 
-        let mut iovecs: SmallVec<[libc::iovec; 1]> =
+        let mut iovecs: SmallVec<[libc::iovec; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
             SmallVec::with_capacity(self.data_descriptors.len());
         for (data_addr, data_len) in &self.data_descriptors {
             if *data_len == 0 {
@@ -654,7 +653,8 @@ where
         completion_list: &mut VecDeque<(u64, i32)>,
     ) -> AsyncIoResult<()> {
         // Convert libc::iovec into IoSliceMut
-        let mut slices: SmallVec<[IoSliceMut; 1]> = SmallVec::with_capacity(iovecs.len());
+        let mut slices: SmallVec<[IoSliceMut; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
+            SmallVec::with_capacity(iovecs.len());
         for iovec in iovecs.iter() {
             // SAFETY: on Linux IoSliceMut wraps around libc::iovec
             slices.push(IoSliceMut::new(unsafe {
@@ -669,9 +669,11 @@ where
             file.seek(SeekFrom::Start(offset as u64))
                 .map_err(AsyncIoError::ReadVectored)?;
 
-            // Read vectored
-            file.read_vectored(slices.as_mut_slice())
-                .map_err(AsyncIoError::ReadVectored)?
+            let mut r = 0;
+            for b in slices.iter_mut() {
+                r += file.read(b).map_err(AsyncIoError::ReadVectored)?;
+            }
+            r
         };
 
         completion_list.push_back((user_data, result as i32));
@@ -689,7 +691,8 @@ where
         completion_list: &mut VecDeque<(u64, i32)>,
     ) -> AsyncIoResult<()> {
         // Convert libc::iovec into IoSlice
-        let mut slices: SmallVec<[IoSlice; 1]> = SmallVec::with_capacity(iovecs.len());
+        let mut slices: SmallVec<[IoSlice; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
+            SmallVec::with_capacity(iovecs.len());
         for iovec in iovecs.iter() {
             // SAFETY: on Linux IoSlice wraps around libc::iovec
             slices.push(IoSlice::new(unsafe {
@@ -704,9 +707,11 @@ where
             file.seek(SeekFrom::Start(offset as u64))
                 .map_err(AsyncIoError::WriteVectored)?;
 
-            // Write vectored
-            file.write_vectored(slices.as_slice())
-                .map_err(AsyncIoError::WriteVectored)?
+            let mut r = 0;
+            for b in slices.iter() {
+                r += file.write(b).map_err(AsyncIoError::WriteVectored)?;
+            }
+            r
         };
 
         completion_list.push_back((user_data, result as i32));
@@ -788,25 +793,6 @@ pub fn detect_image_type(f: &mut File) -> std::io::Result<ImageType> {
 
 pub trait BlockBackend: Read + Write + Seek + Send + Debug {
     fn size(&self) -> Result<u64, Error>;
-}
-
-/// Inspect the image file type and create an appropriate disk file to match it.
-pub fn create_disk_file(mut file: File, direct_io: bool) -> Result<Box<dyn BlockBackend>, Error> {
-    let image_type = detect_image_type(&mut file).map_err(Error::DetectImageType)?;
-
-    Ok(match image_type {
-        ImageType::Qcow2 => {
-            Box::new(QcowFile::from(RawFile::new(file, direct_io)).map_err(Error::QcowError)?)
-                as Box<dyn BlockBackend>
-        }
-        ImageType::FixedVhd => {
-            Box::new(FixedVhd::new(file).map_err(Error::FixedVhdError)?) as Box<dyn BlockBackend>
-        }
-        ImageType::Vhdx => {
-            Box::new(Vhdx::new(file).map_err(Error::VhdxError)?) as Box<dyn BlockBackend>
-        }
-        ImageType::Raw => Box::new(RawFile::new(file, direct_io)) as Box<dyn BlockBackend>,
-    })
 }
 
 #[derive(Debug)]

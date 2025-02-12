@@ -25,8 +25,8 @@ tdx = ["arch/tdx", "hypervisor/tdx"]
 tracing = ["tracer/tracing"]
 
 [dependencies]
-acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main" }
-anyhow = "1.0.87"
+acpi_tables = { workspace = true }
+anyhow = "1.0.94"
 arc-swap = "1.7.1"
 arch = { path = "../arch" }
 bitflags = "2.6.0"
@@ -38,8 +38,8 @@ devices = { path = "../devices" }
 dhat = { version = "0.3.3", optional = true }
 epoll = "4.3.3"
 event_monitor = { path = "../event_monitor" }
-flume = "0.11.0"
-futures = { version = "0.3.30", optional = true }
+flume = "0.11.1"
+futures = { version = "0.3.31", optional = true }
 gdbstub = { version = "0.7.1", optional = true }
 gdbstub_arch = { version = "0.3.0", optional = true }
 hex = { version = "0.4.3", optional = true }
@@ -47,41 +47,41 @@ hypervisor = { path = "../hypervisor" }
 igvm = { version = "0.3.3", optional = true }
 igvm_defs = { version = "0.3.1", optional = true }
 landlock = "0.4.0"
-libc = "0.2.158"
-linux-loader = { version = "0.11.0", features = ["bzimage", "elf", "pe"] }
+libc = "0.2.167"
+linux-loader = { workspace = true, features = ["bzimage", "elf", "pe"] }
 log = "0.4.22"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
-mshv-bindings = { git = "https://github.com/rust-vmm/mshv", tag = "v0.2.0", features = [
+mshv-bindings = { workspace = true, features = [
   "fam-wrappers",
   "with-serde",
 ], optional = true }
 net_util = { path = "../net_util" }
-once_cell = "1.19.0"
+once_cell = "1.20.2"
 option_parser = { path = "../option_parser" }
 pci = { path = "../pci" }
 range_map_vec = { version = "0.2.0", optional = true }
 rate_limiter = { path = "../rate_limiter" }
-seccompiler = "0.4.0"
+seccompiler = { workspace = true }
 serde = { version = "1.0.208", features = ["derive", "rc"] }
 serde_json = "1.0.120"
 serial_buffer = { path = "../serial_buffer" }
 signal-hook = "0.3.17"
-thiserror = "1.0.62"
+thiserror = "2.0.6"
 tracer = { path = "../tracer" }
-uuid = "1.8.0"
-vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
-vfio_user = { git = "https://github.com/rust-vmm/vfio-user", branch = "main" }
+uuid = "1.12.1"
+vfio-ioctls = { workspace = true, default-features = false }
+vfio_user = { workspace = true }
 virtio-devices = { path = "../virtio-devices" }
-virtio-queue = "0.12.0"
+virtio-queue = { workspace = true }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
-vm-memory = { version = "0.14.1", features = [
+vm-memory = { workspace = true, features = [
   "backend-atomic",
   "backend-bitmap",
   "backend-mmap",
 ] }
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
-vmm-sys-util = { version = "0.12.1", features = ["with-serde"] }
-zbus = { version = "4.1.2", optional = true }
+vmm-sys-util = { workspace = true, features = ["with-serde"] }
+zbus = { version = "4.4.0", optional = true }
 zerocopy = { version = "0.7.35", features = ["alloc", "derive"] }

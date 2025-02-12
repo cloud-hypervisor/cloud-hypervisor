@@ -8,11 +8,12 @@ the host kernel. The required Linux and KVM changes can be found in the
 [KVM SGX Tree](https://github.com/intel/kvm-sgx).
 
 Utilizing SGX in the guest requires a kernel/OS with SGX support, e.g. a kernel
-built using the [SGX Linux Development Tree](https://git.kernel.org/pub/scm/linux/kernel/git/jarkko/linux-sgx.git)
+since release 5.11, see
+[here](https://www.intel.com/content/www/us/en/developer/tools/software-guard-extensions/linux-overview.html)
 or the [KVM SGX Tree](https://github.com/intel/kvm-sgx). Running KVM SGX as the
 guest kernel allows nested virtualization of SGX.
 
-For more information about SGX, please refer to the [SGX Homepage](https://software.intel.com/sgx).
+For more information about SGX, please refer to the [SGX Homepage](https://www.intel.com/content/www/us/en/developer/tools/software-guard-extensions/linux-overview.html).
 
 For more information about SGX SDK and how to test SGX, please refer to the
 following [instructions](https://github.com/intel/linux-sgx).

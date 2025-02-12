@@ -5,35 +5,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use super::Error as DeviceError;
-use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
-    RateLimiterConfig, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
-    EPOLL_HELPER_EVENT_LAST,
-};
-use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
-use crate::GuestMemoryMmap;
-use crate::VirtioInterrupt;
-use anyhow::anyhow;
-#[cfg(not(fuzzing))]
-use net_util::virtio_features_to_tap_offload;
-use net_util::CtrlQueue;
-use net_util::{
-    build_net_config_space, build_net_config_space_with_mq, open_tap, MacAddr, NetCounters,
-    NetQueuePair, OpenTapError, RxVirtio, Tap, TapError, TxVirtio, VirtioNetConfig,
-};
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
-use std::thread;
+use std::{result, thread};
+
+use anyhow::anyhow;
+#[cfg(not(fuzzing))]
+use net_util::virtio_features_to_tap_offload;
+use net_util::{
+    build_net_config_space, build_net_config_space_with_mq, open_tap, CtrlQueue, MacAddr,
+    NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TapError, TxVirtio, VirtioNetConfig,
+};
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_bindings::virtio_config::*;
 use virtio_bindings::virtio_net::*;
@@ -43,6 +32,15 @@ use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
+
+use super::{
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
+    Error as DeviceError, RateLimiterConfig, VirtioCommon, VirtioDevice, VirtioDeviceType,
+    VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
+};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::{GuestMemoryMmap, VirtioInterrupt};
 
 /// Control queue
 // Event available on the control queue.
@@ -203,7 +201,7 @@ impl NetEpollHandler {
             .net
             .rx_rate_limiter
             .as_ref()
-            .map_or(false, |r| r.is_blocked());
+            .is_some_and(|r| r.is_blocked());
 
         // Start to listen on RX_TAP_EVENT only when the rate limit is not reached
         if !self.net.rx_tap_listening && !rate_limit_reached {
@@ -240,7 +238,7 @@ impl NetEpollHandler {
             .net
             .tx_rate_limiter
             .as_ref()
-            .map_or(false, |r| r.is_blocked());
+            .is_some_and(|r| r.is_blocked());
 
         if !rate_limit_reached {
             self.process_tx()?;
@@ -451,73 +449,75 @@ impl Net {
 
         let mtu = taps[0].mtu().map_err(Error::TapError)? as u16;
 
-        let (avail_features, acked_features, config, queue_sizes, paused) =
-            if let Some(state) = state {
-                info!("Restoring virtio-net {}", id);
-                (
-                    state.avail_features,
-                    state.acked_features,
-                    state.config,
-                    state.queue_size,
-                    true,
-                )
+        let (avail_features, acked_features, config, queue_sizes, paused) = if let Some(state) =
+            state
+        {
+            info!("Restoring virtio-net {}", id);
+            (
+                state.avail_features,
+                state.acked_features,
+                state.config,
+                state.queue_size,
+                true,
+            )
+        } else {
+            let mut avail_features = (1 << VIRTIO_NET_F_MTU)
+                | (1 << VIRTIO_RING_F_EVENT_IDX)
+                | (1 << VIRTIO_F_VERSION_1);
+
+            if iommu {
+                avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+            }
+
+            // Configure TSO/UFO features when hardware checksum offload is enabled.
+            if offload_csum {
+                avail_features |= (1 << VIRTIO_NET_F_CSUM)
+                    | (1 << VIRTIO_NET_F_GUEST_CSUM)
+                    | (1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS);
+
+                if offload_tso {
+                    avail_features |= (1 << VIRTIO_NET_F_HOST_ECN)
+                        | (1 << VIRTIO_NET_F_HOST_TSO4)
+                        | (1 << VIRTIO_NET_F_HOST_TSO6)
+                        | (1 << VIRTIO_NET_F_GUEST_ECN)
+                        | (1 << VIRTIO_NET_F_GUEST_TSO4)
+                        | (1 << VIRTIO_NET_F_GUEST_TSO6);
+                }
+
+                if offload_ufo {
+                    avail_features |= (1 << VIRTIO_NET_F_HOST_UFO) | (1 << VIRTIO_NET_F_GUEST_UFO);
+                }
+            }
+
+            avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
+            let queue_num = num_queues + 1;
+
+            let mut config = VirtioNetConfig::default();
+            if let Some(mac) = guest_mac {
+                build_net_config_space(
+                    &mut config,
+                    mac,
+                    num_queues,
+                    Some(mtu),
+                    &mut avail_features,
+                );
             } else {
-                let mut avail_features =
-                    1 << VIRTIO_NET_F_MTU | 1 << VIRTIO_RING_F_EVENT_IDX | 1 << VIRTIO_F_VERSION_1;
+                build_net_config_space_with_mq(
+                    &mut config,
+                    num_queues,
+                    Some(mtu),
+                    &mut avail_features,
+                );
+            }
 
-                if iommu {
-                    avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
-                }
-
-                // Configure TSO/UFO features when hardware checksum offload is enabled.
-                if offload_csum {
-                    avail_features |= 1 << VIRTIO_NET_F_CSUM
-                        | 1 << VIRTIO_NET_F_GUEST_CSUM
-                        | 1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS;
-
-                    if offload_tso {
-                        avail_features |= 1 << VIRTIO_NET_F_HOST_ECN
-                            | 1 << VIRTIO_NET_F_HOST_TSO4
-                            | 1 << VIRTIO_NET_F_HOST_TSO6
-                            | 1 << VIRTIO_NET_F_GUEST_ECN
-                            | 1 << VIRTIO_NET_F_GUEST_TSO4
-                            | 1 << VIRTIO_NET_F_GUEST_TSO6;
-                    }
-
-                    if offload_ufo {
-                        avail_features |= 1 << VIRTIO_NET_F_HOST_UFO | 1 << VIRTIO_NET_F_GUEST_UFO;
-                    }
-                }
-
-                avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
-                let queue_num = num_queues + 1;
-
-                let mut config = VirtioNetConfig::default();
-                if let Some(mac) = guest_mac {
-                    build_net_config_space(
-                        &mut config,
-                        mac,
-                        num_queues,
-                        Some(mtu),
-                        &mut avail_features,
-                    );
-                } else {
-                    build_net_config_space_with_mq(
-                        &mut config,
-                        num_queues,
-                        Some(mtu),
-                        &mut avail_features,
-                    );
-                }
-
-                (
-                    avail_features,
-                    0,
-                    config,
-                    vec![queue_size; queue_num],
-                    false,
-                )
-            };
+            (
+                avail_features,
+                0,
+                config,
+                vec![queue_size; queue_num],
+                false,
+            )
+        };
 
         Ok(Net {
             common: VirtioCommon {

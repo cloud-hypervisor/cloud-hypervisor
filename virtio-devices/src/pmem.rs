@@ -6,26 +6,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::Error as DeviceError;
-use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
-    UserspaceMapping, VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST,
-    VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
-};
-use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
-use crate::{GuestMemoryMmap, MmapRegion};
-use crate::{VirtioInterrupt, VirtioInterruptType};
+use std::fs::File;
+use std::mem::size_of;
+use std::os::unix::io::AsRawFd;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Barrier};
+use std::{io, result};
+
 use anyhow::anyhow;
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
-use std::fs::File;
-use std::io;
-use std::mem::size_of;
-use std::os::unix::io::AsRawFd;
-use std::result;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Barrier};
 use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
 use vm_memory::{
@@ -35,6 +25,15 @@ use vm_memory::{
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
+
+use super::{
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
+    Error as DeviceError, UserspaceMapping, VirtioCommon, VirtioDevice, VirtioDeviceType,
+    EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::{GuestMemoryMmap, MmapRegion, VirtioInterrupt, VirtioInterruptType};
 
 const QUEUE_SIZE: u16 = 256;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];

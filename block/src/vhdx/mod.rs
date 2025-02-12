@@ -2,26 +2,20 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::vhdx::{
-    vhdx_bat::{BatEntry, VhdxBatError},
-    vhdx_header::{RegionInfo, RegionTableEntry, VhdxHeader, VhdxHeaderError},
-    vhdx_io::VhdxIoError,
-    vhdx_metadata::{DiskSpec, VhdxMetadataError},
-};
-use crate::BlockBackend;
-use byteorder::{BigEndian, ByteOrder};
-use remain::sorted;
 use std::collections::btree_map::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
+
+use byteorder::{BigEndian, ByteOrder};
+use remain::sorted;
 use thiserror::Error;
 use uuid::Uuid;
 
-macro_rules! div_round_up {
-    ($n:expr,$d:expr) => {
-        ($n + $d - 1) / $d
-    };
-}
+use crate::vhdx::vhdx_bat::{BatEntry, VhdxBatError};
+use crate::vhdx::vhdx_header::{RegionInfo, RegionTableEntry, VhdxHeader, VhdxHeaderError};
+use crate::vhdx::vhdx_io::VhdxIoError;
+use crate::vhdx::vhdx_metadata::{DiskSpec, VhdxMetadataError};
+use crate::BlockBackend;
 
 mod vhdx_bat;
 mod vhdx_header;
@@ -105,11 +99,10 @@ impl Read for Vhdx {
     /// Wrapper function to satisfy Read trait implementation for VHDx disk.
     /// Convert the offset to sector index and buffer length to sector count.
     fn read(&mut self, buf: &mut [u8]) -> std::result::Result<usize, std::io::Error> {
-        let sector_count =
-            div_round_up!(buf.len() as u64, self.disk_spec.logical_sector_size as u64);
+        let sector_count = (buf.len() as u64).div_ceil(self.disk_spec.logical_sector_size as u64);
         let sector_index = self.current_offset / self.disk_spec.logical_sector_size as u64;
 
-        vhdx_io::read(
+        let result = vhdx_io::read(
             &mut self.file,
             buf,
             &self.disk_spec,
@@ -124,7 +117,11 @@ impl Read for Vhdx {
                     "Failed reading {sector_count} sectors from VHDx at index {sector_index}: {e}"
                 ),
             )
-        })
+        })?;
+
+        self.current_offset = self.current_offset.checked_add(result as u64).unwrap();
+
+        Ok(result)
     }
 }
 
@@ -136,8 +133,7 @@ impl Write for Vhdx {
     /// Wrapper function to satisfy Write trait implementation for VHDx disk.
     /// Convert the offset to sector index and buffer length to sector count.
     fn write(&mut self, buf: &[u8]) -> std::result::Result<usize, std::io::Error> {
-        let sector_count =
-            div_round_up!(buf.len() as u64, self.disk_spec.logical_sector_size as u64);
+        let sector_count = (buf.len() as u64).div_ceil(self.disk_spec.logical_sector_size as u64);
         let sector_index = self.current_offset / self.disk_spec.logical_sector_size as u64;
 
         if self.first_write {
@@ -150,7 +146,7 @@ impl Write for Vhdx {
             })?;
         }
 
-        vhdx_io::write(
+        let result = vhdx_io::write(
             &mut self.file,
             buf,
             &mut self.disk_spec,
@@ -166,7 +162,11 @@ impl Write for Vhdx {
                     "Failed writing {sector_count} sectors on VHDx at index {sector_index}: {e}"
                 ),
             )
-        })
+        })?;
+
+        self.current_offset = self.current_offset.checked_add(result as u64).unwrap();
+
+        Ok(result)
     }
 }
 

@@ -2,6 +2,20 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+use std::panic::AssertUnwindSafe;
+use std::sync::mpsc::Sender;
+use std::sync::Arc;
+use std::thread;
+
+use futures::channel::oneshot;
+use futures::{executor, FutureExt};
+use hypervisor::HypervisorType;
+use seccompiler::{apply_filter, SeccompAction};
+use vmm_sys_util::eventfd::EventFd;
+use zbus::fdo::{self, Result};
+use zbus::zvariant::Optional;
+use zbus::{interface, ConnectionBuilder};
+
 use super::{ApiAction, ApiRequest};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::api::VmCoredump;
@@ -12,20 +26,7 @@ use crate::api::{
     VmSendMigration, VmShutdown, VmSnapshot, VmmPing, VmmShutdown,
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
-use crate::{Error as VmmError, Result as VmmResult};
-use crate::{NetConfig, VmConfig};
-use futures::channel::oneshot;
-use futures::{executor, FutureExt};
-use hypervisor::HypervisorType;
-use seccompiler::{apply_filter, SeccompAction};
-use std::panic::AssertUnwindSafe;
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use vmm_sys_util::eventfd::EventFd;
-use zbus::fdo::{self, Result};
-use zbus::zvariant::Optional;
-use zbus::{interface, ConnectionBuilder};
+use crate::{Error as VmmError, NetConfig, Result as VmmResult, VmConfig};
 
 pub type DBusApiShutdownChannels = (oneshot::Sender<()>, oneshot::Receiver<()>);
 
@@ -201,7 +202,7 @@ impl DBusApi {
         let api_sender = self.clone_api_sender().await;
         let api_notifier = self.clone_api_notifier()?;
 
-        let mut vm_config: VmConfig = serde_json::from_str(&vm_config).map_err(api_error)?;
+        let mut vm_config: Box<VmConfig> = serde_json::from_str(&vm_config).map_err(api_error)?;
 
         if let Some(ref mut nets) = vm_config.net {
             if nets.iter().any(|net| net.fds.is_some()) {
@@ -212,11 +213,9 @@ impl DBusApi {
             }
         }
 
-        blocking::unblock(move || {
-            VmCreate.send(api_notifier, api_sender, Arc::new(Mutex::new(vm_config)))
-        })
-        .await
-        .map_err(api_error)?;
+        blocking::unblock(move || VmCreate.send(api_notifier, api_sender, vm_config))
+            .await
+            .map_err(api_error)?;
 
         Ok(())
     }

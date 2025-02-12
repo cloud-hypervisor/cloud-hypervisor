@@ -11,7 +11,9 @@
 // Copyright © 2020, Microsoft Corporation
 //
 
-#[cfg(all(feature = "mshv", target_arch = "x86_64"))]
+use core::fmt;
+
+#[cfg(all(feature = "mshv_emulator", target_arch = "x86_64"))]
 pub mod emulator;
 pub mod gdt;
 #[allow(non_camel_case_types)]
@@ -211,6 +213,22 @@ pub struct CpuIdEntry {
     pub edx: u32,
 }
 
+impl fmt::Display for CpuIdEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "function = 0x{:08x} \
+             index = 0x{:08x} \
+             eax = 0x{:08x} \
+             ebx = 0x{:08x} \
+             ecx = 0x{:08x} \
+             edx = 0x{:08x} \
+             flags = 0x{:08x}",
+            self.function, self.index, self.eax, self.ebx, self.ecx, self.edx, self.flags
+        )
+    }
+}
+
 pub const CPUID_FLAG_VALID_INDEX: u32 = 1;
 
 #[derive(Default, Debug, Clone, serde::Deserialize, serde::Serialize)]
@@ -242,9 +260,10 @@ impl Default for LapicState {
 
 impl LapicState {
     pub fn get_klapic_reg(&self, reg_offset: usize) -> u32 {
-        use byteorder::{LittleEndian, ReadBytesExt};
         use std::io::Cursor;
         use std::mem;
+
+        use byteorder::{LittleEndian, ReadBytesExt};
 
         // SAFETY: plain old data type
         let sliceu8 = unsafe {
@@ -261,9 +280,10 @@ impl LapicState {
     }
 
     pub fn set_klapic_reg(&mut self, reg_offset: usize, value: u32) {
-        use byteorder::{LittleEndian, WriteBytesExt};
         use std::io::Cursor;
         use std::mem;
+
+        use byteorder::{LittleEndian, WriteBytesExt};
 
         // SAFETY: plain old data type
         let sliceu8 = unsafe {

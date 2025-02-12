@@ -11,30 +11,24 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use crate::config::CpusConfig;
+use std::collections::BTreeMap;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use crate::coredump::{
-    CpuElf64Writable, CpuSegment, CpuState as DumpCpusState, DumpState, Elf64Writable,
-    GuestDebuggableError, NoteDescType, X86_64ElfPrStatus, X86_64UserRegs, COREDUMP_NAME_SIZE,
-    NT_PRSTATUS,
-};
-#[cfg(feature = "guest_debug")]
-use crate::gdb::{get_raw_tid, Debuggable, DebuggableError};
-#[cfg(target_arch = "x86_64")]
-use crate::memory_manager::MemoryManager;
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
-#[cfg(target_arch = "x86_64")]
-use crate::vm::physical_bits;
-use crate::GuestMemoryMmap;
-use crate::CPU_MANAGER_SNAPSHOT_ID;
-use acpi_tables::{aml, sdt::Sdt, Aml};
+use std::io::Write;
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use std::mem::size_of;
+use std::os::unix::thread::JoinHandleExt;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Barrier, Mutex};
+use std::{cmp, io, result, thread};
+
+use acpi_tables::sdt::Sdt;
+use acpi_tables::{aml, Aml};
 use anyhow::anyhow;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use arch::aarch64::regs;
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::get_x2apic_id;
-use arch::EntryPoint;
-use arch::NumaNodes;
+use arch::{EntryPoint, NumaNodes};
 use devices::acpi::{OEM_ID, OEM_REVISION};
 #[cfg(target_arch = "aarch64")]
 use devices::gic::Gic;
@@ -68,15 +62,6 @@ use libc::{c_void, siginfo_t};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf::Elf64_Nhdr;
 use seccompiler::{apply_filter, SeccompAction};
-use std::collections::BTreeMap;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use std::io::Write;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use std::mem::size_of;
-use std::os::unix::thread::JoinHandleExt;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
-use std::{cmp, io, result, thread};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::BusDevice;
@@ -92,6 +77,23 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 use zerocopy::AsBytes;
+
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use crate::coredump::{
+    CpuElf64Writable, CpuSegment, CpuState as DumpCpusState, DumpState, Elf64Writable,
+    GuestDebuggableError, NoteDescType, X86_64ElfPrStatus, X86_64UserRegs, COREDUMP_NAME_SIZE,
+    NT_PRSTATUS,
+};
+#[cfg(feature = "guest_debug")]
+use crate::gdb::{get_raw_tid, Debuggable, DebuggableError};
+#[cfg(target_arch = "x86_64")]
+use crate::memory_manager::MemoryManager;
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
+#[cfg(target_arch = "x86_64")]
+use crate::vm::physical_bits;
+use crate::vm_config::CpusConfig;
+use crate::{GuestMemoryMmap, CPU_MANAGER_SNAPSHOT_ID};
+
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 /// Extract the specified bits of a 64-bit integer.
 /// For example, to extrace 2 bits from offset 1 (zero based) of `6u64`,
@@ -204,7 +206,7 @@ pub type Result<T> = result::Result<T, Error>;
 
 #[cfg(target_arch = "x86_64")]
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(AsBytes)]
 struct LocalX2Apic {
     pub r#type: u8,
@@ -216,7 +218,7 @@ struct LocalX2Apic {
 }
 
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, AsBytes)]
 struct Ioapic {
     pub r#type: u8,
@@ -229,7 +231,7 @@ struct Ioapic {
 
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(AsBytes)]
 struct GicC {
     pub r#type: u8,
@@ -254,7 +256,7 @@ struct GicC {
 
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(AsBytes)]
 struct GicD {
     pub r#type: u8,
@@ -269,7 +271,7 @@ struct GicD {
 
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(AsBytes)]
 struct GicR {
     pub r#type: u8,
@@ -281,7 +283,7 @@ struct GicR {
 
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(AsBytes)]
 struct GicIts {
     pub r#type: u8,
@@ -294,7 +296,7 @@ struct GicIts {
 
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(AsBytes)]
 struct ProcessorHierarchyNode {
     pub r#type: u8,
@@ -307,7 +309,7 @@ struct ProcessorHierarchyNode {
 }
 
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, AsBytes)]
 struct InterruptSourceOverride {
     pub r#type: u8,
@@ -1443,7 +1445,7 @@ impl CpuManager {
                         1 << MADT_CPU_ENABLE_FLAG
                     } else {
                         0
-                    } | 1 << MADT_CPU_ONLINE_CAPABLE_FLAG,
+                    } | (1 << MADT_CPU_ONLINE_CAPABLE_FLAG),
                     _reserved: 0,
                 };
                 madt.append(lapic);
@@ -2814,8 +2816,7 @@ impl CpuElf64Writable for CpuManager {
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[cfg(test)]
 mod tests {
-    use arch::layout::BOOT_STACK_POINTER;
-    use arch::layout::ZERO_PAGE_START;
+    use arch::layout::{BOOT_STACK_POINTER, ZERO_PAGE_START};
     use arch::x86_64::interrupts::*;
     use arch::x86_64::regs::*;
     use hypervisor::arch::x86::{FpuState, LapicState};
@@ -2826,9 +2827,9 @@ mod tests {
     fn test_setlint() {
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
-        assert!(hv.check_required_extensions().is_ok());
+        hv.check_required_extensions().unwrap();
         // Calling get_lapic will fail if there is no irqchip before hand.
-        assert!(vm.create_irq_chip().is_ok());
+        vm.create_irq_chip().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
         let klapic_before: LapicState = vcpu.get_lapic().unwrap();
 
@@ -2953,14 +2954,16 @@ mod tests {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
-    use arch::{aarch64::regs, layout};
+    use std::mem;
+
+    use arch::aarch64::regs;
+    use arch::layout;
     use hypervisor::kvm::aarch64::is_system_register;
     use hypervisor::kvm::kvm_bindings::{
         kvm_vcpu_init, user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM_CORE,
         KVM_REG_SIZE_U64,
     };
     use hypervisor::{arm64_core_reg_id, offset_of};
-    use std::mem;
 
     #[test]
     fn test_setup_regs() {
@@ -2968,15 +2971,14 @@ mod tests {
         let vm = hv.create_vm().unwrap();
         let vcpu = vm.create_vcpu(0, None).unwrap();
 
-        let res = vcpu.setup_regs(0, 0x0, layout::FDT_START.0);
         // Must fail when vcpu is not initialized yet.
-        assert!(res.is_err());
+        vcpu.setup_regs(0, 0x0, layout::FDT_START.0).unwrap_err();
 
         let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
         vm.get_preferred_target(&mut kvi).unwrap();
         vcpu.vcpu_init(&kvi).unwrap();
 
-        assert!(vcpu.setup_regs(0, 0x0, layout::FDT_START.0).is_ok());
+        vcpu.setup_regs(0, 0x0, layout::FDT_START.0).unwrap();
     }
 
     #[test]
@@ -2988,7 +2990,7 @@ mod tests {
         vm.get_preferred_target(&mut kvi).unwrap();
 
         // Must fail when vcpu is not initialized yet.
-        assert!(vcpu.get_sys_reg(regs::MPIDR_EL1).is_err());
+        vcpu.get_sys_reg(regs::MPIDR_EL1).unwrap_err();
 
         vcpu.vcpu_init(&kvi).unwrap();
         assert_eq!(vcpu.get_sys_reg(regs::MPIDR_EL1).unwrap(), 0x80000000);
@@ -3012,28 +3014,22 @@ mod tests {
         vm.get_preferred_target(&mut kvi).unwrap();
 
         // Must fail when vcpu is not initialized yet.
-        let res = vcpu.get_regs();
-        assert!(res.is_err());
         assert_eq!(
-            format!("{}", res.unwrap_err()),
-            "Failed to get core register: Exec format error (os error 8)"
+            format!("{}", vcpu.get_regs().unwrap_err()),
+            "Failed to get aarch64 core register: Exec format error (os error 8)"
         );
 
         let mut state = vcpu.create_standard_regs();
-        let res = vcpu.set_regs(&state);
-        assert!(res.is_err());
         assert_eq!(
-            format!("{}", res.unwrap_err()),
-            "Failed to set core register: Exec format error (os error 8)"
+            format!("{}", vcpu.set_regs(&state).unwrap_err()),
+            "Failed to set aarch64 core register: Exec format error (os error 8)"
         );
 
         vcpu.vcpu_init(&kvi).unwrap();
-        let res = vcpu.get_regs();
-        assert!(res.is_ok());
-        state = res.unwrap();
+        state = vcpu.get_regs().unwrap();
         assert_eq!(state.get_pstate(), 0x3C5);
 
-        assert!(vcpu.set_regs(&state).is_ok());
+        vcpu.set_regs(&state).unwrap();
     }
 
     #[test]
@@ -3044,8 +3040,7 @@ mod tests {
         let mut kvi: kvm_vcpu_init = kvm_vcpu_init::default();
         vm.get_preferred_target(&mut kvi).unwrap();
 
-        let res = vcpu.get_mp_state();
-        assert!(res.is_ok());
-        assert!(vcpu.set_mp_state(res.unwrap()).is_ok());
+        let state = vcpu.get_mp_state().unwrap();
+        vcpu.set_mp_state(state).unwrap();
     }
 }

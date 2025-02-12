@@ -3,27 +3,34 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#[macro_use]
-extern crate event_monitor;
+use std::fs::File;
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::sync::mpsc::channel;
+use std::sync::Mutex;
+use std::{env, io};
 
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
+use event_monitor::event;
 use libc::EFD_NONBLOCK;
 use log::{warn, LevelFilter};
 use option_parser::OptionParser;
 use seccompiler::SeccompAction;
 use signal_hook::consts::SIGSYS;
-use std::fs::File;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
-use std::{env, io};
 use thiserror::Error;
 #[cfg(feature = "dbus_api")]
 use vmm::api::dbus::{dbus_api_graceful_shutdown, DBusApiOptions};
 use vmm::api::http::http_api_graceful_shutdown;
 use vmm::api::ApiAction;
-use vmm::config;
+use vmm::config::{RestoreConfig, VmParams};
 use vmm::landlock::{Landlock, LandlockError};
+use vmm::vm_config;
+#[cfg(target_arch = "x86_64")]
+use vmm::vm_config::SgxEpcConfig;
+use vmm::vm_config::{
+    BalloonConfig, DeviceConfig, DiskConfig, FsConfig, LandlockConfig, NetConfig, NumaConfig,
+    PciSegmentConfig, PmemConfig, RateLimiterGroupConfig, TpmConfig, UserDeviceConfig, VdpaConfig,
+    VmConfig, VsockConfig,
+};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
 
@@ -156,17 +163,17 @@ fn prepare_default_values() -> (String, String, String) {
 fn default_vcpus() -> String {
     format!(
         "boot={},max_phys_bits={}",
-        config::DEFAULT_VCPUS,
-        config::DEFAULT_MAX_PHYS_BITS
+        vm_config::DEFAULT_VCPUS,
+        vm_config::DEFAULT_MAX_PHYS_BITS
     )
 }
 
 fn default_memory() -> String {
-    format!("size={}M", config::DEFAULT_MEMORY_MB)
+    format!("size={}M", vm_config::DEFAULT_MEMORY_MB)
 }
 
 fn default_rng() -> String {
-    format!("src={}", config::DEFAULT_RNG_SOURCE)
+    format!("src={}", vm_config::DEFAULT_RNG_SOURCE)
 }
 
 fn create_app(default_vcpus: String, default_memory: String, default_rng: String) -> Command {
@@ -177,9 +184,10 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         .author(env!("CARGO_PKG_AUTHORS"))
         .about("Launch a cloud-hypervisor VMM.")
         .arg_required_else_help(true)
-        .group(ArgGroup::new("vm-config").multiple(true))
+        .group(ArgGroup::new("vm-config").multiple(true).requires("vm-payload"))
         .group(ArgGroup::new("vmm-config").multiple(true))
         .group(ArgGroup::new("logging").multiple(true))
+        .group(ArgGroup::new("vm-payload").multiple(true))
         .arg(
             Arg::new("cpus")
                 .long("cpus")
@@ -196,7 +204,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         .arg(
             Arg::new("platform")
                 .long("platform")
-                .help("num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,serial_number=<dmi_device_serial_number>,uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>")
+                .help("num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,iommu_address_width=<bits>,serial_number=<dmi_device_serial_number>,uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>")
                 .num_args(1)
                 .group("vm-config"),
         )
@@ -236,7 +244,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 .long("firmware")
                 .help("Path to firmware that is loaded in an architectural specific way")
                 .num_args(1)
-                .group("vm-config"),
+                .group("vm-payload"),
         )
         .arg(
             Arg::new("kernel")
@@ -246,7 +254,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 entry point (e.g. vmlinux) or architecture equivalent",
                 )
                 .num_args(1)
-                .group("vm-config"),
+                .group("vm-payload"),
         )
         .arg(
             Arg::new("initramfs")
@@ -265,14 +273,14 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         .arg(
             Arg::new("rate-limit-group")
                 .long("rate-limit-group")
-                .help(config::RateLimiterGroupConfig::SYNTAX)
+                .help(RateLimiterGroupConfig::SYNTAX)
                 .num_args(1..)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("disk")
                 .long("disk")
-                .help(config::DiskConfig::SYNTAX)
+                .help(DiskConfig::SYNTAX)
                 .num_args(1..)
                 .group("vm-config"),
         )
@@ -290,14 +298,14 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         .arg(
             Arg::new("landlock-rules")
             .long("landlock-rules")
-            .help(config::LandlockConfig::SYNTAX)
+            .help(LandlockConfig::SYNTAX)
             .num_args(1..)
             .group("vm-config"),
         )
         .arg(
             Arg::new("net")
                 .long("net")
-                .help(config::NetConfig::SYNTAX)
+                .help(NetConfig::SYNTAX)
                 .num_args(1..)
                 .group("vm-config"),
         )
@@ -313,21 +321,21 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         .arg(
             Arg::new("balloon")
                 .long("balloon")
-                .help(config::BalloonConfig::SYNTAX)
+                .help(BalloonConfig::SYNTAX)
                 .num_args(1)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("fs")
                 .long("fs")
-                .help(config::FsConfig::SYNTAX)
+                .help(FsConfig::SYNTAX)
                 .num_args(1..)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("pmem")
                 .long("pmem")
-                .help(config::PmemConfig::SYNTAX)
+                .help(PmemConfig::SYNTAX)
                 .num_args(1..)
                 .group("vm-config"),
         )
@@ -350,28 +358,28 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         .arg(
             Arg::new("device")
                 .long("device")
-                .help(config::DeviceConfig::SYNTAX)
+                .help(DeviceConfig::SYNTAX)
                 .num_args(1..)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("user-device")
                 .long("user-device")
-                .help(config::UserDeviceConfig::SYNTAX)
+                .help(UserDeviceConfig::SYNTAX)
                 .num_args(1..)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("vdpa")
                 .long("vdpa")
-                .help(config::VdpaConfig::SYNTAX)
+                .help(VdpaConfig::SYNTAX)
                 .num_args(1..)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("vsock")
                 .long("vsock")
-                .help(config::VsockConfig::SYNTAX)
+                .help(VsockConfig::SYNTAX)
                 .num_args(1)
                 .group("vm-config"),
         )
@@ -386,14 +394,14 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         .arg(
             Arg::new("numa")
                 .long("numa")
-                .help(config::NumaConfig::SYNTAX)
+                .help(NumaConfig::SYNTAX)
                 .num_args(1..)
                 .group("vm-config"),
         )
         .arg(
             Arg::new("pci-segment")
                 .long("pci-segment")
-                .help(config::PciSegmentConfig::SYNTAX)
+                .help(PciSegmentConfig::SYNTAX)
                 .num_args(1..)
                 .group("vm-config"),
         )
@@ -436,7 +444,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         .arg(
             Arg::new("restore")
                 .long("restore")
-                .help(config::RestoreConfig::SYNTAX)
+                .help(RestoreConfig::SYNTAX)
                 .num_args(1)
                 .group("vmm-config"),
         )
@@ -451,15 +459,15 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
             Arg::new("tpm")
                 .long("tpm")
                 .num_args(1)
-                .help(config::TpmConfig::SYNTAX)
-                .group("vmm-config"),
+                .help(TpmConfig::SYNTAX)
+                .group("vm-config"),
         );
 
     #[cfg(target_arch = "x86_64")]
     let app = app.arg(
         Arg::new("sgx-epc")
             .long("sgx-epc")
-            .help(config::SgxEpcConfig::SYNTAX)
+            .help(SgxEpcConfig::SYNTAX)
             .num_args(1..)
             .group("vm-config"),
     );
@@ -512,7 +520,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
             .long("igvm")
             .help("Path to IGVM file to load.")
             .num_args(1)
-            .group("vm-config"),
+            .group("vm-payload"),
     );
     #[cfg(feature = "sev_snp")]
     let app = app.arg(
@@ -796,8 +804,8 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
             cmd_arguments.contains_id("kernel") || cmd_arguments.contains_id("firmware");
 
         if payload_present {
-            let vm_params = config::VmParams::from_arg_matches(&cmd_arguments);
-            let vm_config = config::VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
+            let vm_params = VmParams::from_arg_matches(&cmd_arguments);
+            let vm_config = VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
 
             // Create and boot the VM based off the VM config we just built.
             let sender = api_request_sender.clone();
@@ -805,7 +813,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
                 .send(
                     api_evt.try_clone().unwrap(),
                     api_request_sender,
-                    Arc::new(Mutex::new(vm_config)),
+                    Box::new(vm_config),
                 )
                 .map_err(Error::VmCreate)?;
             vmm::api::VmBoot
@@ -816,7 +824,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
                 .send(
                     api_evt.try_clone().unwrap(),
                     api_request_sender,
-                    config::RestoreConfig::parse(restore_params).map_err(Error::ParsingRestore)?,
+                    RestoreConfig::parse(restore_params).map_err(Error::ParsingRestore)?,
                 )
                 .map_err(Error::VmRestore)?;
         }
@@ -981,15 +989,17 @@ fn main() {
 
 #[cfg(test)]
 mod unit_tests {
-    use crate::config::HotplugMethod;
-    use crate::{create_app, prepare_default_values};
     use std::path::PathBuf;
-    use vmm::config::{
-        ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpusConfig, MemoryConfig, PayloadConfig,
-        RngConfig, VmConfig, VmParams,
-    };
+
+    use vmm::config::VmParams;
     #[cfg(target_arch = "x86_64")]
     use vmm::vm_config::DebugConsoleConfig;
+    use vmm::vm_config::{
+        ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpusConfig, HotplugMethod, MemoryConfig,
+        PayloadConfig, RngConfig, VmConfig,
+    };
+
+    use crate::{create_app, prepare_default_values};
 
     fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {
         let (default_vcpus, default_memory, default_rng) = prepare_default_values();

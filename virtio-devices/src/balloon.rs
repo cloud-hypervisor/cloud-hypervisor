@@ -14,20 +14,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{
-    seccomp_filters::Thread, thread_helper::spawn_virtio_thread, ActivateResult, EpollHelper,
-    EpollHelperError, EpollHelperHandler, GuestMemoryMmap, VirtioCommon, VirtioDevice,
-    VirtioDeviceType, VirtioInterrupt, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
-    VIRTIO_F_VERSION_1,
-};
-use anyhow::anyhow;
-use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
 use std::io::{self, Write};
 use std::mem::size_of;
 use std::os::unix::io::AsRawFd;
 use std::result;
-use std::sync::{atomic::AtomicBool, Arc, Barrier};
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Barrier};
+
+use anyhow::anyhow;
+use seccompiler::SeccompAction;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
 use vm_allocator::page_size::{align_page_size_down, get_page_size};
@@ -37,6 +33,14 @@ use vm_memory::{
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::{
+    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, GuestMemoryMmap,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
+    EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
+};
 
 const QUEUE_SIZE: u16 = 128;
 const REPORTING_QUEUE_SIZE: u16 = 32;

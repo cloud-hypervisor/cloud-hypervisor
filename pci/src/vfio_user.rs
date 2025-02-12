@@ -3,19 +3,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::vfio::{UserMemoryRegion, Vfio, VfioCommon, VfioError, VFIO_COMMON_ID};
-use crate::{BarReprogrammingParams, PciBarConfiguration, VfioPciError};
-use crate::{PciBdf, PciDevice, PciDeviceError, PciSubclass};
-use hypervisor::HypervisorVmError;
 use std::any::Any;
 use std::os::unix::prelude::AsRawFd;
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
+
+use hypervisor::HypervisorVmError;
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::VfioIrq;
 use vfio_user::{Client, Error as VfioUserError};
-use vm_allocator::{AddressAllocator, SystemAllocator};
+use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{InterruptManager, InterruptSourceGroup, MsiIrqGroupConfig};
 use vm_device::{BusDevice, Resource};
@@ -26,12 +24,18 @@ use vm_memory::{
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::vfio::{UserMemoryRegion, Vfio, VfioCommon, VfioError, VFIO_COMMON_ID};
+use crate::{
+    BarReprogrammingParams, PciBarConfiguration, PciBdf, PciDevice, PciDeviceError, PciSubclass,
+    VfioPciError,
+};
+
 pub struct VfioUserPciDevice {
     id: String,
     vm: Arc<dyn hypervisor::Vm>,
     client: Arc<Mutex<Client>>,
     common: VfioCommon,
-    memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
+    memory_slot_allocator: MemorySlotAllocator,
 }
 
 #[derive(Error, Debug)]
@@ -70,7 +74,7 @@ impl VfioUserPciDevice {
         msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         bdf: PciBdf,
-        memory_slot: Arc<dyn Fn() -> u32 + Send + Sync>,
+        memory_slot_allocator: MemorySlotAllocator,
         snapshot: Option<Snapshot>,
     ) -> Result<Self, VfioUserPciDeviceError> {
         let resettable = client.lock().unwrap().resettable();
@@ -102,7 +106,7 @@ impl VfioUserPciDevice {
             vm: vm.clone(),
             client,
             common,
-            memory_slot,
+            memory_slot_allocator,
         })
     }
 
@@ -174,7 +178,7 @@ impl VfioUserPciDevice {
                     }
 
                     let user_memory_region = UserMemoryRegion {
-                        slot: (self.memory_slot)(),
+                        slot: self.memory_slot_allocator.next_memory_slot(),
                         start: mmio_region.start.0 + s.offset,
                         size: s.size,
                         host_addr: host_addr as u64,
@@ -217,6 +221,9 @@ impl VfioUserPciDevice {
                 if let Err(e) = self.vm.remove_user_memory_region(r) {
                     error!("Could not remove the userspace memory region: {}", e);
                 }
+
+                self.memory_slot_allocator
+                    .free_memory_slot(user_memory_region.slot);
 
                 // Remove mmaps
                 // SAFETY: FFI call with correct arguments
@@ -415,7 +422,7 @@ impl PciDevice for VfioUserPciDevice {
             .free_bars(allocator, mmio32_allocator, mmio64_allocator)
     }
 
-    fn as_any(&mut self) -> &mut dyn Any {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 

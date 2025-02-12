@@ -5,13 +5,13 @@
 
 // Performance tests
 
-use crate::{mean, PerformanceTestControl};
-use std::fs;
 use std::path::PathBuf;
-use std::thread;
 use std::time::Duration;
-use test_infra::Error as InfraError;
-use test_infra::*;
+use std::{fs, thread};
+
+use test_infra::{Error as InfraError, *};
+
+use crate::{mean, PerformanceTestControl};
 
 #[cfg(target_arch = "x86_64")]
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
@@ -518,6 +518,7 @@ pub fn performance_restore_latency(control: &PerformanceTestControl) -> f64 {
         ));
 
         let _ = child.kill();
+        child.wait().unwrap();
 
         let event_path = String::from(guest.tmp_dir.as_path().join("event.json").to_str().unwrap());
         let mut cmd = GuestCommand::new(&guest);

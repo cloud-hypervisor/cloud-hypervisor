@@ -9,8 +9,8 @@ default = []
 
 [dependencies]
 log = "0.4.22"
-virtio-queue = "0.12.0"
-vm-memory = { version = "0.14.1", features = [
+virtio-queue = { workspace = true }
+vm-memory = { workspace = true, features = [
   "backend-atomic",
   "backend-bitmap",
   "backend-mmap",

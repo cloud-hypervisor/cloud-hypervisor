@@ -5,14 +5,14 @@
 #![no_main]
 use devices::legacy::Cmos;
 use libc::EFD_NONBLOCK;
-use libfuzzer_sys::fuzz_target;
+use libfuzzer_sys::{fuzz_target, Corpus};
 use vm_device::BusDevice;
 use vmm_sys_util::eventfd::EventFd;
 
-fuzz_target!(|bytes| {
+fuzz_target!(|bytes: &[u8]| -> Corpus {
     // Need at least 16 bytes for the test
     if bytes.len() < 16 {
-        return;
+        return Corpus::Reject;
     }
 
     let mut below_4g = [0u8; 8];
@@ -46,4 +46,6 @@ fuzz_target!(|bytes| {
             cmos.write(0, offset, &data);
         }
     }
+
+    Corpus::Keep
 });

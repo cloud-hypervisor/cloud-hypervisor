@@ -7,15 +7,16 @@
 //! This module implements an ARM PrimeCell General Purpose Input/Output(PL061) to support gracefully poweroff microvm from external.
 //!
 
-use crate::{read_le_u32, write_le_u32};
-use serde::{Deserialize, Serialize};
-use std::io;
-use std::result;
 use std::sync::{Arc, Barrier};
+use std::{io, result};
+
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+
+use crate::{read_le_u32, write_le_u32};
 
 const OFS_DATA: u64 = 0x400; // Data Register
 const GPIODIR: u64 = 0x400; // Direction Register
@@ -323,9 +324,10 @@ impl Migratable for Gpio {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
     use vmm_sys_util::eventfd::EventFd;
+
+    use super::*;
 
     const GPIO_NAME: &str = "gpio";
     const LEGACY_GPIO_MAPPED_IO_START: u64 = 0x0902_0000;

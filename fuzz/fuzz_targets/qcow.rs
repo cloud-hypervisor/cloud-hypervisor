@@ -5,20 +5,21 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 #![no_main]
-use block::qcow::{QcowFile, RawFile};
-use libfuzzer_sys::fuzz_target;
 use std::ffi;
 use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::os::unix::io::{FromRawFd, RawFd};
 
+use block::qcow::{QcowFile, RawFile};
+use libfuzzer_sys::{fuzz_target, Corpus};
+
 // Take the first 64 bits of data as an address and the next 64 bits as data to
 // store there. The rest of the data is used as a qcow image.
-fuzz_target!(|bytes| {
+fuzz_target!(|bytes: &[u8]| -> Corpus {
     if bytes.len() < 16 {
         // Need an address and data, each are 8 bytes.
-        return;
+        return Corpus::Reject;
     }
     let mut disk_image = Cursor::new(bytes);
     let addr = read_u64(&mut disk_image);
@@ -32,6 +33,8 @@ fuzz_target!(|bytes| {
             let _ = qcow.write_all(&value.to_le_bytes());
         }
     }
+
+    Corpus::Keep
 });
 
 fn read_u64<T: Read>(readable: &mut T) -> u64 {

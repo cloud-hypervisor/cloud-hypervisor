@@ -2,6 +2,8 @@
 // Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use kvm_ioctls::DeviceFd;
+
 use crate::arch::aarch64::gic::{Error, Result};
 use crate::device::HypervisorDeviceError;
 use crate::kvm::kvm_bindings::{
@@ -10,7 +12,6 @@ use crate::kvm::kvm_bindings::{
     KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP0_SHIFT, KVM_REG_ARM64_SYSREG_OP1_MASK,
     KVM_REG_ARM64_SYSREG_OP1_SHIFT, KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_ARM64_SYSREG_OP2_SHIFT,
 };
-use kvm_ioctls::DeviceFd;
 
 const KVM_DEV_ARM_VGIC_V3_MPIDR_SHIFT: u32 = 32;
 const KVM_DEV_ARM_VGIC_V3_MPIDR_MASK: u64 = 0xffffffff << KVM_DEV_ARM_VGIC_V3_MPIDR_SHIFT as u64;
@@ -104,9 +105,8 @@ fn icc_attr_get(gic: &DeviceFd, offset: u64, typer: u64) -> Result<u32> {
         flags: 0,
     };
 
-    // get_device_attr should be marked as unsafe, and will be in future.
     // SAFETY: gic_icc_attr.addr is safe to write to.
-    gic.get_device_attr(&mut gic_icc_attr).map_err(|e| {
+    unsafe { gic.get_device_attr(&mut gic_icc_attr) }.map_err(|e| {
         Error::GetDeviceAttribute(HypervisorDeviceError::GetDeviceAttribute(e.into()))
     })?;
 

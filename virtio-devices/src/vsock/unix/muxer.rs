@@ -50,11 +50,9 @@ use super::super::packet::VsockPacket;
 use super::super::{
     Result as VsockResult, VsockBackend, VsockChannel, VsockEpollListener, VsockError,
 };
-use super::defs;
 use super::muxer_killq::MuxerKillQ;
 use super::muxer_rxq::MuxerRxQ;
-use super::MuxerConnection;
-use super::{Error, Result};
+use super::{defs, Error, MuxerConnection, Result};
 
 /// A unique identifier of a `MuxerConnection` object. Connections are stored in a hash map,
 /// keyed by a `ConnMapKey` object.
@@ -849,12 +847,14 @@ impl VsockMuxer {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+
+    use virtio_queue::QueueOwnedT;
+
     use super::super::super::csm::defs as csm_defs;
     use super::super::super::tests::TestContext as VsockTestContext;
     use super::*;
-    use std::io::Write;
-    use std::path::{Path, PathBuf};
-    use virtio_queue::QueueOwnedT;
 
     const PEER_CID: u32 = 3;
     const PEER_BUF_ALLOC: u32 = 64 * 1024;

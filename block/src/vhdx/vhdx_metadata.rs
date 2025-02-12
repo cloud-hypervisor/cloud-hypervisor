@@ -2,14 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::vhdx::vhdx_header::RegionTableEntry;
-use byteorder::{LittleEndian, ReadBytesExt};
-use remain::sorted;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::mem::size_of;
+
+use byteorder::{LittleEndian, ReadBytesExt};
+use remain::sorted;
 use thiserror::Error;
 use uuid::Uuid;
+
+use crate::vhdx::vhdx_header::RegionTableEntry;
 
 const METADATA_SIGN: u64 = 0x6174_6164_6174_656D;
 const METADATA_ENTRY_SIZE: usize = 32;
@@ -53,6 +55,8 @@ const METADATA_LENGTH_MAX: u32 = 1 << 20; // 1 MiB
 pub enum VhdxMetadataError {
     #[error("Invalid block size count")]
     InvalidBlockSize,
+    #[error("Invalid disk size {0}")]
+    InvalidDiskSize(u64),
     #[error("Invalid metadata entry count")]
     InvalidEntryCount,
     #[error("Invalid logical sector size")]
@@ -212,6 +216,14 @@ impl DiskSpec {
         if metadata_presence != METADATA_ALL_PRESENT {
             return Err(VhdxMetadataError::MissingMetadata);
         }
+        // Make sure virtual disk size is not zero
+        if (metadata_presence & METADATA_VIRTUAL_DISK_SIZE_PRESENT != 0)
+            && disk_spec.virtual_disk_size == 0
+        {
+            return Err(VhdxMetadataError::InvalidDiskSize(
+                disk_spec.virtual_disk_size,
+            ));
+        }
         // Check if the virtual disk size is a multiple of the logical sector
         // size.
         if ((metadata_presence & METADATA_LOGICAL_SECTOR_SIZE_PRESENT) != 0)
@@ -255,7 +267,7 @@ impl DiskSpec {
     }
 }
 
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, Debug, Clone, Copy)]
 struct MetadataTableHeader {
     signature: u64,
@@ -286,7 +298,7 @@ impl MetadataTableHeader {
     }
 }
 
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, Debug, Clone, Copy)]
 pub struct MetadataTableEntry {
     item_id: Uuid,

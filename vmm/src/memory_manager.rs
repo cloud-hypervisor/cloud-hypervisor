@@ -2,16 +2,21 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-#[cfg(target_arch = "x86_64")]
-use crate::config::SgxEpcConfig;
-use crate::config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
+
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use crate::coredump::{
-    CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
-};
-use crate::migration::url_to_path;
-use crate::MEMORY_MANAGER_SNAPSHOT_ID;
-use crate::{GuestMemoryMmap, GuestRegionMmap};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::{self};
+use std::ops::{BitAnd, Deref, Not, Sub};
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use std::os::fd::AsFd;
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Barrier, Mutex};
+use std::{ffi, result, thread};
+
 use acpi_tables::{aml, Aml};
 use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
@@ -25,36 +30,33 @@ use libc::_SC_NPROCESSORS_ONLN;
 #[cfg(target_arch = "x86_64")]
 use libc::{MAP_NORESERVE, MAP_POPULATE, MAP_SHARED, PROT_READ, PROT_WRITE};
 use serde::{Deserialize, Serialize};
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::{self};
-use std::ops::{BitAnd, Deref, Not, Sub};
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use std::os::fd::AsFd;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::path::PathBuf;
-use std::result;
-use std::sync::{Arc, Barrier, Mutex};
-use std::{ffi, thread};
 use tracer::trace_scoped;
 use virtio_devices::BlocksState;
 #[cfg(target_arch = "x86_64")]
 use vm_allocator::GsiApic;
-use vm_allocator::{AddressAllocator, SystemAllocator};
+use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
 use vm_device::BusDevice;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
+use vm_memory::mmap::MmapRegionError;
 use vm_memory::{
-    mmap::MmapRegionError, Address, Error as MmapError, GuestAddress, GuestAddressSpace,
-    GuestMemory, GuestMemoryAtomic, GuestMemoryError, GuestMemoryRegion, GuestUsize, MmapRegion,
-    ReadVolatile,
+    Address, Error as MmapError, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    GuestMemoryError, GuestMemoryRegion, GuestUsize, MmapRegion, ReadVolatile,
 };
+use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
 use vm_migration::{
-    protocol::MemoryRange, protocol::MemoryRangeTable, Migratable, MigratableError, Pausable,
-    Snapshot, SnapshotData, Snapshottable, Transportable,
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,
 };
+
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use crate::coredump::{
+    CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
+};
+use crate::migration::url_to_path;
+#[cfg(target_arch = "x86_64")]
+use crate::vm_config::SgxEpcConfig;
+use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
+use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID};
 
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
 
@@ -161,7 +163,8 @@ struct ArchMemRegion {
 pub struct MemoryManager {
     boot_guest_memory: GuestMemoryMmap,
     guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
-    next_memory_slot: u32,
+    next_memory_slot: Arc<AtomicU32>,
+    memory_slot_free_list: Arc<Mutex<Vec<u32>>>,
     start_of_device_area: GuestAddress,
     end_of_device_area: GuestAddress,
     end_of_ram_area: GuestAddress,
@@ -1087,9 +1090,9 @@ impl MemoryManager {
                         } else {
                             // Alignment must be "natural" i.e. same as size of block
                             let start_addr = GuestAddress(
-                                (start_of_device_area.0 + virtio_devices::VIRTIO_MEM_ALIGN_SIZE
-                                    - 1)
-                                    / virtio_devices::VIRTIO_MEM_ALIGN_SIZE
+                                start_of_device_area
+                                    .0
+                                    .div_ceil(virtio_devices::VIRTIO_MEM_ALIGN_SIZE)
                                     * virtio_devices::VIRTIO_MEM_ALIGN_SIZE,
                             );
 
@@ -1154,17 +1157,10 @@ impl MemoryManager {
 
         let guest_memory = GuestMemoryAtomic::new(guest_memory);
 
-        // Both MMIO and PIO address spaces start at address 0.
         let allocator = Arc::new(Mutex::new(
             SystemAllocator::new(
-                #[cfg(target_arch = "x86_64")]
-                {
-                    GuestAddress(0)
-                },
-                #[cfg(target_arch = "x86_64")]
-                {
-                    1 << 16
-                },
+                GuestAddress(0),
+                1 << 16,
                 start_of_platform_device_area,
                 PLATFORM_DEVICE_AREA_SIZE,
                 #[cfg(target_arch = "x86_64")]
@@ -1204,7 +1200,8 @@ impl MemoryManager {
         let mut memory_manager = MemoryManager {
             boot_guest_memory,
             guest_memory,
-            next_memory_slot,
+            next_memory_slot: Arc::new(AtomicU32::new(next_memory_slot)),
+            memory_slot_free_list: Arc::new(Mutex::new(Vec::new())),
             start_of_device_area,
             end_of_device_area,
             end_of_ram_area,
@@ -1675,7 +1672,11 @@ impl MemoryManager {
 
         let start_addr = MemoryManager::start_addr(self.guest_memory.memory().last_addr(), true)?;
 
-        if start_addr.checked_add(size.try_into().unwrap()).unwrap() >= self.end_of_ram_area {
+        if start_addr
+            .checked_add((size - 1).try_into().unwrap())
+            .unwrap()
+            > self.end_of_ram_area
+        {
             return Err(Error::InsufficientHotplugRam);
         }
 
@@ -1724,10 +1725,14 @@ impl MemoryManager {
         self.end_of_device_area
     }
 
+    pub fn memory_slot_allocator(&mut self) -> MemorySlotAllocator {
+        let memory_slot_free_list = Arc::clone(&self.memory_slot_free_list);
+        let next_memory_slot = Arc::clone(&self.next_memory_slot);
+        MemorySlotAllocator::new(next_memory_slot, memory_slot_free_list)
+    }
+
     pub fn allocate_memory_slot(&mut self) -> u32 {
-        let slot_id = self.next_memory_slot;
-        self.next_memory_slot += 1;
-        slot_id
+        self.memory_slot_allocator().next_memory_slot()
     }
 
     pub fn create_userspace_mapping(
@@ -1963,9 +1968,8 @@ impl MemoryManager {
         }
 
         // Place the SGX EPC region on a 4k boundary between the RAM and the device area
-        let epc_region_start = GuestAddress(
-            ((self.start_of_device_area.0 + SGX_PAGE_SIZE - 1) / SGX_PAGE_SIZE) * SGX_PAGE_SIZE,
-        );
+        let epc_region_start =
+            GuestAddress(self.start_of_device_area.0.div_ceil(SGX_PAGE_SIZE) * SGX_PAGE_SIZE);
 
         self.start_of_device_area = epc_region_start
             .checked_add(epc_region_size)
@@ -2116,7 +2120,7 @@ impl MemoryManager {
             current_ram: self.current_ram,
             arch_mem_regions: self.arch_mem_regions.clone(),
             hotplug_slots: self.hotplug_slots.clone(),
-            next_memory_slot: self.next_memory_slot,
+            next_memory_slot: self.next_memory_slot.load(Ordering::SeqCst),
             selected_slot: self.selected_slot,
             next_hotplug_slot: self.next_hotplug_slot,
         }

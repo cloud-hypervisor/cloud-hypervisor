@@ -4,17 +4,19 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::any::Any;
+use std::collections::HashMap;
+use std::ops::DerefMut;
+use std::sync::{Arc, Barrier, Mutex};
+
+use byteorder::{ByteOrder, LittleEndian};
+use vm_device::{Bus, BusDevice, BusDeviceSync};
+
 use crate::configuration::{
     PciBarRegionType, PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType,
 };
 use crate::device::{DeviceRelocation, Error as PciDeviceError, PciDevice};
 use crate::PciBarConfiguration;
-use byteorder::{ByteOrder, LittleEndian};
-use std::any::Any;
-use std::collections::HashMap;
-use std::ops::DerefMut;
-use std::sync::{Arc, Barrier, Mutex};
-use vm_device::{Bus, BusDevice, BusDeviceSync};
 
 const VENDOR_ID_INTEL: u16 = 0x8086;
 const DEVICE_ID_INTEL_VIRT_PCIE_HOST: u16 = 0x0d57;
@@ -88,7 +90,7 @@ impl PciDevice for PciRoot {
         self.config.read_reg(reg_idx)
     }
 
-    fn as_any(&mut self) -> &mut dyn Any {
+    fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
 
@@ -123,19 +125,16 @@ impl PciBus {
     pub fn register_mapping(
         &self,
         dev: Arc<dyn BusDeviceSync>,
-        #[cfg(target_arch = "x86_64")] io_bus: &Bus,
+        io_bus: &Bus,
         mmio_bus: &Bus,
         bars: Vec<PciBarConfiguration>,
     ) -> Result<()> {
         for bar in bars {
             match bar.region_type() {
                 PciBarRegionType::IoRegion => {
-                    #[cfg(target_arch = "x86_64")]
                     io_bus
                         .insert(dev.clone(), bar.addr(), bar.size())
                         .map_err(PciRootError::PioInsert)?;
-                    #[cfg(target_arch = "aarch64")]
-                    error!("I/O region is not supported");
                 }
                 PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
                     mmio_bus
@@ -292,7 +291,7 @@ impl PciConfigIo {
             ),
             2 => (
                 0x0000_ffff << (offset * 16),
-                (u32::from(data[1]) << 8 | u32::from(data[0])) << (offset * 16),
+                ((u32::from(data[1]) << 8) | u32::from(data[0])) << (offset * 16),
             ),
             4 => (0xffff_ffff, LittleEndian::read_u32(data)),
             _ => return,

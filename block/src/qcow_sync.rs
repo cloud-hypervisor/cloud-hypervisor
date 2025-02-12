@@ -2,14 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult};
-use crate::qcow::{QcowFile, RawFile, Result as QcowResult};
-use crate::AsyncAdaptor;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
 use std::sync::{Arc, Mutex, MutexGuard};
+
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult};
+use crate::qcow::{QcowFile, RawFile, Result as QcowResult};
+use crate::AsyncAdaptor;
 
 pub struct QcowDiskSync {
     qcow_file: Arc<Mutex<QcowFile>>,

@@ -6,16 +6,18 @@
 //! This module implements an ARM PrimeCell UART(PL011).
 //!
 
-use crate::{read_le_u32, write_le_u32};
-use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::{Arc, Barrier};
 use std::time::Instant;
 use std::{io, result};
+
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+
+use crate::{read_le_u32, write_le_u32};
 
 /* Registers */
 const UARTDR: u64 = 0;
@@ -452,10 +454,12 @@ impl Migratable for Pl011 {}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::Mutex;
+
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};
     use vmm_sys_util::eventfd::EventFd;
+
+    use super::*;
 
     const SERIAL_NAME: &str = "serial";
 
@@ -545,7 +549,7 @@ mod tests {
 
         // write 1 to the interrupt event fd, so that read doesn't block in case the event fd
         // counter doesn't change (for 0 it blocks)
-        assert!(intr_evt.write(1).is_ok());
+        intr_evt.write(1).unwrap();
         pl011.queue_input_bytes(b"abc").unwrap();
 
         assert_eq!(intr_evt.read().unwrap(), 2);

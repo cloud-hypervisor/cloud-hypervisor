@@ -5,5 +5,5 @@ name = "api_client"
 version = "0.1.0"
 
 [dependencies]
-thiserror = "1.0.62"
-vmm-sys-util = "0.12.1"
+thiserror = "2.0.6"
+vmm-sys-util = { workspace = true }

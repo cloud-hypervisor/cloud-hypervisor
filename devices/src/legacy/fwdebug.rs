@@ -8,6 +8,7 @@
 //
 
 use std::sync::{Arc, Barrier};
+
 use vm_device::BusDevice;
 
 /// Provides firmware debug output via I/O port controls

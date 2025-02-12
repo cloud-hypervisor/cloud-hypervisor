@@ -4,12 +4,13 @@
 
 extern crate log;
 
-use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
-use remain::sorted;
 use std::collections::btree_map::BTreeMap;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
+
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
+use remain::sorted;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -109,7 +110,7 @@ impl FileTypeIdentifier {
     }
 }
 
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Debug)]
 pub struct Header {
     pub signature: u32,
@@ -141,7 +142,7 @@ impl Header {
             return Err(VhdxHeaderError::InvalidHeaderSign);
         }
 
-        let new_checksum = calculate_checksum(&mut buffer, size_of::<u32>())?;
+        let new_checksum = calculate_checksum(&mut buffer, size_of::<u32>());
         if header.checksum != new_checksum {
             return Err(VhdxHeaderError::InvalidChecksum(String::from("Header")));
         }
@@ -150,7 +151,7 @@ impl Header {
     }
 
     /// Converts the header structure into a buffer
-    fn get_header_as_buffer(&self, buffer: &mut [u8; HEADER_SIZE as usize]) {
+    fn write_to_buffer(&self, buffer: &mut [u8; HEADER_SIZE as usize]) {
         // SAFETY: self is a valid header.
         let reference = unsafe {
             std::slice::from_raw_parts(self as *const Header as *const u8, HEADER_SIZE as usize)
@@ -159,7 +160,7 @@ impl Header {
     }
 
     /// Creates and returns new updated header from the provided current header
-    pub fn update_header(
+    fn update_header(
         f: &mut File,
         current_header: &Header,
         change_data_guid: bool,
@@ -190,11 +191,9 @@ impl Header {
             log_offset: current_header.log_offset,
         };
 
-        new_header.get_header_as_buffer(&mut buffer);
-        let mut crc = crc_any::CRC::crc32c();
-        crc.digest(&buffer);
-        new_header.checksum = crc.get_crc() as u32;
-        new_header.get_header_as_buffer(&mut buffer);
+        new_header.write_to_buffer(&mut buffer);
+        new_header.checksum = calculate_checksum(&mut buffer, size_of::<u32>());
+        new_header.write_to_buffer(&mut buffer);
 
         f.seek(SeekFrom::Start(start))
             .map_err(VhdxHeaderError::SeekHeader)?;
@@ -204,7 +203,7 @@ impl Header {
     }
 }
 
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Debug)]
 struct RegionTableHeader {
     pub signature: u32,
@@ -230,7 +229,7 @@ impl RegionTableHeader {
             return Err(VhdxHeaderError::InvalidRegionSign);
         }
 
-        let new_checksum = calculate_checksum(&mut buffer, size_of::<u32>())?;
+        let new_checksum = calculate_checksum(&mut buffer, size_of::<u32>());
         if region_table_header.checksum != new_checksum {
             return Err(VhdxHeaderError::InvalidChecksum(String::from("Region")));
         }
@@ -329,7 +328,7 @@ impl RegionInfo {
     }
 }
 
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Clone, Copy, Debug)]
 pub struct RegionTableEntry {
     pub guid: Uuid,
@@ -370,22 +369,10 @@ pub struct VhdxHeader {
 impl VhdxHeader {
     /// Creates a VhdxHeader from a reference to a file
     pub fn new(f: &mut File) -> Result<VhdxHeader> {
-        let _file_type_identifier: FileTypeIdentifier = FileTypeIdentifier::new(f)?;
-        let header_1 = Header::new(f, HEADER_1_START);
-        let header_2 = Header::new(f, HEADER_2_START);
-
-        let mut file_write_guid: u128 = 0;
-        let metadata = f.metadata().map_err(VhdxHeaderError::ReadMetadata)?;
-        if !metadata.permissions().readonly() {
-            file_write_guid = Uuid::new_v4().as_u128();
-        }
-
-        let (header_1, header_2) =
-            VhdxHeader::update_headers(f, header_1, header_2, file_write_guid)?;
         Ok(VhdxHeader {
-            _file_type_identifier,
-            header_1,
-            header_2,
+            _file_type_identifier: FileTypeIdentifier::new(f)?,
+            header_1: Header::new(f, HEADER_1_START)?,
+            header_2: Header::new(f, HEADER_2_START)?,
             region_table_1: RegionTableHeader::new(f, REGION_TABLE_1_START)?,
             _region_table_2: RegionTableHeader::new(f, REGION_TABLE_2_START)?,
         })
@@ -467,13 +454,11 @@ impl VhdxHeader {
 /// Therefore, before calculating, the existing checksum is retrieved and the
 /// corresponding field is made zero. After the calculation, the existing checksum
 /// is put back to the buffer.
-pub fn calculate_checksum(buffer: &mut [u8], csum_offset: usize) -> Result<u32> {
-    // Read the checksum into a mutable slice
-    let csum_buf = &mut buffer[csum_offset..csum_offset + 4];
-    // Convert the checksum chunk into a u32 integer
-    let orig_csum = LittleEndian::read_u32(csum_buf);
+fn calculate_checksum(buffer: &mut [u8], csum_offset: usize) -> u32 {
+    // Read the original checksum from the buffer
+    let orig_csum = LittleEndian::read_u32(&buffer[csum_offset..csum_offset + 4]);
     // Zero the checksum in the buffer
-    LittleEndian::write_u32(csum_buf, 0);
+    LittleEndian::write_u32(&mut buffer[csum_offset..csum_offset + 4], 0);
     // Calculate the checksum on the resulting buffer
     let mut crc = crc_any::CRC::crc32c();
     crc.digest(&buffer);
@@ -482,5 +467,5 @@ pub fn calculate_checksum(buffer: &mut [u8], csum_offset: usize) -> Result<u32> 
     // Put back the original checksum in the buffer
     LittleEndian::write_u32(&mut buffer[csum_offset..csum_offset + 4], orig_csum);
 
-    Ok(new_csum)
+    new_csum
 }

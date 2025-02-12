@@ -8,23 +8,20 @@ extern crate event_monitor;
 #[macro_use]
 extern crate log;
 
-use crate::api::{
-    ApiRequest, ApiResponse, RequestHandler, VmInfoResponse, VmReceiveMigrationData,
-    VmSendMigrationData, VmmPingResponse,
-};
-use crate::config::{
-    add_to_config, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig,
-    UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
-};
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use crate::coredump::GuestDebuggable;
-use crate::landlock::Landlock;
-use crate::memory_manager::MemoryManager;
-#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-use crate::migration::get_vm_snapshot;
-use crate::migration::{recv_vm_config, recv_vm_state};
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
-use crate::vm::{Error as VmError, Vm, VmState};
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{stdout, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::panic::AssertUnwindSafe;
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+use std::{io, result, thread};
+
 use anyhow::anyhow;
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
@@ -38,29 +35,34 @@ use seccompiler::{apply_filter, SeccompAction};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
 use signal_hook::iterator::{Handle, Signals};
-use std::collections::HashMap;
-use std::fs::File;
-use std::io;
-use std::io::{stdout, Read, Write};
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::os::unix::net::UnixListener;
-use std::os::unix::net::UnixStream;
-use std::panic::AssertUnwindSafe;
-use std::path::PathBuf;
-use std::rc::Rc;
-use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
-use std::{result, thread};
 use thiserror::Error;
 use tracer::trace_scoped;
-use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::{ReadVolatile, WriteVolatile};
-use vm_migration::{protocol::*, Migratable};
-use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vm_memory::bitmap::{AtomicBitmap, BitmapSlice};
+use vm_memory::{ReadVolatile, VolatileMemoryError, VolatileSlice, WriteVolatile};
+use vm_migration::protocol::*;
+use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
+
+use crate::api::{
+    ApiRequest, ApiResponse, RequestHandler, VmInfoResponse, VmReceiveMigrationData,
+    VmSendMigrationData, VmmPingResponse,
+};
+use crate::config::{add_to_config, RestoreConfig};
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use crate::coredump::GuestDebuggable;
+use crate::landlock::Landlock;
+use crate::memory_manager::MemoryManager;
+#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+use crate::migration::get_vm_snapshot;
+use crate::migration::{recv_vm_config, recv_vm_state};
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::vm::{Error as VmError, Vm, VmState};
+use crate::vm_config::{
+    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
+    VmConfig, VsockConfig,
+};
 
 mod acpi;
 pub mod api;
@@ -231,6 +233,89 @@ impl From<u64> for EpollDispatch {
             3 => ActivateVirtioDevices,
             4 => Debug,
             _ => Unknown,
+        }
+    }
+}
+
+enum SocketStream {
+    Unix(UnixStream),
+    Tcp(TcpStream),
+}
+
+impl Read for SocketStream {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            SocketStream::Unix(stream) => stream.read(buf),
+            SocketStream::Tcp(stream) => stream.read(buf),
+        }
+    }
+}
+
+impl Write for SocketStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            SocketStream::Unix(stream) => stream.write(buf),
+            SocketStream::Tcp(stream) => stream.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            SocketStream::Unix(stream) => stream.flush(),
+            SocketStream::Tcp(stream) => stream.flush(),
+        }
+    }
+}
+
+impl AsRawFd for SocketStream {
+    fn as_raw_fd(&self) -> RawFd {
+        match self {
+            SocketStream::Unix(s) => s.as_raw_fd(),
+            SocketStream::Tcp(s) => s.as_raw_fd(),
+        }
+    }
+}
+
+impl ReadVolatile for SocketStream {
+    fn read_volatile<B: BitmapSlice>(
+        &mut self,
+        buf: &mut VolatileSlice<B>,
+    ) -> std::result::Result<usize, VolatileMemoryError> {
+        match self {
+            SocketStream::Unix(s) => s.read_volatile(buf),
+            SocketStream::Tcp(s) => s.read_volatile(buf),
+        }
+    }
+
+    fn read_exact_volatile<B: BitmapSlice>(
+        &mut self,
+        buf: &mut VolatileSlice<B>,
+    ) -> std::result::Result<(), VolatileMemoryError> {
+        match self {
+            SocketStream::Unix(s) => s.read_exact_volatile(buf),
+            SocketStream::Tcp(s) => s.read_exact_volatile(buf),
+        }
+    }
+}
+
+impl WriteVolatile for SocketStream {
+    fn write_volatile<B: BitmapSlice>(
+        &mut self,
+        buf: &VolatileSlice<B>,
+    ) -> std::result::Result<usize, VolatileMemoryError> {
+        match self {
+            SocketStream::Unix(s) => s.write_volatile(buf),
+            SocketStream::Tcp(s) => s.write_volatile(buf),
+        }
+    }
+
+    fn write_all_volatile<B: BitmapSlice>(
+        &mut self,
+        buf: &VolatileSlice<B>,
+    ) -> std::result::Result<(), VolatileMemoryError> {
+        match self {
+            SocketStream::Unix(s) => s.write_all_volatile(buf),
+            SocketStream::Tcp(s) => s.write_all_volatile(buf),
         }
     }
 }
@@ -786,6 +871,8 @@ impl Vmm {
             false,
             #[cfg(feature = "sev_snp")]
             false,
+            #[cfg(feature = "sev_snp")]
+            config.lock().unwrap().memory.total_size(),
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!(
@@ -919,14 +1006,72 @@ impl Vmm {
             .map(|s| s.into())
     }
 
+    fn send_migration_socket(
+        destination_url: &str,
+    ) -> std::result::Result<SocketStream, MigratableError> {
+        if let Some(address) = destination_url.strip_prefix("tcp:") {
+            info!("Connecting to TCP socket at {}", address);
+
+            let socket = TcpStream::connect(address).map_err(|e| {
+                MigratableError::MigrateSend(anyhow!("Error connecting to TCP socket: {}", e))
+            })?;
+
+            Ok(SocketStream::Tcp(socket))
+        } else {
+            let path = Vmm::socket_url_to_path(destination_url)?;
+            info!("Connecting to UNIX socket at {:?}", path);
+
+            let socket = UnixStream::connect(&path).map_err(|e| {
+                MigratableError::MigrateSend(anyhow!("Error connecting to UNIX socket: {}", e))
+            })?;
+
+            Ok(SocketStream::Unix(socket))
+        }
+    }
+
+    fn receive_migration_socket(
+        receiver_url: &str,
+    ) -> std::result::Result<SocketStream, MigratableError> {
+        if let Some(address) = receiver_url.strip_prefix("tcp:") {
+            let listener = TcpListener::bind(address).map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error binding to TCP socket: {}", e))
+            })?;
+
+            let (socket, _addr) = listener.accept().map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!(
+                    "Error accepting connection on TCP socket: {}",
+                    e
+                ))
+            })?;
+
+            Ok(SocketStream::Tcp(socket))
+        } else {
+            let path = Vmm::socket_url_to_path(receiver_url)?;
+            let listener = UnixListener::bind(&path).map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error binding to UNIX socket: {}", e))
+            })?;
+
+            let (socket, _addr) = listener.accept().map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!(
+                    "Error accepting connection on UNIX socket: {}",
+                    e
+                ))
+            })?;
+
+            // Remove the UNIX socket file after accepting the connection
+            std::fs::remove_file(&path).map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error removing UNIX socket file: {}", e))
+            })?;
+
+            Ok(SocketStream::Unix(socket))
+        }
+    }
+
     // Returns true if there were dirty pages to send
-    fn vm_maybe_send_dirty_pages<T>(
+    fn vm_maybe_send_dirty_pages(
         vm: &mut Vm,
-        socket: &mut T,
-    ) -> result::Result<bool, MigratableError>
-    where
-        T: Read + Write + WriteVolatile,
-    {
+        socket: &mut SocketStream,
+    ) -> result::Result<bool, MigratableError> {
         // Send (dirty) memory table
         let table = vm.dirty_log()?;
 
@@ -954,10 +1099,8 @@ impl Vmm {
         >,
         send_data_migration: VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
-        let path = Self::socket_url_to_path(&send_data_migration.destination_url)?;
-        let mut socket = UnixStream::connect(path).map_err(|e| {
-            MigratableError::MigrateSend(anyhow!("Error connecting to UNIX socket: {}", e))
-        })?;
+        // Set up the socket connection
+        let mut socket = Self::send_migration_socket(&send_data_migration.destination_url)?;
 
         // Start the migration
         Request::start().write_to(&mut socket)?;
@@ -997,7 +1140,17 @@ impl Vmm {
         };
 
         if send_data_migration.local {
-            vm.send_memory_fds(&mut socket)?;
+            match &mut socket {
+                SocketStream::Unix(unix_socket) => {
+                    // Proceed with sending memory file descriptors over UNIX socket
+                    vm.send_memory_fds(unix_socket)?;
+                }
+                SocketStream::Tcp(_tcp_socket) => {
+                    return Err(MigratableError::MigrateSend(anyhow!(
+                        "--local option is not supported with TCP sockets",
+                    )));
+                }
+            }
         }
 
         let vm_migration_config = VmMigrationConfig {
@@ -1123,6 +1276,76 @@ impl Vmm {
         })
     }
 
+    fn vm_restore(
+        &mut self,
+        source_url: &str,
+        vm_config: Arc<Mutex<VmConfig>>,
+        prefault: bool,
+    ) -> std::result::Result<(), VmError> {
+        let snapshot = recv_vm_state(source_url).map_err(VmError::Restore)?;
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        let vm_snapshot = get_vm_snapshot(&snapshot).map_err(VmError::Restore)?;
+
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        self.vm_check_cpuid_compatibility(&vm_config, &vm_snapshot.common_cpuid)
+            .map_err(VmError::Restore)?;
+
+        self.vm_config = Some(Arc::clone(&vm_config));
+
+        // Always re-populate the 'console_info' based on the new 'vm_config'
+        self.console_info =
+            Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
+
+        let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
+        let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
+        #[cfg(feature = "guest_debug")]
+        let debug_evt = self
+            .vm_debug_evt
+            .try_clone()
+            .map_err(VmError::EventFdClone)?;
+        let activate_evt = self
+            .activate_evt
+            .try_clone()
+            .map_err(VmError::EventFdClone)?;
+
+        let vm = Vm::new(
+            vm_config,
+            exit_evt,
+            reset_evt,
+            #[cfg(feature = "guest_debug")]
+            debug_evt,
+            &self.seccomp_action,
+            self.hypervisor.clone(),
+            activate_evt,
+            self.console_info.clone(),
+            self.console_resize_pipe.clone(),
+            Arc::clone(&self.original_termios_opt),
+            Some(snapshot),
+            Some(source_url),
+            Some(prefault),
+        )?;
+        self.vm = Some(vm);
+
+        if self
+            .vm_config
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .landlock_enable
+        {
+            apply_landlock(self.vm_config.as_ref().unwrap().clone())
+                .map_err(VmError::ApplyLandlock)?;
+        }
+
+        // Now we can restore the rest of the VM.
+        if let Some(ref mut vm) = self.vm {
+            vm.restore()
+        } else {
+            Err(VmError::VmNotCreated)
+        }
+    }
+
     fn control_loop(
         &mut self,
         api_receiver: Rc<Receiver<ApiRequest>>,
@@ -1240,11 +1463,11 @@ fn apply_landlock(vm_config: Arc<Mutex<VmConfig>>) -> result::Result<(), Landloc
 }
 
 impl RequestHandler for Vmm {
-    fn vm_create(&mut self, config: Arc<Mutex<VmConfig>>) -> result::Result<(), VmError> {
+    fn vm_create(&mut self, config: Box<VmConfig>) -> result::Result<(), VmError> {
         // We only store the passed VM config.
         // The VM will be created when being asked to boot it.
         if self.vm_config.is_none() {
-            self.vm_config = Some(config);
+            self.vm_config = Some(Arc::new(Mutex::new(*config)));
             self.console_info =
                 Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
 
@@ -1396,70 +1619,17 @@ impl RequestHandler for Vmm {
             }
         }
 
-        let snapshot = recv_vm_state(source_url).map_err(VmError::Restore)?;
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        let vm_snapshot = get_vm_snapshot(&snapshot).map_err(VmError::Restore)?;
+        self.vm_restore(source_url, vm_config, restore_cfg.prefault)
+            .map_err(|vm_restore_err| {
+                error!("VM Restore failed: {:?}", vm_restore_err);
 
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-        self.vm_check_cpuid_compatibility(&vm_config, &vm_snapshot.common_cpuid)
-            .map_err(VmError::Restore)?;
+                // Cleanup the VM being created while vm restore
+                if let Err(e) = self.vm_delete() {
+                    return e;
+                }
 
-        self.vm_config = Some(Arc::clone(&vm_config));
-
-        // console_info is set to None in vm_snapshot. re-populate here if empty
-        if self.console_info.is_none() {
-            self.console_info =
-                Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
-        }
-
-        let exit_evt = self.exit_evt.try_clone().map_err(VmError::EventFdClone)?;
-        let reset_evt = self.reset_evt.try_clone().map_err(VmError::EventFdClone)?;
-        #[cfg(feature = "guest_debug")]
-        let debug_evt = self
-            .vm_debug_evt
-            .try_clone()
-            .map_err(VmError::EventFdClone)?;
-        let activate_evt = self
-            .activate_evt
-            .try_clone()
-            .map_err(VmError::EventFdClone)?;
-
-        let vm = Vm::new(
-            vm_config,
-            exit_evt,
-            reset_evt,
-            #[cfg(feature = "guest_debug")]
-            debug_evt,
-            &self.seccomp_action,
-            self.hypervisor.clone(),
-            activate_evt,
-            self.console_info.clone(),
-            self.console_resize_pipe.clone(),
-            Arc::clone(&self.original_termios_opt),
-            Some(snapshot),
-            Some(source_url),
-            Some(restore_cfg.prefault),
-        )?;
-        self.vm = Some(vm);
-
-        if self
-            .vm_config
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .landlock_enable
-        {
-            apply_landlock(self.vm_config.as_ref().unwrap().clone())
-                .map_err(VmError::ApplyLandlock)?;
-        }
-
-        // Now we can restore the rest of the VM.
-        if let Some(ref mut vm) = self.vm {
-            vm.restore()
-        } else {
-            Err(VmError::VmNotCreated)
-        }
+                vm_restore_err
+            })
     }
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -1491,11 +1661,10 @@ impl RequestHandler for Vmm {
         event!("vm", "rebooting");
 
         // First we stop the current VM
-        let (config, console_resize_pipe) = if let Some(mut vm) = self.vm.take() {
+        let config = if let Some(mut vm) = self.vm.take() {
             let config = vm.get_config();
-            let console_resize_pipe = vm.console_resize_pipe();
             vm.shutdown()?;
-            (config, console_resize_pipe)
+            config
         } else {
             return Err(VmError::VmNotCreated);
         };
@@ -1537,7 +1706,7 @@ impl RequestHandler for Vmm {
             self.hypervisor.clone(),
             activate_evt,
             self.console_info.clone(),
-            console_resize_pipe,
+            self.console_resize_pipe.clone(),
             Arc::clone(&self.original_termios_opt),
             None,
             None,
@@ -1556,23 +1725,25 @@ impl RequestHandler for Vmm {
 
     fn vm_info(&self) -> result::Result<VmInfoResponse, VmError> {
         match &self.vm_config {
-            Some(config) => {
+            Some(vm_config) => {
                 let state = match &self.vm {
                     Some(vm) => vm.get_state()?,
                     None => VmState::Created,
                 };
+                let config = vm_config.lock().unwrap().clone();
 
-                let config = Arc::clone(config);
-
-                let mut memory_actual_size = config.lock().unwrap().memory.total_size();
+                let mut memory_actual_size = config.memory.total_size();
                 if let Some(vm) = &self.vm {
                     memory_actual_size -= vm.balloon_size();
                 }
 
-                let device_tree = self.vm.as_ref().map(|vm| vm.device_tree());
+                let device_tree = self
+                    .vm
+                    .as_ref()
+                    .map(|vm| vm.device_tree().lock().unwrap().clone());
 
                 Ok(VmInfoResponse {
-                    config,
+                    config: Box::new(config),
                     state,
                     memory_actual_size,
                     device_tree,
@@ -1957,16 +2128,8 @@ impl RequestHandler for Vmm {
             receive_data_migration.receiver_url
         );
 
-        let path = Self::socket_url_to_path(&receive_data_migration.receiver_url)?;
-        let listener = UnixListener::bind(&path).map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error binding to UNIX socket: {}", e))
-        })?;
-        let (mut socket, _addr) = listener.accept().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error accepting on UNIX socket: {}", e))
-        })?;
-        std::fs::remove_file(&path).map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error unlinking UNIX socket: {}", e))
-        })?;
+        // Accept the connection and get the socket
+        let mut socket = Vmm::receive_migration_socket(&receive_data_migration.receiver_url)?;
 
         let mut started = false;
         let mut memory_manager: Option<Arc<Mutex<MemoryManager>>> = None;
@@ -2034,24 +2197,35 @@ impl RequestHandler for Vmm {
                         continue;
                     }
 
-                    let mut buf = [0u8; 4];
-                    let (_, file) = socket.recv_with_fd(&mut buf).map_err(|e| {
-                        MigratableError::MigrateReceive(anyhow!(
-                            "Error receiving slot from socket: {}",
-                            e
-                        ))
-                    })?;
+                    match &mut socket {
+                        SocketStream::Unix(unix_socket) => {
+                            let mut buf = [0u8; 4];
+                            let (_, file) = unix_socket.recv_with_fd(&mut buf).map_err(|e| {
+                                MigratableError::MigrateReceive(anyhow!(
+                                    "Error receiving slot from socket: {}",
+                                    e
+                                ))
+                            })?;
 
-                    if existing_memory_files.is_none() {
-                        existing_memory_files = Some(HashMap::default())
+                            if existing_memory_files.is_none() {
+                                existing_memory_files = Some(HashMap::default())
+                            }
+
+                            if let Some(ref mut existing_memory_files) = existing_memory_files {
+                                let slot = u32::from_le_bytes(buf);
+                                existing_memory_files.insert(slot, file.unwrap());
+                            }
+
+                            Response::ok().write_to(&mut socket)?;
+                        }
+                        SocketStream::Tcp(_tcp_socket) => {
+                            // For TCP sockets, we cannot transfer file descriptors
+                            warn!(
+                                "MemoryFd command received over TCP socket, which is not supported"
+                            );
+                            Response::error().write_to(&mut socket)?;
+                        }
                     }
-
-                    if let Some(ref mut existing_memory_files) = existing_memory_files {
-                        let slot = u32::from_le_bytes(buf);
-                        existing_memory_files.insert(slot, file.unwrap());
-                    }
-
-                    Response::ok().write_to(&mut socket)?;
                 }
                 Command::Complete => {
                     info!("Complete Command Received");
@@ -2145,10 +2319,10 @@ const DEVICE_MANAGER_SNAPSHOT_ID: &str = "device-manager";
 mod unit_tests {
     use super::*;
     #[cfg(target_arch = "x86_64")]
-    use crate::config::DebugConsoleConfig;
-    use config::{
-        ConsoleConfig, ConsoleOutputMode, CpusConfig, HotplugMethod, MemoryConfig, PayloadConfig,
-        RngConfig,
+    use crate::vm_config::DebugConsoleConfig;
+    use crate::vm_config::{
+        ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpusConfig, HotplugMethod, MemoryConfig,
+        PayloadConfig, RngConfig,
     };
 
     fn create_dummy_vmm() -> Vmm {
@@ -2166,8 +2340,8 @@ mod unit_tests {
         .unwrap()
     }
 
-    fn create_dummy_vm_config() -> Arc<Mutex<VmConfig>> {
-        Arc::new(Mutex::new(VmConfig {
+    fn create_dummy_vm_config() -> Box<VmConfig> {
+        Box::new(VmConfig {
             cpus: CpusConfig {
                 boot_vcpus: 1,
                 max_vcpus: 1,
@@ -2175,7 +2349,7 @@ mod unit_tests {
                 kvm_hyperv: false,
                 max_phys_bits: 46,
                 affinity: None,
-                features: config::CpuFeatures::default(),
+                features: CpuFeatures::default(),
             },
             memory: MemoryConfig {
                 size: 536_870_912,
@@ -2244,7 +2418,7 @@ mod unit_tests {
             preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
-        }))
+        })
     }
 
     #[test]
@@ -2279,9 +2453,7 @@ mod unit_tests {
             .devices
             .is_none());
 
-        let result = vmm.vm_add_device(device_config.clone());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(vmm.vm_add_device(device_config.clone()).unwrap().is_none());
         assert_eq!(
             vmm.vm_config
                 .as_ref()
@@ -2328,9 +2500,10 @@ mod unit_tests {
             .user_devices
             .is_none());
 
-        let result = vmm.vm_add_user_device(user_device_config.clone());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(vmm
+            .vm_add_user_device(user_device_config.clone())
+            .unwrap()
+            .is_none());
         assert_eq!(
             vmm.vm_config
                 .as_ref()
@@ -2376,9 +2549,7 @@ mod unit_tests {
             .disks
             .is_none());
 
-        let result = vmm.vm_add_disk(disk_config.clone());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(vmm.vm_add_disk(disk_config.clone()).unwrap().is_none());
         assert_eq!(
             vmm.vm_config
                 .as_ref()
@@ -2417,9 +2588,7 @@ mod unit_tests {
         let _ = vmm.vm_create(create_dummy_vm_config());
         assert!(vmm.vm_config.as_ref().unwrap().lock().unwrap().fs.is_none());
 
-        let result = vmm.vm_add_fs(fs_config.clone());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(vmm.vm_add_fs(fs_config.clone()).unwrap().is_none());
         assert_eq!(
             vmm.vm_config
                 .as_ref()
@@ -2465,9 +2634,7 @@ mod unit_tests {
             .pmem
             .is_none());
 
-        let result = vmm.vm_add_pmem(pmem_config.clone());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(vmm.vm_add_pmem(pmem_config.clone()).unwrap().is_none());
         assert_eq!(
             vmm.vm_config
                 .as_ref()
@@ -2516,9 +2683,7 @@ mod unit_tests {
             .net
             .is_none());
 
-        let result = vmm.vm_add_net(net_config.clone());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(vmm.vm_add_net(net_config.clone()).unwrap().is_none());
         assert_eq!(
             vmm.vm_config
                 .as_ref()
@@ -2564,9 +2729,7 @@ mod unit_tests {
             .vdpa
             .is_none());
 
-        let result = vmm.vm_add_vdpa(vdpa_config.clone());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(vmm.vm_add_vdpa(vdpa_config.clone()).unwrap().is_none());
         assert_eq!(
             vmm.vm_config
                 .as_ref()
@@ -2612,9 +2775,7 @@ mod unit_tests {
             .vsock
             .is_none());
 
-        let result = vmm.vm_add_vsock(vsock_config.clone());
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        assert!(vmm.vm_add_vsock(vsock_config.clone()).unwrap().is_none());
         assert_eq!(
             vmm.vm_config
                 .as_ref()

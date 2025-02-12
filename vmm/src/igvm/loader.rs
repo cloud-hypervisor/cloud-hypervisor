@@ -3,7 +3,7 @@
 // Copyright © 2023, Microsoft Corporation
 //
 use crate::igvm::{BootPageAcceptance, StartupMemoryType};
-use crate::HV_PAGE_SIZE;
+use hypervisor::HV_PAGE_SIZE;
 use range_map_vec::{Entry, RangeMap};
 use thiserror::Error;
 use vm_memory::bitmap::AtomicBitmap;

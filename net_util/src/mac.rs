@@ -5,9 +5,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the THIRD-PARTY file.
 
-use std::fmt;
-use std::io;
 use std::str::FromStr;
+use std::{fmt, io};
 
 use serde::de::{Deserialize, Deserializer, Error};
 use serde::ser::{Serialize, Serializer};
@@ -81,7 +80,7 @@ impl MacAddr {
     pub fn local_random() -> MacAddr {
         // Generate a fully random MAC
         let mut random_bytes = [0u8; MAC_ADDR_LEN];
-        if let Err(e) = getrandom::getrandom(&mut random_bytes) {
+        if let Err(e) = getrandom::fill(&mut random_bytes) {
             error!(
                 "Error populating MAC address with random data: {}",
                 e.to_string()
@@ -147,16 +146,16 @@ mod tests {
     #[test]
     fn test_mac_addr() {
         // too long
-        assert!(MacAddr::parse_str("aa:aa:aa:aa:aa:aa:aa").is_err());
+        MacAddr::parse_str("aa:aa:aa:aa:aa:aa:aa").unwrap_err();
 
         // invalid hex
-        assert!(MacAddr::parse_str("aa:aa:aa:aa:aa:ax").is_err());
+        MacAddr::parse_str("aa:aa:aa:aa:aa:ax").unwrap_err();
 
         // single digit mac address component should be invalid
-        assert!(MacAddr::parse_str("aa:aa:aa:aa:aa:b").is_err());
+        MacAddr::parse_str("aa:aa:aa:aa:aa:b").unwrap_err();
 
         // components with more than two digits should also be invalid
-        assert!(MacAddr::parse_str("aa:aa:aa:aa:aa:bbb").is_err());
+        MacAddr::parse_str("aa:aa:aa:aa:aa:bbb").unwrap_err();
 
         let mac = MacAddr::parse_str("12:34:56:78:9a:BC").unwrap();
 
@@ -172,12 +171,12 @@ mod tests {
         let src2 = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06];
         let src3 = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07];
 
-        assert!(MacAddr::from_bytes(&src1[..]).is_err());
+        MacAddr::from_bytes(&src1[..]).unwrap_err();
 
         let x = MacAddr::from_bytes(&src2[..]).unwrap();
         assert_eq!(x.to_string(), String::from("01:02:03:04:05:06"));
 
-        assert!(MacAddr::from_bytes(&src3[..]).is_err());
+        MacAddr::from_bytes(&src3[..]).unwrap_err();
     }
 
     #[test]

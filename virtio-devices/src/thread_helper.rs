@@ -3,17 +3,15 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use crate::{
-    epoll_helper::EpollHelperError,
-    seccomp_filters::{get_seccomp_filter, Thread},
-    ActivateError,
-};
+use std::panic::AssertUnwindSafe;
+use std::thread::{self, JoinHandle};
+
 use seccompiler::{apply_filter, SeccompAction};
-use std::{
-    panic::AssertUnwindSafe,
-    thread::{self, JoinHandle},
-};
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::epoll_helper::EpollHelperError;
+use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::ActivateError;
 
 pub(crate) fn spawn_virtio_thread<F>(
     name: &str,

@@ -1,36 +1,34 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use super::Error as DeviceError;
-use super::{
-    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, VirtioCommon, VirtioDevice,
-    VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IOMMU_PLATFORM,
-    VIRTIO_F_VERSION_1,
-};
-use crate::seccomp_filters::Thread;
-use crate::thread_helper::spawn_virtio_thread;
-use crate::GuestMemoryMmap;
-use crate::VirtioInterrupt;
+use std::collections::VecDeque;
+use std::fs::File;
+use std::io::{Read, Write};
+use std::os::unix::io::AsRawFd;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Barrier, Mutex};
+use std::{cmp, io, result};
+
 use anyhow::anyhow;
 use libc::{EFD_NONBLOCK, TIOCGWINSZ};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use serial_buffer::SerialBuffer;
-use std::cmp;
-use std::collections::VecDeque;
-use std::fs::File;
-use std::io;
-use std::io::{Read, Write};
-use std::os::unix::io::AsRawFd;
-use std::result;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
+
+use super::{
+    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Error as DeviceError,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
+    VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+};
+use crate::seccomp_filters::Thread;
+use crate::thread_helper::spawn_virtio_thread;
+use crate::{GuestMemoryMmap, VirtioInterrupt};
 
 const QUEUE_SIZE: u16 = 256;
 const NUM_QUEUES: usize = 2;
@@ -108,10 +106,11 @@ struct ConsoleEpollHandler {
     file_event_registered: bool,
 }
 
+#[derive(Clone)]
 pub enum Endpoint {
-    File(File),
-    FilePair(File, File),
-    PtyPair(File, File),
+    File(Arc<File>),
+    FilePair(Arc<File>, Arc<File>),
+    PtyPair(Arc<File>, Arc<File>),
     Null,
 }
 
@@ -136,21 +135,6 @@ impl Endpoint {
 
     fn is_pty(&self) -> bool {
         matches!(self, Self::PtyPair(_, _))
-    }
-}
-
-impl Clone for Endpoint {
-    fn clone(&self) -> Self {
-        match self {
-            Self::File(f) => Self::File(f.try_clone().unwrap()),
-            Self::FilePair(f_out, f_in) => {
-                Self::FilePair(f_out.try_clone().unwrap(), f_in.try_clone().unwrap())
-            }
-            Self::PtyPair(f_out, f_in) => {
-                Self::PtyPair(f_out.try_clone().unwrap(), f_in.try_clone().unwrap())
-            }
-            Self::Null => Self::Null,
-        }
     }
 }
 
@@ -640,7 +624,7 @@ impl Console {
                 true,
             )
         } else {
-            let mut avail_features = 1u64 << VIRTIO_F_VERSION_1 | 1u64 << VIRTIO_CONSOLE_F_SIZE;
+            let mut avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_CONSOLE_F_SIZE);
             if iommu {
                 avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
             }

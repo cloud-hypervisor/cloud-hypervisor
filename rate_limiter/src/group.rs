@@ -4,16 +4,16 @@
 // Copyright 2023 Crusoe Energy Systems LLC
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::{RateLimiter, TokenType};
 use core::panic::AssertUnwindSafe;
 use std::fs::File;
-use std::io;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::result;
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::{io, result, thread};
+
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
+
+use crate::{RateLimiter, TokenType};
 
 /// Errors associated with rate-limiter group.
 #[derive(Debug, Error)]
@@ -298,18 +298,23 @@ impl Drop for RateLimiterGroup {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::RateLimiterGroupHandle;
-    use crate::{group::RateLimiterGroup, TokenBucket, TokenType, REFILL_TIMER_INTERVAL_MS};
-    use std::{os::fd::AsRawFd, thread, time::Duration};
+    use std::os::fd::AsRawFd;
+    use std::thread;
+    use std::time::Duration;
+
     use vmm_sys_util::eventfd::EventFd;
 
+    use super::RateLimiterGroupHandle;
+    use crate::group::RateLimiterGroup;
+    use crate::{TokenBucket, TokenType, REFILL_TIMER_INTERVAL_MS};
+
     impl RateLimiterGroupHandle {
-        pub fn bandwidth(&self) -> Option<TokenBucket> {
+        fn bandwidth(&self) -> Option<TokenBucket> {
             let guard = self.inner.rate_limiter.inner.lock().unwrap();
             guard.bandwidth.clone()
         }
 
-        pub fn ops(&self) -> Option<TokenBucket> {
+        fn ops(&self) -> Option<TokenBucket> {
             let guard = self.inner.rate_limiter.inner.lock().unwrap();
             guard.ops.clone()
         }
@@ -383,7 +388,7 @@ pub(crate) mod tests {
         // wait the other half of the timer period
         thread::sleep(Duration::from_millis(REFILL_TIMER_INTERVAL_MS / 2));
         // the timer_fd should have an event on it by now
-        assert!(h.event_handler().is_ok());
+        h.event_handler().unwrap();
         // limiter should now be unblocked
         assert!(!h.is_blocked());
         // try and succeed on another 100 bytes this time
@@ -419,7 +424,7 @@ pub(crate) mod tests {
         // wait the other half of the timer period
         thread::sleep(Duration::from_millis(REFILL_TIMER_INTERVAL_MS / 2));
         // the timer_fd should have an event on it by now
-        assert!(h.event_handler().is_ok());
+        h.event_handler().unwrap();
         // limiter should now be unblocked
         assert!(!h.is_blocked());
         // try and succeed on another 100 ops this time
@@ -456,7 +461,7 @@ pub(crate) mod tests {
         // wait the other half of the timer period
         thread::sleep(Duration::from_millis(REFILL_TIMER_INTERVAL_MS / 2));
         // the timer_fd should have an event on it by now
-        assert!(h.event_handler().is_ok());
+        h.event_handler().unwrap();
         // limiter should now be unblocked
         assert!(!h.is_blocked());
         // try and succeed on another 100 ops this time
@@ -486,7 +491,7 @@ pub(crate) mod tests {
         // after 1.5x the replenish time has passed, the rate limiter
         // is available again
         thread::sleep(Duration::from_millis(500));
-        assert!(h.event_handler().is_ok());
+        h.event_handler().unwrap();
         assert!(!h.is_blocked());
 
         // reset the rate limiter
@@ -520,7 +525,7 @@ pub(crate) mod tests {
         // after waiting out the full duration, rate limiter should be
         // available again
         thread::sleep(Duration::from_millis(200));
-        assert!(h.event_handler().is_ok());
+        h.event_handler().unwrap();
         assert!(!h.is_blocked());
         assert!(h.consume(100, TokenType::Bytes));
     }

@@ -2,14 +2,14 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-use crate::cpu::CpuManager;
-use crate::device_manager::DeviceManager;
-use crate::memory_manager::MemoryManager;
-use crate::pci_segment::PciSegment;
-use crate::{GuestMemoryMmap, GuestRegionMmap};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+use acpi_tables::rsdp::Rsdp;
 #[cfg(target_arch = "aarch64")]
 use acpi_tables::sdt::GenericAddress;
-use acpi_tables::{rsdp::Rsdp, sdt::Sdt, Aml};
+use acpi_tables::sdt::Sdt;
+use acpi_tables::Aml;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::DeviceInfoForFdt;
 #[cfg(target_arch = "aarch64")]
@@ -20,11 +20,15 @@ use bitflags::bitflags;
 use devices::acpi::AcpiTable;
 use devices::acpi::{OEM_ID, OEM_REVISION, OEM_TABLE_ID};
 use pci::PciBdf;
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
 use tracer::trace_scoped;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryRegion};
 use zerocopy::AsBytes;
+
+use crate::cpu::CpuManager;
+use crate::device_manager::DeviceManager;
+use crate::memory_manager::MemoryManager;
+use crate::pci_segment::PciSegment;
+use crate::{GuestMemoryMmap, GuestRegionMmap};
 
 /* Values for Type in APIC sub-headers */
 #[cfg(target_arch = "x86_64")]
@@ -43,7 +47,7 @@ pub const ACPI_APIC_GENERIC_REDISTRIBUTOR: u8 = 14;
 pub const ACPI_APIC_GENERIC_TRANSLATOR: u8 = 15;
 
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, AsBytes)]
 struct PciRangeEntry {
     pub base_address: u64,
@@ -54,7 +58,7 @@ struct PciRangeEntry {
 }
 
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, AsBytes)]
 struct MemoryAffinity {
     pub type_: u8,
@@ -71,7 +75,7 @@ struct MemoryAffinity {
 }
 
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, AsBytes)]
 struct ProcessorLocalX2ApicAffinity {
     pub type_: u8,
@@ -85,7 +89,7 @@ struct ProcessorLocalX2ApicAffinity {
 }
 
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, AsBytes)]
 struct ProcessorGiccAffinity {
     pub type_: u8,
@@ -145,7 +149,7 @@ impl MemoryAffinity {
 }
 
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, AsBytes)]
 struct ViotVirtioPciNode {
     pub type_: u8,
@@ -157,7 +161,7 @@ struct ViotVirtioPciNode {
 }
 
 #[allow(dead_code)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, AsBytes)]
 struct ViotPciRangeNode {
     pub type_: u8,
@@ -237,7 +241,7 @@ fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Arc<Mutex<Devic
 
     // Architecture common fields
     // HW_REDUCED_ACPI, RESET_REG_SUP, TMR_VAL_EXT
-    let fadt_flags: u32 = 1 << 20 | 1 << 10 | 1 << 8;
+    let fadt_flags: u32 = (1 << 20) | (1 << 10) | (1 << 8);
     facp.write(112, fadt_flags);
     // FADT minor version
     facp.write(131, 3u8);
