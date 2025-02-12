@@ -36,6 +36,9 @@ source "${KOKORO_CHV_DIR}/google_internal/lib_build.sh"
 
 lib_build::set_rbe_flags
 
+# clang is needed for virtio-bindings 0.2.4+
+apt-get update && apt-get install --no-install-recommends --yes clang
+
 # Convert space delimited string to array for bash
 IFS=" " read -r -a BAZEL_DIRECT_ARGS <<< "$BAZEL_DIRECT_ARGS"
 

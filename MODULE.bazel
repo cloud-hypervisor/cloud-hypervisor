@@ -247,7 +247,7 @@ crate.spec(
 )
 crate.spec(
     package = "virtio-bindings",
-    version = "0.2.2",
+    version = "0.2.5",
 )
 crate.spec(
     package = "virtio-queue",
