@@ -221,11 +221,6 @@ impl FwCfg {
         let mut mem_regions = vec![
             (GuestAddress(0), EBDA_START.0 as usize, RegionType::Ram),
             (
-                HIGH_RAM_START,
-                MEM_32BIT_RESERVED_START.0 as usize - HIGH_RAM_START.0 as usize,
-                RegionType::Ram,
-            ),
-            (
                 MEM_32BIT_DEVICES_START,
                 MEM_32BIT_DEVICES_SIZE as usize,
                 RegionType::Reserved,
@@ -237,10 +232,21 @@ impl FwCfg {
             ),
             (STAGE0_START_ADDRESS, STAGE0_SIZE, RegionType::Reserved),
         ];
-        if mem_size > RAM_64BIT_START.0 as usize {
+        if mem_size < MEM_32BIT_DEVICES_START.0 as usize {
+            mem_regions.push((
+                HIGH_RAM_START,
+                mem_size - HIGH_RAM_START.0 as usize,
+                RegionType::Ram,
+            ));
+        } else {
+            mem_regions.push((
+                HIGH_RAM_START,
+                MEM_32BIT_RESERVED_START.0 as usize - HIGH_RAM_START.0 as usize,
+                RegionType::Ram,
+            ));
             mem_regions.push((
                 RAM_64BIT_START,
-                mem_size - RAM_64BIT_START.0 as usize,
+                mem_size - (MEM_32BIT_DEVICES_START.0 as usize),
                 RegionType::Ram,
             ));
         }

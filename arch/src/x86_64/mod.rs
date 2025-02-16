@@ -825,29 +825,6 @@ pub fn generate_common_cpuid(
     Ok(cpuid)
 }
 
-#[cfg(feature = "sev_snp")]
-pub fn configure_sev_snp_cpuid(cpuid: &mut Vec<CpuIdEntry>) {
-    // enabling sev (bit 1), sev-es (bit3), sev-snp (bit4)
-    CpuidPatch::set_cpuid_reg(
-        cpuid,
-        ENCRYPTED_MEM_CAP_CPUID_FN,
-        None,
-        CpuidReg::EAX,
-        0b11010,
-    );
-    CpuidPatch::set_cpuid_reg(cpuid, ENCRYPTED_MEM_CAP_CPUID_FN, None, CpuidReg::ECX, 0);
-    CpuidPatch::set_cpuid_reg(cpuid, ENCRYPTED_MEM_CAP_CPUID_FN, None, CpuidReg::EDX, 0);
-    let host_ebx = unsafe { x86_64::__cpuid(ENCRYPTED_MEM_CAP_CPUID_FN) }.ebx;
-    // keep host Cbit location bits[0:5], set PhysAddrReduction to 1 bits[6:11]
-    CpuidPatch::set_cpuid_reg(
-        cpuid,
-        ENCRYPTED_MEM_CAP_CPUID_FN,
-        None,
-        CpuidReg::EBX,
-        (1 << 6) | (host_ebx & 0x3f),
-    );
-}
-
 pub fn configure_vcpu(
     vcpu: &Arc<dyn hypervisor::Vcpu>,
     id: u8,
@@ -863,9 +840,6 @@ pub fn configure_vcpu(
     let mut cpuid = cpuid;
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0xb, None, CpuidReg::EDX, x2apic_id);
     CpuidPatch::set_cpuid_reg(&mut cpuid, 0x1f, None, CpuidReg::EDX, x2apic_id);
-
-    #[cfg(feature = "sev_snp")]
-    configure_sev_snp_cpuid(&mut cpuid);
 
     if matches!(cpu_vendor, CpuVendor::AMD) {
         CpuidPatch::set_cpuid_reg(&mut cpuid, 0x8000_001e, Some(0), CpuidReg::EAX, x2apic_id);
