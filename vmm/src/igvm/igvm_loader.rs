@@ -25,6 +25,7 @@ use thiserror::Error;
 #[cfg(feature = "sev_snp")]
 use vm_memory::Bytes;
 use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory};
+use vm_migration::Snapshottable;
 use zerocopy::AsBytes;
 #[cfg(feature = "sev_snp")]
 use zerocopy::{FromBytes, FromZeroes};
@@ -464,14 +465,17 @@ pub fn load_igvm(
                 // Set vCPU initial states before calling SNP_LAUNCH_FINISH
                 let vcpus = cpu_manager.lock().unwrap().vcpus();
                 for vcpu in vcpus {
-                    vcpu.lock()
-                        .unwrap()
-                        .set_sev_control_register(
-                            0,
-                            #[cfg(feature = "kvm")]
-                            loaded_info.vmsa,
-                        )
-                        .map_err(Error::SetVmsa)?;
+                    let vcpu_locked = vcpu.lock().unwrap();
+                    let vcpu_id: u16 = vcpu_locked.id().parse().unwrap();
+                    if vcpu_id == *vp_index {
+                        vcpu_locked
+                            .set_sev_control_register(
+                                0,
+                                #[cfg(feature = "kvm")]
+                                loaded_info.vmsa,
+                            )
+                            .map_err(Error::SetVmsa)?;
+                    }
                 }
 
                 gpas.push(GpaPages {
