@@ -502,7 +502,7 @@ impl QcowFile {
         if refcount_bits != 16 {
             return Err(Error::UnsupportedRefcountOrder);
         }
-        let refcount_bytes = (refcount_bits + 7) / 8;
+        let refcount_bytes = refcount_bits.div_ceil(8);
 
         // Need at least one refcount cluster
         if header.refcount_table_clusters == 0 {
