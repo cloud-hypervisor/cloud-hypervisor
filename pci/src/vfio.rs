@@ -1552,7 +1552,7 @@ impl VfioPciDevice {
     /// # Arguments
     ///
     /// * `vm` - The VM object. It is used to set the VFIO MMIO regions
-    ///          as user memory regions.
+    ///   as user memory regions.
     /// * `mem_slot` - The closure to return a memory slot.
     pub fn map_mmio_regions(&mut self) -> Result<(), VfioPciError> {
         let fd = self.device.as_raw_fd();
