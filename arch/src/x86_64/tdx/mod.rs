@@ -299,7 +299,7 @@ pub struct TdHob {
 }
 
 fn align_hob(v: u64) -> u64 {
-    (v + 7) / 8 * 8
+    v.div_ceil(8) * 8
 }
 
 impl TdHob {
