@@ -146,9 +146,9 @@ where
     /// Returns:
     /// - `Ok(())`: the packet has been successfully filled in and is ready for delivery;
     /// - `Err(VsockError::NoData)`: there was no data available with which to fill in the
-    ///    packet;
+    ///   packet;
     /// - `Err(VsockError::PktBufMissing)`: the packet would've been filled in with data, but
-    ///    it is missing the data buffer.
+    ///   it is missing the data buffer.
     ///
     fn recv_pkt(&mut self, pkt: &mut VsockPacket) -> VsockResult<()> {
         // Perform some generic initialization that is the same for any packet operation (e.g.
