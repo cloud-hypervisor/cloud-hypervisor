@@ -108,7 +108,7 @@ struct PartiallyBalloonedPage {
 impl PartiallyBalloonedPage {
     fn new() -> Self {
         let page_size = get_page_size();
-        let len = ((page_size >> VIRTIO_BALLOON_PFN_SHIFT) + 63) / 64;
+        let len = (page_size >> VIRTIO_BALLOON_PFN_SHIFT).div_ceil(64);
         // Initial each padding bit as 1 in bitmap.
         let mut bitmap = vec![0_u64; len as usize];
         let pad_num = len * 64 - (page_size >> VIRTIO_BALLOON_PFN_SHIFT);
@@ -134,7 +134,7 @@ impl PartiallyBalloonedPage {
     }
 
     fn reset(&mut self) {
-        let len = ((self.page_size >> VIRTIO_BALLOON_PFN_SHIFT) + 63) / 64;
+        let len = (self.page_size >> VIRTIO_BALLOON_PFN_SHIFT).div_ceil(64);
         self.addr = 0;
         self.bitmap = vec![0; len as usize];
         let pad_num = len * 64 - (self.page_size >> VIRTIO_BALLOON_PFN_SHIFT);
