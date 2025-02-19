@@ -191,7 +191,7 @@ pub trait Transportable: Pausable + Snapshottable {
     ///
     /// * `snapshot` - The migratable component snapshot to send.
     /// * `destination_url` - The destination URL to send the snapshot to. This
-    ///                       could be an HTTP endpoint, a TCP address or a local file.
+    ///   could be an HTTP endpoint, a TCP address or a local file.
     fn send(
         &self,
         _snapshot: &Snapshot,
@@ -205,7 +205,7 @@ pub trait Transportable: Pausable + Snapshottable {
     /// # Arguments
     ///
     /// * `source_url` - The source URL to fetch the snapshot from. This could be an HTTP
-    ///                  endpoint, a TCP address or a local file.
+    ///   endpoint, a TCP address or a local file.
     fn recv(&self, _source_url: &str) -> std::result::Result<Snapshot, MigratableError> {
         Ok(Snapshot::default())
     }
