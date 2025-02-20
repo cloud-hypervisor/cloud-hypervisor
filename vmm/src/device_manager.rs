@@ -1020,8 +1020,7 @@ impl DeviceManager {
             };
 
         let mut mmio32_aperture_weights: Vec<u32> =
-            std::iter::repeat(DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT)
-                .take(num_pci_segments.into())
+            std::iter::repeat_n(DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT, num_pci_segments.into())
                 .collect();
         if let Some(pci_segments) = &config.lock().unwrap().pci_segments {
             for pci_segment in pci_segments.iter() {
@@ -1041,8 +1040,7 @@ impl DeviceManager {
         );
 
         let mut mmio64_aperture_weights: Vec<u32> =
-            std::iter::repeat(DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT)
-                .take(num_pci_segments.into())
+            std::iter::repeat_n(DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT, num_pci_segments.into())
                 .collect();
         if let Some(pci_segments) = &config.lock().unwrap().pci_segments {
             for pci_segment in pci_segments.iter() {
