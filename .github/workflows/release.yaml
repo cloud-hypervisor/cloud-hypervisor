@@ -45,7 +45,7 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: ${{ matrix.platform.args  }}
           strip: true
-          toolchain: "1.77.0"
+          toolchain: "1.82.0"
       - name: Copy Release Binaries
         if: github.event_name == 'create' && github.event.ref_type == 'tag'
         shell: bash
