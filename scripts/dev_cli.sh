@@ -9,7 +9,7 @@ CLI_NAME="Cloud Hypervisor"
 CTR_IMAGE_TAG="ghcr.io/cloud-hypervisor/cloud-hypervisor"
 
 # Needs to match explicit version in docker-image.yaml workflow
-CTR_IMAGE_VERSION="20250228-0"
+CTR_IMAGE_VERSION="20250307-2"
 : "${CTR_IMAGE:=${CTR_IMAGE_TAG}:${CTR_IMAGE_VERSION}}"
 
 DOCKER_RUNTIME="docker"
