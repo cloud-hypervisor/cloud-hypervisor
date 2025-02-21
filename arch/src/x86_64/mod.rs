@@ -747,12 +747,12 @@ pub fn generate_common_cpuid(
                 // These features are not supported by TDX
                 #[cfg(feature = "tdx")]
                 if config.tdx {
-                    entry.eax &= !(1 << KVM_FEATURE_CLOCKSOURCE_BIT
-                        | 1 << KVM_FEATURE_CLOCKSOURCE2_BIT
-                        | 1 << KVM_FEATURE_CLOCKSOURCE_STABLE_BIT
-                        | 1 << KVM_FEATURE_ASYNC_PF_BIT
-                        | 1 << KVM_FEATURE_ASYNC_PF_VMEXIT_BIT
-                        | 1 << KVM_FEATURE_STEAL_TIME_BIT)
+                    entry.eax &= !((1 << KVM_FEATURE_CLOCKSOURCE_BIT)
+                        | (1 << KVM_FEATURE_CLOCKSOURCE2_BIT)
+                        | (1 << KVM_FEATURE_CLOCKSOURCE_STABLE_BIT)
+                        | (1 << KVM_FEATURE_ASYNC_PF_BIT)
+                        | (1 << KVM_FEATURE_ASYNC_PF_VMEXIT_BIT)
+                        | (1 << KVM_FEATURE_STEAL_TIME_BIT))
                 }
             }
             _ => {}
