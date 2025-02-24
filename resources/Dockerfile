@@ -121,12 +121,9 @@ RUN echo 'source $CARGO_HOME/env' >> "$HOME"/.bashrc \
     && mkdir "$HOME"/.cargo \
     && ln -s $CARGO_HOME/env "$HOME"/.cargo/env
 
-# install SPDK NVMe
-# only for 'x86_64' platform images as 'docker buildx' can't build 'spdk'
+# Allow pip to install packages system wide 
 # hadolint ignore=DL3003,SC2046
-RUN if [ "$TARGETARCH" = "amd64" ]; then \
-        # Allow pip to install packages system wide
-        rm /usr/lib/python3.12/EXTERNALLY-MANAGED \
+RUN rm /usr/lib/python3.12/EXTERNALLY-MANAGED \
         && git clone https://github.com/spdk/spdk \
         && cd spdk \
         && git checkout ef8bcce58f3f02b79c0619a297e4f17e81e62b24 \
@@ -135,13 +132,19 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
         && ./scripts/pkgdep.sh \
         && apt-get clean \
         && ./configure --with-vfio-user \
-        && make -j $(nproc) TARGET_ARCHITECTURE=skylake \
+        && if [ "$TARGETARCH" = "amd64" ]; then \
+            make -j $(nproc) TARGET_ARCHITECTURE=skylake; \
+        elif [ "$TARGETARCH" = "arm64" ]; then \
+            make -j $(nproc) DPDKBUILD_FLAGS="-Dplatform=generic"; \
+        else \
+            echo "Unsupported architecture: ${TARGETARCH}" && exit 1; \
+        fi \
         && rm -rf /usr/local/bin/spdk-nvme \
         && mkdir /usr/local/bin/spdk-nvme \
         && cp -f ./build/bin/nvmf_tgt /usr/local/bin/spdk-nvme \
         && cp -f ./scripts/rpc.py /usr/local/bin/spdk-nvme \
         && cp -rf ./python /usr/local/bin \
-        && cd .. && rm -rf spdk; fi
+        && cd .. && rm -rf spdk
 
 # install ethr tool for performance tests
 RUN if [ "$TARGETARCH" = "amd64" ]; then \
