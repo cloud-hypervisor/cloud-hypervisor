@@ -5,9 +5,12 @@
 use std::any::Any;
 use std::result;
 
+use serde::de::Error as SerdeError;
+use serde::{Deserialize, Serialize};
+use serde_json;
 use thiserror::Error;
 
-use crate::{CpuState, GicState, HypervisorDeviceError, HypervisorVmError};
+use crate::{CpuState, HypervisorDeviceError, HypervisorVmError};
 
 /// Errors thrown while setting up the VGIC.
 #[derive(Debug, Error)]
@@ -34,6 +37,40 @@ pub struct VgicConfig {
     pub msi_addr: u64,
     pub msi_size: u64,
     pub nr_irqs: u32,
+}
+
+#[derive(Clone, Serialize)]
+pub enum GicState {
+    #[cfg(feature = "kvm")]
+    Kvm(crate::kvm::aarch64::gic::Gicv3ItsState),
+}
+
+impl<'de> Deserialize<'de> for GicState {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[cfg(feature = "kvm")]
+        {
+            let value = serde_json::Value::deserialize(deserializer)?;
+            let gicv3_state = crate::kvm::aarch64::gic::Gicv3ItsState::default();
+            let size = serde_json::to_string(&gicv3_state).unwrap().len();
+
+            if let Ok(serialized_str) = serde_json::to_string(&value) {
+                if serialized_str.len() == size {
+                    let state: crate::kvm::aarch64::gic::Gicv3ItsState =
+                        serde_json::from_value(value).map_err(SerdeError::custom)?;
+                    return Ok(GicState::Kvm(state));
+                } else {
+                    let state: GicState =
+                        serde_json::from_value(value).map_err(SerdeError::custom)?;
+                    return Ok(state);
+                }
+            }
+        }
+
+        Err(SerdeError::custom("Failed to deserialize GicState"))
+    }
 }
 
 /// Hypervisor agnostic interface for a virtualized GIC
