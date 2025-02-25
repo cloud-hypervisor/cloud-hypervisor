@@ -15,7 +15,7 @@ version = "44.0.0"
 # a.) A dependency requires it,
 # b.) If we want to use a new feature and that MSRV is at least 6 months old,
 # c.) There is a security issue that is addressed by the toolchain update.
-rust-version = "1.77.0"
+rust-version = "1.82.0"
 
 [profile.release]
 codegen-units = 1
