@@ -135,7 +135,7 @@ RUN rm /usr/lib/python3.12/EXTERNALLY-MANAGED \
         && if [ "$TARGETARCH" = "amd64" ]; then \
             make -j $(nproc) TARGET_ARCHITECTURE=skylake; \
         elif [ "$TARGETARCH" = "arm64" ]; then \
-            make -j $(nproc) DPDKBUILD_FLAGS="-Dplatform=generic"; \
+            make -j $(nproc) TARGET_ARCHITECTURE="armv8.2-a" DPDKBUILD_FLAGS="-Dplatform=generic"; \
         else \
             echo "Unsupported architecture: ${TARGETARCH}" && exit 1; \
         fi \
@@ -143,6 +143,7 @@ RUN rm /usr/lib/python3.12/EXTERNALLY-MANAGED \
         && mkdir /usr/local/bin/spdk-nvme \
         && cp -f ./build/bin/nvmf_tgt /usr/local/bin/spdk-nvme \
         && cp -f ./scripts/rpc.py /usr/local/bin/spdk-nvme \
+        && cp -rf ./python/spdk/ /usr/local/bin/spdk-nvme \
         && cp -rf ./python /usr/local/bin \
         && cd .. && rm -rf spdk
 
