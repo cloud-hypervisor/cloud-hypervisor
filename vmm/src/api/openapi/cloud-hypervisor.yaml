@@ -548,6 +548,10 @@ components:
           type: string
         initramfs:
           type: string
+        igvm:
+          type: string
+        host_data:
+          type: string
       description: Payloads to boot in guest
 
     VmConfig:
@@ -730,6 +734,9 @@ components:
           items:
             type: string
         tdx:
+          type: boolean
+          default: false
+        sev_snp:
           type: boolean
           default: false
 
