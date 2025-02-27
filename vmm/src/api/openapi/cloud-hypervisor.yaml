@@ -626,6 +626,10 @@ components:
           $ref: "#/components/schemas/PlatformConfig"
         tpm:
           $ref: "#/components/schemas/TpmConfig"
+        igvm:
+          type: string
+        host_data:
+          type: string
         landlock_enable:
           type: boolean
           default: false
@@ -730,6 +734,9 @@ components:
           items:
             type: string
         tdx:
+          type: boolean
+          default: false
+        sev_snp:
           type: boolean
           default: false
 
