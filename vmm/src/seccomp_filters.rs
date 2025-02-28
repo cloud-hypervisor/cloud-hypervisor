@@ -825,6 +825,7 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
     Ok(vec![
         (libc::SYS_accept4, vec![]),
         (libc::SYS_brk, vec![]),
+        (libc::SYS_clock_gettime, vec![]),
         (libc::SYS_close, vec![]),
         (libc::SYS_dup, vec![]),
         (libc::SYS_epoll_create1, vec![]),
