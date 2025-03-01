@@ -7,6 +7,7 @@ use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::os::unix::io::AsRawFd;
+use std::path::PathBuf;
 use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
 
@@ -48,10 +49,10 @@ pub(crate) const VFIO_COMMON_ID: &str = "vfio_common";
 pub enum VfioPciError {
     #[error("Failed to create user memory region: {0}")]
     CreateUserMemoryRegion(#[source] HypervisorVmError),
-    #[error("Failed to DMA map: {0} for device {1}")]
-    DmaMap(#[source] vfio_ioctls::VfioError, PciBdf),
-    #[error("Failed to DMA unmap: {0} for device {1}")]
-    DmaUnmap(#[source] vfio_ioctls::VfioError, PciBdf),
+    #[error("Failed to DMA map: {0} for device {1} (guest BDF: {2})")]
+    DmaMap(#[source] vfio_ioctls::VfioError, PathBuf, PciBdf),
+    #[error("Failed to DMA unmap: {0} for device {1} (guest BDF: {2})")]
+    DmaUnmap(#[source] vfio_ioctls::VfioError, PathBuf, PciBdf),
     #[error("Failed to enable INTx: {0}")]
     EnableIntx(#[source] VfioError),
     #[error("Failed to enable MSI: {0}")]
@@ -1411,6 +1412,7 @@ pub struct VfioPciDevice {
     iommu_attached: bool,
     memory_slot_allocator: MemorySlotAllocator,
     bdf: PciBdf,
+    device_path: PathBuf,
 }
 
 impl VfioPciDevice {
@@ -1428,6 +1430,7 @@ impl VfioPciDevice {
         memory_slot_allocator: MemorySlotAllocator,
         snapshot: Option<Snapshot>,
         x_nv_gpudirect_clique: Option<u8>,
+        device_path: PathBuf,
     ) -> Result<Self, VfioPciError> {
         let device = Arc::new(device);
         device.reset();
@@ -1453,6 +1456,7 @@ impl VfioPciDevice {
             iommu_attached,
             memory_slot_allocator,
             bdf,
+            device_path: device_path.clone(),
         };
 
         Ok(vfio_pci_device)
@@ -1658,7 +1662,9 @@ impl VfioPciDevice {
                                 user_memory_region.size,
                                 user_memory_region.host_addr,
                             )
-                            .map_err(|e| VfioPciError::DmaMap(e, self.bdf))?;
+                            .map_err(|e| {
+                                VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf)
+                            })?;
                     }
                 }
             }
@@ -1719,7 +1725,7 @@ impl VfioPciDevice {
         if !self.iommu_attached {
             self.container
                 .vfio_dma_map(iova, size, user_addr)
-                .map_err(|e| VfioPciError::DmaMap(e, self.bdf))?;
+                .map_err(|e| VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf))?;
         }
 
         Ok(())
@@ -1729,7 +1735,7 @@ impl VfioPciDevice {
         if !self.iommu_attached {
             self.container
                 .vfio_dma_unmap(iova, size)
-                .map_err(|e| VfioPciError::DmaUnmap(e, self.bdf))?;
+                .map_err(|e| VfioPciError::DmaUnmap(e, self.device_path.clone(), self.bdf))?;
         }
 
         Ok(())
