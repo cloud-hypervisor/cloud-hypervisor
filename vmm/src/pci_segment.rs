@@ -141,7 +141,7 @@ impl PciSegment {
         Ok(segment)
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     pub(crate) fn new_default_segment(
         address_manager: &Arc<AddressManager>,
         mem32_allocator: Arc<Mutex<AddressAllocator>>,
