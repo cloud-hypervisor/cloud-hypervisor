@@ -7,19 +7,16 @@ concurrency:
 jobs:
   build:
     name: Tests (Rate-Limiter)
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'bare-metal-9950x' }}
+    runs-on: bare-metal-9950x
     env:
       AUTH_DOWNLOAD_TOKEN: ${{ secrets.AUTH_DOWNLOAD_TOKEN }}
     steps:
       - name: Code checkout
-        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Run rate-limiter integration tests
-        if: ${{ github.event_name != 'pull_request' }}
         timeout-minutes: 20
         run: scripts/dev_cli.sh tests --integration-rate-limiter
       - name: Skipping build for PR
-        if: ${{ github.event_name == 'pull_request' }}
         run: echo "Skipping build for PR"

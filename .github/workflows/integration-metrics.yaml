@@ -1,8 +1,5 @@
 name: Cloud Hypervisor Tests (Metrics)
-on:
-  push:
-    branches:
-      - main
+on: pull_request
 
 jobs:
   build:
@@ -18,5 +15,3 @@ jobs:
       - name: Run metrics tests
         timeout-minutes: 60
         run: scripts/dev_cli.sh tests --metrics -- -- --report-file /root/workloads/metrics.json
-      - name: Upload metrics report
-        run: 'curl -X PUT https://ch-metrics.azurewebsites.net/api/publishmetrics -H "x-functions-key: $METRICS_PUBLISH_KEY" -T ~/workloads/metrics.json'
