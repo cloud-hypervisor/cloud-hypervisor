@@ -1172,7 +1172,7 @@ impl DiskConfig {
          ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
          id=<device_id>,pci_segment=<segment_id>,rate_limit_group=<group_id>,\
          queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>,\
-         serial=<serial_number>";
+         serial=<serial_number>,lock=on|warn|off";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1197,6 +1197,7 @@ impl DiskConfig {
             .add("pci_segment")
             .add("serial")
             .add("rate_limit_group")
+            .add("lock")
             .add("queue_affinity");
         parser.parse(disk).map_err(Error::ParseDisk)?;
 
@@ -1282,6 +1283,10 @@ impl DiskConfig {
                     })
                     .collect()
             });
+        let lock = parser
+            .convert("lock")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_default();
         let bw_tb_config = if bw_size != 0 && bw_refill_time != 0 {
             Some(TokenBucketConfig {
                 size: bw_size,
@@ -1326,6 +1331,7 @@ impl DiskConfig {
             pci_segment,
             serial,
             queue_affinity,
+            lock,
         })
     }
 
@@ -2412,6 +2418,29 @@ impl LandlockConfig {
     }
 }
 
+pub enum DickLockStrategyParseError {
+    InvalidValue(String),
+}
+
+impl FromStr for DiskLockStrategy {
+    type Err = DickLockStrategyParseError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match Toggle::from_str(s) {
+            Ok(Toggle(true)) => Ok(Self::On),
+            Ok(Toggle(false)) => Ok(Self::Off),
+            Err(_) => {
+                let s = s.to_lowercase();
+                if s.as_str() == "warn" {
+                    Ok(Self::Warn)
+                } else {
+                    Err(Self::Err::InvalidValue(s.to_owned()))
+                }
+            }
+        }
+    }
+}
+
 impl VmConfig {
     fn validate_identifier(
         id_list: &mut BTreeSet<String>,
@@ -3368,6 +3397,7 @@ mod tests {
             pci_segment: 0,
             serial: None,
             queue_affinity: None,
+            lock: DiskLockStrategy::default(),
         }
     }
 

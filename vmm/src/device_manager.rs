@@ -99,9 +99,9 @@ use crate::memory_manager::{Error as MemoryManagerError, MemoryManager, MEMORY_M
 use crate::pci_segment::PciSegment;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 use crate::vm_config::{
-    ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
-    VdpaConfig, VhostMode, VmConfig, VsockConfig, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS,
-    DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
+    ConsoleOutputMode, DeviceConfig, DiskConfig, DiskLockStrategy, FsConfig, NetConfig, PmemConfig,
+    UserDeviceConfig, VdpaConfig, VhostMode, VmConfig, VsockConfig,
+    DEFAULT_IOMMU_ADDRESS_WIDTH_BITS, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
 };
 use crate::{device_node, GuestRegionMmap, PciDeviceInfo, DEVICE_MANAGER_SNAPSHOT_ID};
 
@@ -810,7 +810,9 @@ mod fcntl {
     use std::os::fd::AsRawFd;
     use std::path::Path;
 
-    use libc::{c_short, fcntl, flock, F_OFD_SETLK, F_RDLCK, F_WRLCK, SEEK_SET};
+    use libc::{
+        c_int, c_short, fcntl, flock, F_OFD_GETLK, F_OFD_SETLK, F_RDLCK, F_UNLCK, F_WRLCK, SEEK_SET,
+    };
 
     fn get_flock_struct(write: bool) -> flock {
         flock {
@@ -823,6 +825,32 @@ mod fcntl {
             l_start: 0,
             l_len: 0, /* EOF */
             l_pid: 0, /* filled by kernel */
+        }
+    }
+
+    #[derive(Debug)]
+    pub enum LockState {
+        /// No lock
+        Unlocked,
+        /// Locked for reading
+        ReadLock,
+        /// Locked for writing (exclusive mode)
+        WriteLock,
+    }
+
+    impl TryFrom<&flock> for LockState {
+        type Error = std::io::Error;
+
+        fn try_from(value: &flock) -> Result<Self, Self::Error> {
+            match value.l_type as c_int {
+                F_UNLCK => Ok(Self::Unlocked),
+                F_WRLCK => Ok(Self::WriteLock),
+                F_RDLCK => Ok(Self::ReadLock),
+                v => {
+                    let msg = format!("Invalid lock type response {v}");
+                    Err(io::Error::new(ErrorKind::InvalidData, msg))
+                }
+            }
         }
     }
 
@@ -844,8 +872,9 @@ mod fcntl {
             );
             Ok(())
         } else {
+            let lock_state = get_lock_state(file, write)?;
             log::error!(
-                "Couldn't lock disk image! write={write}, file={}",
+                "Couldn't lock disk image! write={write}, file={}, lock_state={lock_state:?}",
                 path.display()
             );
             Err(io::Error::new(
@@ -853,6 +882,20 @@ mod fcntl {
                 format!("File {} is locked", path.display()),
             ))
         }
+    }
+
+    /// Gets the current state of the lock for the given file using [`fcntl`]
+    /// and [`F_OFD_GETLK`].
+    pub fn get_lock_state(file: &mut File, write: bool) -> Result<LockState, io::Error> {
+        let mut flock = get_flock_struct(write);
+        // Safety: The file is valid and we pass proper parameters.
+        let ret = unsafe { fcntl(file.as_raw_fd(), F_OFD_GETLK, &mut flock) };
+
+        if ret != 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        LockState::try_from(&flock)
     }
 }
 
@@ -2350,8 +2393,33 @@ impl DeviceManager {
 
             // Ensure that only one cloud-hypervisor instance at a time uses the file
             // in exclusive mode. This is an advisory lock.
-            fcntl::try_set_lock(&mut file, !disk_cfg.readonly, path.as_path())
-                .map_err(DeviceManagerError::Disk)?;
+            match disk_cfg.lock {
+                DiskLockStrategy::On => {
+                    fcntl::try_set_lock(&mut file, !disk_cfg.readonly, path.as_path())
+                        .map_err(DeviceManagerError::Disk)?;
+                }
+                DiskLockStrategy::Warn => {
+                    let lock_state = fcntl::get_lock_state(&mut file, !disk_cfg.readonly)
+                        .map_err(DeviceManagerError::Disk)?;
+                    let wants_exclusive = !disk_cfg.readonly;
+                    match (lock_state, wants_exclusive) {
+                        (fcntl::LockState::ReadLock, true) => {
+                            log::warn!(
+                                "Disk image already opened for reading by another process! file={}, readonly={}",
+                                path.display(), disk_cfg.readonly
+                            )
+                        }
+                        (fcntl::LockState::WriteLock, _) => {
+                            log::warn!(
+                                "Disk image already opened exclusively by another process! file={}, readonly={}",
+                                path.display(), disk_cfg.readonly
+                            )
+                        }
+                        _ => {}
+                    }
+                }
+                DiskLockStrategy::Off => {}
+            }
 
             let image_type =
                 detect_image_type(&mut file).map_err(DeviceManagerError::DetectImageType)?;
