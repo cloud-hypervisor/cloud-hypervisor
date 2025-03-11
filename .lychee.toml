@@ -12,3 +12,7 @@ exclude = [
     # GitHub user smibarber referenced in `CREDITS.md` no longer exist
     '^https://github.com/smibarber',
 ]
+
+max_retries = 3
+
+retry_wait_time = 5
