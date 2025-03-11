@@ -802,6 +802,60 @@ impl AccessPlatform for SevSnpPageAccessProxy {
     }
 }
 
+/// Helpers for advisory file locking following best-practices described in
+/// <https://apenwarr.ca/log/20101213>.
+mod fcntl {
+    use std::fs::File;
+    use std::io::{self, ErrorKind};
+    use std::os::fd::AsRawFd;
+    use std::path::Path;
+
+    use libc::{c_short, fcntl, flock, F_OFD_SETLK, F_RDLCK, F_WRLCK, SEEK_SET};
+
+    fn get_flock_struct(write: bool) -> flock {
+        flock {
+            l_type: if write {
+                F_WRLCK as c_short
+            } else {
+                F_RDLCK as c_short
+            },
+            l_whence: SEEK_SET as c_short,
+            l_start: 0,
+            l_len: 0, /* EOF */
+            l_pid: 0, /* filled by kernel */
+        }
+    }
+
+    /// Try to set an advisory lock on the given file using [`fcntl`] and
+    /// [`F_OFD_SETLK`].
+    ///
+    /// Depending on the `write` parameter, the lock either allows `n` readers
+    /// or `1` writer. In case the lock can't be acquired, this function returns
+    /// [`io::Error`].
+    pub fn try_set_lock(file: &mut File, write: bool, path: &Path) -> Result<(), io::Error> {
+        let mut flock = get_flock_struct(write);
+        // Safety: The file is valid and we pass proper parameters.
+        let ret = unsafe { fcntl(file.as_raw_fd(), F_OFD_SETLK, &mut flock) };
+
+        if ret == 0 {
+            log::info!(
+                "Acquired advisory lock: write={write}, file={}",
+                path.display()
+            );
+            Ok(())
+        } else {
+            log::error!(
+                "Couldn't lock disk image! write={write}, file={}",
+                path.display()
+            );
+            Err(io::Error::new(
+                ErrorKind::Other,
+                format!("File {} is locked", path.display()),
+            ))
+        }
+    }
+}
+
 pub struct DeviceManager {
     // Manage address space related to devices
     address_manager: Arc<AddressManager>,
@@ -2286,16 +2340,19 @@ impl DeviceManager {
             if disk_cfg.direct {
                 options.custom_flags(libc::O_DIRECT);
             }
+            let path = disk_cfg
+                .path
+                .as_ref()
+                .ok_or(DeviceManagerError::NoDiskPath)?
+                .clone();
             // Open block device path
-            let mut file: File = options
-                .open(
-                    disk_cfg
-                        .path
-                        .as_ref()
-                        .ok_or(DeviceManagerError::NoDiskPath)?
-                        .clone(),
-                )
+            let mut file: File = options.open(&path).map_err(DeviceManagerError::Disk)?;
+
+            // Ensure that only one cloud-hypervisor instance at a time uses the file
+            // in exclusive mode. This is an advisory lock.
+            fcntl::try_set_lock(&mut file, !disk_cfg.readonly, path.as_path())
                 .map_err(DeviceManagerError::Disk)?;
+
             let image_type =
                 detect_image_type(&mut file).map_err(DeviceManagerError::DetectImageType)?;
 
