@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
 
+#[cfg(not(target_arch = "riscv64"))]
 use acpi_tables::sdt::Sdt;
 use acpi_tables::{aml, Aml};
 use anyhow::anyhow;
@@ -390,6 +391,8 @@ impl Vcpu {
             self.mpidr = arch::configure_vcpu(&self.vcpu, self.id, boot_setup)
                 .map_err(Error::VcpuConfiguration)?;
         }
+        #[cfg(target_arch = "riscv64")]
+        arch::configure_vcpu(&self.vcpu, self.id, boot_setup).map_err(Error::VcpuConfiguration)?;
         info!("Configuring vCPU: cpu_id = {}", self.id);
         #[cfg(target_arch = "x86_64")]
         arch::configure_vcpu(
@@ -413,7 +416,7 @@ impl Vcpu {
     }
 
     /// Gets the saved vCPU state.
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     pub fn get_saved_state(&self) -> Option<CpuState> {
         self.saved_state.clone()
     }
@@ -797,7 +800,7 @@ impl CpuManager {
         let topology = self.get_vcpu_topology();
         #[cfg(target_arch = "x86_64")]
         let x2apic_id = arch::x86_64::get_x2apic_id(cpu_id as u32, topology);
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         let x2apic_id = cpu_id as u32;
 
         let mut vcpu = Vcpu::new(
@@ -870,6 +873,9 @@ impl CpuManager {
 
         #[cfg(target_arch = "aarch64")]
         vcpu.configure(&self.vm, boot_setup)?;
+
+        #[cfg(target_arch = "riscv64")]
+        vcpu.configure(boot_setup)?;
 
         Ok(())
     }
@@ -1396,6 +1402,7 @@ impl CpuManager {
             .map(|t| (t.threads_per_core, t.cores_per_die, t.packages))
     }
 
+    #[cfg(not(target_arch = "riscv64"))]
     pub fn create_madt(&self) -> Sdt {
         use crate::acpi;
         // This is also checked in the commandline parsing.

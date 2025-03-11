@@ -447,6 +447,12 @@ fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError>
     Ok(arch_rules)
 }
 
+#[cfg(all(target_arch = "riscv64", feature = "kvm"))]
+fn create_vmm_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError> {
+    let common_rules = create_vmm_ioctl_seccomp_rule_common(HypervisorType::Kvm)?;
+    Ok(common_rules)
+}
+
 #[cfg(all(target_arch = "x86_64", feature = "mshv"))]
 fn create_vmm_ioctl_seccomp_rule_mshv() -> Result<Vec<SeccompRule>, BackendError> {
     create_vmm_ioctl_seccomp_rule_common(HypervisorType::Mshv)
