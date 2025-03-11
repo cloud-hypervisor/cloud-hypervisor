@@ -16,7 +16,7 @@ use std::{io, result, thread};
 
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
 use devices::legacy::Serial;
 use libc::EFD_NONBLOCK;
 use serial_buffer::SerialBuffer;
@@ -108,7 +108,7 @@ impl From<u64> for EpollDispatch {
 }
 
 pub struct SerialManager {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
     serial: Arc<Mutex<Serial>>,
     #[cfg(target_arch = "aarch64")]
     serial: Arc<Mutex<Pl011>>,
@@ -122,7 +122,7 @@ pub struct SerialManager {
 
 impl SerialManager {
     pub fn new(
-        #[cfg(target_arch = "x86_64")] serial: Arc<Mutex<Serial>>,
+        #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))] serial: Arc<Mutex<Serial>>,
         #[cfg(target_arch = "aarch64")] serial: Arc<Mutex<Pl011>>,
         mut output: ConsoleOutput,
         socket: Option<PathBuf>,
@@ -226,7 +226,7 @@ impl SerialManager {
     // after the connection happened, and if that's the case it flushes
     // all output from the serial to the PTY. Otherwise, it's a no-op.
     fn trigger_pty_flush(
-        #[cfg(target_arch = "x86_64")] serial: &Arc<Mutex<Serial>>,
+        #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))] serial: &Arc<Mutex<Serial>>,
         #[cfg(target_arch = "aarch64")] serial: &Arc<Mutex<Pl011>>,
         pty_write_out: Option<&Arc<AtomicBool>>,
     ) -> Result<()> {
