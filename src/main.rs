@@ -1257,14 +1257,14 @@ mod unit_tests {
                     "--kernel",
                     "/path/to/kernel",
                     "--disk",
-                    "path=/path/to/disk/1",
-                    "path=/path/to/disk/2",
+                    "path=/path/to/disk/1,readonly=true,lock=warn",
+                    "path=/path/to/disk/2,readonly=true,lock=warn",
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
                     "disks": [
-                        {"path": "/path/to/disk/1"},
-                        {"path": "/path/to/disk/2"}
+                        {"path": "/path/to/disk/1", "readonly": true, "lock": "Warn"},
+                        {"path": "/path/to/disk/2", "readonly": true, "lock": "Warn"}
                     ]
                 }"#,
                 true,
@@ -1275,13 +1275,13 @@ mod unit_tests {
                     "--kernel",
                     "/path/to/kernel",
                     "--disk",
-                    "path=/path/to/disk/1",
+                    "path=/path/to/disk/1,readonly=true,lock=warn",
                     "path=/path/to/disk/2",
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
                     "disks": [
-                        {"path": "/path/to/disk/1"}
+                        {"path": "/path/to/disk/1", "readonly": true, "lock": "Warn"}
                     ]
                 }"#,
                 false,
