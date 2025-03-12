@@ -2460,7 +2460,7 @@ impl DeviceManager {
                     }
                 }
                 ImageType::Qcow2 => {
-                    info!("Using synchronous QCOW disk file");
+                    info!("Using synchronous QCOW2 disk file");
                     Box::new(
                         QcowDiskSync::new(file, disk_cfg.direct)
                             .map_err(DeviceManagerError::CreateQcowDiskSync)?,
