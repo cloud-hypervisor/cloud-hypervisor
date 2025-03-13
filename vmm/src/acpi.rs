@@ -865,7 +865,16 @@ pub fn create_acpi_tables_for_fw_cfg(
     let mut tables: Vec<u64> = Vec::new();
 
     let xsdt_offset = GuestAddress(0);
-    let xsdt_size = 0x44;
+    let xsdt_size = if device_manager
+        .lock()
+        .unwrap()
+        .iommu_attached_devices()
+        .is_some()
+    {
+        0x44
+    } else {
+        0x3c
+    };
     // DSDT
     let dsdt = create_dsdt_table(device_manager, cpu_manager, memory_manager);
     let dsdt_offset = xsdt_offset.checked_add(xsdt_size).unwrap();
