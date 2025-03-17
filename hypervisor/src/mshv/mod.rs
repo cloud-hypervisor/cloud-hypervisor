@@ -29,10 +29,17 @@ mod snp_constants;
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
+// aarch64 dependencies
+#[cfg(target_arch = "aarch64")]
+pub mod aarch64;
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
+#[cfg(target_arch = "aarch64")]
+use std::sync::Mutex;
 
+#[cfg(target_arch = "aarch64")]
+pub use aarch64::VcpuMshvState;
 #[cfg(feature = "sev_snp")]
 use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
 #[cfg(feature = "sev_snp")]
@@ -187,6 +194,44 @@ impl From<IrqRoutingEntry> for mshv_user_irq_entry {
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
             _ => panic!("IrqRoutingEntry is not valid"),
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl From<mshv_bindings::MshvRegList> for crate::RegList {
+    fn from(s: mshv_bindings::MshvRegList) -> Self {
+        crate::RegList::Mshv(s)
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl From<crate::RegList> for mshv_bindings::MshvRegList {
+    fn from(e: crate::RegList) -> Self {
+        match e {
+            crate::RegList::Mshv(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("RegList is not valid"),
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl From<mshv_bindings::MshvVcpuInit> for crate::VcpuInit {
+    fn from(s: mshv_bindings::MshvVcpuInit) -> Self {
+        crate::VcpuInit::Mshv(s)
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl From<crate::VcpuInit> for mshv_bindings::MshvVcpuInit {
+    fn from(e: crate::VcpuInit) -> Self {
+        match e {
+            crate::VcpuInit::Mshv(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("VcpuInit is not valid"),
         }
     }
 }
@@ -442,6 +487,23 @@ impl hypervisor::Hypervisor for MshvHypervisor {
 
     fn get_guest_debug_hw_bps(&self) -> usize {
         0
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    ///
+    /// Retrieve AArch64 host maximum IPA size supported by MSHV.
+    ///
+    fn get_host_ipa_limit(&self) -> i32 {
+        let host_ipa = self.mshv.get_host_partition_property(
+            hv_partition_property_code_HV_PARTITION_PROPERTY_PHYSICAL_ADDRESS_WIDTH as u64,
+        );
+
+        match host_ipa {
+            Ok(ipa) => ipa,
+            Err(e) => {
+                panic!("Failed to get host IPA limit: {:?}", e);
+            }
+        }
     }
 }
 
@@ -1255,6 +1317,31 @@ impl cpu::Vcpu for MshvVcpu {
     #[cfg(target_arch = "aarch64")]
     fn get_regs(&self) -> cpu::Result<StandardRegisters> {
         unimplemented!()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_finalize(&self, _feature: i32) -> cpu::Result<()> {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_get_finalized_features(&self) -> i32 {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_set_processor_features(
+        &self,
+        _vm: &Arc<dyn crate::Vm>,
+        _kvi: &mut crate::VcpuInit,
+        _id: u8,
+    ) -> cpu::Result<()> {
+        unimplemented!()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn create_vcpu_init(&self) -> crate::VcpuInit {
+        unimplemented!();
     }
 
     #[cfg(target_arch = "x86_64")]

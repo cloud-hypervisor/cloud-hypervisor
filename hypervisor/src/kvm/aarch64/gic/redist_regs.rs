@@ -7,11 +7,11 @@ use kvm_ioctls::DeviceFd;
 use crate::arch::aarch64::gic::{Error, Result};
 use crate::device::HypervisorDeviceError;
 use crate::kvm::kvm_bindings::{
-    kvm_device_attr, KVM_DEV_ARM_VGIC_GRP_REDIST_REGS, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
-    KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP0_SHIFT, KVM_REG_ARM64_SYSREG_OP2_MASK,
-    KVM_REG_ARM64_SYSREG_OP2_SHIFT, KVM_REG_SIZE_U64,
+    kvm_device_attr, kvm_one_reg, KVM_DEV_ARM_VGIC_GRP_REDIST_REGS, KVM_REG_ARM64,
+    KVM_REG_ARM64_SYSREG, KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP0_SHIFT,
+    KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_ARM64_SYSREG_OP2_SHIFT, KVM_REG_SIZE_U64,
 };
-use crate::kvm::{Register, VcpuKvmState};
+use crate::kvm::VcpuKvmState;
 use crate::CpuState;
 
 // Relevant redistributor registers that we want to save/restore.
@@ -213,7 +213,7 @@ pub fn construct_gicr_typers(vcpu_states: &[CpuState]) -> Vec<u64> {
         let state: VcpuKvmState = state.clone().into();
         let last = (index == vcpu_states.len() - 1) as u64;
         // state.sys_regs is a big collection of system registers, including MIPDR_EL1
-        let mpidr: Vec<Register> = state
+        let mpidr: Vec<kvm_one_reg> = state
             .sys_regs
             .into_iter()
             .filter(|reg| reg.id == KVM_ARM64_SYSREG_MPIDR_EL1)

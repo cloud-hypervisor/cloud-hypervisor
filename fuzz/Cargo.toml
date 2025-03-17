@@ -27,7 +27,7 @@ micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch
 mshv-bindings = "0.3.2"
 net_util = { path = "../net_util" }
 once_cell = "1.19.0"
-seccompiler = "0.4.0"
+seccompiler = "0.5.0"
 virtio-devices = { path = "../virtio-devices" }
 virtio-queue = "0.14.0"
 vm-device = { path = "../vm-device" }

@@ -18,15 +18,18 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Mutex};
+#[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
 
 use acpi_tables::sdt::GenericAddress;
+#[cfg(not(target_arch = "riscv64"))]
 use acpi_tables::{aml, Aml};
+#[cfg(not(target_arch = "riscv64"))]
 use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use arch::{layout, NumaNodes};
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use arch::{DeviceType, MmioDeviceInfo};
 use block::async_io::DiskFile;
 use block::fixed_vhd_sync::FixedVhdDiskSync;
@@ -39,6 +42,10 @@ use block::{
 };
 #[cfg(feature = "io_uring")]
 use block::{fixed_vhd_async::FixedVhdDiskAsync, raw_async::RawFileDisk};
+#[cfg(target_arch = "riscv64")]
+use devices::aia;
+#[cfg(target_arch = "x86_64")]
+use devices::debug_console;
 #[cfg(target_arch = "x86_64")]
 use devices::debug_console::DebugConsole;
 #[cfg(target_arch = "aarch64")]
@@ -49,6 +56,8 @@ use devices::ioapic;
 use devices::legacy::FwCfg;
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
+#[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
+use devices::legacy::Serial;
 #[cfg(feature = "pvmemcontrol")]
 use devices::pvmemcontrol::{PvmemcontrolBusDevice, PvmemcontrolPciDevice};
 use devices::{interrupt_controller, AcpiNotificationFlags};
@@ -89,8 +98,6 @@ use vm_migration::{
 };
 use vm_virtio::{AccessPlatform, VirtioDeviceType};
 use vmm_sys_util::eventfd::EventFd;
-#[cfg(target_arch = "x86_64")]
-use {devices::debug_console, devices::legacy::Serial};
 
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo, ConsoleOutput};
 use crate::cpu::{CpuManager, CPU_MANAGER_ACPI_SIZE};
@@ -106,7 +113,7 @@ use crate::vm_config::{
 };
 use crate::{device_node, GuestRegionMmap, PciDeviceInfo, DEVICE_MANAGER_SNAPSHOT_ID};
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 const MMIO_LEN: u64 = 0x1000;
 
 // Singleton devices / devices the user cannot name
@@ -824,9 +831,11 @@ pub struct DeviceManager {
     interrupt_controller: Option<Arc<Mutex<ioapic::Ioapic>>>,
     #[cfg(target_arch = "aarch64")]
     interrupt_controller: Option<Arc<Mutex<gic::Gic>>>,
+    #[cfg(target_arch = "riscv64")]
+    interrupt_controller: Option<Arc<Mutex<aia::Aia>>>,
 
-    // Things to be added to the commandline (e.g. aarch64 early console)
-    #[cfg(target_arch = "aarch64")]
+    // Things to be added to the commandline (e.g. aarch64 or riscv64 early console)
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     cmdline_additions: Vec<String>,
 
     // ACPI GED notification device
@@ -889,7 +898,7 @@ pub struct DeviceManager {
     exit_evt: EventFd,
     reset_evt: EventFd,
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     id_to_dev_info: HashMap<(DeviceType, String), MmioDeviceInfo>,
 
     // seccomp action
@@ -905,6 +914,7 @@ pub struct DeviceManager {
     // activation and thus start the threads from the VMM thread
     activate_evt: EventFd,
 
+    #[cfg(not(target_arch = "riscv64"))]
     acpi_address: GuestAddress,
 
     selected_segment: usize,
@@ -937,12 +947,14 @@ pub struct DeviceManager {
     // List of unique identifiers provided at boot through the configuration.
     boot_id_list: BTreeSet<String>,
 
+    #[cfg(not(target_arch = "riscv64"))]
     // Start time of the VM
     timestamp: Instant,
 
     // Pending activations
     pending_activations: Arc<Mutex<Vec<VirtioPciDeviceActivator>>>,
 
+    #[cfg(not(target_arch = "riscv64"))]
     // Addresses for ACPI platform devices e.g. ACPI PM timer, sleep/reset registers
     acpi_platform_addresses: AcpiPlatformAddresses,
 
@@ -999,7 +1011,7 @@ impl DeviceManager {
         activate_evt: &EventFd,
         force_iommu: bool,
         boot_id_list: BTreeSet<String>,
-        timestamp: Instant,
+        #[cfg(not(target_arch = "riscv64"))] timestamp: Instant,
         snapshot: Option<Snapshot>,
         dynamic: bool,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
@@ -1023,8 +1035,7 @@ impl DeviceManager {
             };
 
         let mut mmio32_aperture_weights: Vec<u32> =
-            std::iter::repeat(DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT)
-                .take(num_pci_segments.into())
+            std::iter::repeat_n(DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT, num_pci_segments.into())
                 .collect();
         if let Some(pci_segments) = &config.lock().unwrap().pci_segments {
             for pci_segment in pci_segments.iter() {
@@ -1044,8 +1055,7 @@ impl DeviceManager {
         );
 
         let mut mmio64_aperture_weights: Vec<u32> =
-            std::iter::repeat(DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT)
-                .take(num_pci_segments.into())
+            std::iter::repeat_n(DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT, num_pci_segments.into())
                 .collect();
         if let Some(pci_segments) = &config.lock().unwrap().pci_segments {
             for pci_segment in pci_segments.iter() {
@@ -1166,7 +1176,7 @@ impl DeviceManager {
             address_manager: Arc::clone(&address_manager),
             console: Arc::new(Console::default()),
             interrupt_controller: None,
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
             cmdline_additions: Vec::new(),
             ged_notification_device: None,
             config,
@@ -1186,7 +1196,7 @@ impl DeviceManager {
             device_tree,
             exit_evt,
             reset_evt,
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
             id_to_dev_info: HashMap::new(),
             seccomp_action,
             numa_nodes,
@@ -1194,6 +1204,7 @@ impl DeviceManager {
             activate_evt: activate_evt
                 .try_clone()
                 .map_err(DeviceManagerError::EventFd)?,
+            #[cfg(not(target_arch = "riscv64"))]
             acpi_address,
             selected_segment: 0,
             serial_manager: None,
@@ -1209,8 +1220,10 @@ impl DeviceManager {
             io_uring_supported: None,
             aio_supported: None,
             boot_id_list,
+            #[cfg(not(target_arch = "riscv64"))]
             timestamp,
             pending_activations: Arc::new(Mutex::new(Vec::default())),
+            #[cfg(not(target_arch = "riscv64"))]
             acpi_platform_addresses: AcpiPlatformAddresses::default(),
             snapshot,
             rate_limit_groups,
@@ -1305,6 +1318,7 @@ impl DeviceManager {
             console_resize_pipe,
         )?;
 
+        #[cfg(not(target_arch = "riscv64"))]
         if let Some(tpm) = self.config.clone().lock().unwrap().tpm.as_ref() {
             let tpm_dev = self.add_tpm_device(tpm.socket.clone())?;
             self.bus_devices
@@ -1353,11 +1367,21 @@ impl DeviceManager {
                 vgic_config.msi_addr + vgic_config.msi_size - 1,
             )
         }
+        #[cfg(target_arch = "riscv64")]
+        {
+            let vcpus = self.config.lock().unwrap().cpus.boot_vcpus;
+            let vaia_config = aia::Aia::create_default_config(vcpus.into());
+            (
+                vaia_config.imsic_addr,
+                vaia_config.imsic_addr + vaia_config.vcpu_count as u64 * arch::layout::IMSIC_SIZE
+                    - 1,
+            )
+        }
         #[cfg(target_arch = "x86_64")]
         (0xfee0_0000, 0xfeef_ffff)
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     /// Gets the information of the devices registered up to some point in time.
     pub fn get_device_info(&self) -> &HashMap<(DeviceType, String), MmioDeviceInfo> {
         &self.id_to_dev_info
@@ -1519,6 +1543,43 @@ impl DeviceManager {
 
     #[cfg(target_arch = "aarch64")]
     pub fn get_interrupt_controller(&mut self) -> Option<&Arc<Mutex<gic::Gic>>> {
+        self.interrupt_controller.as_ref()
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    fn add_interrupt_controller(
+        &mut self,
+    ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
+        let interrupt_controller: Arc<Mutex<aia::Aia>> = Arc::new(Mutex::new(
+            aia::Aia::new(
+                self.config.lock().unwrap().cpus.boot_vcpus,
+                Arc::clone(&self.msi_interrupt_manager),
+                self.address_manager.vm.clone(),
+            )
+            .map_err(DeviceManagerError::CreateInterruptController)?,
+        ));
+
+        self.interrupt_controller = Some(interrupt_controller.clone());
+
+        // Restore the vAia if this is in the process of restoration
+        let id = String::from(aia::_AIA_SNAPSHOT_ID);
+        if let Some(_vaia_snapshot) = snapshot_from_id(self.snapshot.as_ref(), &id) {
+            // TODO: vAia snapshotting and restoration is scheduled to next stage of riscv64 support.
+            // TODO: PMU support is scheduled to next stage of riscv64 support.
+            // PMU support is optional. Nothing should be impacted if the PMU initialization failed.
+            unimplemented!()
+        }
+
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, interrupt_controller));
+
+        Ok(interrupt_controller)
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    pub fn get_interrupt_controller(&mut self) -> Option<&Arc<Mutex<aia::Aia>>> {
         self.interrupt_controller.as_ref()
     }
 
@@ -2017,6 +2078,69 @@ impl DeviceManager {
         Ok(serial)
     }
 
+    #[cfg(target_arch = "riscv64")]
+    fn add_serial_device(
+        &mut self,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+        serial_writer: Option<Box<dyn io::Write + Send>>,
+    ) -> DeviceManagerResult<Arc<Mutex<Serial>>> {
+        let id = String::from(SERIAL_DEVICE_NAME);
+
+        let serial_irq = self
+            .address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_irq()
+            .unwrap();
+
+        let interrupt_group = interrupt_manager
+            .create_group(LegacyIrqGroupConfig {
+                irq: serial_irq as InterruptIndex,
+            })
+            .map_err(DeviceManagerError::CreateInterruptGroup)?;
+
+        let serial = Arc::new(Mutex::new(Serial::new(
+            id.clone(),
+            interrupt_group,
+            serial_writer,
+            state_from_id(self.snapshot.as_ref(), id.as_str())
+                .map_err(DeviceManagerError::RestoreGetState)?,
+        )));
+
+        self.bus_devices
+            .push(Arc::clone(&serial) as Arc<dyn BusDeviceSync>);
+
+        let addr = arch::layout::LEGACY_SERIAL_MAPPED_IO_START;
+
+        self.address_manager
+            .mmio_bus
+            .insert(serial.clone(), addr.0, MMIO_LEN)
+            .map_err(DeviceManagerError::BusError)?;
+
+        self.id_to_dev_info.insert(
+            (DeviceType::Serial, DeviceType::Serial.to_string()),
+            MmioDeviceInfo {
+                addr: addr.0,
+                len: MMIO_LEN,
+                irq: serial_irq,
+            },
+        );
+
+        self.cmdline_additions
+            .push(format!("earlycon=uart,mmio,0x{:08x}", addr.0));
+
+        // Fill the device tree with a new node. In case of restore, we
+        // know there is nothing to do, so we can simply override the
+        // existing entry.
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, serial));
+
+        Ok(serial)
+    }
+
     fn add_virtio_console_device(
         &mut self,
         virtio_devices: &mut Vec<MetaVirtioDevice>,
@@ -2181,6 +2305,7 @@ impl DeviceManager {
         Ok(Arc::new(Console { console_resizer }))
     }
 
+    #[cfg(not(target_arch = "riscv64"))]
     fn add_tpm_device(
         &mut self,
         tpm_path: PathBuf,
@@ -3453,6 +3578,7 @@ impl DeviceManager {
             memory_manager.lock().unwrap().memory_slot_allocator(),
             vm_migration::snapshot_from_id(self.snapshot.as_ref(), vfio_name.as_str()),
             device_cfg.x_nv_gpudirect_clique,
+            device_cfg.path.clone(),
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
 
@@ -3930,7 +4056,7 @@ impl DeviceManager {
         &self.pci_segments
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     pub fn cmdline_additions(&self) -> &[String] {
         self.cmdline_additions.as_slice()
     }
@@ -4516,6 +4642,7 @@ impl DeviceManager {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "riscv64"))]
     pub(crate) fn acpi_platform_addresses(&self) -> &AcpiPlatformAddresses {
         &self.acpi_platform_addresses
     }
@@ -4541,8 +4668,10 @@ fn numa_node_id_from_pci_segment_id(numa_nodes: &NumaNodes, pci_segment_id: u16)
     0
 }
 
+#[cfg(not(target_arch = "riscv64"))]
 struct TpmDevice {}
 
+#[cfg(not(target_arch = "riscv64"))]
 impl Aml for TpmDevice {
     fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
         aml::Device::new(
@@ -4564,6 +4693,7 @@ impl Aml for TpmDevice {
     }
 }
 
+#[cfg(not(target_arch = "riscv64"))]
 impl Aml for DeviceManager {
     fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
         #[cfg(target_arch = "aarch64")]

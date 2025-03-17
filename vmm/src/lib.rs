@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
+#[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
 use std::{io, result, thread};
 
@@ -64,6 +65,7 @@ use crate::vm_config::{
     VmConfig, VsockConfig,
 };
 
+#[cfg(not(target_arch = "riscv64"))]
 mod acpi;
 pub mod api;
 mod clone3;
@@ -941,6 +943,7 @@ impl Vmm {
             MigratableError::MigrateReceive(anyhow!("Error cloning activate EventFd: {}", e))
         })?;
 
+        #[cfg(not(target_arch = "riscv64"))]
         let timestamp = Instant::now();
         let hypervisor_vm = mm.lock().unwrap().vm.clone();
         let mut vm = Vm::new_from_memory_manager(
@@ -954,6 +957,7 @@ impl Vmm {
             &self.seccomp_action,
             self.hypervisor.clone(),
             activate_evt,
+            #[cfg(not(target_arch = "riscv64"))]
             timestamp,
             self.console_info.clone(),
             self.console_resize_pipe.clone(),

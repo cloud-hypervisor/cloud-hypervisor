@@ -20,6 +20,7 @@ use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex, RwLock};
+#[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
 use std::{cmp, result, str, thread};
 
@@ -28,7 +29,7 @@ use anyhow::anyhow;
 use arch::layout::{KVM_IDENTITY_MAP_START, KVM_TSS_START};
 #[cfg(feature = "tdx")]
 use arch::x86_64::tdx::TdvfSection;
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use arch::PciSpaceInfo;
 use arch::{get_host_cpu_phys_bits, EntryPoint, NumaNode, NumaNodes};
 #[cfg(target_arch = "aarch64")]
@@ -53,7 +54,7 @@ use linux_loader::elf;
 use linux_loader::loader::bzimage::BzImage;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
 use linux_loader::loader::KernelLoader;
 use seccompiler::SeccompAction;
@@ -481,8 +482,10 @@ pub struct Vm {
     vm: Arc<dyn hypervisor::Vm>,
     #[cfg(target_arch = "x86_64")]
     saved_clock: Option<hypervisor::ClockData>,
+    #[cfg(not(target_arch = "riscv64"))]
     numa_nodes: NumaNodes,
     #[cfg_attr(any(not(feature = "kvm"), target_arch = "aarch64"), allow(dead_code))]
+    #[cfg(not(target_arch = "riscv64"))]
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     stop_on_boot: bool,
     load_payload_handle: Option<thread::JoinHandle<Result<EntryPoint>>>,
@@ -512,7 +515,7 @@ impl Vm {
         seccomp_action: &SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         activate_evt: EventFd,
-        timestamp: Instant,
+        #[cfg(not(target_arch = "riscv64"))] timestamp: Instant,
         console_info: Option<ConsoleInfo>,
         console_resize_pipe: Option<Arc<File>>,
         original_termios: Arc<Mutex<Option<termios>>>,
@@ -660,6 +663,7 @@ impl Vm {
             &activate_evt,
             force_iommu,
             boot_id_list,
+            #[cfg(not(target_arch = "riscv64"))]
             timestamp,
             snapshot_from_id(snapshot.as_ref(), DEVICE_MANAGER_SNAPSHOT_ID),
             dynamic,
@@ -788,7 +792,9 @@ impl Vm {
             vm,
             #[cfg(target_arch = "x86_64")]
             saved_clock,
+            #[cfg(not(target_arch = "riscv64"))]
             numa_nodes,
+            #[cfg(not(target_arch = "riscv64"))]
             hypervisor,
             stop_on_boot,
             load_payload_handle,
@@ -897,6 +903,7 @@ impl Vm {
     ) -> Result<Self> {
         trace_scoped!("Vm::new");
 
+        #[cfg(not(target_arch = "riscv64"))]
         let timestamp = Instant::now();
 
         #[cfg(feature = "tdx")]
@@ -979,6 +986,7 @@ impl Vm {
             seccomp_action,
             hypervisor,
             activate_evt,
+            #[cfg(not(target_arch = "riscv64"))]
             timestamp,
             console_info,
             console_resize_pipe,
@@ -1056,14 +1064,16 @@ impl Vm {
 
     pub fn generate_cmdline(
         payload: &PayloadConfig,
-        #[cfg(target_arch = "aarch64")] device_manager: &Arc<Mutex<DeviceManager>>,
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))] device_manager: &Arc<
+            Mutex<DeviceManager>,
+        >,
     ) -> Result<Cmdline> {
         let mut cmdline = Cmdline::new(arch::CMDLINE_MAX_SIZE).map_err(Error::CmdLineCreate)?;
         if let Some(s) = payload.cmdline.as_ref() {
             cmdline.insert_str(s).map_err(Error::CmdLineInsertStr)?;
         }
 
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         for entry in device_manager.lock().unwrap().cmdline_additions() {
             cmdline.insert_str(entry).map_err(Error::CmdLineInsertStr)?;
         }
@@ -1130,6 +1140,47 @@ impl Vm {
             .add_ram_region(KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE)
             .map_err(|e| Error::MemoryManager(e))?;
         Ok(())
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    fn load_kernel(
+        firmware: Option<File>,
+        kernel: Option<File>,
+        memory_manager: Arc<Mutex<MemoryManager>>,
+    ) -> Result<EntryPoint> {
+        let guest_memory = memory_manager.lock().as_ref().unwrap().guest_memory();
+        let mem = guest_memory.memory();
+        let alignment = 0x20_0000;
+        let aligned_kernel_addr = arch::layout::KERNEL_START.0 + (alignment - 1) & !(alignment - 1);
+        let entry_addr = match (firmware, kernel) {
+            (None, Some(mut kernel)) => {
+                match linux_loader::loader::pe::PE::load(
+                    mem.deref(),
+                    Some(GuestAddress(aligned_kernel_addr)),
+                    &mut kernel,
+                    None,
+                ) {
+                    Ok(entry_addr) => entry_addr.kernel_load,
+                    // Try to load the binary as kernel PE file at first.
+                    // If failed, retry to load it as UEFI binary.
+                    // As the UEFI binary is formatless, it must be the last option to try.
+                    Err(linux_loader::loader::Error::Pe(InvalidImageMagicNumber)) => {
+                        // TODO: UEFI for riscv64 is scheduled to next stage.
+                        unimplemented!()
+                    }
+                    Err(e) => {
+                        return Err(Error::KernelLoad(e));
+                    }
+                }
+            }
+            (Some(_firmware), None) => {
+                // TODO: UEFI for riscv64 is scheduled to next stage.
+                unimplemented!()
+            }
+            _ => return Err(Error::InvalidPayload),
+        };
+
+        Ok(EntryPoint { entry_addr })
     }
 
     #[cfg(feature = "igvm")]
@@ -1264,7 +1315,7 @@ impl Vm {
         }
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     fn load_payload(
         payload: &PayloadConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
@@ -1476,6 +1527,72 @@ impl Vm {
             &vgic,
             &self.numa_nodes,
             pmu_supported,
+        )
+        .map_err(Error::ConfigureSystem)?;
+
+        Ok(())
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    fn configure_system(&mut self) -> Result<()> {
+        let cmdline = Self::generate_cmdline(
+            self.config.lock().unwrap().payload.as_ref().unwrap(),
+            &self.device_manager,
+        )?;
+        let num_vcpu = self.cpu_manager.lock().unwrap().vcpus().len();
+        let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
+        let mut pci_space_info: Vec<PciSpaceInfo> = Vec::new();
+        let initramfs_config = match self.initramfs {
+            Some(_) => Some(self.load_initramfs(&mem)?),
+            None => None,
+        };
+
+        let device_info = &self
+            .device_manager
+            .lock()
+            .unwrap()
+            .get_device_info()
+            .clone();
+
+        for pci_segment in self.device_manager.lock().unwrap().pci_segments().iter() {
+            let pci_space = PciSpaceInfo {
+                pci_segment_id: pci_segment.id,
+                mmio_config_address: pci_segment.mmio_config_address,
+                pci_device_space_start: pci_segment.start_of_mem64_area,
+                pci_device_space_size: pci_segment.end_of_mem64_area
+                    - pci_segment.start_of_mem64_area
+                    + 1,
+            };
+            pci_space_info.push(pci_space);
+        }
+
+        // TODO: IOMMU for riscv64 is not yet support in kernel.
+
+        let vaia = self
+            .device_manager
+            .lock()
+            .unwrap()
+            .get_interrupt_controller()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .get_vaia()
+            .map_err(|_| {
+                Error::ConfigureSystem(arch::Error::PlatformSpecific(
+                    arch::riscv64::Error::SetupAia,
+                ))
+            })?;
+
+        // TODO: PMU support for riscv64 is scheduled to next stage.
+
+        arch::configure_system(
+            &mem,
+            cmdline.as_cstring().unwrap().to_str().unwrap(),
+            num_vcpu as u32,
+            device_info,
+            &initramfs_config,
+            &pci_space_info,
+            &vaia,
         )
         .map_err(Error::ConfigureSystem)?;
 
@@ -2148,6 +2265,7 @@ impl Vm {
     // In case of TDX being used, this is a no-op since the tables will be
     // created and passed when populating the HOB.
 
+    #[cfg(not(target_arch = "riscv64"))]
     fn create_acpi_tables(&self) -> Option<GuestAddress> {
         #[cfg(feature = "tdx")]
         if self.config.lock().unwrap().is_tdx_enabled() {
@@ -2257,6 +2375,7 @@ impl Vm {
         #[cfg(target_arch = "aarch64")]
         let rsdp_addr = self.create_acpi_tables();
 
+        #[cfg(not(target_arch = "riscv64"))]
         // Configure shared state based on loaded kernel
         entry_point
             .map(|entry_point| {
@@ -2265,6 +2384,9 @@ impl Vm {
                 self.configure_system(rsdp_addr.unwrap(), entry_point)
             })
             .transpose()?;
+
+        #[cfg(target_arch = "riscv64")]
+        self.configure_system().unwrap();
 
         #[cfg(feature = "tdx")]
         if let Some(hob_address) = hob_address {
@@ -2452,6 +2574,11 @@ impl Vm {
             .unwrap()
             .notify_power_button()
             .map_err(Error::PowerButton)
+    }
+
+    #[cfg(target_arch = "riscv64")]
+    pub fn power_button(&self) -> Result<()> {
+        unimplemented!()
     }
 
     pub fn memory_manager_data(&self) -> MemoryManagerSnapshotData {

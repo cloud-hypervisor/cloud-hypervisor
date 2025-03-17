@@ -5,10 +5,10 @@
 # When changing this file don't forget to update the tag name in the
 # .github/workflows/docker-image.yaml file if doing multiple per day
 
-FROM ubuntu:22.04 as dev
+FROM ubuntu:24.04 AS dev
 
 ARG TARGETARCH
-ARG RUST_TOOLCHAIN="1.77.0"
+ARG RUST_TOOLCHAIN="1.82.0"
 ARG CLH_SRC_DIR="/cloud-hypervisor"
 ARG CLH_BUILD_DIR="$CLH_SRC_DIR/build"
 ARG CARGO_REGISTRY_DIR="$CLH_BUILD_DIR/cargo_registry"
@@ -48,7 +48,6 @@ RUN apt-get update \
         python3 \
         python3-setuptools \
         ntfs-3g \
-        python3-distutils \
         uuid-dev \
         iperf3 \
         zip \
@@ -108,7 +107,9 @@ ENV OPENSSL_INCLUDE_DIR=/usr/include/
 RUN export ARCH="$(uname -m)" \
     && nohup curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "$RUST_TOOLCHAIN" \
     && rustup target add "$ARCH"-unknown-linux-musl --toolchain "$RUST_TOOLCHAIN" \
-    && if [ "$TARGETARCH" = "amd64" ]; then rustup toolchain add --profile minimal $RUST_TOOLCHAIN-x86_64-unknown-linux-musl; fi \
+    && if [ "$TARGETARCH" = "amd64" ]; then \
+        rustup toolchain add --profile minimal --force-non-host \
+            $RUST_TOOLCHAIN-x86_64-unknown-linux-musl; fi \
     && if [ "$TARGETARCH" = "amd64" ]; then rustup component add rustfmt; fi \
     && if [ "$TARGETARCH" = "amd64" ]; then rustup component add clippy; fi \
     && rm -rf "$CARGO_HOME/registry" \
@@ -122,25 +123,31 @@ RUN echo 'source $CARGO_HOME/env' >> "$HOME"/.bashrc \
     && mkdir "$HOME"/.cargo \
     && ln -s $CARGO_HOME/env "$HOME"/.cargo/env
 
-# install SPDK NVMe
-# only for 'x86_64' platform images as 'docker buildx' can't build 'spdk'
+# Allow pip to install packages system wide 
 # hadolint ignore=DL3003,SC2046
-RUN if [ "$TARGETARCH" = "amd64" ]; then \
-       git clone https://github.com/spdk/spdk \
-       && cd spdk \
-       && git checkout ef8bcce58f3f02b79c0619a297e4f17e81e62b24 \
-       && git submodule update --init \
-       && apt-get update \
-       && ./scripts/pkgdep.sh \
-       && apt-get clean \
-       && ./configure --with-vfio-user \
-       && make -j $(nproc) TARGET_ARCHITECTURE=skylake \
-       && rm -rf /usr/local/bin/spdk-nvme \
-       && mkdir /usr/local/bin/spdk-nvme \
-       && cp -f ./build/bin/nvmf_tgt /usr/local/bin/spdk-nvme \
-       && cp -f ./scripts/rpc.py /usr/local/bin/spdk-nvme \
-       && cp -rf ./python /usr/local/bin \
-       && cd .. && rm -rf spdk; fi
+RUN rm /usr/lib/python3.12/EXTERNALLY-MANAGED \
+        && git clone https://github.com/spdk/spdk \
+        && cd spdk \
+        && git checkout ef8bcce58f3f02b79c0619a297e4f17e81e62b24 \
+        && git submodule update --init \
+        && apt-get update \
+        && ./scripts/pkgdep.sh \
+        && apt-get clean \
+        && ./configure --with-vfio-user \
+        && if [ "$TARGETARCH" = "amd64" ]; then \
+            make -j $(nproc) TARGET_ARCHITECTURE=skylake; \
+        elif [ "$TARGETARCH" = "arm64" ]; then \
+            make -j $(nproc) TARGET_ARCHITECTURE="armv8.2-a" DPDKBUILD_FLAGS="-Dplatform=generic"; \
+        else \
+            echo "Unsupported architecture: ${TARGETARCH}" && exit 1; \
+        fi \
+        && rm -rf /usr/local/bin/spdk-nvme \
+        && mkdir /usr/local/bin/spdk-nvme \
+        && cp -f ./build/bin/nvmf_tgt /usr/local/bin/spdk-nvme \
+        && cp -f ./scripts/rpc.py /usr/local/bin/spdk-nvme \
+        && cp -rf ./python/spdk/ /usr/local/bin/spdk-nvme \
+        && cp -rf ./python /usr/local/bin \
+        && cd .. && rm -rf spdk
 
 # install ethr tool for performance tests
 RUN if [ "$TARGETARCH" = "amd64" ]; then \

@@ -56,8 +56,7 @@ use x86_64::sev;
 use crate::aarch64::gic::KvmGicV3Its;
 #[cfg(target_arch = "aarch64")]
 pub use crate::aarch64::{
-    check_required_kvm_extensions, gic::Gicv3ItsState as GicState, is_system_register, VcpuInit,
-    VcpuKvmState,
+    check_required_kvm_extensions, gic::Gicv3ItsState as GicState, is_system_register, VcpuKvmState,
 };
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
@@ -89,15 +88,11 @@ use crate::{
     USER_MEMORY_REGION_GUEST_MEMFD, USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ,
     USER_MEMORY_REGION_WRITE,
 };
-#[cfg(target_arch = "aarch64")]
-use aarch64::{RegList, Register};
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
     kvm_create_guest_memfd, kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC,
     KVM_CAP_SPLIT_IRQCHIP, KVM_GUESTDBG_USE_HW_BP, KVM_X86_SW_PROTECTED_VM,
 };
-#[cfg(target_arch = "riscv64")]
-use riscv64::{RegList, Register};
 #[cfg(target_arch = "x86_64")]
 use x86_64::check_required_kvm_extensions;
 #[cfg(target_arch = "x86_64")]
@@ -142,6 +137,9 @@ use vfio_ioctls::VfioDeviceFd;
 #[cfg(feature = "tdx")]
 use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_ioc_nr, ioctl_iowr_nr};
 pub use {kvm_bindings, kvm_ioctls};
+
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+use crate::RegList;
 
 #[cfg(target_arch = "x86_64")]
 const KVM_CAP_SGX_ATTRIBUTE: u32 = 196;
@@ -444,6 +442,61 @@ impl From<ClockData> for kvm_clock_data {
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
             _ => panic!("CpuState is not valid"),
+        }
+    }
+}
+
+impl From<kvm_bindings::kvm_one_reg> for crate::Register {
+    fn from(s: kvm_bindings::kvm_one_reg) -> Self {
+        crate::Register::Kvm(s)
+    }
+}
+
+impl From<crate::Register> for kvm_bindings::kvm_one_reg {
+    fn from(e: crate::Register) -> Self {
+        match e {
+            crate::Register::Kvm(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("Register is not valid"),
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl From<kvm_bindings::kvm_vcpu_init> for crate::VcpuInit {
+    fn from(s: kvm_bindings::kvm_vcpu_init) -> Self {
+        crate::VcpuInit::Kvm(s)
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+impl From<crate::VcpuInit> for kvm_bindings::kvm_vcpu_init {
+    fn from(e: crate::VcpuInit) -> Self {
+        match e {
+            crate::VcpuInit::Kvm(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("VcpuInit is not valid"),
+        }
+    }
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+impl From<kvm_bindings::RegList> for crate::RegList {
+    fn from(s: kvm_bindings::RegList) -> Self {
+        crate::RegList::Kvm(s)
+    }
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+impl From<crate::RegList> for kvm_bindings::RegList {
+    fn from(e: crate::RegList) -> Self {
+        match e {
+            crate::RegList::Kvm(e) => e,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("RegList is not valid"),
         }
     }
 }
@@ -979,10 +1032,13 @@ impl vm::Vm for KvmVm {
     /// Returns the preferred CPU target type which can be emulated by KVM on underlying host.
     ///
     #[cfg(target_arch = "aarch64")]
-    fn get_preferred_target(&self, kvi: &mut VcpuInit) -> vm::Result<()> {
+    fn get_preferred_target(&self, kvi: &mut crate::VcpuInit) -> vm::Result<()> {
+        let mut kvm_kvi: kvm_bindings::kvm_vcpu_init = (*kvi).into();
         self.fd
-            .get_preferred_target(kvi)
-            .map_err(|e| vm::HypervisorVmError::GetPreferredTarget(e.into()))
+            .get_preferred_target(&mut kvm_kvi)
+            .map_err(|e| vm::HypervisorVmError::GetPreferredTarget(e.into()))?;
+        *kvi = kvm_kvi.into();
+        Ok(())
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -2943,11 +2999,70 @@ impl cpu::Vcpu for KvmVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn vcpu_init(&self, kvi: &VcpuInit) -> cpu::Result<()> {
+    fn vcpu_get_finalized_features(&self) -> i32 {
+        kvm_bindings::KVM_ARM_VCPU_SVE as i32
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_set_processor_features(
+        &self,
+        vm: &Arc<dyn crate::Vm>,
+        kvi: &mut crate::VcpuInit,
+        id: u8,
+    ) -> cpu::Result<()> {
+        use std::arch::is_aarch64_feature_detected;
+        #[allow(clippy::nonminimal_bool)]
+        let sve_supported =
+            is_aarch64_feature_detected!("sve") || is_aarch64_feature_detected!("sve2");
+
+        let mut kvm_kvi: kvm_bindings::kvm_vcpu_init = (*kvi).into();
+
+        // We already checked that the capability is supported.
+        kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
+        if vm
+            .as_any()
+            .downcast_ref::<crate::kvm::KvmVm>()
+            .unwrap()
+            .check_extension(Cap::ArmPmuV3)
+        {
+            kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PMU_V3;
+        }
+
+        if sve_supported
+            && vm
+                .as_any()
+                .downcast_ref::<crate::kvm::KvmVm>()
+                .unwrap()
+                .check_extension(Cap::ArmSve)
+        {
+            kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_SVE;
+        }
+
+        // Non-boot cpus are powered off initially.
+        if id > 0 {
+            kvm_kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_POWER_OFF;
+        }
+
+        *kvi = kvm_kvi.into();
+
+        Ok(())
+    }
+
+    ///
+    /// Return VcpuInit with default value set
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn create_vcpu_init(&self) -> crate::VcpuInit {
+        kvm_bindings::kvm_vcpu_init::default().into()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn vcpu_init(&self, kvi: &crate::VcpuInit) -> cpu::Result<()> {
+        let kvm_kvi: kvm_bindings::kvm_vcpu_init = (*kvi).into();
         self.fd
             .lock()
             .unwrap()
-            .vcpu_init(kvi)
+            .vcpu_init(&kvm_kvi)
             .map_err(|e| cpu::HypervisorCpuError::VcpuInit(e.into()))
     }
 
@@ -2966,11 +3081,14 @@ impl cpu::Vcpu for KvmVcpu {
     /// KVM_GET_ONE_REG/KVM_SET_ONE_REG calls.
     ///
     fn get_reg_list(&self, reg_list: &mut RegList) -> cpu::Result<()> {
+        let mut kvm_reg_list: kvm_bindings::RegList = reg_list.clone().into();
         self.fd
             .lock()
             .unwrap()
-            .get_reg_list(reg_list)
-            .map_err(|e| cpu::HypervisorCpuError::GetRegList(e.into()))
+            .get_reg_list(&mut kvm_reg_list)
+            .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::GetRegList(e.into()))?;
+        *reg_list = kvm_reg_list.into();
+        Ok(())
     }
 
     ///
@@ -3258,8 +3376,8 @@ impl cpu::Vcpu for KvmVcpu {
         // Get systerm register
         // Call KVM_GET_REG_LIST to get all registers available to the guest.
         // For ArmV8 there are around 500 registers.
-        let mut sys_regs: Vec<Register> = Vec::new();
-        let mut reg_list = RegList::new(500).unwrap();
+        let mut sys_regs: Vec<kvm_bindings::kvm_one_reg> = Vec::new();
+        let mut reg_list = kvm_bindings::RegList::new(500).unwrap();
         self.fd
             .lock()
             .unwrap()
@@ -3311,8 +3429,8 @@ impl cpu::Vcpu for KvmVcpu {
         // Get non-core register
         // Call KVM_GET_REG_LIST to get all registers available to the guest.
         // For RISC-V 64-bit there are around 200 registers.
-        let mut sys_regs: Vec<Register> = Vec::new();
-        let mut reg_list = RegList::new(200).unwrap();
+        let mut sys_regs: Vec<kvm_bindings::kvm_one_reg> = Vec::new();
+        let mut reg_list = kvm_bindings::RegList::new(200).unwrap();
         self.fd
             .lock()
             .unwrap()

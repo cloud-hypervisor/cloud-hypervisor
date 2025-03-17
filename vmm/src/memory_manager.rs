@@ -1246,6 +1246,11 @@ impl MemoryManager {
             memory_manager.add_uefi_flash()?;
         }
 
+        #[cfg(target_arch = "riscv64")]
+        {
+            memory_manager.allocate_address_space()?;
+        }
+
         #[cfg(target_arch = "x86_64")]
         if let Some(sgx_epc_config) = sgx_epc_config {
             memory_manager.setup_sgx(sgx_epc_config)?;
@@ -1607,6 +1612,7 @@ impl MemoryManager {
             .checked_add(1)
             .ok_or(Error::GuestAddressOverFlow)?;
 
+        #[cfg(not(target_arch = "riscv64"))]
         if mem_end < arch::layout::MEM_32BIT_RESERVED_START {
             return Ok(arch::layout::RAM_64BIT_START);
         }

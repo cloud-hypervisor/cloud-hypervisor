@@ -175,7 +175,7 @@ pub enum IoEventAddress {
 pub enum CpuState {
     #[cfg(feature = "kvm")]
     Kvm(kvm::VcpuKvmState),
-    #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
+    #[cfg(feature = "mshv")]
     Mshv(mshv::VcpuMshvState),
 }
 
@@ -206,6 +206,27 @@ pub enum IrqRoutingEntry {
     Kvm(kvm_bindings::kvm_irq_routing_entry),
     #[cfg(feature = "mshv")]
     Mshv(mshv_bindings::mshv_user_irq_entry),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum VcpuInit {
+    #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
+    Kvm(kvm_bindings::kvm_vcpu_init),
+    #[cfg(all(feature = "mshv", target_arch = "aarch64"))]
+    Mshv(mshv_bindings::MshvVcpuInit),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RegList {
+    #[cfg(all(feature = "kvm", any(target_arch = "aarch64", target_arch = "riscv64")))]
+    Kvm(kvm_bindings::RegList),
+    #[cfg(all(feature = "mshv", target_arch = "aarch64"))]
+    Mshv(mshv_bindings::MshvRegList),
+}
+
+pub enum Register {
+    #[cfg(feature = "kvm")]
+    Kvm(kvm_bindings::kvm_one_reg),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]

@@ -7,7 +7,7 @@ concurrency:
 jobs:
   build:
     name: Tests (Rate-Limiter)
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'garm-jammy-16' }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'bare-metal-9950x' }}
     env:
       AUTH_DOWNLOAD_TOKEN: ${{ secrets.AUTH_DOWNLOAD_TOKEN }}
     steps:
@@ -16,16 +16,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Install Docker
-        if: ${{ github.event_name != 'pull_request' }}
-        run: |
-          sudo apt-get update
-          sudo apt-get -y install ca-certificates curl gnupg
-          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-          sudo chmod a+r /usr/share/keyrings/docker-archive-keyring.gpg
-          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-          sudo apt-get update
-          sudo apt install -y docker-ce docker-ce-cli
       - name: Run rate-limiter integration tests
         if: ${{ github.event_name != 'pull_request' }}
         timeout-minutes: 20

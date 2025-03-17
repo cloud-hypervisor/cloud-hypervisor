@@ -8,7 +8,6 @@ use kvm_bindings::{
     kvm_mp_state, kvm_one_reg, kvm_riscv_core, KVM_REG_RISCV_CORE, KVM_REG_RISCV_TYPE_MASK,
     KVM_REG_SIZE_MASK, KVM_REG_SIZE_U64,
 };
-pub use kvm_bindings::{kvm_one_reg as Register, RegList};
 pub use kvm_ioctls::{Cap, Kvm};
 use serde::{Deserialize, Serialize};
 
