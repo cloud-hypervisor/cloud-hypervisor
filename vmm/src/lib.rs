@@ -2282,14 +2282,16 @@ impl RequestHandler for Vmm {
                 vm,
                 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
                 self.hypervisor.clone(),
-                send_data_migration,
+                send_data_migration.clone(),
             )
             .map_err(|migration_err| {
                 error!("Migration failed: {:?}", migration_err);
 
-                // Stop logging dirty pages
-                if let Err(e) = vm.stop_dirty_log() {
-                    return e;
+                // Stop logging dirty pages only for non-local migrations
+                if !send_data_migration.local {
+                    if let Err(e) = vm.stop_dirty_log() {
+                        return e;
+                    }
                 }
 
                 if vm.get_state().unwrap() == VmState::Paused {
