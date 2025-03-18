@@ -23,7 +23,8 @@ use linux_loader::loader::elf::start_info::{
 };
 use thiserror::Error;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestMemory, GuestMemoryAtomic, GuestMemoryRegion, GuestUsize,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    GuestMemoryRegion, GuestUsize,
 };
 
 use crate::{GuestMemoryMmap, InitramfsConfig, RegionType};
@@ -825,7 +826,7 @@ pub fn generate_common_cpuid(
     Ok(cpuid)
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables, clippy::too_many_arguments)]
 pub fn configure_vcpu(
     vcpu: &Arc<dyn hypervisor::Vcpu>,
     id: u8,
@@ -834,6 +835,7 @@ pub fn configure_vcpu(
     kvm_hyperv: bool,
     cpu_vendor: CpuVendor,
     topology: Option<(u8, u8, u8)>,
+    setup_registers: bool,
 ) -> super::Result<()> {
     let x2apic_id = get_x2apic_id(id as u32, topology);
 
@@ -902,10 +904,7 @@ pub fn configure_vcpu(
 
     regs::setup_msrs(vcpu).map_err(Error::MsrsConfiguration)?;
     if let Some((kernel_entry_point, guest_memory)) = boot_setup {
-        #[cfg(not(all(feature = "sev_snp", feature = "kvm")))]
-        {
-            use vm_memory::GuestAddressSpace;
-
+        if setup_registers {
             regs::setup_regs(vcpu, kernel_entry_point).map_err(Error::RegsConfiguration)?;
             regs::setup_sregs(&guest_memory.memory(), vcpu).map_err(Error::SregsConfiguration)?;
         }
