@@ -486,7 +486,8 @@ pub struct PmemConfig {
 
 impl ApplyLandlock for PmemConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        landlock.add_rule_with_access(self.file.to_path_buf(), "rw")?;
+        let access = if self.discard_writes { "r" } else { "rw" };
+        landlock.add_rule_with_access(self.file.to_path_buf(), access)?;
         Ok(())
     }
 }
