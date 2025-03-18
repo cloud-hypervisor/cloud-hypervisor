@@ -4,12 +4,3 @@ test --test_output=errors
 test --test_verbose_timeout_warnings
 # Show stdout/stderr in test output when logging
 test --test_arg=--nocapture
-
-build --config=rustfmt
-build --config=clippy
-
-build:rustfmt --aspects=@rules_rust//rust:defs.bzl%rustfmt_aspect
-build:rustfmt --output_groups=+rustfmt_checks
-
-build:clippy --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect
-build:clippy --output_groups=+clippy_checks

@@ -536,7 +536,7 @@ enabled with `--landlock` and [fully documentated](docs/landlock.md). (#5170)
 
 ### Contributors
 
-Many thanks to everyone who has contributed to our release:
+Many thanks to everyone who has contributed to our release:  
 
 * Alyssa Ross <hi@alyssa.is>
 * Bo Chen <chen.bo@intel.com>
@@ -584,7 +584,7 @@ other file descriptor backed network devices. (#6286)
 
 ### Contributors
 
-Many thanks to everyone who has contributed to our release:
+Many thanks to everyone who has contributed to our release:  
 
 * Alexandru Matei <alexandru.matei@uipath.com>
 * Bo Chen <chen.bo@intel.com>
@@ -602,7 +602,7 @@ Many thanks to everyone who has contributed to our release:
 * Wei Liu <liuwe@microsoft.com>
 * Yi Wang <foxywang@tencent.com>
 * Yu Li <liyu.yukiteru@bytedance.com>
-*
+* 
 
 # v39.0
 
@@ -653,10 +653,10 @@ guest. (#6047)
 * Fix panic when running `ch-remote` with no subcommand (#6230)
 * Fix hotplug of `virtio` devices after snapshot/restore and live migration
   (#6326, #6265)
-
+  
 ### Contributors
 
-Many thanks to everyone who has contributed to our release:
+Many thanks to everyone who has contributed to our release:  
 
 * Alexandru Matei <alexandru.matei@uipath.com>
 * Andrew Carp <acarp@crusoeenergy.com>

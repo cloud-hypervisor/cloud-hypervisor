@@ -63,8 +63,8 @@ and then be considered EOL.
 + - Active release support
 E - EOL
 
-        2021                2022                2023
-         |    |    |    |    |    |    |    |    |
+        2021                2022                2023 
+         |    |    |    |    |    |    |    |    | 
 18.0     |    |    |  ++++++++E
 19.0     |    |    |    |++++++++E
 20.0     |    |    |    |   ++++++++E

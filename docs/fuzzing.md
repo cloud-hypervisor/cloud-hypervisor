@@ -6,13 +6,13 @@ The fuzzers are in the `fuzz/fuzz_targets` directory
 
 ## Preparation
 
-Switch to nightly:
+Switch to nightly: 
 
 ````
 rustup override set nightly
 ````
 
-Install `cargo fuzz`:
+Install `cargo fuzz`: 
 
 ```
 cargo install cargo-fuzz

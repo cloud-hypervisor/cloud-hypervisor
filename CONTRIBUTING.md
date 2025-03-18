@@ -58,17 +58,17 @@ For example:
 
 ```
 vm-virtio: Reset underlying device on driver request
-
+    
 If the driver triggers a reset by writing zero into the status register
 then reset the underlying device if supported. A device reset also
 requires resetting various aspects of the queue.
-
+    
 In order to be able to do a subsequent reactivate it is required to
 reclaim certain resources (interrupt and queue EventFDs.) If a device
 reset is requested by the driver but the underlying device does not
 support it then generate an error as the driver would not be able to
 configure it anyway.
-
+    
 Signed-off-by: Rob Bradford <robert.bradford@intel.com>
 ```
 
@@ -101,14 +101,14 @@ comments or by adding the `Fixes` keyword to your commit message:
 
 ```
 serial: Set terminal in raw mode
-
+    
 In order to have proper output from the serial, we need to setup the
 terminal in raw mode. When the VM is shutting down, it is also the
 VMM responsibility to set the terminal back into canonical mode if we
 don't want to get any weird behavior from the shell.
-
+    
 Fixes #88
-
+	
 Signed-off-by: Sebastien Boeuf <sebastien.boeuf@intel.com>
 ```
 

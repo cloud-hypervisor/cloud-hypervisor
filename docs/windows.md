@@ -4,7 +4,7 @@ Starting with the release version [0.10.0](https://github.com/cloud-hypervisor/c
 
 __Requirements__
 
-- Host with KVM enabled
+- Host with KVM enabled 
 - [UEFI](uefi.md) capable Windows guest image with Virtio drivers integrated
 
 Any modern Windows Server version is compatible. Cloud Hypervisor has been successfully tested with Windows Server 2019 and Windows Server Core 2004.
@@ -20,7 +20,7 @@ The subsequent sections will tell, in detail, how to prepare an appropriate Wind
 __Prerequisites__
 
 - QEMU, version >=5.0.0 is recommended.
-- Windows installation ISO. Obtained through MSDN, Visual Studio subscription, evaluation center, etc.
+- Windows installation ISO. Obtained through MSDN, Visual Studio subscription, evaluation center, etc. 
 - [VirtIO driver ISO](https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/)
 - Suitable firmware for Cloud Hypervisor (`CLOUDHV.fd`) and for QEMU (`OVMF.fd`)
 - With the suggested image size of 30G, there should be enough free disk space to hold the installation ISO and any other necessary files
@@ -105,15 +105,15 @@ bcdedit /ems on
 bcdedit /bootems on
 ```
 
-Once SAC is enabled, the image can be booted under Cloud Hypervisor. The SAC prompt will show up
+Once SAC is enabled, the image can be booted under Cloud Hypervisor. The SAC prompt will show up 
 
 <pre>
-Computer is booting, SAC started and initialized.
-
-Use the "ch -?" command for information about using channels.
-Use the "?" command for general help.
-
-
+Computer is booting, SAC started and initialized.                               
+                                                                                
+Use the "ch -?" command for information about using channels.                   
+Use the "?" command for general help.                                           
+                                                                                
+                                                                                
 SAC>
 </pre>
 
@@ -139,7 +139,7 @@ As the simplest option, using `--net tap=` in the Cloud Hypervisor command line 
 
 <pre>
 SAC>i 10 192.168.249.2 255.255.255.0 192.168.249.1
-</pre>
+</pre> 
 
 Where `10` is the device index as shown by the `i` command.
 
@@ -167,8 +167,8 @@ Set-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\" -Name
 Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 Add-LocalGroupMember -Group "Remote Desktop Users" -Member someuser
 ```
-
-Administrators can always RDP, non administrator users have to be explicitly enabled.
+ 
+Administrators can always RDP, non administrator users have to be explicitly enabled. 
 
 Once the configuration is set, RDP clients can connect to `192.168.249.2`.
 
@@ -203,7 +203,7 @@ The Windows guest debugging process relies heavily on QEMU and [socat](http://ww
 
 The connection between both guests happens over TCP, whereby on the guest side it is automatically translated to a COM port. Because the VMs are connected through TCP, the debugging infrastructure can be distributed over the network. The serial port, while slowly transferring data, is common enough to support a wide range of cases and tools.
 
-In this exercise, [WinDbg](https://docs.microsoft.com/en-us/windows-hardware/drivers/debugger/) is used. Any other debugger of choice with the ability to use serial connection can be used instead.
+In this exercise, [WinDbg](https://docs.microsoft.com/en-us/windows-hardware/drivers/debugger/) is used. Any other debugger of choice with the ability to use serial connection can be used instead. 
 
 ### Debugger and Debuggee
 
@@ -256,7 +256,7 @@ bcdedit /debug on
 bcdedit /bootdebug on
 ```
 
-##### Turn on boot manager debug
+##### Turn on boot manager debug 
 
 ```cmd
 bcdedit /set {bootmgr} bootdebug on

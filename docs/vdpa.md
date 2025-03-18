@@ -145,10 +145,10 @@ The `virtio-block` device backed by the vDPA simulator can be found as
 ```
 cloud@cloud:~$ lsblk
 NAME    MAJ:MIN RM  SIZE RO TYPE MOUNTPOINT
-nullb0  252:0    0  250G  0 disk
-vda     254:0    0  2.2G  0 disk
+nullb0  252:0    0  250G  0 disk 
+vda     254:0    0  2.2G  0 disk 
 ├─vda1  254:1    0  2.1G  0 part /
-├─vda14 254:14   0    4M  0 part
+├─vda14 254:14   0    4M  0 part 
 └─vda15 254:15   0  106M  0 part /boot/efi
 vdb     254:16   0  128M  0 disk
 ```
