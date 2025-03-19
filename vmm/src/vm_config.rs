@@ -239,6 +239,20 @@ pub struct VirtQueueAffinity {
     pub host_cpus: Vec<usize>,
 }
 
+/// The locking strategy for the file of a disk image, with respect to the
+/// corresponding `readonly` property.
+#[derive(Clone, Default, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub enum DiskLockStrategy {
+    Off,
+    // TODO switch the default to On in an upcoming release
+    #[default]
+    /// Warn when disk-images are already used by other processes and this
+    /// VM wants to have exclusive access. Don't acquire any locks.
+    Warn,
+    /// Enforce the acquiring of advisory file-system locks for disk image files.
+    On,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DiskConfig {
     pub path: Option<PathBuf>,
@@ -273,6 +287,9 @@ pub struct DiskConfig {
     pub serial: Option<String>,
     #[serde(default)]
     pub queue_affinity: Option<Vec<VirtQueueAffinity>>,
+    /// Whether the disk file should be locked (with respect to `readonly`).
+    #[serde(default)]
+    pub lock: DiskLockStrategy,
 }
 
 impl ApplyLandlock for DiskConfig {
