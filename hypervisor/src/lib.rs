@@ -217,16 +217,14 @@ pub enum Register {
     Kvm(kvm_bindings::kvm_one_reg),
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum StandardRegisters {
     #[cfg(all(feature = "kvm", not(target_arch = "riscv64")))]
     Kvm(kvm_bindings::kvm_regs),
     #[cfg(all(feature = "kvm", target_arch = "riscv64"))]
     Kvm(kvm_bindings::kvm_riscv_core),
-    #[cfg(all(
-        any(feature = "mshv", feature = "mshv_emulator"),
-        target_arch = "x86_64"
-    ))]
+    #[cfg(any(feature = "mshv", feature = "mshv_emulator"))]
     Mshv(mshv_bindings::StandardRegisters),
 }
 
@@ -313,6 +311,8 @@ macro_rules! set_aarch64_reg {
                     match self {
                         #[cfg(feature = "kvm")]
                         StandardRegisters::Kvm(s) => s.regs.$reg_name = val,
+                        #[cfg(feature = "mshv")]
+                        StandardRegisters::Mshv(s) => s.$reg_name = val,
                     }
                 }
             }
@@ -329,6 +329,8 @@ macro_rules! get_aarch64_reg {
                     match self {
                         #[cfg(feature = "kvm")]
                         StandardRegisters::Kvm(s) => s.regs.$reg_name,
+                        #[cfg(feature = "mshv")]
+                        StandardRegisters::Mshv(s) => s.$reg_name,
                     }
                 }
             }

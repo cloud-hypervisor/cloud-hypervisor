@@ -12,15 +12,19 @@ use std::sync::{Arc, RwLock};
 #[cfg(feature = "sev_snp")]
 use arc_swap::ArcSwap;
 use mshv_bindings::*;
-use mshv_ioctls::{set_registers_64, InterruptRequest, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
+#[cfg(target_arch = "x86_64")]
+use mshv_ioctls::{set_registers_64, InterruptRequest};
+use mshv_ioctls::{Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
 #[cfg(feature = "sev_snp")]
 use vm_memory::bitmap::AtomicBitmap;
 
+#[cfg(target_arch = "x86_64")]
 use crate::arch::emulator::PlatformEmulator;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::emulator::Emulator;
+#[cfg(target_arch = "x86_64")]
 use crate::mshv::emulator::MshvEmulatorContext;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::{cpu, hypervisor, vec_with_array_field, HypervisorType};
@@ -57,6 +61,8 @@ pub use {
     mshv_bindings::mshv_device_attr as DeviceAttr, mshv_ioctls, mshv_ioctls::DeviceFd,
 };
 
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
 #[cfg(target_arch = "x86_64")]
@@ -1300,22 +1306,22 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn get_reg_list(&self, reg_list: &mut RegList) -> cpu::Result<()> {
+    fn get_reg_list(&self, _reg_list: &mut crate::RegList) -> cpu::Result<()> {
         unimplemented!()
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn vcpu_init(&self, kvi: &VcpuInit) -> cpu::Result<()> {
+    fn vcpu_init(&self, _kvi: &crate::VcpuInit) -> cpu::Result<()> {
         unimplemented!()
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn set_regs(&self, regs: &StandardRegisters) -> cpu::Result<()> {
+    fn set_regs(&self, _regs: &crate::StandardRegisters) -> cpu::Result<()> {
         unimplemented!()
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn get_regs(&self) -> cpu::Result<StandardRegisters> {
+    fn get_regs(&self) -> cpu::Result<crate::StandardRegisters> {
         unimplemented!()
     }
 
@@ -2182,7 +2188,7 @@ impl vm::Vm for MshvVm {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn get_preferred_target(&self, kvi: &mut VcpuInit) -> vm::Result<()> {
+    fn get_preferred_target(&self, _kvi: &mut crate::VcpuInit) -> vm::Result<()> {
         unimplemented!()
     }
 
