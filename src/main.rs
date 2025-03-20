@@ -176,58 +176,163 @@ fn default_rng() -> String {
     format!("src={}", vm_config::DEFAULT_RNG_SOURCE)
 }
 
-fn create_app(default_vcpus: String, default_memory: String, default_rng: String) -> Command {
-    #[allow(clippy::let_and_return)]
-    let app = Command::new("cloud-hypervisor")
-        // 'BUILD_VERSION' is set by the build script 'build.rs' at
-        // compile time
-        .author(env!("CARGO_PKG_AUTHORS"))
-        .about("Launch a cloud-hypervisor VMM.")
-        .arg_required_else_help(true)
-        .group(ArgGroup::new("vm-config").multiple(true).requires("vm-payload"))
-        .group(ArgGroup::new("vmm-config").multiple(true))
-        .group(ArgGroup::new("logging").multiple(true))
-        .group(ArgGroup::new("vm-payload").multiple(true))
-        .arg(
-            Arg::new("cpus")
-                .long("cpus")
-                .help(
-                    "boot=<boot_vcpus>,max=<max_vcpus>,\
+/// Returns all [`Arg`]s in alphabetical order. This is the order used in the
+/// `--help` output.
+fn get_cli_options_sorted(
+    default_vcpus: String,
+    default_memory: String,
+    default_rng: String,
+) -> Box<[Arg]> {
+    [
+        Arg::new("api-socket")
+            .long("api-socket")
+            .help("HTTP API socket (UNIX domain socket): path=</path/to/a/file> or fd=<fd>.")
+            .num_args(1)
+            .group("vmm-config"),
+        Arg::new("balloon")
+            .long("balloon")
+            .help(BalloonConfig::SYNTAX)
+            .num_args(1)
+            .group("vm-config"),
+        Arg::new("cmdline")
+            .long("cmdline")
+            .help("Kernel command line")
+            .num_args(1)
+            .group("vm-config"), Arg::new("console")
+            .long("console")
+            .help(
+                "Control (virtio) console: \"off|null|pty|tty|file=</path/to/a/file>,iommu=on|off\"",
+            )
+            .default_value("tty")
+            .group("vm-config"),
+        Arg::new("cpus")
+            .long("cpus")
+            .help(
+                "boot=<boot_vcpus>,max=<max_vcpus>,\
                     topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,\
                     kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,\
                     affinity=<list_of_vcpus_with_their_associated_cpuset>,\
                     features=<list_of_features_to_enable>",
-                )
-                .default_value(default_vcpus)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("platform")
-                .long("platform")
-                .help("num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,iommu_address_width=<bits>,serial_number=<dmi_device_serial_number>,uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>")
-                .num_args(1)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("memory")
-                .long("memory")
-                .help(
-                    "Memory parameters \
+            )
+            .default_value(default_vcpus)
+            .group("vm-config"),
+        #[cfg(target_arch = "x86_64")]
+        Arg::new("debug-console")
+            .long("debug-console")
+            .help("Debug console: off|pty|tty|file=</path/to/a/file>,iobase=<port in hex>")
+            .default_value("off,iobase=0xe9")
+            .group("vm-config"),
+        #[cfg(feature = "dbus_api")]
+        Arg::new("dbus-service-name")
+            .long("dbus-service-name")
+            .help("Well known name of the device")
+            .num_args(1)
+            .group("vmm-config"),
+        #[cfg(feature = "dbus_api")]
+        Arg::new("dbus-object-path")
+            .long("dbus-object-path")
+            .help("Object path to serve the dbus interface")
+            .num_args(1)
+            .group("vmm-config"),
+        #[cfg(feature = "dbus_api")]
+        Arg::new("dbus-system-bus")
+            .long("dbus-system-bus")
+            .action(ArgAction::SetTrue)
+            .help("Use the system bus instead of a session bus")
+            .num_args(0)
+            .group("vmm-config"),
+        Arg::new("device")
+            .long("device")
+            .help(DeviceConfig::SYNTAX)
+            .num_args(1..)
+            .group("vm-config"),
+        Arg::new("disk")
+            .long("disk")
+            .help(DiskConfig::SYNTAX)
+            .num_args(1..)
+            .group("vm-config"),
+        Arg::new("event-monitor")
+            .long("event-monitor")
+            .help("File to report events on: path=</path/to/a/file> or fd=<fd>")
+            .num_args(1)
+            .group("vmm-config"),
+        Arg::new("firmware")
+            .long("firmware")
+            .help("Path to firmware that is loaded in an architectural specific way")
+            .num_args(1)
+            .group("vm-payload"),
+        Arg::new("fs")
+            .long("fs")
+            .help(FsConfig::SYNTAX)
+            .num_args(1..)
+            .group("vm-config"),
+        #[cfg(feature = "guest_debug")]
+        Arg::new("gdb")
+            .long("gdb")
+            .help("GDB socket (UNIX domain socket): path=</path/to/a/file>")
+            .num_args(1)
+            .group("vmm-config"),
+        #[cfg(feature = "igvm")]
+        Arg::new("igvm")
+            .long("igvm")
+            .help("Path to IGVM file to load.")
+            .num_args(1)
+            .group("vm-payload"),
+        #[cfg(feature = "sev_snp")]
+        Arg::new("host-data")
+            .long("host-data")
+            .help("Host specific data to SEV SNP guest")
+            .num_args(1)
+            .group("vm-config"),
+        Arg::new("initramfs")
+            .long("initramfs")
+            .help("Path to initramfs image")
+            .num_args(1)
+            .group("vm-config"),
+        Arg::new("kernel")
+            .long("kernel")
+            .help(
+                "Path to kernel to load. This may be a kernel or firmware that supports a PVH \
+                entry point (e.g. vmlinux) or architecture equivalent",
+            )
+            .num_args(1)
+            .group("vm-payload"),
+        Arg::new("landlock")
+            .long("landlock")
+            .num_args(0)
+            .help(
+                "enable/disable Landlock.",
+            )
+            .action(ArgAction::SetTrue)
+            .default_value("false")
+            .group("vm-config"),
+        Arg::new("landlock-rules")
+            .long("landlock-rules")
+            .help(LandlockConfig::SYNTAX)
+            .num_args(1..)
+            .group("vm-config"),
+        Arg::new("log-file")
+            .long("log-file")
+            .help("Log file. Standard error is used if not specified")
+            .num_args(1)
+            .group("logging"),
+        Arg::new("memory")
+            .long("memory")
+            .help(
+                "Memory parameters \
                      \"size=<guest_memory_size>,mergeable=on|off,shared=on|off,\
                      hugepages=on|off,hugepage_size=<hugepage_size>,\
                      hotplug_method=acpi|virtio-mem,\
                      hotplug_size=<hotpluggable_memory_size>,\
                      hotplugged_size=<hotplugged_memory_size>,\
                      prefault=on|off,thp=on|off\"",
-                )
-                .default_value(default_memory)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("memory-zone")
-                .long("memory-zone")
-                .help(
-                    "User defined memory zone parameters \
+            )
+            .default_value(default_memory)
+            .group("vm-config"),
+        Arg::new("memory-zone")
+            .long("memory-zone")
+            .help(
+                "User defined memory zone parameters \
                      \"size=<guest_memory_region_size>,file=<backing_file>,\
                      shared=on|off,\
                      hugepages=on|off,hugepage_size=<hugepage_size>,\
@@ -235,328 +340,150 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                      id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,\
                      hotplugged_size=<hotplugged_memory_size>,\
                      prefault=on|off\"",
-                )
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("firmware")
-                .long("firmware")
-                .help("Path to firmware that is loaded in an architectural specific way")
-                .num_args(1)
-                .group("vm-payload"),
-        )
-        .arg(
-            Arg::new("kernel")
-                .long("kernel")
-                .help(
-                    "Path to kernel to load. This may be a kernel or firmware that supports a PVH \
-                entry point (e.g. vmlinux) or architecture equivalent",
-                )
-                .num_args(1)
-                .group("vm-payload"),
-        )
-        .arg(
-            Arg::new("initramfs")
-                .long("initramfs")
-                .help("Path to initramfs image")
-                .num_args(1)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("cmdline")
-                .long("cmdline")
-                .help("Kernel command line")
-                .num_args(1)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("rate-limit-group")
-                .long("rate-limit-group")
-                .help(RateLimiterGroupConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("disk")
-                .long("disk")
-                .help(DiskConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("landlock")
-                .long("landlock")
-                .num_args(0)
-                .help(
-                    "enable/disable Landlock.",
-                )
-                .action(ArgAction::SetTrue)
-                .default_value("false")
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("landlock-rules")
-            .long("landlock-rules")
-            .help(LandlockConfig::SYNTAX)
+            )
             .num_args(1..)
             .group("vm-config"),
-        )
-        .arg(
-            Arg::new("net")
-                .long("net")
-                .help(NetConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("rng")
-                .long("rng")
-                .help(
-                    "Random number generator parameters \"src=<entropy_source_path>,iommu=on|off\"",
-                )
-                .default_value(default_rng)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("balloon")
-                .long("balloon")
-                .help(BalloonConfig::SYNTAX)
-                .num_args(1)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("fs")
-                .long("fs")
-                .help(FsConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("pmem")
-                .long("pmem")
-                .help(PmemConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("serial")
-                .long("serial")
-                .help("Control serial port: off|null|pty|tty|file=</path/to/a/file>|socket=</path/to/a/file>")
-                .default_value("null")
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("console")
-                .long("console")
-                .help(
-                    "Control (virtio) console: \"off|null|pty|tty|file=</path/to/a/file>,iommu=on|off\"",
-                )
-                .default_value("tty")
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("device")
-                .long("device")
-                .help(DeviceConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("user-device")
-                .long("user-device")
-                .help(UserDeviceConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("vdpa")
-                .long("vdpa")
-                .help(VdpaConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("vsock")
-                .long("vsock")
-                .help(VsockConfig::SYNTAX)
-                .num_args(1)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("pvpanic")
-                .long("pvpanic")
-                .help("Enable pvpanic device")
-                .num_args(0)
-                .action(ArgAction::SetTrue)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("numa")
-                .long("numa")
-                .help(NumaConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("pci-segment")
-                .long("pci-segment")
-                .help(PciSegmentConfig::SYNTAX)
-                .num_args(1..)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("watchdog")
-                .long("watchdog")
-                .help("Enable virtio-watchdog")
-                .num_args(0)
-                .action(ArgAction::SetTrue)
-                .group("vm-config"),
-        )
-        .arg(
-            Arg::new("v")
-                .short('v')
-                .action(ArgAction::Count)
-                .help("Sets the level of debugging output")
-                .group("logging"),
-        )
-        .arg(
-            Arg::new("log-file")
-                .long("log-file")
-                .help("Log file. Standard error is used if not specified")
-                .num_args(1)
-                .group("logging"),
-        )
-        .arg(
-            Arg::new("api-socket")
-                .long("api-socket")
-                .help("HTTP API socket (UNIX domain socket): path=</path/to/a/file> or fd=<fd>.")
-                .num_args(1)
-                .group("vmm-config"),
-        )
-        .arg(
-            Arg::new("event-monitor")
-                .long("event-monitor")
-                .help("File to report events on: path=</path/to/a/file> or fd=<fd>")
-                .num_args(1)
-                .group("vmm-config"),
-        )
-        .arg(
-            Arg::new("restore")
-                .long("restore")
-                .help(RestoreConfig::SYNTAX)
-                .num_args(1)
-                .group("vmm-config"),
-        )
-        .arg(
-            Arg::new("seccomp")
-                .long("seccomp")
-                .num_args(1)
-                .value_parser(["true", "false", "log"])
-                .default_value("true"),
-        )
-        .arg(
-            Arg::new("tpm")
-                .long("tpm")
-                .num_args(1)
-                .help(TpmConfig::SYNTAX)
-                .group("vm-config"),
-        );
-
-    #[cfg(target_arch = "x86_64")]
-    let app = app.arg(
-        Arg::new("sgx-epc")
-            .long("sgx-epc")
-            .help(SgxEpcConfig::SYNTAX)
+        Arg::new("net")
+            .long("net")
+            .help(NetConfig::SYNTAX)
             .num_args(1..)
             .group("vm-config"),
-    );
-
-    #[cfg(target_arch = "x86_64")]
-    let app = app.arg(
-        Arg::new("debug-console")
-            .long("debug-console")
-            .help("Debug console: off|pty|tty|file=</path/to/a/file>,iobase=<port in hex>")
-            .default_value("off,iobase=0xe9")
+        Arg::new("numa")
+            .long("numa")
+            .help(NumaConfig::SYNTAX)
+            .num_args(1..)
             .group("vm-config"),
-    );
-
-    #[cfg(feature = "guest_debug")]
-    let app = app.arg(
-        Arg::new("gdb")
-            .long("gdb")
-            .help("GDB socket (UNIX domain socket): path=</path/to/a/file>")
-            .num_args(1)
-            .group("vmm-config"),
-    );
-
-    #[cfg(feature = "dbus_api")]
-    let app = app
-        .arg(
-            Arg::new("dbus-service-name")
-                .long("dbus-service-name")
-                .help("Well known name of the device")
-                .num_args(1)
-                .group("vmm-config"),
-        )
-        .arg(
-            Arg::new("dbus-object-path")
-                .long("dbus-object-path")
-                .help("Object path to serve the dbus interface")
-                .num_args(1)
-                .group("vmm-config"),
-        )
-        .arg(
-            Arg::new("dbus-system-bus")
-                .long("dbus-system-bus")
-                .action(ArgAction::SetTrue)
-                .help("Use the system bus instead of a session bus")
-                .num_args(0)
-                .group("vmm-config"),
-        );
-    #[cfg(feature = "igvm")]
-    let app = app.arg(
-        Arg::new("igvm")
-            .long("igvm")
-            .help("Path to IGVM file to load.")
-            .num_args(1)
-            .group("vm-payload"),
-    );
-    #[cfg(feature = "sev_snp")]
-    let app = app.arg(
-        Arg::new("host-data")
-            .long("host-data")
-            .help("Host specific data to SEV SNP guest")
+        Arg::new("pci-segment")
+            .long("pci-segment")
+            .help(PciSegmentConfig::SYNTAX)
+            .num_args(1..)
+            .group("vm-config"),
+        Arg::new("platform")
+            .long("platform")
+            .help(
+                "num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,iommu_address_width=<bits>,serial_number=<dmi_device_serial_number>,uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>"
+            )
             .num_args(1)
             .group("vm-config"),
-    );
-    #[cfg(feature = "sev_snp")]
-    let app = app.arg(
-        Arg::new("sev_device_path")
-            .long("sev_device_path")
-            .help("Path to the sev device")
-            .num_args(1)
-            .group("vm-config")
-            .default_value("/dev/sev"),
-    );
-    #[cfg(feature = "pvmemcontrol")]
-    let app = app.arg(
+        Arg::new("pmem")
+            .long("pmem")
+            .help(PmemConfig::SYNTAX)
+            .num_args(1..)
+            .group("vm-config"),
+        #[cfg(feature = "pvmemcontrol")]
         Arg::new("pvmemcontrol")
             .long("pvmemcontrol")
             .help("Pvmemcontrol device")
             .num_args(0)
             .action(ArgAction::SetTrue)
             .group("vm-config"),
-    );
-
-    app.arg(
+        Arg::new("pvpanic")
+            .long("pvpanic")
+            .help("Enable pvpanic device")
+            .num_args(0)
+            .action(ArgAction::SetTrue)
+            .group("vm-config"),
+        Arg::new("rate-limit-group")
+            .long("rate-limit-group")
+            .help(RateLimiterGroupConfig::SYNTAX)
+            .num_args(1..)
+            .group("vm-config"),
+        Arg::new("restore")
+            .long("restore")
+            .help(RestoreConfig::SYNTAX)
+            .num_args(1)
+            .group("vmm-config"),
+        Arg::new("rng")
+            .long("rng")
+            .help(
+                "Random number generator parameters \"src=<entropy_source_path>,iommu=on|off\"",
+            )
+            .default_value(default_rng)
+            .group("vm-config"),
+        Arg::new("seccomp")
+            .long("seccomp")
+            .num_args(1)
+            .value_parser(["true", "false", "log"])
+            .default_value("true"),
+        Arg::new("serial")
+            .long("serial")
+            .help("Control serial port: off|null|pty|tty|file=</path/to/a/file>|socket=</path/to/a/file>")
+            .default_value("null")
+            .group("vm-config"),
+        #[cfg(feature = "sev_snp")]
+        Arg::new("sev_device_path")
+                .long("sev_device_path")
+                .help("Path to the sev device")
+                .num_args(1)
+                .group("vm-config")
+                .default_value("/dev/sev"),
+        #[cfg(target_arch = "x86_64")]
+        Arg::new("sgx-epc")
+            .long("sgx-epc")
+            .help(SgxEpcConfig::SYNTAX)
+            .num_args(1..)
+            .group("vm-config"),
+        Arg::new("tpm")
+            .long("tpm")
+            .num_args(1)
+            .help(TpmConfig::SYNTAX)
+            .group("vm-config"),
+        Arg::new("user-device")
+            .long("user-device")
+            .help(UserDeviceConfig::SYNTAX)
+            .num_args(1..)
+            .group("vm-config"),
+        Arg::new("v")
+            .short('v')
+            .action(ArgAction::Count)
+            .help("Sets the level of debugging output")
+            .group("logging"),
+        Arg::new("vdpa")
+            .long("vdpa")
+            .help(VdpaConfig::SYNTAX)
+            .num_args(1..)
+            .group("vm-config"),
         Arg::new("version")
             .short('V')
             .long("version")
             .action(ArgAction::SetTrue)
             .help("Print version")
             .num_args(0),
-    )
+        Arg::new("vsock")
+            .long("vsock")
+            .help(VsockConfig::SYNTAX)
+            .num_args(1)
+            .group("vm-config"),
+        Arg::new("watchdog")
+            .long("watchdog")
+            .help("Enable virtio-watchdog")
+            .num_args(0)
+            .action(ArgAction::SetTrue)
+            .group("vm-config"),
+    ].to_vec().into_boxed_slice()
+}
+
+/// Creates the CLI definition of Cloud Hypervisor.
+fn create_app(default_vcpus: String, default_memory: String, default_rng: String) -> Command {
+    let groups = [
+        ArgGroup::new("vm-config")
+            .multiple(true)
+            .requires("vm-payload"),
+        ArgGroup::new("vmm-config").multiple(true),
+        ArgGroup::new("logging").multiple(true),
+        ArgGroup::new("vm-payload").multiple(true),
+    ];
+
+    let args = get_cli_options_sorted(default_vcpus, default_memory, default_rng);
+
+    Command::new("cloud-hypervisor")
+        // 'BUILD_VERSION' is set by the build script 'build.rs' at
+        // compile time
+        .author(env!("CARGO_PKG_AUTHORS"))
+        .about("Launch a cloud-hypervisor VMM.")
+        .arg_required_else_help(true)
+        .groups(groups)
+        .args(args)
 }
 
 fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
@@ -989,6 +916,7 @@ fn main() {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::cmp::Ordering;
     use std::path::PathBuf;
 
     use vmm::config::VmParams;
@@ -999,7 +927,7 @@ mod unit_tests {
         PayloadConfig, RngConfig, VmConfig,
     };
 
-    use crate::{create_app, prepare_default_values};
+    use crate::{create_app, get_cli_options_sorted, prepare_default_values};
 
     fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {
         let (default_vcpus, default_memory, default_rng) = prepare_default_values();
@@ -2098,5 +2026,25 @@ mod unit_tests {
         .for_each(|(cli, openapi, equal)| {
             compare_vm_config_cli_vs_json(cli, openapi, *equal);
         });
+    }
+
+    // TODO the check for the option list being sorted could be moved into the
+    // getter itself, when the getter becomes a const function. This however
+    // needs more support by Rust (as of March 2025).
+    #[test]
+    fn test_cli_options_sorted() {
+        let (default_vcpus, default_memory, default_rng) = prepare_default_values();
+        let args = get_cli_options_sorted(default_vcpus, default_memory, default_rng);
+
+        let iter = args.iter().zip(args.iter().skip(1));
+        for (elem, next) in iter {
+            assert_ne!(
+                elem.get_id().cmp(next.get_id()),
+                Ordering::Greater,
+                "items not alphabetically sorted: elem={}, next={}",
+                elem.get_id(),
+                next.get_id()
+            );
+        }
     }
 }
