@@ -30,7 +30,6 @@ use arch::aarch64::regs;
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::get_x2apic_id;
 use arch::{EntryPoint, NumaNodes};
-use devices::acpi::{OEM_ID, OEM_REVISION};
 #[cfg(target_arch = "aarch64")]
 use devices::gic::Gic;
 use devices::interrupt_controller::InterruptController;
@@ -1418,7 +1417,7 @@ impl CpuManager {
         // This is also checked in the commandline parsing.
         assert!(self.config.boot_vcpus <= self.config.max_vcpus);
 
-        let mut madt = Sdt::new(*b"APIC", 44, 5, OEM_ID, *b"CHMADT  ", OEM_REVISION);
+        let mut madt = Sdt::new(*b"APIC", 44, 5, *b"CLOUDH", *b"CHMADT  ", 1);
         #[cfg(target_arch = "x86_64")]
         {
             madt.write(36, arch::layout::APIC_START.0);
