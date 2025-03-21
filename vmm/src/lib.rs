@@ -1209,9 +1209,6 @@ impl Vmm {
 
             // Send last batch of dirty pages
             Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
-
-            // Stop logging dirty pages
-            vm.stop_dirty_log()?;
         }
         // Capture snapshot and send it
         let vm_snapshot = vm.snapshot()?;
@@ -1230,6 +1227,11 @@ impl Vmm {
             &mut socket,
             MigratableError::MigrateSend(anyhow!("Error completing migration")),
         )?;
+
+        // Stop logging dirty pages
+        if !send_data_migration.local {
+            vm.stop_dirty_log()?;
+        }
 
         info!("Migration complete");
 
@@ -2282,14 +2284,16 @@ impl RequestHandler for Vmm {
                 vm,
                 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
                 self.hypervisor.clone(),
-                send_data_migration,
+                send_data_migration.clone(),
             )
             .map_err(|migration_err| {
                 error!("Migration failed: {:?}", migration_err);
 
-                // Stop logging dirty pages
-                if let Err(e) = vm.stop_dirty_log() {
-                    return e;
+                // Stop logging dirty pages only for non-local migrations
+                if !send_data_migration.local {
+                    if let Err(e) = vm.stop_dirty_log() {
+                        return e;
+                    }
                 }
 
                 if vm.get_state().unwrap() == VmState::Paused {
