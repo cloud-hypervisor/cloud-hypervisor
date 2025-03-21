@@ -8,6 +8,9 @@
 //
 //
 
+#[cfg(feature = "sev_snp")]
+pub(crate) mod sev;
+
 use serde::{Deserialize, Serialize};
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms

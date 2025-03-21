@@ -39,7 +39,11 @@ use devices::AcpiNotificationFlags;
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
+#[cfg(feature = "sev_snp")]
+use hypervisor::kvm::KVM_X86_SNP_VM;
 use hypervisor::{HypervisorVmError, VmOps};
+#[cfg(feature = "sev_snp")]
+use igvm_defs::SnpPolicy;
 use libc::{termios, SIGWINCH};
 use linux_loader::cmdline::Cmdline;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -327,6 +331,15 @@ pub enum Error {
 
     #[error("Error creating console devices")]
     CreateConsoleDevices(ConsoleDeviceError),
+
+    #[error("Fw Cfg missing kernel file")]
+    FwCfgKernelFile,
+
+    #[error("Fw Cfg missing initramfs")]
+    FwCfgInitramfs,
+
+    #[error("Fw Cfg missing kernel cmdline")]
+    FwCfgCmdline,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -479,6 +492,16 @@ pub struct Vm {
 impl Vm {
     pub const HANDLED_SIGNALS: [i32; 1] = [SIGWINCH];
 
+    #[cfg(feature = "sev_snp")]
+    pub fn get_default_sev_snp_guest_policy() -> igvm_defs::SnpPolicy {
+        SnpPolicy::new()
+            .with_abi_minor(0)
+            .with_abi_major(0)
+            .with_smt(1)
+            .with_reserved_must_be_one(1)
+            .with_migrate_ma(0)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
@@ -613,9 +636,10 @@ impl Vm {
         // This initial SEV-SNP configuration must be done immediately after
         // vCPUs are created. As part of this initialization we are
         // transitioning the guest into secure state.
-        #[cfg(feature = "sev_snp")]
+        #[cfg(all(feature = "sev_snp", feature = "igvm"))]
         if sev_snp_enabled {
-            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
+            vm.sev_snp_init(Vm::get_default_sev_snp_guest_policy())
+                .map_err(Error::InitializeSevSnpVm)?;
         }
 
         #[cfg(feature = "tdx")]
@@ -869,6 +893,18 @@ impl Vm {
             .map_err(Error::MemoryManager)?
         };
 
+        #[cfg(target_arch = "x86_64")]
+        // Note: For x86, always call this function before invoking start boot vcpus.
+        // Otherwise guest would fail to boot because we haven't created the
+        // userspace mappings to update the hypervisor about the memory mappings.
+        // These mappings must be created before we start the vCPU threads for
+        // the very first time.
+        memory_manager
+            .lock()
+            .unwrap()
+            .allocate_address_space()
+            .map_err(Error::MemoryManager)?;
+
         Vm::new_from_memory_manager(
             vm_config,
             memory_manager,
@@ -908,10 +944,17 @@ impl Vm {
             } else if #[cfg(feature = "sev_snp")] {
                 // Passing SEV_SNP_ENABLED: 1 if sev_snp_enabled is true
                 // Otherwise SEV_SNP_DISABLED: 0
+                let vm = if sev_snp_enabled {
+                // vm type KVM_X86_SNP_VM = 4 in Kernel 6.11
+                hypervisor
+                    .create_vm_with_type(KVM_X86_SNP_VM.into())
+                    .unwrap()
+                } else {
                 // value of sev_snp_enabled is mapped to SEV_SNP_ENABLED for true or SEV_SNP_DISABLED for false
-                let vm = hypervisor
+                hypervisor
                     .create_vm_with_type_and_memory(u64::from(sev_snp_enabled), mem_size)
-                    .unwrap();
+                    .unwrap()
+                };
             } else {
                 let vm = hypervisor.create_vm().unwrap();
             }
@@ -1063,6 +1106,7 @@ impl Vm {
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
     ) -> Result<EntryPoint> {
+
         let res = igvm_loader::load_igvm(
             &igvm,
             memory_manager,
@@ -1150,19 +1194,20 @@ impl Vm {
         payload: &PayloadConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
         #[cfg(feature = "igvm")] cpu_manager: Arc<Mutex<cpu::CpuManager>>,
-        #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
+        #[cfg(feature = "sev_snp")] _sev_snp_enabled: bool,
     ) -> Result<EntryPoint> {
         trace_scoped!("load_payload");
         #[cfg(feature = "igvm")]
         {
             if let Some(_igvm_file) = &payload.igvm {
                 let igvm = File::open(_igvm_file).map_err(Error::IgvmFile)?;
-                #[cfg(feature = "sev_snp")]
-                if sev_snp_enabled {
-                    return Self::load_igvm(igvm, memory_manager, cpu_manager, &payload.host_data);
-                }
-                #[cfg(not(feature = "sev_snp"))]
-                return Self::load_igvm(igvm, memory_manager, cpu_manager);
+                return Self::load_igvm(
+                    igvm,
+                    memory_manager,
+                    cpu_manager,
+                    #[cfg(feature = "sev_snp")]
+                    &payload.host_data,
+                );
             }
         }
         match (
@@ -2187,7 +2232,7 @@ impl Vm {
                     // In case of SEV-SNP guest ACPI tables are provided via
                     // IGVM. So skip the creation of ACPI tables and set the
                     // rsdp addr to None.
-                    None
+                    self.create_acpi_tables()
                 } else {
                     self.create_acpi_tables()
                 };
@@ -2248,18 +2293,6 @@ impl Vm {
 
         #[cfg(target_arch = "riscv64")]
         self.configure_system().unwrap();
-
-        #[cfg(target_arch = "x86_64")]
-        // Note: For x86, always call this function before invoking start boot vcpus.
-        // Otherwise guest would fail to boot because we haven't created the
-        // userspace mappings to update the hypervisor about the memory mappings.
-        // These mappings must be created before we start the vCPU threads for
-        // the very first time.
-        self.memory_manager
-            .lock()
-            .unwrap()
-            .allocate_address_space()
-            .map_err(Error::MemoryManager)?;
 
         #[cfg(feature = "tdx")]
         if let Some(hob_address) = hob_address {

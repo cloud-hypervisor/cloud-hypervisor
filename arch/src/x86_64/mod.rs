@@ -23,8 +23,7 @@ use linux_loader::loader::elf::start_info::{
 };
 use thiserror::Error;
 use vm_memory::{
-    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
-    GuestMemoryRegion, GuestUsize,
+    Address, Bytes, GuestAddress, GuestMemory, GuestMemoryAtomic, GuestMemoryRegion, GuestUsize,
 };
 
 use crate::{GuestMemoryMmap, InitramfsConfig, RegionType};
@@ -56,6 +55,8 @@ const KVM_FEATURE_ASYNC_PF_BIT: u8 = 4;
 const KVM_FEATURE_ASYNC_PF_VMEXIT_BIT: u8 = 10;
 #[cfg(feature = "tdx")]
 const KVM_FEATURE_STEAL_TIME_BIT: u8 = 5;
+// See section E.4.17 of https://tinyurl.com/amd-arch
+const ENCRYPTED_MEM_CAP_CPUID_FN: u32 = 0x8000_001f;
 
 pub const _NSIG: i32 = 65;
 
@@ -824,6 +825,7 @@ pub fn generate_common_cpuid(
     Ok(cpuid)
 }
 
+#[allow(unused_variables)]
 pub fn configure_vcpu(
     vcpu: &Arc<dyn hypervisor::Vcpu>,
     id: u8,
@@ -900,9 +902,14 @@ pub fn configure_vcpu(
 
     regs::setup_msrs(vcpu).map_err(Error::MsrsConfiguration)?;
     if let Some((kernel_entry_point, guest_memory)) = boot_setup {
-        regs::setup_regs(vcpu, kernel_entry_point).map_err(Error::RegsConfiguration)?;
+        #[cfg(not(all(feature = "sev_snp", feature = "kvm")))]
+        {
+            use vm_memory::GuestAddressSpace;
+
+            regs::setup_regs(vcpu, kernel_entry_point).map_err(Error::RegsConfiguration)?;
+            regs::setup_sregs(&guest_memory.memory(), vcpu).map_err(Error::SregsConfiguration)?;
+        }
         regs::setup_fpu(vcpu).map_err(Error::FpuConfiguration)?;
-        regs::setup_sregs(&guest_memory.memory(), vcpu).map_err(Error::SregsConfiguration)?;
     }
     interrupts::set_lint(vcpu).map_err(|e| Error::LocalIntConfiguration(e.into()))?;
     Ok(())
@@ -1347,11 +1354,11 @@ pub fn get_host_cpu_phys_bits(hypervisor: &Arc<dyn hypervisor::Hypervisor>) -> u
         // Detect and handle AMD SME (Secure Memory Encryption) properly.
         // Some physical address bits may become reserved when the feature is enabled.
         // See AMD64 Architecture Programmer's Manual Volume 2, Section 7.10.1
-        let reduced = if leaf.eax >= 0x8000_001f
+        let reduced = if leaf.eax >= ENCRYPTED_MEM_CAP_CPUID_FN
             && matches!(hypervisor.get_cpu_vendor(), CpuVendor::AMD)
-            && x86_64::__cpuid(0x8000_001f).eax & 0x1 != 0
+            && x86_64::__cpuid(ENCRYPTED_MEM_CAP_CPUID_FN).eax & 0x1 != 0
         {
-            (x86_64::__cpuid(0x8000_001f).ebx >> 6) & 0x3f
+            (x86_64::__cpuid(ENCRYPTED_MEM_CAP_CPUID_FN).ebx >> 6) & 0x3f
         } else {
             0
         };

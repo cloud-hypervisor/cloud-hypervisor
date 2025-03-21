@@ -410,6 +410,13 @@ fn get_cli_options_sorted(
             .help("Control serial port: off|null|pty|tty|file=</path/to/a/file>|socket=</path/to/a/file>")
             .default_value("null")
             .group("vm-config"),
+        #[cfg(feature = "sev_snp")]
+        Arg::new("sev_device_path")
+                .long("sev_device_path")
+                .help("Path to the sev device")
+                .num_args(1)
+                .group("vm-config")
+                .default_value("/dev/sev"),
         #[cfg(target_arch = "x86_64")]
         Arg::new("sgx-epc")
             .long("sgx-epc")
