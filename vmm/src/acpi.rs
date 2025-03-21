@@ -192,8 +192,6 @@ pub fn create_dsdt_table(
     dsdt
 }
 
-pub const FACP_DSDT_OFFSET: usize = 140;
-
 fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Arc<Mutex<DeviceManager>>) -> Sdt {
     trace_scoped!("create_facp_table");
 
@@ -243,7 +241,7 @@ fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Arc<Mutex<Devic
     // FADT minor version
     facp.write(131, 3u8);
     // X_DSDT
-    facp.write(FACP_DSDT_OFFSET, dsdt_offset.0);
+    facp.write(140, dsdt_offset.0);
     // Hypervisor Vendor Identity
     facp.write_bytes(268, b"CLOUDHYP");
 
@@ -530,14 +528,7 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
     let iort_table_size: u32 = (ACPI_IORT_NODE_ROOT_COMPLEX_OFFSET
         + ACPI_IORT_NODE_ROOT_COMPLEX_SIZE * pci_segments.len())
         as u32;
-    let mut iort = Sdt::new(
-        *b"IORT",
-        iort_table_size,
-        2,
-        *b"CLOUDH",
-        *b"CHIORT  ",
-        1,
-    );
+    let mut iort = Sdt::new(*b"IORT", iort_table_size, 2, *b"CLOUDH", *b"CHIORT  ", 1);
     iort.write(36, ((1 + pci_segments.len()) as u32).to_le());
     iort.write(40, (48u32).to_le());
 
@@ -601,7 +592,7 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
 
 fn create_viot_table(iommu_bdf: &PciBdf, devices_bdf: &[PciBdf]) -> Sdt {
     // VIOT
-    let mut viot = Sdt::new(*b"VIOT", 36, 0, *b"CLOUDH", *b"CHVIOT  ", 1);
+    let mut viot = Sdt::new(*b"VIOT", 36, 0, *b"CLOUDH", *b"CHVIOT  ", 0);
     // Node count
     viot.append((devices_bdf.len() + 1) as u16);
     // Node offset
@@ -823,7 +814,7 @@ pub fn create_acpi_tables(
     }
 
     // XSDT
-    let mut xsdt = Sdt::new(*b"XSDT", 36, 1, *b"CLOUDH", *b"CLHVXSDT", 1);
+    let mut xsdt = Sdt::new(*b"XSDT", 36, 1, *b"CLOUDH", *b"CHXSDT  ", 1);
     for table in tables {
         xsdt.append(table);
     }

@@ -11,11 +11,6 @@
 #[cfg(feature = "sev_snp")]
 pub(crate) mod sev;
 
-use crate::arch::x86::{
-    CpuIdEntry, DescriptorTable, FpuState, LapicState, MsrEntry, SegmentRegister, SpecialRegisters,
-    XsaveState, CPUID_FLAG_VALID_INDEX,
-};
-use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 use serde::{Deserialize, Serialize};
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
@@ -29,6 +24,12 @@ pub use {
     kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs as MsrEntries,
     kvm_bindings::KVM_CPUID_FLAG_SIGNIFCANT_INDEX,
 };
+
+use crate::arch::x86::{
+    CpuIdEntry, DescriptorTable, FpuState, LapicState, MsrEntry, SegmentRegister, SpecialRegisters,
+    XsaveState, CPUID_FLAG_VALID_INDEX,
+};
+use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 
 ///
 /// Check KVM extension for Linux
