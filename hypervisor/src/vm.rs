@@ -32,10 +32,6 @@ use crate::cpu::Vcpu;
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
 use crate::{IoEventAddress, IrqRoutingEntry, UserMemoryRegion};
-#[cfg(feature = "sev_snp")]
-use igvm_defs::SnpPolicy;
-#[cfg(target_arch = "aarch64")]
-use std::sync::Mutex;
 
 ///
 /// I/O events data matches (32 or 64 bits).
@@ -178,11 +174,6 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to write to IO Bus: {0}")]
     IoBusWrite(#[source] anyhow::Error),
-    ///
-    /// Set memory attributes
-    ///
-    #[error("Failed to set memory attributes: {0}")]
-    SetMemoryAttributes(#[source] anyhow::Error),
     ///
     /// Start dirty log error
     ///
@@ -380,7 +371,9 @@ pub trait Vm: Send + Sync + Any {
     fn get_dirty_log(&self, slot: u32, base_gpa: u64, memory_size: u64) -> Result<Vec<u64>>;
     #[cfg(feature = "sev_snp")]
     /// Initialize SEV-SNP on this VM
-    fn sev_snp_init(&self, _guest_policy: SnpPolicy) -> Result<()>;
+    fn sev_snp_init(&self) -> Result<()> {
+        unimplemented!()
+    }
     #[cfg(feature = "tdx")]
     /// Initialize TDX on this VM
     fn tdx_init(&self, _cpuid: &[CpuIdEntry], _max_vcpus: u32) -> Result<()> {
@@ -411,8 +404,9 @@ pub trait Vm: Send + Sync + Any {
         _page_type: u32,
         _page_size: u32,
         _pages: &[u64],
-    ) -> Result<()>;
-
+    ) -> Result<()> {
+        unimplemented!()
+    }
     /// Complete the isolated import
     #[cfg(feature = "sev_snp")]
     fn complete_isolated_import(

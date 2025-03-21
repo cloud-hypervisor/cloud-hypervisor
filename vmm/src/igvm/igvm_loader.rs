@@ -55,6 +55,7 @@ struct GpaPages {
     pub page_type: u32,
     pub page_size: u32,
 }
+
 #[derive(Debug)]
 enum ParameterAreaState {
     /// Parameter area has been declared via a ParameterArea header.
@@ -62,10 +63,12 @@ enum ParameterAreaState {
     /// Parameter area inserted and invalid to use.
     Inserted,
 }
+
 #[cfg(feature = "sev_snp")]
 fn igvm_memmap_from_ram_range(ram_range: (u64, u64)) -> IGVM_VHS_MEMORY_MAP_ENTRY {
     assert!(ram_range.0 % HV_PAGE_SIZE == 0);
     assert!((ram_range.1 - ram_range.0) % HV_PAGE_SIZE == 0);
+
     IGVM_VHS_MEMORY_MAP_ENTRY {
         starting_gpa_page_number: ram_range.0 / HV_PAGE_SIZE,
         number_of_pages: (ram_range.1 - ram_range.0) / HV_PAGE_SIZE,
@@ -74,18 +77,23 @@ fn igvm_memmap_from_ram_range(ram_range: (u64, u64)) -> IGVM_VHS_MEMORY_MAP_ENTR
         reserved: 0,
     }
 }
+
 #[cfg(feature = "sev_snp")]
 fn generate_memory_map(
     guest_mem: &GuestMemoryMmap,
 ) -> Result<Vec<IGVM_VHS_MEMORY_MAP_ENTRY>, Error> {
     let mut memory_map = Vec::new();
+
     // Get usable physical memory ranges
     let ram_ranges = arch::generate_ram_ranges(guest_mem).map_err(Error::InvalidGuestMemmap)?;
+
     for ram_range in ram_ranges {
         memory_map.push(igvm_memmap_from_ram_range(ram_range));
     }
+
     Ok(memory_map)
 }
+
 // Import a parameter to the given parameter area.
 fn import_parameter(
     parameter_areas: &mut HashMap<u32, ParameterAreaState>,
@@ -101,13 +109,16 @@ fn import_parameter(
     };
     let offset = info.byte_offset as usize;
     let end_of_parameter = offset + parameter.len();
+
     if end_of_parameter > *max_size as usize {
         // TODO: tracing for which parameter was too big?
         return Err(Error::ParameterTooLarge);
     }
+
     if parameter_area.len() < end_of_parameter {
         parameter_area.resize(end_of_parameter, 0);
     }
+
     parameter_area[offset..end_of_parameter].copy_from_slice(parameter);
     Ok(())
 }
@@ -131,6 +142,7 @@ pub fn load_igvm(
     let memory = memory_manager.lock().as_ref().unwrap().guest_memory();
     let mut gpas: Vec<GpaPages> = Vec::new();
     let proc_count = cpu_manager.lock().unwrap().vcpus().len() as u32;
+
     #[cfg(feature = "sev_snp")]
     let mut host_data_contents = [0; 32];
     #[cfg(feature = "sev_snp")]
@@ -138,8 +150,10 @@ pub fn load_igvm(
         hex::decode_to_slice(host_data_str, &mut host_data_contents as &mut [u8])
             .map_err(Error::FailedToDecodeHostData)?;
     }
+
     file.seek(SeekFrom::Start(0)).map_err(Error::Igvm)?;
     file.read_to_end(&mut file_contents).map_err(Error::Igvm)?;
+
     let igvm_file = IgvmFile::new_from_binary(&file_contents, Some(IsolationType::Snp))
         .map_err(Error::InvalidIgvmFile)?;
 
@@ -151,9 +165,12 @@ pub fn load_igvm(
     };
 
     let mut loader = Loader::new(memory);
+
     let mut parameter_areas: HashMap<u32, ParameterAreaState> = HashMap::new();
+
     for header in igvm_file.directives() {
         debug_assert!(header.compatibility_mask().unwrap_or(mask) & mask == mask);
+
         match header {
             IgvmDirectiveHeader::PageData {
                 gpa,
@@ -163,8 +180,10 @@ pub fn load_igvm(
                 data,
             } => {
                 debug_assert!(data.len() as u64 % HV_PAGE_SIZE == 0);
+
                 // TODO: only 4k or empty page data supported right now
                 assert!(data.len() as u64 == HV_PAGE_SIZE || data.is_empty());
+
                 let acceptance = match *data_type {
                     IgvmPageDataType::NORMAL => {
                         if flags.unmeasured() {
@@ -243,6 +262,7 @@ pub fn load_igvm(
                 debug_assert!(
                     initial_data.is_empty() || initial_data.len() as u64 == *number_of_bytes
                 );
+
                 // Allocate a new parameter area. It must not be already used.
                 if parameter_areas
                     .insert(
@@ -365,6 +385,7 @@ pub fn load_igvm(
                 parameter_area_index,
             }) => {
                 debug_assert!(gpa % HV_PAGE_SIZE == 0);
+
                 let area = parameter_areas
                     .get_mut(parameter_area_index)
                     .expect("igvmfile should be valid");
@@ -400,8 +421,10 @@ pub fn load_igvm(
         use std::time::Instant;
 
         let mut now = Instant::now();
+
         // Sort the gpas to group them by the page type
         gpas.sort_by(|a, b| a.gpa.cmp(&b.gpa));
+
         let gpas_grouped = gpas
             .iter()
             .fold(Vec::<Vec<GpaPages>>::new(), |mut acc, gpa| {
@@ -414,6 +437,7 @@ pub fn load_igvm(
                 acc.push(vec![*gpa]);
                 acc
             });
+
         // Import the pages as a group(by page type) of PFNs to reduce the
         // hypercall.
         for group in gpas_grouped.iter() {
@@ -454,11 +478,13 @@ pub fn load_igvm(
             .vm
             .complete_isolated_import(loaded_info.snp_id_block, host_data_contents, 1)
             .map_err(Error::CompleteIsolatedImport)?;
+
         info!(
             "Time it took to for launch complete command  {:.2?}",
             now.elapsed()
         );
     }
+
     debug!("Dumping the contents of VMSA page: {:x?}", loaded_info.vmsa);
     Ok(loaded_info)
 }

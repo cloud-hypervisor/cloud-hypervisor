@@ -458,17 +458,9 @@ impl Vcpu {
     }
 
     #[cfg(feature = "sev_snp")]
-    pub fn set_sev_control_register(
-        &self,
-        vmsa_pfn: u64,
-        #[cfg(feature = "kvm")] vmsa: igvm::snp_defs::SevVmsa,
-    ) -> Result<()> {
+    pub fn set_sev_control_register(&self, vmsa_pfn: u64) -> Result<()> {
         self.vcpu
-            .set_sev_control_register(
-                vmsa_pfn,
-                #[cfg(feature = "kvm")]
-                vmsa,
-            )
+            .set_sev_control_register(vmsa_pfn)
             .map_err(Error::SetSevControlRegister)
     }
 }
@@ -850,12 +842,11 @@ impl CpuManager {
     ) -> Result<()> {
         let mut vcpu = vcpu.lock().unwrap();
 
-        #[cfg(all(feature = "sev_snp", not(feature = "kvm")))]
+        #[cfg(feature = "sev_snp")]
         if self.sev_snp_enabled {
             if let Some((kernel_entry_point, _)) = boot_setup {
                 vcpu.set_sev_control_register(
-                    // TODO(b/372004040) Implement support for different page sizes
-                    kernel_entry_point.entry_addr.0 / crate::HV_PAGE_SIZE,
+                    kernel_entry_point.entry_addr.0 / crate::igvm::HV_PAGE_SIZE,
                 )?;
             }
 
@@ -1866,7 +1857,7 @@ impl CpuManager {
         &self.vcpus_kill_signalled
     }
 
-    #[cfg(all(feature = "igvm", feature = "mshv"))]
+    #[cfg(feature = "igvm")]
     pub(crate) fn get_cpuid_leaf(
         &self,
         cpu_id: u8,
