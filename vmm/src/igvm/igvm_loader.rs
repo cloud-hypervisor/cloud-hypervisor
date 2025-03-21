@@ -9,85 +9,22 @@ use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 
 use igvm::snp_defs::SevVmsa;
-use igvm::{
-    IgvmDirectiveHeader, IgvmFile, IgvmInitializationHeader, IgvmPlatformHeader, IsolationType,
+use igvm::{IgvmDirectiveHeader, IgvmFile, IgvmPlatformHeader, IsolationType};
+use igvm_defs::{
+    IgvmPageDataType, IgvmPlatformType, IGVM_VHS_PARAMETER, IGVM_VHS_PARAMETER_INSERT,
 };
-use igvm_defs::{IgvmPageDataType, IGVM_VHS_PARAMETER, IGVM_VHS_PARAMETER_INSERT};
 #[cfg(feature = "sev_snp")]
 use igvm_defs::{MemoryMapEntryType, IGVM_VHS_MEMORY_MAP_ENTRY};
-#[cfg(feature = "mshv")]
-use mshv_bindings::*;
-#[cfg(feature = "mshv")]
 use mshv_bindings::*;
 use thiserror::Error;
-#[cfg(feature = "sev_snp")]
-use vm_memory::Bytes;
-use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory};
-use vm_migration::Snapshottable;
 use zerocopy::AsBytes;
-#[cfg(feature = "sev_snp")]
-use zerocopy::{FromBytes, FromZeroes};
 
 use crate::cpu::CpuManager;
 use crate::igvm::loader::Loader;
-use crate::igvm::{BootPageAcceptance, IgvmLoadedInfo, StartupMemoryType};
+use crate::igvm::{BootPageAcceptance, IgvmLoadedInfo, StartupMemoryType, HV_PAGE_SIZE};
 use crate::memory_manager::MemoryManager;
 #[cfg(feature = "sev_snp")]
 use crate::GuestMemoryMmap;
-use crate::HV_PAGE_SIZE;
-
-cfg_if::cfg_if! {
-    if #[cfg(feature = "mshv")] {
-#[derive(Debug)]
-#[repr(u32)]
-enum IsolatedPageType {
-    Normal = mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_NORMAL,
-    Unmeasured = mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_UNMEASURED,
-    Cpuid = mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_CPUID,
-    Secrets = mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_SECRETS,
-    Vmsa = mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_VMSA,
-}
-const ISOLATED_PAGE_SIZE_4KB: u32 = mshv_bindings::hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB;
-const ISOLATED_PAGE_SHIFT: u32 = mshv_bindings::HV_HYP_PAGE_SHIFT;
-    } else if #[cfg(feature = "kvm")] {
-        #[derive(Debug)]
-        // https://tinyurl.com/sev-snp-page-types
-#[repr(u32)]
-enum IsolatedPageType {
-    Normal = 1, /* KVM_SEV_SNP_PAGE_TYPE_NORMAL */
-    Vmsa = 2,
-    Unmeasured = 4, /* KVM_SEV_SNP_PAGE_TYPE_UNMEASURED */
-    Secrets = 5, /* KVM_SEV_SNP_PAGE_TYPE_SECRETS */
-    Cpuid = 6, /* KVM_SEV_SNP_PAGE_TYPE_CPUID */
-}
-const ISOLATED_PAGE_SIZE_4KB: u32 = 0x1000;
-const ISOLATED_PAGE_SHIFT: u32 = 12;
-    }
-}
-
-// see section 7.1 https://tinyurl.com/sev-snp-spec
-#[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, AsBytes, FromBytes, FromZeroes)]
-pub struct SnpCpuidFunc {
-    pub eax_in: u32,
-    pub ecx_in: u32,
-    pub xcr0_in: u64,
-    pub xss_in: u64,
-    pub eax: u32,
-    pub ebx: u32,
-    pub ecx: u32,
-    pub edx: u32,
-    pub reserved: u64,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, FromBytes, AsBytes, FromZeroes)]
-pub struct SnpCpuidInfo {
-    pub count: u32,
-    pub _reserved1: u32,
-    pub _reserved2: u64,
-    pub entries: [SnpCpuidFunc; 64],
-}
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -109,8 +46,6 @@ pub enum Error {
     CompleteIsolatedImport(#[source] hypervisor::HypervisorVmError),
     #[error("Error decoding host data: {0}")]
     FailedToDecodeHostData(#[source] hex::FromHexError),
-    #[error("Error applying VMSA to vCPU registers: {0}")]
-    SetVmsa(#[source] crate::cpu::Error),
 }
 
 #[allow(dead_code)]
@@ -120,7 +55,6 @@ struct GpaPages {
     pub page_type: u32,
     pub page_size: u32,
 }
-
 #[derive(Debug)]
 enum ParameterAreaState {
     /// Parameter area has been declared via a ParameterArea header.
@@ -128,12 +62,10 @@ enum ParameterAreaState {
     /// Parameter area inserted and invalid to use.
     Inserted,
 }
-
 #[cfg(feature = "sev_snp")]
 fn igvm_memmap_from_ram_range(ram_range: (u64, u64)) -> IGVM_VHS_MEMORY_MAP_ENTRY {
     assert!(ram_range.0 % HV_PAGE_SIZE == 0);
     assert!((ram_range.1 - ram_range.0) % HV_PAGE_SIZE == 0);
-
     IGVM_VHS_MEMORY_MAP_ENTRY {
         starting_gpa_page_number: ram_range.0 / HV_PAGE_SIZE,
         number_of_pages: (ram_range.1 - ram_range.0) / HV_PAGE_SIZE,
@@ -142,23 +74,18 @@ fn igvm_memmap_from_ram_range(ram_range: (u64, u64)) -> IGVM_VHS_MEMORY_MAP_ENTR
         reserved: 0,
     }
 }
-
 #[cfg(feature = "sev_snp")]
 fn generate_memory_map(
     guest_mem: &GuestMemoryMmap,
 ) -> Result<Vec<IGVM_VHS_MEMORY_MAP_ENTRY>, Error> {
     let mut memory_map = Vec::new();
-
     // Get usable physical memory ranges
     let ram_ranges = arch::generate_ram_ranges(guest_mem).map_err(Error::InvalidGuestMemmap)?;
-
     for ram_range in ram_ranges {
         memory_map.push(igvm_memmap_from_ram_range(ram_range));
     }
-
     Ok(memory_map)
 }
-
 // Import a parameter to the given parameter area.
 fn import_parameter(
     parameter_areas: &mut HashMap<u32, ParameterAreaState>,
@@ -174,47 +101,15 @@ fn import_parameter(
     };
     let offset = info.byte_offset as usize;
     let end_of_parameter = offset + parameter.len();
-
     if end_of_parameter > *max_size as usize {
         // TODO: tracing for which parameter was too big?
         return Err(Error::ParameterTooLarge);
     }
-
     if parameter_area.len() < end_of_parameter {
         parameter_area.resize(end_of_parameter, 0);
     }
-
     parameter_area[offset..end_of_parameter].copy_from_slice(parameter);
     Ok(())
-}
-
-#[cfg(feature = "sev_snp")]
-///
-/// This gets the sev_snp guest policy from the IGVM configuration file
-///
-pub fn _get_sev_snp_guest_policy(
-    mut file: &std::fs::File,
-    guest_compatibility_mask: u32,
-) -> Result<igvm_defs::SnpPolicy, Error> {
-    let mut file_contents = Vec::new();
-    file.seek(SeekFrom::Start(0)).map_err(Error::Igvm)?;
-    file.read_to_end(&mut file_contents).map_err(Error::Igvm)?;
-
-    let igvm_file = IgvmFile::new_from_binary(&file_contents, Some(IsolationType::Snp))
-        .map_err(Error::InvalidIgvmFile)?;
-
-    for init in igvm_file.initializations() {
-        if let IgvmInitializationHeader::GuestPolicy {
-            policy,
-            compatibility_mask,
-        } = init
-        {
-            if guest_compatibility_mask == *compatibility_mask {
-                return Ok(igvm_defs::SnpPolicy::from_bits(*policy));
-            }
-        }
-    }
-    Err(Error::Igvm(std::io::Error::last_os_error()))
 }
 
 ///
@@ -236,7 +131,6 @@ pub fn load_igvm(
     let memory = memory_manager.lock().as_ref().unwrap().guest_memory();
     let mut gpas: Vec<GpaPages> = Vec::new();
     let proc_count = cpu_manager.lock().unwrap().vcpus().len() as u32;
-
     #[cfg(feature = "sev_snp")]
     let mut host_data_contents = [0; 32];
     #[cfg(feature = "sev_snp")]
@@ -244,25 +138,22 @@ pub fn load_igvm(
         hex::decode_to_slice(host_data_str, &mut host_data_contents as &mut [u8])
             .map_err(Error::FailedToDecodeHostData)?;
     }
-
     file.seek(SeekFrom::Start(0)).map_err(Error::Igvm)?;
     file.read_to_end(&mut file_contents).map_err(Error::Igvm)?;
-
     let igvm_file = IgvmFile::new_from_binary(&file_contents, Some(IsolationType::Snp))
         .map_err(Error::InvalidIgvmFile)?;
 
-    let sev_snp_enabled = cpu_manager.lock().unwrap().sev_snp_enabled();
     let mask = match &igvm_file.platforms()[0] {
-        IgvmPlatformHeader::SupportedPlatform(info) => info.compatibility_mask,
+        IgvmPlatformHeader::SupportedPlatform(info) => {
+            debug_assert!(info.platform_type == IgvmPlatformType::SEV_SNP);
+            info.compatibility_mask
+        }
     };
 
     let mut loader = Loader::new(memory);
-
     let mut parameter_areas: HashMap<u32, ParameterAreaState> = HashMap::new();
-
     for header in igvm_file.directives() {
         debug_assert!(header.compatibility_mask().unwrap_or(mask) & mask == mask);
-
         match header {
             IgvmDirectiveHeader::PageData {
                 gpa,
@@ -272,24 +163,22 @@ pub fn load_igvm(
                 data,
             } => {
                 debug_assert!(data.len() as u64 % HV_PAGE_SIZE == 0);
-
                 // TODO: only 4k or empty page data supported right now
                 assert!(data.len() as u64 == HV_PAGE_SIZE || data.is_empty());
-
                 let acceptance = match *data_type {
                     IgvmPageDataType::NORMAL => {
                         if flags.unmeasured() {
                             gpas.push(GpaPages {
                                 gpa: *gpa,
-                                page_type: IsolatedPageType::Unmeasured as u32,
-                                page_size: ISOLATED_PAGE_SIZE_4KB,
+                                page_type: hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_UNMEASURED,
+                                page_size: hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
                             });
                             BootPageAcceptance::ExclusiveUnmeasured
                         } else {
                             gpas.push(GpaPages {
                                 gpa: *gpa,
-                                page_type: IsolatedPageType::Normal as u32,
-                                page_size: ISOLATED_PAGE_SIZE_4KB,
+                                page_type: hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_NORMAL,
+                                page_size: hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
                             });
                             BootPageAcceptance::Exclusive
                         }
@@ -297,14 +186,13 @@ pub fn load_igvm(
                     IgvmPageDataType::SECRETS => {
                         gpas.push(GpaPages {
                             gpa: *gpa,
-                            page_type: IsolatedPageType::Secrets as u32,
-                            page_size: ISOLATED_PAGE_SIZE_4KB,
+                            page_type: hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_SECRETS,
+                            page_size: hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
                         });
                         BootPageAcceptance::SecretsPage
                     }
                     IgvmPageDataType::CPUID_DATA => {
                         // SAFETY: CPUID is readonly
-                        #[cfg(feature = "mshv")]
                         unsafe {
                             let cpuid_page_p: *mut hv_psp_cpuid_page =
                                 data.as_ptr() as *mut hv_psp_cpuid_page; // as *mut hv_psp_cpuid_page;
@@ -333,51 +221,18 @@ pub fn load_igvm(
                         }
                         gpas.push(GpaPages {
                             gpa: *gpa,
-                            page_type: IsolatedPageType::Cpuid as u32,
-                            page_size: ISOLATED_PAGE_SIZE_4KB,
+                            page_type: hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_CPUID,
+                            page_size: hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
                         });
                         BootPageAcceptance::CpuidPage
                     }
                     // TODO: other data types SNP / TDX only, unsupported
                     _ => todo!("unsupported IgvmPageDataType"),
                 };
-                if *data_type == IgvmPageDataType::CPUID_DATA {
-                    let mut new_cp = SnpCpuidInfo::new_zeroed();
 
-                    let entries = cpu_manager.lock().unwrap().common_cpuid();
-
-                    for (i, entry) in entries.iter().enumerate() {
-                        new_cp.entries[i].eax_in = entry.function;
-                        new_cp.entries[i].ecx_in = entry.index;
-                        new_cp.entries[i].eax = entry.eax;
-                        new_cp.entries[i].ebx = entry.ebx;
-                        new_cp.entries[i].ecx = entry.ecx;
-                        new_cp.entries[i].edx = entry.edx;
-                        /*
-                         * Guest kernels will calculate EBX themselves using the 0xD
-                         * subfunctions corresponding to the individual XSAVE areas, so only
-                         * encode the base XSAVE size in the initial leaves, corresponding
-                         * to the initial XCR0=1 state. (https://tinyurl.com/qemu-cpuid)
-                         */
-                        if new_cp.entries[i].eax_in == 0xd
-                            && (new_cp.entries[i].ecx_in == 0x0 || new_cp.entries[i].ecx_in == 0x1)
-                        {
-                            new_cp.entries[i].ebx = 0x240;
-                            new_cp.entries[i].xcr0_in = 1;
-                            new_cp.entries[i].xss_in = 0;
-                        }
-                    }
-                    new_cp.count = entries.len() as u32;
-                    assert_eq!(new_cp.count, entries.len() as u32);
-                    info!("gpa: {:#x}", *gpa);
-                    loader
-                        .import_pages(gpa / HV_PAGE_SIZE, 1, acceptance, new_cp.as_bytes())
-                        .map_err(Error::Loader)?;
-                } else {
-                    loader
-                        .import_pages(gpa / HV_PAGE_SIZE, 1, acceptance, data)
-                        .map_err(Error::Loader)?;
-                }
+                loader
+                    .import_pages(gpa / HV_PAGE_SIZE, 1, acceptance, data)
+                    .map_err(Error::Loader)?;
             }
             IgvmDirectiveHeader::ParameterArea {
                 number_of_bytes,
@@ -388,7 +243,6 @@ pub fn load_igvm(
                 debug_assert!(
                     initial_data.is_empty() || initial_data.len() as u64 == *number_of_bytes
                 );
-
                 // Allocate a new parameter area. It must not be already used.
                 if parameter_areas
                     .insert(
@@ -410,13 +264,15 @@ pub fn load_igvm(
                 todo!("unsupported IgvmPageDataType");
             }
             IgvmDirectiveHeader::MemoryMap(_info) => {
-                if sev_snp_enabled {
+                #[cfg(feature = "sev_snp")]
+                {
                     let guest_mem = memory_manager.lock().unwrap().boot_guest_memory();
                     let memory_map = generate_memory_map(&guest_mem)?;
                     import_parameter(&mut parameter_areas, _info, memory_map.as_bytes())?;
-                } else {
-                    todo!("Not implemented");
                 }
+
+                #[cfg(not(feature = "sev_snp"))]
+                todo!("Not implemented");
             }
             IgvmDirectiveHeader::CommandLine(info) => {
                 import_parameter(&mut parameter_areas, info, command_line.as_bytes_with_nul())?;
@@ -456,26 +312,10 @@ pub fn load_igvm(
                         .map_err(Error::Loader)?;
                 }
 
-                // Set vCPU initial states before calling SNP_LAUNCH_FINISH
-                let vcpus = cpu_manager.lock().unwrap().vcpus();
-                for vcpu in vcpus {
-                    let vcpu_locked = vcpu.lock().unwrap();
-                    let vcpu_id: u16 = vcpu_locked.id().parse().unwrap();
-                    if vcpu_id == *vp_index {
-                        vcpu_locked
-                            .set_sev_control_register(
-                                0,
-                                #[cfg(feature = "kvm")]
-                                loaded_info.vmsa,
-                            )
-                            .map_err(Error::SetVmsa)?;
-                    }
-                }
-
                 gpas.push(GpaPages {
                     gpa: *gpa,
-                    page_type: IsolatedPageType::Vmsa as u32,
-                    page_size: ISOLATED_PAGE_SIZE_4KB,
+                    page_type: hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_VMSA,
+                    page_size: hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
                 });
             }
             IgvmDirectiveHeader::SnpIdBlock {
@@ -525,7 +365,6 @@ pub fn load_igvm(
                 parameter_area_index,
             }) => {
                 debug_assert!(gpa % HV_PAGE_SIZE == 0);
-
                 let area = parameter_areas
                     .get_mut(parameter_area_index)
                     .expect("igvmfile should be valid");
@@ -543,8 +382,8 @@ pub fn load_igvm(
                 *area = ParameterAreaState::Inserted;
                 gpas.push(GpaPages {
                     gpa: *gpa,
-                    page_type: IsolatedPageType::Unmeasured as u32,
-                    page_size: ISOLATED_PAGE_SIZE_4KB,
+                    page_type: hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_UNMEASURED,
+                    page_size: hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
                 });
             }
             IgvmDirectiveHeader::ErrorRange { .. } => {
@@ -556,14 +395,13 @@ pub fn load_igvm(
         }
     }
 
-    if sev_snp_enabled {
+    #[cfg(feature = "sev_snp")]
+    {
         use std::time::Instant;
 
         let mut now = Instant::now();
-
         // Sort the gpas to group them by the page type
         gpas.sort_by(|a, b| a.gpa.cmp(&b.gpa));
-
         let gpas_grouped = gpas
             .iter()
             .fold(Vec::<Vec<GpaPages>>::new(), |mut acc, gpa| {
@@ -576,7 +414,6 @@ pub fn load_igvm(
                 acc.push(vec![*gpa]);
                 acc
             });
-
         // Import the pages as a group(by page type) of PFNs to reduce the
         // hypercall.
         for group in gpas_grouped.iter() {
@@ -589,72 +426,18 @@ pub fn load_igvm(
             // of PFN for importing the isolated pages
             let pfns: Vec<u64> = group
                 .iter()
-                .map(|gpa| gpa.gpa >> ISOLATED_PAGE_SHIFT)
+                .map(|gpa| gpa.gpa >> HV_HYP_PAGE_SHIFT)
                 .collect();
-            let guest_memory = memory_manager.lock().unwrap().guest_memory().memory();
-            let uaddrs: Vec<_> = group
-                .iter()
-                .map(|gpa| {
-                    let guest_region_mmap = guest_memory.to_region_addr(GuestAddress(gpa.gpa));
-                    let uaddr_base = guest_region_mmap.unwrap().0.as_ptr() as u64;
-                    let uaddr_offset: u64 = guest_region_mmap.unwrap().1 .0;
-                    let uaddr = uaddr_base + uaddr_offset;
-                    uaddr
-                })
-                .collect();
-            info!("Calling KVM_SEV_SNP_LAUNCH_UPDATE");
-            if group[0].page_type == IsolatedPageType::Cpuid as u32 {
-                let mut new_cp = SnpCpuidInfo::new_zeroed();
-                let _ = guest_memory.read(new_cp.as_bytes_mut(), GuestAddress(group[0].gpa));
-                let import = memory_manager
-                    .lock()
-                    .unwrap()
-                    .vm
-                    .import_isolated_pages(
-                        group[0].page_type,
-                        ISOLATED_PAGE_SIZE_4KB,
-                        &pfns,
-                        &uaddrs,
-                    )
-                    .map_err(Error::ImportIsolatedPages);
-                if import.is_err() {
-                    // When we import the CPUID page, the firmware will change any cpuid fns that
-                    // could lead to an insecure guest, we must then make sure to import the updated cpuid
-                    let mut updated_cp = SnpCpuidInfo::new_zeroed();
-                    let _ =
-                        guest_memory.read(updated_cp.as_bytes_mut(), GuestAddress(group[0].gpa));
-                    for (set, got) in
-                        std::iter::zip(new_cp.entries.iter(), updated_cp.entries.iter())
-                    {
-                        if set != got {
-                            error!("Set cpuid fn: {set:#x?}, but firmware expects: {got:#x?}");
-                        }
-                    }
-                    memory_manager
-                        .lock()
-                        .unwrap()
-                        .vm
-                        .import_isolated_pages(
-                            group[0].page_type,
-                            ISOLATED_PAGE_SIZE_4KB,
-                            &pfns,
-                            &uaddrs,
-                        )
-                        .map_err(Error::ImportIsolatedPages)?
-                }
-            } else {
-                memory_manager
-                    .lock()
-                    .unwrap()
-                    .vm
-                    .import_isolated_pages(
-                        group[0].page_type,
-                        ISOLATED_PAGE_SIZE_4KB,
-                        &pfns,
-                        &uaddrs,
-                    )
-                    .map_err(Error::ImportIsolatedPages)?
-            }
+            memory_manager
+                .lock()
+                .unwrap()
+                .vm
+                .import_isolated_pages(
+                    group[0].page_type,
+                    hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
+                    &pfns,
+                )
+                .map_err(Error::ImportIsolatedPages)?;
         }
 
         info!(
@@ -665,20 +448,17 @@ pub fn load_igvm(
 
         now = Instant::now();
         // Call Complete Isolated Import since we are done importing isolated pages
-        // TODO(b/371268173) Extract id block and sig block addresses to be used in launch finish
         memory_manager
             .lock()
             .unwrap()
             .vm
             .complete_isolated_import(loaded_info.snp_id_block, host_data_contents, 1)
             .map_err(Error::CompleteIsolatedImport)?;
-
         info!(
             "Time it took to for launch complete command  {:.2?}",
             now.elapsed()
         );
     }
-
     debug!("Dumping the contents of VMSA page: {:x?}", loaded_info.vmsa);
     Ok(loaded_info)
 }

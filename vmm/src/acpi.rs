@@ -849,7 +849,7 @@ pub fn create_acpi_tables(
     rsdp_offset
 }
 
-#[cfg(feature = "sev_snp")]
+#[cfg(feature = "fw_cfg")]
 pub fn create_acpi_tables_for_fw_cfg(
     device_manager: &Arc<Mutex<DeviceManager>>,
     cpu_manager: &Arc<Mutex<CpuManager>>,

@@ -90,7 +90,6 @@ mod serial_manager;
 mod sigwinch_listener;
 pub mod vm;
 pub mod vm_config;
-pub use hypervisor::HV_PAGE_SIZE;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;

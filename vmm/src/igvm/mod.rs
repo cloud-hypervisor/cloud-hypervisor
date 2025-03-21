@@ -50,6 +50,8 @@ impl Default for IgvmLoadedInfo {
     }
 }
 
+pub const HV_PAGE_SIZE: u64 = 4096;
+
 /// The page acceptance used for importing pages into the initial launch context of the guest.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum BootPageAcceptance {
