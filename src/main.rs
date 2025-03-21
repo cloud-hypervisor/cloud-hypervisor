@@ -487,15 +487,6 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
 }
 
 fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
-    #[cfg(feature = "sev_snp")]
-    {
-        #[allow(unused_mut)]
-        let mut parser = OptionParser::new();
-        std::env::set_var(
-            "SEV_DEVICE_PATH",
-            parser.get("sev_device_path").unwrap_or_default(),
-        );
-    }
     let log_level = match cmd_arguments.get_count("v") {
         0 => LevelFilter::Warn,
         1 => LevelFilter::Info,
@@ -878,13 +869,7 @@ fn main() {
     let cmd_arguments = create_app(default_vcpus, default_memory, default_rng).get_matches();
 
     if cmd_arguments.get_flag("version") {
-        println!(
-            "{} {}",
-            &std::env::var("CARGO_BIN_NAME")
-                .map_err(|_| "Couldn't find CARGO_BIN_NAME")
-                .unwrap(),
-            env!("BUILD_VERSION")
-        );
+        println!("{} {}", env!("CARGO_BIN_NAME"), env!("BUILD_VERSION"));
 
         if cmd_arguments.get_count("v") != 0 {
             println!("Enabled features: {:?}", vmm::feature_list());

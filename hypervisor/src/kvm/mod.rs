@@ -10,33 +10,10 @@
 //
 //
 
-#[cfg(target_arch = "aarch64")]
-use crate::aarch64::gic::KvmGicV3Its;
-#[cfg(target_arch = "aarch64")]
-pub use crate::aarch64::{
-    check_required_kvm_extensions, gic::Gicv3ItsState as GicState, is_system_register, VcpuInit,
-    VcpuKvmState,
-};
-#[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::gic::{Vgic, VgicConfig};
-use crate::cpu;
-use crate::hypervisor;
-use crate::vec_with_array_field;
-use crate::vm::{self, InterruptSourceConfig, VmOps};
-use crate::HypervisorType;
-#[cfg(target_arch = "aarch64")]
-use crate::{arm64_core_reg_id, offset_of};
-#[cfg(feature = "sev_snp")]
-use igvm_defs::PAGE_SIZE_4K;
-#[cfg(feature = "sev_snp")]
-use kvm_bindings::{kvm_memory_attributes, kvm_segment as Segment, KVM_MEMORY_ATTRIBUTE_PRIVATE};
-use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use std::any::Any;
 use std::collections::HashMap;
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
-#[cfg(target_arch = "x86_64")]
-use std::os::fd::{FromRawFd, OwnedFd};
 #[cfg(target_arch = "x86_64")]
 use std::os::unix::io::AsRawFd;
 #[cfg(feature = "tdx")]
@@ -45,12 +22,9 @@ use std::result;
 #[cfg(target_arch = "x86_64")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use vm_memory::GuestAddress;
-use vmm_sys_util::errno;
 
+use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use vmm_sys_util::eventfd::EventFd;
-#[cfg(feature = "sev_snp")]
-use x86_64::sev;
 
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::gic::KvmGicV3Its;
@@ -69,35 +43,35 @@ pub use crate::riscv64::{
     aia::AiaImsicsState as AiaState, check_required_kvm_extensions, is_non_core_register,
     VcpuKvmState,
 };
+use crate::vm::{self, InterruptSourceConfig, VmOps};
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset_of};
+use crate::{cpu, hypervisor, vec_with_array_field, HypervisorType};
 #[cfg(target_arch = "riscv64")]
 use crate::{offset_of, riscv64_reg_id};
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{
-    CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, XsaveState, NUM_IOAPIC_PINS,
-};
-#[cfg(target_arch = "x86_64")]
-use crate::ClockData;
-use crate::StandardRegisters;
-use crate::{
-    CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
-    USER_MEMORY_REGION_GUEST_MEMFD, USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ,
-    USER_MEMORY_REGION_WRITE,
-};
-#[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
-    kvm_create_guest_memfd, kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC,
-    KVM_CAP_SPLIT_IRQCHIP, KVM_GUESTDBG_USE_HW_BP, KVM_X86_SW_PROTECTED_VM,
+    kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP,
+    KVM_GUESTDBG_USE_HW_BP,
 };
 #[cfg(target_arch = "x86_64")]
 use x86_64::check_required_kvm_extensions;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, VcpuKvmState};
 
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86::{
+    CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, XsaveState, NUM_IOAPIC_PINS,
+};
+#[cfg(target_arch = "x86_64")]
+use crate::ClockData;
+use crate::{
+    CpuState, IoEventAddress, IrqRoutingEntry, MpState, StandardRegisters, UserMemoryRegion,
+    USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
+};
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
@@ -116,9 +90,8 @@ pub use kvm_bindings::{
     kvm_clock_data, kvm_create_device, kvm_create_device as CreateDevice,
     kvm_device_attr as DeviceAttr, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug,
     kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state, kvm_run, kvm_userspace_memory_region,
-    kvm_userspace_memory_region2, KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP,
-    KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI, KVM_MEM_GUEST_MEMFD, KVM_MEM_LOG_DIRTY_PAGES,
-    KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
+    KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI,
+    KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
@@ -262,72 +235,14 @@ pub struct KvmTdxExitVmcall {
     pub out_rdx: u64,
 }
 
-#[cfg(feature = "sev_snp")]
-bitfield::bitfield! {
-    /// Guest segment register access right.
-    ///
-    /// See Intel Architecture Software Developer's Manual, Vol.3, Table 24-2.
-    #[derive(Copy, Clone, Default, PartialEq, Eq, Hash)]
-    pub struct SegAccess(u32);
-    impl Debug;
-    pub seg_type, _ : 3, 0;
-    pub s_code_data, _ : 4;
-    pub priv_level, _ : 6, 5;
-    pub present, _ : 7;
-    pub available, _ : 12;
-    pub l_64bit, _ : 13;
-    pub db_size_32, _: 14;
-    pub granularity, _: 15;
-    pub unusable, _: 16;
-}
-
-#[cfg(feature = "sev_snp")]
-fn make_segment(sev_selector: igvm::snp_defs::SevSelector) -> Segment {
-    let flags = SegAccess(sev_selector.attrib.into());
-    Segment {
-        base: sev_selector.base,
-        limit: sev_selector.limit,
-        selector: sev_selector.selector,
-        type_: flags.seg_type() as u8,
-        s: flags.s_code_data() as u8,
-        dpl: flags.priv_level() as u8,
-        present: flags.present() as u8,
-        avl: flags.available() as u8,
-        db: flags.db_size_32() as u8,
-        g: flags.granularity() as u8,
-        l: flags.l_64bit() as u8,
-        unusable: flags.unusable() as u8,
-        ..Default::default()
-    }
-}
-
-// TODO(b/369607475): The following VM types are defined in latest linux kernel arch/x86/include/uapi/asm/kvm.h but doesn't exist in kvm binding yet.
-#[cfg(feature = "kvm")]
-pub const KVM_X86_SNP_VM: u32 = 4;
-// Hardcoded GPA of VMSA page for KVM
-#[cfg(feature = "kvm")]
-pub const KVM_VMSA_PAGE_ADDRESS: GuestAddress = GuestAddress(0xffff_ffff_f000);
-#[cfg(feature = "kvm")]
-pub const KVM_VMSA_PAGE_SIZE: usize = 0x1000;
-#[cfg(feature = "kvm")]
-pub const STAGE0_START_ADDRESS: GuestAddress = GuestAddress(0xffe0_0000);
-#[cfg(feature = "kvm")]
-pub const STAGE0_SIZE: usize = 0x20_0000;
-
-// Maximum Virtual address space.
-const VIRTUTAL_ADDRESS_SIZE_IN_BITS: usize = 1 << 48;
-
-impl From<kvm_userspace_memory_region2> for UserMemoryRegion {
-    fn from(region: kvm_userspace_memory_region2) -> Self {
+impl From<kvm_userspace_memory_region> for UserMemoryRegion {
+    fn from(region: kvm_userspace_memory_region) -> Self {
         let mut flags = USER_MEMORY_REGION_READ;
         if region.flags & KVM_MEM_READONLY == 0 {
             flags |= USER_MEMORY_REGION_WRITE;
         }
         if region.flags & KVM_MEM_LOG_DIRTY_PAGES != 0 {
             flags |= USER_MEMORY_REGION_LOG_DIRTY;
-        }
-        if region.flags & KVM_MEM_GUEST_MEMFD != 0 {
-            flags |= USER_MEMORY_REGION_GUEST_MEMFD;
         }
 
         UserMemoryRegion {
@@ -336,15 +251,11 @@ impl From<kvm_userspace_memory_region2> for UserMemoryRegion {
             memory_size: region.memory_size,
             userspace_addr: region.userspace_addr,
             flags,
-            guest_memfd: region.guest_memfd,
-            guest_memfd_offset: region.guest_memfd_offset,
-            pad1: region.pad1,
-            pad2: region.pad2,
         }
     }
 }
 
-impl From<UserMemoryRegion> for kvm_userspace_memory_region2 {
+impl From<UserMemoryRegion> for kvm_userspace_memory_region {
     fn from(region: UserMemoryRegion) -> Self {
         assert!(
             region.flags & USER_MEMORY_REGION_READ != 0,
@@ -358,19 +269,13 @@ impl From<UserMemoryRegion> for kvm_userspace_memory_region2 {
         if region.flags & USER_MEMORY_REGION_LOG_DIRTY != 0 {
             flags |= KVM_MEM_LOG_DIRTY_PAGES;
         }
-        if region.flags & USER_MEMORY_REGION_GUEST_MEMFD != 0 {
-            flags |= KVM_MEM_GUEST_MEMFD;
-        }
 
-        kvm_userspace_memory_region2 {
+        kvm_userspace_memory_region {
             slot: region.slot,
             guest_phys_addr: region.guest_phys_addr,
             memory_size: region.memory_size,
             userspace_addr: region.userspace_addr,
             flags,
-            guest_memfd: region.guest_memfd,
-            guest_memfd_offset: region.guest_memfd_offset,
-            ..Default::default()
         }
     }
 }
@@ -561,11 +466,6 @@ struct KvmDirtyLogSlot {
     guest_phys_addr: u64,
     memory_size: u64,
     userspace_addr: u64,
-    // Following is used by user_memory_region2.
-    guest_memfd_offset: u64,
-    guest_memfd: u32,
-    pad1: u32,
-    pad2: [u64; 14usize],
 }
 
 /// Wrapper over KVM VM ioctls.
@@ -574,10 +474,6 @@ pub struct KvmVm {
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
     dirty_log_slots: Arc<RwLock<HashMap<u32, KvmDirtyLogSlot>>>,
-    #[cfg(feature = "sev_snp")]
-    sev_fd: Option<x86_64::sev::SevFd>,
-    memfd: Option<OwnedFd>,
-    kvm_guest_memfd_supported: bool,
 }
 
 impl KvmVm {
@@ -596,31 +492,6 @@ impl KvmVm {
     pub fn check_extension(&self, c: Cap) -> bool {
         self.fd.check_extension(c)
     }
-    /// Set user memory region to either use memfd.
-    unsafe fn set_user_memory_region(
-        &self,
-        region: kvm_userspace_memory_region2,
-    ) -> Result<(), errno::Error> {
-        if self.kvm_guest_memfd_supported {
-            self.fd.set_user_memory_region2(region)
-        } else {
-            self.fd.set_user_memory_region(kvm_userspace_memory_region {
-                slot: region.slot,
-                guest_phys_addr: region.guest_phys_addr,
-                userspace_addr: region.userspace_addr,
-                flags: region.flags,
-                memory_size: region.memory_size,
-            })
-        }
-    }
-    /// Get flag for kvm_userspace_memory_region based on memfd support.
-    fn get_kvm_userspace_memory_region_flag(&self, flag: u32) -> u32 {
-        flag | if self.kvm_guest_memfd_supported {
-            KVM_MEM_GUEST_MEMFD
-        } else {
-            0
-        }
-    }
 }
 
 /// Implementation of Vm trait for KVM
@@ -635,74 +506,6 @@ impl KvmVm {
 /// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
 /// ```
 impl vm::Vm for KvmVm {
-    #[cfg(feature = "sev_snp")]
-    fn sev_snp_init(&self, guest_policy: igvm_defs::SnpPolicy) -> vm::Result<()> {
-        info!("Calling KVM_SEV_SNP_LAUNCH_START");
-        self.sev_fd
-            .as_ref()
-            .unwrap()
-            .launch_start(&self.fd, guest_policy)
-            .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
-    }
-
-    #[cfg(feature = "sev_snp")]
-    fn import_isolated_pages(
-        &self,
-        page_type: u32,
-        page_size: u32,
-        // host page frame numbers
-        pfns: &[u64],
-        uaddrs: &[u64],
-    ) -> vm::Result<()> {
-        assert_eq!(pfns.len(), uaddrs.len());
-        if pfns.is_empty() {
-            return Ok(());
-        }
-        // VMSA pages are not supported by launch_update (https://tinyurl.com/vmsa-page-type)
-        if page_type == sev::SEV_VMSA_PAGE_TYPE {
-            // TODO(): investigate where vmsa pages are encrypted
-            return Ok(());
-        }
-        for (pfn, uaddr) in pfns.iter().zip(uaddrs.iter()) {
-            self.fd
-                .set_memory_attributes(kvm_bindings::kvm_memory_attributes {
-                    address: *pfn << sev::GPA_METADATA_PADDING,
-                    size: page_size as u64,
-                    attributes: kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
-                    // Flags must be zero o/w error (flags aren't being used here yet)
-                    flags: 0,
-                })
-                .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
-            self.sev_fd
-                .as_ref()
-                .unwrap()
-                .launch_update(&self.fd, *uaddr, page_size as u64, *pfn, page_type)
-                .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
-        }
-
-        Ok(())
-    }
-
-    #[cfg(feature = "sev_snp")]
-    fn complete_isolated_import(
-        &self,
-        snp_id_block: igvm_defs::IGVM_VHS_SNP_ID_BLOCK,
-        host_data: [u8; 32],
-        id_block_enabled: u8,
-    ) -> vm::Result<()> {
-        self.sev_fd
-            .as_ref()
-            .unwrap()
-            .launch_finish(
-                &self.fd,
-                host_data,
-                id_block_enabled,
-                snp_id_block.author_key_enabled,
-            )
-            .map_err(|e| vm::HypervisorVmError::CompleteIsolatedImport(e.into()))?;
-        Ok(())
-    }
-
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the address of the one-page region in the VM's address space.
@@ -770,8 +573,6 @@ impl vm::Vm for KvmVm {
             vm_ops,
             #[cfg(target_arch = "x86_64")]
             hyperv_synic: AtomicBool::new(false),
-            #[cfg(feature = "sev_snp")]
-            vm_fd: self.fd.clone(),
         };
         Ok(Arc::new(vcpu))
     }
@@ -931,28 +732,17 @@ impl vm::Vm for KvmVm {
         readonly: bool,
         log_dirty_pages: bool,
     ) -> UserMemoryRegion {
-        let flags = if readonly { KVM_MEM_READONLY } else { 0 }
-            | if log_dirty_pages {
-                KVM_MEM_LOG_DIRTY_PAGES
-            } else {
-                0
-            };
-
-        let guest_memfd = if let Some(memfd) = &self.memfd {
-            memfd.as_raw_fd() as u32
-        } else {
-            0
-        };
-
-        kvm_userspace_memory_region2 {
+        kvm_userspace_memory_region {
             slot,
-            flags: self.get_kvm_userspace_memory_region_flag(flags),
             guest_phys_addr,
             memory_size,
             userspace_addr,
-            guest_memfd,
-            guest_memfd_offset: guest_phys_addr,
-            ..Default::default()
+            flags: if readonly { KVM_MEM_READONLY } else { 0 }
+                | if log_dirty_pages {
+                    KVM_MEM_LOG_DIRTY_PAGES
+                } else {
+                    0
+                },
         }
         .into()
     }
@@ -961,7 +751,8 @@ impl vm::Vm for KvmVm {
     /// Creates a guest physical memory region.
     ///
     fn create_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
-        let mut region: kvm_userspace_memory_region2 = user_memory_region.into();
+        let mut region: kvm_userspace_memory_region = user_memory_region.into();
+
         if (region.flags & KVM_MEM_LOG_DIRTY_PAGES) != 0 {
             if (region.flags & KVM_MEM_READONLY) != 0 {
                 return Err(vm::HypervisorVmError::CreateUserMemory(anyhow!(
@@ -977,44 +768,27 @@ impl vm::Vm for KvmVm {
                     guest_phys_addr: region.guest_phys_addr,
                     memory_size: region.memory_size,
                     userspace_addr: region.userspace_addr,
-                    guest_memfd_offset: region.guest_memfd_offset,
-                    guest_memfd: region.guest_memfd,
-                    pad1: region.pad1,
-                    pad2: region.pad2,
                 },
             );
 
             // Always create guest physical memory region without `KVM_MEM_LOG_DIRTY_PAGES`.
             // For regions that need this flag, dirty pages log will be turned on in `start_dirty_log`.
-            region.flags = self.get_kvm_userspace_memory_region_flag(0);
+            region.flags = 0;
         }
 
         // SAFETY: Safe because guest regions are guaranteed not to overlap.
         unsafe {
-            self.set_user_memory_region(region)
-                .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
-        }
-
-        #[cfg(feature = "sev_snp")]
-        // TODO(b/369607475): check if all pages have to be private for SNP guests, including VFIO
-        if self.kvm_guest_memfd_supported {
             self.fd
-                .set_memory_attributes(kvm_memory_attributes {
-                    address: region.guest_phys_addr,
-                    size: region.memory_size,
-                    attributes: KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
-                    flags: 0,
-                })
-                .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
+                .set_user_memory_region(region)
+                .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))
         }
-        Ok(())
     }
 
     ///
     /// Removes a guest physical memory region.
     ///
     fn remove_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
-        let mut region: kvm_userspace_memory_region2 = user_memory_region.into();
+        let mut region: kvm_userspace_memory_region = user_memory_region.into();
 
         // Remove the corresponding entry from "self.dirty_log_slots" if needed
         self.dirty_log_slots.write().unwrap().remove(&region.slot);
@@ -1023,7 +797,8 @@ impl vm::Vm for KvmVm {
         region.memory_size = 0;
         // SAFETY: Safe because guest regions are guaranteed not to overlap.
         unsafe {
-            self.set_user_memory_region(region)
+            self.fd
+                .set_user_memory_region(region)
                 .map_err(|e| vm::HypervisorVmError::RemoveUserMemory(e.into()))
         }
     }
@@ -1107,20 +882,17 @@ impl vm::Vm for KvmVm {
     fn start_dirty_log(&self) -> vm::Result<()> {
         let dirty_log_slots = self.dirty_log_slots.read().unwrap();
         for (_, s) in dirty_log_slots.iter() {
-            let region = kvm_userspace_memory_region2 {
+            let region = kvm_userspace_memory_region {
                 slot: s.slot,
                 guest_phys_addr: s.guest_phys_addr,
                 memory_size: s.memory_size,
                 userspace_addr: s.userspace_addr,
-                flags: self.get_kvm_userspace_memory_region_flag(KVM_MEM_LOG_DIRTY_PAGES),
-                guest_memfd: s.guest_memfd,
-                guest_memfd_offset: s.guest_memfd_offset,
-                pad1: s.pad1,
-                pad2: s.pad2,
+                flags: KVM_MEM_LOG_DIRTY_PAGES,
             };
             // SAFETY: Safe because guest regions are guaranteed not to overlap.
             unsafe {
-                self.set_user_memory_region(region)
+                self.fd
+                    .set_user_memory_region(region)
                     .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
             }
         }
@@ -1134,20 +906,17 @@ impl vm::Vm for KvmVm {
     fn stop_dirty_log(&self) -> vm::Result<()> {
         let dirty_log_slots = self.dirty_log_slots.read().unwrap();
         for (_, s) in dirty_log_slots.iter() {
-            let region = kvm_userspace_memory_region2 {
+            let region = kvm_userspace_memory_region {
                 slot: s.slot,
                 guest_phys_addr: s.guest_phys_addr,
                 memory_size: s.memory_size,
                 userspace_addr: s.userspace_addr,
-                flags: self.get_kvm_userspace_memory_region_flag(0),
-                guest_memfd: s.guest_memfd,
-                guest_memfd_offset: s.guest_memfd_offset,
-                pad1: s.pad1,
-                pad2: s.pad2,
+                flags: 0,
             };
             // SAFETY: Safe because guest regions are guaranteed not to overlap.
             unsafe {
-                self.set_user_memory_region(region)
+                self.fd
+                    .set_user_memory_region(region)
                     .map_err(|e| vm::HypervisorVmError::StartDirtyLog(e.into()))?;
             }
         }
@@ -1416,9 +1185,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
 
         #[cfg(target_arch = "x86_64")]
         {
-            // TODO(b/369607475): Check capability instead of VM type for guest memfd support once supported in kvm-ioctls.
-            let kvm_guest_memfd_supported =
-                vm_type == KVM_X86_SW_PROTECTED_VM as u64 || vm_type == KVM_X86_SNP_VM as u64;
             let msr_list = self.get_msr_list()?;
             let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
             let mut msrs: Vec<MsrEntry> = vec![
@@ -1432,82 +1198,19 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 msrs[pos].index = *index;
             }
 
-            let memfd = if kvm_guest_memfd_supported {
-                // TODO(b/369607475): Refactor to create memfd when the memory region is created so
-                // that the size is appropriate.
-                unsafe {
-                    Some(OwnedFd::from_raw_fd(
-                        vm_fd
-                            .create_guest_memfd(kvm_create_guest_memfd {
-                                size: VIRTUTAL_ADDRESS_SIZE_IN_BITS as u64,
-                                ..Default::default()
-                            })
-                            .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?,
-                    ))
-                }
-            } else {
-                None
-            };
+            Ok(Arc::new(KvmVm {
+                fd: vm_fd,
+                msrs,
+                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+            }))
+        }
 
-            #[cfg(feature = "sev_snp")]
-            {
-                let sev_snp_enabled = vm_type == KVM_X86_SNP_VM as u64;
-                if sev_snp_enabled {
-                    let mask = self.kvm.check_extension_int(crate::kvm::Cap::ExitHypercall);
-                    let cap = kvm_bindings::kvm_enable_cap {
-                        cap: kvm_bindings::KVM_CAP_EXIT_HYPERCALL,
-                        args: [mask as _, 0, 0, 0],
-                        ..Default::default()
-                    };
-                    vm_fd
-                        .enable_cap(&cap)
-                        .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
-                    // TODO: Fix sev device path flag as setting the environment variable is not working
-                }
-                let sev_fd = if sev_snp_enabled {
-                    let sev_dev = x86_64::sev::SevFd::new(&"/dev/sev".to_string())
-                        .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilities(e.into()))?;
-                    // This ioctl initializes the sev context and must be called right after opening the sev device.
-                    info!("Calling KVM_SEV_INIT2");
-                    sev_dev
-                        .init2(&vm_fd)
-                        .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
-                    Some(sev_dev)
-                } else {
-                    None
-                };
-
-                Ok(Arc::new(KvmVm {
-                    fd: vm_fd,
-                    msrs,
-                    dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
-                    sev_fd,
-                    memfd,
-                    kvm_guest_memfd_supported,
-                }))
-            }
-
-            #[cfg(not(feature = "sev_snp"))]
-            {
-                Ok(Arc::new(KvmVm {
-                    fd: vm_fd,
-                    msrs,
-                    dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
-                    memfd,
-                    kvm_guest_memfd_supported,
-                }))
-            }
-
-            #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-            {
-                Ok(Arc::new(KvmVm {
-                    fd: vm_fd,
-                    msrs,
-                    dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
-                    memfd,
-                    kvm_guest_memfd_supported,
-                }))
-            }
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+        {
+            Ok(Arc::new(KvmVm {
+                fd: vm_fd,
+                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+            }))
         }
     }
 
@@ -1614,8 +1317,6 @@ pub struct KvmVcpu {
     vm_ops: Option<Arc<dyn vm::VmOps>>,
     #[cfg(target_arch = "x86_64")]
     hyperv_synic: AtomicBool,
-    #[cfg(feature = "sev_snp")]
-    vm_fd: Arc<VmFd>,
 }
 
 /// Implementation of Vcpu trait for KVM
@@ -2864,48 +2565,6 @@ impl cpu::Vcpu for KvmVcpu {
                 #[cfg(feature = "tdx")]
                 VcpuExit::Unsupported(KVM_EXIT_TDX) => Ok(cpu::VmExit::Tdx),
                 VcpuExit::Debug(_) => Ok(cpu::VmExit::Debug),
-                #[cfg(feature = "sev_snp")]
-                VcpuExit::Hypercall(hypercall) => {
-                    // https://tinyurl.com/kvm-hypercall-map-gpa
-                    info!("VcpuExit::Hypercall");
-                    const KVM_HC_MAP_GPA_RANGE: u64 = 12;
-                    // 4th bit of attributes argument is encrypted page bit
-                    match hypercall.nr {
-                        KVM_HC_MAP_GPA_RANGE => {
-                            info!("Handling KVM_HC_MAP_GPA_RANGE hyper call");
-                            // guest physical address of start page
-                            let address = hypercall.args[0];
-                            // num pages to map from start address
-                            let num_pages = hypercall.args[1];
-                            // bits[0-3]  = page size encoding
-                            // bits [4]   = 1 if private, 0 if shared
-                            // bits[5-63] = zero
-                            let attributes = hypercall.args[2];
-                            // TODO: b/394610854 - Add 2mb page support
-                            let size = num_pages * PAGE_SIZE_4K;
-                            let private_encoding_bitmask = 0b10000;
-                            info!("hypercall attributes: {:#b}", attributes);
-                            let set_private_attr = if attributes & private_encoding_bitmask > 0 {
-                                KVM_MEMORY_ATTRIBUTE_PRIVATE as u64
-                            } else {
-                                // the only attribute available is private, o/w 0
-                                // https://docs.kernel.org/virt/kvm/api.html#kvm-set-memory-attributes
-                                0u64
-                            };
-                            let mem_attributes = kvm_bindings::kvm_memory_attributes {
-                                address,
-                                size,
-                                attributes: set_private_attr as u64,
-                                ..Default::default()
-                            };
-                            self.vm_fd
-                                .set_memory_attributes(mem_attributes)
-                                .map(|_| cpu::VmExit::Ignore)
-                                .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))
-                        }
-                        _ => Ok(cpu::VmExit::Ignore),
-                    }
-                }
 
                 r => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
                     "Unexpected exit reason on vcpu run: {:?}",
@@ -3792,56 +3451,6 @@ impl cpu::Vcpu for KvmVcpu {
             }
             Ok(_) => Ok(()),
         }
-    }
-
-    #[cfg(feature = "sev_snp")]
-    fn set_sev_control_register(
-        &self,
-        _vmsa_pfn: u64,
-        vmsa: igvm::snp_defs::SevVmsa,
-    ) -> cpu::Result<()> {
-        let vcpu = self.fd.lock().unwrap();
-
-        let mut sregs = vcpu
-            .get_sregs()
-            .map_err(|e| cpu::HypervisorCpuError::GetSpecialRegs(e.into()))?;
-        sregs.cs = make_segment(vmsa.cs);
-        info!("CS: {:?}", sregs.cs);
-        sregs.ds = make_segment(vmsa.ds);
-        sregs.es = make_segment(vmsa.es);
-        sregs.fs = make_segment(vmsa.fs);
-        sregs.gs = make_segment(vmsa.gs);
-        sregs.ss = make_segment(vmsa.ss);
-        sregs.tr = make_segment(vmsa.tr);
-        sregs.ldt = make_segment(vmsa.ldtr);
-
-        sregs.cr0 = vmsa.cr0;
-        sregs.cr4 = vmsa.cr4;
-        sregs.efer = vmsa.efer;
-
-        sregs.idt.base = vmsa.idtr.base;
-        sregs.idt.limit = vmsa.idtr.limit.try_into().unwrap();
-        info!("idt limit: {}", sregs.idt.limit);
-        sregs.gdt.base = vmsa.gdtr.base;
-        sregs.gdt.limit = vmsa.gdtr.limit.try_into().unwrap();
-        info!("gdt limit: {}", sregs.gdt.limit);
-        let _ = vcpu
-            .set_sregs(&sregs)
-            .map_err(|e| cpu::HypervisorCpuError::SetSpecialRegs(e.into()))?;
-
-        let mut regs = vcpu
-            .get_regs()
-            .map_err(|e| cpu::HypervisorCpuError::GetRegister(e.into()))?;
-        regs.rip = vmsa.rip;
-        info!("rds: {}", vmsa.rdx);
-        regs.rdx = vmsa.rdx;
-        regs.rflags = vmsa.rflags;
-
-        let _ = vcpu
-            .set_regs(&regs)
-            .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
-
-        Ok(())
     }
 }
 

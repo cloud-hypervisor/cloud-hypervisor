@@ -269,9 +269,6 @@ pub const FW_CFG_FILENAME_TABLE_LOADER: &str = "etc/table-loader";
 pub const FW_CFG_FILENAME_RSDP: &str = "acpi/rsdp";
 pub const FW_CFG_FILENAME_ACPI_TABLES: &str = "acpi/tables";
 
-pub const OEM_TABLE_ID: [u8; 8] = *b"CLHVXSDT";
-pub const OEM_ID: [u8; 6] = *b"CLOUDH";
-pub const OEM_REVISION: u32 = 1;
 pub const SIGNATURE: [u8; 4] = *b"XSDT";
 pub const COMPILER_ID: [u8; 4] = *b"RVAT";
 
@@ -423,9 +420,9 @@ pub fn create_acpi_loader(mut acpi_table: AcpiTable) -> [FwCfgItem; 3] {
     };
     table_loader_bytes.extend(allocate_tables.as_bytes());
 
-    for pinter_offset in acpi_table.pointers().iter() {
-        let pinter = create_intra_pointer(FW_CFG_FILENAME_ACPI_TABLES, *pinter_offset, 8);
-        table_loader_bytes.extend(pinter.as_bytes());
+    for pointer_offset in acpi_table.pointers().iter() {
+        let pointer = create_intra_pointer(FW_CFG_FILENAME_ACPI_TABLES, *pointer_offset, 8);
+        table_loader_bytes.extend(pointer.as_bytes());
     }
     for (offset, len) in acpi_table.checksums().iter() {
         let checksum = create_acpi_table_checksum(*offset, *len);

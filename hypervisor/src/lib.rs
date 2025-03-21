@@ -67,8 +67,6 @@ pub use vm::{
     Vm, VmOps,
 };
 
-pub const HV_PAGE_SIZE: u64 = 4096;
-
 pub use crate::hypervisor::{Hypervisor, HypervisorError};
 
 #[derive(Debug, Copy, Clone)]
@@ -135,14 +133,6 @@ pub struct UserMemoryRegion {
     pub memory_size: u64,
     pub userspace_addr: u64,
     pub flags: u32,
-    #[cfg(feature = "kvm")]
-    pub guest_memfd: u32,
-    #[cfg(feature = "kvm")]
-    pub guest_memfd_offset: u64,
-    #[cfg(feature = "kvm")]
-    pub pad1: u32,
-    #[cfg(feature = "kvm")]
-    pub pad2: [u64; 14usize],
 }
 
 ///
@@ -153,8 +143,6 @@ pub const USER_MEMORY_REGION_WRITE: u32 = 1 << 1;
 pub const USER_MEMORY_REGION_EXECUTE: u32 = 1 << 2;
 pub const USER_MEMORY_REGION_LOG_DIRTY: u32 = 1 << 3;
 pub const USER_MEMORY_REGION_ADJUSTABLE: u32 = 1 << 4;
-#[cfg(feature = "kvm")]
-pub const USER_MEMORY_REGION_GUEST_MEMFD: u32 = 1 << 5;
 
 #[derive(Debug)]
 pub enum MpState {

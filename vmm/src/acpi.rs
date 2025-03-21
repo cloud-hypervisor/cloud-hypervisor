@@ -18,7 +18,6 @@ use arch::NumaNodes;
 use bitflags::bitflags;
 #[cfg(feature = "fw_cfg")]
 use devices::acpi::AcpiTable;
-use devices::acpi::{OEM_ID, OEM_REVISION, OEM_TABLE_ID};
 use pci::PciBdf;
 use tracer::trace_scoped;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryRegion};
@@ -183,7 +182,7 @@ pub fn create_dsdt_table(
 ) -> Sdt {
     trace_scoped!("create_dsdt_table");
     // DSDT
-    let mut dsdt = Sdt::new(*b"DSDT", 36, 6, OEM_ID, *b"CHDSDT  ", OEM_REVISION);
+    let mut dsdt = Sdt::new(*b"DSDT", 36, 6, *b"CLOUDH", *b"CHDSDT  ", 1);
 
     let mut bytes = Vec::new();
 
@@ -201,7 +200,7 @@ fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Arc<Mutex<Devic
     trace_scoped!("create_facp_table");
 
     // Revision 6 of the ACPI FADT table is 276 bytes long
-    let mut facp = Sdt::new(*b"FACP", 276, 6, OEM_ID, *b"CHFACP  ", OEM_REVISION);
+    let mut facp = Sdt::new(*b"FACP", 276, 6, *b"CLOUDH", *b"CHFACP  ", 1);
 
     {
         let device_manager = device_manager.lock().unwrap();
@@ -256,7 +255,7 @@ fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Arc<Mutex<Devic
 }
 
 fn create_mcfg_table(pci_segments: &[PciSegment]) -> Sdt {
-    let mut mcfg = Sdt::new(*b"MCFG", 36, 1, OEM_ID, *b"CHMCFG  ", OEM_REVISION);
+    let mut mcfg = Sdt::new(*b"MCFG", 36, 1, *b"CLOUDH", *b"CHMCFG  ", 1);
 
     // MCFG reserved 8 bytes
     mcfg.append(0u64);
@@ -275,7 +274,7 @@ fn create_mcfg_table(pci_segments: &[PciSegment]) -> Sdt {
 }
 
 fn create_tpm2_table() -> Sdt {
-    let mut tpm = Sdt::new(*b"TPM2", 52, 3, OEM_ID, *b"CHTPM2  ", OEM_REVISION);
+    let mut tpm = Sdt::new(*b"TPM2", 52, 3, *b"CLOUDH", *b"CHTPM2  ", 1);
 
     tpm.write(36, 0_u16); //Platform Class
     tpm.write(38, 0_u16); // Reserved Space
@@ -290,7 +289,7 @@ fn create_srat_table(
     numa_nodes: &NumaNodes,
     #[cfg(target_arch = "x86_64")] topology: Option<(u8, u8, u8)>,
 ) -> Sdt {
-    let mut srat = Sdt::new(*b"SRAT", 36, 3, OEM_ID, *b"CHSRAT  ", OEM_REVISION);
+    let mut srat = Sdt::new(*b"SRAT", 36, 3, *b"CLOUDH", *b"CHSRAT  ", 1);
     // SRAT reserved 12 bytes
     srat.append_slice(&[0u8; 12]);
 
@@ -363,7 +362,7 @@ fn create_srat_table(
 }
 
 fn create_slit_table(numa_nodes: &NumaNodes) -> Sdt {
-    let mut slit = Sdt::new(*b"SLIT", 36, 1, OEM_ID, *b"CHSLIT  ", OEM_REVISION);
+    let mut slit = Sdt::new(*b"SLIT", 36, 1, *b"CLOUDH", *b"CHSLIT  ", 1);
     // Number of System Localities on 8 bytes.
     slit.append(numa_nodes.len() as u64);
 
@@ -396,7 +395,7 @@ fn create_gtdt_table() -> Sdt {
 
     let irqflags: u32 = ACPI_GTDT_INTERRUPT_MODE_LEVEL;
     // GTDT
-    let mut gtdt = Sdt::new(*b"GTDT", 104, 2, OEM_ID, *b"CHGTDT  ", OEM_REVISION);
+    let mut gtdt = Sdt::new(*b"GTDT", 104, 2, *b"CLOUDH", *b"CHGTDT  ", 1);
     // Secure EL1 Timer GSIV
     gtdt.write(48, ARCH_TIMER_S_EL1_IRQ + 16);
     // Secure EL1 Timer Flags
@@ -422,7 +421,7 @@ fn create_gtdt_table() -> Sdt {
 #[cfg(target_arch = "aarch64")]
 fn create_spcr_table(base_address: u64, gsi: u32) -> Sdt {
     // SPCR
-    let mut spcr = Sdt::new(*b"SPCR", 80, 2, OEM_ID, *b"CHSPCR  ", OEM_REVISION);
+    let mut spcr = Sdt::new(*b"SPCR", 80, 2, *b"CLOUDH", *b"CHSPCR  ", 1);
     // Interface Type
     spcr.write(36, 3u8);
     // Base Address in format ACPI Generic Address Structure
@@ -456,7 +455,7 @@ fn create_dbg2_table(base_address: u64) -> Sdt {
                        4 /* AddressSize */ +
                        namespace.len() as u16 + 1 /* zero-terminated */;
     let tbl_len: u32 = debug_device_info_offset as u32 + debug_device_info_len as u32;
-    let mut dbg2 = Sdt::new(*b"DBG2", tbl_len, 0, OEM_ID, *b"CHDBG2  ", OEM_REVISION);
+    let mut dbg2 = Sdt::new(*b"DBG2", tbl_len, 0, *b"CLOUDH", *b"CHDBG2  ", 1);
 
     /* OffsetDbgDeviceInfo */
     dbg2.write_u32(36, 44);
@@ -537,9 +536,9 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
         *b"IORT",
         iort_table_size,
         2,
-        OEM_ID,
+        *b"CLOUDH",
         *b"CHIORT  ",
-        OEM_REVISION,
+        1,
     );
     iort.write(36, ((1 + pci_segments.len()) as u32).to_le());
     iort.write(40, (48u32).to_le());
@@ -604,7 +603,7 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
 
 fn create_viot_table(iommu_bdf: &PciBdf, devices_bdf: &[PciBdf]) -> Sdt {
     // VIOT
-    let mut viot = Sdt::new(*b"VIOT", 36, 0, OEM_ID, *b"CHVIOT  ", OEM_REVISION);
+    let mut viot = Sdt::new(*b"VIOT", 36, 0, *b"CLOUDH", *b"CHVIOT  ", 1);
     // Node count
     viot.append((devices_bdf.len() + 1) as u16);
     // Node offset
@@ -826,7 +825,7 @@ pub fn create_acpi_tables(
     }
 
     // XSDT
-    let mut xsdt = Sdt::new(*b"XSDT", 36, 1, OEM_ID, OEM_TABLE_ID, OEM_REVISION);
+    let mut xsdt = Sdt::new(*b"XSDT", 36, 1, *b"CLOUDH", *b"CLHVXSDT", 1);
     for table in tables {
         xsdt.append(table);
     }
@@ -837,7 +836,7 @@ pub fn create_acpi_tables(
         .expect("Error writing XSDT table");
 
     // RSDP
-    let rsdp = Rsdp::new(OEM_ID, xsdt_offset.0);
+    let rsdp = Rsdp::new(*b"CLOUDH", xsdt_offset.0);
     guest_mem
         .write_slice(rsdp.as_bytes(), rsdp_offset)
         .expect("Error writing RSDP");
@@ -850,7 +849,7 @@ pub fn create_acpi_tables(
     rsdp_offset
 }
 
-#[cfg(feature = "sev_snp")]
+#[cfg(feature = "fw_cfg")]
 pub fn create_acpi_tables_for_fw_cfg(
     device_manager: &Arc<Mutex<DeviceManager>>,
     cpu_manager: &Arc<Mutex<CpuManager>>,
@@ -915,7 +914,7 @@ pub fn create_acpi_tables_for_fw_cfg(
         table_bytes.extend_from_slice(viot.as_slice());
     }
     // XSDT
-    let mut xsdt = Sdt::new(*b"XSDT", 36, 1, OEM_ID, OEM_TABLE_ID, OEM_REVISION);
+    let mut xsdt = Sdt::new(*b"XSDT", 36, 1, *b"CLOUDH", *b"CLHVXSDT", 1);
     for table in tables {
         pointers.push(xsdt.len());
         xsdt.append(table);

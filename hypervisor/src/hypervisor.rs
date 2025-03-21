@@ -89,11 +89,6 @@ pub enum HypervisorError {
     ///
     #[error("Unsupported VmType")]
     UnsupportedVmType(),
-    ///
-    /// Failed to retrieve SEV-SNP capabilities
-    ///
-    #[error("Failed to retrieve SEV-SNP capabilities:{0}")]
-    SevSnpCapabilities(#[source] anyhow::Error),
 }
 
 ///
