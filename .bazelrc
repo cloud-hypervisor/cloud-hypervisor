@@ -1,6 +1,0 @@
-# Output more information on failure
-build --verbose_failures
-test --test_output=errors
-test --test_verbose_timeout_warnings
-# Show stdout/stderr in test output when logging
-test --test_arg=--nocapture

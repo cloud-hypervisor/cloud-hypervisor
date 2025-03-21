@@ -40,9 +40,7 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 #[cfg(feature = "sev_snp")]
-use hypervisor::kvm::{
-    KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE, KVM_X86_SNP_VM, STAGE0_SIZE, STAGE0_START_ADDRESS,
-};
+use hypervisor::kvm::KVM_X86_SNP_VM;
 use hypervisor::{HypervisorVmError, VmOps};
 #[cfg(feature = "sev_snp")]
 use igvm_defs::SnpPolicy;
@@ -676,74 +674,6 @@ impl Vm {
             .create_devices(console_info, console_resize_pipe, original_termios)
             .map_err(Error::DeviceManager)?;
 
-        #[cfg(feature = "fw_cfg")]
-        {
-            let _ = device_manager
-                .lock()
-                .unwrap()
-                .fw_cfg()
-                .expect("fw_cfg device must be present")
-                .lock()
-                .unwrap()
-                .add_e820(config.lock().unwrap().memory.size as usize);
-
-            let kernel = config
-                .lock()
-                .unwrap()
-                .payload
-                .as_ref()
-                .map(|p| p.kernel.as_ref().map(File::open))
-                .unwrap_or_default()
-                .transpose()
-                .map_err(Error::KernelFile)?;
-            if let Some(kernel_file) = kernel {
-                let _ = device_manager
-                    .lock()
-                    .unwrap()
-                    .fw_cfg()
-                    .expect("fw_cfg device must be present")
-                    .lock()
-                    .unwrap()
-                    .add_kernel_data(kernel_file);
-            } else {
-                return Err(Error::FwCfgKernelFile);
-            }
-            let _ = device_manager
-                .lock()
-                .unwrap()
-                .fw_cfg()
-                .expect("fw_cfg device must be present")
-                .lock()
-                .unwrap()
-                .add_kernel_cmdline(
-                    Vm::generate_cmdline(config.lock().unwrap().payload.as_ref().unwrap())
-                        .map_err(|_| Error::FwCfgCmdline)?
-                        .as_cstring()
-                        .map_err(|_| Error::FwCfgCmdline)?,
-                );
-            let initramfs = config
-                .lock()
-                .unwrap()
-                .payload
-                .as_ref()
-                .map(|p| p.initramfs.as_ref().map(File::open))
-                .unwrap_or_default()
-                .transpose()
-                .map_err(Error::InitramfsFile)?;
-            // We measure the initramfs when running Oak Containers in SNP mode (initramfs = Stage1)
-            // o/w use Stage0 to launch cloud disk images
-            if let Some(initramfs_file) = initramfs {
-                let _ = device_manager
-                    .lock()
-                    .unwrap()
-                    .fw_cfg()
-                    .expect("fw_cfg device must be present")
-                    .lock()
-                    .unwrap()
-                    .add_initramfs_data(initramfs_file);
-            }
-        }
-
         #[cfg(feature = "tdx")]
         let kernel = config
             .lock()
@@ -1128,20 +1058,6 @@ impl Vm {
         Ok(EntryPoint { entry_addr })
     }
 
-    #[cfg(feature = "fw_cfg")]
-    fn reserve_region_for_stage0(memory_manager: &Arc<Mutex<MemoryManager>>) -> Result<()> {
-        let mut memory_manager = memory_manager.lock().unwrap();
-        // Region for loading Stage 0;
-        memory_manager
-            .add_ram_region(STAGE0_START_ADDRESS, STAGE0_SIZE)
-            .map_err(|e| Error::MemoryManager(e))?;
-        // Region for loading the VMSA page
-        memory_manager
-            .add_ram_region(KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE)
-            .map_err(|e| Error::MemoryManager(e))?;
-        Ok(())
-    }
-
     #[cfg(target_arch = "riscv64")]
     fn load_kernel(
         firmware: Option<File>,
@@ -1190,8 +1106,6 @@ impl Vm {
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
     ) -> Result<EntryPoint> {
-        #[cfg(feature = "fw_cfg")]
-        Self::reserve_region_for_stage0(&memory_manager)?;
 
         let res = igvm_loader::load_igvm(
             &igvm,
@@ -2273,14 +2187,6 @@ impl Vm {
         }
         let mem = self.memory_manager.lock().unwrap().guest_memory().memory();
         let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
-        #[cfg(feature = "fw_cfg")]
-        {
-            let _ = crate::acpi::create_acpi_tables_for_fw_cfg(
-                &self.device_manager,
-                &self.cpu_manager,
-                &self.memory_manager,
-            );
-        }
         let rsdp_addr = crate::acpi::create_acpi_tables(
             &mem,
             &self.device_manager,

@@ -1,8 +1,0 @@
-# Temp files made from testing manual run
-**/*.digest.json
-summary.json
-**/*.isolate
-triggered/*
-tmp_output/*
-tests/*
-out/*

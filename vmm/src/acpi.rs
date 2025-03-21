@@ -16,9 +16,6 @@ use arch::aarch64::DeviceInfoForFdt;
 use arch::DeviceType;
 use arch::NumaNodes;
 use bitflags::bitflags;
-#[cfg(feature = "fw_cfg")]
-use devices::acpi::AcpiTable;
-use devices::acpi::{OEM_ID, OEM_REVISION, OEM_TABLE_ID};
 use pci::PciBdf;
 use tracer::trace_scoped;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryRegion};
@@ -183,7 +180,7 @@ pub fn create_dsdt_table(
 ) -> Sdt {
     trace_scoped!("create_dsdt_table");
     // DSDT
-    let mut dsdt = Sdt::new(*b"DSDT", 36, 6, OEM_ID, *b"CHDSDT  ", OEM_REVISION);
+    let mut dsdt = Sdt::new(*b"DSDT", 36, 6, *b"CLOUDH", *b"CHDSDT  ", 1);
 
     let mut bytes = Vec::new();
 
@@ -201,7 +198,7 @@ fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Arc<Mutex<Devic
     trace_scoped!("create_facp_table");
 
     // Revision 6 of the ACPI FADT table is 276 bytes long
-    let mut facp = Sdt::new(*b"FACP", 276, 6, OEM_ID, *b"CHFACP  ", OEM_REVISION);
+    let mut facp = Sdt::new(*b"FACP", 276, 6, *b"CLOUDH", *b"CHFACP  ", 1);
 
     {
         let device_manager = device_manager.lock().unwrap();
@@ -256,7 +253,7 @@ fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Arc<Mutex<Devic
 }
 
 fn create_mcfg_table(pci_segments: &[PciSegment]) -> Sdt {
-    let mut mcfg = Sdt::new(*b"MCFG", 36, 1, OEM_ID, *b"CHMCFG  ", OEM_REVISION);
+    let mut mcfg = Sdt::new(*b"MCFG", 36, 1, *b"CLOUDH", *b"CHMCFG  ", 1);
 
     // MCFG reserved 8 bytes
     mcfg.append(0u64);
@@ -275,7 +272,7 @@ fn create_mcfg_table(pci_segments: &[PciSegment]) -> Sdt {
 }
 
 fn create_tpm2_table() -> Sdt {
-    let mut tpm = Sdt::new(*b"TPM2", 52, 3, OEM_ID, *b"CHTPM2  ", OEM_REVISION);
+    let mut tpm = Sdt::new(*b"TPM2", 52, 3, *b"CLOUDH", *b"CHTPM2  ", 1);
 
     tpm.write(36, 0_u16); //Platform Class
     tpm.write(38, 0_u16); // Reserved Space
@@ -290,7 +287,7 @@ fn create_srat_table(
     numa_nodes: &NumaNodes,
     #[cfg(target_arch = "x86_64")] topology: Option<(u8, u8, u8)>,
 ) -> Sdt {
-    let mut srat = Sdt::new(*b"SRAT", 36, 3, OEM_ID, *b"CHSRAT  ", OEM_REVISION);
+    let mut srat = Sdt::new(*b"SRAT", 36, 3, *b"CLOUDH", *b"CHSRAT  ", 1);
     // SRAT reserved 12 bytes
     srat.append_slice(&[0u8; 12]);
 
@@ -363,7 +360,7 @@ fn create_srat_table(
 }
 
 fn create_slit_table(numa_nodes: &NumaNodes) -> Sdt {
-    let mut slit = Sdt::new(*b"SLIT", 36, 1, OEM_ID, *b"CHSLIT  ", OEM_REVISION);
+    let mut slit = Sdt::new(*b"SLIT", 36, 1, *b"CLOUDH", *b"CHSLIT  ", 1);
     // Number of System Localities on 8 bytes.
     slit.append(numa_nodes.len() as u64);
 
@@ -396,7 +393,7 @@ fn create_gtdt_table() -> Sdt {
 
     let irqflags: u32 = ACPI_GTDT_INTERRUPT_MODE_LEVEL;
     // GTDT
-    let mut gtdt = Sdt::new(*b"GTDT", 104, 2, OEM_ID, *b"CHGTDT  ", OEM_REVISION);
+    let mut gtdt = Sdt::new(*b"GTDT", 104, 2, *b"CLOUDH", *b"CHGTDT  ", 1);
     // Secure EL1 Timer GSIV
     gtdt.write(48, ARCH_TIMER_S_EL1_IRQ + 16);
     // Secure EL1 Timer Flags
@@ -422,7 +419,7 @@ fn create_gtdt_table() -> Sdt {
 #[cfg(target_arch = "aarch64")]
 fn create_spcr_table(base_address: u64, gsi: u32) -> Sdt {
     // SPCR
-    let mut spcr = Sdt::new(*b"SPCR", 80, 2, OEM_ID, *b"CHSPCR  ", OEM_REVISION);
+    let mut spcr = Sdt::new(*b"SPCR", 80, 2, *b"CLOUDH", *b"CHSPCR  ", 1);
     // Interface Type
     spcr.write(36, 3u8);
     // Base Address in format ACPI Generic Address Structure
@@ -456,7 +453,7 @@ fn create_dbg2_table(base_address: u64) -> Sdt {
                        4 /* AddressSize */ +
                        namespace.len() as u16 + 1 /* zero-terminated */;
     let tbl_len: u32 = debug_device_info_offset as u32 + debug_device_info_len as u32;
-    let mut dbg2 = Sdt::new(*b"DBG2", tbl_len, 0, OEM_ID, *b"CHDBG2  ", OEM_REVISION);
+    let mut dbg2 = Sdt::new(*b"DBG2", tbl_len, 0, *b"CLOUDH", *b"CHDBG2  ", 1);
 
     /* OffsetDbgDeviceInfo */
     dbg2.write_u32(36, 44);
@@ -537,9 +534,9 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
         *b"IORT",
         iort_table_size,
         2,
-        OEM_ID,
+        *b"CLOUDH",
         *b"CHIORT  ",
-        OEM_REVISION,
+        1,
     );
     iort.write(36, ((1 + pci_segments.len()) as u32).to_le());
     iort.write(40, (48u32).to_le());
@@ -604,7 +601,7 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
 
 fn create_viot_table(iommu_bdf: &PciBdf, devices_bdf: &[PciBdf]) -> Sdt {
     // VIOT
-    let mut viot = Sdt::new(*b"VIOT", 36, 0, OEM_ID, *b"CHVIOT  ", OEM_REVISION);
+    let mut viot = Sdt::new(*b"VIOT", 36, 0, *b"CLOUDH", *b"CHVIOT  ", 1);
     // Node count
     viot.append((devices_bdf.len() + 1) as u16);
     // Node offset
@@ -826,7 +823,7 @@ pub fn create_acpi_tables(
     }
 
     // XSDT
-    let mut xsdt = Sdt::new(*b"XSDT", 36, 1, OEM_ID, OEM_TABLE_ID, OEM_REVISION);
+    let mut xsdt = Sdt::new(*b"XSDT", 36, 1, *b"CLOUDH", *b"CLHVXSDT", 1);
     for table in tables {
         xsdt.append(table);
     }
@@ -837,7 +834,7 @@ pub fn create_acpi_tables(
         .expect("Error writing XSDT table");
 
     // RSDP
-    let rsdp = Rsdp::new(OEM_ID, xsdt_offset.0);
+    let rsdp = Rsdp::new(*b"CLOUDH", xsdt_offset.0);
     guest_mem
         .write_slice(rsdp.as_bytes(), rsdp_offset)
         .expect("Error writing RSDP");
@@ -848,102 +845,6 @@ pub fn create_acpi_tables(
         xsdt_offset.0 + xsdt.len() as u64 - rsdp_offset.0
     );
     rsdp_offset
-}
-
-#[cfg(feature = "sev_snp")]
-pub fn create_acpi_tables_for_fw_cfg(
-    device_manager: &Arc<Mutex<DeviceManager>>,
-    cpu_manager: &Arc<Mutex<CpuManager>>,
-    memory_manager: &Arc<Mutex<MemoryManager>>,
-) -> GuestAddress {
-    trace_scoped!("create_acpi_tables");
-
-    // To create AcpiTable
-    let mut table_bytes: Vec<u8> = vec![];
-    let mut pointers: Vec<usize> = vec![];
-    let mut checksums: Vec<(usize, usize)> = vec![];
-    let mut tables: Vec<u64> = Vec::new();
-
-    let xsdt_offset = GuestAddress(0);
-    let xsdt_size = if device_manager
-        .lock()
-        .unwrap()
-        .iommu_attached_devices()
-        .is_some()
-    {
-        0x44
-    } else {
-        0x3c
-    };
-    // DSDT
-    let dsdt = create_dsdt_table(device_manager, cpu_manager, memory_manager);
-    let dsdt_offset = xsdt_offset.checked_add(xsdt_size).unwrap();
-    table_bytes.extend_from_slice(dsdt.as_slice());
-
-    // FACP aka FADT
-    let facp = create_facp_table(dsdt_offset, device_manager);
-    let facp_offset = dsdt_offset.checked_add(dsdt.len() as u64).unwrap();
-    let pointer_facp_to_dsdt = facp_offset.0 as usize + FACP_DSDT_OFFSET;
-    pointers.push(pointer_facp_to_dsdt);
-    table_bytes.extend_from_slice(facp.as_slice());
-    checksums.push((facp_offset.0 as usize, facp.len()));
-    tables.push(facp_offset.0);
-
-    // MADT
-    let madt = cpu_manager.lock().unwrap().create_madt();
-    let madt_offset = facp_offset.checked_add(facp.len() as u64).unwrap();
-    tables.push(madt_offset.0);
-    let mut prev_tbl_len = madt.len() as u64;
-    let mut prev_tbl_off = madt_offset;
-    table_bytes.extend_from_slice(madt.as_slice());
-
-    // MCFG
-    let mcfg = create_mcfg_table(device_manager.lock().unwrap().pci_segments());
-    let mcfg_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
-    tables.push(mcfg_offset.0);
-    prev_tbl_len = mcfg.len() as u64;
-    prev_tbl_off = mcfg_offset;
-    table_bytes.extend_from_slice(mcfg.as_slice());
-
-    // VIOT
-    if let Some((iommu_bdf, devices_bdf)) = device_manager.lock().unwrap().iommu_attached_devices()
-    {
-        let viot = create_viot_table(iommu_bdf, devices_bdf);
-
-        let viot_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
-        tables.push(viot_offset.0);
-        table_bytes.extend_from_slice(viot.as_slice());
-    }
-    // XSDT
-    let mut xsdt = Sdt::new(*b"XSDT", 36, 1, OEM_ID, OEM_TABLE_ID, OEM_REVISION);
-    for table in tables {
-        pointers.push(xsdt.len());
-        xsdt.append(table);
-    }
-    xsdt.update_checksum();
-    info!("xsdt len: {:x}", xsdt.len());
-    checksums.push((xsdt_offset.0 as usize, xsdt.len()));
-    let bytes = [xsdt.as_slice(), &table_bytes].concat();
-
-    // RSDP
-    let rsdp = Rsdp::new(*b"CLOUDH", xsdt_offset.0);
-
-    let acpi = AcpiTable {
-        rsdp,
-        tables: bytes,
-        table_checksums: checksums,
-        table_pointers: pointers,
-    };
-    info!("created acpi table, now add to fw_cfg");
-    let _ = device_manager
-        .lock()
-        .unwrap()
-        .fw_cfg()
-        .expect("fw_cfg must be present")
-        .lock()
-        .unwrap()
-        .add_acpi(acpi);
-    xsdt_offset
 }
 
 #[cfg(feature = "tdx")]

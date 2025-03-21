@@ -20,10 +20,9 @@ kvm = [
 ]
 mshv = ["hypervisor/mshv", "pci/mshv", "vfio-ioctls/mshv", "vm-device/mshv"]
 pvmemcontrol = ["devices/pvmemcontrol"]
-sev_snp = ["arch/sev_snp", "hypervisor/sev_snp", "virtio-devices/sev_snp", "igvm_defs"]
+sev_snp = ["arch/sev_snp", "hypervisor/sev_snp", "virtio-devices/sev_snp"]
 tdx = ["arch/tdx", "hypervisor/tdx"]
 tracing = ["tracer/tracing"]
-fw_cfg = []
 
 [dependencies]
 acpi_tables = { workspace = true }
