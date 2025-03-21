@@ -14,7 +14,7 @@ use kvm_ioctls::DeviceFd;
 use redist_regs::{construct_gicr_typers, get_redist_regs, set_redist_regs};
 use serde::{Deserialize, Serialize};
 
-use crate::arch::aarch64::gic::{Error, Result, Vgic, VgicConfig};
+use crate::arch::aarch64::gic::{Error, GicState, Result, Vgic, VgicConfig};
 use crate::device::HypervisorDeviceError;
 use crate::kvm::KvmVm;
 use crate::{CpuState, Vm};
@@ -123,6 +123,20 @@ pub struct Gicv3ItsState {
     its_cwriter: u64,
     its_creadr: u64,
     its_baser: [u64; 8],
+}
+
+impl From<GicState> for Gicv3ItsState {
+    fn from(state: GicState) -> Self {
+        match state {
+            GicState::Kvm(state) => state,
+        }
+    }
+}
+
+impl From<Gicv3ItsState> for GicState {
+    fn from(state: Gicv3ItsState) -> Self {
+        GicState::Kvm(state)
+    }
 }
 
 impl KvmGicV3Its {
@@ -316,7 +330,7 @@ impl Vgic for KvmGicV3Its {
     }
 
     /// Save the state of GICv3ITS.
-    fn state(&self) -> Result<Gicv3ItsState> {
+    fn state(&self) -> Result<GicState> {
         let gicr_typers = self.gicr_typers.clone();
 
         let gicd_ctlr = read_ctlr(&self.device)?;
@@ -366,7 +380,7 @@ impl Vgic for KvmGicV3Its {
             GITS_IIDR,
         )?;
 
-        Ok(Gicv3ItsState {
+        let gic_state: GicState = Gicv3ItsState {
             dist: dist_state,
             rdist: rdist_state,
             icc: icc_state,
@@ -377,48 +391,53 @@ impl Vgic for KvmGicV3Its {
             its_cwriter: its_cwriter_state,
             its_creadr: its_creadr_state,
             its_baser: its_baser_state,
-        })
+        }
+        .into();
+
+        Ok(gic_state)
     }
 
     /// Restore the state of GICv3ITS.
-    fn set_state(&mut self, state: &Gicv3ItsState) -> Result<()> {
+    fn set_state(&mut self, state: &GicState) -> Result<()> {
+        let kvm_state: Gicv3ItsState = state.clone().into();
+
         let gicr_typers = self.gicr_typers.clone();
 
-        write_ctlr(&self.device, state.gicd_ctlr)?;
+        write_ctlr(&self.device, kvm_state.gicd_ctlr)?;
 
-        set_dist_regs(&self.device, &state.dist)?;
+        set_dist_regs(&self.device, &kvm_state.dist)?;
 
-        set_redist_regs(&self.device, &gicr_typers, &state.rdist)?;
+        set_redist_regs(&self.device, &gicr_typers, &kvm_state.rdist)?;
 
-        set_icc_regs(&self.device, &gicr_typers, &state.icc)?;
+        set_icc_regs(&self.device, &gicr_typers, &kvm_state.icc)?;
 
         //Restore GICv3ITS registers
         gicv3_its_attr_set(
             self.its_device.as_ref().unwrap(),
             kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ITS_REGS,
             GITS_IIDR,
-            state.its_iidr,
+            kvm_state.its_iidr,
         )?;
 
         gicv3_its_attr_set(
             self.its_device.as_ref().unwrap(),
             kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ITS_REGS,
             GITS_CBASER,
-            state.its_cbaser,
+            kvm_state.its_cbaser,
         )?;
 
         gicv3_its_attr_set(
             self.its_device.as_ref().unwrap(),
             kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ITS_REGS,
             GITS_CREADR,
-            state.its_creadr,
+            kvm_state.its_creadr,
         )?;
 
         gicv3_its_attr_set(
             self.its_device.as_ref().unwrap(),
             kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ITS_REGS,
             GITS_CWRITER,
-            state.its_cwriter,
+            kvm_state.its_cwriter,
         )?;
 
         for i in 0..8 {
@@ -426,7 +445,7 @@ impl Vgic for KvmGicV3Its {
                 self.its_device.as_ref().unwrap(),
                 kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ITS_REGS,
                 GITS_BASER + i * 8,
-                state.its_baser[i as usize],
+                kvm_state.its_baser[i as usize],
             )?;
         }
 
@@ -437,7 +456,7 @@ impl Vgic for KvmGicV3Its {
             self.its_device.as_ref().unwrap(),
             kvm_bindings::KVM_DEV_ARM_VGIC_GRP_ITS_REGS,
             GITS_CTLR,
-            state.its_ctlr,
+            kvm_state.its_ctlr,
         )
     }
 

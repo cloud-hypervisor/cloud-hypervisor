@@ -59,7 +59,7 @@ pub use cpu::CpuVendor;
 pub use cpu::{HypervisorCpuError, Vcpu, VmExit};
 pub use device::HypervisorDeviceError;
 #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
-pub use kvm::{aarch64, GicState};
+pub use kvm::aarch64;
 #[cfg(all(feature = "kvm", target_arch = "riscv64"))]
 pub use kvm::{riscv64, AiaState};
 pub use vm::{
