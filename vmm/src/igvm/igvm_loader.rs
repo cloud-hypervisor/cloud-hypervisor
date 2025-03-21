@@ -17,7 +17,7 @@ use igvm_defs::{
 use igvm_defs::{MemoryMapEntryType, IGVM_VHS_MEMORY_MAP_ENTRY};
 use mshv_bindings::*;
 use thiserror::Error;
-use zerocopy::AsBytes;
+use zerocopy::IntoBytes;
 
 use crate::cpu::CpuManager;
 use crate::igvm::loader::Loader;
