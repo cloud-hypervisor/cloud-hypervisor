@@ -59,13 +59,15 @@ based on the [Rust VMM](https://github.com/rust-vmm) crates.
 
 ### Architectures
 
-Cloud Hypervisor supports the `x86-64` and `AArch64` architectures. There are
-minor differences in functionality between the two architectures
-(see [#1125](https://github.com/cloud-hypervisor/cloud-hypervisor/issues/1125)).
+Cloud Hypervisor supports the `x86-64`, `AArch64` and `RISC-V` (experimental)
+architectures. There are minor differences in functionality between these
+architectures, the differences of `x86-64` and `AArch64` is documented in
+[#1125](https://github.com/cloud-hypervisor/cloud-hypervisor/issues/1125).
 
 ### Guest OS
 
-Cloud Hypervisor supports `64-bit Linux` and Windows 10/Windows Server 2019.
+Cloud Hypervisor supports `64-bit Linux` and Windows 10/Windows Server 2019
+(exclude `RISC-V`).
 
 # 2. Getting Started
 
@@ -74,6 +76,11 @@ The following sections describe how to build and run Cloud Hypervisor.
 ## Prerequisites for AArch64
 
 - AArch64 servers (recommended) or development boards equipped with the GICv3
+  interrupt controller.
+
+## Prerequisites for RISC-V
+
+- RISC-V servers (recommended) or development boards equipped with the AIA
   interrupt controller.
 
 ## Host OS
