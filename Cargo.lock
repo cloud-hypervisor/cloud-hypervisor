@@ -532,6 +532,7 @@ dependencies = [
  "event_monitor",
  "hypervisor",
  "libc",
+ "linux-loader",
  "log",
  "num_enum",
  "pci",
@@ -1126,8 +1127,7 @@ dependencies = [
 [[package]]
 name = "linux-loader"
 version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "870c3814345f050991f99869417779f6062542bcf4ed81db7a1b926ad1306638"
+source = "git+https://github.com/rust-vmm/linux-loader?branch=main#fd6a83dc7a788830a374c016dc0032e24ddc57bd"
 dependencies = [
  "vm-memory",
 ]
