@@ -543,6 +543,7 @@ dependencies = [
  "vm-memory",
  "vm-migration",
  "vmm-sys-util",
+ "zerocopy 0.8.26",
 ]
 
 [[package]]
