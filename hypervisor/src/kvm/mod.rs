@@ -127,6 +127,10 @@ use crate::kvm::x86_64::XsaveStateError;
 #[cfg(target_arch = "x86_64")]
 ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 
+// TODO: The following VM types are defined in latest linux kernel arch/x86/include/uapi/asm/kvm.h but doesn't exist in kvm binding yet.
+#[cfg(all(feature = "kvm", feature = "sev_snp"))]
+pub const KVM_X86_SNP_VM: u32 = 4;
+
 #[cfg(feature = "tdx")]
 const KVM_EXIT_TDX: u32 = 50;
 #[cfg(feature = "tdx")]
@@ -430,6 +434,8 @@ pub struct KvmVm {
     fd: Arc<VmFd>,
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
+    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    sev_fd: Option<x86_64::sev::SevFd>,
     dirty_log_slots: Arc<RwLock<HashMap<u32, KvmDirtyLogSlot>>>,
 }
 
@@ -508,6 +514,15 @@ impl KvmVm {
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// ```
 impl vm::Vm for KvmVm {
+    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    fn sev_snp_init(&self, guest_policy: igvm_defs::SnpPolicy) -> vm::Result<()> {
+        self.sev_fd
+            .as_ref()
+            .unwrap()
+            .launch_start(&self.fd, guest_policy)
+            .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
+    }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the address of the one-page region in the VM's address space.
@@ -1215,11 +1230,23 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             vm_type = self.kvm.get_host_ipa_limit().try_into().unwrap();
         }
 
-        #[cfg(feature = "tdx")]
-        if _config.tdx_enabled {
-            vm_type = KVM_X86_SW_PROTECTED_VM.into();
-        } else {
-            vm_type = KVM_X86_DEFAULT_VM.into();
+        #[cfg(target_arch = "x86_64")]
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "tdx")] {
+                if _config.tdx_enabled {
+                    vm_type = KVM_X86_SW_PROTECTED_VM.into();
+                } else {
+                vm_type = 0;
+                };
+            } else if #[cfg(feature = "sev_snp")] {
+                if _config.sev_snp_enabled {
+                    vm_type = KVM_X86_SNP_VM.into()
+                } else {
+                    vm_type = 0
+                }
+            } else {
+                vm_type = KVM_X86_DEFAULT_VM.into();
+            }
         }
 
         loop {
@@ -1254,11 +1281,31 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             for (pos, index) in indices.iter().enumerate() {
                 msrs[pos].index = *index;
             }
+            #[allow(unused_assignments)]
+            #[cfg(feature = "sev_snp")]
+            let mut sev_fd = None;
+            #[cfg(feature = "sev_snp")]
+            {
+                let sev_snp_enabled = vm_type == KVM_X86_SNP_VM as u64;
+                sev_fd = if sev_snp_enabled {
+                    let sev_dev = x86_64::sev::SevFd::new(&"/dev/sev".to_string())
+                        .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilities(e.into()))?;
+                    // This ioctl initializes the sev context and must be called right after opening the sev device.
+                    sev_dev
+                        .init2(&vm_fd)
+                        .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
+                    Some(sev_dev)
+                } else {
+                    None
+                };
+            }
 
             Ok(Arc::new(KvmVm {
                 fd: vm_fd,
                 msrs,
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                #[cfg(feature = "sev_snp")]
+                sev_fd,
             }))
         }
 
