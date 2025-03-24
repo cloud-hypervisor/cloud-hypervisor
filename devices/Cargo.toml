@@ -9,6 +9,7 @@ acpi_tables = { workspace = true }
 anyhow = "1.0.94"
 arch = { path = "../arch" }
 bitflags = "2.9.0"
+bitfield = "0.16.1"
 byteorder = "1.5.0"
 event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
