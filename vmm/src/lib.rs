@@ -405,6 +405,8 @@ pub fn feature_list() -> Vec<String> {
         "dbus_api".to_string(),
         #[cfg(feature = "dhat-heap")]
         "dhat-heap".to_string(),
+        #[cfg(feature = "fw_cfg")]
+        "fw_cfg".to_string(),
         #[cfg(feature = "guest_debug")]
         "guest_debug".to_string(),
         #[cfg(feature = "igvm")]
