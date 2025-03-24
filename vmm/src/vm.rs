@@ -327,6 +327,15 @@ pub enum Error {
 
     #[error("Error creating console devices")]
     CreateConsoleDevices(ConsoleDeviceError),
+
+    #[error("Fw Cfg missing kernel file")]
+    FwCfgKernelFile,
+
+    #[error("Fw Cfg missing initramfs")]
+    FwCfgInitramfs,
+
+    #[error("Fw Cfg missing kernel cmdline")]
+    FwCfgCmdline,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -649,6 +658,65 @@ impl Vm {
             .unwrap()
             .create_devices(console_info, console_resize_pipe, original_termios)
             .map_err(Error::DeviceManager)?;
+
+        #[cfg(feature = "fw_cfg")]
+        {
+            let kernel = config
+                .lock()
+                .unwrap()
+                .payload
+                .as_ref()
+                .map(|p| p.kernel.as_ref().map(File::open))
+                .unwrap_or_default()
+                .transpose()
+                .map_err(Error::KernelFile)?;
+            if let Some(kernel_file) = kernel {
+                let _ = device_manager
+                    .lock()
+                    .unwrap()
+                    .fw_cfg()
+                    .expect("fw_cfg device must be present")
+                    .lock()
+                    .unwrap()
+                    .add_kernel_data(&kernel_file);
+            } else {
+                return Err(Error::FwCfgKernelFile);
+            }
+            let _ = device_manager
+                .lock()
+                .unwrap()
+                .fw_cfg()
+                .expect("fw_cfg device must be present")
+                .lock()
+                .unwrap()
+                .add_kernel_cmdline(
+                    Vm::generate_cmdline(config.lock().unwrap().payload.as_ref().unwrap())
+                        .map_err(|_| Error::FwCfgCmdline)?
+                        .as_cstring()
+                        .map_err(|_| Error::FwCfgCmdline)?,
+                );
+            let initramfs = config
+                .lock()
+                .unwrap()
+                .payload
+                .as_ref()
+                .map(|p| p.initramfs.as_ref().map(File::open))
+                .unwrap_or_default()
+                .transpose()
+                .map_err(Error::InitramfsFile)?;
+            // We measure the initramfs when running Oak Containers in SNP mode (initramfs = Stage1)
+            // o/w use Stage0 to launch cloud disk images
+            if let Some(initramfs_file) = initramfs {
+                let _ = device_manager
+                    .lock()
+                    .unwrap()
+                    .fw_cfg()
+                    .expect("fw_cfg device must be present")
+                    .lock()
+                    .unwrap()
+                    .add_initramfs_data(&initramfs_file);
+            }
+        }
 
         #[cfg(feature = "tdx")]
         let kernel = config
