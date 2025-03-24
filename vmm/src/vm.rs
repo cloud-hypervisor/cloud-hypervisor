@@ -335,6 +335,18 @@ pub enum Error {
 
     #[error("Error locking disk images: Another instance likely holds a lock")]
     LockingError(#[source] DeviceManagerError),
+
+    #[cfg(feature = "fw_cfg")]
+    #[error("Fw Cfg missing kernel")]
+    MissingFwCfgKernelFile(#[source] io::Error),
+
+    #[cfg(feature = "fw_cfg")]
+    #[error("Fw Cfg missing initramfs")]
+    MissingFwCfgInitramfs(#[source] io::Error),
+
+    #[cfg(feature = "fw_cfg")]
+    #[error("Fw Cfg missing kernel cmdline")]
+    MissingFwCfgCmdline,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -778,6 +790,72 @@ impl Vm {
             stop_on_boot,
             load_payload_handle,
         })
+    }
+
+    #[cfg(feature = "fw_cfg")]
+    fn populate_fw_cfg(
+        device_manager: &Arc<Mutex<DeviceManager>>,
+        config: &Arc<Mutex<VmConfig>>,
+    ) -> Result<()> {
+        let kernel = config
+            .lock()
+            .unwrap()
+            .payload
+            .as_ref()
+            .map(|p| p.kernel.as_ref().map(File::open))
+            .unwrap_or_default()
+            .transpose()
+            .map_err(Error::MissingFwCfgKernelFile)?;
+        if let Some(kernel_file) = kernel {
+            device_manager
+                .lock()
+                .unwrap()
+                .fw_cfg()
+                .expect("fw_cfg device must be present")
+                .lock()
+                .unwrap()
+                .add_kernel_data(&kernel_file)
+                .map_err(Error::MissingFwCfgKernelFile)?
+        }
+        let cmdline = Vm::generate_cmdline(
+            config.lock().unwrap().payload.as_ref().unwrap(),
+            #[cfg(target_arch = "aarch64")]
+            device_manager,
+        )
+        .map_err(|_| Error::MissingFwCfgCmdline)?
+        .as_cstring()
+        .map_err(|_| Error::MissingFwCfgCmdline)?;
+        device_manager
+            .lock()
+            .unwrap()
+            .fw_cfg()
+            .expect("fw_cfg device must be present")
+            .lock()
+            .unwrap()
+            .add_kernel_cmdline(cmdline);
+        let initramfs = config
+            .lock()
+            .unwrap()
+            .payload
+            .as_ref()
+            .map(|p| p.initramfs.as_ref().map(File::open))
+            .unwrap_or_default()
+            .transpose()
+            .map_err(Error::MissingFwCfgInitramfs)?;
+        // We measure the initramfs when running Oak Containers in SNP mode (initramfs = Stage1)
+        // o/w use Stage0 to launch cloud disk images
+        if let Some(initramfs_file) = initramfs {
+            device_manager
+                .lock()
+                .unwrap()
+                .fw_cfg()
+                .expect("fw_cfg device must be present")
+                .lock()
+                .unwrap()
+                .add_initramfs_data(&initramfs_file)
+                .map_err(Error::MissingFwCfgInitramfs)?;
+        }
+        Ok(())
     }
 
     fn create_numa_nodes(
@@ -2258,6 +2336,9 @@ impl Vm {
             VmState::Running
         };
         current_state.valid_transition(new_state)?;
+
+        #[cfg(feature = "fw_cfg")]
+        Self::populate_fw_cfg(&self.device_manager, &self.config)?;
 
         // Do earlier to parallelise with loading kernel
         #[cfg(target_arch = "x86_64")]

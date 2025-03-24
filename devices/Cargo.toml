@@ -13,6 +13,11 @@ byteorder = { workspace = true }
 event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
 libc = { workspace = true }
+linux-loader = { workspace = true, features = [
+  "bzimage",
+  "elf",
+  "pe",
+], optional = true }
 log = { workspace = true }
 num_enum = "0.7.2"
 pci = { path = "../pci" }
@@ -38,6 +43,6 @@ arch = { path = "../arch" }
 
 [features]
 default = []
-fw_cfg = ["zerocopy"]
+fw_cfg = ["linux-loader", "zerocopy"]
 kvm = ["arch/kvm"]
 pvmemcontrol = []
