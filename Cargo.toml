@@ -107,7 +107,8 @@ members = [
 acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main" }
 kvm-bindings = "0.12.0"
 kvm-ioctls = "0.22.0"
-linux-loader = "0.13.0"
+# TODO: update to 0.13.1+
+linux-loader = { git = "https://github.com/rust-vmm/linux-loader", branch = "main" }
 mshv-bindings = "0.5.2"
 mshv-ioctls = "0.5.2"
 seccompiler = "0.5.0"

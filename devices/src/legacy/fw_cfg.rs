@@ -14,12 +14,17 @@
 use std::{
     fs::File,
     io::Result,
-    mem::size_of_val,
+    mem::{size_of, size_of_val},
     os::unix::fs::FileExt,
     sync::{Arc, Barrier},
 };
 
+#[cfg(target_arch = "x86_64")]
+use linux_loader::bootparam::boot_params;
+#[cfg(target_arch = "aarch64")]
+use linux_loader::loader::pe::arm64_image_header as boot_params;
 use vm_device::BusDevice;
+use vm_memory::ByteValued;
 use vmm_sys_util::sock_ctrl_msg::IntoIovec;
 use zerocopy::{FromBytes, IntoBytes};
 
@@ -50,6 +55,14 @@ pub const PORT_FW_CFG_WIDTH: u64 = 0x10;
 
 const FW_CFG_SIGNATURE: u16 = 0x00;
 const FW_CFG_ID: u16 = 0x01;
+const FW_CFG_KERNEL_SIZE: u16 = 0x08;
+const FW_CFG_INITRD_SIZE: u16 = 0x0b;
+const FW_CFG_KERNEL_DATA: u16 = 0x11;
+const FW_CFG_INITRD_DATA: u16 = 0x12;
+const FW_CFG_CMDLINE_SIZE: u16 = 0x14;
+const FW_CFG_CMDLINE_DATA: u16 = 0x15;
+const FW_CFG_SETUP_SIZE: u16 = 0x17;
+const FW_CFG_SETUP_DATA: u16 = 0x18;
 const FW_CFG_FILE_DIR: u16 = 0x19;
 const FW_CFG_KNOWN_ITEMS: usize = 0x20;
 
@@ -183,6 +196,46 @@ impl FwCfg {
         Ok(())
     }
 
+    pub fn add_kernel_data(&mut self, file: &File) -> Result<()> {
+        let mut buffer = vec![0u8; size_of::<boot_params>()];
+        file.read_exact_at(&mut buffer, 0)?;
+        let bp = boot_params::from_mut_slice(&mut buffer).unwrap();
+        #[cfg(target_arch = "x86_64")]
+        {
+            // must set to 4 for backwards compatibility
+            // https://docs.kernel.org/arch/x86/boot.html#the-real-mode-kernel-header
+            if bp.hdr.setup_sects == 0 {
+                bp.hdr.setup_sects = 4;
+            }
+            // wildcard boot loader type
+            bp.hdr.type_of_loader = 0xff;
+        }
+        #[cfg(target_arch = "aarch64")]
+        let kernel_start = bp.text_offset;
+        #[cfg(target_arch = "x86_64")]
+        let kernel_start = (bp.hdr.setup_sects as usize + 1) * 512;
+        self.known_items[FW_CFG_SETUP_SIZE as usize] = FwCfgContent::U32(buffer.len() as u32);
+        self.known_items[FW_CFG_SETUP_DATA as usize] = FwCfgContent::Bytes(buffer);
+        self.known_items[FW_CFG_KERNEL_SIZE as usize] =
+            FwCfgContent::U32(file.metadata()?.len() as u32 - kernel_start as u32);
+        self.known_items[FW_CFG_KERNEL_DATA as usize] =
+            FwCfgContent::File(kernel_start as u64, file.try_clone()?);
+        Ok(())
+    }
+
+    pub fn add_kernel_cmdline(&mut self, s: std::ffi::CString) {
+        let bytes = s.into_bytes_with_nul();
+        self.known_items[FW_CFG_CMDLINE_SIZE as usize] = FwCfgContent::U32(bytes.len() as u32);
+        self.known_items[FW_CFG_CMDLINE_DATA as usize] = FwCfgContent::Bytes(bytes);
+    }
+
+    pub fn add_initramfs_data(&mut self, file: &File) -> Result<()> {
+        let initramfs_size = file.metadata()?.len();
+        self.known_items[FW_CFG_INITRD_SIZE as usize] = FwCfgContent::U32(initramfs_size as _);
+        self.known_items[FW_CFG_INITRD_DATA as usize] = FwCfgContent::File(0, file.try_clone()?);
+        Ok(())
+    }
+
     fn read_content(content: &FwCfgContent, offset: u32, data: &mut [u8], size: u32) -> Option<u8> {
         let start = offset as usize;
         let end = start + size as usize;
@@ -278,6 +331,11 @@ impl BusDevice for FwCfg {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::CString;
+    use std::io::Write;
+
+    use vmm_sys_util::tempfile::TempFile;
+
     use super::*;
 
     #[cfg(target_arch = "x86_64")]
@@ -299,6 +357,53 @@ mod tests {
         fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_SIGNATURE as u8, 0]);
         loop {
             if let Some(char) = sig_iter.next() {
+                fw_cfg.read(0, DATA_OFFSET, &mut data);
+                assert_eq!(data[0], char);
+            } else {
+                return;
+            }
+        }
+    }
+    #[test]
+    fn test_kernel_cmdline() {
+        let mut fw_cfg = FwCfg::new();
+
+        let cmdline = *b"cmdline\0";
+
+        fw_cfg.add_kernel_cmdline(CString::from_vec_with_nul(cmdline.to_vec()).unwrap());
+
+        let mut data = vec![0u8];
+
+        let mut cmdline_iter = cmdline.into_iter();
+        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_CMDLINE_DATA as u8, 0]);
+        loop {
+            if let Some(char) = cmdline_iter.next() {
+                fw_cfg.read(0, DATA_OFFSET, &mut data);
+                assert_eq!(data[0], char);
+            } else {
+                return;
+            }
+        }
+    }
+
+    #[test]
+    fn test_initram_fs() {
+        let mut fw_cfg = FwCfg::new();
+
+        let temp = TempFile::new().unwrap();
+        let mut temp_file = temp.as_file();
+
+        let initram_content = b"this is the initramfs";
+        let written = temp_file.write(initram_content);
+        assert_eq!(written.unwrap(), 21);
+        let _ = fw_cfg.add_initramfs_data(temp_file);
+
+        let mut data = vec![0u8];
+
+        let mut initram_iter = (*initram_content).into_iter();
+        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_INITRD_DATA as u8, 0]);
+        loop {
+            if let Some(char) = initram_iter.next() {
                 fw_cfg.read(0, DATA_OFFSET, &mut data);
                 assert_eq!(data[0], char);
             } else {
