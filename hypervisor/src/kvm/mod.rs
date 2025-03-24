@@ -123,6 +123,10 @@ use vmm_sys_util::ioctl_ioc_nr;
 #[cfg(target_arch = "x86_64")]
 ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 
+// TODO: The following VM types are defined in latest linux kernel arch/x86/include/uapi/asm/kvm.h but doesn't exist in kvm binding yet.
+#[cfg(all(feature = "kvm", feature = "sev_snp"))]
+pub const KVM_X86_SNP_VM: u32 = 4;
+
 #[cfg(feature = "tdx")]
 const KVM_EXIT_TDX: u32 = 50;
 #[cfg(feature = "tdx")]
@@ -471,6 +475,8 @@ pub struct KvmVm {
     fd: Arc<VmFd>,
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
+    #[cfg(feature = "sev_snp")]
+    sev_fd: Option<x86_64::sev::SevFd>,
     dirty_log_slots: Arc<RwLock<HashMap<u32, KvmDirtyLogSlot>>>,
 }
 
@@ -504,6 +510,16 @@ impl KvmVm {
 /// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
 /// ```
 impl vm::Vm for KvmVm {
+    #[cfg(feature = "sev_snp")]
+    fn sev_snp_init(&self, guest_policy: igvm_defs::SnpPolicy) -> vm::Result<()> {
+        info!("Calling KVM_SEV_SNP_LAUNCH_START");
+        self.sev_fd
+            .as_ref()
+            .unwrap()
+            .launch_start(&self.fd, guest_policy)
+            .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
+    }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the address of the one-page region in the VM's address space.
@@ -1196,6 +1212,30 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 msrs[pos].index = *index;
             }
 
+            #[cfg(feature = "sev_snp")]
+            {
+                let sev_snp_enabled = vm_type == KVM_X86_SNP_VM as u64;
+                let sev_fd = if sev_snp_enabled {
+                    let sev_dev = x86_64::sev::SevFd::new(&"/dev/sev".to_string())
+                        .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilities(e.into()))?;
+                    // This ioctl initializes the sev context and must be called right after opening the sev device.
+                    info!("Calling KVM_SEV_INIT2");
+                    sev_dev
+                        .init2(&vm_fd)
+                        .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
+                    Some(sev_dev)
+                } else {
+                    None
+                };
+
+                Ok(Arc::new(KvmVm {
+                    fd: vm_fd,
+                    msrs,
+                    dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                    sev_fd,
+                }))
+            }
+            #[cfg(not(feature = "sev_snp"))]
             Ok(Arc::new(KvmVm {
                 fd: vm_fd,
                 msrs,
