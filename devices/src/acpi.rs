@@ -3,18 +3,26 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#[cfg(not(target_arch = "riscv64"))]
+use std::mem::{offset_of, size_of};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
+#[cfg(not(target_arch = "riscv64"))]
+use acpi_tables::rsdp::Rsdp;
 use acpi_tables::{aml, Aml, AmlSink};
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
 use vm_memory::GuestAddress;
 use vmm_sys_util::eventfd::EventFd;
+#[cfg(not(target_arch = "riscv64"))]
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use super::AcpiNotificationFlags;
+#[cfg(not(target_arch = "riscv64"))]
+use crate::legacy::fw_cfg::{create_file_name, FwCfgContent, FwCfgItem, FILE_NAME_SIZE};
 
 pub const GED_DEVICE_ACPI_SIZE: usize = 0x1;
 
@@ -253,4 +261,205 @@ impl BusDevice for AcpiPmTimerDevice {
 
         data.copy_from_slice(&counter.to_le_bytes());
     }
+}
+
+pub const COMMAND_ALLOCATE: u32 = 0x1;
+pub const COMMAND_ADD_POINTER: u32 = 0x2;
+pub const COMMAND_ADD_CHECKSUM: u32 = 0x3;
+
+pub const ALLOC_ZONE_HIGH: u8 = 0x1;
+pub const ALLOC_ZONE_FSEG: u8 = 0x2;
+
+pub const FW_CFG_FILENAME_TABLE_LOADER: &str = "etc/table-loader";
+pub const FW_CFG_FILENAME_RSDP: &str = "acpi/rsdp";
+pub const FW_CFG_FILENAME_ACPI_TABLES: &str = "acpi/tables";
+
+pub const SIGNATURE: [u8; 4] = *b"XSDT";
+pub const COMPILER_ID: [u8; 4] = *b"RVAT";
+
+#[cfg(not(target_arch = "riscv64"))]
+#[repr(C, align(4))]
+#[derive(Debug, IntoBytes, Immutable)]
+pub struct Allocate {
+    command: u32,
+    file: [u8; FILE_NAME_SIZE],
+    align: u32,
+    zone: u8,
+    _pad: [u8; 63],
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+#[repr(C, align(4))]
+#[derive(Debug, IntoBytes, Immutable)]
+pub struct AddPointer {
+    command: u32,
+    dst: [u8; FILE_NAME_SIZE],
+    src: [u8; FILE_NAME_SIZE],
+    offset: u32,
+    size: u8,
+    _pad: [u8; 7],
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+#[repr(C, align(4))]
+#[derive(Debug, IntoBytes, Immutable)]
+pub struct AddChecksum {
+    command: u32,
+    file: [u8; FILE_NAME_SIZE],
+    offset: u32,
+    start: u32,
+    len: u32,
+    _pad: [u8; 56],
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+fn create_intra_pointer(name: &str, offset: usize, size: u8) -> AddPointer {
+    AddPointer {
+        command: COMMAND_ADD_POINTER,
+        dst: create_file_name(name),
+        src: create_file_name(name),
+        offset: offset as u32,
+        size,
+        _pad: [0; 7],
+    }
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+fn create_acpi_table_checksum(offset: usize, len: usize) -> AddChecksum {
+    AddChecksum {
+        command: COMMAND_ADD_CHECKSUM,
+        file: create_file_name(FW_CFG_FILENAME_ACPI_TABLES),
+        offset: (offset + offset_of!(AcpiTableHeader, checksum)) as u32,
+        start: offset as u32,
+        len: len as u32,
+        _pad: [0; 56],
+    }
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+#[inline]
+pub fn wrapping_sum<'a, T>(data: T) -> u8
+where
+    T: IntoIterator<Item = &'a u8>,
+{
+    data.into_iter().fold(0u8, |accu, e| accu.wrapping_add(*e))
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+#[repr(C, align(4))]
+#[derive(Debug, Clone, Default, FromBytes, IntoBytes)]
+pub struct AcpiTableHeader {
+    pub signature: [u8; 4],
+    pub length: u32,
+    pub revision: u8,
+    pub checksum: u8,
+    pub oem_id: [u8; 6],
+    pub oem_table_id: [u8; 8],
+    pub oem_revision: u32,
+    pub asl_compiler_id: [u8; 4],
+    pub asl_compiler_revision: u32,
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+pub struct AcpiTable {
+    pub rsdp: Rsdp,
+    pub tables: Vec<u8>,
+    pub table_pointers: Vec<usize>,
+    pub table_checksums: Vec<(usize, usize)>,
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+impl AcpiTable {
+    pub fn rsdp(&self) -> &Rsdp {
+        &self.rsdp
+    }
+
+    pub fn tables(&self) -> &[u8] {
+        &self.tables
+    }
+
+    pub fn pointers(&self) -> &[usize] {
+        &self.table_pointers
+    }
+
+    pub fn checksums(&self) -> &[(usize, usize)] {
+        &self.table_checksums
+    }
+
+    pub fn take(self) -> (Rsdp, Vec<u8>) {
+        (self.rsdp, self.tables)
+    }
+}
+
+#[cfg(not(target_arch = "riscv64"))]
+pub fn create_acpi_loader(acpi_table: AcpiTable) -> [FwCfgItem; 3] {
+    let mut table_loader_bytes: Vec<u8> = Vec::new();
+    let allocate_rsdp = Allocate {
+        command: COMMAND_ALLOCATE,
+        file: create_file_name(FW_CFG_FILENAME_RSDP),
+        align: 4,
+        zone: ALLOC_ZONE_FSEG,
+        _pad: [0; 63],
+    };
+    table_loader_bytes.extend(allocate_rsdp.as_bytes());
+
+    let allocate_tables = Allocate {
+        command: COMMAND_ALLOCATE,
+        file: create_file_name(FW_CFG_FILENAME_ACPI_TABLES),
+        align: 4,
+        zone: ALLOC_ZONE_HIGH,
+        _pad: [0; 63],
+    };
+    table_loader_bytes.extend(allocate_tables.as_bytes());
+
+    for pointer_offset in acpi_table.pointers().iter() {
+        let pointer = create_intra_pointer(FW_CFG_FILENAME_ACPI_TABLES, *pointer_offset, 8);
+        table_loader_bytes.extend(pointer.as_bytes());
+    }
+    for (offset, len) in acpi_table.checksums().iter() {
+        let checksum = create_acpi_table_checksum(*offset, *len);
+        table_loader_bytes.extend(checksum.as_bytes());
+    }
+    let pointer_rsdp_to_xsdt = AddPointer {
+        command: COMMAND_ADD_POINTER,
+        dst: create_file_name(FW_CFG_FILENAME_RSDP),
+        src: create_file_name(FW_CFG_FILENAME_ACPI_TABLES),
+        offset: offset_of!(Rsdp, xsdt_addr) as u32,
+        size: 8,
+        _pad: [0; 7],
+    };
+    table_loader_bytes.extend(pointer_rsdp_to_xsdt.as_bytes());
+    let checksum_rsdp = AddChecksum {
+        command: COMMAND_ADD_CHECKSUM,
+        file: create_file_name(FW_CFG_FILENAME_RSDP),
+        offset: offset_of!(Rsdp, checksum) as u32,
+        start: 0,
+        len: offset_of!(Rsdp, length) as u32,
+        _pad: [0; 56],
+    };
+    let checksum_rsdp_ext = AddChecksum {
+        command: COMMAND_ADD_CHECKSUM,
+        file: create_file_name(FW_CFG_FILENAME_RSDP),
+        offset: offset_of!(Rsdp, extended_checksum) as u32,
+        start: 0,
+        len: size_of::<Rsdp>() as u32,
+        _pad: [0; 56],
+    };
+    table_loader_bytes.extend(checksum_rsdp.as_bytes());
+    table_loader_bytes.extend(checksum_rsdp_ext.as_bytes());
+
+    let table_loader = FwCfgItem {
+        name: FW_CFG_FILENAME_TABLE_LOADER.to_owned(),
+        content: FwCfgContent::Bytes(table_loader_bytes),
+    };
+    let (rsdp, tables) = acpi_table.take();
+    let acpi_rsdp = FwCfgItem {
+        name: FW_CFG_FILENAME_RSDP.to_owned(),
+        content: FwCfgContent::Bytes(rsdp.as_bytes().to_owned()),
+    };
+    let apci_tables = FwCfgItem {
+        name: FW_CFG_FILENAME_ACPI_TABLES.to_owned(),
+        content: FwCfgContent::Bytes(tables),
+    };
+    [table_loader, acpi_rsdp, apci_tables]
 }

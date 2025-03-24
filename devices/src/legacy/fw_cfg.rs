@@ -34,6 +34,8 @@ use vm_memory::GuestAddress;
 use vmm_sys_util::sock_ctrl_msg::IntoIovec;
 use zerocopy::{FromBytes, IntoBytes};
 
+use crate::acpi::{create_acpi_loader, AcpiTable};
+
 // TODO: make arm64_image_header public in linux loader crate
 // https://github.com/rust-vmm/linux-loader/blob/main/src/loader/pe/mod.rs#L78
 #[cfg(target_arch = "aarch64")]
@@ -311,6 +313,13 @@ impl FwCfg {
         let bytes = s.into_bytes_with_nul();
         self.known_items[FW_CFG_CMDLINE_SIZE as usize] = FwCfgContent::U32(bytes.len() as u32);
         self.known_items[FW_CFG_CMDLINE_DATA as usize] = FwCfgContent::Bytes(bytes);
+    }
+
+    pub fn add_acpi(&mut self, acpi_table: AcpiTable) -> Result<()> {
+        let [table_loader, acpi_rsdp, apci_tables] = create_acpi_loader(acpi_table);
+        self.add_item(table_loader)?;
+        self.add_item(acpi_rsdp)?;
+        self.add_item(apci_tables)
     }
 
     pub fn add_initramfs_data(&mut self, file: &File) -> Result<()> {
