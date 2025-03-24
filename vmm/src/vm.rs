@@ -39,7 +39,11 @@ use devices::AcpiNotificationFlags;
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
+#[cfg(all(feature = "sev_snp", feature = "kvm"))]
+use hypervisor::kvm::KVM_X86_SNP_VM;
 use hypervisor::{HypervisorVmError, VmOps};
+#[cfg(feature = "sev_snp")]
+use igvm_defs::SnpPolicy;
 use libc::{termios, SIGWINCH};
 use linux_loader::cmdline::Cmdline;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -479,6 +483,16 @@ pub struct Vm {
 impl Vm {
     pub const HANDLED_SIGNALS: [i32; 1] = [SIGWINCH];
 
+    #[cfg(feature = "sev_snp")]
+    pub fn get_default_sev_snp_guest_policy() -> SnpPolicy {
+        SnpPolicy::new()
+            .with_abi_minor(0)
+            .with_abi_major(0)
+            .with_smt(1)
+            .with_reserved_must_be_one(1)
+            .with_migrate_ma(0)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
@@ -615,7 +629,8 @@ impl Vm {
         // transitioning the guest into secure state.
         #[cfg(feature = "sev_snp")]
         if sev_snp_enabled {
-            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
+            vm.sev_snp_init(#[cfg(feature = "kvm")] Vm::get_default_sev_snp_guest_policy())
+                .map_err(Error::InitializeSevSnpVm)?;
         }
 
         #[cfg(feature = "tdx")]
@@ -909,8 +924,19 @@ impl Vm {
                 // Passing SEV_SNP_ENABLED: 1 if sev_snp_enabled is true
                 // Otherwise SEV_SNP_DISABLED: 0
                 // value of sev_snp_enabled is mapped to SEV_SNP_ENABLED for true or SEV_SNP_DISABLED for false
+                cfg_if::cfg_if! {
+                    if #[cfg(feature = "mshv")] {
+                        let vm_type = u64::from(sev_snp_enabled);
+                    } else if #[cfg(feature = "kvm")] {
+                        let vm_type = if sev_snp_enabled {
+                            KVM_X86_SNP_VM.into()
+                        } else {
+                            0
+                        };
+                    }
+                }
                 let vm = hypervisor
-                    .create_vm_with_type_and_memory(u64::from(sev_snp_enabled), mem_size)
+                    .create_vm_with_type_and_memory(vm_type, mem_size)
                     .unwrap();
             } else {
                 let vm = hypervisor.create_vm().unwrap();

@@ -580,7 +580,7 @@ pub trait Vcpu: Send + Sync {
     ) -> Result<[u32; 4]> {
         unimplemented!()
     }
-    #[cfg(feature = "mshv")]
+    #[cfg(feature = "sev_snp")]
     fn set_sev_control_register(&self, _reg: u64) -> Result<()> {
         unimplemented!()
     }
