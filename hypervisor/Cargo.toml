@@ -18,8 +18,8 @@ arc-swap = "1.7.1"
 byteorder = "1.5.0"
 cfg-if = "1.0.0"
 concat-idents = "1.1.5"
-igvm = { version = "0.3.4", optional = true }
-igvm_defs = { version = "0.3.1", optional = true }
+igvm = { workspace = true, optional = true }
+igvm_defs = { workspace = true, optional = true }
 kvm-bindings = { workspace = true, optional = true, features = ["serde"] }
 kvm-ioctls = { workspace = true, optional = true }
 libc = "0.2.167"
