@@ -2313,6 +2313,8 @@ impl Vm {
             &self.memory_manager,
             &self.numa_nodes,
             tpm_enabled,
+            #[cfg(feature = "fw_cfg")]
+            true,
         );
         info!("Created ACPI tables: rsdp_addr = 0x{:x}", rsdp_addr.0);
 
@@ -2349,7 +2351,6 @@ impl Vm {
             VmState::Running
         };
         current_state.valid_transition(new_state)?;
-
         #[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
         Self::populate_fw_cfg(&self.device_manager, &self.config)?;
 
