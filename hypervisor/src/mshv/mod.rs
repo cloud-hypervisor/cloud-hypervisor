@@ -52,7 +52,7 @@ use aarch64::gic::{MshvGicV2M, BASE_SPI_IRQ};
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::VcpuMshvState;
 #[cfg(feature = "sev_snp")]
-use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
+use igvm_defs::{SnpPolicy, IGVM_VHS_SNP_ID_BLOCK};
 #[cfg(feature = "sev_snp")]
 use snp_constants::*;
 use vmm_sys_util::eventfd::EventFd;
@@ -2149,7 +2149,7 @@ impl vm::Vm for MshvVm {
 
     /// Initialize the SEV-SNP VM
     #[cfg(feature = "sev_snp")]
-    fn sev_snp_init(&self) -> vm::Result<()> {
+    fn sev_snp_init(&self, _guest_policy: SnpPolicy) -> vm::Result<()> {
         self.fd
             .set_partition_property(
                 hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_STATE,

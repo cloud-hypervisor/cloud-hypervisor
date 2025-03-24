@@ -43,7 +43,11 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
+#[cfg(all(feature = "sev_snp", feature = "kvm"))]
+use hypervisor::kvm::KVM_X86_SNP_VM;
 use hypervisor::{HypervisorVmError, VmOps};
+#[cfg(feature = "sev_snp")]
+use igvm_defs::SnpPolicy;
 use libc::{termios, SIGWINCH};
 use linux_loader::cmdline::Cmdline;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -527,6 +531,16 @@ pub struct Vm {
 impl Vm {
     pub const HANDLED_SIGNALS: [i32; 1] = [SIGWINCH];
 
+    #[cfg(feature = "sev_snp")]
+    pub fn get_default_sev_snp_guest_policy() -> SnpPolicy {
+        SnpPolicy::new()
+            .with_abi_minor(0)
+            .with_abi_major(0)
+            .with_smt(1)
+            .with_reserved_must_be_one(1)
+            .with_migrate_ma(0)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
@@ -702,6 +716,23 @@ impl Vm {
             .add_uefi_flash()
             .map_err(Error::MemoryManager)?;
 
+        cpu_manager
+            .lock()
+            .unwrap()
+            .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
+            .map_err(Error::CpuManager)?;
+
+        // This initial SEV-SNP configuration must be done immediately after
+        // vCPUs are created. As part of this initialization we are
+        // transitioning the guest into secure state.
+        // For KVM + SEV_SNP we must call sev_snp_init before we load the
+        // payload (i.e before calling launch update)
+        #[cfg(feature = "sev_snp")]
+        if sev_snp_enabled {
+            vm.sev_snp_init(Vm::get_default_sev_snp_guest_policy())
+                .map_err(Error::InitializeSevSnpVm)?;
+        }
+
         // Loading the igvm file is pushed down here because
         // igvm parser needs cpu_manager to retrieve cpuid leaf.
         // Currently, Microsoft Hypervisor does not provide any
@@ -719,12 +750,6 @@ impl Vm {
         } else {
             None
         };
-
-        cpu_manager
-            .lock()
-            .unwrap()
-            .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
-            .map_err(Error::CpuManager)?;
 
         // For KVM, we need to create interrupt controller after we create boot vcpus.
         // Because we restore GIC state from the snapshot as part of boot vcpu creation.
@@ -746,14 +771,6 @@ impl Vm {
                     .create_devices(console_info, console_resize_pipe, original_termios, ic)
                     .map_err(Error::DeviceManager)?;
             }
-        }
-
-        // This initial SEV-SNP configuration must be done immediately after
-        // vCPUs are created. As part of this initialization we are
-        // transitioning the guest into secure state.
-        #[cfg(feature = "sev_snp")]
-        if sev_snp_enabled {
-            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
         }
 
         #[cfg(feature = "fw_cfg")]
@@ -1117,8 +1134,20 @@ impl Vm {
                 // Passing SEV_SNP_ENABLED: 1 if sev_snp_enabled is true
                 // Otherwise SEV_SNP_DISABLED: 0
                 // value of sev_snp_enabled is mapped to SEV_SNP_ENABLED for true or SEV_SNP_DISABLED for false
+                let vm_type = match hypervisor.hypervisor_type() {
+                    #[cfg(feature = "mshv")]
+                    hypervisor::HypervisorType::Mshv => u64::from(sev_snp_enabled),
+                    #[cfg(feature = "kvm")]
+                    hypervisor::HypervisorType::Kvm => {
+                        if sev_snp_enabled {
+                            KVM_X86_SNP_VM.into()
+                        } else {
+                            0
+                        }
+                    },
+                };
                 let vm = hypervisor
-                    .create_vm_with_type_and_memory(u64::from(sev_snp_enabled), mem_size)
+                    .create_vm_with_type_and_memory(vm_type, mem_size)
                     .unwrap();
             } else {
                 let vm = hypervisor.create_vm().unwrap();
