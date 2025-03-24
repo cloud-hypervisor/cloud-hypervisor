@@ -716,6 +716,13 @@ impl Vm {
             vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
         }
 
+        #[cfg(feature = "fw_cfg")]
+        device_manager
+            .lock()
+            .unwrap()
+            .create_fw_cfg_device()
+            .map_err(Error::DeviceManager)?;
+
         #[cfg(feature = "tdx")]
         let kernel = config
             .lock()
