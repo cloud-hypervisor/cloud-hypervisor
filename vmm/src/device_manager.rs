@@ -57,6 +57,11 @@ use devices::ioapic;
 use devices::legacy::Pl011;
 #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
 use devices::legacy::Serial;
+#[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
+use devices::legacy::{
+    fw_cfg::{PORT_FW_CFG_BASE, PORT_FW_CFG_WIDTH},
+    FwCfg,
+};
 #[cfg(feature = "pvmemcontrol")]
 use devices::pvmemcontrol::{PvmemcontrolBusDevice, PvmemcontrolPciDevice};
 use devices::{interrupt_controller, AcpiNotificationFlags};
@@ -1070,6 +1075,9 @@ pub struct DeviceManager {
     rate_limit_groups: HashMap<String, Arc<RateLimiterGroup>>,
 
     mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
+
+    #[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
+    fw_cfg: Option<Arc<Mutex<FwCfg>>>,
 }
 
 fn create_mmio_allocators(
@@ -1334,6 +1342,8 @@ impl DeviceManager {
             snapshot,
             rate_limit_groups,
             mmio_regions: Arc::new(Mutex::new(Vec::new())),
+            #[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
+            fw_cfg: None,
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -1458,6 +1468,40 @@ impl DeviceManager {
         }
 
         Ok(())
+    }
+
+    #[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
+    pub fn create_fw_cfg_device(&mut self) -> Result<(), DeviceManagerError> {
+        let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new()));
+
+        self.bus_devices
+            .push(Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>);
+
+        self.fw_cfg = Some(fw_cfg.clone());
+
+        self.address_manager
+            .io_bus
+            .insert(fw_cfg, PORT_FW_CFG_BASE, PORT_FW_CFG_WIDTH)
+            .map_err(DeviceManagerError::BusError)?;
+        return Ok(());
+    }
+
+    #[cfg(all(feature = "fw_cfg", target_arch = "aarch64"))]
+    pub fn create_fw_cfg_device(&mut self) -> Result<(), DeviceManagerError> {
+        let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new()));
+
+        self.fw_cfg = Some(fw_cfg.clone());
+
+        // default address for fw_cfg on arm via mmio
+        // https://github.com/torvalds/linux/blob/master/drivers/firmware/qemu_fw_cfg.c#L27
+        self.address_manager
+            .io_bus
+            .insert(fw_cfg.clone(), PORT_FW_CFG_BASE, PORT_FW_CFG_WIDTH)
+            .map_err(DeviceManagerError::BusError)?;
+
+        self.bus_devices
+            .push(Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>);
+        return Ok(());
     }
 
     fn state(&self) -> DeviceManagerState {
@@ -4185,6 +4229,11 @@ impl DeviceManager {
 
     pub fn mmio_bus(&self) -> &Arc<Bus> {
         &self.address_manager.mmio_bus
+    }
+
+    #[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
+    pub fn fw_cfg(&self) -> Option<&Arc<Mutex<FwCfg>>> {
+        self.fw_cfg.as_ref()
     }
 
     pub fn allocator(&self) -> &Arc<Mutex<SystemAllocator>> {
