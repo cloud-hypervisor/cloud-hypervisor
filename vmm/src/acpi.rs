@@ -192,6 +192,8 @@ pub fn create_dsdt_table(
     dsdt
 }
 
+const FACP_DSDT_OFFSET: usize = 140;
+
 fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Arc<Mutex<DeviceManager>>) -> Sdt {
     trace_scoped!("create_facp_table");
 
@@ -241,7 +243,7 @@ fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Arc<Mutex<Devic
     // FADT minor version
     facp.write(131, 3u8);
     // X_DSDT
-    facp.write(140, dsdt_offset.0);
+    facp.write(FACP_DSDT_OFFSET, dsdt_offset.0);
     // Hypervisor Vendor Identity
     facp.write_bytes(268, b"CLOUDHYP");
 
@@ -805,6 +807,65 @@ fn create_acpi_tables_internal(
     let rsdp = Rsdp::new(*b"CLOUDH", xsdt_addr.0);
 
     (rsdp, tables_bytes, xsdt_table_pointers)
+}
+
+#[cfg(feature = "fw_cfg")]
+pub fn create_acpi_tables_for_fw_cfg(
+    device_manager: &Arc<Mutex<DeviceManager>>,
+    cpu_manager: &Arc<Mutex<CpuManager>>,
+    memory_manager: &Arc<Mutex<MemoryManager>>,
+    numa_nodes: &NumaNodes,
+    tpm_enabled: bool,
+) -> Result<(), crate::vm::Error> {
+    let dsdt_offset = GuestAddress(0);
+    let (rsdp, table_bytes, xsdt_table_pointers) = create_acpi_tables_internal(
+        dsdt_offset,
+        device_manager,
+        cpu_manager,
+        memory_manager,
+        numa_nodes,
+        tpm_enabled,
+    );
+    let mut pointer_offsets: Vec<usize> = vec![];
+    let mut checksums: Vec<(usize, usize)> = vec![];
+
+    let xsdt_addr = rsdp.xsdt_addr.get() as usize;
+    let xsdt_checksum = (xsdt_addr, table_bytes.len() - xsdt_addr);
+
+    // create pointer offsets (use location of pointers in XSDT table)
+    // XSDT doesn't have a pointer to DSDT so we use FACP's pointer to DSDT
+    let facp_offset = xsdt_table_pointers[0] as usize;
+    pointer_offsets.push(facp_offset + FACP_DSDT_OFFSET);
+    let mut current_offset = xsdt_addr + 36;
+    for _ in 0..xsdt_table_pointers.len() {
+        pointer_offsets.push(current_offset);
+        current_offset += 8;
+    }
+
+    // create (offset, len) pairs for firmware to calculate
+    // table checksums and verify ACPI tables
+    let mut i = 0;
+    while i < xsdt_table_pointers.len() - 1 {
+        let current_table_offset = xsdt_table_pointers[i];
+        let current_table_length = xsdt_table_pointers[i + 1] - current_table_offset;
+        checksums.push((current_table_offset as usize, current_table_length as usize));
+        i += 1;
+    }
+    checksums.push((
+        xsdt_table_pointers[xsdt_table_pointers.len() - 1] as usize,
+        0,
+    ));
+    checksums.push(xsdt_checksum);
+
+    device_manager
+        .lock()
+        .unwrap()
+        .fw_cfg()
+        .expect("fw_cfg must be present")
+        .lock()
+        .unwrap()
+        .add_acpi(rsdp, table_bytes, checksums, pointer_offsets)
+        .map_err(crate::vm::Error::CreatingAcpiTables)
 }
 
 pub fn create_acpi_tables(

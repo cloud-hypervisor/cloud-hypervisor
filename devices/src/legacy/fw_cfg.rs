@@ -14,11 +14,12 @@
 use std::{
     fs::File,
     io::Result,
-    mem::{size_of, size_of_val},
+    mem::offset_of,
     os::unix::fs::FileExt,
     sync::{Arc, Barrier},
 };
 
+use acpi_tables::rsdp::Rsdp;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::layout::{
     MEM_32BIT_DEVICES_START, MEM_32BIT_RESERVED_START, RAM_64BIT_START, RAM_START as HIGH_RAM_START,
@@ -38,7 +39,7 @@ use vm_memory::ByteValued;
 #[cfg(target_arch = "x86_64")]
 use vm_memory::GuestAddress;
 use vmm_sys_util::sock_ctrl_msg::IntoIovec;
-use zerocopy::{FromBytes, IntoBytes};
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 #[cfg(target_arch = "x86_64")]
 // https://github.com/project-oak/oak/tree/main/stage0_bin#memory-layout
@@ -93,6 +94,17 @@ const FW_CFG_F_RESERVED: u8 = 1 << 0;
 // DMA Toggle Bit (enabled by default)
 const FW_CFG_F_DMA: u8 = 1 << 1;
 pub const FW_CFG_FEATURE: [u8; 4] = [FW_CFG_F_RESERVED | FW_CFG_F_DMA, 0, 0, 0];
+
+const COMMAND_ALLOCATE: u32 = 0x1;
+const COMMAND_ADD_POINTER: u32 = 0x2;
+const COMMAND_ADD_CHECKSUM: u32 = 0x3;
+
+const ALLOC_ZONE_HIGH: u8 = 0x1;
+const ALLOC_ZONE_FSEG: u8 = 0x2;
+
+const FW_CFG_FILENAME_TABLE_LOADER: &str = "etc/table-loader";
+const FW_CFG_FILENAME_RSDP: &str = "acpi/rsdp";
+const FW_CFG_FILENAME_ACPI_TABLES: &str = "acpi/tables";
 
 #[derive(Debug)]
 pub enum FwCfgContent {
@@ -166,6 +178,169 @@ struct FwCfgFile {
     select_be: u16,
     _reserved: u16,
     name: [u8; FILE_NAME_SIZE],
+}
+
+#[repr(C, align(4))]
+#[derive(Debug, IntoBytes, Immutable)]
+struct Allocate {
+    command: u32,
+    file: [u8; FILE_NAME_SIZE],
+    align: u32,
+    zone: u8,
+    _pad: [u8; 63],
+}
+
+#[repr(C, align(4))]
+#[derive(Debug, IntoBytes, Immutable)]
+struct AddPointer {
+    command: u32,
+    dst: [u8; FILE_NAME_SIZE],
+    src: [u8; FILE_NAME_SIZE],
+    offset: u32,
+    size: u8,
+    _pad: [u8; 7],
+}
+
+#[repr(C, align(4))]
+#[derive(Debug, IntoBytes, Immutable)]
+struct AddChecksum {
+    command: u32,
+    file: [u8; FILE_NAME_SIZE],
+    offset: u32,
+    start: u32,
+    len: u32,
+    _pad: [u8; 56],
+}
+
+fn create_intra_pointer(name: &str, offset: usize, size: u8) -> AddPointer {
+    AddPointer {
+        command: COMMAND_ADD_POINTER,
+        dst: create_file_name(name),
+        src: create_file_name(name),
+        offset: offset as u32,
+        size,
+        _pad: [0; 7],
+    }
+}
+
+fn create_acpi_table_checksum(offset: usize, len: usize) -> AddChecksum {
+    AddChecksum {
+        command: COMMAND_ADD_CHECKSUM,
+        file: create_file_name(FW_CFG_FILENAME_ACPI_TABLES),
+        offset: (offset + offset_of!(AcpiTableHeader, checksum)) as u32,
+        start: offset as u32,
+        len: len as u32,
+        _pad: [0; 56],
+    }
+}
+
+#[repr(C, align(4))]
+#[derive(Debug, Clone, Default, FromBytes, IntoBytes)]
+struct AcpiTableHeader {
+    signature: [u8; 4],
+    length: u32,
+    revision: u8,
+    checksum: u8,
+    oem_id: [u8; 6],
+    oem_table_id: [u8; 8],
+    oem_revision: u32,
+    asl_compiler_id: [u8; 4],
+    asl_compiler_revision: u32,
+}
+
+struct AcpiTable {
+    rsdp: Rsdp,
+    tables: Vec<u8>,
+    table_pointers: Vec<usize>,
+    table_checksums: Vec<(usize, usize)>,
+}
+
+impl AcpiTable {
+    fn pointers(&self) -> &[usize] {
+        &self.table_pointers
+    }
+
+    fn checksums(&self) -> &[(usize, usize)] {
+        &self.table_checksums
+    }
+
+    fn take(self) -> (Rsdp, Vec<u8>) {
+        (self.rsdp, self.tables)
+    }
+}
+
+// Creates fw_cfg items used by firmware to load and verify Acpi tables
+// https://github.com/qemu/qemu/blob/master/hw/acpi/bios-linker-loader.c
+fn create_acpi_loader(acpi_table: AcpiTable) -> [FwCfgItem; 3] {
+    let mut table_loader_bytes: Vec<u8> = Vec::new();
+    let allocate_rsdp = Allocate {
+        command: COMMAND_ALLOCATE,
+        file: create_file_name(FW_CFG_FILENAME_RSDP),
+        align: 4,
+        zone: ALLOC_ZONE_FSEG,
+        _pad: [0; 63],
+    };
+    table_loader_bytes.extend(allocate_rsdp.as_bytes());
+
+    let allocate_tables = Allocate {
+        command: COMMAND_ALLOCATE,
+        file: create_file_name(FW_CFG_FILENAME_ACPI_TABLES),
+        align: 4,
+        zone: ALLOC_ZONE_HIGH,
+        _pad: [0; 63],
+    };
+    table_loader_bytes.extend(allocate_tables.as_bytes());
+
+    for pointer_offset in acpi_table.pointers().iter() {
+        let pointer = create_intra_pointer(FW_CFG_FILENAME_ACPI_TABLES, *pointer_offset, 8);
+        table_loader_bytes.extend(pointer.as_bytes());
+    }
+    for (offset, len) in acpi_table.checksums().iter() {
+        let checksum = create_acpi_table_checksum(*offset, *len);
+        table_loader_bytes.extend(checksum.as_bytes());
+    }
+    let pointer_rsdp_to_xsdt = AddPointer {
+        command: COMMAND_ADD_POINTER,
+        dst: create_file_name(FW_CFG_FILENAME_RSDP),
+        src: create_file_name(FW_CFG_FILENAME_ACPI_TABLES),
+        offset: offset_of!(Rsdp, xsdt_addr) as u32,
+        size: 8,
+        _pad: [0; 7],
+    };
+    table_loader_bytes.extend(pointer_rsdp_to_xsdt.as_bytes());
+    let checksum_rsdp = AddChecksum {
+        command: COMMAND_ADD_CHECKSUM,
+        file: create_file_name(FW_CFG_FILENAME_RSDP),
+        offset: offset_of!(Rsdp, checksum) as u32,
+        start: 0,
+        len: offset_of!(Rsdp, length) as u32,
+        _pad: [0; 56],
+    };
+    let checksum_rsdp_ext = AddChecksum {
+        command: COMMAND_ADD_CHECKSUM,
+        file: create_file_name(FW_CFG_FILENAME_RSDP),
+        offset: offset_of!(Rsdp, extended_checksum) as u32,
+        start: 0,
+        len: size_of::<Rsdp>() as u32,
+        _pad: [0; 56],
+    };
+    table_loader_bytes.extend(checksum_rsdp.as_bytes());
+    table_loader_bytes.extend(checksum_rsdp_ext.as_bytes());
+
+    let table_loader = FwCfgItem {
+        name: FW_CFG_FILENAME_TABLE_LOADER.to_owned(),
+        content: FwCfgContent::Bytes(table_loader_bytes),
+    };
+    let (rsdp, tables) = acpi_table.take();
+    let acpi_rsdp = FwCfgItem {
+        name: FW_CFG_FILENAME_RSDP.to_owned(),
+        content: FwCfgContent::Bytes(rsdp.as_bytes().to_owned()),
+    };
+    let apci_tables = FwCfgItem {
+        name: FW_CFG_FILENAME_ACPI_TABLES.to_owned(),
+        content: FwCfgContent::Bytes(tables),
+    };
+    [table_loader, acpi_rsdp, apci_tables]
 }
 
 impl FwCfg {
@@ -304,6 +479,25 @@ impl FwCfg {
         let bytes = s.into_bytes_with_nul();
         self.known_items[FW_CFG_CMDLINE_SIZE as usize] = FwCfgContent::U32(bytes.len() as u32);
         self.known_items[FW_CFG_CMDLINE_DATA as usize] = FwCfgContent::Bytes(bytes);
+    }
+
+    pub fn add_acpi(
+        &mut self,
+        rsdp: Rsdp,
+        tables: Vec<u8>,
+        table_checksums: Vec<(usize, usize)>,
+        table_pointers: Vec<usize>,
+    ) -> Result<()> {
+        let acpi_table = AcpiTable {
+            rsdp,
+            tables,
+            table_checksums,
+            table_pointers,
+        };
+        let [table_loader, acpi_rsdp, apci_tables] = create_acpi_loader(acpi_table);
+        self.add_item(table_loader)?;
+        self.add_item(acpi_rsdp)?;
+        self.add_item(apci_tables)
     }
 
     pub fn add_initramfs_data(&mut self, file: &File) -> Result<()> {
