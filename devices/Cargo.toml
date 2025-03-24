@@ -8,6 +8,7 @@ version = "0.1.0"
 acpi_tables = { workspace = true }
 anyhow = "1.0.94"
 arch = { path = "../arch" }
+bitfield = "0.16.1"
 bitflags = "2.9.0"
 byteorder = "1.5.0"
 event_monitor = { path = "../event_monitor" }
