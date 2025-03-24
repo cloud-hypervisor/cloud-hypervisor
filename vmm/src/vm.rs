@@ -2348,10 +2348,21 @@ impl Vm {
         } else {
             VmState::Running
         };
+
         current_state.valid_transition(new_state)?;
 
         #[cfg(feature = "fw_cfg")]
-        Self::populate_fw_cfg(&self.device_manager, &self.config)?;
+        {
+            Self::populate_fw_cfg(&self.device_manager, &self.config)?;
+            let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
+            crate::acpi::create_acpi_tables_for_fw_cfg(
+                &self.device_manager,
+                &self.cpu_manager,
+                &self.memory_manager,
+                &self.numa_nodes,
+                tpm_enabled,
+            );
+        }
 
         // Do earlier to parallelise with loading kernel
         #[cfg(target_arch = "x86_64")]
