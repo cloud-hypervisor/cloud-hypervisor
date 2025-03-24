@@ -16,6 +16,7 @@
 /// We implement the functionality necessary to use Oak's Stage0 Firmware
 /// (This includes most of the functionality, besides adding additional
 /// items to the fw_cfg device for the firmware).
+use crate::acpi::{create_acpi_loader, AcpiTable};
 use arch::{
     layout::{
         EBDA_START, HIGH_RAM_START, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START,
@@ -262,6 +263,14 @@ impl FwCfg {
         let bytes = s.into_bytes_with_nul();
         self.known_items[FW_CFG_CMDLINE_SIZE as usize] = FwCfgContent::U32(bytes.len() as u32);
         self.known_items[FW_CFG_CMDLINE_DATA as usize] = FwCfgContent::Bytes(bytes);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn add_acpi(&mut self, acpi_table: AcpiTable) -> Result<()> {
+        let [table_loader, acpi_rsdp, apci_tables] = create_acpi_loader(acpi_table);
+        self.add_item(table_loader)?;
+        self.add_item(acpi_rsdp)?;
+        self.add_item(apci_tables)
     }
 
     pub fn add_initramfs_data(&mut self, file: &File) -> Result<()> {

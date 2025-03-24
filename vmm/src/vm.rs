@@ -68,6 +68,8 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
+#[cfg(feature = "fw_cfg")]
+use crate::acpi::create_acpi_tables_for_fw_cfg;
 use crate::config::{add_to_config, ValidationError};
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -2254,6 +2256,13 @@ impl Vm {
             VmState::Running
         };
         current_state.valid_transition(new_state)?;
+
+        #[cfg(feature = "fw_cfg")]
+        let _ = create_acpi_tables_for_fw_cfg(
+            &self.device_manager,
+            &self.cpu_manager,
+            &self.memory_manager,
+        );
 
         // Do earlier to parallelise with loading kernel
         #[cfg(target_arch = "x86_64")]
