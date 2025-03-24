@@ -19,6 +19,7 @@ log = "0.4.22"
 num_enum = "0.7.2"
 pci = { path = "../pci" }
 serde = { version = "1.0.208", features = ["derive"] }
+tempfile = "3.18.0"
 thiserror = "2.0.6"
 tpm = { path = "../tpm" }
 vm-allocator = { path = "../vm-allocator" }

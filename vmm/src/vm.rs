@@ -68,6 +68,8 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
+#[cfg(feature = "fw_cfg")]
+use crate::acpi::create_acpi_tables_for_fw_cfg;
 use crate::config::{add_to_config, ValidationError};
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -687,7 +689,7 @@ impl Vm {
                     .expect("fw_cfg device must be present")
                     .lock()
                     .unwrap()
-                    .add_kernel_data(kernel_file);
+                    .add_kernel_data(&kernel_file);
             } else {
                 return Err(Error::FwCfgKernelFile);
             }
@@ -723,7 +725,7 @@ impl Vm {
                     .expect("fw_cfg device must be present")
                     .lock()
                     .unwrap()
-                    .add_initramfs_data(initramfs_file);
+                    .add_initramfs_data(&initramfs_file);
             }
         }
 
@@ -2219,14 +2221,6 @@ impl Vm {
         }
         let mem = self.memory_manager.lock().unwrap().guest_memory().memory();
         let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
-        #[cfg(feature = "fw_cfg")]
-        {
-            let _ = crate::acpi::create_acpi_tables_for_fw_cfg(
-                &self.device_manager,
-                &self.cpu_manager,
-                &self.memory_manager,
-            );
-        }
         let rsdp_addr = crate::acpi::create_acpi_tables(
             &mem,
             &self.device_manager,
@@ -2262,6 +2256,13 @@ impl Vm {
             VmState::Running
         };
         current_state.valid_transition(new_state)?;
+
+        #[cfg(feature = "fw_cfg")]
+        let _ = create_acpi_tables_for_fw_cfg(
+            &self.device_manager,
+            &self.cpu_manager,
+            &self.memory_manager,
+        );
 
         // Do earlier to parallelise with loading kernel
         #[cfg(target_arch = "x86_64")]

@@ -53,6 +53,7 @@ use devices::gic;
 use devices::interrupt_controller::InterruptController;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
+#[cfg(feature = "fw_cfg")]
 use devices::legacy::FwCfg;
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
@@ -964,6 +965,7 @@ pub struct DeviceManager {
 
     mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
 
+    #[cfg(feature = "fw_cfg")]
     fw_cfg: Option<Arc<Mutex<FwCfg>>>,
 }
 
@@ -1228,6 +1230,7 @@ impl DeviceManager {
             snapshot,
             rate_limit_groups,
             mmio_regions: Arc::new(Mutex::new(Vec::new())),
+            #[cfg(feature = "fw_cfg")]
             fw_cfg: None,
         };
 
@@ -1769,21 +1772,24 @@ impl DeviceManager {
             let mem_below_4g = std::cmp::min(arch::layout::MEM_32BIT_RESERVED_START.0, mem_size);
             let mem_above_4g = mem_size.saturating_sub(arch::layout::RAM_64BIT_START.0);
 
-            let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new(
-                self.memory_manager.lock().as_ref().unwrap().guest_memory(),
-            )));
+            #[cfg(feature = "fw_cfg")]
+            {
+                let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new(
+                    self.memory_manager.lock().as_ref().unwrap().guest_memory(),
+                )));
 
-            self.bus_devices
-                .push(Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>);
+                self.bus_devices
+                    .push(Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>);
 
-            self.fw_cfg = Some(fw_cfg.clone());
+                self.fw_cfg = Some(fw_cfg.clone());
 
-            log::info!("allocating address space for fw_cfg");
+                log::info!("allocating address space for fw_cfg");
 
-            self.address_manager
-                .io_bus
-                .insert(fw_cfg, 0x510, 0x10)
-                .map_err(DeviceManagerError::BusError)?;
+                self.address_manager
+                    .io_bus
+                    .insert(fw_cfg, 0x510, 0x10)
+                    .map_err(DeviceManagerError::BusError)?;
+            }
 
             let cmos = Arc::new(Mutex::new(devices::legacy::Cmos::new(
                 mem_below_4g,
@@ -4038,6 +4044,7 @@ impl DeviceManager {
         &self.address_manager.mmio_bus
     }
 
+    #[cfg(feature = "fw_cfg")]
     pub fn fw_cfg(&self) -> Option<&Arc<Mutex<FwCfg>>> {
         self.fw_cfg.as_ref()
     }

@@ -387,7 +387,7 @@ impl FwCfg {
         }
     }
 
-    pub fn add_kernel_data(&mut self, file: File) -> Result<()> {
+    pub fn add_kernel_data(&mut self, file: &File) -> Result<()> {
         let mut buffer = vec![0u8; size_of::<boot_params>()];
         file.read_exact_at(&mut buffer, 0)?;
         let bp = boot_params::from_mut_slice(&mut buffer).unwrap();
@@ -401,7 +401,7 @@ impl FwCfg {
         self.known_items[FW_CFG_KERNEL_SIZE as usize] =
             FwCfgContent::U32(file.metadata()?.len() as u32 - kernel_start as u32);
         self.known_items[FW_CFG_KERNEL_DATA as usize] =
-            FwCfgContent::File(kernel_start as u64, file);
+            FwCfgContent::File(kernel_start as u64, file.try_clone()?);
         Ok(())
     }
 
@@ -419,10 +419,10 @@ impl FwCfg {
         self.add_item(apci_tables)
     }
 
-    pub fn add_initramfs_data(&mut self, file: File) -> Result<()> {
+    pub fn add_initramfs_data(&mut self, file: &File) -> Result<()> {
         let initramfs_size = file.metadata()?.len();
         self.known_items[FW_CFG_INITRD_SIZE as usize] = FwCfgContent::U32(initramfs_size as _);
-        self.known_items[FW_CFG_INITRD_DATA as usize] = FwCfgContent::File(0, file);
+        self.known_items[FW_CFG_INITRD_DATA as usize] = FwCfgContent::File(0, file.try_clone()?);
         Ok(())
     }
 
@@ -520,5 +520,149 @@ impl BusDevice for FwCfg {
             ),
         };
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::CString;
+    use std::io::Write;
+
+    use super::*;
+
+    #[test]
+    fn test_signature() {
+        let gm = GuestMemoryAtomic::new(
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), RAM_64BIT_START.0 as usize)]).unwrap(),
+        );
+
+        let mut fw_cfg = FwCfg::new(gm);
+
+        let mut data = vec![0u8];
+
+        let mut sig_iter = FW_CFG_DMA_SIGNATURE.into_iter();
+        fw_cfg.write(0, 0, &[FW_CFG_SIGNATURE as u8, 0]);
+        loop {
+            if let Some(char) = sig_iter.next() {
+                fw_cfg.read(0, 1, &mut data);
+                assert_eq!(data[0], char);
+            } else {
+                return;
+            }
+        }
+    }
+
+    #[test]
+    fn test_kernel_cmdline() {
+        let gm = GuestMemoryAtomic::new(
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), RAM_64BIT_START.0 as usize)]).unwrap(),
+        );
+
+        let mut fw_cfg = FwCfg::new(gm);
+
+        let cmdline = *b"cmdline\0";
+
+        fw_cfg.add_kernel_cmdline(CString::from_vec_with_nul(cmdline.to_vec()).unwrap());
+
+        let mut data = vec![0u8];
+
+        let mut cmdline_iter = cmdline.into_iter();
+        fw_cfg.write(0, 0, &[FW_CFG_CMDLINE_DATA as u8, 0]);
+        loop {
+            if let Some(char) = cmdline_iter.next() {
+                fw_cfg.read(0, 1, &mut data);
+                assert_eq!(data[0], char);
+            } else {
+                return;
+            }
+        }
+    }
+
+    #[test]
+    fn test_initram_fs() {
+        use tempfile::NamedTempFile;
+        let gm = GuestMemoryAtomic::new(
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), RAM_64BIT_START.0 as usize)]).unwrap(),
+        );
+
+        let mut fw_cfg = FwCfg::new(gm);
+
+        let mut temp = NamedTempFile::new().unwrap();
+        let temp_file = temp.as_file_mut();
+
+        let initram_content = b"this is the initramfs";
+        let written = temp_file.write(initram_content);
+        assert_eq!(written.unwrap(), 21);
+        let _ = fw_cfg.add_initramfs_data(temp_file);
+
+        let mut data = vec![0u8];
+
+        let mut initram_iter = (*initram_content).into_iter();
+        fw_cfg.write(0, 0, &[FW_CFG_INITRD_DATA as u8, 0]);
+        loop {
+            if let Some(char) = initram_iter.next() {
+                fw_cfg.read(0, 1, &mut data);
+                assert_eq!(data[0], char);
+            } else {
+                return;
+            }
+        }
+    }
+
+    #[test]
+    fn test_dma() {
+        use bitfield::BitMut;
+        let code = [
+            0xba, 0xf8, 0x03, 0x00, 0xd8, 0x04, b'0', 0xee, 0xb0, b'\n', 0xee, 0xf4,
+        ];
+
+        let content = FwCfgContent::Bytes(code.to_vec());
+
+        let mem_size = 0x1000;
+        let load_addr = GuestAddress(0x1000);
+        let mem: GuestMemoryMmap<AtomicBitmap> =
+            GuestMemoryMmap::from_ranges(&[(load_addr, mem_size)]).unwrap();
+
+        // Note: In firmware we would just allocate FwCfgDmaAccess struct
+        // and use address of struct (&) as dma address
+        let mut access_control = AccessControl(0);
+        // bit 1 = read access
+        access_control.set_bit(1, true);
+        // length of data to access
+        let length_be = (code.len() as u32).to_be();
+        // guest address for data
+        let code_address = 0x1900_u64;
+        let address_be = code_address.to_be();
+        let mut access = FwCfgDmaAccess {
+            control_be: access_control.0.to_be(), // bit(1) = read bit
+            length_be,
+            address_be,
+        };
+        // access address is where to put the code
+        let access_address = GuestAddress(load_addr.0);
+        let address_bytes = access_address.0.to_be_bytes();
+        let dma_lo: [u8; 4] = address_bytes[0..4].try_into().unwrap();
+        let dma_hi: [u8; 4] = address_bytes[4..8].try_into().unwrap();
+
+        // writing the FwCfgDmaAccess to mem (this would just be self.dma_acess.as_ref() in guest)
+        let _ = mem.write(access.as_bytes_mut(), access_address);
+        let mem_m = GuestMemoryAtomic::new(mem.clone());
+        let mut fw_cfg = FwCfg::new(mem_m);
+        let cfg_item = FwCfgItem {
+            name: "code".to_string(),
+            content,
+        };
+        let _ = fw_cfg.add_item(cfg_item);
+
+        let mut data = [0u8; 12];
+
+        let _ = mem.read(&mut data, GuestAddress(code_address));
+        assert_ne!(data, code);
+
+        fw_cfg.write(0, 0, &[FW_CFG_FILE_FIRST as u8, 0]);
+        fw_cfg.write(0, 4, &dma_lo);
+        fw_cfg.write(0, 8, &dma_hi);
+        let _ = mem.read(&mut data, GuestAddress(code_address));
+        assert_eq!(data, code);
     }
 }
