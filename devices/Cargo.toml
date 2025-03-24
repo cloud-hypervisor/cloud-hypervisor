@@ -28,11 +28,16 @@ vm-memory = { workspace = true, features = [
 ] }
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = { workspace = true }
+zerocopy = { version = "0.8.26", features = [
+  "alloc",
+  "derive",
+], optional = true }
 
 [target.'cfg(any(target_arch = "aarch64", target_arch = "riscv64"))'.dependencies]
 arch = { path = "../arch" }
 
 [features]
 default = []
+fw_cfg = ["zerocopy"]
 kvm = ["arch/kvm"]
 pvmemcontrol = []
