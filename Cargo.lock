@@ -532,6 +532,7 @@ dependencies = [
  "event_monitor",
  "hypervisor",
  "libc",
+ "linux-loader",
  "log",
  "num_enum",
  "pci",

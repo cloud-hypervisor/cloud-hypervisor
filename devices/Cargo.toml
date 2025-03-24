@@ -13,6 +13,7 @@ byteorder = "1.5.0"
 event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
 libc = "0.2.167"
+linux-loader = { workspace = true, features = ["bzimage", "elf", "pe"] }
 log = "0.4.22"
 num_enum = "0.7.2"
 pci = { path = "../pci" }
