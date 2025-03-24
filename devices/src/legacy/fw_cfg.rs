@@ -16,6 +16,13 @@
 /// We implement the functionality necessary to use Oak's Stage0 Firmware
 /// (This includes most of the functionality, besides adding additional
 /// items to the fw_cfg device for the firmware).
+use arch::{
+    layout::{
+        EBDA_START, HIGH_RAM_START, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START,
+        MEM_32BIT_RESERVED_START, PCI_MMCONFIG_SIZE, PCI_MMCONFIG_START, RAM_64BIT_START,
+    },
+    RegionType,
+};
 use linux_loader::bootparam::boot_params;
 use std::{
     fs::File,
@@ -25,9 +32,14 @@ use std::{
     sync::{Arc, Barrier},
 };
 use vm_device::BusDevice;
-use vm_memory::ByteValued;
+use vm_memory::{ByteValued, GuestAddress};
 use vmm_sys_util::sock_ctrl_msg::IntoIovec;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
+
+const STAGE0_START_ADDRESS: GuestAddress = GuestAddress(0xffe0_0000);
+const STAGE0_SIZE: usize = 0x20_0000;
+const E820_RAM: u32 = 1;
+const E820_RESERVED: u32 = 2;
 
 pub const PORT_FW_CFG_SELECTOR: u16 = 0x510;
 pub const PORT_FW_CFG_DATA: u16 = 0x511;
@@ -140,6 +152,61 @@ impl FwCfg {
             items: vec![],
             known_items,
         }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    pub fn add_e820(&mut self, mem_size: usize) -> Result<()> {
+        let mut mem_regions = vec![
+            (GuestAddress(0), EBDA_START.0 as usize, RegionType::Ram),
+            (
+                MEM_32BIT_DEVICES_START,
+                MEM_32BIT_DEVICES_SIZE as usize,
+                RegionType::Reserved,
+            ),
+            (
+                PCI_MMCONFIG_START,
+                PCI_MMCONFIG_SIZE as usize,
+                RegionType::Reserved,
+            ),
+            (STAGE0_START_ADDRESS, STAGE0_SIZE, RegionType::Reserved),
+        ];
+        if mem_size < MEM_32BIT_DEVICES_START.0 as usize {
+            mem_regions.push((
+                HIGH_RAM_START,
+                mem_size - HIGH_RAM_START.0 as usize,
+                RegionType::Ram,
+            ));
+        } else {
+            mem_regions.push((
+                HIGH_RAM_START,
+                MEM_32BIT_RESERVED_START.0 as usize - HIGH_RAM_START.0 as usize,
+                RegionType::Ram,
+            ));
+            mem_regions.push((
+                RAM_64BIT_START,
+                mem_size - (MEM_32BIT_DEVICES_START.0 as usize),
+                RegionType::Ram,
+            ));
+        }
+        let mut bytes = vec![];
+        for (addr, size, region) in mem_regions.iter() {
+            let type_ = match region {
+                RegionType::Ram => E820_RAM,
+                RegionType::Reserved => E820_RESERVED,
+                RegionType::SubRegion => continue,
+            };
+            let entry = BootE820Entry {
+                addr: addr.0,
+                size: *size as u64,
+                type_,
+            };
+            bytes.extend_from_slice(entry.as_bytes());
+        }
+        let item = FwCfgItem {
+            name: "etc/e820".to_owned(),
+            content: FwCfgContent::Bytes(bytes),
+        };
+        self.add_item(item)
     }
 
     fn get_file_dir_mut(&mut self) -> &mut Vec<u8> {
