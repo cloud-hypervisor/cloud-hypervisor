@@ -543,6 +543,15 @@ impl Vm {
         let force_iommu = sev_snp_enabled;
         #[cfg(not(any(feature = "tdx", feature = "sev_snp")))]
         let force_iommu = false;
+        #[cfg(feature = "igvm")]
+        let igvm_enabled = config
+            .lock()
+            .unwrap()
+            .payload
+            .clone()
+            .unwrap()
+            .igvm
+            .is_some();
 
         #[cfg(feature = "guest_debug")]
         let stop_on_boot = config.lock().unwrap().gdb;
@@ -576,6 +585,8 @@ impl Vm {
             &numa_nodes,
             #[cfg(feature = "sev_snp")]
             sev_snp_enabled,
+            #[cfg(feature = "igvm")]
+            igvm_enabled,
         )
         .map_err(Error::CpuManager)?;
 
@@ -886,6 +897,18 @@ impl Vm {
             )
             .map_err(Error::MemoryManager)?
         };
+
+        #[cfg(target_arch = "x86_64")]
+        // Note: For x86, always call this function before invoking start boot vcpus.
+        // Otherwise guest would fail to boot because we haven't created the
+        // userspace mappings to update the hypervisor about the memory mappings.
+        // These mappings must be created before we start the vCPU threads for
+        // the very first time.
+        memory_manager
+            .lock()
+            .unwrap()
+            .allocate_address_space()
+            .map_err(Error::MemoryManager)?;
 
         Vm::new_from_memory_manager(
             vm_config,
@@ -2286,18 +2309,6 @@ impl Vm {
 
         #[cfg(target_arch = "riscv64")]
         self.configure_system().unwrap();
-
-        #[cfg(target_arch = "x86_64")]
-        // Note: For x86, always call this function before invoking start boot vcpus.
-        // Otherwise guest would fail to boot because we haven't created the
-        // userspace mappings to update the hypervisor about the memory mappings.
-        // These mappings must be created before we start the vCPU threads for
-        // the very first time.
-        self.memory_manager
-            .lock()
-            .unwrap()
-            .allocate_address_space()
-            .map_err(Error::MemoryManager)?;
 
         #[cfg(feature = "tdx")]
         if let Some(hob_address) = hob_address {
