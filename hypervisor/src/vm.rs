@@ -404,7 +404,7 @@ pub trait Vm: Send + Sync + Any {
         _page_type: u32,
         _page_size: u32,
         _pages: &[u64],
-        #[cfg(feature = "kvm")] _uaddrs: &[u64],
+        _uaddrs: &[u64],
     ) -> Result<()> {
         unimplemented!()
     }
