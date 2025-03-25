@@ -16,6 +16,7 @@ tdx = []
 anyhow = { workspace = true }
 arc-swap = "1.7.1"
 bitfield-struct = "0.10.1"
+bitfield = "0.16.1"
 byteorder = { workspace = true }
 cfg-if = { workspace = true }
 concat-idents = "1.1.5"
