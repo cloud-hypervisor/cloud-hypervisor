@@ -1571,7 +1571,7 @@ impl cpu::Vcpu for MshvVcpu {
     /// Sets the AMD specific vcpu's sev control register.
     ///
     #[cfg(feature = "sev_snp")]
-    fn set_sev_control_register(&self, vmsa_pfn: u64) -> cpu::Result<()> {
+    fn set_sev_control_register(&self, vmsa_pfn: u64,_vmsa: igvm::snp_defs::SevVmsa) -> cpu::Result<()> {
         let sev_control_reg = snp::get_sev_control_register(vmsa_pfn);
 
         self.fd
@@ -2129,7 +2129,7 @@ impl vm::Vm for MshvVm {
         page_type: u32,
         page_size: u32,
         pages: &[u64],
-        _uaddrs: &[u64]
+        _uaddrs: &[u64],
     ) -> vm::Result<()> {
         debug_assert!(page_size == hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB);
         if pages.is_empty() {

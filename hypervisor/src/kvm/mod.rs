@@ -128,6 +128,46 @@ ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 pub const KVM_X86_SNP_VM: u32 = 4;
 #[cfg(feature = "sev_snp")]
 use x86_64::sev;
+#[cfg(all(feature = "sev_snp"))]
+use kvm_bindings::kvm_segment as Segment;
+#[cfg(feature = "sev_snp")]
+bitfield::bitfield! {
+    /// Guest segment register access right.
+    ///
+    /// See Intel Architecture Software Developer's Manual, Vol.3, Table 24-2.
+    #[derive(Copy, Clone, Default, PartialEq, Eq, Hash)]
+    pub struct SegAccess(u32);
+    impl Debug;
+    pub seg_type, _ : 3, 0;
+    pub s_code_data, _ : 4;
+    pub priv_level, _ : 6, 5;
+    pub present, _ : 7;
+    pub available, _ : 12;
+    pub l_64bit, _ : 13;
+    pub db_size_32, _: 14;
+    pub granularity, _: 15;
+    pub unusable, _: 16;
+}
+
+#[cfg(feature = "sev_snp")]
+fn make_segment(sev_selector: igvm::snp_defs::SevSelector) -> Segment {
+    let flags = SegAccess(sev_selector.attrib.into());
+    Segment {
+        base: sev_selector.base,
+        limit: sev_selector.limit,
+        selector: sev_selector.selector,
+        type_: flags.seg_type() as u8,
+        s: flags.s_code_data() as u8,
+        dpl: flags.priv_level() as u8,
+        present: flags.present() as u8,
+        avl: flags.available() as u8,
+        db: flags.db_size_32() as u8,
+        g: flags.granularity() as u8,
+        l: flags.l_64bit() as u8,
+        unusable: flags.unusable() as u8,
+        ..Default::default()
+    }
+}
 
 #[cfg(feature = "tdx")]
 const KVM_EXIT_TDX: u32 = 50;
@@ -3042,6 +3082,56 @@ impl cpu::Vcpu for KvmVcpu {
             }
             Ok(_) => Ok(()),
         }
+    }
+
+    #[cfg(feature = "sev_snp")]
+    fn set_sev_control_register(
+        &self,
+        _vmsa_pfn: u64,
+        vmsa: igvm::snp_defs::SevVmsa,
+    ) -> cpu::Result<()> {
+        let vcpu = self.fd.lock().unwrap();
+
+        let mut sregs = vcpu
+            .get_sregs()
+            .map_err(|e| cpu::HypervisorCpuError::GetSpecialRegs(e.into()))?;
+        sregs.cs = make_segment(vmsa.cs);
+        info!("CS: {:?}", sregs.cs);
+        sregs.ds = make_segment(vmsa.ds);
+        sregs.es = make_segment(vmsa.es);
+        sregs.fs = make_segment(vmsa.fs);
+        sregs.gs = make_segment(vmsa.gs);
+        sregs.ss = make_segment(vmsa.ss);
+        sregs.tr = make_segment(vmsa.tr);
+        sregs.ldt = make_segment(vmsa.ldtr);
+
+        sregs.cr0 = vmsa.cr0;
+        sregs.cr4 = vmsa.cr4;
+        sregs.efer = vmsa.efer;
+
+        sregs.idt.base = vmsa.idtr.base;
+        sregs.idt.limit = vmsa.idtr.limit.try_into().unwrap();
+        info!("idt limit: {}", sregs.idt.limit);
+        sregs.gdt.base = vmsa.gdtr.base;
+        sregs.gdt.limit = vmsa.gdtr.limit.try_into().unwrap();
+        info!("gdt limit: {}", sregs.gdt.limit);
+        let _ = vcpu
+            .set_sregs(&sregs)
+            .map_err(|e| cpu::HypervisorCpuError::SetSpecialRegs(e.into()))?;
+
+        let mut regs = vcpu
+            .get_regs()
+            .map_err(|e| cpu::HypervisorCpuError::GetRegister(e.into()))?;
+        regs.rip = vmsa.rip;
+        info!("rds: {}", vmsa.rdx);
+        regs.rdx = vmsa.rdx;
+        regs.rflags = vmsa.rflags;
+
+        let _ = vcpu
+            .set_regs(&regs)
+            .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+
+        Ok(())
     }
 }
 
