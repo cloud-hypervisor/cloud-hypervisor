@@ -139,8 +139,16 @@ use igvm_defs::PAGE_SIZE_4K;
 use kvm_bindings::kvm_memory_attributes;
 #[cfg(all(feature = "sev_snp"))]
 use kvm_bindings::{kvm_segment as Segment, KVM_MEMORY_ATTRIBUTE_PRIVATE};
+use vm_memory::GuestAddress;
 #[cfg(feature = "sev_snp")]
 use x86_64::sev;
+// Hardcoded GPA of VMSA page for KVM
+pub const KVM_VMSA_PAGE_ADDRESS: GuestAddress = GuestAddress(0xffff_ffff_f000);
+pub const KVM_VMSA_PAGE_SIZE: usize = 0x1000;
+#[cfg(feature = "igvm")]
+pub const STAGE0_START_ADDRESS: GuestAddress = GuestAddress(0xffe0_0000);
+#[cfg(feature = "igvm")]
+pub const STAGE0_SIZE: usize = 0x20_0000;
 // Maximum Virtual address space.
 #[cfg(target_arch = "x86_64")]
 const VIRTUTAL_ADDRESS_SIZE_IN_BITS: usize = 1 << 48;
