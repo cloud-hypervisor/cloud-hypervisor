@@ -1883,7 +1883,7 @@ impl CpuManager {
         &self.vcpus_kill_signalled
     }
 
-    #[cfg(feature = "igvm")]
+    #[cfg(all(feature = "igvm", feature = "mshv"))]
     pub(crate) fn get_cpuid_leaf(
         &self,
         cpu_id: u8,
