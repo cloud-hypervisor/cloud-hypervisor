@@ -128,8 +128,10 @@ ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 // TODO: The following VM types are defined in latest linux kernel arch/x86/include/uapi/asm/kvm.h but doesn't exist in kvm binding yet.
 #[cfg(all(feature = "kvm", feature = "sev_snp"))]
 pub const KVM_X86_SNP_VM: u32 = 4;
+#[cfg(feature = "sev_snp")]
+use igvm_defs::PAGE_SIZE_4K;
 #[cfg(all(feature = "sev_snp"))]
-use kvm_bindings::kvm_segment as Segment;
+use kvm_bindings::{kvm_segment as Segment, KVM_MEMORY_ATTRIBUTE_PRIVATE};
 #[cfg(feature = "sev_snp")]
 use x86_64::sev;
 #[cfg(feature = "sev_snp")]
@@ -687,6 +689,8 @@ impl vm::Vm for KvmVm {
             vm_ops,
             #[cfg(target_arch = "x86_64")]
             hyperv_synic: AtomicBool::new(false),
+            #[cfg(feature = "sev_snp")]
+            vm_fd: self.fd.clone(),
         };
         Ok(Arc::new(vcpu))
     }
@@ -1318,6 +1322,15 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             {
                 let sev_snp_enabled = vm_type == KVM_X86_SNP_VM as u64;
                 sev_fd = if sev_snp_enabled {
+                    let mask = self.kvm.check_extension_int(crate::kvm::Cap::ExitHypercall);
+                    let cap = kvm_bindings::kvm_enable_cap {
+                        cap: kvm_bindings::KVM_CAP_EXIT_HYPERCALL,
+                        args: [mask as _, 0, 0, 0],
+                        ..Default::default()
+                    };
+                    vm_fd
+                        .enable_cap(&cap)
+                        .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
                     let sev_dev = x86_64::sev::SevFd::new(&"/dev/sev".to_string())
                         .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilities(e.into()))?;
                     // This ioctl initializes the sev context and must be called right after opening the sev device.
@@ -1451,6 +1464,8 @@ pub struct KvmVcpu {
     vm_ops: Option<Arc<dyn vm::VmOps>>,
     #[cfg(target_arch = "x86_64")]
     hyperv_synic: AtomicBool,
+    #[cfg(feature = "sev_snp")]
+    vm_fd: Arc<VmFd>,
 }
 
 /// Implementation of Vcpu trait for KVM
@@ -2192,6 +2207,48 @@ impl cpu::Vcpu for KvmVcpu {
                 #[cfg(feature = "tdx")]
                 VcpuExit::Unsupported(KVM_EXIT_TDX) => Ok(cpu::VmExit::Tdx),
                 VcpuExit::Debug(_) => Ok(cpu::VmExit::Debug),
+                #[cfg(feature = "sev_snp")]
+                VcpuExit::Hypercall(hypercall) => {
+                    // https://docs.kernel.org/virt/kvm/x86/hypercalls.html#kvm-hc-map-gpa-range
+                    info!("VcpuExit::Hypercall");
+                    const KVM_HC_MAP_GPA_RANGE: u64 = 12;
+                    // 4th bit of attributes argument is encrypted page bit
+                    match hypercall.nr {
+                        KVM_HC_MAP_GPA_RANGE => {
+                            info!("Handling KVM_HC_MAP_GPA_RANGE hyper call");
+                            // guest physical address of start page
+                            let address = hypercall.args[0];
+                            // num pages to map from start address
+                            let num_pages = hypercall.args[1];
+                            // bits[0-3]  = page size encoding
+                            // bits[4]   = 1 if private, 0 if shared
+                            // bits[5-63] = zero
+                            let attributes = hypercall.args[2];
+                            // TODO: Add 2mb page support
+                            let size = num_pages * PAGE_SIZE_4K;
+                            let private_encoding_bitmask = 0b10000;
+                            info!("hypercall attributes: {:#b}", attributes);
+                            let set_private_attr = if attributes & private_encoding_bitmask > 0 {
+                                KVM_MEMORY_ATTRIBUTE_PRIVATE as u64
+                            } else {
+                                // the only attribute available is private, o/w 0
+                                // https://docs.kernel.org/virt/kvm/api.html#kvm-set-memory-attributes
+                                0u64
+                            };
+                            let mem_attributes = kvm_bindings::kvm_memory_attributes {
+                                address,
+                                size,
+                                attributes: set_private_attr as u64,
+                                ..Default::default()
+                            };
+                            self.vm_fd
+                                .set_memory_attributes(mem_attributes)
+                                .map(|_| cpu::VmExit::Ignore)
+                                .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))
+                        }
+                        _ => Ok(cpu::VmExit::Ignore),
+                    }
+                }
 
                 r => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
                     "Unexpected exit reason on vcpu run: {:?}",
