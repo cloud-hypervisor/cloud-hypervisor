@@ -17,6 +17,8 @@ use igvm_defs::{
 use igvm_defs::{MemoryMapEntryType, IGVM_VHS_MEMORY_MAP_ENTRY};
 use mshv_bindings::*;
 use thiserror::Error;
+#[cfg(all(feature = "sev_snp", feature = "kvm"))]
+use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory};
 use zerocopy::AsBytes;
 
 use crate::cpu::CpuManager;
@@ -452,6 +454,22 @@ pub fn load_igvm(
                 .iter()
                 .map(|gpa| gpa.gpa >> HV_HYP_PAGE_SHIFT)
                 .collect();
+            #[cfg(feature = "kvm")]
+            let mut _uaddrs = vec![];
+            #[cfg(feature = "kvm")]
+            {
+                let guest_memory = memory_manager.lock().unwrap().guest_memory().memory();
+                _uaddrs = group
+                    .iter()
+                    .map(|gpa| {
+                        let guest_region_mmap = guest_memory.to_region_addr(GuestAddress(gpa.gpa));
+                        let uaddr_base = guest_region_mmap.unwrap().0.as_ptr() as u64;
+                        let uaddr_offset: u64 = guest_region_mmap.unwrap().1 .0;
+                        let uaddr = uaddr_base + uaddr_offset;
+                        uaddr
+                    })
+                    .collect();
+            }
             memory_manager
                 .lock()
                 .unwrap()
@@ -460,6 +478,7 @@ pub fn load_igvm(
                     group[0].page_type,
                     hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
                     &pfns,
+                    #[cfg(feature = "kvm")] &_uaddrs,
                 )
                 .map_err(Error::ImportIsolatedPages)?;
         }
