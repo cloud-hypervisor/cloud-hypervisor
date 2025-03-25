@@ -832,6 +832,7 @@ pub fn configure_vcpu(
     kvm_hyperv: bool,
     cpu_vendor: CpuVendor,
     topology: Option<(u8, u8, u8)>,
+    setup_registers: bool,
 ) -> super::Result<()> {
     let x2apic_id = get_x2apic_id(id as u32, topology);
 
@@ -900,9 +901,11 @@ pub fn configure_vcpu(
 
     regs::setup_msrs(vcpu).map_err(Error::MsrsConfiguration)?;
     if let Some((kernel_entry_point, guest_memory)) = boot_setup {
-        regs::setup_regs(vcpu, kernel_entry_point).map_err(Error::RegsConfiguration)?;
+        if setup_registers {
+            regs::setup_regs(vcpu, kernel_entry_point).map_err(Error::RegsConfiguration)?;
+            regs::setup_sregs(&guest_memory.memory(), vcpu).map_err(Error::SregsConfiguration)?;
+        }
         regs::setup_fpu(vcpu).map_err(Error::FpuConfiguration)?;
-        regs::setup_sregs(&guest_memory.memory(), vcpu).map_err(Error::SregsConfiguration)?;
     }
     interrupts::set_lint(vcpu).map_err(|e| Error::LocalIntConfiguration(e.into()))?;
     Ok(())
