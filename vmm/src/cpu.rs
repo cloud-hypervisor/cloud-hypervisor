@@ -391,6 +391,7 @@ impl Vcpu {
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
         #[cfg(target_arch = "x86_64")] topology: Option<(u16, u16, u16, u16)>,
+        #[cfg(feature = "igvm")] igvm_enabled: bool,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
@@ -402,16 +403,26 @@ impl Vcpu {
         arch::configure_vcpu(&self.vcpu, self.id, boot_setup).map_err(Error::VcpuConfiguration)?;
         info!("Configuring vCPU: cpu_id = {}", self.id);
         #[cfg(target_arch = "x86_64")]
-        arch::configure_vcpu(
-            &self.vcpu,
-            self.id,
-            boot_setup,
-            cpuid,
-            kvm_hyperv,
-            self.vendor,
-            topology,
-        )
-        .map_err(Error::VcpuConfiguration)?;
+        {
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "igvm")] {
+                    let setup_registers = !igvm_enabled;
+                }  else {
+                    let setup_registers = true;
+                }
+            }
+            arch::configure_vcpu(
+                &self.vcpu,
+                self.id,
+                boot_setup,
+                cpuid,
+                kvm_hyperv,
+                self.vendor,
+                topology,
+                setup_registers,
+            )
+            .map_err(Error::VcpuConfiguration)?;
+        }
 
         Ok(())
     }
@@ -542,6 +553,8 @@ pub struct CpuManager {
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     #[cfg(feature = "sev_snp")]
     sev_snp_enabled: bool,
+    #[cfg(feature = "igvm")]
+    igvm_enabled: bool,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -691,6 +704,7 @@ impl CpuManager {
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         numa_nodes: &NumaNodes,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
+        #[cfg(feature = "igvm")] igvm_enabled: bool,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         if u32::from(config.max_vcpus) > hypervisor.get_max_vcpus() {
             return Err(Error::MaximumVcpusExceeded);
@@ -785,6 +799,8 @@ impl CpuManager {
             hypervisor: hypervisor.clone(),
             #[cfg(feature = "sev_snp")]
             sev_snp_enabled,
+            #[cfg(feature = "igvm")]
+            igvm_enabled,
         })))
     }
 
@@ -913,6 +929,8 @@ impl CpuManager {
             self.cpuid.clone(),
             self.config.kvm_hyperv,
             topology,
+            #[cfg(feature = "igvm")]
+            self.igvm_enabled,
         )?;
 
         #[cfg(target_arch = "aarch64")]
