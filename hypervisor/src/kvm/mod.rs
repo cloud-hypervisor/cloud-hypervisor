@@ -535,7 +535,8 @@ impl vm::Vm for KvmVm {
         if pfns.is_empty() {
             return Ok(());
         }
-        // VMSA pages are not supported by launch_update (https://tinyurl.com/vmsa-page-type)
+        // VMSA pages are not supported by launch_update
+        // https://elixir.bootlin.com/linux/v6.11/source/arch/x86/kvm/svm/sev.c#L2377
         if page_type == sev::SEV_VMSA_PAGE_TYPE {
             return Ok(());
         }
@@ -556,6 +557,26 @@ impl vm::Vm for KvmVm {
                 .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
         }
 
+        Ok(())
+    }
+
+    #[cfg(feature = "sev_snp")]
+    fn complete_isolated_import(
+        &self,
+        snp_id_block: igvm_defs::IGVM_VHS_SNP_ID_BLOCK,
+        host_data: [u8; 32],
+        id_block_enabled: u8,
+    ) -> vm::Result<()> {
+        self.sev_fd
+            .as_ref()
+            .unwrap()
+            .launch_finish(
+                &self.fd,
+                host_data,
+                id_block_enabled,
+                snp_id_block.author_key_enabled,
+            )
+            .map_err(|e| vm::HypervisorVmError::CompleteIsolatedImport(e.into()))?;
         Ok(())
     }
 
