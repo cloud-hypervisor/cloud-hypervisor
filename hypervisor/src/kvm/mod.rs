@@ -28,6 +28,8 @@ use std::sync::{Arc, RwLock};
 use anyhow::anyhow;
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 #[cfg(target_arch = "x86_64")]
+#[cfg(feature = "sev_snp")]
+use log::info;
 use log::warn;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -131,7 +133,47 @@ ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 #[cfg(all(feature = "kvm", feature = "sev_snp"))]
 pub const KVM_X86_SNP_VM: u32 = 4;
 #[cfg(feature = "sev_snp")]
+use kvm_bindings::kvm_segment as Segment;
+#[cfg(feature = "sev_snp")]
 use x86_64::sev;
+#[cfg(feature = "sev_snp")]
+bitfield::bitfield! {
+    /// Guest segment register access right.
+    ///
+    /// See Intel Architecture Software Developer's Manual, Vol.3, Table 24-2.
+    #[derive(Copy, Clone, Default, PartialEq, Eq, Hash)]
+    pub struct SegAccess(u32);
+    impl Debug;
+    pub seg_type, _ : 3, 0;
+    pub s_code_data, _ : 4;
+    pub priv_level, _ : 6, 5;
+    pub present, _ : 7;
+    pub available, _ : 12;
+    pub l_64bit, _ : 13;
+    pub db_size_32, _: 14;
+    pub granularity, _: 15;
+    pub unusable, _: 16;
+}
+
+#[cfg(feature = "sev_snp")]
+fn make_segment(sev_selector: igvm::snp_defs::SevSelector) -> Segment {
+    let flags = SegAccess(sev_selector.attrib.into());
+    Segment {
+        base: sev_selector.base,
+        limit: sev_selector.limit,
+        selector: sev_selector.selector,
+        type_: flags.seg_type() as u8,
+        s: flags.s_code_data() as u8,
+        dpl: flags.priv_level() as u8,
+        present: flags.present() as u8,
+        avl: flags.available() as u8,
+        db: flags.db_size_32() as u8,
+        g: flags.granularity() as u8,
+        l: flags.l_64bit() as u8,
+        unusable: flags.unusable() as u8,
+        ..Default::default()
+    }
+}
 
 #[cfg(feature = "tdx")]
 const KVM_EXIT_TDX: u32 = 50;
@@ -540,7 +582,7 @@ impl vm::Vm for KvmVm {
         assert_eq!(pfns.len(), uaddrs.len());
         // VMSA pages are not supported by launch_update
         // https://elixir.bootlin.com/linux/v6.11/source/arch/x86/kvm/svm/sev.c#L2377
-        if page_type == sev::SEV_VMSA_PAGE_TYPE {
+        if page_type == sev::SNP_PAGE_TYPE_VMSA {
             return Ok(());
         }
         for i in 0..pfns.len() {
@@ -2968,6 +3010,56 @@ impl cpu::Vcpu for KvmVcpu {
             }
             Ok(_) => Ok(()),
         }
+    }
+
+    #[cfg(feature = "sev_snp")]
+    fn set_sev_control_register(
+        &self,
+        _vmsa_pfn: u64,
+        vmsa: igvm::snp_defs::SevVmsa,
+    ) -> cpu::Result<()> {
+        let mut sregs = self
+            .fd
+            .get_sregs()
+            .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::GetSpecialRegs(e.into()))?;
+        sregs.cs = make_segment(vmsa.cs);
+        info!("CS: {:?}", sregs.cs);
+        sregs.ds = make_segment(vmsa.ds);
+        sregs.es = make_segment(vmsa.es);
+        sregs.fs = make_segment(vmsa.fs);
+        sregs.gs = make_segment(vmsa.gs);
+        sregs.ss = make_segment(vmsa.ss);
+        sregs.tr = make_segment(vmsa.tr);
+        sregs.ldt = make_segment(vmsa.ldtr);
+
+        sregs.cr0 = vmsa.cr0;
+        sregs.cr4 = vmsa.cr4;
+        sregs.efer = vmsa.efer;
+
+        sregs.idt.base = vmsa.idtr.base;
+        sregs.idt.limit = vmsa.idtr.limit.try_into().unwrap();
+        info!("idt limit: {}", sregs.idt.limit);
+        sregs.gdt.base = vmsa.gdtr.base;
+        sregs.gdt.limit = vmsa.gdtr.limit.try_into().unwrap();
+        info!("gdt limit: {}", sregs.gdt.limit);
+        self.fd
+            .set_sregs(&sregs)
+            .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::SetSpecialRegs(e.into()))?;
+
+        let mut regs = self
+            .fd
+            .get_regs()
+            .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::GetRegister(e.into()))?;
+        regs.rip = vmsa.rip;
+        info!("rds: {}", vmsa.rdx);
+        regs.rdx = vmsa.rdx;
+        regs.rflags = vmsa.rflags;
+
+        self.fd
+            .set_regs(&regs)
+            .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+
+        Ok(())
     }
 }
 
