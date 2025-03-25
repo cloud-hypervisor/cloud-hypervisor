@@ -43,8 +43,10 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
-#[cfg(all(feature = "sev_snp", feature = "kvm"))]
-use hypervisor::kvm::KVM_X86_SNP_VM;
+#[cfg(all(feature = "igvm", feature = "kvm"))]
+use hypervisor::kvm::{
+    KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE, KVM_X86_SNP_VM, STAGE0_SIZE, STAGE0_START_ADDRESS,
+};
 use hypervisor::{HypervisorVmError, VmOps};
 #[cfg(feature = "sev_snp")]
 use igvm_defs::SnpPolicy;
@@ -1263,6 +1265,20 @@ impl Vm {
         Ok(EntryPoint { entry_addr })
     }
 
+    #[cfg(all(feature = "kvm", feature = "igvm"))]
+    fn reserve_region_for_stage0(memory_manager: &Arc<Mutex<MemoryManager>>) -> Result<()> {
+        let mut memory_manager = memory_manager.lock().unwrap();
+        // Region for loading Stage 0;
+        memory_manager
+            .add_ram_region(STAGE0_START_ADDRESS, STAGE0_SIZE)
+            .map_err(Error::MemoryManager)?;
+        // Region for loading the VMSA page
+        memory_manager
+            .add_ram_region(KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE)
+            .map_err(Error::MemoryManager)?;
+        Ok(())
+    }
+
     #[cfg(target_arch = "riscv64")]
     fn load_firmware(mut firmware: &File, memory_manager: Arc<Mutex<MemoryManager>>) -> Result<()> {
         let uefi_flash = memory_manager.lock().as_ref().unwrap().uefi_flash();
@@ -1320,6 +1336,9 @@ impl Vm {
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
     ) -> Result<EntryPoint> {
+        #[cfg(all(feature = "kvm", feature = "igvm"))]
+        Self::reserve_region_for_stage0(&memory_manager)?;
+
         let res = igvm_loader::load_igvm(
             &igvm,
             memory_manager,
@@ -1501,7 +1520,11 @@ impl Vm {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn configure_system(&mut self, rsdp_addr: GuestAddress, entry_addr: EntryPoint) -> Result<()> {
+    fn configure_system(
+        &mut self,
+        rsdp_addr: Option<GuestAddress>,
+        entry_addr: EntryPoint,
+    ) -> Result<()> {
         trace_scoped!("configure_system");
         info!("Configuring system");
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
@@ -1512,7 +1535,6 @@ impl Vm {
         };
 
         let boot_vcpus = self.cpu_manager.lock().unwrap().boot_vcpus();
-        let rsdp_addr = Some(rsdp_addr);
         let sgx_epc_region = self
             .memory_manager
             .lock()
@@ -1572,7 +1594,7 @@ impl Vm {
     #[cfg(target_arch = "aarch64")]
     fn configure_system(
         &mut self,
-        _rsdp_addr: GuestAddress,
+        _rsdp_addr: Option<GuestAddress>,
         _entry_addr: EntryPoint,
     ) -> Result<()> {
         let cmdline = Self::generate_cmdline(
@@ -2560,16 +2582,15 @@ impl Vm {
         let rsdp_addr = self.create_acpi_tables();
 
         #[cfg(not(target_arch = "riscv64"))]
-        {
-            #[cfg(not(feature = "sev_snp"))]
-            assert!(rsdp_addr.is_some());
-            // Configure shared state based on loaded kernel
-            if let Some(rsdp_adr) = rsdp_addr {
-                entry_point
-                    .map(|entry_point| self.configure_system(rsdp_adr, entry_point))
-                    .transpose()?;
-            }
-        }
+        // Configure shared state based on loaded kernel
+        entry_point
+            .map(|entry_point| {
+                // Safe to unwrap rsdp_addr as we know it can't be None when
+                // the entry_point is Some.
+                self.configure_system(rsdp_addr, entry_point)
+            })
+            .transpose()?;
+
         #[cfg(target_arch = "riscv64")]
         self.configure_system().unwrap();
 
