@@ -1518,302 +1518,39 @@ impl cpu::Vcpu for KvmVcpu {
             };
         }
 
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, pc);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.pc = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, ra);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.ra = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, sp);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.sp = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, gp);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.gp = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, tp);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.tp = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t0);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.t0 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t1);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.t1 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t2);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.t2 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s0);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.s0 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s1);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.s1 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a0);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.a0 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a1);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.a1 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a2);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.a2 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a3);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.a3 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a4);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.a4 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a5);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.a5 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a6);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.a6 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, a7);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.a7 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s2);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.s2 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s3);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.s3 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s4);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.s4 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s5);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.s5 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s6);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.s6 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s7);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.s7 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s8);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.s8 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s9);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.s9 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s10);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.s10 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, s11);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.s11 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t3);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.t3 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t4);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.t4 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t5);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.t5 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, t6);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.regs.t6 = u64::from_le_bytes(bytes);
-
-        let off = offset_of!(kvm_riscv_core, mode);
-        let mut bytes = [0_u8; 8];
-        self.fd
-            .lock()
-            .unwrap()
-            .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
-            .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
-        state.mode = u64::from_le_bytes(bytes);
+        riscv64_get_one_reg_from_vcpu!(pc);
+        riscv64_get_one_reg_from_vcpu!(ra);
+        riscv64_get_one_reg_from_vcpu!(sp);
+        riscv64_get_one_reg_from_vcpu!(gp);
+        riscv64_get_one_reg_from_vcpu!(tp);
+        riscv64_get_one_reg_from_vcpu!(t0);
+        riscv64_get_one_reg_from_vcpu!(t1);
+        riscv64_get_one_reg_from_vcpu!(t2);
+        riscv64_get_one_reg_from_vcpu!(s0);
+        riscv64_get_one_reg_from_vcpu!(s1);
+        riscv64_get_one_reg_from_vcpu!(a0);
+        riscv64_get_one_reg_from_vcpu!(a1);
+        riscv64_get_one_reg_from_vcpu!(a2);
+        riscv64_get_one_reg_from_vcpu!(a3);
+        riscv64_get_one_reg_from_vcpu!(a4);
+        riscv64_get_one_reg_from_vcpu!(a5);
+        riscv64_get_one_reg_from_vcpu!(a6);
+        riscv64_get_one_reg_from_vcpu!(a7);
+        riscv64_get_one_reg_from_vcpu!(s2);
+        riscv64_get_one_reg_from_vcpu!(s3);
+        riscv64_get_one_reg_from_vcpu!(s4);
+        riscv64_get_one_reg_from_vcpu!(s5);
+        riscv64_get_one_reg_from_vcpu!(s6);
+        riscv64_get_one_reg_from_vcpu!(s7);
+        riscv64_get_one_reg_from_vcpu!(s8);
+        riscv64_get_one_reg_from_vcpu!(s9);
+        riscv64_get_one_reg_from_vcpu!(s10);
+        riscv64_get_one_reg_from_vcpu!(s11);
+        riscv64_get_one_reg_from_vcpu!(t3);
+        riscv64_get_one_reg_from_vcpu!(t4);
+        riscv64_get_one_reg_from_vcpu!(t5);
+        riscv64_get_one_reg_from_vcpu!(t6);
+        riscv64_get_one_reg_from_vcpu!(mode);
 
         Ok(state.into())
     }
