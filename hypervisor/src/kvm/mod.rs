@@ -1493,6 +1493,31 @@ impl cpu::Vcpu for KvmVcpu {
     fn get_regs(&self) -> cpu::Result<StandardRegisters> {
         let mut state = kvm_riscv_core::default();
 
+        /// Macro used to extract RISC-V register data from KVM Vcpu according
+        /// to `$reg_name` provided to `state`.
+        macro_rules! riscv64_get_one_reg_from_vcpu {
+            (mode) => {
+                let off = offset_of!(kvm_riscv_core, mode);
+                let mut bytes = [0_u8; 8];
+                self.fd
+                    .lock()
+                    .unwrap()
+                    .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+                    .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+                state.mode = u64::from_le_bytes(bytes);
+            };
+            ($reg_name:ident) => {
+                let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, $reg_name);
+                let mut bytes = [0_u8; 8];
+                self.fd
+                    .lock()
+                    .unwrap()
+                    .get_one_reg(riscv64_reg_id!(KVM_REG_RISCV_CORE, off), &mut bytes)
+                    .map_err(|e| cpu::HypervisorCpuError::GetRiscvCoreRegister(e.into()))?;
+                state.regs.$reg_name = u64::from_le_bytes(bytes);
+            };
+        }
+
         let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, pc);
         let mut bytes = [0_u8; 8];
         self.fd
