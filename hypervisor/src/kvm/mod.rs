@@ -1700,6 +1700,33 @@ impl cpu::Vcpu for KvmVcpu {
         // for some additional info on registers.
         let kvm_regs_state: kvm_riscv_core = (*state).into();
 
+        /// Macro used to set value of specific RISC-V `$reg_name` stored in
+        /// `state` to KVM Vcpu.
+        macro_rules! riscv64_set_one_reg_to_vcpu {
+            (mode) => {
+                let off = offset_of!(kvm_riscv_core, mode);
+                self.fd
+                    .lock()
+                    .unwrap()
+                    .set_one_reg(
+                        riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                        &kvm_regs_state.mode.to_le_bytes(),
+                    )
+                    .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+            };
+            ($reg_name:ident) => {
+                let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, $reg_name);
+                self.fd
+                    .lock()
+                    .unwrap()
+                    .set_one_reg(
+                        riscv64_reg_id!(KVM_REG_RISCV_CORE, off),
+                        &kvm_regs_state.regs.$reg_name.to_le_bytes(),
+                    )
+                    .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
+            };
+        }
+
         let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, pc);
         self.fd
             .lock()
