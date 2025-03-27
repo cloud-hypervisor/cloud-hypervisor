@@ -29,9 +29,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::gic::KvmGicV3Its;
 #[cfg(target_arch = "aarch64")]
-pub use crate::aarch64::{
-    check_required_kvm_extensions, gic::Gicv3ItsState as GicState, is_system_register, VcpuKvmState,
-};
+pub use crate::aarch64::{check_required_kvm_extensions, is_system_register, VcpuKvmState};
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 #[cfg(target_arch = "riscv64")]
