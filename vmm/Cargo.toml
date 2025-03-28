@@ -8,6 +8,7 @@ version = "0.1.0"
 dbus_api = ["blocking", "futures", "zbus"]
 default = []
 dhat-heap = ["dhat"] # For heap profiling
+fw_cfg = []
 guest_debug = ["gdbstub", "gdbstub_arch", "kvm"]
 igvm = ["dep:igvm", "hex", "igvm_defs", "mshv-bindings", "range_map_vec"]
 io_uring = ["block/io_uring"]
