@@ -2520,7 +2520,7 @@ dependencies = [
  "vm-virtio",
  "vmm-sys-util",
  "zbus",
- "zerocopy 0.7.35",
+ "zerocopy 0.8.8",
 ]
 
 [[package]]
