@@ -2108,6 +2108,7 @@ impl vm::Vm for MshvVm {
         page_type: u32,
         page_size: u32,
         pages: &[u64],
+        _uaddrs: &[u64],
     ) -> vm::Result<()> {
         debug_assert!(page_size == hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB);
         if pages.is_empty() {
