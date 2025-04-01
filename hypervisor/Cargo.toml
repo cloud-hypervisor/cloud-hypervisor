@@ -30,7 +30,7 @@ mshv-bindings = { workspace = true, features = [
 ], optional = true }
 mshv-ioctls = { workspace = true, optional = true }
 serde = { version = "1.0.208", features = ["derive", "rc"] }
-serde_json = "1.0.120"
+serde_json = { workspace = true }
 serde_with = { version = "3.9.0", default-features = false, features = [
   "macros",
 ] }
