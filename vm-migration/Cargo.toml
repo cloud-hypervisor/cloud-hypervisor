@@ -7,6 +7,6 @@ version = "0.1.0"
 [dependencies]
 anyhow = "1.0.94"
 serde = { version = "1.0.208", features = ["derive", "rc"] }
-serde_json = "1.0.120"
+serde_json = { workspace = true }
 thiserror = "2.0.6"
 vm-memory = { workspace = true, features = ["backend-atomic", "backend-mmap"] }
