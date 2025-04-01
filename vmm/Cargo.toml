@@ -77,3 +77,4 @@ vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { version = "0.12.1", features = ["with-serde"] }
 zbus = { version = "4.1.2", optional = true }
 zerocopy = { version = "0.7.32", features = ["alloc", "derive"] }
+fuse-backend-rs = "0.12.1"

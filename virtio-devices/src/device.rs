@@ -25,6 +25,7 @@ use vm_migration::{MigratableError, Pausable};
 use vm_virtio::AccessPlatform;
 use vm_virtio::VirtioDeviceType;
 use vmm_sys_util::eventfd::EventFd;
+use downcast_rs::{Downcast, impl_downcast};
 
 pub enum VirtioInterruptType {
     Config,
@@ -69,7 +70,7 @@ pub struct VirtioSharedMemoryList {
 /// and all the events, memory, and queues for device operation will be moved into the device.
 /// Optionally, a virtio device can implement device reset in which it returns said resources and
 /// resets its internal.
-pub trait VirtioDevice: Send {
+pub trait VirtioDevice: Send + Downcast{
     /// The virtio device type.
     fn device_type(&self) -> u32;
 
@@ -176,6 +177,8 @@ pub trait VirtioDevice: Send {
     /// translations if needed.
     fn set_access_platform(&mut self, _access_platform: Arc<dyn AccessPlatform>) {}
 }
+
+impl_downcast!(VirtioDevice);
 
 /// Trait providing address translation the same way a physical DMA remapping
 /// table would provide translation between an IOVA and a physical address.

@@ -259,6 +259,22 @@ paths:
         500:
           description: The new device could not be added to the VM instance.
 
+  /vm.patch-fs:
+    put:
+      summary: Patch fs to the VM
+      requestBody:
+        description: The identifier of the patch fs
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchFsConfig"
+        required: true
+      responses:
+        204:
+          description: The fs was patched successfully.
+        404:
+          description: The fs could not be patched from the VM.
+  
   /vm.add-pmem:
     put:
       summary: Add a new pmem device to the VM

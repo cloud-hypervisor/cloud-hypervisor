@@ -40,7 +40,7 @@ pub use self::http::start_http_path_thread;
 
 use crate::config::{
     DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, RestoreConfig, UserDeviceConfig,
-    VdpaConfig, VmConfig, VsockConfig,
+    VdpaConfig, VmConfig, VsockConfig, FsMountConfigInfo,
 };
 use crate::device_tree::DeviceTree;
 use crate::vm::{Error as VmError, VmState};
@@ -162,6 +162,9 @@ pub enum ApiError {
 
     /// Error triggering NMI
     VmNmi(VmError),
+
+    // Error manipulate backend fs
+    VmPatchFs(VmError),
 }
 pub type ApiResult<T> = Result<T, ApiError>;
 
@@ -204,6 +207,7 @@ impl Display for ApiError {
             VmSendMigration(migratable_error) => write!(f, "{}", migratable_error),
             VmPowerButton(vm_error) => write!(f, "{}", vm_error),
             VmNmi(vm_error) => write!(f, "{}", vm_error),
+            VmPatchFs(vm_error) => write!(f, "{}", vm_error),
         }
     }
 }
@@ -359,6 +363,8 @@ pub trait RequestHandler {
     ) -> Result<(), MigratableError>;
 
     fn vm_nmi(&mut self) -> Result<(), VmError>;
+
+    fn vm_manipulate_fs_backend_fs(&mut self, config: FsMountConfigInfo) -> Result<(), VmError>;
 }
 
 /// It would be nice if we could pass around an object like this:
@@ -515,6 +521,43 @@ impl ApiAction for VmAddFs {
                 .vm_add_fs(config)
                 .map_err(ApiError::VmAddFs)
                 .map(ApiResponsePayload::VmAction);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
+}
+
+pub struct VmPatchFs;
+
+impl ApiAction for VmPatchFs {
+    type RequestBody = FsMountConfigInfo;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        config: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmPatchFs {:?}", config);
+
+            let response = vmm
+                .vm_manipulate_fs_backend_fs(config)
+                .map_err(ApiError::VmPatchFs)
+                .map(|_| ApiResponsePayload::Empty);
 
             response_sender
                 .send(response)

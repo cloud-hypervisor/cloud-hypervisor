@@ -47,3 +47,17 @@ vm-memory = { version = "0.14.1", features = [
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = "0.12.1"
+fuse-backend-rs = { version = "0.12.1", features = ["virtiofs", "fusedev"] }
+nydus-api = { git = "https://github.com/dragonflyoss/nydus", package = "nydus-api", features = [
+    "error-backtrace",
+    "handler",
+] }
+nydus-rafs = { git = "https://github.com/dragonflyoss/nydus", package = "nydus-rafs", features = ["virtio-fs"] }
+nydus-storage = { git = "https://github.com/dragonflyoss/nydus", package = "nydus-storage", features = [
+    "prefetch-rate-limit",
+] }
+caps = "^0.5.3"
+nix = "^0.24.3"
+threadpool = "1"
+downcast-rs = "2.0.1"
+rlimit = "0.7.0"

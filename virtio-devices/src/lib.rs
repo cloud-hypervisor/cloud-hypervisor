@@ -37,6 +37,7 @@ pub mod vdpa;
 pub mod vhost_user;
 pub mod vsock;
 pub mod watchdog;
+pub mod fs;
 
 pub use self::balloon::Balloon;
 pub use self::block::{Block, BlockState};
@@ -48,6 +49,7 @@ pub use self::device::{
 pub use self::epoll_helper::{
     EpollHelper, EpollHelperError, EpollHelperHandler, EPOLL_HELPER_EVENT_LAST,
 };
+pub use self::fs::*;
 pub use self::iommu::{AccessPlatformMapping, Iommu, IommuMapping};
 pub use self::mem::{BlocksState, Mem, VirtioMemMappingSource, VIRTIO_MEM_ALIGN_SIZE};
 pub use self::net::{Net, NetCtrlEpollHandler};
@@ -98,6 +100,8 @@ pub enum ActivateError {
     CreateRateLimiter(std::io::Error),
     #[error("Failed to activate the vDPA device: {0}")]
     ActivateVdpa(vdpa::Error),
+    #[error("Failed to activate the virtio-fs device: {0}")]
+    ActivateVirtioFs(std::io::Error),
 }
 
 pub type ActivateResult = std::result::Result<(), ActivateError>;

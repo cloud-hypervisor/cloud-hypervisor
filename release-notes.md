@@ -2656,7 +2656,7 @@ This is non exhaustive list of HTTP API and command line changes
   configurations to ensure that the provided options are compatible e.g. that
   shared memory is in use if any attempt is made to used a `vhost-user` backed
   device.
-* `ch-remote` has added `add-disk`, `add-fs`, `add-net`, `add-pmem` and
+* `ch-remote` has added `add-disk`, `add-fs`, `patch-fs`, `add-net`, `add-pmem` and
   `add-vsock` subcommands. For removal `remove-device` is used. The REST API
   has appropriate new HTTP endpoints too.
 * Specifying a `size` with `--pmem` is no longer required and instead the size

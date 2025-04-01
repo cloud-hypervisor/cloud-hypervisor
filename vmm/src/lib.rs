@@ -59,6 +59,7 @@ use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable, Transport
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
+use crate::vm_config::FsMountConfigInfo;
 
 mod acpi;
 pub mod api;
@@ -1755,6 +1756,19 @@ impl RequestHandler for Vmm {
             let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
             add_to_config(&mut config.fs, fs_cfg);
             Ok(None)
+        }
+    }
+
+    fn vm_manipulate_fs_backend_fs(&mut self, config: FsMountConfigInfo) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            if let Err(e) = vm.manipulate_fs_backend_fs(config) {
+                error!("Error when manipulate backend fs to the VM: {:?}", e);
+                Err(e)
+            } else {
+                Ok(())
+            }
+        } else {
+            Err(VmError::VmNotRunning)
         }
     }
 

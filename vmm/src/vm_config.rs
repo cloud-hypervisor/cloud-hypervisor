@@ -6,6 +6,7 @@ use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
 use std::{net::Ipv4Addr, path::PathBuf};
 use virtio_devices::RateLimiterConfig;
+use virtio_devices::fs::BackendFsConfig;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpuAffinity {
@@ -392,6 +393,7 @@ pub struct BalloonConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct FsConfig {
     pub tag: String,
+    #[serde(default)]
     pub socket: PathBuf,
     #[serde(default = "default_fsconfig_num_queues")]
     pub num_queues: usize,
@@ -401,6 +403,8 @@ pub struct FsConfig {
     pub id: Option<String>,
     #[serde(default)]
     pub pci_segment: u16,
+    #[serde(default)]
+    pub backendfs_config: Option<BackendFsConfig>,
 }
 
 pub fn default_fsconfig_num_queues() -> usize {
@@ -410,6 +414,43 @@ pub fn default_fsconfig_num_queues() -> usize {
 pub fn default_fsconfig_queue_size() -> u16 {
     1024
 }
+
+impl Default for FsConfig {
+    fn default() -> Self {
+        Self {
+            tag: "".to_owned(),
+            socket: PathBuf::new(),
+            num_queues: default_fsconfig_num_queues(),
+            queue_size: default_fsconfig_queue_size(),
+            id: None,
+            pci_segment: 0,
+            backendfs_config: None,
+        }
+    }
+}
+
+/// Configuration information of manipulating backend fs for a virtiofs device.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize, Default)]
+pub struct FsMountConfigInfo {
+    /// Mount operations, mount, update, umount
+    pub ops: String,
+    /// The backend fs type to mount.
+    pub fstype: Option<String>,
+    /// the source file/directory the backend fs points to
+    pub source: Option<String>,
+    /// where the backend fs gets mounted
+    pub mountpoint: String,
+    /// backend fs config content in json format
+    pub config: Option<String>,
+    /// virtiofs mount tag name used inside the guest.
+    /// used as the device name during mount.
+    pub tag: String,
+    /// Path to file that contains file lists that should be prefetched by rafs
+    pub prefetch_list_path: Option<String>,
+    /// What size file supports dax
+    pub dax_threshold_size_kb: Option<u64>,
+}
+
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PmemConfig {

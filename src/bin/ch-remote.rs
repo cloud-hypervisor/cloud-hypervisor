@@ -30,6 +30,7 @@ enum Error {
     AddDeviceConfig(vmm::config::Error),
     AddDiskConfig(vmm::config::Error),
     AddFsConfig(vmm::config::Error),
+    PatchFsConfig(vmm::config::Error),
     AddPmemConfig(vmm::config::Error),
     AddNetConfig(vmm::config::Error),
     AddUserDeviceConfig(vmm::config::Error),
@@ -53,6 +54,7 @@ impl fmt::Display for Error {
             AddDeviceConfig(e) => write!(f, "Error parsing device syntax: {e}"),
             AddDiskConfig(e) => write!(f, "Error parsing disk syntax: {e}"),
             AddFsConfig(e) => write!(f, "Error parsing filesystem syntax: {e}"),
+            PatchFsConfig(e) => write!(f, "Error parsing patch filesystem syntax: {e}"),
             AddPmemConfig(e) => write!(f, "Error parsing persistent memory syntax: {e}"),
             AddNetConfig(e) => write!(f, "Error parsing network syntax: {e}"),
             AddUserDeviceConfig(e) => write!(f, "Error parsing user device syntax: {e}"),
@@ -378,6 +380,17 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
             simple_api_command(socket, "PUT", "add-fs", Some(&fs_config))
                 .map_err(Error::HttpApiClient)
         }
+        Some("patch-fs") => {
+            let patch_fs_config = patch_fs_config(
+                matches
+                    .subcommand_matches("patch-fs")
+                    .unwrap()
+                    .get_one::<String>("patch_fs_config")
+                    .unwrap(),
+            )?;
+            simple_api_command(socket, "PUT", "patch-fs", Some(&patch_fs_config))
+                .map_err(Error::HttpApiClient)
+        }
         Some("add-pmem") => {
             let pmem_config = add_pmem_config(
                 matches
@@ -600,6 +613,16 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
             )?;
             proxy.api_vm_add_fs(&fs_config)
         }
+        Some("patch-fs") => {
+            let mount_fs_config = patch_fs_config(
+                matches
+                    .subcommand_matches("patch-fs")
+                    .unwrap()
+                    .get_one::<String>("patch_fs_config")
+                    .unwrap(),
+            )?;
+            proxy.api_vm_patch_fs(&mount_fs_config)
+        }
         Some("add-pmem") => {
             let pmem_config = add_pmem_config(
                 matches
@@ -807,6 +830,13 @@ fn add_fs_config(config: &str) -> Result<String, Error> {
     Ok(fs_config)
 }
 
+fn patch_fs_config(config: &str) -> Result<String, Error> {
+    let patch_fs_config = vmm::config::FsMountConfigInfo::parse(config).map_err(Error::PatchFsConfig)?;
+    let patch_fs_config = serde_json::to_string(&patch_fs_config).unwrap();
+
+    Ok(patch_fs_config)
+}
+
 fn add_pmem_config(config: &str) -> Result<String, Error> {
     let pmem_config = vmm::config::PmemConfig::parse(config).map_err(Error::AddPmemConfig)?;
     let pmem_config = serde_json::to_string(&pmem_config).unwrap();
@@ -953,6 +983,15 @@ fn main() {
                     Arg::new("fs_config")
                         .index(1)
                         .help(vmm::config::FsConfig::SYNTAX),
+                ),
+        )
+        .subcommand(
+            Command::new("patch-fs")
+                .about("Patch fs device")
+                .arg(
+                    Arg::new("patch_fs_config")
+                        .index(1)
+                        .help(vmm::config::FsMountConfigInfo::SYNTAX),
                 ),
         )
         .subcommand(
@@ -1158,3 +1197,4 @@ fn main() {
         process::exit(1)
     };
 }
+

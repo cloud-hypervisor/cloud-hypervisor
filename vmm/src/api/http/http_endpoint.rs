@@ -11,7 +11,7 @@ use crate::api::{
     AddDisk, ApiAction, ApiRequest, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem, VmAddUserDevice,
     VmAddVdpa, VmAddVsock, VmBoot, VmConfig, VmCounters, VmDelete, VmNmi, VmPause, VmPowerButton,
     VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume,
-    VmSendMigration, VmShutdown, VmSnapshot,
+    VmSendMigration, VmShutdown, VmSnapshot, VmPatchFs,
 };
 use crate::config::{NetConfig, RestoreConfig};
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
@@ -177,6 +177,7 @@ vm_action_put_handler!(VmNmi);
 vm_action_put_handler_body!(VmAddDevice);
 vm_action_put_handler_body!(AddDisk);
 vm_action_put_handler_body!(VmAddFs);
+vm_action_put_handler_body!(VmPatchFs);
 vm_action_put_handler_body!(VmAddPmem);
 vm_action_put_handler_body!(VmAddVdpa);
 vm_action_put_handler_body!(VmAddVsock);

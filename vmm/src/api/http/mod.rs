@@ -10,7 +10,7 @@ use crate::api::{
     AddDisk, ApiError, ApiRequest, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem, VmAddUserDevice,
     VmAddVdpa, VmAddVsock, VmBoot, VmCounters, VmDelete, VmNmi, VmPause, VmPowerButton, VmReboot,
     VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume,
-    VmSendMigration, VmShutdown, VmSnapshot,
+    VmSendMigration, VmShutdown, VmSnapshot, VmPatchFs,
 };
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error as VmmError, Result};
@@ -179,6 +179,10 @@ pub static HTTP_ROUTES: Lazy<HttpRoutes> = Lazy::new(|| {
     r.routes.insert(
         endpoint!("/vm.add-fs"),
         Box::new(VmActionHandler::new(&VmAddFs)),
+    );
+    r.routes.insert(
+        endpoint!("/vm.patch-fs"),
+        Box::new(VmActionHandler::new(&VmPatchFs)),
     );
     r.routes.insert(
         endpoint!("/vm.add-net"),

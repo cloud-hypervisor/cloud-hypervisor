@@ -13,7 +13,7 @@
 
 use crate::config::{
     add_to_config, DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, PmemConfig,
-    UserDeviceConfig, ValidationError, VdpaConfig, VmConfig, VsockConfig,
+    UserDeviceConfig, ValidationError, VdpaConfig, VmConfig, VsockConfig, FsMountConfigInfo,
 };
 use crate::config::{NumaConfig, PayloadConfig};
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
@@ -326,6 +326,9 @@ pub enum Error {
 
     #[error("Error creating console devices")]
     CreateConsoleDevices(ConsoleDeviceError),
+
+    #[error("Manipulate backend fs with id {0:?}")]
+    ManipulateBackendFs(String),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1619,6 +1622,40 @@ impl Vm {
             .map_err(Error::DeviceManager)?;
 
         Ok(pci_device_info)
+    }
+
+    pub fn manipulate_fs_backend_fs(&mut self, config: FsMountConfigInfo) -> Result<()> {
+        let mut found = false;
+        let virtio_devices = &self.device_manager.lock().unwrap().virtio_devices;
+
+        for virtio_device in virtio_devices.iter() {
+            let mut device = virtio_device.virtio_device.lock().unwrap();
+            if let Some(virtio_fs_device) = device.downcast_mut::<virtio_devices::VirtioFs>() {
+                if virtio_fs_device.get_tag() == config.tag {
+                    found = true;
+                    if let Err(_) = virtio_fs_device.manipulate_backend_fs(
+                            config.source.clone(),
+                            config.fstype.clone(),
+                            &config.mountpoint,
+                            config.config.clone(),
+                            &config.ops,
+                            config.prefetch_list_path.clone(),
+                            config.dax_threshold_size_kb,
+                    ) {
+                        return Err(Error::ManipulateBackendFs(config.tag));
+                    }
+                    break;
+                }
+            }
+        }
+
+        if !found {
+            Err(Error::ManipulateBackendFs(
+                "fs tag id not found".to_string(),
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     pub fn add_pmem(&mut self, mut pmem_cfg: PmemConfig) -> Result<PciDeviceInfo> {

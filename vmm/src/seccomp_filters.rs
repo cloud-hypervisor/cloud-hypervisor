@@ -641,8 +641,8 @@ fn vmm_thread_rules(
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_recvmsg, vec![]),
         (libc::SYS_restart_syscall, vec![]),
-        // musl is missing this constant
-        // (libc::SYS_rseq, vec![]),
+        #[cfg(target_env = "gnu")]
+        (libc::SYS_rseq, vec![]),
         #[cfg(target_arch = "x86_64")]
         (334, vec![]),
         #[cfg(target_arch = "aarch64")]
@@ -677,17 +677,63 @@ fn vmm_thread_rules(
         (libc::SYS_timerfd_create, vec![]),
         (libc::SYS_timerfd_settime, vec![]),
         (libc::SYS_tkill, vec![]),
-        (
-            libc::SYS_umask,
-            or![and![Cond::new(0, ArgLen::Dword, Eq, 0o077)?]],
-        ),
+        (libc::SYS_umask, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_unlink, vec![]),
-        #[cfg(target_arch = "aarch64")]
         (libc::SYS_unlinkat, vec![]),
         (libc::SYS_wait4, vec![]),
         (libc::SYS_write, vec![]),
         (libc::SYS_writev, vec![]),
+         // native virtiofs stuff
+        (libc::SYS_capget, vec![]), // For CAP_FSETID
+        (libc::SYS_capset, vec![]),
+        (libc::SYS_copy_file_range, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_epoll_create, vec![]),
+        (libc::SYS_fchdir, vec![]),
+        (libc::SYS_fchmod, vec![]),
+        (libc::SYS_fchmodat, vec![]),
+        (libc::SYS_fchownat, vec![]),
+        (libc::SYS_fgetxattr, vec![]),
+        (libc::SYS_flistxattr, vec![]),
+        (libc::SYS_flock, vec![]),
+        (libc::SYS_fremovexattr, vec![]),
+        (libc::SYS_fsetxattr, vec![]),
+        #[cfg(target_arch = "s390x")]
+        (libc::SYS_fstatfs64, vec![]),
+        (libc::SYS_fstatfs, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_getdents, vec![]),
+        (libc::SYS_getdents64, vec![]),
+        (libc::SYS_getegid, vec![]),
+        (libc::SYS_geteuid, vec![]),
+        (libc::SYS_getxattr, vec![]),
+        (libc::SYS_linkat, vec![]),
+        (libc::SYS_listxattr, vec![]),
+        (libc::SYS_mkdirat, vec![]),
+        (libc::SYS_mknodat, vec![]),
+        (libc::SYS_name_to_handle_at, vec![]),
+        (libc::SYS_openat2, vec![]),
+        (libc::SYS_open_by_handle_at, vec![]),
+        (libc::SYS_pwritev2, vec![]),
+        (libc::SYS_renameat, vec![]),
+        (libc::SYS_renameat2, vec![]),
+        (libc::SYS_removexattr, vec![]),
+        (libc::SYS_setresgid, vec![]),
+        (libc::SYS_setresuid, vec![]),
+        //(libc::SYS_setresgid32);  Needed on some platforms,
+        //(libc::SYS_setresuid32);  Needed on some platforms
+        (libc::SYS_setxattr, vec![]),
+        #[cfg(target_arch = "s390x")]
+        (libc::SYS_sigreturn, vec![]),
+        (libc::SYS_symlinkat, vec![]),
+        (libc::SYS_syncfs, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_time, vec![]), // Rarely needed, except on static builds
+        (libc::SYS_unshare, vec![]),
+        (libc::SYS_utimensat, vec![]),
+        // to support operations in init_backendfs()
+        (libc::SYS_lstat, vec![]),
     ])
 }
 

@@ -16,6 +16,7 @@ use std::result;
 use std::str::FromStr;
 use thiserror::Error;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
+use virtio_devices::fs::BackendFsConfig;
 
 const MAX_NUM_PCI_SEGMENTS: u16 = 96;
 
@@ -58,6 +59,8 @@ pub enum Error {
     ParseBalloon(OptionParserError),
     /// Error parsing filesystem parameters
     ParseFileSystem(OptionParserError),
+    /// Error parsing patch filesystem parameters
+    ParsePatchFileSystem(OptionParserError),
     /// Error parsing persistent memory parameters
     ParsePersistentMemory(OptionParserError),
     /// Failed parsing console
@@ -205,6 +208,8 @@ pub enum ValidationError {
     RestoreMissingRequiredNetId(String),
     /// Number of FDs passed during Restore are incorrect to the NetConfig
     RestoreNetFdCountMismatch(String, usize, usize),
+    /// native virtio-fs shouldn't have socket argument
+    NativeVirtioFsSocket,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -356,6 +361,9 @@ impl fmt::Display for ValidationError {
                     "Number of Net FDs passed for '{s}' during Restore: {u1}. Expected: {u2}"
                 )
             }
+            NativeVirtioFsSocket => {
+                write!(f, "Native virtio-fs shouldn't have socket argument")
+            }
         }
     }
 }
@@ -375,6 +383,7 @@ impl fmt::Display for Error {
             ParseDevice(o) => write!(f, "Error parsing --device: {o}"),
             ParseDevicePathMissing => write!(f, "Error parsing --device: path missing"),
             ParseFileSystem(o) => write!(f, "Error parsing --fs: {o}"),
+            ParsePatchFileSystem(o) => write!(f, "Error parsing --patch-fs: {o}"),
             ParseFsSockMissing => write!(f, "Error parsing --fs: socket missing"),
             ParseFsTagMissing => write!(f, "Error parsing --fs: tag missing"),
             ParseFsTagTooLong => write!(
@@ -1593,27 +1602,128 @@ impl BalloonConfig {
     }
 }
 
+pub const DEFAULT_FS_THREAD_POOL_SIZE: usize = 0;
+
+fn default_fsconfig_thread_pool_size() -> usize {
+    DEFAULT_FS_THREAD_POOL_SIZE
+}
+
 impl FsConfig {
     pub const SYNTAX: &'static str = "virtio-fs parameters \
     \"tag=<tag_name>,socket=<socket_path>,num_queues=<number_of_queues>,\
-    queue_size=<size_of_each_queue>,id=<device_id>,pci_segment=<segment_id>\"";
+    queue_size=<size_of_each_queue>,id=<device_id>,pci_segment=<segment_id>,\
+    native=on|off,thread_pool_size=<thread_pool_size>,cache=auto|always|none,\
+    writeback_cache=on|off,no_open=on|off,killpriv_v2=on|off,\
+    no_readdir=on|off,xattr=on|off,drop_sys_resource=on|off\"";
 
-    pub fn parse(fs: &str) -> Result<Self> {
-        let mut parser = OptionParser::new();
+    fn add_frontend_args(parser: &mut OptionParser) {
         parser
             .add("tag")
             .add("queue_size")
             .add("num_queues")
             .add("socket")
             .add("id")
-            .add("pci_segment");
+            .add("pci_segment")
+            .add("native");
+    }
+
+    fn add_backend_args(parser: &mut OptionParser) {
+        parser
+            .add("thread_pool_size")
+            .add("cache")
+            .add("writeback_cache")
+            .add("no_open")            
+            .add("killpriv_v2")
+            .add("no_readdir")
+            .add("xattr")
+            .add("drop_sys_resource");
+    }
+
+    fn parse_backendfs(parser: &OptionParser) -> Result<BackendFsConfig> {
+        let thread_pool_size = parser
+            .convert("thread_pool_size")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or_else(default_fsconfig_thread_pool_size);
+        let writeback_cache = parser
+            .convert::<Toggle>("writeback_cache")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let no_open = parser
+            .convert::<Toggle>("no_open")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let killpriv_v2 = parser
+            .convert::<Toggle>("killpriv_v2")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let no_readdir = parser
+            .convert::<Toggle>("no_readdir")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let xattr = parser
+            .convert::<Toggle>("xattr")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let drop_sys_resource = parser
+            .convert::<Toggle>("drop_sys_resource")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(Toggle(false))
+            .0;
+
+        let cache;
+        if let Some(cache_string) = parser.get("cache") {
+            cache = match cache_string.as_str() {
+                "auto" => 0,
+                "always" => 1,
+                "none" => 2,
+                cache_str => {
+                    return Err(Error::ParseFileSystem(OptionParserError::Conversion(
+                        "cache".to_string(),
+                        cache_str.to_string(),
+                    )))
+                }
+            }
+        } else {
+            cache = 0;
+        }
+
+        Ok(BackendFsConfig {
+            thread_pool_size,
+            cache,
+            writeback_cache,
+            no_open,
+            killpriv_v2,
+            no_readdir,
+            xattr,
+            drop_sys_resource,
+        })
+    }
+
+    pub fn parse(fs: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        Self::add_frontend_args(&mut parser);
+        Self::add_backend_args(&mut parser);
         parser.parse(fs).map_err(Error::ParseFileSystem)?;
+
+        let native = parser
+            .convert::<Toggle>("native")
+            .map_err(Error::ParseFileSystem)?
+            .unwrap_or(Toggle(false))
+            .0;
 
         let tag = parser.get("tag").ok_or(Error::ParseFsTagMissing)?;
         if tag.len() > virtio_devices::vhost_user::VIRTIO_FS_TAG_LEN {
             return Err(Error::ParseFsTagTooLong);
         }
-        let socket = PathBuf::from(parser.get("socket").ok_or(Error::ParseFsSockMissing)?);
+        let mut socket = PathBuf::new();
+        if !native {
+            socket = PathBuf::from(parser.get("socket").ok_or(Error::ParseFsSockMissing)?);
+        }
 
         let queue_size = parser
             .convert("queue_size")
@@ -1631,6 +1741,12 @@ impl FsConfig {
             .map_err(Error::ParseFileSystem)?
             .unwrap_or_default();
 
+        let mut backendfs_config = None;
+        // backend args are ignored if native is false
+        if native {
+            backendfs_config = Some(Self::parse_backendfs(&parser)?);
+        }
+
         Ok(FsConfig {
             tag,
             socket,
@@ -1638,10 +1754,24 @@ impl FsConfig {
             queue_size,
             id,
             pci_segment,
+            backendfs_config,
         })
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if self.backendfs_config.is_some() {
+            if self.socket.to_str() != Some("") {
+                return Err(ValidationError::NativeVirtioFsSocket);
+            }
+        } else {
+            if self.socket.to_str() == Some("") {
+                return Err(ValidationError::VhostUserMissingSocket);
+            }
+            if !vm_config.backed_by_shared_memory() {
+                return Err(ValidationError::VhostUserRequiresSharedMemory);
+            }
+        }
+
         if self.num_queues > vm_config.cpus.boot_vcpus as usize {
             return Err(ValidationError::TooManyQueues);
         }
@@ -1661,6 +1791,51 @@ impl FsConfig {
         }
 
         Ok(())
+    }
+}
+
+
+impl FsMountConfigInfo {
+    pub const SYNTAX: &'static str = "patch-fs parameters \
+    \"ops=<ops>,fstype=<fstype>,source=<source>,mountpoint=<mountpoint>,\
+    config=<config>,tag=<tag>,prefetch_list_path=<prefetch_list_path>,\
+    dax_threshold_size_kb=<dax_threshold_size_kb>,\"";
+
+    pub fn parse(patch_fs: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser
+            .add("ops")
+            .add("fstype")
+            .add("source")
+            .add("mountpoint")
+            .add("config")
+            .add("tag")
+            .add("prefetch_list_path")
+            .add("dax_threshold_size_kb");
+        parser.parse(patch_fs).map_err(Error::ParsePatchFileSystem)?;
+
+        let ops = parser.get("ops").unwrap();
+        let fstype = parser.get("fstype");
+        let source = parser.get("source");
+        let mountpoint = parser.get("mountpoint").unwrap();
+        let config = parser.get("config");
+        let tag = parser.get("tag").unwrap();
+        let prefetch_list_path = parser.get("prefetch_list_path");
+        let dax_threshold_size_kb = parser
+            .convert::<u64>("dax_threshold_size_kb")
+            .map_err(Error::ParsePatchFileSystem)?
+            .map(|v| v);
+
+        Ok(FsMountConfigInfo {
+            ops,
+            fstype,
+            source,
+            mountpoint,
+            config,
+            tag,
+            prefetch_list_path,
+            dax_threshold_size_kb,
+        })
     }
 }
 
@@ -2457,9 +2632,6 @@ impl VmConfig {
         }
 
         if let Some(fses) = &self.fs {
-            if !fses.is_empty() && !self.backed_by_shared_memory() {
-                return Err(ValidationError::VhostUserRequiresSharedMemory);
-            }
             for fs in fses {
                 fs.validate(self)?;
 
@@ -4524,3 +4696,4 @@ mod tests {
         let _still_valid_config = still_valid_config.clone();
     }
 }
+

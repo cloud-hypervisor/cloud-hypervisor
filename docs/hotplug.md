@@ -201,6 +201,14 @@ To ask the VMM to add additional fs device then use the `add-fs` API.
 ./ch-remote --api-socket=/tmp/ch-socket add-fs tag=myfs,socket=/foo/bar/virtiofs.sock
 ```
 
+### Patch Fs Device
+
+To ask the VMM to add additional fs device then use the `patch-fs` API.
+
+```shell
+./ch-remote --api-socket=/tmp/ch-socket patch-fs tag=myfs,socket=/foo/bar/virtiofs.sock
+```
+
 ### Add Net Device
 
 To ask the VMM to add additional network device then use the `add-net` API.
