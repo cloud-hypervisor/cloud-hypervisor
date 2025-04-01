@@ -43,6 +43,8 @@ pub struct VgicConfig {
 pub enum GicState {
     #[cfg(feature = "kvm")]
     Kvm(crate::kvm::aarch64::gic::Gicv3ItsState),
+    #[cfg(feature = "mshv")]
+    MshvGicV2M(crate::mshv::aarch64::gic::MshvGicV2MState),
 }
 
 impl<'de> Deserialize<'de> for GicState {
@@ -56,6 +58,8 @@ impl<'de> Deserialize<'de> for GicState {
         pub enum GicStateDefaultDeserialize {
             #[cfg(feature = "kvm")]
             Kvm(crate::kvm::aarch64::gic::Gicv3ItsState),
+            #[cfg(feature = "mshv")]
+            MshvGicV2M(crate::mshv::aarch64::gic::MshvGicV2MState),
         }
 
         const {
@@ -78,6 +82,8 @@ impl<'de> Deserialize<'de> for GicState {
             return match gic_state_de {
                 #[cfg(feature = "kvm")]
                 GicStateDefaultDeserialize::Kvm(state) => Ok(GicState::Kvm(state)),
+                #[cfg(feature = "mshv")]
+                GicStateDefaultDeserialize::MshvGicV2M(state) => Ok(GicState::MshvGicV2M(state)),
             };
         }
         Err(SerdeError::custom("Failed to deserialize GicState"))
