@@ -169,7 +169,7 @@ impl VfioUserPciDevice {
                         )
                     };
 
-                    if host_addr == libc::MAP_FAILED {
+                    if std::ptr::eq(host_addr, libc::MAP_FAILED) {
                         error!(
                             "Could not mmap regions, error:{}",
                             std::io::Error::last_os_error()

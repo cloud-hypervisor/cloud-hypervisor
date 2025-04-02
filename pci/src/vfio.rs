@@ -1613,7 +1613,7 @@ impl VfioPciDevice {
                         )
                     };
 
-                    if host_addr == libc::MAP_FAILED {
+                    if std::ptr::eq(host_addr, libc::MAP_FAILED) {
                         error!(
                             "Could not mmap sparse area (offset = 0x{:x}, size = 0x{:x}): {}",
                             area.offset,
