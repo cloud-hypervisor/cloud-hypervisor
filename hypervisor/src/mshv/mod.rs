@@ -1813,7 +1813,7 @@ impl vm::Vm for MshvVm {
                     MSHV_VP_MMAP_OFFSET_GHCB as i64 * libc::sysconf(libc::_SC_PAGE_SIZE),
                 )
             };
-            if addr == libc::MAP_FAILED {
+            if std::ptr::eq(addr, libc::MAP_FAILED) {
                 // No point of continuing, without this mmap VMGEXIT will fail anyway
                 // Return error
                 return Err(vm::HypervisorVmError::MmapToRoot);
