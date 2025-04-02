@@ -310,10 +310,9 @@ impl MmioRegionRange for Vec<MmioRegion> {
             }
         }
 
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("unable to find user address: 0x{guest_addr:x}"),
-        ))
+        Err(io::Error::other(format!(
+            "unable to find user address: 0x{guest_addr:x}"
+        )))
     }
 }
 
@@ -1872,7 +1871,7 @@ impl PciDevice for VfioPciDevice {
 
                     self.vm
                         .remove_user_memory_region(old_mem_region)
-                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                        .map_err(io::Error::other)?;
 
                     // Update the user memory region with the correct start address.
                     if new_base > old_base {
@@ -1893,7 +1892,7 @@ impl PciDevice for VfioPciDevice {
 
                     self.vm
                         .create_user_memory_region(new_mem_region)
-                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                        .map_err(io::Error::other)?;
                 }
             }
         }
@@ -1965,8 +1964,7 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
             match mem.get_host_address(guest_addr) {
                 Ok(t) => t as u64,
                 Err(e) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
+                    return Err(io::Error::other(
                         format!("unable to retrieve user address for gpa 0x{gpa:x} from guest memory region: {e}")
                     ));
                 }
@@ -1974,34 +1972,27 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
         } else if self.mmio_regions.lock().unwrap().check_range(gpa, size) {
             self.mmio_regions.lock().unwrap().find_user_address(gpa)?
         } else {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("failed to locate guest address 0x{gpa:x} in guest memory"),
-            ));
+            return Err(io::Error::other(format!(
+                "failed to locate guest address 0x{gpa:x} in guest memory"
+            )));
         };
 
         self.container
             .vfio_dma_map(iova, size, user_addr)
             .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!(
-                        "failed to map memory for VFIO container, \
+                io::Error::other(format!(
+                    "failed to map memory for VFIO container, \
                          iova 0x{iova:x}, gpa 0x{gpa:x}, size 0x{size:x}: {e:?}"
-                    ),
-                )
+                ))
             })
     }
 
     fn unmap(&self, iova: u64, size: u64) -> std::result::Result<(), io::Error> {
         self.container.vfio_dma_unmap(iova, size).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!(
-                    "failed to unmap memory for VFIO container, \
+            io::Error::other(format!(
+                "failed to unmap memory for VFIO container, \
                      iova 0x{iova:x}, size 0x{size:x}: {e:?}"
-                ),
-            )
+            ))
         })
     }
 }

@@ -723,10 +723,9 @@ impl Mem {
         let region_len = region.len();
 
         if region_len != region_len / VIRTIO_MEM_ALIGN_SIZE * VIRTIO_MEM_ALIGN_SIZE {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Virtio-mem size is not aligned with {VIRTIO_MEM_ALIGN_SIZE}"),
-            ));
+            return Err(io::Error::other(format!(
+                "Virtio-mem size is not aligned with {VIRTIO_MEM_ALIGN_SIZE}"
+            )));
         }
 
         let (avail_features, acked_features, config, paused) = if let Some(state) = state {
@@ -753,12 +752,9 @@ impl Mem {
 
             if initial_size != 0 {
                 config.resize(initial_size).map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!(
-                            "Failed to resize virtio-mem configuration to {initial_size}: {e:?}"
-                        ),
-                    )
+                    io::Error::other(format!(
+                        "Failed to resize virtio-mem configuration to {initial_size}: {e:?}"
+                    ))
                 })?;
             }
 
@@ -770,10 +766,7 @@ impl Mem {
             // Make sure the virtio-mem configuration complies with the
             // specification.
             config.validate().map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Invalid virtio-mem configuration: {e:?}"),
-                )
+                io::Error::other(format!("Invalid virtio-mem configuration: {e:?}"))
             })?;
 
             (avail_features, 0, config, false)

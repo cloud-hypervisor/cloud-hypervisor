@@ -25,10 +25,10 @@ impl MacAddr {
     {
         let v: Vec<&str> = s.as_ref().split(':').collect();
         let mut bytes = [0u8; MAC_ADDR_LEN];
-        let common_err = Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("parsing of {} into a MAC address failed", s.as_ref()),
-        ));
+        let common_err = Err(io::Error::other(format!(
+            "parsing of {} into a MAC address failed",
+            s.as_ref()
+        )));
 
         if v.len() != MAC_ADDR_LEN {
             return common_err;
@@ -39,10 +39,11 @@ impl MacAddr {
                 return common_err;
             }
             bytes[i] = u8::from_str_radix(v[i], 16).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("parsing of {} into a MAC address failed: {}", s.as_ref(), e),
-                )
+                io::Error::other(format!(
+                    "parsing of {} into a MAC address failed: {}",
+                    s.as_ref(),
+                    e
+                ))
             })?;
         }
 
@@ -64,10 +65,11 @@ impl MacAddr {
     #[inline]
     pub fn from_bytes(src: &[u8]) -> Result<MacAddr, io::Error> {
         if src.len() != MAC_ADDR_LEN {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!("invalid length of slice: {} vs {}", src.len(), MAC_ADDR_LEN),
-            ));
+            return Err(io::Error::other(format!(
+                "invalid length of slice: {} vs {}",
+                src.len(),
+                MAC_ADDR_LEN
+            )));
         }
         Ok(MacAddr::from_bytes_unchecked(src))
     }

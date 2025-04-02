@@ -1625,8 +1625,7 @@ impl FileSync for QcowFile {
 
 impl FileSetLen for QcowFile {
     fn set_len(&self, _len: u64) -> std::io::Result<()> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        Err(std::io::Error::other(
             "set_len() not supported for QcowFile",
         ))
     }
