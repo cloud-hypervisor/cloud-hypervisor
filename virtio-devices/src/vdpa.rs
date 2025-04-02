@@ -541,13 +541,10 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M
         let user_addr = if mem.check_range(guest_addr, size as usize) {
             mem.get_host_address(guest_addr).unwrap() as *const u8
         } else {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!(
-                    "failed to convert guest address 0x{gpa:x} into \
+            return Err(io::Error::other(format!(
+                "failed to convert guest address 0x{gpa:x} into \
                      host user virtual address"
-                ),
-            ));
+            )));
         };
 
         debug!(
@@ -559,13 +556,10 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M
             .unwrap()
             .dma_map(iova, size, user_addr, false)
             .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!(
-                        "failed to map memory for vDPA device, \
+                io::Error::other(format!(
+                    "failed to map memory for vDPA device, \
                          iova 0x{iova:x}, gpa 0x{gpa:x}, size 0x{size:x}: {e:?}"
-                    ),
-                )
+                ))
             })
     }
 
@@ -576,13 +570,10 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M
             .unwrap()
             .dma_unmap(iova, size)
             .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!(
-                        "failed to unmap memory for vDPA device, \
+                io::Error::other(format!(
+                    "failed to unmap memory for vDPA device, \
                      iova 0x{iova:x}, size 0x{size:x}: {e:?}"
-                    ),
-                )
+                ))
             })
     }
 }

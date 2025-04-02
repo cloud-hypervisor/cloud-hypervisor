@@ -608,12 +608,9 @@ impl Block {
                     true,
                 )
             } else {
-                let disk_size = disk_image.size().map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("Failed getting disk size: {e}"),
-                    )
-                })?;
+                let disk_size = disk_image
+                    .size()
+                    .map_err(|e| io::Error::other(format!("Failed getting disk size: {e}")))?;
                 if disk_size % SECTOR_SIZE != 0 {
                     warn!(
                         "Disk size {} is not a multiple of sector size {}; \

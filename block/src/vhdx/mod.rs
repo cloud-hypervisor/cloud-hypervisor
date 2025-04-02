@@ -111,12 +111,9 @@ impl Read for Vhdx {
             sector_count,
         )
         .map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!(
-                    "Failed reading {sector_count} sectors from VHDx at index {sector_index}: {e}"
-                ),
-            )
+            std::io::Error::other(format!(
+                "Failed reading {sector_count} sectors from VHDx at index {sector_index}: {e}"
+            ))
         })?;
 
         self.current_offset = self.current_offset.checked_add(result as u64).unwrap();
@@ -138,12 +135,9 @@ impl Write for Vhdx {
 
         if self.first_write {
             self.first_write = false;
-            self.vhdx_header.update(&mut self.file).map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to update VHDx header: {e}"),
-                )
-            })?;
+            self.vhdx_header
+                .update(&mut self.file)
+                .map_err(|e| std::io::Error::other(format!("Failed to update VHDx header: {e}")))?;
         }
 
         let result = vhdx_io::write(
@@ -156,12 +150,9 @@ impl Write for Vhdx {
             sector_count,
         )
         .map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!(
-                    "Failed writing {sector_count} sectors on VHDx at index {sector_index}: {e}"
-                ),
-            )
+            std::io::Error::other(format!(
+                "Failed writing {sector_count} sectors on VHDx at index {sector_index}: {e}"
+            ))
         })?;
 
         self.current_offset = self.current_offset.checked_add(result as u64).unwrap();
