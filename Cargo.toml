@@ -107,8 +107,8 @@ acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main"
 kvm-bindings = "0.10.0"
 kvm-ioctls = "0.19.1"
 linux-loader = "0.13.0"
-mshv-bindings = "0.3.3"
-mshv-ioctls = "0.3.3"
+mshv-bindings = "0.3.5"
+mshv-ioctls = "0.3.5"
 seccompiler = "0.5.0"
 vfio-bindings = { git = "https://github.com/rust-vmm/vfio", branch = "main" }
 vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
@@ -122,8 +122,8 @@ vm-memory = "0.16.1"
 vmm-sys-util = "0.12.1"
 
 # igvm crates
-igvm = "0.3.4"
-igvm_defs = "0.3.1"
+igvm = { git = "https://github.com/microsoft/igvm", branch = "main" }
+igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main" }
 
 # serde crates
 serde_json = "1.0.120"

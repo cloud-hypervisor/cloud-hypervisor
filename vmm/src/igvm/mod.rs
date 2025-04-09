@@ -29,7 +29,7 @@ pub mod igvm_loader;
 mod loader;
 use igvm::snp_defs::SevVmsa;
 use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
-use zerocopy::FromZeroes;
+use zerocopy::FromZeros;
 
 #[derive(Debug, Clone)]
 pub struct IgvmLoadedInfo {
