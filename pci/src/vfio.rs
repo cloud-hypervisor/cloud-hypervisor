@@ -1662,8 +1662,12 @@ impl VfioPciDevice {
                                 user_memory_region.host_addr,
                             )
                             .map_err(|e| {
-                                VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf)
-                            })?;
+                                error!(
+                                    "{}: p2p operation between pass-through devices may not work",
+                                    VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf)
+                                );
+                            })
+                            .unwrap_or_default();
                     }
                 }
             }
