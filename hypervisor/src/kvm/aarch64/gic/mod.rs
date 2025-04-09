@@ -129,6 +129,9 @@ impl From<GicState> for Gicv3ItsState {
     fn from(state: GicState) -> Self {
         match state {
             GicState::Kvm(state) => state,
+            /* Needed in case other hypervisors are enabled */
+            #[allow(unreachable_patterns)]
+            _ => panic!("GicState is not valid"),
         }
     }
 }
