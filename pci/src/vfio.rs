@@ -897,8 +897,15 @@ impl VfioCommon {
             if PciCapabilityId::from(cap_id) == PciCapabilityId::MsiX {
                 return Some(cap_next as usize);
             } else {
-                cap_next = self.vfio_wrapper.read_config_byte((cap_next + 1).into())
+                let cap_ptr = self.vfio_wrapper.read_config_byte((cap_next + 1).into())
                     & PCI_CONFIG_CAPABILITY_PTR_MASK;
+
+                // See parse_capabilities below for an explanation.
+                if cap_ptr != cap_next {
+                    cap_next = cap_ptr;
+                } else {
+                    break;
+                }
             }
         }
 
@@ -950,7 +957,12 @@ impl VfioCommon {
 
             let cap_next = self.vfio_wrapper.read_config_byte((cap_iter + 1).into())
                 & PCI_CONFIG_CAPABILITY_PTR_MASK;
-            if cap_next == 0 {
+
+            // Break out of the loop, if we either find the end or we have a broken device. This
+            // doesn't handle all cases where a device might send us in a loop here, but it
+            // handles case of a device returning 0xFF instead of implementing a real
+            // capabilities list.
+            if cap_next == 0 || cap_next == cap_iter {
                 break;
             }
 
