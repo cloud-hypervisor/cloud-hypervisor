@@ -804,7 +804,7 @@ impl VfioCommon {
         Ok(())
     }
 
-    pub(crate) fn parse_msix_capabilities(&mut self, cap: u8) -> MsixCap {
+    fn parse_msix_capabilities(&mut self, cap: u8) -> MsixCap {
         let msg_ctl = self.vfio_wrapper.read_config_word((cap + 2).into());
 
         let table = self.vfio_wrapper.read_config_dword((cap + 4).into());
@@ -818,7 +818,7 @@ impl VfioCommon {
         }
     }
 
-    pub(crate) fn initialize_msix(
+    fn initialize_msix(
         &mut self,
         msix_cap: MsixCap,
         cap_offset: u32,
@@ -849,16 +849,11 @@ impl VfioCommon {
         });
     }
 
-    pub(crate) fn parse_msi_capabilities(&mut self, cap: u8) -> u16 {
+    fn parse_msi_capabilities(&mut self, cap: u8) -> u16 {
         self.vfio_wrapper.read_config_word((cap + 2).into())
     }
 
-    pub(crate) fn initialize_msi(
-        &mut self,
-        msg_ctl: u16,
-        cap_offset: u32,
-        state: Option<MsiConfigState>,
-    ) {
+    fn initialize_msi(&mut self, msg_ctl: u16, cap_offset: u32, state: Option<MsiConfigState>) {
         let interrupt_source_group = self
             .msi_interrupt_manager
             .create_group(MsiIrqGroupConfig {
@@ -877,12 +872,12 @@ impl VfioCommon {
     }
 
     /// Returns true, if the device claims to have a PCI capability list.
-    pub(crate) fn has_capabilities(&self) -> bool {
+    fn has_capabilities(&self) -> bool {
         let status = self.vfio_wrapper.read_config_word(PCI_CONFIG_STATUS_OFFSET);
         status & PCI_CONFIG_STATUS_CAPABILITIES_LIST != 0
     }
 
-    pub(crate) fn get_msix_cap_idx(&self) -> Option<usize> {
+    fn get_msix_cap_idx(&self) -> Option<usize> {
         if !self.has_capabilities() {
             return None;
         }
@@ -912,7 +907,7 @@ impl VfioCommon {
         None
     }
 
-    pub(crate) fn parse_capabilities(&mut self, bdf: PciBdf) {
+    fn parse_capabilities(&mut self, bdf: PciBdf) {
         if !self.has_capabilities() {
             return;
         }
@@ -1122,7 +1117,7 @@ impl VfioCommon {
         }
     }
 
-    pub(crate) fn initialize_legacy_interrupt(&mut self) -> Result<(), VfioPciError> {
+    fn initialize_legacy_interrupt(&mut self) -> Result<(), VfioPciError> {
         if let Some(irq_info) = self.vfio_wrapper.get_irq_info(VFIO_PCI_INTX_IRQ_INDEX) {
             if irq_info.count == 0 {
                 // A count of 0 means the INTx IRQ is not supported, therefore
@@ -1143,11 +1138,7 @@ impl VfioCommon {
         Ok(())
     }
 
-    pub(crate) fn update_msi_capabilities(
-        &mut self,
-        offset: u64,
-        data: &[u8],
-    ) -> Result<(), VfioPciError> {
+    fn update_msi_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<(), VfioPciError> {
         match self.interrupt.update_msi(offset, data) {
             Some(InterruptUpdateAction::EnableMsi) => {
                 // Disable INTx before we can enable MSI
@@ -1165,11 +1156,7 @@ impl VfioCommon {
         Ok(())
     }
 
-    pub(crate) fn update_msix_capabilities(
-        &mut self,
-        offset: u64,
-        data: &[u8],
-    ) -> Result<(), VfioPciError> {
+    fn update_msix_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<(), VfioPciError> {
         match self.interrupt.update_msix(offset, data) {
             Some(InterruptUpdateAction::EnableMsix) => {
                 // Disable INTx before we can enable MSI-X
@@ -1187,7 +1174,7 @@ impl VfioCommon {
         Ok(())
     }
 
-    pub(crate) fn find_region(&self, addr: u64) -> Option<MmioRegion> {
+    fn find_region(&self, addr: u64) -> Option<MmioRegion> {
         for region in self.mmio_regions.iter() {
             if addr >= region.start.raw_value()
                 && addr < region.start.unchecked_add(region.length).raw_value()
