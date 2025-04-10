@@ -39,7 +39,13 @@ use devices::AcpiNotificationFlags;
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
+#[cfg(all(feature = "igvm", feature = "kvm"))]
+use hypervisor::kvm::{
+    KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE, KVM_X86_SNP_VM, STAGE0_SIZE, STAGE0_START_ADDRESS,
+};
 use hypervisor::{HypervisorVmError, VmOps};
+#[cfg(feature = "sev_snp")]
+use igvm_defs::SnpPolicy;
 use libc::{termios, SIGWINCH};
 use linux_loader::cmdline::Cmdline;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -479,6 +485,16 @@ pub struct Vm {
 impl Vm {
     pub const HANDLED_SIGNALS: [i32; 1] = [SIGWINCH];
 
+    #[cfg(feature = "sev_snp")]
+    pub fn get_default_sev_snp_guest_policy() -> SnpPolicy {
+        SnpPolicy::new()
+            .with_abi_minor(0)
+            .with_abi_major(0)
+            .with_smt(1)
+            .with_reserved_must_be_one(1)
+            .with_migrate_ma(0)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
@@ -527,6 +543,15 @@ impl Vm {
         let force_iommu = sev_snp_enabled;
         #[cfg(not(any(feature = "tdx", feature = "sev_snp")))]
         let force_iommu = false;
+        #[cfg(feature = "igvm")]
+        let igvm_enabled = config
+            .lock()
+            .unwrap()
+            .payload
+            .clone()
+            .unwrap()
+            .igvm
+            .is_some();
 
         #[cfg(feature = "guest_debug")]
         let stop_on_boot = config.lock().unwrap().gdb;
@@ -560,6 +585,8 @@ impl Vm {
             &numa_nodes,
             #[cfg(feature = "sev_snp")]
             sev_snp_enabled,
+            #[cfg(feature = "igvm")]
+            igvm_enabled,
         )
         .map_err(Error::CpuManager)?;
 
@@ -615,7 +642,8 @@ impl Vm {
         // transitioning the guest into secure state.
         #[cfg(feature = "sev_snp")]
         if sev_snp_enabled {
-            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
+            vm.sev_snp_init(#[cfg(feature = "kvm")] Vm::get_default_sev_snp_guest_policy())
+                .map_err(Error::InitializeSevSnpVm)?;
         }
 
         #[cfg(feature = "tdx")]
@@ -869,6 +897,18 @@ impl Vm {
             .map_err(Error::MemoryManager)?
         };
 
+        #[cfg(target_arch = "x86_64")]
+        // Note: For x86, always call this function before invoking start boot vcpus.
+        // Otherwise guest would fail to boot because we haven't created the
+        // userspace mappings to update the hypervisor about the memory mappings.
+        // These mappings must be created before we start the vCPU threads for
+        // the very first time.
+        memory_manager
+            .lock()
+            .unwrap()
+            .allocate_address_space()
+            .map_err(Error::MemoryManager)?;
+
         Vm::new_from_memory_manager(
             vm_config,
             memory_manager,
@@ -909,8 +949,19 @@ impl Vm {
                 // Passing SEV_SNP_ENABLED: 1 if sev_snp_enabled is true
                 // Otherwise SEV_SNP_DISABLED: 0
                 // value of sev_snp_enabled is mapped to SEV_SNP_ENABLED for true or SEV_SNP_DISABLED for false
+                cfg_if::cfg_if! {
+                    if #[cfg(feature = "mshv")] {
+                        let vm_type = u64::from(sev_snp_enabled);
+                    } else if #[cfg(feature = "kvm")] {
+                        let vm_type = if sev_snp_enabled {
+                            KVM_X86_SNP_VM.into()
+                        } else {
+                            0
+                        };
+                    }
+                }
                 let vm = hypervisor
-                    .create_vm_with_type_and_memory(u64::from(sev_snp_enabled), mem_size)
+                    .create_vm_with_type_and_memory(vm_type, mem_size)
                     .unwrap();
             } else {
                 let vm = hypervisor.create_vm().unwrap();
@@ -1015,6 +1066,20 @@ impl Vm {
         Ok(EntryPoint { entry_addr })
     }
 
+    #[cfg(all(feature = "kvm", feature = "igvm"))]
+    fn reserve_region_for_stage0(memory_manager: &Arc<Mutex<MemoryManager>>) -> Result<()> {
+        let mut memory_manager = memory_manager.lock().unwrap();
+        // Region for loading Stage 0;
+        memory_manager
+            .add_ram_region(STAGE0_START_ADDRESS, STAGE0_SIZE)
+            .map_err(|e| Error::MemoryManager(e))?;
+        // Region for loading the VMSA page
+        memory_manager
+            .add_ram_region(KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE)
+            .map_err(|e| Error::MemoryManager(e))?;
+        Ok(())
+    }
+
     #[cfg(target_arch = "riscv64")]
     fn load_kernel(
         firmware: Option<File>,
@@ -1063,6 +1128,9 @@ impl Vm {
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
     ) -> Result<EntryPoint> {
+        #[cfg(all(feature = "kvm", feature = "igvm"))]
+        Self::reserve_region_for_stage0(&memory_manager)?;
+
         let res = igvm_loader::load_igvm(
             &igvm,
             memory_manager,
@@ -1150,19 +1218,20 @@ impl Vm {
         payload: &PayloadConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
         #[cfg(feature = "igvm")] cpu_manager: Arc<Mutex<cpu::CpuManager>>,
-        #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
+        #[cfg(feature = "sev_snp")] _sev_snp_enabled: bool,
     ) -> Result<EntryPoint> {
         trace_scoped!("load_payload");
         #[cfg(feature = "igvm")]
         {
             if let Some(_igvm_file) = &payload.igvm {
                 let igvm = File::open(_igvm_file).map_err(Error::IgvmFile)?;
-                #[cfg(feature = "sev_snp")]
-                if sev_snp_enabled {
-                    return Self::load_igvm(igvm, memory_manager, cpu_manager, &payload.host_data);
-                }
-                #[cfg(not(feature = "sev_snp"))]
-                return Self::load_igvm(igvm, memory_manager, cpu_manager);
+                return Self::load_igvm(
+                    igvm,
+                    memory_manager,
+                    cpu_manager,
+                    #[cfg(feature = "sev_snp")]
+                    &payload.host_data,
+                );
             }
         }
         match (
@@ -1243,7 +1312,11 @@ impl Vm {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn configure_system(&mut self, rsdp_addr: GuestAddress, entry_addr: EntryPoint) -> Result<()> {
+    fn configure_system(
+        &mut self,
+        rsdp_addr: Option<GuestAddress>,
+        entry_addr: EntryPoint,
+    ) -> Result<()> {
         trace_scoped!("configure_system");
         info!("Configuring system");
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
@@ -1254,7 +1327,6 @@ impl Vm {
         };
 
         let boot_vcpus = self.cpu_manager.lock().unwrap().boot_vcpus();
-        let rsdp_addr = Some(rsdp_addr);
         let sgx_epc_region = self
             .memory_manager
             .lock()
@@ -2242,24 +2314,12 @@ impl Vm {
             .map(|entry_point| {
                 // Safe to unwrap rsdp_addr as we know it can't be None when
                 // the entry_point is Some.
-                self.configure_system(rsdp_addr.unwrap(), entry_point)
+                self.configure_system(rsdp_addr, entry_point)
             })
             .transpose()?;
 
         #[cfg(target_arch = "riscv64")]
         self.configure_system().unwrap();
-
-        #[cfg(target_arch = "x86_64")]
-        // Note: For x86, always call this function before invoking start boot vcpus.
-        // Otherwise guest would fail to boot because we haven't created the
-        // userspace mappings to update the hypervisor about the memory mappings.
-        // These mappings must be created before we start the vCPU threads for
-        // the very first time.
-        self.memory_manager
-            .lock()
-            .unwrap()
-            .allocate_address_space()
-            .map_err(Error::MemoryManager)?;
 
         #[cfg(feature = "tdx")]
         if let Some(hob_address) = hob_address {
