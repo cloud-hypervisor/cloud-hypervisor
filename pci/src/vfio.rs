@@ -876,7 +876,17 @@ impl VfioCommon {
         });
     }
 
+    /// Returns true, if the device claims to have a PCI capability list.
+    pub(crate) fn has_capabilities(&self) -> bool {
+        let status = self.vfio_wrapper.read_config_word(PCI_CONFIG_STATUS_OFFSET);
+        status & PCI_CONFIG_STATUS_CAPABILITIES_LIST != 0
+    }
+
     pub(crate) fn get_msix_cap_idx(&self) -> Option<usize> {
+        if !self.has_capabilities() {
+            return None;
+        }
+
         let mut cap_next = self
             .vfio_wrapper
             .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
@@ -894,6 +904,10 @@ impl VfioCommon {
     }
 
     pub(crate) fn parse_capabilities(&mut self, bdf: PciBdf) {
+        if !self.has_capabilities() {
+            return;
+        }
+
         let mut cap_iter = self
             .vfio_wrapper
             .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
@@ -1777,6 +1791,10 @@ impl BusDevice for VfioPciDevice {
     }
 }
 
+// Offset of the 16-bit status register in the PCI configuration space.
+const PCI_CONFIG_STATUS_OFFSET: u32 = 0x06;
+// Status bit indicating the presence of a capabilities list.
+const PCI_CONFIG_STATUS_CAPABILITIES_LIST: u16 = 1 << 4;
 // First BAR offset in the PCI config space.
 const PCI_CONFIG_BAR_OFFSET: u32 = 0x10;
 // Capability register offset in the PCI config space.
