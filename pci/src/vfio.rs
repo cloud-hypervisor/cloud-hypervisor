@@ -889,14 +889,16 @@ impl VfioCommon {
 
         let mut cap_next = self
             .vfio_wrapper
-            .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
+            .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET)
+            & PCI_CONFIG_CAPABILITY_PTR_MASK;
 
         while cap_next != 0 {
             let cap_id = self.vfio_wrapper.read_config_byte(cap_next.into());
             if PciCapabilityId::from(cap_id) == PciCapabilityId::MsiX {
                 return Some(cap_next as usize);
             } else {
-                cap_next = self.vfio_wrapper.read_config_byte((cap_next + 1).into());
+                cap_next = self.vfio_wrapper.read_config_byte((cap_next + 1).into())
+                    & PCI_CONFIG_CAPABILITY_PTR_MASK;
             }
         }
 
@@ -910,7 +912,8 @@ impl VfioCommon {
 
         let mut cap_iter = self
             .vfio_wrapper
-            .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
+            .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET)
+            & PCI_CONFIG_CAPABILITY_PTR_MASK;
 
         let mut pci_express_cap_found = false;
         let mut power_management_cap_found = false;
@@ -945,7 +948,8 @@ impl VfioCommon {
                 _ => {}
             };
 
-            let cap_next = self.vfio_wrapper.read_config_byte((cap_iter + 1).into());
+            let cap_next = self.vfio_wrapper.read_config_byte((cap_iter + 1).into())
+                & PCI_CONFIG_CAPABILITY_PTR_MASK;
             if cap_next == 0 {
                 break;
             }
@@ -1799,6 +1803,8 @@ const PCI_CONFIG_STATUS_CAPABILITIES_LIST: u16 = 1 << 4;
 const PCI_CONFIG_BAR_OFFSET: u32 = 0x10;
 // Capability register offset in the PCI config space.
 const PCI_CONFIG_CAPABILITY_OFFSET: u32 = 0x34;
+// The valid bits for the capabilities pointer.
+const PCI_CONFIG_CAPABILITY_PTR_MASK: u8 = !0b11;
 // Extended capabilities register offset in the PCI config space.
 const PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET: u32 = 0x100;
 // IO BAR when first BAR bit is 1.
