@@ -72,7 +72,7 @@ use vm_migration::{
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
-use zerocopy::AsBytes;
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
@@ -207,7 +207,7 @@ pub type Result<T> = result::Result<T, Error>;
 #[cfg(target_arch = "x86_64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct LocalX2Apic {
     pub r#type: u8,
     pub length: u8,
@@ -219,7 +219,7 @@ struct LocalX2Apic {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct Ioapic {
     pub r#type: u8,
     pub length: u8,
@@ -232,7 +232,7 @@ struct Ioapic {
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct GicC {
     pub r#type: u8,
     pub length: u8,
@@ -257,7 +257,7 @@ struct GicC {
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct GicD {
     pub r#type: u8,
     pub length: u8,
@@ -272,7 +272,7 @@ struct GicD {
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct GicR {
     pub r#type: u8,
     pub length: u8,
@@ -284,7 +284,7 @@ struct GicR {
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct GicIts {
     pub r#type: u8,
     pub length: u8,
@@ -297,7 +297,7 @@ struct GicIts {
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct ProcessorHierarchyNode {
     pub r#type: u8,
     pub length: u8,
@@ -310,7 +310,7 @@ struct ProcessorHierarchyNode {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct InterruptSourceOverride {
     pub r#type: u8,
     pub length: u8,

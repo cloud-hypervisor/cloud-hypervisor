@@ -5,9 +5,9 @@ version = 4
 [[package]]
 name = "acpi_tables"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/acpi_tables?branch=main#849d5950196f66dd10f2b2606d8fe8c7cb39ec24"
+source = "git+https://github.com/rust-vmm/acpi_tables?branch=main#e08a3f0b0a59b98859dbf59f5aa7fd4d2eb4018a"
 dependencies = [
- "zerocopy 0.7.35",
+ "zerocopy 0.8.24",
 ]
 
 [[package]]
@@ -463,6 +463,7 @@ dependencies = [
  "log",
  "mshv-bindings",
  "serde",
+ "serde_json",
  "serde_with",
  "thiserror 2.0.9",
  "vfio-ioctls",
@@ -639,7 +640,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "vmm-sys-util",
- "zerocopy 0.8.14",
+ "zerocopy 0.8.24",
 ]
 
 [[package]]
@@ -788,7 +789,7 @@ checksum = "3779b94aeb87e8bd4e834cee3650289ee9e0d5677f976ecdb6d219e5f4f6cd94"
 dependencies = [
  "rand_chacha",
  "rand_core",
- "zerocopy 0.8.14",
+ "zerocopy 0.8.24",
 ]
 
 [[package]]
@@ -1294,7 +1295,7 @@ dependencies = [
  "vm-migration",
  "vm-virtio",
  "vmm-sys-util",
- "zerocopy 0.7.35",
+ "zerocopy 0.8.24",
 ]
 
 [[package]]
@@ -1504,11 +1505,11 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.14"
+version = "0.8.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a367f292d93d4eab890745e75a778da40909cab4d6ff8173693812f79c4a2468"
+checksum = "2586fea28e186957ef732a5f8b3be2da217d65c5969d4b1e17f973ebbe876879"
 dependencies = [
- "zerocopy-derive 0.8.14",
+ "zerocopy-derive 0.8.24",
 ]
 
 [[package]]
@@ -1524,9 +1525,9 @@ dependencies = [
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.14"
+version = "0.8.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3931cb58c62c13adec22e38686b559c86a30565e16ad6e8510a337cedc611e1"
+checksum = "a996a8f63c5c4448cd959ac1bab0aaa3306ccfd060472f85943ee0750f0169be"
 dependencies = [
  "proc-macro2",
  "quote",
