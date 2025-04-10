@@ -804,7 +804,7 @@ impl VfioCommon {
         Ok(())
     }
 
-    pub(crate) fn parse_msix_capabilities(&mut self, cap: u8) -> MsixCap {
+    fn parse_msix_capabilities(&mut self, cap: u8) -> MsixCap {
         let msg_ctl = self.vfio_wrapper.read_config_word((cap + 2).into());
 
         let table = self.vfio_wrapper.read_config_dword((cap + 4).into());
@@ -818,7 +818,7 @@ impl VfioCommon {
         }
     }
 
-    pub(crate) fn initialize_msix(
+    fn initialize_msix(
         &mut self,
         msix_cap: MsixCap,
         cap_offset: u32,
@@ -849,16 +849,11 @@ impl VfioCommon {
         });
     }
 
-    pub(crate) fn parse_msi_capabilities(&mut self, cap: u8) -> u16 {
+    fn parse_msi_capabilities(&mut self, cap: u8) -> u16 {
         self.vfio_wrapper.read_config_word((cap + 2).into())
     }
 
-    pub(crate) fn initialize_msi(
-        &mut self,
-        msg_ctl: u16,
-        cap_offset: u32,
-        state: Option<MsiConfigState>,
-    ) {
+    fn initialize_msi(&mut self, msg_ctl: u16, cap_offset: u32, state: Option<MsiConfigState>) {
         let interrupt_source_group = self
             .msi_interrupt_manager
             .create_group(MsiIrqGroupConfig {
@@ -876,27 +871,51 @@ impl VfioCommon {
         });
     }
 
-    pub(crate) fn get_msix_cap_idx(&self) -> Option<usize> {
+    /// Returns true, if the device claims to have a PCI capability list.
+    fn has_capabilities(&self) -> bool {
+        let status = self.vfio_wrapper.read_config_word(PCI_CONFIG_STATUS_OFFSET);
+        status & PCI_CONFIG_STATUS_CAPABILITIES_LIST != 0
+    }
+
+    fn get_msix_cap_idx(&self) -> Option<usize> {
+        if !self.has_capabilities() {
+            return None;
+        }
+
         let mut cap_next = self
             .vfio_wrapper
-            .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
+            .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET)
+            & PCI_CONFIG_CAPABILITY_PTR_MASK;
 
         while cap_next != 0 {
             let cap_id = self.vfio_wrapper.read_config_byte(cap_next.into());
             if PciCapabilityId::from(cap_id) == PciCapabilityId::MsiX {
                 return Some(cap_next as usize);
             } else {
-                cap_next = self.vfio_wrapper.read_config_byte((cap_next + 1).into());
+                let cap_ptr = self.vfio_wrapper.read_config_byte((cap_next + 1).into())
+                    & PCI_CONFIG_CAPABILITY_PTR_MASK;
+
+                // See parse_capabilities below for an explanation.
+                if cap_ptr != cap_next {
+                    cap_next = cap_ptr;
+                } else {
+                    break;
+                }
             }
         }
 
         None
     }
 
-    pub(crate) fn parse_capabilities(&mut self, bdf: PciBdf) {
+    fn parse_capabilities(&mut self, bdf: PciBdf) {
+        if !self.has_capabilities() {
+            return;
+        }
+
         let mut cap_iter = self
             .vfio_wrapper
-            .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET);
+            .read_config_byte(PCI_CONFIG_CAPABILITY_OFFSET)
+            & PCI_CONFIG_CAPABILITY_PTR_MASK;
 
         let mut pci_express_cap_found = false;
         let mut power_management_cap_found = false;
@@ -931,8 +950,14 @@ impl VfioCommon {
                 _ => {}
             };
 
-            let cap_next = self.vfio_wrapper.read_config_byte((cap_iter + 1).into());
-            if cap_next == 0 {
+            let cap_next = self.vfio_wrapper.read_config_byte((cap_iter + 1).into())
+                & PCI_CONFIG_CAPABILITY_PTR_MASK;
+
+            // Break out of the loop, if we either find the end or we have a broken device. This
+            // doesn't handle all cases where a device might send us in a loop here, but it
+            // handles case of a device returning 0xFF instead of implementing a real
+            // capabilities list.
+            if cap_next == 0 || cap_next == cap_iter {
                 break;
             }
 
@@ -1092,7 +1117,7 @@ impl VfioCommon {
         }
     }
 
-    pub(crate) fn initialize_legacy_interrupt(&mut self) -> Result<(), VfioPciError> {
+    fn initialize_legacy_interrupt(&mut self) -> Result<(), VfioPciError> {
         if let Some(irq_info) = self.vfio_wrapper.get_irq_info(VFIO_PCI_INTX_IRQ_INDEX) {
             if irq_info.count == 0 {
                 // A count of 0 means the INTx IRQ is not supported, therefore
@@ -1113,11 +1138,7 @@ impl VfioCommon {
         Ok(())
     }
 
-    pub(crate) fn update_msi_capabilities(
-        &mut self,
-        offset: u64,
-        data: &[u8],
-    ) -> Result<(), VfioPciError> {
+    fn update_msi_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<(), VfioPciError> {
         match self.interrupt.update_msi(offset, data) {
             Some(InterruptUpdateAction::EnableMsi) => {
                 // Disable INTx before we can enable MSI
@@ -1135,11 +1156,7 @@ impl VfioCommon {
         Ok(())
     }
 
-    pub(crate) fn update_msix_capabilities(
-        &mut self,
-        offset: u64,
-        data: &[u8],
-    ) -> Result<(), VfioPciError> {
+    fn update_msix_capabilities(&mut self, offset: u64, data: &[u8]) -> Result<(), VfioPciError> {
         match self.interrupt.update_msix(offset, data) {
             Some(InterruptUpdateAction::EnableMsix) => {
                 // Disable INTx before we can enable MSI-X
@@ -1157,7 +1174,7 @@ impl VfioCommon {
         Ok(())
     }
 
-    pub(crate) fn find_region(&self, addr: u64) -> Option<MmioRegion> {
+    fn find_region(&self, addr: u64) -> Option<MmioRegion> {
         for region in self.mmio_regions.iter() {
             if addr >= region.start.raw_value()
                 && addr < region.start.unchecked_add(region.length).raw_value()
@@ -1777,10 +1794,16 @@ impl BusDevice for VfioPciDevice {
     }
 }
 
+// Offset of the 16-bit status register in the PCI configuration space.
+const PCI_CONFIG_STATUS_OFFSET: u32 = 0x06;
+// Status bit indicating the presence of a capabilities list.
+const PCI_CONFIG_STATUS_CAPABILITIES_LIST: u16 = 1 << 4;
 // First BAR offset in the PCI config space.
 const PCI_CONFIG_BAR_OFFSET: u32 = 0x10;
 // Capability register offset in the PCI config space.
 const PCI_CONFIG_CAPABILITY_OFFSET: u32 = 0x34;
+// The valid bits for the capabilities pointer.
+const PCI_CONFIG_CAPABILITY_PTR_MASK: u8 = !0b11;
 // Extended capabilities register offset in the PCI config space.
 const PCI_CONFIG_EXTENDED_CAPABILITY_OFFSET: u32 = 0x100;
 // IO BAR when first BAR bit is 1.

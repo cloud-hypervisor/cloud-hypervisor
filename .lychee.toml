@@ -11,6 +11,9 @@ exclude = [
 
     # GitHub user smibarber referenced in `CREDITS.md` no longer exist
     '^https://github.com/smibarber',
+
+    # OSDev has added bot protection and accesses my result in 403 Forbidden.
+    '^https://wiki.osdev.org',
 ]
 
 max_retries = 3
