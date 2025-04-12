@@ -3794,11 +3794,6 @@ mod common_parallel {
     }
 
     #[test]
-    fn test_virtio_pmem_persist_writes() {
-        test_virtio_pmem(false, false)
-    }
-
-    #[test]
     fn test_virtio_pmem_discard_writes() {
         test_virtio_pmem(true, false)
     }
@@ -7956,6 +7951,11 @@ mod common_sequential {
         });
 
         handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_virtio_pmem_persist_writes() {
+        test_virtio_pmem(false, false)
     }
 }
 
