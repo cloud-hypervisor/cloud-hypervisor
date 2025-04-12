@@ -122,8 +122,9 @@ vm-memory = "0.16.1"
 vmm-sys-util = "0.12.1"
 
 # igvm crates
-igvm = "0.3.4"
-igvm_defs = "0.3.1"
+# TODO: bump to 0.3.5 release
+igvm = { git = "https://github.com/microsoft/igvm", branch = "main" }
+igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main" }
 
 # serde crates
 serde_json = "1.0.120"
