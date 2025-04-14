@@ -20,13 +20,14 @@ use std::rc::Rc;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "riscv64"))]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::{io, result, thread};
 
 use anyhow::anyhow;
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
 use api::http::HttpApiHandle;
+use arch::PAGE_SIZE;
 use console_devices::{pre_create_console_devices, ConsoleInfo};
 use landlock::LandlockError;
 use libc::{tcsetattr, termios, EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW};
@@ -639,6 +640,45 @@ impl VmmVersionInfo {
     }
 }
 
+#[derive(Debug, Clone)]
+struct MigrationState {
+    current_dirty_pages: u64,
+    downtime: Duration,
+    downtime_start: Instant,
+    iteration: u64,
+    iteration_cost_time: Duration,
+    iteration_start_time: Instant,
+    mb_per_sec: f64,
+    pages_per_second: u64,
+    pending_size: u64,
+    start_time: Instant,
+    threshold_size: u64,
+    total_time: Duration,
+    total_transferred_bytes: u64,
+    total_transferred_dirty_pages: u64,
+}
+
+impl MigrationState {
+    pub fn new() -> Self {
+        Self {
+            current_dirty_pages: 0,
+            downtime: Duration::default(),
+            downtime_start: Instant::now(),
+            iteration: 0,
+            iteration_cost_time: Duration::default(),
+            iteration_start_time: Instant::now(),
+            mb_per_sec: 0.0,
+            pages_per_second: 0,
+            pending_size: 0,
+            start_time: Instant::now(),
+            threshold_size: 0,
+            total_time: Duration::default(),
+            total_transferred_bytes: 0,
+            total_transferred_dirty_pages: 0,
+        }
+    }
+}
+
 pub struct VmmThreadHandle {
     pub thread_handle: thread::JoinHandle<Result<()>>,
     #[cfg(feature = "dbus_api")]
@@ -1075,10 +1115,8 @@ impl Vmm {
     fn vm_maybe_send_dirty_pages(
         vm: &mut Vm,
         socket: &mut SocketStream,
+        table: MemoryRangeTable,
     ) -> result::Result<bool, MigratableError> {
-        // Send (dirty) memory table
-        let table = vm.dirty_log()?;
-
         // But if there are no regions go straight to pause
         if table.regions().is_empty() {
             return Ok(false);
@@ -1096,6 +1134,150 @@ impl Vmm {
         Ok(true)
     }
 
+    fn memory_copy_iterations(
+        vm: &mut Vm,
+        socket: &mut SocketStream,
+        s: &mut MigrationState,
+        migration_timeout: Duration,
+        migrate_downtime_limit: Duration,
+    ) -> result::Result<MemoryRangeTable, MigratableError> {
+        let mut bandwidth = 0.0;
+        let mut iteration_table;
+
+        loop {
+            // Update the start time of the iteration
+            s.iteration_start_time = Instant::now();
+
+            // Increment iteration counter
+            s.iteration += 1;
+
+            // Check if migration has timed out
+            // migration_timeout > 0 means enabling the timeout check, 0 means disabling the timeout check
+            if !migration_timeout.is_zero() && s.start_time.elapsed() > migration_timeout {
+                warn!("Migration timed out after {:?}", migration_timeout);
+                Request::abandon().write_to(socket)?;
+                Response::read_from(socket)?.ok_or_abandon(
+                    socket,
+                    MigratableError::MigrateSend(anyhow!("Migration timed out")),
+                )?;
+            }
+
+            // Get the dirty page table
+            iteration_table = vm.dirty_log()?;
+
+            // Update the pending size (amount of data to transfer)
+            s.pending_size = iteration_table
+                .regions()
+                .iter()
+                .map(|range| range.length)
+                .sum();
+
+            // Update thresholds
+            if bandwidth > 0.0 {
+                s.threshold_size = bandwidth as u64 * migrate_downtime_limit.as_millis() as u64;
+            }
+
+            // Enter the final stage of migration when the suspension conditions are met
+            if s.iteration > 1 && s.pending_size < s.threshold_size {
+                break;
+            }
+
+            // Update the number of dirty pages
+            s.total_transferred_bytes += s.pending_size;
+            s.current_dirty_pages = s.pending_size.div_ceil(PAGE_SIZE as u64);
+            s.total_transferred_dirty_pages += s.current_dirty_pages;
+
+            // Send the current dirty pages
+            let transfer_start = Instant::now();
+            Self::vm_maybe_send_dirty_pages(vm, socket, iteration_table.clone())?;
+            let transfer_time = transfer_start.elapsed().as_millis() as f64;
+
+            // Update bandwidth
+            if transfer_time > 0.0 && s.pending_size > 0 {
+                bandwidth = s.pending_size as f64 / transfer_time;
+                // Convert bandwidth to MB/s
+                s.mb_per_sec = (bandwidth * 1000.0) / (1024.0 * 1024.0);
+            }
+
+            // Update iteration cost time
+            s.iteration_cost_time = s.iteration_start_time.elapsed();
+            if s.iteration_cost_time.as_millis() > 0 {
+                s.pages_per_second =
+                    s.current_dirty_pages * 1000 / s.iteration_cost_time.as_millis() as u64;
+            }
+        }
+
+        Ok(iteration_table)
+    }
+
+    fn do_memory_migration(
+        vm: &mut Vm,
+        socket: &mut SocketStream,
+        s: &mut MigrationState,
+        send_data_migration: &VmSendMigrationData,
+    ) -> result::Result<(), MigratableError> {
+        // Start logging dirty pages
+        vm.start_dirty_log()?;
+
+        // Send memory table
+        let table = vm.memory_range_table()?;
+        Request::memory(table.length()).write_to(socket).unwrap();
+        table.write_to(socket)?;
+        // And then the memory itself
+        vm.send_memory_regions(&table, socket)?;
+        Response::read_from(socket)?.ok_or_abandon(
+            socket,
+            MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
+        )?;
+
+        // Define the maximum allowed downtime 2000 seconds(2000000 milliseconds)
+        const MAX_MIGRATE_DOWNTIME: u64 = 2000000;
+
+        // Verify that downtime must be between 1 and MAX_MIGRATE_DOWNTIME
+        if send_data_migration.downtime == 0 || send_data_migration.downtime > MAX_MIGRATE_DOWNTIME
+        {
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "downtime_limit must be an integer in the range of 1 to {} ms",
+                MAX_MIGRATE_DOWNTIME
+            )));
+        }
+
+        let migration_timeout = Duration::from_secs(send_data_migration.migration_timeout);
+        let migrate_downtime_limit = Duration::from_millis(send_data_migration.downtime);
+
+        // Verify that downtime must be less than the migration timeout
+        if !migration_timeout.is_zero() && migrate_downtime_limit >= migration_timeout {
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "downtime_limit {}ms must be less than migration_timeout {}ms",
+                send_data_migration.downtime,
+                send_data_migration.migration_timeout * 1000
+            )));
+        }
+
+        let iteration_table =
+            Self::memory_copy_iterations(vm, socket, s, migration_timeout, migrate_downtime_limit)?;
+
+        info!("Entering downtime phase");
+        s.downtime_start = Instant::now();
+        vm.pause()?;
+
+        // Send last batch of dirty pages
+        let mut final_table = vm.dirty_log()?;
+        final_table.extend(iteration_table.clone());
+        Self::vm_maybe_send_dirty_pages(vm, socket, final_table.clone())?;
+
+        // Update statistics
+        s.pending_size = final_table.regions().iter().map(|range| range.length).sum();
+        s.total_transferred_bytes += s.pending_size;
+        s.current_dirty_pages = s.pending_size.div_ceil(PAGE_SIZE as u64);
+        s.total_transferred_dirty_pages += s.current_dirty_pages;
+
+        // Stop logging dirty pages
+        vm.stop_dirty_log()?;
+
+        Ok(())
+    }
+
     fn send_migration(
         vm: &mut Vm,
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))] hypervisor: Arc<
@@ -1103,6 +1285,8 @@ impl Vmm {
         >,
         send_data_migration: VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
+        let mut s = MigrationState::new();
+
         // Set up the socket connection
         let mut socket = Self::send_migration_socket(&send_data_migration.destination_url)?;
 
@@ -1180,36 +1364,7 @@ impl Vmm {
             // Now pause VM
             vm.pause()?;
         } else {
-            // Start logging dirty pages
-            vm.start_dirty_log()?;
-
-            // Send memory table
-            let table = vm.memory_range_table()?;
-            Request::memory(table.length())
-                .write_to(&mut socket)
-                .unwrap();
-            table.write_to(&mut socket)?;
-            // And then the memory itself
-            vm.send_memory_regions(&table, &mut socket)?;
-            Response::read_from(&mut socket)?.ok_or_abandon(
-                &mut socket,
-                MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
-            )?;
-
-            // Try at most 5 passes of dirty memory sending
-            const MAX_DIRTY_MIGRATIONS: usize = 5;
-            for i in 0..MAX_DIRTY_MIGRATIONS {
-                info!("Dirty memory migration {} of {}", i, MAX_DIRTY_MIGRATIONS);
-                if !Self::vm_maybe_send_dirty_pages(vm, &mut socket)? {
-                    break;
-                }
-            }
-
-            // Now pause VM
-            vm.pause()?;
-
-            // Send last batch of dirty pages
-            Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
+            Self::do_memory_migration(vm, &mut socket, &mut s, &send_data_migration)?;
         }
 
         // We release the locks early to enable locking them on the destination host.
@@ -1236,10 +1391,16 @@ impl Vmm {
             MigratableError::MigrateSend(anyhow!("Error completing migration")),
         )?;
 
+        // Record downtime
+        s.downtime = s.downtime_start.elapsed();
+
         // Stop logging dirty pages
         if !send_data_migration.local {
             vm.stop_dirty_log()?;
         }
+
+        // Record total migration time
+        s.total_time = s.start_time.elapsed();
 
         info!("Migration complete");
 
