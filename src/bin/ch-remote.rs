@@ -1098,6 +1098,22 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
                     .long("local")
                     .num_args(0)
                     .action(ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("downtime")
+                    .long("downtime")
+                    .help("Set the expected maximum downtime in milliseconds")
+                    .num_args(1)
+                    .value_parser(clap::value_parser!(u64).range(1..))
+                    .default_value("500"),
+            )
+            .arg(
+                Arg::new("migration_timeout")
+                    .long("migration-timeout")
+                    .help("Set the maximum allowed migration time in seconds")
+                    .num_args(1)
+                    .value_parser(clap::value_parser!(u64))
+                    .default_value("3600"),
             ),
         Command::new("shutdown").about("Shutdown the VM"),
         Command::new("shutdown-vmm").about("Shutdown the VMM"),
