@@ -29,7 +29,7 @@ acpi_tables = { workspace = true }
 anyhow = "1.0.94"
 arc-swap = "1.7.1"
 arch = { path = "../arch" }
-bitflags = "2.6.0"
+bitflags = "2.9.0"
 block = { path = "../block" }
 blocking = { version = "1.6.1", optional = true }
 cfg-if = "1.0.0"
