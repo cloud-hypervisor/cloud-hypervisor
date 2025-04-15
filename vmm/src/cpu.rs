@@ -2934,14 +2934,18 @@ mod tests {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "kvm")]
     use std::mem;
 
     use arch::aarch64::regs;
     use arch::layout;
+    #[cfg(feature = "kvm")]
     use hypervisor::kvm::aarch64::is_system_register;
+    #[cfg(feature = "kvm")]
     use hypervisor::kvm::kvm_bindings::{
         user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
     };
+    #[cfg(feature = "kvm")]
     use hypervisor::{arm64_core_reg_id, offset_of};
 
     #[test]
@@ -2975,6 +2979,7 @@ mod tests {
         assert_eq!(vcpu.get_sys_reg(regs::MPIDR_EL1).unwrap(), 0x80000000);
     }
 
+    #[cfg(feature = "kvm")]
     #[test]
     fn test_is_system_register() {
         let offset = offset_of!(user_pt_regs, pc);
