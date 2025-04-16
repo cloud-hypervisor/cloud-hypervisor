@@ -15,7 +15,7 @@ use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
 use vm_memory::GuestAddress;
 use vmm_sys_util::eventfd::EventFd;
-use zerocopy::{transmute, AsBytes, FromBytes, FromZeroes};
+use zerocopy::{transmute, FromBytes, Immutable, IntoBytes};
 
 use super::AcpiNotificationFlags;
 use crate::legacy::fw_cfg::{create_file_name, FwCfgContent, FwCfgItem, FILE_NAME_SIZE};
@@ -274,7 +274,7 @@ pub const SIGNATURE: [u8; 4] = *b"XSDT";
 pub const COMPILER_ID: [u8; 4] = *b"RVAT";
 
 #[repr(C, align(4))]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, IntoBytes, Immutable)]
 pub struct Allocate {
     command: u32,
     file: [u8; FILE_NAME_SIZE],
@@ -284,7 +284,7 @@ pub struct Allocate {
 }
 
 #[repr(C, align(4))]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, IntoBytes, Immutable)]
 pub struct AddPointer {
     command: u32,
     dst: [u8; FILE_NAME_SIZE],
@@ -295,7 +295,7 @@ pub struct AddPointer {
 }
 
 #[repr(C, align(4))]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, IntoBytes, Immutable)]
 pub struct AddChecksum {
     command: u32,
     file: [u8; FILE_NAME_SIZE],
@@ -337,7 +337,7 @@ where
 }
 
 #[repr(C, align(4))]
-#[derive(Debug, Clone, Default, FromBytes, FromZeroes, AsBytes)]
+#[derive(Debug, Clone, Default, FromBytes, IntoBytes)]
 pub struct AcpiTableHeader {
     pub signature: [u8; 4],
     pub length: u32,
@@ -367,9 +367,9 @@ impl AcpiTable {
         self.rsdp.extended_checksum = self.rsdp.extended_checksum.wrapping_sub(ext_sum);
 
         for pointer in self.table_pointers.iter() {
-            let old_val = u64::read_from_prefix(&self.tables[*pointer..]).unwrap();
+            let old_val = u64::read_from_prefix(&self.tables[*pointer..]).unwrap().0;
             let new_val = old_val.wrapping_sub(old_addr).wrapping_add(table_addr);
-            AsBytes::write_to_prefix(&new_val, &mut self.tables[*pointer..]).unwrap();
+            IntoBytes::write_to_prefix(&new_val, &mut self.tables[*pointer..]).unwrap();
         }
 
         for (start, len) in self.table_checksums.iter() {

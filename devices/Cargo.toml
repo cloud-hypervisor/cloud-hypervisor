@@ -8,7 +8,7 @@ version = "0.1.0"
 acpi_tables = { workspace = true }
 anyhow = "1.0.94"
 arch = { path = "../arch" }
-bitflags = "2.6.0"
+bitflags = "2.9.0"
 bitfield = "0.16.1"
 byteorder = "1.5.0"
 event_monitor = { path = "../event_monitor" }
@@ -30,7 +30,7 @@ vm-memory = { workspace = true, features = [
 ] }
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = { workspace = true }
-zerocopy = { version = "0.7.35", features = ["alloc", "derive"] }
+zerocopy = { version = "0.8.24", features = ["alloc", "derive"] }
 
 [target.'cfg(any(target_arch = "aarch64", target_arch = "riscv64"))'.dependencies]
 arch = { path = "../arch" }

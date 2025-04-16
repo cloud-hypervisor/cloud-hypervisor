@@ -9,7 +9,7 @@ version = "0.1.0"
 clap = { version = "4.5.13", features = ["wrap_help"] }
 dirs = "6.0.0"
 serde = { version = "1.0.208", features = ["derive", "rc"] }
-serde_json = "1.0.120"
+serde_json = { workspace = true }
 test_infra = { path = "../test_infra" }
 thiserror = "2.0.6"
 wait-timeout = "0.2.0"

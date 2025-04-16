@@ -21,7 +21,7 @@ use devices::acpi::AcpiTable;
 use pci::PciBdf;
 use tracer::trace_scoped;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryRegion};
-use zerocopy::AsBytes;
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use crate::cpu::CpuManager;
 use crate::device_manager::DeviceManager;
@@ -47,7 +47,7 @@ pub const ACPI_APIC_GENERIC_TRANSLATOR: u8 = 15;
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct PciRangeEntry {
     pub base_address: u64,
     pub segment: u16,
@@ -58,7 +58,7 @@ struct PciRangeEntry {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct MemoryAffinity {
     pub type_: u8,
     pub length: u8,
@@ -75,7 +75,7 @@ struct MemoryAffinity {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct ProcessorLocalX2ApicAffinity {
     pub type_: u8,
     pub length: u8,
@@ -89,7 +89,7 @@ struct ProcessorLocalX2ApicAffinity {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct ProcessorGiccAffinity {
     pub type_: u8,
     pub length: u8,
@@ -149,7 +149,7 @@ impl MemoryAffinity {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct ViotVirtioPciNode {
     pub type_: u8,
     _reserved: u8,
@@ -161,7 +161,7 @@ struct ViotVirtioPciNode {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct ViotPciRangeNode {
     pub type_: u8,
     _reserved: u8,

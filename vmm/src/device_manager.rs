@@ -575,14 +575,12 @@ impl DeviceRelocation for AddressManager {
                     .lock()
                     .unwrap()
                     .allocate_io_addresses(Some(GuestAddress(new_base)), len as GuestUsize, None)
-                    .ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::Other, "failed allocating new IO range")
-                    })?;
+                    .ok_or_else(|| io::Error::other("failed allocating new IO range"))?;
 
                 // Update PIO bus
                 self.io_bus
                     .update_range(old_base, len, new_base, len)
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                    .map_err(io::Error::other)?;
             }
             PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
                 let allocators = if region_type == PciBarRegionType::Memory32BitRegion {
@@ -606,12 +604,7 @@ impl DeviceRelocation for AddressManager {
                             .lock()
                             .unwrap()
                             .allocate(Some(GuestAddress(new_base)), len as GuestUsize, Some(len))
-                            .ok_or_else(|| {
-                                io::Error::new(
-                                    io::ErrorKind::Other,
-                                    "failed allocating new MMIO range",
-                                )
-                            })?;
+                            .ok_or_else(|| io::Error::other("failed allocating new MMIO range"))?;
 
                         break;
                     }
@@ -620,7 +613,7 @@ impl DeviceRelocation for AddressManager {
                 // Update MMIO bus
                 self.mmio_bus
                     .update_range(old_base, len, new_base, len)
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                    .map_err(io::Error::other)?;
             }
         }
 
@@ -639,18 +632,14 @@ impl DeviceRelocation for AddressManager {
                 }
 
                 if !resource_updated {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        format!(
-                            "Couldn't find a resource with base 0x{old_base:x} for device {id}"
-                        ),
-                    ));
+                    return Err(io::Error::other(format!(
+                        "Couldn't find a resource with base 0x{old_base:x} for device {id}"
+                    )));
                 }
             } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Couldn't find device {id} from device tree"),
-                ));
+                return Err(io::Error::other(format!(
+                    "Couldn't find device {id} from device tree"
+                )));
             }
         }
 
@@ -661,10 +650,7 @@ impl DeviceRelocation for AddressManager {
                 for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.vm.unregister_ioevent(event, &io_addr).map_err(|e| {
-                        io::Error::new(
-                            io::ErrorKind::Other,
-                            format!("failed to unregister ioevent: {e:?}"),
-                        )
+                        io::Error::other(format!("failed to unregister ioevent: {e:?}"))
                     })?;
                 }
                 for (event, addr) in virtio_pci_dev.ioeventfds(new_base) {
@@ -672,10 +658,7 @@ impl DeviceRelocation for AddressManager {
                     self.vm
                         .register_ioevent(event, &io_addr, None)
                         .map_err(|e| {
-                            io::Error::new(
-                                io::ErrorKind::Other,
-                                format!("failed to register ioevent: {e:?}"),
-                            )
+                            io::Error::other(format!("failed to register ioevent: {e:?}"))
                         })?;
                 }
             } else {
@@ -693,10 +676,7 @@ impl DeviceRelocation for AddressManager {
                         );
 
                         self.vm.remove_user_memory_region(mem_region).map_err(|e| {
-                            io::Error::new(
-                                io::ErrorKind::Other,
-                                format!("failed to remove user memory region: {e:?}"),
-                            )
+                            io::Error::other(format!("failed to remove user memory region: {e:?}"))
                         })?;
 
                         // Create new mapping by inserting new region to KVM.
@@ -710,19 +690,15 @@ impl DeviceRelocation for AddressManager {
                         );
 
                         self.vm.create_user_memory_region(mem_region).map_err(|e| {
-                            io::Error::new(
-                                io::ErrorKind::Other,
-                                format!("failed to create user memory regions: {e:?}"),
-                            )
+                            io::Error::other(format!("failed to create user memory regions: {e:?}"))
                         })?;
 
                         // Update shared memory regions to reflect the new mapping.
                         shm_regions.addr = GuestAddress(new_base);
                         virtio_dev.set_shm_regions(shm_regions).map_err(|e| {
-                            io::Error::new(
-                                io::ErrorKind::Other,
-                                format!("failed to update shared memory regions: {e:?}"),
-                            )
+                            io::Error::other(format!(
+                                "failed to update shared memory regions: {e:?}"
+                            ))
                         })?;
                     }
                 }
@@ -806,7 +782,7 @@ impl AccessPlatform for SevSnpPageAccessProxy {
     fn translate_gva(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error> {
         self.vm
             .gain_page_access(base, size as u32)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
         Ok(base)
     }
 }

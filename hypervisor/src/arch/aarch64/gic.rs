@@ -5,9 +5,12 @@
 use std::any::Any;
 use std::result;
 
+use serde::de::Error as SerdeError;
+use serde::{Deserialize, Serialize};
+use serde_json;
 use thiserror::Error;
 
-use crate::{CpuState, GicState, HypervisorDeviceError, HypervisorVmError};
+use crate::{CpuState, HypervisorDeviceError, HypervisorVmError};
 
 /// Errors thrown while setting up the VGIC.
 #[derive(Debug, Error)]
@@ -36,6 +39,56 @@ pub struct VgicConfig {
     pub nr_irqs: u32,
 }
 
+#[derive(Clone, Serialize)]
+pub enum GicState {
+    #[cfg(feature = "kvm")]
+    Kvm(crate::kvm::aarch64::gic::Gicv3ItsState),
+    #[cfg(feature = "mshv")]
+    MshvGicV2M(crate::mshv::aarch64::gic::MshvGicV2MState),
+}
+
+impl<'de> Deserialize<'de> for GicState {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // GicStateDefaultDeserialize is a helper enum that mirrors GicState but also derives the Deserialize trait.
+        // This enables backward-compatible deserialization of GicState, facilitating live-upgrade scenarios.
+        #[derive(Deserialize)]
+        pub enum GicStateDefaultDeserialize {
+            #[cfg(feature = "kvm")]
+            Kvm(crate::kvm::aarch64::gic::Gicv3ItsState),
+            #[cfg(feature = "mshv")]
+            MshvGicV2M(crate::mshv::aarch64::gic::MshvGicV2MState),
+        }
+
+        const {
+            assert!(
+                std::mem::size_of::<GicStateDefaultDeserialize>()
+                    == std::mem::size_of::<GicState>()
+            )
+        };
+
+        let value: serde_json::Value = Deserialize::deserialize(deserializer)?;
+
+        #[cfg(feature = "kvm")]
+        if let Ok(gicv3_its_state) =
+            crate::kvm::aarch64::gic::Gicv3ItsState::deserialize(value.clone())
+        {
+            return Ok(GicState::Kvm(gicv3_its_state));
+        }
+
+        if let Ok(gic_state_de) = GicStateDefaultDeserialize::deserialize(value.clone()) {
+            return match gic_state_de {
+                #[cfg(feature = "kvm")]
+                GicStateDefaultDeserialize::Kvm(state) => Ok(GicState::Kvm(state)),
+                #[cfg(feature = "mshv")]
+                GicStateDefaultDeserialize::MshvGicV2M(state) => Ok(GicState::MshvGicV2M(state)),
+            };
+        }
+        Err(SerdeError::custom("Failed to deserialize GicState"))
+    }
+}
 /// Hypervisor agnostic interface for a virtualized GIC
 pub trait Vgic: Send + Sync {
     /// Returns the fdt compatibility property of the device

@@ -39,7 +39,7 @@ use vm_memory::{
     GuestMemoryMmap,
 };
 use vmm_sys_util::sock_ctrl_msg::IntoIovec;
-use zerocopy::{AsBytes, FromBytes, FromZeroes};
+use zerocopy::{FromBytes, Immutable, IntoBytes, FromZeros};
 
 const STAGE0_START_ADDRESS: GuestAddress = GuestAddress(0xffe0_0000);
 const STAGE0_SIZE: usize = 0x20_0000;
@@ -146,7 +146,7 @@ pub struct FwCfg {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes, FromBytes, FromZeroes)]
+#[derive(Debug, IntoBytes, FromBytes, Immutable)]
 struct FwCfgDmaAccess {
     control_be: u32,
     length_be: u32,
@@ -165,7 +165,7 @@ bitfield! {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, IntoBytes, Immutable)]
 struct FwCfgFilesHeader {
     count_be: u32,
 }
@@ -181,7 +181,7 @@ pub fn create_file_name(name: &str) -> [u8; FILE_NAME_SIZE] {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Debug, AsBytes, FromBytes, FromZeroes, Clone, Copy)]
+#[derive(Debug, IntoBytes, FromBytes, Clone, Copy, Immutable)]
 pub struct BootE820Entry {
     pub addr: u64,
     pub size: u64,
@@ -189,7 +189,7 @@ pub struct BootE820Entry {
 }
 
 #[repr(C)]
-#[derive(Debug, AsBytes)]
+#[derive(Debug, IntoBytes, Immutable)]
 struct FwCfgFile {
     size_be: u32,
     select_be: u16,
@@ -313,7 +313,7 @@ impl FwCfg {
         let op_size = std::cmp::min(content_size, len);
         let mut access = content.access(offset);
         let mut buf = vec![0u8; op_size as usize];
-        access.read_exact(buf.as_bytes_mut())?;
+        access.read_exact(buf.as_mut_bytes())?;
         let r = self
             .memory
             .memory()
@@ -350,7 +350,7 @@ impl FwCfg {
         let dma_access = match self
             .memory
             .memory()
-            .read(access.as_bytes_mut(), GuestAddress(dma_address))
+            .read(access.as_mut_bytes(), GuestAddress(dma_address))
         {
             Ok(_) => access,
             Err(e) => {

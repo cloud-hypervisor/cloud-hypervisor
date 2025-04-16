@@ -528,6 +528,7 @@ unsafe impl Send for Ghcb {}
 unsafe impl Sync for Ghcb {}
 
 /// Vcpu struct for Microsoft Hypervisor
+#[allow(dead_code)]
 pub struct MshvVcpu {
     fd: VcpuFd,
     vp_index: u8,
@@ -559,11 +560,9 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Returns StandardRegisters with default value set
     ///
-    #[cfg(target_arch = "x86_64")]
     fn create_standard_regs(&self) -> crate::StandardRegisters {
         mshv_bindings::StandardRegisters::default().into()
     }
-    #[cfg(target_arch = "x86_64")]
     ///
     /// Returns the vCPU general purpose registers.
     ///
@@ -575,7 +574,6 @@ impl cpu::Vcpu for MshvVcpu {
             .into())
     }
 
-    #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the vCPU general purpose registers.
     ///
@@ -1286,7 +1284,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn init_pmu(&self, irq: u32) -> cpu::Result<()> {
+    fn init_pmu(&self, _irq: u32) -> cpu::Result<()> {
         unimplemented!()
     }
 
@@ -1296,12 +1294,12 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
+    fn setup_regs(&self, _cpu_id: u8, _boot_ip: u64, _fdt_start: u64) -> cpu::Result<()> {
         unimplemented!()
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn get_sys_reg(&self, sys_reg: u32) -> cpu::Result<u64> {
+    fn get_sys_reg(&self, _sys_reg: u32) -> cpu::Result<u64> {
         unimplemented!()
     }
 
@@ -1312,16 +1310,6 @@ impl cpu::Vcpu for MshvVcpu {
 
     #[cfg(target_arch = "aarch64")]
     fn vcpu_init(&self, _kvi: &crate::VcpuInit) -> cpu::Result<()> {
-        unimplemented!()
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    fn set_regs(&self, _regs: &crate::StandardRegisters) -> cpu::Result<()> {
-        unimplemented!()
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    fn get_regs(&self) -> cpu::Result<crate::StandardRegisters> {
         unimplemented!()
     }
 
@@ -1457,7 +1445,7 @@ impl cpu::Vcpu for MshvVcpu {
     ///
     /// Set CPU state for aarch64 guest.
     ///
-    fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+    fn set_state(&self, _state: &CpuState) -> cpu::Result<()> {
         unimplemented!()
     }
 
@@ -1813,7 +1801,7 @@ impl vm::Vm for MshvVm {
                     MSHV_VP_MMAP_OFFSET_GHCB as i64 * libc::sysconf(libc::_SC_PAGE_SIZE),
                 )
             };
-            if addr == libc::MAP_FAILED {
+            if std::ptr::eq(addr, libc::MAP_FAILED) {
                 // No point of continuing, without this mmap VMGEXIT will fail anyway
                 // Return error
                 return Err(vm::HypervisorVmError::MmapToRoot);
@@ -2183,7 +2171,7 @@ impl vm::Vm for MshvVm {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn create_vgic(&self, config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
+    fn create_vgic(&self, _config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
         unimplemented!()
     }
 

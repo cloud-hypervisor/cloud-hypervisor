@@ -31,7 +31,6 @@ pub struct AiaImsicsState {}
 
 impl KvmAiaImsics {
     /// Device trees specific constants
-
     fn version() -> u32 {
         kvm_bindings::kvm_device_type_KVM_DEV_TYPE_RISCV_AIA
     }
