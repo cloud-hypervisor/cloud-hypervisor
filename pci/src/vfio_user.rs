@@ -169,7 +169,7 @@ impl VfioUserPciDevice {
                         )
                     };
 
-                    if host_addr == libc::MAP_FAILED {
+                    if std::ptr::eq(host_addr, libc::MAP_FAILED) {
                         error!(
                             "Could not mmap regions, error:{}",
                             std::io::Error::last_os_error()
@@ -476,7 +476,7 @@ impl PciDevice for VfioUserPciDevice {
 
                     self.vm
                         .remove_user_memory_region(old_region)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                        .map_err(std::io::Error::other)?;
 
                     // Update the user memory region with the correct start address.
                     if new_base > old_base {
@@ -497,7 +497,7 @@ impl PciDevice for VfioUserPciDevice {
 
                     self.vm
                         .create_user_memory_region(new_region)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                        .map_err(std::io::Error::other)?;
                 }
                 info!("Moved bar 0x{:x} -> 0x{:x}", old_base, new_base);
             }
@@ -582,17 +582,11 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioUserDmaMappi
                 .lock()
                 .unwrap()
                 .dma_map(offset, iova, size, file_offset.file().as_raw_fd())
-                .map_err(|e| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Error mapping region: {e}"),
-                    )
-                })
+                .map_err(|e| std::io::Error::other(format!("Error mapping region: {e}")))
         } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Region not found for 0x{gpa:x}"),
-            ))
+            Err(std::io::Error::other(format!(
+                "Region not found for 0x{gpa:x}"
+            )))
         }
     }
 
@@ -601,11 +595,6 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioUserDmaMappi
             .lock()
             .unwrap()
             .dma_unmap(iova, size)
-            .map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Error unmapping region: {e}"),
-                )
-            })
+            .map_err(|e| std::io::Error::other(format!("Error unmapping region: {e}")))
     }
 }

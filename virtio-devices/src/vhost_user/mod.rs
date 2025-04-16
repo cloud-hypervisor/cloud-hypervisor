@@ -215,10 +215,9 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
             true,
         )
         .map_err(|e| {
-            EpollHelperError::IoError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("failed connecting vhost-user backend {e:?}"),
-            ))
+            EpollHelperError::IoError(std::io::Error::other(format!(
+                "failed connecting vhost-user backend {e:?}"
+            )))
         })?;
 
         // Initialize the backend
@@ -236,10 +235,9 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
                 self.inflight.as_mut(),
             )
             .map_err(|e| {
-                EpollHelperError::IoError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("failed reconnecting vhost-user backend: {e:?}"),
-                ))
+                EpollHelperError::IoError(std::io::Error::other(format!(
+                    "failed reconnecting vhost-user backend: {e:?}"
+                )))
             })?;
 
         helper.add_event_custom(

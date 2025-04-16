@@ -148,7 +148,7 @@ impl AddressAllocator {
             if let Some(size_delta) =
                 address.checked_sub(self.align_address(prev_end_address, alignment).raw_value())
             {
-                let adjust = if alignment > 1 { alignment - 1 } else { 0 };
+                let adjust = alignment.saturating_sub(1);
                 if size_delta.raw_value() >= req_size {
                     return Some(
                         self.align_address(address.unchecked_sub(req_size + adjust), alignment),

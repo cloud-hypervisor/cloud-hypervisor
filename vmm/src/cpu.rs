@@ -74,9 +74,9 @@ use vm_migration::{
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
-use zerocopy::AsBytes;
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 #[cfg(all(feature = "mshv", feature = "sev_snp"))]
-use zerocopy::FromZeroes;
+use zerocopy::FromZeros;
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
@@ -211,7 +211,7 @@ pub type Result<T> = result::Result<T, Error>;
 #[cfg(target_arch = "x86_64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct LocalX2Apic {
     pub r#type: u8,
     pub length: u8,
@@ -223,7 +223,7 @@ struct LocalX2Apic {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct Ioapic {
     pub r#type: u8,
     pub length: u8,
@@ -236,7 +236,7 @@ struct Ioapic {
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct GicC {
     pub r#type: u8,
     pub length: u8,
@@ -261,7 +261,7 @@ struct GicC {
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct GicD {
     pub r#type: u8,
     pub length: u8,
@@ -276,7 +276,7 @@ struct GicD {
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct GicR {
     pub r#type: u8,
     pub length: u8,
@@ -288,7 +288,7 @@ struct GicR {
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct GicIts {
     pub r#type: u8,
     pub length: u8,
@@ -301,7 +301,7 @@ struct GicIts {
 #[cfg(target_arch = "aarch64")]
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, FromBytes)]
 struct ProcessorHierarchyNode {
     pub r#type: u8,
     pub length: u8,
@@ -314,7 +314,7 @@ struct ProcessorHierarchyNode {
 
 #[allow(dead_code)]
 #[repr(C, packed)]
-#[derive(Default, AsBytes)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
 struct InterruptSourceOverride {
     pub r#type: u8,
     pub length: u8,
@@ -2964,14 +2964,18 @@ mod tests {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "kvm")]
     use std::mem;
 
     use arch::aarch64::regs;
     use arch::layout;
+    #[cfg(feature = "kvm")]
     use hypervisor::kvm::aarch64::is_system_register;
+    #[cfg(feature = "kvm")]
     use hypervisor::kvm::kvm_bindings::{
         user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
     };
+    #[cfg(feature = "kvm")]
     use hypervisor::{arm64_core_reg_id, offset_of};
 
     #[test]
@@ -3005,6 +3009,7 @@ mod tests {
         assert_eq!(vcpu.get_sys_reg(regs::MPIDR_EL1).unwrap(), 0x80000000);
     }
 
+    #[cfg(feature = "kvm")]
     #[test]
     fn test_is_system_register() {
         let offset = offset_of!(user_pt_regs, pc);

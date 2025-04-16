@@ -23,9 +23,9 @@ use thiserror::Error;
 use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory, Bytes};
 #[cfg(feature = "kvm")]
 use vm_migration::Snapshottable;
-use zerocopy::AsBytes;
+use zerocopy::IntoBytes;
 #[cfg(feature = "sev_snp")]
-use zerocopy::{FromBytes, FromZeroes};
+use zerocopy::{FromBytes, FromZeros};
 
 use crate::cpu::CpuManager;
 use crate::igvm::loader::Loader;
@@ -38,7 +38,7 @@ const ISOLATED_PAGE_SHIFT: u32 = 12;
 // see section 7.1 https://tinyurl.com/sev-snp-spec
 #[cfg(feature = "sev_snp")]
 #[repr(C)]
-#[derive(Debug, Clone, PartialEq, Eq, AsBytes, FromBytes, FromZeroes)]
+#[derive(Debug, Clone, PartialEq, Eq, IntoBytes, FromBytes)]
 pub struct SnpCpuidFunc {
     pub eax_in: u32,
     pub ecx_in: u32,
@@ -53,7 +53,7 @@ pub struct SnpCpuidFunc {
 
 #[cfg(feature = "sev_snp")]
 #[repr(C)]
-#[derive(Debug, Clone, FromBytes, AsBytes, FromZeroes)]
+#[derive(Debug, Clone, FromBytes, IntoBytes)]
 pub struct SnpCpuidInfo {
     pub count: u32,
     pub _reserved1: u32,
@@ -359,7 +359,7 @@ pub fn load_igvm(
                     assert_eq!(new_cp.count, entries.len() as u32);
                     info!("gpa: {:#x}", *gpa);
                     loader
-                        .import_pages(gpa / HV_PAGE_SIZE, 1, acceptance, new_cp.as_bytes())
+                        .import_pages(gpa / HV_PAGE_SIZE, 1, acceptance, new_cp.as_mut_bytes())
                         .map_err(Error::Loader)?;
                     imported_page = true;
                 }
@@ -597,7 +597,7 @@ pub fn load_igvm(
             #[cfg(feature = "kvm")]
             let page_type = group[0].page_type;
             let mut new_cp = SnpCpuidInfo::new_zeroed();
-            let _ = guest_memory.read(new_cp.as_bytes_mut(), GuestAddress(group[0].gpa));
+            let _ = guest_memory.read(new_cp.as_mut_bytes(), GuestAddress(group[0].gpa));
             let _import = memory_manager
                 .lock()
                 .unwrap()
@@ -615,7 +615,7 @@ pub fn load_igvm(
                 // could lead to an insecure guest, we must then make sure to import the updated cpuid
                 // https://elixir.bootlin.com/linux/v6.11/source/arch/x86/kvm/svm/sev.c#L2322
                 let mut updated_cp = SnpCpuidInfo::new_zeroed();
-                let _ = guest_memory.read(updated_cp.as_bytes_mut(), GuestAddress(group[0].gpa));
+                let _ = guest_memory.read(updated_cp.as_mut_bytes(), GuestAddress(group[0].gpa));
                 for (set, got) in std::iter::zip(new_cp.entries.iter(), updated_cp.entries.iter()) {
                     if set != got {
                         error!("Set cpuid fn: {set:#x?}, but firmware expects: {got:#x?}");

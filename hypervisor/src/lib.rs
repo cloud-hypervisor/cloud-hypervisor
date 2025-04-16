@@ -36,7 +36,7 @@ pub mod arch;
 pub mod kvm;
 
 /// Microsoft Hypervisor implementation module
-#[cfg(all(feature = "mshv", target_arch = "x86_64"))]
+#[cfg(feature = "mshv")]
 pub mod mshv;
 
 /// Hypervisor related module
@@ -59,7 +59,7 @@ pub use cpu::CpuVendor;
 pub use cpu::{HypervisorCpuError, Vcpu, VmExit};
 pub use device::HypervisorDeviceError;
 #[cfg(all(feature = "kvm", target_arch = "aarch64"))]
-pub use kvm::{aarch64, GicState};
+pub use kvm::aarch64;
 #[cfg(all(feature = "kvm", target_arch = "riscv64"))]
 pub use kvm::{riscv64, AiaState};
 pub use vm::{
@@ -158,7 +158,7 @@ pub const USER_MEMORY_REGION_GUEST_MEMFD: u32 = 1 << 5;
 pub enum MpState {
     #[cfg(feature = "kvm")]
     Kvm(kvm_bindings::kvm_mp_state),
-    #[cfg(all(feature = "mshv", target_arch = "x86_64"))]
+    #[cfg(feature = "mshv")]
     Mshv, /* MSHV does not support MpState yet */
 }
 
