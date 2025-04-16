@@ -54,6 +54,8 @@ use hypervisor::HypervisorType;
 #[cfg(feature = "guest_debug")]
 use hypervisor::StandardRegisters;
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
+#[cfg(feature = "sev_snp")]
+use igvm::snp_defs::SevVmsa;
 use libc::{c_void, siginfo_t};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf::Elf64_Nhdr;
@@ -73,6 +75,8 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
 use zerocopy::AsBytes;
+#[cfg(all(feature = "mshv", feature = "sev_snp"))]
+use zerocopy::FromZeroes;
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
@@ -472,12 +476,11 @@ impl Vcpu {
     pub fn set_sev_control_register(
         &self,
         vmsa_pfn: u64,
-        #[cfg(feature = "kvm")] vmsa: igvm::snp_defs::SevVmsa,
+        vmsa: SevVmsa,
     ) -> Result<()> {
         self.vcpu
             .set_sev_control_register(
                 vmsa_pfn,
-                #[cfg(feature = "kvm")]
                 vmsa,
             )
             .map_err(Error::SetSevControlRegister)
@@ -866,11 +869,12 @@ impl CpuManager {
     ) -> Result<()> {
         let mut vcpu = vcpu.lock().unwrap();
 
-        #[cfg(all(feature = "sev_snp", feature = "mshv"))]
-        if self.sev_snp_enabled {
+        #[cfg(all(feature = "mshv", feature = "sev_snp"))]
+        if self.hypervisor.hypervisor_type() == hypervisor::HypervisorType::Mshv && self.sev_snp_enabled {
             if let Some((kernel_entry_point, _)) = boot_setup {
                 vcpu.set_sev_control_register(
                     kernel_entry_point.entry_addr.0 / crate::igvm::HV_PAGE_SIZE,
+                    SevVmsa::new_zeroed(),
                 )?;
             }
 

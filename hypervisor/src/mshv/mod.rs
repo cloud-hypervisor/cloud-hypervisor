@@ -1550,7 +1550,7 @@ impl cpu::Vcpu for MshvVcpu {
     /// Sets the AMD specific vcpu's sev control register.
     ///
     #[cfg(feature = "sev_snp")]
-    fn set_sev_control_register(&self, vmsa_pfn: u64) -> cpu::Result<()> {
+    fn set_sev_control_register(&self, vmsa_pfn: u64, _vmsa: igvm::snp_defs::SevVmsa) -> cpu::Result<()> {
         let sev_control_reg = snp::get_sev_control_register(vmsa_pfn);
 
         self.fd
@@ -2090,7 +2090,7 @@ impl vm::Vm for MshvVm {
 
     /// Initialize the SEV-SNP VM
     #[cfg(feature = "sev_snp")]
-    fn sev_snp_init(&self) -> vm::Result<()> {
+    fn sev_snp_init(&self, _guest_policy: igvm_defs::SnpPolicy) -> vm::Result<()> {
         self.fd
             .set_partition_property(
                 hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_STATE,

@@ -43,6 +43,8 @@ use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 use hypervisor::kvm::{
     KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE, KVM_X86_SNP_VM, STAGE0_SIZE, STAGE0_START_ADDRESS,
 };
+#[cfg(feature = "igvm")]
+use hypervisor::HypervisorType;
 use hypervisor::{HypervisorVmError, VmOps};
 #[cfg(feature = "sev_snp")]
 use igvm_defs::SnpPolicy;
@@ -617,6 +619,7 @@ impl Vm {
                 &cpu_manager,
                 #[cfg(feature = "sev_snp")]
                 sev_snp_enabled,
+                hypervisor.hypervisor_type(),
             )?
         } else {
             None
@@ -642,7 +645,7 @@ impl Vm {
         // transitioning the guest into secure state.
         #[cfg(feature = "sev_snp")]
         if sev_snp_enabled {
-            vm.sev_snp_init(#[cfg(feature = "kvm")] Vm::get_default_sev_snp_guest_policy())
+            vm.sev_snp_init(Vm::get_default_sev_snp_guest_policy())
                 .map_err(Error::InitializeSevSnpVm)?;
         }
 
@@ -949,17 +952,18 @@ impl Vm {
                 // Passing SEV_SNP_ENABLED: 1 if sev_snp_enabled is true
                 // Otherwise SEV_SNP_DISABLED: 0
                 // value of sev_snp_enabled is mapped to SEV_SNP_ENABLED for true or SEV_SNP_DISABLED for false
-                cfg_if::cfg_if! {
-                    if #[cfg(feature = "mshv")] {
-                        let vm_type = u64::from(sev_snp_enabled);
-                    } else if #[cfg(feature = "kvm")] {
-                        let vm_type = if sev_snp_enabled {
-                            KVM_X86_SNP_VM.into()
+                let vm_type = match hypervisor.hypervisor_type() {
+                    #[cfg(feature = "mshv")]
+                    HypervisorType::Mshv => u64::from(sev_snp_enabled),
+                    #[cfg(feature = "kvm")]
+                    HypervisorType::Kvm => {
+                        if sev_snp_enabled {
+                            KVM_X86_SNP_VM as u64
                         } else {
                             0
-                        };
-                    }
-                }
+                        }
+                },
+                };
                 let vm = hypervisor
                     .create_vm_with_type_and_memory(vm_type, mem_size)
                     .unwrap();
@@ -1127,6 +1131,7 @@ impl Vm {
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
+        hypervisor_type: HypervisorType,
     ) -> Result<EntryPoint> {
         #[cfg(all(feature = "kvm", feature = "igvm"))]
         Self::reserve_region_for_stage0(&memory_manager)?;
@@ -1138,6 +1143,7 @@ impl Vm {
             "",
             #[cfg(feature = "sev_snp")]
             host_data,
+            hypervisor_type,
         )
         .map_err(Error::IgvmLoad)?;
 
@@ -1219,6 +1225,7 @@ impl Vm {
         memory_manager: Arc<Mutex<MemoryManager>>,
         #[cfg(feature = "igvm")] cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] _sev_snp_enabled: bool,
+        #[cfg(feature = "igvm")] hypervisor_type: HypervisorType,
     ) -> Result<EntryPoint> {
         trace_scoped!("load_payload");
         #[cfg(feature = "igvm")]
@@ -1231,6 +1238,7 @@ impl Vm {
                     cpu_manager,
                     #[cfg(feature = "sev_snp")]
                     &payload.host_data,
+                    hypervisor_type,
                 );
             }
         }
@@ -1276,6 +1284,7 @@ impl Vm {
         config: &Arc<Mutex<VmConfig>>,
         #[cfg(feature = "igvm")] cpu_manager: &Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
+        #[cfg(feature = "igvm")] hypervisor_type: HypervisorType,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
         // Kernel with TDX is loaded in a different manner
         #[cfg(feature = "tdx")]
@@ -1304,6 +1313,8 @@ impl Vm {
                             cpu_manager,
                             #[cfg(feature = "sev_snp")]
                             sev_snp_enabled,
+                            #[cfg(feature = "igvm")]
+                            hypervisor_type,
                         )
                     })
                     .map_err(Error::KernelLoadThreadSpawn)

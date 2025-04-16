@@ -130,7 +130,6 @@ use vmm_sys_util::ioctl_ioc_nr;
 ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 
 // TODO: The following VM types are defined in latest linux kernel arch/x86/include/uapi/asm/kvm.h but doesn't exist in kvm binding yet.
-#[cfg(all(feature = "kvm", feature = "sev_snp"))]
 pub const KVM_X86_SNP_VM: u32 = 4;
 #[cfg(all(feature = "sev_snp"))]
 use kvm_bindings::{kvm_segment as Segment, KVM_MEMORY_ATTRIBUTE_PRIVATE};
