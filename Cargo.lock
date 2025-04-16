@@ -970,6 +970,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arc-swap",
+ "bitfield-struct",
  "byteorder",
  "cfg-if",
  "concat-idents",
@@ -983,6 +984,7 @@ dependencies = [
  "log",
  "mshv-bindings",
  "mshv-ioctls",
+ "open-enum",
  "serde",
  "serde_json",
  "serde_with",
@@ -990,6 +992,7 @@ dependencies = [
  "vfio-ioctls",
  "vm-memory",
  "vmm-sys-util",
+ "zerocopy 0.8.24",
 ]
 
 [[package]]
