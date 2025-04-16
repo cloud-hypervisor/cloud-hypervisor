@@ -24,7 +24,8 @@ use vm_memory::bitmap::AtomicBitmap;
 use crate::arch::emulator::PlatformEmulator;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::emulator::Emulator;
-#[cfg(target_arch = "x86_64")]
+#[cfg(target_arch = "aarch64")]
+use crate::mshv::aarch64::emulator;
 use crate::mshv::emulator::MshvEmulatorContext;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 use crate::{cpu, hypervisor, vec_with_array_field, HypervisorType};
@@ -775,6 +776,38 @@ impl cpu::Vcpu for MshvVcpu {
                     ];
                     set_registers_64!(self.fd, arr_reg_name_value)
                         .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+                    Ok(cpu::VmExit::Ignore)
+                }
+                #[cfg(target_arch = "aarch64")]
+                hv_message_type_HVMSG_UNMAPPED_GPA => {
+                    let info = x.to_memory_info().unwrap();
+                    let gva = info.guest_virtual_address;
+                    let gpa = info.guest_physical_address;
+
+                    debug!("Unmapped GPA exit: GVA {:x} GPA {:x}", gva, gpa);
+
+                    let context = MshvEmulatorContext {
+                        vcpu: self,
+                        map: (gva, gpa),
+                        syndrome: info.syndrome,
+                        instruction_bytes: info.instruction_bytes,
+                        instruction_byte_count: info.instruction_byte_count,
+                        // SAFETY: Accessing a union element from bindgen generated bindings.
+                        interruption_pending: unsafe {
+                            info.header
+                                .execution_state
+                                .__bindgen_anon_1
+                                .interruption_pending()
+                                != 0
+                        },
+                        pc: info.header.pc,
+                    };
+
+                    let mut emulator = emulator::Emulator::new(context);
+                    emulator
+                        .emulate()
+                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+
                     Ok(cpu::VmExit::Ignore)
                 }
                 #[cfg(target_arch = "x86_64")]

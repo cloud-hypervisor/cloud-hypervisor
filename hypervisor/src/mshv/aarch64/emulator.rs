@@ -28,7 +28,7 @@ impl<'a> Emulator<'a> {
         Emulator { context }
     }
 
-    /// Decode the instruction using the syndrome register.
+    /// Decode & emulate the instruction using the syndrome register.
     pub fn emulate_with_syndrome(&mut self) -> Result<bool, PlatformError> {
         let esr_el2 = EsrEl2::from(self.context.syndrome);
         if !matches!(
