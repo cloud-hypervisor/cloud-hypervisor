@@ -720,17 +720,34 @@ impl cpu::Vcpu for MshvVcpu {
                     match port {
                         0x402 | 0x510 | 0x511 | 0x514 => {
                             let insn_len = info.header.instruction_length() as u64;
+                            /*
+                             * Advance RIP and update RAX
+                             * First, try to update the registers using VP register page
+                             * which is mapped into user space for faster access.
+                             * If the register page is not available, fall back to regular
+                             * IOCTL to update the registers.
+                             */
+                            if let Some(reg_page) = self.fd.get_vp_reg_page() {
+                                let vp_reg_page = reg_page.0;
+                                set_gp_regs_field_ptr!(vp_reg_page, rax, ret_rax);
+                                // SAFETY: access union fields
+                                unsafe {
+                                    (*vp_reg_page).__bindgen_anon_1.__bindgen_anon_1.rip =
+                                        info.header.rip + insn_len;
+                                    (*vp_reg_page).dirty |= 1 << HV_X64_REGISTER_CLASS_IP;
+                                }
+                            } else {
+                                let arr_reg_name_value = [
+                                    (
+                                        hv_register_name_HV_X64_REGISTER_RIP,
+                                        info.header.rip + insn_len,
+                                    ),
+                                    (hv_register_name_HV_X64_REGISTER_RAX, ret_rax),
+                                ];
+                                set_registers_64!(self.fd, arr_reg_name_value)
+                                    .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+                            }
 
-                            /* Advance RIP and update RAX */
-                            let arr_reg_name_value = [
-                                (
-                                    hv_register_name_HV_X64_REGISTER_RIP,
-                                    info.header.rip + insn_len,
-                                ),
-                                (hv_register_name_HV_X64_REGISTER_RAX, ret_rax),
-                            ];
-                            set_registers_64!(self.fd, arr_reg_name_value)
-                                .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
                             return Ok(cpu::VmExit::Ignore);
                         }
                         _ => {}
