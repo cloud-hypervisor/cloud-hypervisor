@@ -1891,7 +1891,9 @@ impl DeviceManager {
 
             #[cfg(feature = "fw_cfg")]
             {
-                let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new()));
+                let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new(
+                    self.memory_manager.lock().as_ref().unwrap().guest_memory(),
+                )));
 
                 self.bus_devices
                     .push(Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>);
@@ -2036,7 +2038,9 @@ impl DeviceManager {
 
         #[cfg(feature = "fw_cfg")]
         {
-            let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new()));
+            let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new(
+                self.memory_manager.lock().as_ref().unwrap().guest_memory(),
+            )));
 
             self.fw_cfg = Some(fw_cfg.clone());
 
