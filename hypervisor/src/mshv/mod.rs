@@ -13,8 +13,8 @@ use std::sync::{Arc, RwLock};
 use arc_swap::ArcSwap;
 use mshv_bindings::*;
 #[cfg(target_arch = "x86_64")]
-use mshv_ioctls::{set_registers_64, InterruptRequest};
-use mshv_ioctls::{Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
+use mshv_ioctls::InterruptRequest;
+use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
 #[cfg(feature = "sev_snp")]
@@ -66,6 +66,8 @@ pub use {
 
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::regs;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
 #[cfg(target_arch = "x86_64")]
@@ -1329,8 +1331,24 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn setup_regs(&self, _cpu_id: u8, _boot_ip: u64, _fdt_start: u64) -> cpu::Result<()> {
-        unimplemented!()
+    fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
+        let arr_reg_name_value = [(
+            hv_register_name_HV_ARM64_REGISTER_PSTATE,
+            regs::PSTATE_FAULT_BITS_64,
+        )];
+        set_registers_64!(self.fd, arr_reg_name_value)
+            .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+
+        if cpu_id == 0 {
+            let arr_reg_name_value = [
+                (hv_register_name_HV_ARM64_REGISTER_PC, boot_ip),
+                (hv_register_name_HV_ARM64_REGISTER_X0, fdt_start),
+            ];
+            set_registers_64!(self.fd, arr_reg_name_value)
+                .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+        }
+
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]

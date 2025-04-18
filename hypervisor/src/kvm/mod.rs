@@ -77,8 +77,6 @@ pub mod aarch64;
 #[cfg(target_arch = "riscv64")]
 pub mod riscv64;
 #[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::regs;
-#[cfg(target_arch = "aarch64")]
 use std::mem;
 
 ///
@@ -111,6 +109,8 @@ use vfio_ioctls::VfioDeviceFd;
 use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_ioc_nr, ioctl_iowr_nr};
 pub use {kvm_bindings, kvm_ioctls};
 
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::regs;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use crate::RegList;
 
