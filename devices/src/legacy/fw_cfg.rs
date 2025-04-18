@@ -19,14 +19,34 @@ use std::{
     sync::{Arc, Barrier},
 };
 
+#[cfg(target_arch = "aarch64")]
+use arch::aarch64::layout::{
+    MEM_32BIT_DEVICES_START, MEM_32BIT_RESERVED_START, RAM_64BIT_START, RAM_START as HIGH_RAM_START,
+};
+#[cfg(target_arch = "x86_64")]
+use arch::layout::{
+    EBDA_START, HIGH_RAM_START, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START,
+    MEM_32BIT_RESERVED_START, PCI_MMCONFIG_SIZE, PCI_MMCONFIG_START, RAM_64BIT_START,
+};
+use arch::RegionType;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::bootparam::boot_params;
 #[cfg(target_arch = "aarch64")]
 use linux_loader::loader::pe::arm64_image_header as boot_params;
 use vm_device::BusDevice;
 use vm_memory::ByteValued;
+#[cfg(target_arch = "x86_64")]
+use vm_memory::GuestAddress;
 use vmm_sys_util::sock_ctrl_msg::IntoIovec;
 use zerocopy::{FromBytes, IntoBytes};
+
+#[cfg(target_arch = "x86_64")]
+// https://github.com/project-oak/oak/tree/main/stage0_bin#memory-layout
+const STAGE0_START_ADDRESS: GuestAddress = GuestAddress(0xfffe_0000);
+#[cfg(target_arch = "x86_64")]
+const STAGE0_SIZE: usize = 0x2_0000;
+const E820_RAM: u32 = 1;
+const E820_RESERVED: u32 = 2;
 
 #[cfg(target_arch = "x86_64")]
 const PORT_FW_CFG_SELECTOR: u64 = 0x510;
@@ -163,6 +183,63 @@ impl FwCfg {
             items: vec![],
             known_items,
         }
+    }
+
+    pub fn add_e820(&mut self, mem_size: usize) -> Result<()> {
+        #[cfg(target_arch = "x86_64")]
+        let mut mem_regions = vec![
+            (GuestAddress(0), EBDA_START.0 as usize, RegionType::Ram),
+            (
+                MEM_32BIT_DEVICES_START,
+                MEM_32BIT_DEVICES_SIZE as usize,
+                RegionType::Reserved,
+            ),
+            (
+                PCI_MMCONFIG_START,
+                PCI_MMCONFIG_SIZE as usize,
+                RegionType::Reserved,
+            ),
+            (STAGE0_START_ADDRESS, STAGE0_SIZE, RegionType::Reserved),
+        ];
+        #[cfg(target_arch = "aarch64")]
+        let mut mem_regions = arch::aarch64::arch_memory_regions();
+        if mem_size < MEM_32BIT_DEVICES_START.0 as usize {
+            mem_regions.push((
+                HIGH_RAM_START,
+                mem_size - HIGH_RAM_START.0 as usize,
+                RegionType::Ram,
+            ));
+        } else {
+            mem_regions.push((
+                HIGH_RAM_START,
+                MEM_32BIT_RESERVED_START.0 as usize - HIGH_RAM_START.0 as usize,
+                RegionType::Ram,
+            ));
+            mem_regions.push((
+                RAM_64BIT_START,
+                mem_size - (MEM_32BIT_DEVICES_START.0 as usize),
+                RegionType::Ram,
+            ));
+        }
+        let mut bytes = vec![];
+        for (addr, size, region) in mem_regions.iter() {
+            let type_ = match region {
+                RegionType::Ram => E820_RAM,
+                RegionType::Reserved => E820_RESERVED,
+                RegionType::SubRegion => continue,
+            };
+            let mut entry = BootE820Entry {
+                addr: addr.0,
+                size: *size as u64,
+                type_,
+            };
+            bytes.extend_from_slice(entry.as_mut_bytes());
+        }
+        let item = FwCfgItem {
+            name: "etc/e820".to_owned(),
+            content: FwCfgContent::Bytes(bytes),
+        };
+        self.add_item(item)
     }
 
     fn file_dir_mut(&mut self) -> &mut Vec<u8> {
