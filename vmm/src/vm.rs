@@ -732,6 +732,15 @@ impl Vm {
                 .unwrap()
                 .create_fw_cfg_device()
                 .map_err(Error::DeviceManager)?;
+            let _ = device_manager
+                .lock()
+                .unwrap()
+                .fw_cfg()
+                .expect("fw_cfg device must be present")
+                .lock()
+                .unwrap()
+                .add_e820(config.lock().unwrap().memory.size as usize);
+
             let kernel = config
                 .lock()
                 .unwrap()
