@@ -1477,7 +1477,9 @@ impl DeviceManager {
 
     #[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
     pub fn create_fw_cfg_device(&mut self) -> Result<(), DeviceManagerError> {
-        let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new()));
+        let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new(
+            self.memory_manager.lock().as_ref().unwrap().guest_memory(),
+        )));
 
         self.fw_cfg = Some(fw_cfg.clone());
 
@@ -1494,7 +1496,9 @@ impl DeviceManager {
 
     #[cfg(all(feature = "fw_cfg", target_arch = "aarch64"))]
     pub fn create_fw_cfg_device(&mut self) -> Result<(), DeviceManagerError> {
-        let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new()));
+        let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new(
+            self.memory_manager.lock().as_ref().unwrap().guest_memory(),
+        )));
 
         self.fw_cfg = Some(fw_cfg.clone());
 
