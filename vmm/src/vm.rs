@@ -41,6 +41,8 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 #[cfg(all(feature = "sev_snp", feature = "kvm"))]
 use hypervisor::kvm::KVM_X86_SNP_VM;
+#[cfg(feature = "igvm")]
+use hypervisor::HypervisorType;
 use hypervisor::{HypervisorVmError, VmOps};
 #[cfg(feature = "sev_snp")]
 use igvm_defs::SnpPolicy;
@@ -520,7 +522,7 @@ impl Vm {
 
         #[cfg(not(feature = "igvm"))]
         let load_payload_handle = if snapshot.is_none() {
-            Self::load_payload_async(&memory_manager, &config)?
+            Self::load_payload_async(&memory_manager, &config, #[cfg(feature = "igvm")] hypervisor.hypervisor_type())?
         } else {
             None
         };
@@ -604,6 +606,7 @@ impl Vm {
                 &cpu_manager,
                 #[cfg(feature = "sev_snp")]
                 sev_snp_enabled,
+                hypervisor.hypervisor_type(),
             )?
         } else {
             None
@@ -1089,6 +1092,7 @@ impl Vm {
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
+        hypervisor_type: HypervisorType,
     ) -> Result<EntryPoint> {
         let res = igvm_loader::load_igvm(
             &igvm,
@@ -1097,6 +1101,7 @@ impl Vm {
             "",
             #[cfg(feature = "sev_snp")]
             host_data,
+            hypervisor_type,
         )
         .map_err(Error::IgvmLoad)?;
 
@@ -1177,19 +1182,22 @@ impl Vm {
         payload: &PayloadConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
         #[cfg(feature = "igvm")] cpu_manager: Arc<Mutex<cpu::CpuManager>>,
-        #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
+        #[cfg(feature = "sev_snp")] _sev_snp_enabled: bool,
+        #[cfg(feature = "igvm")] hypervisor_type: HypervisorType,
     ) -> Result<EntryPoint> {
         trace_scoped!("load_payload");
         #[cfg(feature = "igvm")]
         {
             if let Some(_igvm_file) = &payload.igvm {
                 let igvm = File::open(_igvm_file).map_err(Error::IgvmFile)?;
-                #[cfg(feature = "sev_snp")]
-                if sev_snp_enabled {
-                    return Self::load_igvm(igvm, memory_manager, cpu_manager, &payload.host_data);
-                }
-                #[cfg(not(feature = "sev_snp"))]
-                return Self::load_igvm(igvm, memory_manager, cpu_manager);
+                return Self::load_igvm(
+                    igvm,
+                    memory_manager,
+                    cpu_manager,
+                    #[cfg(feature = "sev_snp")]
+                    &payload.host_data,
+                    hypervisor_type,
+                );
             }
         }
         match (
@@ -1234,6 +1242,7 @@ impl Vm {
         config: &Arc<Mutex<VmConfig>>,
         #[cfg(feature = "igvm")] cpu_manager: &Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
+        #[cfg(feature = "igvm")] hypervisor_type: HypervisorType,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
         // Kernel with TDX is loaded in a different manner
         #[cfg(feature = "tdx")]
@@ -1262,6 +1271,8 @@ impl Vm {
                             cpu_manager,
                             #[cfg(feature = "sev_snp")]
                             sev_snp_enabled,
+                            #[cfg(feature = "igvm")]
+                            hypervisor_type,
                         )
                     })
                     .map_err(Error::KernelLoadThreadSpawn)

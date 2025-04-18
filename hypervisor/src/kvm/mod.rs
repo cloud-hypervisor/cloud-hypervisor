@@ -126,6 +126,8 @@ ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 // TODO: The following VM types are defined in latest linux kernel arch/x86/include/uapi/asm/kvm.h but doesn't exist in kvm binding yet.
 #[cfg(all(feature = "kvm", feature = "sev_snp"))]
 pub const KVM_X86_SNP_VM: u32 = 4;
+#[cfg(feature = "sev_snp")]
+use x86_64::sev;
 
 #[cfg(feature = "tdx")]
 const KVM_EXIT_TDX: u32 = 50;
@@ -518,6 +520,43 @@ impl vm::Vm for KvmVm {
             .unwrap()
             .launch_start(&self.fd, guest_policy)
             .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
+    }
+
+    #[cfg(feature = "sev_snp")]
+    fn import_isolated_pages(
+        &self,
+        page_type: u32,
+        page_size: u32,
+        // host page frame numbers
+        pfns: &[u64],
+        uaddrs: &[u64],
+    ) -> vm::Result<()> {
+        assert_eq!(pfns.len(), uaddrs.len());
+        if pfns.is_empty() {
+            return Ok(());
+        }
+        // VMSA pages are not supported by launch_update (https://tinyurl.com/vmsa-page-type)
+        if page_type == sev::SEV_VMSA_PAGE_TYPE {
+            return Ok(());
+        }
+        for (pfn, uaddr) in pfns.iter().zip(uaddrs.iter()) {
+            self.fd
+                .set_memory_attributes(kvm_bindings::kvm_memory_attributes {
+                    address: *pfn << sev::GPA_METADATA_PADDING,
+                    size: page_size as u64,
+                    attributes: kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
+                    // Flags must be zero o/w error (flags aren't being used here yet)
+                    flags: 0,
+                })
+                .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
+            self.sev_fd
+                .as_ref()
+                .unwrap()
+                .launch_update(&self.fd, *uaddr, page_size as u64, *pfn, page_type)
+                .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
+        }
+
+        Ok(())
     }
 
     #[cfg(target_arch = "x86_64")]
