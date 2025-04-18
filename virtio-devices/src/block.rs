@@ -52,6 +52,8 @@ const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 const COMPLETION_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
 // New 'wake up' event from the rate limiter
 const RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
+// Proxy KILL event from the VMM
+const PROXY_KILL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 4;
 
 // latency scale, for reduce precision loss in calculate.
 const LATENCY_SCALE: u64 = 10000;
@@ -117,6 +119,13 @@ impl Default for BlockCounters {
     }
 }
 
+#[derive(PartialEq)]
+enum ProxyKillEventState {
+    Running,
+    Pending,
+    Sent,
+}
+
 struct BlockEpollHandler {
     queue_index: u16,
     queue: Queue,
@@ -125,6 +134,7 @@ struct BlockEpollHandler {
     disk_nsectors: u64,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     serial: Vec<u8>,
+    proxy_kill_evt: EventFd,
     kill_evt: EventFd,
     pause_evt: EventFd,
     writeback: Arc<AtomicBool>,
@@ -135,6 +145,7 @@ struct BlockEpollHandler {
     access_platform: Option<Arc<dyn AccessPlatform>>,
     read_only: bool,
     host_cpus: Option<Vec<usize>>,
+    pending_kill: ProxyKillEventState,
 }
 
 impl BlockEpollHandler {
@@ -466,6 +477,8 @@ impl BlockEpollHandler {
         paused_sync: Arc<Barrier>,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
+        // Proxy the kill event from the VMM through the runloop to ensure that all inflight requests are completed
+        helper.add_event(self.proxy_kill_evt.as_raw_fd(), PROXY_KILL_EVENT)?;
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
         helper.add_event(self.disk_image.notifier().as_raw_fd(), COMPLETION_EVENT)?;
         if let Some(rate_limiter) = &self.rate_limiter {
@@ -493,8 +506,8 @@ impl EpollHelperHandler for BlockEpollHandler {
 
                 let rate_limit_reached = self.rate_limiter.as_ref().is_some_and(|r| r.is_blocked());
 
-                // Process the queue only when the rate limit is not reached
-                if !rate_limit_reached {
+                // Process the queue only when the rate limit is not reached and no pending kill
+                if !rate_limit_reached && self.pending_kill == ProxyKillEventState::Running {
                     self.process_queue_submit_and_signal()?
                 }
             }
@@ -541,6 +554,11 @@ impl EpollHelperHandler for BlockEpollHandler {
                     )));
                 }
             }
+            PROXY_KILL_EVENT => {
+                if self.pending_kill == ProxyKillEventState::Running {
+                    self.pending_kill = ProxyKillEventState::Pending;
+                }
+            }
             _ => {
                 return Err(EpollHelperError::HandleEvent(anyhow!(
                     "Unexpected event: {}",
@@ -548,6 +566,22 @@ impl EpollHelperHandler for BlockEpollHandler {
                 )));
             }
         }
+
+        // Pending kill and no more inflight requests -> kill for real
+        if self.pending_kill == ProxyKillEventState::Pending {
+            if self.inflight_requests.is_empty() {
+                self.kill_evt.write(1).map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!("Failed to write kill event: {:?}", e))
+                })?;
+                self.pending_kill = ProxyKillEventState::Sent;
+            } else {
+                info!(
+                    "KILL event pending with {} inflight requests",
+                    self.inflight_requests.len()
+                )
+            }
+        }
+
         Ok(())
     }
 }
@@ -806,7 +840,7 @@ impl VirtioDevice for Block {
             queue.set_event_idx(event_idx);
 
             let queue_size = queue.size();
-            let (kill_evt, pause_evt) = self.common.dup_eventfds();
+            let (proxy_kill_evt, pause_evt) = self.common.dup_eventfds();
             let queue_idx = i as u16;
 
             let mut handler = BlockEpollHandler {
@@ -823,7 +857,8 @@ impl VirtioDevice for Block {
                 disk_nsectors: self.disk_nsectors,
                 interrupt_cb: interrupt_cb.clone(),
                 serial: self.serial.clone(),
-                kill_evt,
+                proxy_kill_evt,
+                kill_evt: EventFd::new(libc::EFD_NONBLOCK).unwrap(),
                 pause_evt,
                 writeback: self.writeback.clone(),
                 counters: self.counters.clone(),
@@ -841,6 +876,7 @@ impl VirtioDevice for Block {
                 access_platform: self.common.access_platform.clone(),
                 read_only: self.read_only,
                 host_cpus: self.queue_affinity.get(&queue_idx).cloned(),
+                pending_kill: ProxyKillEventState::Running,
             };
 
             let paused = self.common.paused.clone();
