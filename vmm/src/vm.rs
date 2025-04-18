@@ -727,6 +727,15 @@ impl Vm {
 
         #[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
         {
+            let _ = device_manager
+                .lock()
+                .unwrap()
+                .fw_cfg()
+                .expect("fw_cfg device must be present")
+                .lock()
+                .unwrap()
+                .add_e820(config.lock().unwrap().memory.size as usize);
+
             let kernel = config
                 .lock()
                 .unwrap()
