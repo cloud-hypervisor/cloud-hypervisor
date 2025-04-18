@@ -15,6 +15,7 @@ EXTINT = "EXTINT"
 INOUT = "INOUT"
 liness = "liness"
 outout = "outout"
+TRANSLATER = "TRANSLATER"
 
 [default.extend-identifiers]
 fo = "fo"
