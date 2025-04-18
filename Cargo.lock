@@ -526,6 +526,7 @@ dependencies = [
  "acpi_tables",
  "anyhow",
  "arch",
+ "bitfield-struct",
  "bitflags 2.9.0",
  "byteorder",
  "event_monitor",
