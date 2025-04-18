@@ -13,8 +13,8 @@ use std::sync::{Arc, RwLock};
 use arc_swap::ArcSwap;
 use mshv_bindings::*;
 #[cfg(target_arch = "x86_64")]
-use mshv_ioctls::{set_registers_64, InterruptRequest};
-use mshv_ioctls::{Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
+use mshv_ioctls::InterruptRequest;
+use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
 #[cfg(feature = "sev_snp")]
@@ -73,6 +73,8 @@ use crate::{
     USER_MEMORY_REGION_ADJUSTABLE, USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ,
     USER_MEMORY_REGION_WRITE,
 };
+#[cfg(target_arch = "aarch64")]
+use aarch64::gic::MshvGicV2M;
 
 pub const PAGE_SHIFT: usize = 12;
 
@@ -1327,8 +1329,21 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn setup_regs(&self, _cpu_id: u8, _boot_ip: u64, _fdt_start: u64) -> cpu::Result<()> {
-        unimplemented!()
+    fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
+        let arr_reg_name_value = [(hv_register_name_HV_ARM64_REGISTER_PSTATE, 0x3c5)];
+        set_registers_64!(self.fd, arr_reg_name_value)
+            .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+
+        if cpu_id == 0 {
+            let arr_reg_name_value = [
+                (hv_register_name_HV_ARM64_REGISTER_PC, boot_ip),
+                (hv_register_name_HV_ARM64_REGISTER_X0, fdt_start),
+            ];
+            set_registers_64!(self.fd, arr_reg_name_value)
+                .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+        }
+
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -2204,8 +2219,31 @@ impl vm::Vm for MshvVm {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn create_vgic(&self, _config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
-        unimplemented!()
+    fn create_vgic(&self, config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
+        let gic_device = MshvGicV2M::new(self, config)
+            .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {:?}", e)))?;
+
+        // Register GICD address with the hypervisor
+        self.fd
+            .set_partition_property(
+                hv_partition_property_code_HV_PARTITION_PROPERTY_GICD_BASE_ADDRESS,
+                gic_device.dist_addr,
+            )
+            .map_err(|e| {
+                vm::HypervisorVmError::CreateVgic(anyhow!("Failed to set GICD address: {}", e))
+            })?;
+
+        // Register GITS address with the hypervisor
+        self.fd
+            .set_partition_property(
+                hv_partition_property_code_HV_PARTITION_PROPERTY_GITS_TRANSLATER_BASE_ADDRESS,
+                gic_device.gits_addr,
+            )
+            .map_err(|e| {
+                vm::HypervisorVmError::CreateVgic(anyhow!("Failed to set GITS address: {}", e))
+            })?;
+
+        Ok(Arc::new(Mutex::new(gic_device)))
     }
 
     #[cfg(target_arch = "aarch64")]
