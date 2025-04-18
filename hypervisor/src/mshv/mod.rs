@@ -44,6 +44,8 @@ use std::os::unix::io::AsRawFd;
 use std::sync::Mutex;
 
 #[cfg(target_arch = "aarch64")]
+use aarch64::gic::MshvGicV2M;
+#[cfg(target_arch = "aarch64")]
 pub use aarch64::VcpuMshvState;
 #[cfg(feature = "sev_snp")]
 use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
@@ -2204,8 +2206,32 @@ impl vm::Vm for MshvVm {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn create_vgic(&self, _config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
-        unimplemented!()
+    fn create_vgic(&self, config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
+        let gic_device = MshvGicV2M::new(self, config)
+            .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {:?}", e)))?;
+
+        // Register GICD address with the hypervisor
+        self.fd
+            .set_partition_property(
+                hv_partition_property_code_HV_PARTITION_PROPERTY_GICD_BASE_ADDRESS,
+                gic_device.dist_addr,
+            )
+            .map_err(|e| {
+                vm::HypervisorVmError::CreateVgic(anyhow!("Failed to set GICD address: {}", e))
+            })?;
+
+        // Register GITS address with the hypervisor
+        self.fd
+            .set_partition_property(
+                // spellchecker:disable-line
+                hv_partition_property_code_HV_PARTITION_PROPERTY_GITS_TRANSLATER_BASE_ADDRESS,
+                gic_device.gits_addr,
+            )
+            .map_err(|e| {
+                vm::HypervisorVmError::CreateVgic(anyhow!("Failed to set GITS address: {}", e))
+            })?;
+
+        Ok(Arc::new(Mutex::new(gic_device)))
     }
 
     #[cfg(target_arch = "aarch64")]
