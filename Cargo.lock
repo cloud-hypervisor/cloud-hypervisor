@@ -283,6 +283,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitfield"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5acf59e2452f0c4b968b15ce4b9468f57b45f7733b919d68b19fcc39264bfb8"
+
+[[package]]
 name = "bitfield-struct"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -527,6 +533,7 @@ dependencies = [
  "acpi_tables",
  "anyhow",
  "arch",
+ "bitfield",
  "bitflags 2.9.0",
  "byteorder",
  "event_monitor",
