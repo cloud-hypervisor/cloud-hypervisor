@@ -351,6 +351,10 @@ pub enum Error {
     #[cfg(feature = "fw_cfg")]
     #[error("Fw Cfg missing kernel cmdline")]
     MissingFwCfgCmdline,
+
+    #[cfg(feature = "fw_cfg")]
+    #[error("Error creating e820 map")]
+    CreatingE820Map(#[source] io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -801,6 +805,15 @@ impl Vm {
         device_manager: &Arc<Mutex<DeviceManager>>,
         config: &Arc<Mutex<VmConfig>>,
     ) -> Result<()> {
+        device_manager
+            .lock()
+            .unwrap()
+            .fw_cfg()
+            .expect("fw_cfg device must be present")
+            .lock()
+            .unwrap()
+            .add_e820(config.lock().unwrap().memory.size as usize)
+            .map_err(Error::CreatingE820Map)?;
         let kernel = config
             .lock()
             .unwrap()
