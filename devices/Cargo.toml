@@ -8,6 +8,7 @@ version = "0.1.0"
 acpi_tables = { workspace = true }
 anyhow = { workspace = true }
 arch = { path = "../arch" }
+bitfield-struct = { version = "0.10.1", optional = true }
 bitflags = { workspace = true }
 byteorder = { workspace = true }
 event_monitor = { path = "../event_monitor" }
@@ -43,6 +44,6 @@ arch = { path = "../arch" }
 
 [features]
 default = []
-fw_cfg = ["linux-loader", "zerocopy"]
+fw_cfg = ["bitfield-struct", "linux-loader", "zerocopy"]
 kvm = ["arch/kvm"]
 pvmemcontrol = []
