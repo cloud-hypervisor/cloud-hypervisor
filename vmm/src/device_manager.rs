@@ -581,14 +581,19 @@ impl DeviceRelocation for AddressManager {
                     .map_err(io::Error::other)?;
             }
             PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
-                let allocators = if region_type == PciBarRegionType::Memory32BitRegion {
-                    &self.pci_mmio32_allocators
-                } else {
-                    &self.pci_mmio64_allocators
-                };
-
-                // Find the specific allocator that this BAR was allocated from and use it for new one
-                for allocator in allocators {
+                assert_eq!(
+                    self.pci_mmio32_allocators.len(),
+                    self.pci_mmio64_allocators.len(),
+                    "length of 32-bit and 64-bit MMIO allocators must be equal to number of PCI segments"
+                );
+                let num_segments = self.pci_mmio32_allocators.len();
+                let mut allocators = self.pci_mmio32_allocators.clone();
+                if region_type == PciBarRegionType::Memory64BitRegion {
+                    allocators.append(&mut self.pci_mmio64_allocators.clone());
+                }
+                let mut segment_id = None;
+                // Find the specific allocator that this BAR was allocated from and find the appropriate segment
+                for (i, allocator) in allocators.iter().enumerate() {
                     let allocator_base = allocator.lock().unwrap().base();
                     let allocator_end = allocator.lock().unwrap().end();
 
@@ -597,14 +602,37 @@ impl DeviceRelocation for AddressManager {
                             .lock()
                             .unwrap()
                             .free(GuestAddress(old_base), len as GuestUsize);
-
-                        allocator
-                            .lock()
-                            .unwrap()
-                            .allocate(Some(GuestAddress(new_base)), len as GuestUsize, Some(len))
-                            .ok_or_else(|| io::Error::other("failed allocating new MMIO range"))?;
-
+                        // Modulo needed here as this could be from the 32-bit or 64-bit set of segments
+                        segment_id = Some(i % num_segments);
                         break;
+                    }
+                }
+
+                if let Some(segment_id) = segment_id {
+                    // Create a new set of allocators comprising of the 32-bit and 64-bit allocators for a specific segment
+                    let allocators = [
+                        &self.pci_mmio32_allocators[segment_id],
+                        &self.pci_mmio64_allocators[segment_id],
+                    ];
+                    for allocator in allocators.iter() {
+                        let allocator_base = allocator.lock().unwrap().base();
+                        let allocator_end = allocator.lock().unwrap().end();
+
+                        if new_base >= allocator_base.0 && new_base <= allocator_end.0 {
+                            allocator
+                                .lock()
+                                .unwrap()
+                                .allocate(
+                                    Some(GuestAddress(new_base)),
+                                    len as GuestUsize,
+                                    Some(len),
+                                )
+                                .ok_or_else(|| {
+                                    io::Error::other("failed allocating new MMIO range")
+                                })?;
+
+                            break;
+                        }
                     }
                 }
 
