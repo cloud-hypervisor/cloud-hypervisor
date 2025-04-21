@@ -164,3 +164,14 @@ pub enum ExceptionClass {
     VECTOR_CATCH_32 = 0b111010,
     BRK = 0b111100,
 }
+
+#[allow(non_upper_case_globals)]
+// PSR (Processor State Register) bits.
+// Taken from arch/arm64/include/uapi/asm/ptrace.h.
+const PSR_MODE_EL1h: u64 = 0x0000_0005;
+const PSR_F_BIT: u64 = 0x0000_0040;
+const PSR_I_BIT: u64 = 0x0000_0080;
+const PSR_A_BIT: u64 = 0x0000_0100;
+const PSR_D_BIT: u64 = 0x0000_0200;
+// Taken from arch/arm64/kvm/inject_fault.c.
+pub const PSTATE_FAULT_BITS_64: u64 = PSR_MODE_EL1h | PSR_A_BIT | PSR_F_BIT | PSR_I_BIT | PSR_D_BIT;
