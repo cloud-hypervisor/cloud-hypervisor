@@ -323,7 +323,13 @@ pub enum HypervisorCpuError {
     #[cfg(feature = "sev_snp")]
     #[error("Failed to set sev control register: {0}")]
     SetSevControlRegister(#[source] anyhow::Error),
-
+    ///
+    /// Unsupported SysReg registers
+    ///
+    #[cfg(target_arch = "aarch64")]
+    #[error("Unsupported SysReg registers: {0}")]
+    UnsupportedSysReg(u32),
+    ///
     /// Error injecting NMI
     ///
     #[error("Failed to inject NMI")]

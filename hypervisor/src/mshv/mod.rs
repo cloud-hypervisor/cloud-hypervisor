@@ -1328,8 +1328,20 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn get_sys_reg(&self, _sys_reg: u32) -> cpu::Result<u64> {
-        unimplemented!()
+    fn get_sys_reg(&self, sys_reg: u32) -> cpu::Result<u64> {
+        let mshv_reg = self.sys_reg_to_mshv_reg(sys_reg)?;
+
+        let mut reg_assocs = [hv_register_assoc {
+            name: mshv_reg,
+            ..Default::default()
+        }];
+        self.fd
+            .get_reg(&mut reg_assocs)
+            .map_err(|e| cpu::HypervisorCpuError::GetRegister(e.into()))?;
+
+        // SAFETY: Accessing a union element from bindgen generated definition.
+        let res = unsafe { reg_assocs[0].value.reg64 };
+        Ok(res)
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -1743,6 +1755,14 @@ impl MshvVcpu {
                 .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
         }
         Ok(())
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn sys_reg_to_mshv_reg(&self, sys_regs: u32) -> cpu::Result<u32> {
+        match sys_regs {
+            regs::MPIDR_EL1 => Ok(hv_register_name_HV_ARM64_REGISTER_MPIDR_EL1),
+            _ => Err(cpu::HypervisorCpuError::UnsupportedSysReg(sys_regs)),
+        }
     }
 }
 
