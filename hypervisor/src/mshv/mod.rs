@@ -506,11 +506,11 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     ///
     fn get_host_ipa_limit(&self) -> i32 {
         let host_ipa = self.mshv.get_host_partition_property(
-            hv_partition_property_code_HV_PARTITION_PROPERTY_PHYSICAL_ADDRESS_WIDTH as u64,
+            hv_partition_property_code_HV_PARTITION_PROPERTY_PHYSICAL_ADDRESS_WIDTH,
         );
 
         match host_ipa {
-            Ok(ipa) => ipa,
+            Ok(ipa) => ipa.try_into().unwrap(),
             Err(e) => {
                 panic!("Failed to get host IPA limit: {:?}", e);
             }
