@@ -262,7 +262,7 @@ impl MshvHypervisor {
     ///
     /// Retrieve the list of MSRs supported by MSHV.
     ///
-    fn get_msr_list(&self) -> hypervisor::Result<MsrList> {
+    fn get_msr_list(&self) -> hypervisor::Result<Vec<u32>> {
         self.mshv
             .get_msr_index_list()
             .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))
@@ -347,15 +347,13 @@ impl MshvHypervisor {
         #[cfg(target_arch = "x86_64")]
         {
             let msr_list = self.get_msr_list()?;
-            let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
             let mut msrs: Vec<MsrEntry> = vec![
                 MsrEntry {
                     ..Default::default()
                 };
-                num_msrs
+                msr_list.len()
             ];
-            let indices = msr_list.as_slice();
-            for (pos, index) in indices.iter().enumerate() {
+            for (pos, index) in msr_list.iter().enumerate() {
                 msrs[pos].index = *index;
             }
 
