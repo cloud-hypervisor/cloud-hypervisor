@@ -693,6 +693,14 @@ impl Vm {
             } else {
                 return Err(Error::FwCfgKernelFile);
             }
+            let cmdline = Vm::generate_cmdline(
+                config.lock().unwrap().payload.as_ref().unwrap(),
+                #[cfg(target_arch = "aarch64")]
+                &device_manager,
+            )
+            .map_err(|_| Error::FwCfgCmdline)?
+            .as_cstring()
+            .map_err(|_| Error::FwCfgCmdline)?;
             let _ = device_manager
                 .lock()
                 .unwrap()
@@ -700,12 +708,7 @@ impl Vm {
                 .expect("fw_cfg device must be present")
                 .lock()
                 .unwrap()
-                .add_kernel_cmdline(
-                    Vm::generate_cmdline(config.lock().unwrap().payload.as_ref().unwrap())
-                        .map_err(|_| Error::FwCfgCmdline)?
-                        .as_cstring()
-                        .map_err(|_| Error::FwCfgCmdline)?,
-                );
+                .add_kernel_cmdline(cmdline);
             let initramfs = config
                 .lock()
                 .unwrap()

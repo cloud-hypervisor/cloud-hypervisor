@@ -16,30 +16,54 @@
 /// We implement the functionality necessary to use Oak's Stage0 Firmware
 /// (This includes most of the functionality, besides adding additional
 /// items to the fw_cfg device for the firmware).
-use crate::acpi::{create_acpi_loader, AcpiTable};
-use arch::{
-    layout::{
-        EBDA_START, HIGH_RAM_START, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START,
-        MEM_32BIT_RESERVED_START, PCI_MMCONFIG_SIZE, PCI_MMCONFIG_START, RAM_64BIT_START,
-    },
-    RegionType,
+use std::fs::File;
+use std::io::{ErrorKind, Read, Result, Seek, SeekFrom};
+use std::mem::{size_of, size_of_val};
+use std::os::unix::fs::FileExt;
+use std::sync::{Arc, Barrier};
+
+#[cfg(target_arch = "aarch64")]
+use arch::aarch64::layout::{
+    MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, MEM_32BIT_RESERVED_START, PCI_MMCONFIG_SIZE,
+    PCI_MMCONFIG_START, RAM_64BIT_START, RAM_START as HIGH_RAM_START, UEFI_SIZE,
 };
+#[cfg(target_arch = "x86_64")]
+use arch::layout::{
+    EBDA_START, HIGH_RAM_START, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START,
+    MEM_32BIT_RESERVED_START, PCI_MMCONFIG_SIZE, PCI_MMCONFIG_START, RAM_64BIT_START,
+};
+use arch::RegionType;
 use bitfield::bitfield;
+#[cfg(target_arch = "x86_64")]
 use linux_loader::bootparam::boot_params;
-use std::{
-    fs::File,
-    io::{ErrorKind, Read, Result, Seek, SeekFrom},
-    mem::{size_of, size_of_val},
-    os::unix::fs::FileExt,
-    sync::{Arc, Barrier},
-};
 use vm_device::BusDevice;
+use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{
-    bitmap::AtomicBitmap, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
-    GuestMemoryMmap,
+    ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
 };
+#[cfg(target_arch = "aarch64")]
+#[repr(C, packed)]
+#[derive(Debug, Copy, Clone, Default)]
+// TODO: make arm64_image_header public in linux loader crate
+// https://github.com/rust-vmm/linux-loader/blob/main/src/loader/pe/mod.rs#L78
+struct boot_params {
+    code0: u32,
+    code1: u32,
+    text_offset: u64,
+    image_size: u64,
+    flags: u64,
+    res2: u64,
+    res3: u64,
+    res4: u64,
+    magic: u32,
+    res5: u32,
+}
+#[cfg(target_arch = "aarch64")]
+unsafe impl ByteValued for boot_params {}
 use vmm_sys_util::sock_ctrl_msg::IntoIovec;
-use zerocopy::{IntoBytes, FromBytes, FromZeros};
+use zerocopy::{FromBytes, FromZeros, IntoBytes};
+
+use crate::acpi::{create_acpi_loader, AcpiTable};
 
 const STAGE0_START_ADDRESS: GuestAddress = GuestAddress(0xffe0_0000);
 const STAGE0_SIZE: usize = 0x20_0000;
@@ -216,10 +240,12 @@ impl FwCfg {
         }
     }
 
-    #[cfg(target_arch = "x86_64")]
     pub fn add_e820(&mut self, mem_size: usize) -> Result<()> {
         let mut mem_regions = vec![
+            #[cfg(target_arch = "x86_64")]
             (GuestAddress(0), EBDA_START.0 as usize, RegionType::Ram),
+            #[cfg(target_arch = "aarch64")]
+            (GuestAddress(0), UEFI_SIZE as usize, RegionType::Ram),
             (
                 MEM_32BIT_DEVICES_START,
                 MEM_32BIT_DEVICES_SIZE as usize,
@@ -391,10 +417,16 @@ impl FwCfg {
         let mut buffer = vec![0u8; size_of::<boot_params>()];
         file.read_exact_at(&mut buffer, 0)?;
         let bp = boot_params::from_mut_slice(&mut buffer).unwrap();
-        if bp.hdr.setup_sects == 0 {
-            bp.hdr.setup_sects = 4;
+        #[cfg(target_arch = "x86_64")]
+        {
+            if bp.hdr.setup_sects == 0 {
+                bp.hdr.setup_sects = 4;
+            }
+            bp.hdr.type_of_loader = 0xff;
         }
-        bp.hdr.type_of_loader = 0xff;
+        #[cfg(target_arch = "aarch64")]
+        let kernel_start = bp.text_offset;
+        #[cfg(target_arch = "x86_64")]
         let kernel_start = (bp.hdr.setup_sects as usize + 1) * 512;
         self.known_items[FW_CFG_SETUP_SIZE as usize] = FwCfgContent::U32(buffer.len() as u32);
         self.known_items[FW_CFG_SETUP_DATA as usize] = FwCfgContent::Bytes(buffer);
@@ -411,7 +443,6 @@ impl FwCfg {
         self.known_items[FW_CFG_CMDLINE_DATA as usize] = FwCfgContent::Bytes(bytes);
     }
 
-    #[cfg(target_arch = "x86_64")]
     pub fn add_acpi(&mut self, acpi_table: AcpiTable) -> Result<()> {
         let [table_loader, acpi_rsdp, apci_tables] = create_acpi_loader(acpi_table);
         self.add_item(table_loader)?;
@@ -643,7 +674,7 @@ mod tests {
         let dma_lo: [u8; 4] = address_bytes[0..4].try_into().unwrap();
         let dma_hi: [u8; 4] = address_bytes[4..8].try_into().unwrap();
 
-        // writing the FwCfgDmaAccess to mem (this would just be self.dma_acess.as_ref() in guest)
+        // writing the FwCfgDmaAccess to mem (this would just be self.dma_access.as_ref() in guest)
         let _ = mem.write(access.as_mut_bytes(), access_address);
         let mem_m = GuestMemoryAtomic::new(mem.clone());
         let mut fw_cfg = FwCfg::new(mem_m);
