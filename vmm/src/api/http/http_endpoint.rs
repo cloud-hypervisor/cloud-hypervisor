@@ -15,12 +15,14 @@ use crate::api::http::{error_response, EndpointHandler, HttpError};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::api::VmCoredump;
 use crate::api::{
-    AddDisk, ApiAction, ApiRequest, NetConfig, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem,
+    AddDisk, ApiAction, ApiError, ApiRequest, NetConfig, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem,
     VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBoot, VmConfig, VmCounters, VmDelete, VmNmi, VmPause,
     VmPowerButton, VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore,
     VmResume, VmSendMigration, VmShutdown, VmSnapshot,
 };
 use crate::config::RestoreConfig;
+use crate::cpu::Error as CpuError;
+use crate::vm::Error as VmError;
 
 // /api/v1/vm.create handler
 pub struct VmCreate {}
@@ -183,7 +185,6 @@ vm_action_put_handler_body!(VmAddVdpa);
 vm_action_put_handler_body!(VmAddVsock);
 vm_action_put_handler_body!(VmAddUserDevice);
 vm_action_put_handler_body!(VmRemoveDevice);
-vm_action_put_handler_body!(VmResize);
 vm_action_put_handler_body!(VmResizeZone);
 vm_action_put_handler_body!(VmSnapshot);
 vm_action_put_handler_body!(VmReceiveMigration);
@@ -219,6 +220,34 @@ impl PutHandler for VmAddNet {
 }
 
 impl GetHandler for VmAddNet {}
+
+impl PutHandler for VmResize {
+    fn handle_request(
+        &'static self,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+        body: &Option<Body>,
+        _files: Vec<File>,
+    ) -> std::result::Result<Option<Body>, HttpError> {
+        if let Some(body) = body {
+            self.send(
+                api_notifier,
+                api_sender,
+                serde_json::from_slice(body.raw())?,
+            )
+            .map_err(|e| match e {
+                ApiError::VmResize(VmError::CpuManager(CpuError::VcpuPendingRemovedVcpu)) => {
+                    HttpError::TooManyRequests
+                }
+                _ => HttpError::ApiError(e),
+            })
+        } else {
+            Err(HttpError::BadRequest)
+        }
+    }
+}
+
+impl GetHandler for VmResize {}
 
 impl PutHandler for VmRestore {
     fn handle_request(
