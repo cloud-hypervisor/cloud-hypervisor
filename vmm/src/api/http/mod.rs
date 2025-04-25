@@ -52,6 +52,9 @@ pub enum HttpError {
     /// Undefined endpoints
     NotFound,
 
+    /// Too many requests
+    TooManyRequests,
+
     /// Internal Server Error
     InternalServerError,
 
@@ -65,6 +68,7 @@ impl Display for HttpError {
         match self {
             BadRequest => write!(f, "Bad Request"),
             NotFound => write!(f, "Not Found"),
+            TooManyRequests => write!(f, "Too Many Requests"),
             InternalServerError => write!(f, "Internal Server Error"),
             SerdeJsonDeserialize(serde_error) => write!(f, "{}", serde_error),
             ApiError(api_error) => write!(f, "{}", api_error),
@@ -125,6 +129,7 @@ pub trait EndpointHandler {
             Err(e @ HttpError::SerdeJsonDeserialize(_)) => {
                 error_response(e, StatusCode::BadRequest)
             }
+            Err(e @ HttpError::TooManyRequests) => error_response(e, StatusCode::TooManyRequests),
             Err(e) => error_response(e, StatusCode::InternalServerError),
         }
     }
