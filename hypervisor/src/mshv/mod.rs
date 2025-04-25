@@ -755,18 +755,7 @@ impl cpu::Vcpu for MshvVcpu {
                         ret_rax = eax as u64;
                     }
 
-                    let insn_len = info.header.instruction_length() as u64;
-
-                    /* Advance RIP and update RAX */
-                    let arr_reg_name_value = [
-                        (
-                            hv_register_name_HV_X64_REGISTER_RIP,
-                            info.header.rip + insn_len,
-                        ),
-                        (hv_register_name_HV_X64_REGISTER_RAX, ret_rax),
-                    ];
-                    set_registers_64!(self.fd, arr_reg_name_value)
-                        .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+                    self.advance_rip_update_rax(&info, ret_rax)?;
                     Ok(cpu::VmExit::Ignore)
                 }
                 #[cfg(target_arch = "aarch64")]
