@@ -301,7 +301,8 @@ Further details can be found in the [release documentation](docs/releases.md).
 As of 2023-01-03, the following cloud images are supported:
 
 - [Ubuntu Focal](https://cloud-images.ubuntu.com/focal/current/) (focal-server-cloudimg-{amd64,arm64}.img)
-- [Ubuntu Jammy](https://cloud-images.ubuntu.com/jammy/current/) (jammy-server-cloudimg-{amd64,arm64}.img )
+- [Ubuntu Jammy](https://cloud-images.ubuntu.com/jammy/current/) (jammy-server-cloudimg-{amd64,arm64}.img)
+- [Ubuntu Noble](https://cloud-images.ubuntu.com/noble/current/) (noble-server-cloudimg-{amd64,arm64}.img)
 - [Fedora 36](https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/36/Cloud/) ([Fedora-Cloud-Base-36-1.5.x86_64.raw.xz](https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/36/Cloud/x86_64/images/) / [Fedora-Cloud-Base-36-1.5.aarch64.raw.xz](https://archives.fedoraproject.org/pub/archive/fedora/linux/releases/36/Cloud/aarch64/images/))
 
 Direct kernel boot to userspace should work with a rootfs from most
