@@ -17,8 +17,7 @@ use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
 use vm_memory::GuestAddress;
 use vmm_sys_util::eventfd::EventFd;
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-use zerocopy::{transmute, FromBytes, Immutable, IntoBytes};
+use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use super::AcpiNotificationFlags;
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
@@ -370,28 +369,6 @@ pub struct AcpiTable {
 
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 impl AcpiTable {
-    pub fn relocate(&mut self, table_addr: u64) {
-        let old_addr: u64 = transmute!(self.rsdp.xsdt_addr);
-        self.rsdp.xsdt_addr = transmute!(table_addr);
-
-        let sum = wrapping_sum(&self.rsdp.as_bytes()[0..20]);
-        self.rsdp.checksum = self.rsdp.checksum.wrapping_sub(sum);
-        let ext_sum = wrapping_sum(self.rsdp.as_bytes());
-        self.rsdp.extended_checksum = self.rsdp.extended_checksum.wrapping_sub(ext_sum);
-
-        for pointer in self.table_pointers.iter() {
-            let old_val = u64::read_from_prefix(&self.tables[*pointer..]).unwrap().0;
-            let new_val = old_val.wrapping_sub(old_addr).wrapping_add(table_addr);
-            IntoBytes::write_to_prefix(&new_val, &mut self.tables[*pointer..]).unwrap();
-        }
-
-        for (start, len) in self.table_checksums.iter() {
-            let sum = wrapping_sum(&self.tables[*start..(*start + *len)]);
-            let checksum = &mut self.tables[start + offset_of!(AcpiTableHeader, checksum)];
-            *checksum = checksum.wrapping_sub(sum);
-        }
-    }
-
     pub fn rsdp(&self) -> &Rsdp {
         &self.rsdp
     }
@@ -413,9 +390,7 @@ impl AcpiTable {
     }
 }
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-pub fn create_acpi_loader(mut acpi_table: AcpiTable) -> [FwCfgItem; 3] {
-    acpi_table.relocate(0);
+pub fn create_acpi_loader(acpi_table: AcpiTable) -> [FwCfgItem; 3] {
     let mut table_loader_bytes: Vec<u8> = Vec::new();
     let allocate_rsdp = Allocate {
         command: COMMAND_ALLOCATE,

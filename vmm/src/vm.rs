@@ -2259,12 +2259,16 @@ impl Vm {
             VmState::Running
         };
         current_state.valid_transition(new_state)?;
+        #[cfg(feature = "fw_cfg")]
+        let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
 
         #[cfg(feature = "fw_cfg")]
-        let _ = create_acpi_tables_for_fw_cfg(
+        create_acpi_tables_for_fw_cfg(
             &self.device_manager,
             &self.cpu_manager,
             &self.memory_manager,
+            &self.numa_nodes,
+            tpm_enabled,
         );
 
         // Do earlier to parallelise with loading kernel

@@ -847,7 +847,9 @@ pub fn create_acpi_tables_for_fw_cfg(
     device_manager: &Arc<Mutex<DeviceManager>>,
     cpu_manager: &Arc<Mutex<CpuManager>>,
     memory_manager: &Arc<Mutex<MemoryManager>>,
-) -> GuestAddress {
+    numa_nodes: &NumaNodes,
+    tpm_enabled: bool,
+) {
     trace_scoped!("create_acpi_tables");
 
     // To create AcpiTable
@@ -856,21 +858,9 @@ pub fn create_acpi_tables_for_fw_cfg(
     let mut checksums: Vec<(usize, usize)> = vec![];
     let mut tables: Vec<u64> = Vec::new();
 
-    let xsdt_offset = GuestAddress(0);
-    let xsdt_size = if device_manager
-        .lock()
-        .unwrap()
-        .iommu_attached_devices()
-        .is_some()
-    {
-        0x44
-    } else {
-        0x3c
-    };
-
     // DSDT
     let dsdt = create_dsdt_table(device_manager, cpu_manager, memory_manager);
-    let dsdt_offset = xsdt_offset.checked_add(xsdt_size).unwrap();
+    let dsdt_offset = GuestAddress(0);
     table_bytes.extend_from_slice(dsdt.as_slice());
 
     // FACP aka FADT
@@ -890,6 +880,28 @@ pub fn create_acpi_tables_for_fw_cfg(
     let mut prev_tbl_off = madt_offset;
     table_bytes.extend_from_slice(madt.as_slice());
 
+    // PPTT
+    #[cfg(target_arch = "aarch64")]
+    {
+        let pptt = cpu_manager.lock().unwrap().create_pptt();
+        let pptt_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
+        tables.push(pptt_offset.0);
+        prev_tbl_len = pptt.len() as u64;
+        prev_tbl_off = pptt_offset;
+        table_bytes.extend_from_slice(pptt.as_slice());
+    }
+
+    // GTDT
+    #[cfg(target_arch = "aarch64")]
+    {
+        let gtdt = create_gtdt_table();
+        let gtdt_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
+        tables.push(gtdt_offset.0);
+        prev_tbl_len = gtdt.len() as u64;
+        prev_tbl_off = gtdt_offset;
+        table_bytes.extend_from_slice(gtdt.as_slice());
+    }
+
     // MCFG
     let mcfg = create_mcfg_table(device_manager.lock().unwrap().pci_segments());
     let mcfg_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
@@ -898,6 +910,92 @@ pub fn create_acpi_tables_for_fw_cfg(
     prev_tbl_off = mcfg_offset;
     table_bytes.extend_from_slice(mcfg.as_slice());
 
+    // SPCR and DBG2
+    #[cfg(target_arch = "aarch64")]
+    {
+        let is_serial_on = device_manager
+            .lock()
+            .unwrap()
+            .get_device_info()
+            .clone()
+            .contains_key(&(DeviceType::Serial, DeviceType::Serial.to_string()));
+        let serial_device_addr = arch::layout::LEGACY_SERIAL_MAPPED_IO_START.raw_value();
+        let serial_device_irq = if is_serial_on {
+            device_manager
+                .lock()
+                .unwrap()
+                .get_device_info()
+                .clone()
+                .get(&(DeviceType::Serial, DeviceType::Serial.to_string()))
+                .unwrap()
+                .irq()
+        } else {
+            // If serial is turned off, add a fake device with invalid irq.
+            31
+        };
+
+        // SPCR
+        let spcr = create_spcr_table(serial_device_addr, serial_device_irq);
+        let spcr_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
+        tables.push(spcr_offset.0);
+        prev_tbl_len = spcr.len() as u64;
+        prev_tbl_off = spcr_offset;
+        table_bytes.extend_from_slice(spcr.as_slice());
+
+        // DBG2
+        let dbg2 = create_dbg2_table(serial_device_addr);
+        let dbg2_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
+        tables.push(dbg2_offset.0);
+        prev_tbl_len = dbg2.len() as u64;
+        prev_tbl_off = dbg2_offset;
+        table_bytes.extend_from_slice(dbg2.as_slice());
+    }
+
+    if tpm_enabled {
+        // TPM2 Table
+        let tpm2 = create_tpm2_table();
+        let tpm2_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
+        tables.push(tpm2_offset.0);
+
+        prev_tbl_len = tpm2.len() as u64;
+        prev_tbl_off = tpm2_offset;
+        table_bytes.extend_from_slice(tpm2.as_slice());
+    }
+    // SRAT and SLIT
+    // Only created if the NUMA nodes list is not empty.
+    if !numa_nodes.is_empty() {
+        #[cfg(target_arch = "x86_64")]
+        let topology = cpu_manager.lock().unwrap().get_vcpu_topology();
+        // SRAT
+        let srat = create_srat_table(
+            numa_nodes,
+            #[cfg(target_arch = "x86_64")]
+            topology,
+        );
+        let srat_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
+        tables.push(srat_offset.0);
+        table_bytes.extend_from_slice(srat.as_slice());
+
+        // SLIT
+        let slit = create_slit_table(numa_nodes);
+        let slit_offset = srat_offset.checked_add(srat.len() as u64).unwrap();
+        tables.push(slit_offset.0);
+
+        prev_tbl_len = slit.len() as u64;
+        prev_tbl_off = slit_offset;
+        table_bytes.extend_from_slice(slit.as_slice());
+    };
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        let iort = create_iort_table(device_manager.lock().unwrap().pci_segments());
+        let iort_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
+        tables.push(iort_offset.0);
+        prev_tbl_len = iort.len() as u64;
+        prev_tbl_off = iort_offset;
+        table_bytes.extend_from_slice(slit.as_slice());
+    }
+
     // VIOT
     if let Some((iommu_bdf, devices_bdf)) = device_manager.lock().unwrap().iommu_attached_devices()
     {
@@ -905,18 +1003,20 @@ pub fn create_acpi_tables_for_fw_cfg(
 
         let viot_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
         tables.push(viot_offset.0);
+        prev_tbl_len = viot.len() as u64;
+        prev_tbl_off = viot_offset;
         table_bytes.extend_from_slice(viot.as_slice());
     }
     // XSDT
+    let xsdt_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
     let mut xsdt = Sdt::new(*b"XSDT", 36, 1, *b"CLOUDH", *b"CHXSDT  ", 1);
     for table in tables {
-        pointers.push(xsdt.len());
+        pointers.push(xsdt_offset.0 as usize + xsdt.len());
         xsdt.append(table);
     }
     xsdt.update_checksum();
-    info!("xsdt len: {:x}", xsdt.len());
     checksums.push((xsdt_offset.0 as usize, xsdt.len()));
-    let bytes = [xsdt.as_slice(), &table_bytes].concat();
+    let bytes = [&table_bytes, xsdt.as_slice()].concat();
 
     // RSDP
     let rsdp = Rsdp::new(*b"CLOUDH", xsdt_offset.0);
@@ -936,7 +1036,6 @@ pub fn create_acpi_tables_for_fw_cfg(
         .lock()
         .unwrap()
         .add_acpi(acpi);
-    xsdt_offset
 }
 
 #[cfg(feature = "tdx")]
