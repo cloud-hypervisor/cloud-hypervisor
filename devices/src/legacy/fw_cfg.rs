@@ -1,16 +1,7 @@
 // Copyright 2025 Google LLC.
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// SPDX-License-Identifier: Apache-2.0
 //
-//      https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
 
 /// NOTE: This is not a full implementation of the qemu fw_cfg spec.
 /// We implement the functionality necessary to use Oak's Stage0 Firmware
@@ -59,6 +50,7 @@ struct boot_params {
     res5: u32,
 }
 #[cfg(target_arch = "aarch64")]
+// SAFETY: data structure only contain a series of integers
 unsafe impl ByteValued for boot_params {}
 use vmm_sys_util::sock_ctrl_msg::IntoIovec;
 use zerocopy::{FromBytes, FromZeros, IntoBytes};
@@ -558,6 +550,7 @@ impl BusDevice for FwCfg {
 mod tests {
     use std::ffi::CString;
     use std::io::Write;
+
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
