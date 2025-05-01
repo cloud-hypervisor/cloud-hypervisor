@@ -993,7 +993,7 @@ pub fn create_acpi_tables_for_fw_cfg(
         tables.push(iort_offset.0);
         prev_tbl_len = iort.len() as u64;
         prev_tbl_off = iort_offset;
-        table_bytes.extend_from_slice(slit.as_slice());
+        table_bytes.extend_from_slice(iort.as_slice());
     }
 
     // VIOT

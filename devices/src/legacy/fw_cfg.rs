@@ -15,8 +15,7 @@ use std::sync::{Arc, Barrier};
 
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::layout::{
-    MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, MEM_32BIT_RESERVED_START, PCI_MMCONFIG_SIZE,
-    PCI_MMCONFIG_START, RAM_64BIT_START, RAM_START as HIGH_RAM_START, UEFI_SIZE,
+    MEM_32BIT_DEVICES_START, MEM_32BIT_RESERVED_START, RAM_64BIT_START, RAM_START as HIGH_RAM_START,
 };
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{
@@ -57,7 +56,9 @@ use zerocopy::{FromBytes, FromZeros, IntoBytes};
 
 use crate::acpi::{create_acpi_loader, AcpiTable};
 
+#[cfg(target_arch = "x86_64")]
 const STAGE0_START_ADDRESS: GuestAddress = GuestAddress(0xffe0_0000);
+#[cfg(target_arch = "x86_64")]
 const STAGE0_SIZE: usize = 0x20_0000;
 const E820_RAM: u32 = 1;
 const E820_RESERVED: u32 = 2;
@@ -233,11 +234,9 @@ impl FwCfg {
     }
 
     pub fn add_e820(&mut self, mem_size: usize) -> Result<()> {
+        #[cfg(target_arch = "x86_64")]
         let mut mem_regions = vec![
-            #[cfg(target_arch = "x86_64")]
             (GuestAddress(0), EBDA_START.0 as usize, RegionType::Ram),
-            #[cfg(target_arch = "aarch64")]
-            (GuestAddress(0), UEFI_SIZE as usize, RegionType::Ram),
             (
                 MEM_32BIT_DEVICES_START,
                 MEM_32BIT_DEVICES_SIZE as usize,
@@ -250,6 +249,8 @@ impl FwCfg {
             ),
             (STAGE0_START_ADDRESS, STAGE0_SIZE, RegionType::Reserved),
         ];
+        #[cfg(target_arch = "aarch64")]
+        let mut mem_regions = arch::aarch64::arch_memory_regions();
         if mem_size < MEM_32BIT_DEVICES_START.0 as usize {
             mem_regions.push((
                 HIGH_RAM_START,
