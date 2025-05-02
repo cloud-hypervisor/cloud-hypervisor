@@ -3,24 +3,25 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(not(target_arch = "riscv64"))]
 use std::mem::{offset_of, size_of};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(not(target_arch = "riscv64"))]
 use acpi_tables::rsdp::Rsdp;
 use acpi_tables::{aml, Aml, AmlSink};
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
 use vm_memory::GuestAddress;
 use vmm_sys_util::eventfd::EventFd;
+#[cfg(not(target_arch = "riscv64"))]
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use super::AcpiNotificationFlags;
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(not(target_arch = "riscv64"))]
 use crate::legacy::fw_cfg::{create_file_name, FwCfgContent, FwCfgItem, FILE_NAME_SIZE};
 
 pub const GED_DEVICE_ACPI_SIZE: usize = 0x1;
@@ -276,7 +277,7 @@ pub const FW_CFG_FILENAME_ACPI_TABLES: &str = "acpi/tables";
 pub const SIGNATURE: [u8; 4] = *b"XSDT";
 pub const COMPILER_ID: [u8; 4] = *b"RVAT";
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(not(target_arch = "riscv64"))]
 #[repr(C, align(4))]
 #[derive(Debug, IntoBytes, Immutable)]
 pub struct Allocate {
@@ -287,7 +288,7 @@ pub struct Allocate {
     _pad: [u8; 63],
 }
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(not(target_arch = "riscv64"))]
 #[repr(C, align(4))]
 #[derive(Debug, IntoBytes, Immutable)]
 pub struct AddPointer {
@@ -299,7 +300,7 @@ pub struct AddPointer {
     _pad: [u8; 7],
 }
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(not(target_arch = "riscv64"))]
 #[repr(C, align(4))]
 #[derive(Debug, IntoBytes, Immutable)]
 pub struct AddChecksum {
@@ -311,7 +312,7 @@ pub struct AddChecksum {
     _pad: [u8; 56],
 }
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(not(target_arch = "riscv64"))]
 fn create_intra_pointer(name: &str, offset: usize, size: u8) -> AddPointer {
     AddPointer {
         command: COMMAND_ADD_POINTER,
@@ -323,7 +324,7 @@ fn create_intra_pointer(name: &str, offset: usize, size: u8) -> AddPointer {
     }
 }
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(not(target_arch = "riscv64"))]
 fn create_acpi_table_checksum(offset: usize, len: usize) -> AddChecksum {
     AddChecksum {
         command: COMMAND_ADD_CHECKSUM,
@@ -335,7 +336,7 @@ fn create_acpi_table_checksum(offset: usize, len: usize) -> AddChecksum {
     }
 }
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(not(target_arch = "riscv64"))]
 #[inline]
 pub fn wrapping_sum<'a, T>(data: T) -> u8
 where
@@ -344,7 +345,7 @@ where
     data.into_iter().fold(0u8, |accu, e| accu.wrapping_add(*e))
 }
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(not(target_arch = "riscv64"))]
 #[repr(C, align(4))]
 #[derive(Debug, Clone, Default, FromBytes, IntoBytes)]
 pub struct AcpiTableHeader {
@@ -359,7 +360,7 @@ pub struct AcpiTableHeader {
     pub asl_compiler_revision: u32,
 }
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(not(target_arch = "riscv64"))]
 pub struct AcpiTable {
     pub rsdp: Rsdp,
     pub tables: Vec<u8>,
@@ -367,7 +368,7 @@ pub struct AcpiTable {
     pub table_checksums: Vec<(usize, usize)>,
 }
 
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(not(target_arch = "riscv64"))]
 impl AcpiTable {
     pub fn rsdp(&self) -> &Rsdp {
         &self.rsdp
@@ -390,6 +391,7 @@ impl AcpiTable {
     }
 }
 
+#[cfg(not(target_arch = "riscv64"))]
 pub fn create_acpi_loader(acpi_table: AcpiTable) -> [FwCfgItem; 3] {
     let mut table_loader_bytes: Vec<u8> = Vec::new();
     let allocate_rsdp = Allocate {

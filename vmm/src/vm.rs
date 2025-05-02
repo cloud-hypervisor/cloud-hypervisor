@@ -68,7 +68,7 @@ use vm_migration::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
-#[cfg(feature = "fw_cfg")]
+#[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
 use crate::acpi::create_acpi_tables_for_fw_cfg;
 use crate::config::{add_to_config, ValidationError};
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
@@ -661,7 +661,7 @@ impl Vm {
             .create_devices(console_info, console_resize_pipe, original_termios)
             .map_err(Error::DeviceManager)?;
 
-        #[cfg(feature = "fw_cfg")]
+        #[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
         {
             let _ = device_manager
                 .lock()
@@ -2259,17 +2259,17 @@ impl Vm {
             VmState::Running
         };
         current_state.valid_transition(new_state)?;
-        #[cfg(feature = "fw_cfg")]
-        let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
-
-        #[cfg(feature = "fw_cfg")]
-        create_acpi_tables_for_fw_cfg(
-            &self.device_manager,
-            &self.cpu_manager,
-            &self.memory_manager,
-            &self.numa_nodes,
-            tpm_enabled,
-        );
+        #[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
+        {
+            let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
+            create_acpi_tables_for_fw_cfg(
+                &self.device_manager,
+                &self.cpu_manager,
+                &self.memory_manager,
+                &self.numa_nodes,
+                tpm_enabled,
+            );
+        }
 
         // Do earlier to parallelise with loading kernel
         #[cfg(target_arch = "x86_64")]

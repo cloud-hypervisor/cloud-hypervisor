@@ -8,7 +8,7 @@
 mod cmos;
 #[cfg(target_arch = "x86_64")]
 mod debug_port;
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(not(target_arch = "riscv64"))]
 pub mod fw_cfg;
 #[cfg(target_arch = "x86_64")]
 mod fwdebug;
@@ -24,7 +24,7 @@ mod uart_pl011;
 pub use self::cmos::Cmos;
 #[cfg(target_arch = "x86_64")]
 pub use self::debug_port::DebugPort;
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[cfg(not(target_arch = "riscv64"))]
 pub use self::fw_cfg::FwCfg;
 #[cfg(target_arch = "x86_64")]
 pub use self::fwdebug::FwDebugDevice;

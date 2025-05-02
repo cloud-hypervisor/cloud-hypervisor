@@ -53,7 +53,7 @@ use devices::gic;
 use devices::interrupt_controller::InterruptController;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
-#[cfg(feature = "fw_cfg")]
+#[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
 use devices::legacy::FwCfg;
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
@@ -941,7 +941,7 @@ pub struct DeviceManager {
 
     mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
 
-    #[cfg(feature = "fw_cfg")]
+    #[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
     fw_cfg: Option<Arc<Mutex<FwCfg>>>,
 }
 
@@ -1206,7 +1206,7 @@ impl DeviceManager {
             snapshot,
             rate_limit_groups,
             mmio_regions: Arc::new(Mutex::new(Vec::new())),
-            #[cfg(feature = "fw_cfg")]
+            #[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
             fw_cfg: None,
         };
 
@@ -4020,7 +4020,7 @@ impl DeviceManager {
         &self.address_manager.mmio_bus
     }
 
-    #[cfg(feature = "fw_cfg")]
+    #[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
     pub fn fw_cfg(&self) -> Option<&Arc<Mutex<FwCfg>>> {
         self.fw_cfg.as_ref()
     }
