@@ -80,6 +80,86 @@ sudo $CLOUDH/cloud-hypervisor/target/debug/cloud-hypervisor \
 popd
 ```
 
+## Virtualized Development Setup
+
+Since there are few RISC-V development boards on the market and not 
+many details about the AIA interrupt controller featured in product listings,
+QEMU is a popular and viable choice for creating a RISC-V development environment. 
+Below are the steps used to create a QEMU virtual machine that can be used for 
+cloud-hypervisor RISC-V development:
+
+### Install Dependencies
+
+```console
+sudo apt update
+sudo apt install opensbi qemu-system-misc u-boot-qemu
+```
+
+### Download and Build QEMU (>=v9.2.0)
+
+Older versions of QEMU may not have support for the AIA 
+interrupt controller.
+
+```console
+wget https://download.qemu.org/qemu-10.0.0.tar.xz
+tar xvJf qemu-10.0.0.tar.xz
+cd qemu-10.0.0
+./configure --target-list=riscv64-softmmu
+make -j $(nproc)
+sudo make install
+```
+
+### Download Ubuntu Server Image
+
+At the time of writing, the best results have been seen with 
+the Ubuntu 24.10 (Oracular) server image. Ex:
+
+```console
+wget https://cdimage.ubuntu.com/releases/oracular/release/ubuntu-24.10-preinstalled-server-riscv64.img.xz
+xz -dk ubuntu-24.10-preinstalled-server-riscv64.img.xz
+```
+
+### (Optional) Resize Disk
+
+If you would like a larger disk, you can resize it now.
+
+```console
+qemu-img resize -f raw <ubuntu-image> +5G
+```
+
+### Boot VM
+
+Note the inclusion of the AIA interrupt controller in the 
+invocation.
+
+```console
+qemu-system-riscv64 \
+  -machine virt,aia=aplic-imsic \
+  -nographic -m 1G -smp 8 \
+  -kernel /usr/lib/u-boot/qemu-riscv64_smode/uboot.elf \
+  -device virtio-rng-pci \
+  -device virtio-net-device,netdev=eth0 -netdev user,id=eth0 \
+  -drive file=<ubuntu-image>,format=raw,if=virtio
+```
+
+### Install KVM Kernel Module Within VM
+KVM is not enabled within the VM by default, so we must enable 
+it manually.
+
+```console
+sudo modprobe kvm
+```
+
+From this point, you can continue with the above steps from the beginning.
+
+### Sources
+
+https://risc-v-getting-started-guide.readthedocs.io/en/latest/linux-qemu.html
+
+https://canonical-ubuntu-boards.readthedocs-hosted.com/en/latest/how-to/qemu-riscv/#using-the-live-server-image
+
+https://www.qemu.org/docs/master/specs/riscv-aia.html
+
 ## Known limitations
 
 - Direct kernel boot only
