@@ -15,6 +15,7 @@ mod queue_pair;
 mod tap;
 
 use std::io::Error as IoError;
+use std::net::IpAddr;
 use std::os::raw::c_uint;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::{io, mem, net};
@@ -76,9 +77,14 @@ fn create_sockaddr(ip_addr: net::Ipv4Addr) -> net_gen::sockaddr {
     unsafe { mem::transmute(addr_in) }
 }
 
-fn create_inet_socket() -> Result<net::UdpSocket> {
+fn create_inet_socket(addr: IpAddr) -> Result<net::UdpSocket> {
+    let domain = match addr {
+        IpAddr::V4(_) => libc::AF_INET,
+        IpAddr::V6(_) => libc::AF_INET6,
+    };
+
     // SAFETY: we check the return value.
-    let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
+    let sock = unsafe { libc::socket(domain, libc::SOCK_DGRAM, 0) };
     if sock < 0 {
         return Err(Error::CreateSocket(IoError::last_os_error()));
     }
