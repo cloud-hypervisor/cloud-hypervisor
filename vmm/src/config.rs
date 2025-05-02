@@ -3138,7 +3138,7 @@ impl Drop for VmConfig {
 #[cfg(test)]
 mod tests {
     use std::fs::File;
-    use std::net::Ipv4Addr;
+    use std::net::{IpAddr, Ipv4Addr};
     use std::os::unix::io::AsRawFd;
 
     use net_util::MacAddr;
@@ -3468,8 +3468,8 @@ mod tests {
     fn net_fixture() -> NetConfig {
         NetConfig {
             tap: None,
-            ip: Ipv4Addr::new(192, 168, 249, 1),
-            mask: Ipv4Addr::new(255, 255, 255, 0),
+            ip: IpAddr::V4(Ipv4Addr::new(192, 168, 249, 1)),
+            mask: IpAddr::V4(Ipv4Addr::new(255, 255, 255, 0)),
             mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
             host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
             mtu: None,

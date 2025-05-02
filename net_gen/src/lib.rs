@@ -26,6 +26,9 @@ pub mod if_tun;
 // --constified-enum '*' --with-derive-default
 // Name is "inn" to avoid conflicting with "in" keyword.
 pub mod inn;
+// generated with bindgen /usr/include/linux/ipv6.h --no-layout-tests --constified-enum '*'
+// --allowlist-type 'sockaddr_in6|in6_ifreq'
+pub mod ipv6;
 // generated with bindgen /usr/include/linux/sockios.h --no-unstable-rust
 // --constified-enum '*' --with-derive-default
 pub mod sockios;
@@ -35,6 +38,7 @@ pub use if_tun::{
 };
 pub use iff::{ifreq, net_device_flags_IFF_UP, setsockopt, sockaddr, AF_INET};
 pub use inn::sockaddr_in;
+pub use ipv6::{in6_ifreq, sockaddr_in6};
 
 pub const TUNTAP: ::std::os::raw::c_uint = 84;
 

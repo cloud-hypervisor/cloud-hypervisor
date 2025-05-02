@@ -6330,7 +6330,9 @@ mod common_parallel {
         use std::str::FromStr;
         let taps = net_util::open_tap(
             Some("chtap0"),
-            Some(std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap()),
+            Some(std::net::IpAddr::V4(
+                std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap(),
+            )),
             None,
             &mut None,
             None,
@@ -7597,7 +7599,9 @@ mod common_sequential {
         use std::str::FromStr;
         let taps = net_util::open_tap(
             Some(tap_name),
-            Some(std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap()),
+            Some(std::net::IpAddr::V4(
+                std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap(),
+            )),
             None,
             &mut None,
             None,
@@ -7695,7 +7699,9 @@ mod common_sequential {
 
         let taps = net_util::open_tap(
             Some(tap_name),
-            Some(std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap()),
+            Some(std::net::IpAddr::V4(
+                std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap(),
+            )),
             None,
             &mut None,
             None,

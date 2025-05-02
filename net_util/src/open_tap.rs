@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::net::Ipv4Addr;
+use std::net::IpAddr;
 use std::path::Path;
 use std::{fs, io};
 
@@ -22,10 +22,8 @@ pub enum Error {
     ReadSysfsTunFlags(io::Error),
     #[error("Open tap device failed: {0}")]
     TapOpen(TapError),
-    #[error("Setting tap IP failed: {0}")]
-    TapSetIp(TapError),
-    #[error("Setting tap netmask failed: {0}")]
-    TapSetNetmask(TapError),
+    #[error("Setting tap IP and/or netmask failed: {0}")]
+    TapSetIpNetmask(TapError),
     #[error("Setting MAC address failed: {0}")]
     TapSetMac(TapError),
     #[error("Getting MAC address failed: {0}")]
@@ -64,8 +62,8 @@ fn check_mq_support(if_name: &Option<&str>, queue_pairs: usize) -> Result<()> {
 /// netmask.
 pub fn open_tap(
     if_name: Option<&str>,
-    ip_addr: Option<Ipv4Addr>,
-    netmask: Option<Ipv4Addr>,
+    ip_addr: Option<IpAddr>,
+    netmask: Option<IpAddr>,
     host_mac: &mut Option<MacAddr>,
     mtu: Option<u16>,
     num_rx_q: usize,
@@ -94,10 +92,8 @@ pub fn open_tap(
             // Don't overwrite ip configuration of existing interfaces:
             if !tap_existed {
                 if let Some(ip) = ip_addr {
-                    tap.set_ip_addr(ip).map_err(Error::TapSetIp)?;
-                }
-                if let Some(mask) = netmask {
-                    tap.set_netmask(mask).map_err(Error::TapSetNetmask)?;
+                    tap.set_ip_addr(ip, netmask)
+                        .map_err(Error::TapSetIpNetmask)?;
                 }
             } else {
                 warn!(
