@@ -142,6 +142,9 @@ pub enum Error {
     #[error("Error from device manager: {0:?}")]
     DeviceManager(DeviceManagerError),
 
+    #[error("Error initializing VM: {0:?}")]
+    InitializeVm(hypervisor::HypervisorVmError),
+
     #[error("No device with id {0:?} to remove")]
     NoDeviceToRemove(String),
 
@@ -603,6 +606,8 @@ impl Vm {
             vm.tdx_init(&cpuid, max_vcpus)
                 .map_err(Error::InitializeTdxVm)?;
         }
+
+        vm.init().map_err(Error::InitializeVm)?;
 
         cpu_manager
             .lock()
