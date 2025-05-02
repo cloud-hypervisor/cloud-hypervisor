@@ -295,53 +295,6 @@ impl MshvHypervisor {
             break;
         }
 
-        // Set additional partition property for SEV-SNP partition.
-        #[cfg(target_arch = "x86_64")]
-        if mshv_vm_type == VmType::Snp {
-            let snp_policy = snp::get_default_snp_guest_policy();
-            let vmgexit_offloads = snp::get_default_vmgexit_offload_features();
-            // SAFETY: access union fields
-            unsafe {
-                debug!(
-                    "Setting the partition isolation policy as: 0x{:x}",
-                    snp_policy.as_uint64
-                );
-                fd.set_partition_property(
-                    hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_POLICY,
-                    snp_policy.as_uint64,
-                )
-                .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-                debug!(
-                    "Setting the partition property to enable VMGEXIT offloads as : 0x{:x}",
-                    vmgexit_offloads.as_uint64
-                );
-                fd.set_partition_property(
-                    hv_partition_property_code_HV_PARTITION_PROPERTY_SEV_VMGEXIT_OFFLOADS,
-                    vmgexit_offloads.as_uint64,
-                )
-                .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-            }
-        }
-
-        // Default Microsoft Hypervisor behavior for unimplemented MSR is to
-        // send a fault to the guest if it tries to access it. It is possible
-        // to override this behavior with a more suitable option i.e., ignore
-        // writes from the guest and return zero in attempt to read unimplemented
-        // MSR.
-        #[cfg(target_arch = "x86_64")]
-        fd.set_partition_property(
-            hv_partition_property_code_HV_PARTITION_PROPERTY_UNIMPLEMENTED_MSR_ACTION,
-            hv_unimplemented_msr_action_HV_UNIMPLEMENTED_MSR_ACTION_IGNORE_WRITE_READ_ZERO as u64,
-        )
-        .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-
-        // Always create a frozen partition
-        fd.set_partition_property(
-            hv_partition_property_code_HV_PARTITION_PROPERTY_TIME_FREEZE,
-            1u64,
-        )
-        .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-
         let vm_fd = Arc::new(fd);
 
         #[cfg(target_arch = "x86_64")]
@@ -2412,6 +2365,65 @@ impl vm::Vm for MshvVm {
                 });
             }
         }
+
+        Ok(())
+    }
+
+    fn init(&self) -> vm::Result<()> {
+        self.fd
+            .initialize()
+            .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
+
+        // Set additional partition property for SEV-SNP partition.
+        #[cfg(feature = "sev_snp")]
+        if self.sev_snp_enabled {
+            let snp_policy = snp::get_default_snp_guest_policy();
+            let vmgexit_offloads = snp::get_default_vmgexit_offload_features();
+            // SAFETY: access union fields
+            unsafe {
+                debug!(
+                    "Setting the partition isolation policy as: 0x{:x}",
+                    snp_policy.as_uint64
+                );
+                self.fd
+                    .set_partition_property(
+                        hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_POLICY,
+                        snp_policy.as_uint64,
+                    )
+                    .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
+                debug!(
+                    "Setting the partition property to enable VMGEXIT offloads as : 0x{:x}",
+                    vmgexit_offloads.as_uint64
+                );
+                self.fd
+                    .set_partition_property(
+                        hv_partition_property_code_HV_PARTITION_PROPERTY_SEV_VMGEXIT_OFFLOADS,
+                        vmgexit_offloads.as_uint64,
+                    )
+                    .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
+            }
+        }
+        // Default Microsoft Hypervisor behavior for unimplemented MSR is to
+        // send a fault to the guest if it tries to access it. It is possible
+        // to override this behavior with a more suitable option i.e., ignore
+        // writes from the guest and return zero in attempt to read unimplemented
+        // MSR.
+        #[cfg(target_arch = "x86_64")]
+        self.fd
+            .set_partition_property(
+                hv_partition_property_code_HV_PARTITION_PROPERTY_UNIMPLEMENTED_MSR_ACTION,
+                hv_unimplemented_msr_action_HV_UNIMPLEMENTED_MSR_ACTION_IGNORE_WRITE_READ_ZERO
+                    as u64,
+            )
+            .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
+
+        // Always create a frozen partition
+        self.fd
+            .set_partition_property(
+                hv_partition_property_code_HV_PARTITION_PROPERTY_TIME_FREEZE,
+                1u64,
+            )
+            .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
 
         Ok(())
     }
