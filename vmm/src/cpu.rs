@@ -147,6 +147,10 @@ pub enum Error {
     #[error("Error finalising vCPU: {0}")]
     VcpuArmFinalize(#[source] hypervisor::HypervisorCpuError),
 
+    #[cfg(target_arch = "aarch64")]
+    #[error("Error initialising GICR base address: {0}")]
+    VcpuSetGicrBaseAddr(#[source] hypervisor::HypervisorCpuError),
+
     #[error("Failed to join on vCPU threads: {0:?}")]
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
@@ -462,6 +466,23 @@ impl Vcpu {
         self.vcpu
             .set_sev_control_register(vmsa_pfn)
             .map_err(Error::SetSevControlRegister)
+    }
+
+    ///
+    /// Sets the vCPU's GIC redistributor base address.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    pub fn set_gic_redistributor_addr(
+        &self,
+        base_redist_addr: u64,
+        redist_size: u64,
+    ) -> Result<()> {
+        let gicr_base = base_redist_addr + (arch::layout::GIC_V3_REDIST_SIZE * self.id as u64);
+        assert!(gicr_base + arch::layout::GIC_V3_REDIST_SIZE <= base_redist_addr + redist_size);
+        self.vcpu
+            .set_gic_redistributor_addr(gicr_base)
+            .map_err(Error::VcpuSetGicrBaseAddr)?;
+        Ok(())
     }
 }
 

@@ -1603,6 +1603,24 @@ impl cpu::Vcpu for MshvVcpu {
             .request_virtual_interrupt(&cfg)
             .map_err(|e| cpu::HypervisorCpuError::Nmi(e.into()))
     }
+    ///
+    /// Set the GICR base address for the vcpu.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn set_gic_redistributor_addr(&self, gicr_base_addr: u64) -> cpu::Result<()> {
+        debug!(
+            "Setting GICR base address to: {:#x}, for vp_index: {:?}",
+            gicr_base_addr, self.vp_index
+        );
+        let arr_reg_name_value = [(
+            hv_register_name_HV_ARM64_REGISTER_GICR_BASE_GPA,
+            gicr_base_addr,
+        )];
+        set_registers_64!(self.fd, arr_reg_name_value)
+            .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+
+        Ok(())
+    }
 }
 
 impl MshvVcpu {
