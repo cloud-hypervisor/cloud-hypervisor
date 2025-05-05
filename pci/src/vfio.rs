@@ -1718,8 +1718,13 @@ impl VfioPciDevice {
                     if let Err(e) = self
                         .container
                         .vfio_dma_unmap(user_memory_region.start, user_memory_region.size)
+                        .map_err(|e| VfioPciError::DmaUnmap(e, self.device_path.clone(), self.bdf))
                     {
-                        error!("Could not unmap mmio region from vfio container: {}", e);
+                        error!(
+                            "Could not unmap mmio region from vfio container: \
+                            iova 0x{:x}, size 0x{:x}: {}, ",
+                            user_memory_region.start, user_memory_region.size, e
+                        );
                     }
                 }
 
