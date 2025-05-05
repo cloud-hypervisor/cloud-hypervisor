@@ -21,8 +21,8 @@ use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryRegion
 
 use super::super::{DeviceType, GuestMemoryMmap, InitramfsConfig};
 use super::layout::{
-    IRQ_BASE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, MEM_PCI_IO_SIZE, MEM_PCI_IO_START,
-    PCI_HIGH_BASE, PCI_MMIO_CONFIG_SIZE_PER_SEGMENT,
+    GIC_V2M_COMPATIBLE, IRQ_BASE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, MEM_PCI_IO_SIZE,
+    MEM_PCI_IO_START, PCI_HIGH_BASE, PCI_MMIO_CONFIG_SIZE_PER_SEGMENT, SPI_BASE, SPI_NUM,
 };
 use crate::{NumaNodes, PciSpaceInfo};
 
@@ -670,12 +670,19 @@ fn create_gic_node(fdt: &mut FdtWriter, gic_device: &Arc<Mutex<dyn Vgic>>) -> Fd
 
     if gic_device.lock().unwrap().msi_compatible() {
         let msic_node = fdt.begin_node("msic")?;
-        fdt.property_string("compatible", gic_device.lock().unwrap().msi_compatibility())?;
+        let msi_compatibility = gic_device.lock().unwrap().msi_compatibility().to_string();
+
+        fdt.property_string("compatible", msi_compatibility.as_str())?;
         fdt.property_null("msi-controller")?;
         fdt.property_u32("phandle", MSI_PHANDLE)?;
         let msi_reg_prop = gic_device.lock().unwrap().msi_properties();
         fdt.property_array_u64("reg", &msi_reg_prop)?;
         fdt.end_node(msic_node)?;
+
+        if msi_compatibility == GIC_V2M_COMPATIBLE {
+            fdt.property_u32("arm,msi-base-spi", SPI_BASE)?;
+            fdt.property_u32("arm,msi-num-spis", SPI_NUM)?;
+        }
     }
 
     fdt.end_node(intc_node)?;
