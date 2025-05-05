@@ -32,6 +32,8 @@ pub struct MshvGicV2M {
     pub vcpu_count: u64,
 }
 
+pub const BASE_SPI_IRQ: u32 = 32;
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct MshvGicV2MState {}
 
