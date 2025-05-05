@@ -1882,6 +1882,23 @@ impl PciDevice for VfioPciDevice {
                 region.start = GuestAddress(new_base);
 
                 for user_memory_region in region.user_memory_regions.iter_mut() {
+                    // Unmap the old MMIO region from vfio container
+                    if !self.iommu_attached {
+                        if let Err(e) = self
+                            .container
+                            .vfio_dma_unmap(user_memory_region.start, user_memory_region.size)
+                            .map_err(|e| {
+                                VfioPciError::DmaUnmap(e, self.device_path.clone(), self.bdf)
+                            })
+                        {
+                            error!(
+                                "Could not unmap mmio region from vfio container: \
+                                iova 0x{:x}, size 0x{:x}: {}, ",
+                                user_memory_region.start, user_memory_region.size, e
+                            );
+                        }
+                    }
+
                     // Remove old region
                     let old_mem_region = self.vm.make_user_memory_region(
                         user_memory_region.slot,
@@ -1916,6 +1933,26 @@ impl PciDevice for VfioPciDevice {
                     self.vm
                         .create_user_memory_region(new_mem_region)
                         .map_err(io::Error::other)?;
+
+                    // Map the moved mmio region to vfio container
+                    if !self.iommu_attached {
+                        self.container
+                            .vfio_dma_map(
+                                user_memory_region.start,
+                                user_memory_region.size,
+                                user_memory_region.host_addr,
+                            )
+                            .map_err(|e| {
+                                VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf)
+                            })
+                            .map_err(|e| {
+                                io::Error::other(format!(
+                                    "Could not map mmio region to vfio container: \
+                                    iova 0x{:x}, size 0x{:x}: {}, ",
+                                    user_memory_region.start, user_memory_region.size, e
+                                ))
+                            })?;
+                    }
                 }
             }
         }
