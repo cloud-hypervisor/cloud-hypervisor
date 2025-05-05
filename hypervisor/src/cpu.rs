@@ -590,7 +590,13 @@ pub trait Vcpu: Send + Sync {
     fn set_sev_control_register(&self, _reg: u64) -> Result<()> {
         unimplemented!()
     }
-
+    ///
+    /// Sets the value of GIC redistributor address
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn set_gic_redistributor_addr(&self, _gicr_base_addr: u64) -> Result<()> {
+        Ok(())
+    }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Trigger NMI interrupt

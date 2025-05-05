@@ -2203,6 +2203,21 @@ impl Vm {
         #[cfg(feature = "tdx")]
         let tdx_enabled = self.config.lock().unwrap().is_tdx_enabled();
 
+        #[cfg(target_arch = "aarch64")]
+        let vgic = self
+            .device_manager
+            .lock()
+            .unwrap()
+            .get_interrupt_controller()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .get_vgic()
+            .unwrap();
+
+        #[cfg(target_arch = "aarch64")]
+        let redist_addr = vgic.lock().unwrap().device_properties();
+
         // Configure the vcpus that have been created
         let vcpus = self.cpu_manager.lock().unwrap().vcpus();
         for vcpu in vcpus {
@@ -2211,7 +2226,13 @@ impl Vm {
             self.cpu_manager
                 .lock()
                 .unwrap()
-                .configure_vcpu(vcpu, boot_setup)
+                .configure_vcpu(vcpu.clone(), boot_setup)
+                .map_err(Error::CpuManager)?;
+
+            #[cfg(target_arch = "aarch64")]
+            vcpu.lock()
+                .unwrap()
+                .set_gic_redistributor_addr(redist_addr[2], redist_addr[3])
                 .map_err(Error::CpuManager)?;
         }
 
