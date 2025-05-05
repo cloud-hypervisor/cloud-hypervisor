@@ -44,7 +44,7 @@ use std::os::unix::io::AsRawFd;
 use std::sync::Mutex;
 
 #[cfg(target_arch = "aarch64")]
-use aarch64::gic::MshvGicV2M;
+use aarch64::gic::{MshvGicV2M, BASE_SPI_IRQ};
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::VcpuMshvState;
 #[cfg(feature = "sev_snp")]
@@ -2055,9 +2055,20 @@ impl vm::Vm for MshvVm {
                 data: cfg.data,
             }
             .into(),
+            #[cfg(target_arch = "x86_64")]
             _ => {
                 unreachable!()
             }
+            #[cfg(target_arch = "aarch64")]
+            InterruptSourceConfig::LegacyIrq(cfg) => mshv_user_irq_entry {
+                gsi,
+                // In order to get IRQ line we need to add `BASE_SPI_IRQ` to the pin number
+                // as `BASE_SPI_IRQ` is the base SPI interrupt number exposed via FDT to the
+                // guest.
+                data: cfg.pin + BASE_SPI_IRQ,
+                ..Default::default()
+            }
+            .into(),
         }
     }
 
