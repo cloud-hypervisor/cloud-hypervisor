@@ -482,10 +482,7 @@ impl Vcpu {
         vmsa: igvm::snp_defs::SevVmsa,
     ) -> Result<()> {
         self.vcpu
-            .set_sev_control_register(
-                vmsa_pfn,
-                vmsa,
-            )
+            .set_sev_control_register(vmsa_pfn, vmsa)
             .map_err(Error::SetSevControlRegister)
     }
 

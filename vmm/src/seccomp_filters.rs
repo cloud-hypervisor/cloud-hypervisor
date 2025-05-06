@@ -281,7 +281,12 @@ fn create_vmm_ioctl_seccomp_rule_common_kvm() -> Result<Vec<SeccompRule>, Backen
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_ONE_REG)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_REGS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_USER_MEMORY_REGION,)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_USER_MEMORY_REGION2,)?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            KVM_SET_USER_MEMORY_REGION2,
+        )?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_MEMORY_ATTRIBUTES,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_CREATE_GUEST_MEMFD,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_VCPU_EVENTS,)?],
@@ -721,7 +726,12 @@ fn create_vcpu_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_DEVICE_ATTR,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_GSI_ROUTING,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_USER_MEMORY_REGION,)?],
-        and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_USER_MEMORY_REGION2,)?],
+        and![Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            KVM_SET_USER_MEMORY_REGION2,
+        )?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_CREATE_GUEST_MEMFD,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_MEMORY_ATTRIBUTES,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_RUN,)?],
@@ -992,10 +1002,12 @@ pub fn get_seccomp_filter(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use hypervisor::HypervisorType;
     use std::os::unix::io::AsRawFd;
+
+    use hypervisor::HypervisorType;
     use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
 
     fn test_seccomp_filter(
         thread_type: Thread,

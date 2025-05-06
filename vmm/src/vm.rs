@@ -620,7 +620,8 @@ impl Vm {
         // transitioning the guest into secure state.
         #[cfg(feature = "sev_snp")]
         if sev_snp_enabled {
-            vm.sev_snp_init(Vm::get_default_sev_snp_guest_policy()).map_err(Error::InitializeSevSnpVm)?;
+            vm.sev_snp_init(Vm::get_default_sev_snp_guest_policy())
+                .map_err(Error::InitializeSevSnpVm)?;
         }
 
         #[cfg(feature = "tdx")]
@@ -1463,7 +1464,7 @@ impl Vm {
     #[cfg(target_arch = "aarch64")]
     fn configure_system(
         &mut self,
-        _rsdp_addr: GuestAddress,
+        _rsdp_addr: Option<GuestAddress>,
         _entry_addr: EntryPoint,
     ) -> Result<()> {
         let cmdline = Self::generate_cmdline(

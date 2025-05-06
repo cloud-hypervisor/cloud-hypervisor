@@ -18,9 +18,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 #[cfg(feature = "sev_snp")]
-use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
-#[cfg(feature = "sev_snp")]
 use igvm_defs::SnpPolicy;
+#[cfg(feature = "sev_snp")]
+use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 

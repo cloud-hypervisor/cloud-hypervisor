@@ -25,9 +25,11 @@ use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+#[cfg(target_arch = "x86_64")]
 use kvm_bindings::kvm_create_guest_memfd;
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
-use vmm_sys_util::{eventfd::EventFd, errno};
+use vmm_sys_util::errno;
+use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::gic::KvmGicV3Its;
@@ -67,9 +69,9 @@ use crate::arch::x86::{
 };
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
-use crate::{cpu, hypervisor, vec_with_array_field, vm, HypervisorType, InterruptSourceConfig, StandardRegisters, VmOps};
 use crate::{
-    CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
+    cpu, hypervisor, vec_with_array_field, vm, CpuState, HypervisorType, InterruptSourceConfig,
+    IoEventAddress, IrqRoutingEntry, MpState, StandardRegisters, UserMemoryRegion, VmOps,
     USER_MEMORY_REGION_GUEST_MEMFD, USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ,
     USER_MEMORY_REGION_WRITE,
 };
@@ -87,13 +89,15 @@ use std::mem;
 ///
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 pub use kvm_bindings::kvm_vcpu_events as VcpuEvents;
+#[cfg(target_arch = "x86_64")]
+use kvm_bindings::KVM_X86_SW_PROTECTED_VM;
 pub use kvm_bindings::{
     kvm_clock_data, kvm_create_device, kvm_create_device as CreateDevice,
     kvm_device_attr as DeviceAttr, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug,
     kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state, kvm_run, kvm_userspace_memory_region,
     kvm_userspace_memory_region2, KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP,
     KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI, KVM_MEM_GUEST_MEMFD, KVM_MEM_LOG_DIRTY_PAGES,
-    KVM_MEM_READONLY, KVM_MSI_VALID_DEVID, KVM_X86_SW_PROTECTED_VM,
+    KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
@@ -131,15 +135,15 @@ ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 
 // TODO: The following VM types are defined in latest linux kernel arch/x86/include/uapi/asm/kvm.h but doesn't exist in kvm binding yet.
 pub const KVM_X86_SNP_VM: u32 = 4;
-#[cfg(all(feature = "sev_snp"))]
-use kvm_bindings::{kvm_segment as Segment, KVM_MEMORY_ATTRIBUTE_PRIVATE};
-#[cfg(feature = "sev_snp")]
-use x86_64::sev;
 #[cfg(feature = "sev_snp")]
 use igvm_defs::PAGE_SIZE_4K;
 #[cfg(feature = "sev_snp")]
 use kvm_bindings::kvm_memory_attributes;
+#[cfg(all(feature = "sev_snp"))]
+use kvm_bindings::{kvm_segment as Segment, KVM_MEMORY_ATTRIBUTE_PRIVATE};
 use vm_memory::GuestAddress;
+#[cfg(feature = "sev_snp")]
+use x86_64::sev;
 // Hardcoded GPA of VMSA page for KVM
 pub const KVM_VMSA_PAGE_ADDRESS: GuestAddress = GuestAddress(0xffff_ffff_f000);
 pub const KVM_VMSA_PAGE_SIZE: usize = 0x1000;
@@ -147,6 +151,7 @@ pub const KVM_VMSA_PAGE_SIZE: usize = 0x1000;
 pub const STAGE0_START_ADDRESS: GuestAddress = GuestAddress(0xffe0_0000);
 #[cfg(feature = "igvm")]
 pub const STAGE0_SIZE: usize = 0x20_0000;
+#[cfg(target_arch = "x86_64")]
 // Maximum Virtual address space.
 const VIRTUTAL_ADDRESS_SIZE_IN_BITS: usize = 1 << 48;
 #[cfg(feature = "sev_snp")]
@@ -557,6 +562,7 @@ pub struct KvmVm {
     #[cfg(feature = "sev_snp")]
     sev_fd: Option<x86_64::sev::SevFd>,
     dirty_log_slots: Arc<RwLock<HashMap<u32, KvmDirtyLogSlot>>>,
+    #[cfg(target_arch = "x86_64")]
     memfd: Option<OwnedFd>,
     kvm_guest_memfd_supported: bool,
 }
@@ -577,7 +583,8 @@ impl KvmVm {
     pub fn check_extension(&self, c: Cap) -> bool {
         self.fd.check_extension(c)
     }
-    /// Set user memory region to either use memfd.
+    /// Set user memory region to use guest_memfd when available.
+    /// guest_memfd is available on host linux kernel v6.8+
     unsafe fn set_user_memory_region(
         &self,
         region: kvm_userspace_memory_region2,
@@ -595,12 +602,18 @@ impl KvmVm {
         }
     }
     /// Get flag for kvm_userspace_memory_region based on memfd support.
+    #[cfg(target_arch = "x86_64")]
     fn get_kvm_userspace_memory_region_flag(&self, flag: u32) -> u32 {
         flag | if self.kvm_guest_memfd_supported {
             KVM_MEM_GUEST_MEMFD
         } else {
             0
         }
+    }
+    /// Get flag for kvm_userspace_memory_region based on memfd support.
+    #[cfg(target_arch = "aarch64")]
+    fn get_kvm_userspace_memory_region_flag(&self, flag: u32) -> u32 {
+        flag
     }
 }
 
@@ -919,11 +932,14 @@ impl vm::Vm for KvmVm {
                 0
             };
 
+        #[cfg(target_arch = "x86_64")]
         let guest_memfd = if let Some(memfd) = &self.memfd {
             memfd.as_raw_fd() as u32
         } else {
             0
         };
+        #[cfg(target_arch = "aarch64")]
+        let guest_memfd = 0;
 
         kvm_userspace_memory_region2 {
             slot,
@@ -1477,17 +1493,15 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                     kvm_guest_memfd_supported,
                 }))
             }
+        }
 
-            #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-            {
-                Ok(Arc::new(KvmVm {
-                    fd: vm_fd,
-                    msrs,
-                    dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
-                    memfd,
-                    kvm_guest_memfd_supported,
-                }))
-            }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            Ok(Arc::new(KvmVm {
+                fd: vm_fd,
+                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                kvm_guest_memfd_supported: false,
+            }))
         }
     }
 

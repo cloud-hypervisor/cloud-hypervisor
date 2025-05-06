@@ -52,7 +52,7 @@ use aarch64::gic::{MshvGicV2M, BASE_SPI_IRQ};
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::VcpuMshvState;
 #[cfg(feature = "sev_snp")]
-use igvm_defs::{IGVM_VHS_SNP_ID_BLOCK, SnpPolicy};
+use igvm_defs::{SnpPolicy, IGVM_VHS_SNP_ID_BLOCK};
 #[cfg(feature = "sev_snp")]
 use snp_constants::*;
 use vmm_sys_util::eventfd::EventFd;
@@ -1534,7 +1534,11 @@ impl cpu::Vcpu for MshvVcpu {
     /// Sets the AMD specific vcpu's sev control register.
     ///
     #[cfg(feature = "sev_snp")]
-    fn set_sev_control_register(&self, vmsa_pfn: u64,_vmsa: igvm::snp_defs::SevVmsa) -> cpu::Result<()> {
+    fn set_sev_control_register(
+        &self,
+        vmsa_pfn: u64,
+        _vmsa: igvm::snp_defs::SevVmsa,
+    ) -> cpu::Result<()> {
         let sev_control_reg = snp::get_sev_control_register(vmsa_pfn);
 
         self.fd
