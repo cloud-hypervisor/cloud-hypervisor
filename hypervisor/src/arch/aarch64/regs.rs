@@ -224,3 +224,5 @@ pub const AARCH64_ARCH_TIMER_HYP_IRQ: u32 = 10;
 
 // PMU PPI interrupt number
 pub const AARCH64_PMU_IRQ: u32 = 7;
+
+pub const AARCH64_MIN_PPI_IRQ: u32 = 16;
