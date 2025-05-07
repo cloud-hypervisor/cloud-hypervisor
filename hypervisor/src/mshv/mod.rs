@@ -20,6 +20,10 @@ use vm::DataMatch;
 #[cfg(feature = "sev_snp")]
 use vm_memory::bitmap::AtomicBitmap;
 
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::regs::{
+    AARCH64_ARCH_TIMER_VIRT_IRQ, AARCH64_MIN_PPI_IRQ, AARCH64_PMU_IRQ,
+};
 #[cfg(target_arch = "x86_64")]
 use crate::arch::emulator::PlatformEmulator;
 #[cfg(target_arch = "x86_64")]
@@ -2370,6 +2374,45 @@ impl vm::Vm for MshvVm {
     }
 
     fn init(&self) -> vm::Result<()> {
+        #[cfg(target_arch = "aarch64")]
+        {
+            self.fd
+                .set_partition_property(
+                    hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_LPI_INT_ID_BITS,
+                    0,
+                )
+                .map_err(|e| {
+                    vm::HypervisorVmError::InitializeVm(anyhow!(
+                        "Failed to set GIC LPI support: {}",
+                        e
+                    ))
+                })?;
+
+            self.fd
+                .set_partition_property(
+                    hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_PPI_OVERFLOW_INTERRUPT_FROM_CNTV,
+                    (AARCH64_ARCH_TIMER_VIRT_IRQ + AARCH64_MIN_PPI_IRQ) as u64,
+                )
+                .map_err(|e| {
+                    vm::HypervisorVmError::InitializeVm(anyhow!(
+                        "Failed to set arch timer interrupt ID: {}",
+                        e
+                    ))
+                })?;
+
+            self.fd
+                .set_partition_property(
+                    hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_PPI_PERFORMANCE_MONITORS_INTERRUPT,
+                    (AARCH64_PMU_IRQ + AARCH64_MIN_PPI_IRQ) as u64,
+                )
+                .map_err(|e| {
+                    vm::HypervisorVmError::InitializeVm(anyhow!(
+                        "Failed to set PMU interrupt ID: {}",
+                        e
+                    ))
+                })?;
+        }
+
         self.fd
             .initialize()
             .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
