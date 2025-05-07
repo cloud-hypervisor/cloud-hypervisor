@@ -15,6 +15,10 @@ use std::{cmp, fs, result, str};
 
 use byteorder::{BigEndian, ByteOrder};
 use hypervisor::arch::aarch64::gic::Vgic;
+use hypervisor::arch::aarch64::regs::{
+    AARCH64_ARCH_TIMER_HYP_IRQ, AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ,
+    AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ, AARCH64_ARCH_TIMER_VIRT_IRQ,
+};
 use thiserror::Error;
 use vm_fdt::{FdtWriter, FdtWriterResult};
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryRegion};
@@ -708,9 +712,14 @@ fn create_clock_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
 
 fn create_timer_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
     // See
-    // https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/interrupt-controller/arch_timer.txt
+    // https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/timer/arm%2Carch_timer.yaml
     // These are fixed interrupt numbers for the timer device.
-    let irqs = [13, 14, 11, 10];
+    let irqs = [
+        AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ,
+        AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ,
+        AARCH64_ARCH_TIMER_VIRT_IRQ,
+        AARCH64_ARCH_TIMER_HYP_IRQ,
+    ];
     let compatible = "arm,armv8-timer";
 
     let mut timer_reg_cells: Vec<u32> = Vec::new();
