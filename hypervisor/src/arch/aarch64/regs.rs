@@ -216,3 +216,8 @@ arm64_sys_reg!(MPIDR_EL1, 3, 0, 0, 0, 5);
 arm64_sys_reg!(ID_AA64MMFR0_EL1, 3, 0, 0, 7, 0);
 arm64_sys_reg!(TTBR1_EL1, 3, 0, 2, 0, 1);
 arm64_sys_reg!(TCR_EL1, 3, 0, 2, 0, 2);
+
+pub const AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ: u32 = 13;
+pub const AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ: u32 = 14;
+pub const AARCH64_ARCH_TIMER_VIRT_IRQ: u32 = 11;
+pub const AARCH64_ARCH_TIMER_HYP_IRQ: u32 = 10;
