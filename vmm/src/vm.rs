@@ -651,10 +651,16 @@ impl Vm {
         )
         .map_err(Error::DeviceManager)?;
 
+        let ic = device_manager
+            .lock()
+            .unwrap()
+            .create_interrupt_controller()
+            .map_err(Error::DeviceManager)?;
+
         device_manager
             .lock()
             .unwrap()
-            .create_devices(console_info, console_resize_pipe, original_termios)
+            .create_devices(console_info, console_resize_pipe, original_termios, ic)
             .map_err(Error::DeviceManager)?;
 
         #[cfg(feature = "tdx")]
