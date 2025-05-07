@@ -1223,17 +1223,22 @@ impl DeviceManager {
         self.console_resize_pipe.clone()
     }
 
+    pub fn create_interrupt_controller(
+        &mut self,
+    ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
+        self.add_interrupt_controller()
+    }
+
     pub fn create_devices(
         &mut self,
         console_info: Option<ConsoleInfo>,
         console_resize_pipe: Option<Arc<File>>,
         original_termios_opt: Arc<Mutex<Option<termios>>>,
+        interrupt_controller: Arc<Mutex<dyn InterruptController>>,
     ) -> DeviceManagerResult<()> {
         trace_scoped!("create_devices");
 
         let mut virtio_devices: Vec<MetaVirtioDevice> = Vec::new();
-
-        let interrupt_controller = self.add_interrupt_controller()?;
 
         self.cpu_manager
             .lock()
