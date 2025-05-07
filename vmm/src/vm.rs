@@ -39,6 +39,8 @@ use devices::AcpiNotificationFlags;
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
+#[cfg(target_arch = "aarch64")]
+use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
 use hypervisor::{HypervisorVmError, VmOps};
 use libc::{termios, SIGWINCH};
 use linux_loader::cmdline::Cmdline;
@@ -1382,7 +1384,7 @@ impl Vm {
             .cpu_manager
             .lock()
             .unwrap()
-            .init_pmu(arch::aarch64::fdt::AARCH64_PMU_IRQ + 16)
+            .init_pmu(AARCH64_PMU_IRQ + 16)
             .map_err(|_| {
                 Error::ConfigureSystem(arch::Error::PlatformSpecific(
                     arch::aarch64::Error::VcpuInitPmu,
