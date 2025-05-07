@@ -17,7 +17,7 @@ use byteorder::{BigEndian, ByteOrder};
 use hypervisor::arch::aarch64::gic::Vgic;
 use hypervisor::arch::aarch64::regs::{
     AARCH64_ARCH_TIMER_HYP_IRQ, AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ,
-    AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ, AARCH64_ARCH_TIMER_VIRT_IRQ,
+    AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ, AARCH64_ARCH_TIMER_VIRT_IRQ, AARCH64_PMU_IRQ,
 };
 use thiserror::Error;
 use vm_fdt::{FdtWriter, FdtWriterResult};
@@ -62,9 +62,6 @@ const GIC_FDT_IRQ_TYPE_PPI: u32 = 1;
 // From https://elixir.bootlin.com/linux/v4.9.62/source/include/dt-bindings/interrupt-controller/irq.h#L17
 const IRQ_TYPE_EDGE_RISING: u32 = 1;
 const IRQ_TYPE_LEVEL_HI: u32 = 4;
-
-// PMU PPI interrupt number
-pub const AARCH64_PMU_IRQ: u32 = 7;
 
 // Keys and Buttons
 // System Power Down

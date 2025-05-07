@@ -60,6 +60,8 @@ use devices::legacy::Serial;
 #[cfg(feature = "pvmemcontrol")]
 use devices::pvmemcontrol::{PvmemcontrolBusDevice, PvmemcontrolPciDevice};
 use devices::{interrupt_controller, AcpiNotificationFlags};
+#[cfg(target_arch = "aarch64")]
+use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
 use hypervisor::IoEventAddress;
 use libc::{
     tcsetattr, termios, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE,
@@ -1488,7 +1490,7 @@ impl DeviceManager {
                 .cpu_manager
                 .lock()
                 .unwrap()
-                .init_pmu(arch::aarch64::fdt::AARCH64_PMU_IRQ + 16)
+                .init_pmu(AARCH64_PMU_IRQ + 16)
                 .is_err()
             {
                 info!("Failed to initialize PMU");
