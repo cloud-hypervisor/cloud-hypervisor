@@ -952,7 +952,7 @@ impl MemoryManager {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn add_uefi_flash(&mut self) -> Result<(), Error> {
+    pub fn add_uefi_flash(&mut self) -> Result<(), Error> {
         // On AArch64, the UEFI binary requires a flash device at address 0.
         // 4 MiB memory is mapped to simulate the flash.
         let uefi_mem_slot = self.allocate_memory_slot();
@@ -1197,6 +1197,7 @@ impl MemoryManager {
         let end_of_ram_area = start_of_device_area.unchecked_sub(1);
         let ram_allocator = AddressAllocator::new(GuestAddress(0), start_of_device_area.0).unwrap();
 
+        #[allow(unused_mut)]
         let mut memory_manager = MemoryManager {
             boot_guest_memory,
             guest_memory,
@@ -1233,23 +1234,6 @@ impl MemoryManager {
             uefi_flash: None,
             thp: config.thp,
         };
-
-        #[cfg(target_arch = "aarch64")]
-        {
-            // For Aarch64 we cannot lazily allocate the address space like we
-            // do for x86, because while restoring a VM from snapshot we would
-            // need the address space to be allocated to properly restore VGIC.
-            // And the restore of VGIC happens before we attempt to run the vCPUs
-            // for the first time, thus we need to allocate the address space
-            // beforehand.
-            memory_manager.allocate_address_space()?;
-            memory_manager.add_uefi_flash()?;
-        }
-
-        #[cfg(target_arch = "riscv64")]
-        {
-            memory_manager.allocate_address_space()?;
-        }
 
         #[cfg(target_arch = "x86_64")]
         if let Some(sgx_epc_config) = sgx_epc_config {
