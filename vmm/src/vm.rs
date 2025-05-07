@@ -609,26 +609,21 @@ impl Vm {
                 .map_err(Error::InitializeTdxVm)?;
         }
 
-        vm.init().map_err(Error::InitializeVm)?;
-
-        cpu_manager
-            .lock()
-            .unwrap()
-            .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
-            .map_err(Error::CpuManager)?;
-
-        // This initial SEV-SNP configuration must be done immediately after
-        // vCPUs are created. As part of this initialization we are
-        // transitioning the guest into secure state.
-        #[cfg(feature = "sev_snp")]
-        if sev_snp_enabled {
-            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
-        }
-
         #[cfg(feature = "tdx")]
         let dynamic = !tdx_enabled;
         #[cfg(not(feature = "tdx"))]
         let dynamic = true;
+
+        #[cfg(feature = "kvm")]
+        let is_kvm = matches!(
+            hypervisor.hypervisor_type(),
+            hypervisor::HypervisorType::Kvm
+        );
+        #[cfg(feature = "mshv")]
+        let is_mshv = matches!(
+            hypervisor.hypervisor_type(),
+            hypervisor::HypervisorType::Mshv
+        );
 
         let device_manager = DeviceManager::new(
             io_bus,
@@ -651,17 +646,67 @@ impl Vm {
         )
         .map_err(Error::DeviceManager)?;
 
-        let ic = device_manager
-            .lock()
-            .unwrap()
-            .create_interrupt_controller()
-            .map_err(Error::DeviceManager)?;
+        // For MSHV, we need to create the interrupt controller before we initialize the VM.
+        // Because we need to set the base address of GICD before we initialize the VM.
+        #[cfg(feature = "mshv")]
+        {
+            if is_mshv {
+                let ic = device_manager
+                    .lock()
+                    .unwrap()
+                    .create_interrupt_controller()
+                    .map_err(Error::DeviceManager)?;
 
-        device_manager
+                vm.init().map_err(Error::InitializeVm)?;
+
+                device_manager
+                    .lock()
+                    .unwrap()
+                    .create_devices(
+                        console_info.clone(),
+                        console_resize_pipe.clone(),
+                        original_termios.clone(),
+                        ic,
+                    )
+                    .map_err(Error::DeviceManager)?;
+            }
+        }
+
+        cpu_manager
             .lock()
             .unwrap()
-            .create_devices(console_info, console_resize_pipe, original_termios, ic)
-            .map_err(Error::DeviceManager)?;
+            .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
+            .map_err(Error::CpuManager)?;
+
+        // For KVM, we need to create interrupt controller after we create boot vcpus.
+        // Because we restore GIC state from the snapshot as part of boot vcpu creation.
+        // This means that we need to create interrupt controller after we restore in case of KVM guests.
+        #[cfg(feature = "kvm")]
+        {
+            if is_kvm {
+                let ic = device_manager
+                    .lock()
+                    .unwrap()
+                    .create_interrupt_controller()
+                    .map_err(Error::DeviceManager)?;
+
+                vm.init().map_err(Error::InitializeVm)?;
+
+                device_manager
+                    .lock()
+                    .unwrap()
+                    .create_devices(console_info, console_resize_pipe, original_termios, ic)
+                    .map_err(Error::DeviceManager)?;
+            }
+        }
+
+        // This initial SEV-SNP configuration must be done immediately after
+        // vCPUs are created. As part of this initialization we are
+        // transitioning the guest into secure state.
+        #[cfg(feature = "sev_snp")]
+        if sev_snp_enabled {
+            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
+        }
 
         #[cfg(feature = "tdx")]
         let kernel = config
