@@ -678,12 +678,13 @@ fn create_gic_node(fdt: &mut FdtWriter, gic_device: &Arc<Mutex<dyn Vgic>>) -> Fd
         fdt.property_u32("phandle", MSI_PHANDLE)?;
         let msi_reg_prop = gic_device.lock().unwrap().msi_properties();
         fdt.property_array_u64("reg", &msi_reg_prop)?;
-        fdt.end_node(msic_node)?;
 
         if msi_compatibility == GIC_V2M_COMPATIBLE {
             fdt.property_u32("arm,msi-base-spi", SPI_BASE)?;
             fdt.property_u32("arm,msi-num-spis", SPI_NUM)?;
         }
+
+        fdt.end_node(msic_node)?;
     }
 
     fdt.end_node(intc_node)?;
