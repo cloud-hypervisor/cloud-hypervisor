@@ -1255,12 +1255,12 @@ impl cpu::Vcpu for MshvVcpu {
 
     #[cfg(target_arch = "aarch64")]
     fn init_pmu(&self, _irq: u32) -> cpu::Result<()> {
-        unimplemented!()
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
     fn has_pmu_support(&self) -> bool {
-        unimplemented!()
+        true
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -1308,17 +1308,17 @@ impl cpu::Vcpu for MshvVcpu {
 
     #[cfg(target_arch = "aarch64")]
     fn vcpu_init(&self, _kvi: &crate::VcpuInit) -> cpu::Result<()> {
-        unimplemented!()
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
     fn vcpu_finalize(&self, _feature: i32) -> cpu::Result<()> {
-        unimplemented!()
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
     fn vcpu_get_finalized_features(&self) -> i32 {
-        unimplemented!()
+        0
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -1328,12 +1328,12 @@ impl cpu::Vcpu for MshvVcpu {
         _kvi: &mut crate::VcpuInit,
         _id: u8,
     ) -> cpu::Result<()> {
-        unimplemented!()
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
     fn create_vcpu_init(&self) -> crate::VcpuInit {
-        unimplemented!();
+        MshvVcpuInit {}.into()
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -2272,7 +2272,7 @@ impl vm::Vm for MshvVm {
 
     #[cfg(target_arch = "aarch64")]
     fn get_preferred_target(&self, _kvi: &mut crate::VcpuInit) -> vm::Result<()> {
-        unimplemented!()
+        Ok(())
     }
 
     /// Pause the VM
