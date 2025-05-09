@@ -19,7 +19,8 @@ use std::{io, result};
 
 use anyhow::anyhow;
 use block::async_io::{AsyncIo, AsyncIoError, DiskFile};
-use block::{build_serial, Request, RequestType, VirtioBlockConfig};
+use block::fcntl::{get_lock_state, LockError, LockType};
+use block::{build_serial, fcntl, Request, RequestType, VirtioBlockConfig};
 use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
 use rate_limiter::TokenType;
 use seccompiler::SeccompAction;
@@ -80,6 +81,16 @@ pub enum Error {
     RequestStatus(GuestMemoryError),
     #[error("Failed to enable notification: {0}")]
     QueueEnableNotification(virtio_queue::Error),
+    #[error("Failed to get {lock_type:?} lock for disk image {path}: {error}")]
+    LockDiskImage {
+        /// The underlying error.
+        #[source]
+        error: LockError,
+        /// The requested lock type.
+        lock_type: LockType,
+        /// The path of the disk image.
+        path: PathBuf,
+    },
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -700,6 +711,53 @@ impl Block {
             read_only,
             serial,
             queue_affinity,
+        })
+    }
+
+    /// Tries to set an advisory lock for the corresponding disk image.
+    pub fn try_lock_image(&mut self) -> Result<()> {
+        let lock_type = match self.read_only {
+            true => LockType::Read,
+            false => LockType::Write,
+        };
+        log::debug!(
+            "Attempting to acquire {lock_type:?} lock for disk image id={},path={}",
+            self.id,
+            self.disk_path.display()
+        );
+        let fd = self.disk_image.fd();
+        fcntl::try_acquire_lock(fd, lock_type).map_err(|error| {
+            let current_lock = get_lock_state(fd);
+            // Don't propagate the error to the outside, as it is not useful at all. Instead,
+            // we try to log additional help to the user.
+            if let Ok(current_lock) = current_lock {
+                log::error!("Can't get {lock_type:?} lock for {} as there is already a {current_lock:?} lock", self.disk_path.display());
+            } else {
+                log::error!("Can't get {lock_type:?} lock for {}, but also can't determine the current lock state", self.disk_path.display());
+            }
+            Error::LockDiskImage {
+                path: self.disk_path.clone(),
+                error,
+                lock_type,
+            }
+        })?;
+        log::info!(
+            "Acquired {lock_type:?} lock for disk image id={},path={}",
+            self.id,
+            self.disk_path.display()
+        );
+        Ok(())
+    }
+
+    /// Releases the advisory lock held for the corresponding disk image.
+    pub fn unlock_image(&mut self) -> Result<()> {
+        // It is very unlikely that this fails;
+        // Should we remove the Result to simplify the error propagation on
+        // higher levels?
+        fcntl::clear_lock(self.disk_image.fd()).map_err(|error| Error::LockDiskImage {
+            path: self.disk_path.clone(),
+            error,
+            lock_type: LockType::Unlock,
         })
     }
 

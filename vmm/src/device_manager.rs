@@ -79,7 +79,7 @@ use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd};
 use virtio_devices::transport::{VirtioPciDevice, VirtioPciDeviceActivator, VirtioTransport};
 use virtio_devices::vhost_user::VhostUserConfig;
 use virtio_devices::{
-    AccessPlatformMapping, ActivateError, Endpoint, IommuMapping, VdpaDmaMapping,
+    AccessPlatformMapping, ActivateError, Block, Endpoint, IommuMapping, VdpaDmaMapping,
     VirtioMemMappingSource,
 };
 use vm_allocator::{AddressAllocator, SystemAllocator};
@@ -517,6 +517,9 @@ pub enum DeviceManagerError {
 
     // Invalid console fd
     InvalidConsoleFd,
+
+    /// Cannot lock images of all block devices.
+    DiskLockError(virtio_devices::block::Error),
 }
 
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
@@ -829,6 +832,9 @@ pub struct DeviceManager {
 
     // The virtio devices on the system
     virtio_devices: Vec<MetaVirtioDevice>,
+
+    /// All disks. Needed for locking and unlocking the images.
+    block_devices: Vec<Arc<Mutex<Block>>>,
 
     // List of bus devices
     // Let the DeviceManager keep strong references to the BusDevice devices.
@@ -1158,6 +1164,7 @@ impl DeviceManager {
             memory_manager,
             cpu_manager,
             virtio_devices: Vec::new(),
+            block_devices: vec![],
             bus_devices: Vec::new(),
             device_id_cnt,
             msi_interrupt_manager,
@@ -2292,6 +2299,35 @@ impl DeviceManager {
         Ok(tpm)
     }
 
+    /// Tries to acquire advisory locks for all disk images.
+    ///
+    /// This should only be called when a VM boots or VM state is restored.
+    /// For live-migration, the locks must be released on the destination side
+    /// before they are acquired again by the receiving side.
+    pub fn try_lock_disks(&self) -> DeviceManagerResult<()> {
+        for dev in &self.block_devices {
+            let mut dev = dev.lock().unwrap();
+            dev.try_lock_image()
+                .map_err(DeviceManagerError::DiskLockError)?;
+        }
+        Ok(())
+    }
+
+    /// Release all advisory locks held for the disk images.
+    ///
+    /// This should only be called when the VM is stopped and the VMM supposed
+    /// to shut down. A new VMM, either after a live migration or a
+    /// state save/resume cycle, should then acquire all locks before the VM
+    /// starts to run.
+    pub fn release_disk_locks(&self) -> DeviceManagerResult<()> {
+        for dev in &self.block_devices {
+            let mut dev = dev.lock().unwrap();
+            dev.unlock_image()
+                .map_err(DeviceManagerError::DiskLockError)?;
+        }
+        Ok(())
+    }
+
     fn make_virtio_devices(&mut self) -> DeviceManagerResult<Vec<MetaVirtioDevice>> {
         let mut devices: Vec<MetaVirtioDevice> = Vec::new();
 
@@ -2345,9 +2381,20 @@ impl DeviceManager {
         supported
     }
 
+    /// Creates a [`MetaVirtioDevice`] from the provided [`DiskConfig`].
+    ///
+    /// Depending on the config, this is a [`vhost_user::Blk`] device or a [`virtio_devices::Block`]
+    /// device.
+    ///
+    /// # Arguments
+    /// - `disk_cfg`: The [`DiskConfig`] used to create the block device.
+    /// - `is_hotplug`: Whether the device is being hotplugged and the lock for the disk image
+    ///   should be acquired right away. Locking will only happen for normal block devices, and not
+    ///   vhost-user devices.
     fn make_virtio_block_device(
         &mut self,
         disk_cfg: &mut DiskConfig,
+        is_hotplug: bool,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
         let id = if let Some(id) = &disk_cfg.id {
             id.clone()
@@ -2360,6 +2407,9 @@ impl DeviceManager {
         info!("Creating virtio-block device: {:?}", disk_cfg);
 
         let (virtio_device, migratable_device) = if disk_cfg.vhost_user {
+            if is_hotplug {
+                log::debug!("Acquiring image lock for vhost-user block device not supported");
+            }
             let socket = disk_cfg.vhost_socket.as_ref().unwrap().clone();
             let vu_cfg = VhostUserConfig {
                 socket,
@@ -2516,31 +2566,43 @@ impl DeviceManager {
                 BTreeMap::new()
             };
 
-            let virtio_block = Arc::new(Mutex::new(
-                virtio_devices::Block::new(
-                    id.clone(),
-                    image,
-                    disk_cfg
-                        .path
-                        .as_ref()
-                        .ok_or(DeviceManagerError::NoDiskPath)?
-                        .clone(),
-                    disk_cfg.readonly,
-                    self.force_iommu | disk_cfg.iommu,
-                    disk_cfg.num_queues,
-                    disk_cfg.queue_size,
-                    disk_cfg.serial.clone(),
-                    self.seccomp_action.clone(),
-                    rate_limit_group,
-                    self.exit_evt
-                        .try_clone()
-                        .map_err(DeviceManagerError::EventFd)?,
-                    state_from_id(self.snapshot.as_ref(), id.as_str())
-                        .map_err(DeviceManagerError::RestoreGetState)?,
-                    queue_affinity,
-                )
-                .map_err(DeviceManagerError::CreateVirtioBlock)?,
-            ));
+            let mut virtio_block = virtio_devices::Block::new(
+                id.clone(),
+                image,
+                disk_cfg
+                    .path
+                    .as_ref()
+                    .ok_or(DeviceManagerError::NoDiskPath)?
+                    .clone(),
+                disk_cfg.readonly,
+                self.force_iommu | disk_cfg.iommu,
+                disk_cfg.num_queues,
+                disk_cfg.queue_size,
+                disk_cfg.serial.clone(),
+                self.seccomp_action.clone(),
+                rate_limit_group,
+                self.exit_evt
+                    .try_clone()
+                    .map_err(DeviceManagerError::EventFd)?,
+                state_from_id(self.snapshot.as_ref(), id.as_str())
+                    .map_err(DeviceManagerError::RestoreGetState)?,
+                queue_affinity,
+            )
+            .map_err(DeviceManagerError::CreateVirtioBlock)?;
+
+            // We lock the file here only for hotplugging. In normal operation,
+            // state save/resume, and live-migration, locking is part of the outer control flow
+            // to ensure proper order of (un)locking.
+            if is_hotplug {
+                log::debug!("Acquiring lock for hotplugged image");
+                virtio_block
+                    .try_lock_image()
+                    .map_err(DeviceManagerError::DiskLockError)?;
+            }
+
+            let virtio_block = Arc::new(Mutex::new(virtio_block));
+
+            self.block_devices.push(virtio_block.clone());
 
             (
                 Arc::clone(&virtio_block) as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
@@ -2571,7 +2633,7 @@ impl DeviceManager {
         let mut block_devices = self.config.lock().unwrap().disks.clone();
         if let Some(disk_list_cfg) = &mut block_devices {
             for disk_cfg in disk_list_cfg.iter_mut() {
-                devices.push(self.make_virtio_block_device(disk_cfg)?);
+                devices.push(self.make_virtio_block_device(disk_cfg, false)?);
             }
         }
         self.config.lock().unwrap().disks = block_devices;
@@ -4141,7 +4203,24 @@ impl DeviceManager {
         let device_tree = self.device_tree.lock().unwrap();
         let node = device_tree
             .get(&id)
-            .ok_or(DeviceManagerError::UnknownDeviceId(id))?;
+            .ok_or(DeviceManagerError::UnknownDeviceId(id.clone()))?;
+
+        // Release advisory locks by dropping all references.
+        // Linux automatically releases all locks of that file if the last open FD is closed.
+        {
+            let maybe_block_device_index = self
+                .block_devices
+                .iter()
+                .enumerate()
+                .find(|(_, dev)| {
+                    let dev = dev.lock().unwrap();
+                    dev.id() == id
+                })
+                .map(|(i, _)| i);
+            if let Some(index) = maybe_block_device_index {
+                let _ = self.block_devices.swap_remove(index);
+            }
+        }
 
         let pci_device_node = if node.pci_bdf.is_some() && node.pci_device_handle.is_some() {
             node
@@ -4454,7 +4533,7 @@ impl DeviceManager {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
-        let device = self.make_virtio_block_device(disk_cfg)?;
+        let device = self.make_virtio_block_device(disk_cfg, true)?;
         self.hotplug_virtio_pci_device(device)
     }
 
@@ -4858,7 +4937,6 @@ impl Pausable for DeviceManager {
                 migratable.lock().unwrap().resume()?;
             }
         }
-
         Ok(())
     }
 }

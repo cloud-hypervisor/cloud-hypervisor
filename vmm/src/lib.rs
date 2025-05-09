@@ -1210,6 +1210,12 @@ impl Vmm {
             // Send last batch of dirty pages
             Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
         }
+
+        // We release the locks early to enable locking them on the destination host.
+        // The VM is already stopped.
+        vm.release_disk_locks()
+            .map_err(|e| MigratableError::UnlockError(anyhow!("{e}")))?;
+
         // Capture snapshot and send it
         let vm_snapshot = vm.snapshot()?;
         let snapshot_data = serde_json::to_vec(&vm_snapshot).unwrap();
@@ -1222,6 +1228,7 @@ impl Vmm {
             MigratableError::MigrateSend(anyhow!("Error during state migration")),
         )?;
         // Complete the migration
+        // At this step, the receiving VMM will acquire disk locks again.
         Request::complete().write_to(&mut socket)?;
         Response::read_from(&mut socket)?.ok_or_abandon(
             &mut socket,
