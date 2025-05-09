@@ -4,6 +4,7 @@
 
 use std::collections::VecDeque;
 use std::fs::File;
+use std::os::fd::{AsRawFd, RawFd};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use vmm_sys_util::eventfd::EventFd;
@@ -34,6 +35,11 @@ impl DiskFile for VhdxDiskSync {
             Box::new(VhdxSync::new(self.vhdx_file.clone()).map_err(DiskFileError::NewAsyncIo)?)
                 as Box<dyn AsyncIo>,
         )
+    }
+
+    fn fd(&mut self) -> RawFd {
+        let lock = self.vhdx_file.lock().unwrap();
+        lock.as_raw_fd()
     }
 }
 
