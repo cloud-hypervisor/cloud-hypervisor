@@ -988,7 +988,7 @@ impl PciConfiguration {
 
                 info!(
                     "Detected BAR reprogramming: (BAR {}) 0x{:x}->0x{:x}",
-                    reg_idx, self.registers[reg_idx], value
+                    bar_idx, self.bars[bar_idx].addr, value
                 );
                 let old_base = u64::from(self.bars[bar_idx].addr & mask);
                 let new_base = u64::from(value & mask);
@@ -1014,7 +1014,7 @@ impl PciConfiguration {
             {
                 info!(
                     "Detected BAR reprogramming: (BAR {}) 0x{:x}->0x{:x}",
-                    reg_idx, self.registers[reg_idx], value
+                    bar_idx, self.bars[bar_idx].addr, value
                 );
                 let old_base = (u64::from(self.bars[bar_idx].addr & mask) << 32)
                     | u64::from(self.bars[bar_idx - 1].addr & self.writable_bits[reg_idx - 1]);
@@ -1043,8 +1043,8 @@ impl PciConfiguration {
             }
 
             info!(
-                "Detected ROM BAR reprogramming: (BAR {}) 0x{:x}->0x{:x}",
-                reg_idx, self.registers[reg_idx], value
+                "Detected ROM BAR reprogramming: (Expansion ROM BAR) 0x{:x}->0x{:x}",
+                self.rom_bar_addr, value
             );
             let old_base = u64::from(self.rom_bar_addr & mask);
             let new_base = u64::from(value & mask);
