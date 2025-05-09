@@ -12,6 +12,7 @@
 extern crate log;
 
 pub mod async_io;
+pub mod fcntl;
 pub mod fixed_vhd;
 #[cfg(feature = "io_uring")]
 /// Enabled with the `"io_uring"` feature
