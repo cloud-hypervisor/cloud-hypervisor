@@ -87,18 +87,10 @@ pub trait PciDevice: Send {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> Option<Arc<Barrier>>;
+    ) -> (Option<BarReprogrammingParams>, Option<Arc<Barrier>>);
     /// Gets a register from the configuration space.
     /// * `reg_idx` - The index of the config register to read.
     fn read_config_register(&mut self, reg_idx: usize) -> u32;
-    /// Detects if a BAR is being reprogrammed.
-    fn detect_bar_reprogramming(
-        &mut self,
-        _reg_idx: usize,
-        _data: &[u8],
-    ) -> Option<BarReprogrammingParams> {
-        None
-    }
     /// Reads from a BAR region mapped into the device.
     /// * `addr` - The guest address inside the BAR.
     /// * `data` - Filled with the data from `addr`.

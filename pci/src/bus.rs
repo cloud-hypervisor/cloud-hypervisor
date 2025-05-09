@@ -15,7 +15,7 @@ use vm_device::{Bus, BusDevice, BusDeviceSync};
 use crate::configuration::{
     PciBarRegionType, PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType,
 };
-use crate::device::{DeviceRelocation, Error as PciDeviceError, PciDevice};
+use crate::device::{BarReprogrammingParams, DeviceRelocation, Error as PciDeviceError, PciDevice};
 use crate::PciBarConfiguration;
 
 const VENDOR_ID_INTEL: u16 = 0x8086;
@@ -81,9 +81,11 @@ impl PciDevice for PciRoot {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> Option<Arc<Barrier>> {
-        self.config.write_config_register(reg_idx, offset, data);
-        None
+    ) -> (Option<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+        (
+            self.config.write_config_register(reg_idx, offset, data),
+            None,
+        )
     }
 
     fn read_config_register(&mut self, reg_idx: usize) -> u32 {
@@ -256,9 +258,11 @@ impl PciConfigIo {
         if let Some(d) = pci_bus.devices.get(&(device as u32)) {
             let mut device = d.lock().unwrap();
 
-            // Find out if one of the device's BAR is being reprogrammed, and
-            // reprogram it if needed.
-            if let Some(params) = device.detect_bar_reprogramming(register, data) {
+            // Update the register value
+            let (bar_reprogram, ret) = device.write_config_register(register, offset, data);
+
+            // Move the device's BAR if needed
+            if let Some(params) = bar_reprogram {
                 if let Err(e) = pci_bus.device_reloc.move_bar(
                     params.old_base,
                     params.new_base,
@@ -273,8 +277,7 @@ impl PciConfigIo {
                 }
             }
 
-            // Update the register value
-            device.write_config_register(register, offset, data)
+            ret
         } else {
             None
         }
@@ -380,9 +383,11 @@ impl PciConfigMmio {
         if let Some(d) = pci_bus.devices.get(&(device as u32)) {
             let mut device = d.lock().unwrap();
 
-            // Find out if one of the device's BAR is being reprogrammed, and
-            // reprogram it if needed.
-            if let Some(params) = device.detect_bar_reprogramming(register, data) {
+            // Update the register value
+            let (bar_reprogram, _) = device.write_config_register(register, offset, data);
+
+            // Move the device's BAR if needed
+            if let Some(params) = bar_reprogram {
                 if let Err(e) = pci_bus.device_reloc.move_bar(
                     params.old_base,
                     params.new_base,
@@ -396,9 +401,6 @@ impl PciConfigMmio {
                     );
                 }
             }
-
-            // Update the register value
-            device.write_config_register(register, offset, data);
         }
     }
 }

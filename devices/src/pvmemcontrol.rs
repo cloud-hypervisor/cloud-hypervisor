@@ -698,10 +698,12 @@ impl PciDevice for PvmemcontrolPciDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> Option<Arc<Barrier>> {
-        self.configuration
-            .write_config_register(reg_idx, offset, data);
-        None
+    ) -> (Option<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+        (
+            self.configuration
+                .write_config_register(reg_idx, offset, data),
+            None,
+        )
     }
 
     fn read_config_register(&mut self, reg_idx: usize) -> u32 {
@@ -714,14 +716,6 @@ impl PciDevice for PvmemcontrolPciDevice {
 
     fn id(&self) -> Option<String> {
         Some(self.id.clone())
-    }
-
-    fn detect_bar_reprogramming(
-        &mut self,
-        reg_idx: usize,
-        data: &[u8],
-    ) -> Option<BarReprogrammingParams> {
-        self.configuration.detect_bar_reprogramming(reg_idx, data)
     }
 
     fn allocate_bars(
