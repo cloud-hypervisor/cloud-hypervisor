@@ -33,6 +33,10 @@ impl DiskFile for FixedVhdDiskSync {
                 .map_err(DiskFileError::NewAsyncIo)?,
         ) as Box<dyn AsyncIo>)
     }
+
+    fn fd(&mut self) -> RawFd {
+        self.0.as_raw_fd()
+    }
 }
 
 pub struct FixedVhdSync {

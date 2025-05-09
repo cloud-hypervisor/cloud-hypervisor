@@ -2,6 +2,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::os::fd::RawFd;
+
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -25,6 +27,12 @@ pub trait DiskFile: Send {
     fn topology(&mut self) -> DiskTopology {
         DiskTopology::default()
     }
+    /// Returns the file descriptor of the underlying disk image file.
+    // Impl Note:
+    // This must be `RawFd` instead of `BorrowedFd` or `&File`, as some
+    // implementations wrap the file in an `Arc<Mutex<T>>`, which makes it
+    // impossible to return a reference.
+    fn fd(&mut self) -> RawFd;
 }
 
 #[derive(Error, Debug)]
