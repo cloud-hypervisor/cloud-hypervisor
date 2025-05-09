@@ -760,6 +760,7 @@ fn create_vcpu_ioctl_seccomp_rule(
     let mut rules = or![
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_DEVICE_SET_IRQS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_GROUP_UNSET_CONTAINER)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_MAP_DMA)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_UNMAP_DMA)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SET_STATUS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_GET_CONFIG)?],
