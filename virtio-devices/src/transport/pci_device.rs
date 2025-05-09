@@ -912,7 +912,7 @@ impl PciDevice for VirtioPciDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> Option<Arc<Barrier>> {
+    ) -> (Option<BarReprogrammingParams>, Option<Arc<Barrier>>) {
         // Handle the special case where the capability VIRTIO_PCI_CAP_PCI_CFG
         // is accessed. This capability has a special meaning as it allows the
         // guest to access other capabilities without mapping the PCI BAR.
@@ -922,11 +922,13 @@ impl PciDevice for VirtioPciDevice {
                 <= self.cap_pci_cfg_info.offset + self.cap_pci_cfg_info.cap.bytes().len()
         {
             let offset = base + offset as usize - self.cap_pci_cfg_info.offset;
-            self.write_cap_pci_cfg(offset, data)
+            (None, self.write_cap_pci_cfg(offset, data))
         } else {
-            self.configuration
-                .write_config_register(reg_idx, offset, data);
-            None
+            (
+                self.configuration
+                    .write_config_register(reg_idx, offset, data),
+                None,
+            )
         }
     }
 
@@ -945,14 +947,6 @@ impl PciDevice for VirtioPciDevice {
         } else {
             self.configuration.read_reg(reg_idx)
         }
-    }
-
-    fn detect_bar_reprogramming(
-        &mut self,
-        reg_idx: usize,
-        data: &[u8],
-    ) -> Option<BarReprogrammingParams> {
-        self.configuration.detect_bar_reprogramming(reg_idx, data)
     }
 
     fn allocate_bars(
