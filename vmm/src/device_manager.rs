@@ -108,9 +108,9 @@ use crate::memory_manager::{Error as MemoryManagerError, MemoryManager, MEMORY_M
 use crate::pci_segment::PciSegment;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 use crate::vm_config::{
-    ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
-    VdpaConfig, VhostMode, VmConfig, VsockConfig, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS,
-    DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
+    ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, IvshmemConfig, NetConfig, PmemConfig,
+    UserDeviceConfig, VdpaConfig, VhostMode, VmConfig, VsockConfig,
+    DEFAULT_IOMMU_ADDRESS_WIDTH_BITS, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
 };
 use crate::{device_node, GuestRegionMmap, PciDeviceInfo, DEVICE_MANAGER_SNAPSHOT_ID};
 
@@ -132,6 +132,7 @@ const PVMEMCONTROL_DEVICE_NAME: &str = "__pvmemcontrol";
 const BALLOON_DEVICE_NAME: &str = "__balloon";
 const CONSOLE_DEVICE_NAME: &str = "__console";
 const PVPANIC_DEVICE_NAME: &str = "__pvpanic";
+const IVSHMEM_DEVICE_NAME: &str = "__ivshmem";
 
 // Devices that the user may name and for which we generate
 // identifiers if the user doesn't give one
@@ -505,6 +506,9 @@ pub enum DeviceManagerError {
 
     /// Cannot create a PvPanic device
     PvPanicCreate(devices::pvpanic::PvPanicError),
+
+    /// Cannot create a Ivshmem device
+    IvshmemCreate(devices::ivshmem::IvshmemError),
 
     /// Cannot create a RateLimiterGroup
     RateLimiterGroupCreate(rate_limiter::group::Error),
@@ -940,6 +944,9 @@ pub struct DeviceManager {
     rate_limit_groups: HashMap<String, Arc<RateLimiterGroup>>,
 
     mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
+
+    // ivshmem device
+    ivshmem_device: Option<Arc<Mutex<devices::IvshmemDevice>>>,
 }
 
 fn create_mmio_allocators(
@@ -1203,6 +1210,7 @@ impl DeviceManager {
             snapshot,
             rate_limit_groups,
             mmio_regions: Arc::new(Mutex::new(Vec::new())),
+            ivshmem_device: None,
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -1324,6 +1332,10 @@ impl DeviceManager {
 
         if self.config.clone().lock().unwrap().pvpanic {
             self.pvpanic_device = self.add_pvpanic_device()?;
+        }
+
+        if let Some(ivshmem) = self.config.clone().lock().unwrap().ivshmem.as_ref() {
+            self.ivshmem_device = self.add_ivshmem_device(ivshmem)?;
         }
 
         Ok(())
@@ -3954,6 +3966,76 @@ impl DeviceManager {
         self.device_tree.lock().unwrap().insert(id, node);
 
         Ok(Some(pvpanic_device))
+    }
+
+    fn add_ivshmem_device(
+        &mut self,
+        ivshmem_cfg: &IvshmemConfig,
+    ) -> DeviceManagerResult<Option<Arc<Mutex<devices::IvshmemDevice>>>> {
+        let id = String::from(IVSHMEM_DEVICE_NAME);
+        let pci_segment_id = 0x0_u16;
+        info!("Creating ivshmem device {}", id);
+
+        let (pci_segment_id, pci_device_bdf, resources) =
+            self.pci_resources(&id, pci_segment_id)?;
+        let snapshot = snapshot_from_id(self.snapshot.as_ref(), id.as_str());
+
+        let ivshmem_device = Arc::new(Mutex::new(
+            devices::IvshmemDevice::new(id.clone(), ivshmem_cfg.size as u64, snapshot)
+                .map_err(DeviceManagerError::IvshmemCreate)?,
+        ));
+        let new_resources = self.add_pci_device(
+            ivshmem_device.clone(),
+            ivshmem_device.clone(),
+            pci_segment_id,
+            pci_device_bdf,
+            resources,
+        )?;
+
+        let start_addr = ivshmem_device.lock().unwrap().data_bar_addr();
+        let region = MemoryManager::create_ram_region(
+            &Some(ivshmem_cfg.path.clone()),
+            0,
+            GuestAddress(start_addr),
+            ivshmem_cfg.size,
+            false,
+            true,
+            false,
+            None,
+            None,
+            None,
+            false,
+        )
+        .map_err(DeviceManagerError::MemoryManager)?;
+        let mem_slot = self
+            .memory_manager
+            .lock()
+            .unwrap()
+            .create_userspace_mapping(
+                region.start_addr().0,
+                region.len(),
+                region.as_ptr() as u64,
+                false,
+                false,
+                false,
+            )
+            .map_err(DeviceManagerError::MemoryManager)?;
+        let _mapping = virtio_devices::UserspaceMapping {
+            host_addr: region.as_ptr() as u64,
+            mem_slot,
+            addr: GuestAddress(region.start_addr().0),
+            len: region.len(),
+            mergeable: false,
+        };
+        ivshmem_device.lock().unwrap().assign_region(region);
+
+        let mut node = device_node!(id, ivshmem_device);
+        node.resources = new_resources;
+        node.pci_bdf = Some(pci_device_bdf);
+        node.pci_device_handle = None;
+        self.device_tree.lock().unwrap().insert(id, node);
+
+        Ok(Some(ivshmem_device))
     }
 
     fn pci_resources(
