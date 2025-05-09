@@ -46,6 +46,10 @@ impl DiskFile for RawFileDisk {
             DiskTopology::default()
         }
     }
+
+    fn fd(&mut self) -> RawFd {
+        self.file.as_raw_fd()
+    }
 }
 
 pub struct RawFileAsync {
