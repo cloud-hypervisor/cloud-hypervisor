@@ -19,7 +19,8 @@ use std::{io, result};
 
 use anyhow::anyhow;
 use block::async_io::{AsyncIo, AsyncIoError, DiskFile};
-use block::{build_serial, Request, RequestType, VirtioBlockConfig};
+use block::fcntl::{FileLockError, LockType};
+use block::{build_serial, fcntl, Request, RequestType, VirtioBlockConfig};
 use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
 use rate_limiter::TokenType;
 use seccompiler::SeccompAction;
@@ -80,6 +81,8 @@ pub enum Error {
     RequestStatus(GuestMemoryError),
     #[error("Failed to enable notification: {0}")]
     QueueEnableNotification(virtio_queue::Error),
+    #[error("Failed to lock disk image: {0}")]
+    LockDiskImage(FileLockError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -701,6 +704,30 @@ impl Block {
             serial,
             queue_affinity,
         })
+    }
+
+    /// Tries to set an advisory OFD lock for this file.
+    pub fn try_lock_image(&mut self) -> Result<()> {
+        let lock_type = match self.read_only {
+            true => LockType::Read,
+            false => LockType::Write,
+        };
+        fcntl::try_acquire_lock(self.disk_image.fd(), lock_type).map_err(Error::LockDiskImage)?;
+        log::info!(
+            "Acquired {lock_type:?} lock for disk image id={},path={}",
+            self.id,
+            self.disk_path.display()
+        );
+        Ok(())
+    }
+
+    pub fn get_lock_state(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    pub fn try_unlock_image(&mut self) -> Result<()> {
+        fcntl::try_clear_lock(self.disk_image.fd()).unwrap();
+        Ok(())
     }
 
     fn state(&self) -> BlockState {

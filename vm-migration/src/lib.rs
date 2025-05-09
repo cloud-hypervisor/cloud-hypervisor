@@ -48,6 +48,12 @@ pub enum MigratableError {
 
     #[error("Failed to complete migration for migratable component: {0}")]
     CompleteMigration(#[source] anyhow::Error),
+
+    #[error("Failed to release a disk lock before the migration: {0}")]
+    UnlockError(#[source] anyhow::Error),
+
+    #[error("Failed to acquire a disk lock after the migration: {0}")]
+    LockError(#[source] anyhow::Error),
 }
 
 /// A Pausable component can be paused and resumed.

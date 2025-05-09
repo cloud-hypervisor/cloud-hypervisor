@@ -77,7 +77,7 @@ use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd};
 use virtio_devices::transport::{VirtioPciDevice, VirtioPciDeviceActivator, VirtioTransport};
 use virtio_devices::vhost_user::VhostUserConfig;
 use virtio_devices::{
-    AccessPlatformMapping, ActivateError, Endpoint, IommuMapping, VdpaDmaMapping,
+    AccessPlatformMapping, ActivateError, Block, Endpoint, IommuMapping, VdpaDmaMapping,
     VirtioMemMappingSource,
 };
 use vm_allocator::{AddressAllocator, SystemAllocator};
@@ -515,6 +515,9 @@ pub enum DeviceManagerError {
 
     // Invalid console fd
     InvalidConsoleFd,
+
+    /// Error with one of the block devices.
+    BlockError(virtio_devices::block::Error),
 }
 
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
@@ -827,6 +830,9 @@ pub struct DeviceManager {
 
     // The virtio devices on the system
     virtio_devices: Vec<MetaVirtioDevice>,
+
+    /// All disks. Needed for locking and unlocking the images.
+    block_devices: Vec<Arc<Mutex<Block>>>,
 
     // List of bus devices
     // Let the DeviceManager keep strong references to the BusDevice devices.
@@ -1156,6 +1162,7 @@ impl DeviceManager {
             memory_manager,
             cpu_manager,
             virtio_devices: Vec::new(),
+            block_devices: vec![],
             bus_devices: Vec::new(),
             device_id_cnt,
             msi_interrupt_manager,
@@ -2285,6 +2292,35 @@ impl DeviceManager {
         Ok(tpm)
     }
 
+    /// Tries to acquire an advisory lock for all disk images.
+    ///
+    /// This should only be called when a VM boots or VM state is restored.
+    /// For live-migration, the locks must be released on the destination side
+    /// before they are acquired again by the receiving side.
+    pub fn try_lock_disks(&self) -> DeviceManagerResult<()> {
+        for dev in &self.block_devices {
+            let mut dev = dev.lock().unwrap();
+            dev.try_lock_image()
+                .map_err(DeviceManagerError::BlockError)?;
+        }
+        Ok(())
+    }
+
+    /// Release all advisory locks held for the disk images.
+    ///
+    /// This should only be called when the VM is stopped and the VMM supposed
+    /// to shut down. A new VMM, either after a live migration or a
+    /// state save/resume cycle, should then acquire all locks before the VM
+    /// starts to run.
+    pub fn release_disk_locks(&self) -> DeviceManagerResult<()> {
+        for dev in &self.block_devices {
+            let mut dev = dev.lock().unwrap();
+            dev.try_unlock_image()
+                .map_err(DeviceManagerError::BlockError)?;
+        }
+        Ok(())
+    }
+
     fn make_virtio_devices(&mut self) -> DeviceManagerResult<Vec<MetaVirtioDevice>> {
         let mut devices: Vec<MetaVirtioDevice> = Vec::new();
 
@@ -2453,7 +2489,7 @@ impl DeviceManager {
                     }
                 }
                 ImageType::Qcow2 => {
-                    info!("Using synchronous QCOW disk file");
+                    info!("Using synchronous QCOW2 disk file");
                     Box::new(
                         QcowDiskSync::new(file, disk_cfg.direct)
                             .map_err(DeviceManagerError::CreateQcowDiskSync)?,
@@ -2509,31 +2545,35 @@ impl DeviceManager {
                 BTreeMap::new()
             };
 
-            let virtio_block = Arc::new(Mutex::new(
-                virtio_devices::Block::new(
-                    id.clone(),
-                    image,
-                    disk_cfg
-                        .path
-                        .as_ref()
-                        .ok_or(DeviceManagerError::NoDiskPath)?
-                        .clone(),
-                    disk_cfg.readonly,
-                    self.force_iommu | disk_cfg.iommu,
-                    disk_cfg.num_queues,
-                    disk_cfg.queue_size,
-                    disk_cfg.serial.clone(),
-                    self.seccomp_action.clone(),
-                    rate_limit_group,
-                    self.exit_evt
-                        .try_clone()
-                        .map_err(DeviceManagerError::EventFd)?,
-                    state_from_id(self.snapshot.as_ref(), id.as_str())
-                        .map_err(DeviceManagerError::RestoreGetState)?,
-                    queue_affinity,
-                )
-                .map_err(DeviceManagerError::CreateVirtioBlock)?,
-            ));
+            let virtio_block = virtio_devices::Block::new(
+                id.clone(),
+                image,
+                disk_cfg
+                    .path
+                    .as_ref()
+                    .ok_or(DeviceManagerError::NoDiskPath)?
+                    .clone(),
+                disk_cfg.readonly,
+                self.force_iommu | disk_cfg.iommu,
+                disk_cfg.num_queues,
+                disk_cfg.queue_size,
+                disk_cfg.serial.clone(),
+                self.seccomp_action.clone(),
+                rate_limit_group,
+                self.exit_evt
+                    .try_clone()
+                    .map_err(DeviceManagerError::EventFd)?,
+                state_from_id(self.snapshot.as_ref(), id.as_str())
+                    .map_err(DeviceManagerError::RestoreGetState)?,
+                queue_affinity,
+            )
+            .map_err(DeviceManagerError::CreateVirtioBlock)?;
+            // We intentionally do not lock the file here to not prevent live-migration.
+            // Instead, advisory disk image locks are taken when the VM starts and the VM is no
+            // longer running on the receiver side.
+            let virtio_block = Arc::new(Mutex::new(virtio_block));
+
+            self.block_devices.push(virtio_block.clone());
 
             (
                 Arc::clone(&virtio_block) as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
@@ -4851,7 +4891,6 @@ impl Pausable for DeviceManager {
                 migratable.lock().unwrap().resume()?;
             }
         }
-
         Ok(())
     }
 }
