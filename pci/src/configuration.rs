@@ -907,9 +907,14 @@ impl PciConfiguration {
         (next + 3) & !3
     }
 
-    pub fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) {
+    pub fn write_config_register(
+        &mut self,
+        reg_idx: usize,
+        offset: u64,
+        data: &[u8],
+    ) -> Option<BarReprogrammingParams> {
         if offset as usize + data.len() > 4 {
-            return;
+            return None;
         }
 
         // Handle potential write to MSI-X message control register
@@ -938,13 +943,15 @@ impl PciConfiguration {
             4 => self.write_reg(reg_idx, LittleEndian::read_u32(data)),
             _ => (),
         }
+
+        self.detect_bar_reprogramming(reg_idx, data)
     }
 
     pub fn read_config_register(&self, reg_idx: usize) -> u32 {
         self.read_reg(reg_idx)
     }
 
-    pub fn detect_bar_reprogramming(
+    fn detect_bar_reprogramming(
         &mut self,
         reg_idx: usize,
         data: &[u8],
