@@ -14,9 +14,10 @@ use vm_device::{Bus, BusDevice, BusDeviceSync};
 
 use crate::configuration::{
     PciBarRegionType, PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType,
+    COMMAND_REG, COMMAND_REG_MEMORY_SPACE_MASK,
 };
 use crate::device::{DeviceRelocation, Error as PciDeviceError, PciDevice};
-use crate::PciBarConfiguration;
+use crate::{BarReprogrammingParams, PciBarConfiguration};
 
 const VENDOR_ID_INTEL: u16 = 0x8086;
 const DEVICE_ID_INTEL_VIRT_PCIE_HOST: u16 = 0x0d57;
@@ -194,6 +195,7 @@ pub struct PciConfigIo {
     /// Config space register.
     config_address: u32,
     pci_bus: Arc<Mutex<PciBus>>,
+    pending_bar_reprogram: Vec<BarReprogrammingParams>,
 }
 
 impl PciConfigIo {
@@ -201,6 +203,7 @@ impl PciConfigIo {
         PciConfigIo {
             config_address: 0,
             pci_bus,
+            pending_bar_reprogram: Vec::new(),
         }
     }
 
@@ -255,26 +258,35 @@ impl PciConfigIo {
         let pci_bus = self.pci_bus.as_ref().lock().unwrap();
         if let Some(d) = pci_bus.devices.get(&(device as u32)) {
             let mut device = d.lock().unwrap();
+            // Update the register value
+            let ret = device.write_config_register(register, offset, data);
 
-            // Find out if one of the device's BAR is being reprogrammed, and
-            // reprogram it if needed.
+            // Find out if one of the device's BAR is being reprogrammed
             if let Some(params) = device.detect_bar_reprogramming(register, data) {
-                if let Err(e) = pci_bus.device_reloc.move_bar(
-                    params.old_base,
-                    params.new_base,
-                    params.len,
-                    device.deref_mut(),
-                    params.region_type,
-                ) {
-                    error!(
-                        "Failed moving device BAR: {}: 0x{:x}->0x{:x}(0x{:x})",
-                        e, params.old_base, params.new_base, params.len
-                    );
+                self.pending_bar_reprogram.push(params);
+            }
+
+            // Reprogram bar only if the MSE bit is enabled
+            if device.read_config_register(COMMAND_REG) & COMMAND_REG_MEMORY_SPACE_MASK
+                == COMMAND_REG_MEMORY_SPACE_MASK
+            {
+                for params in self.pending_bar_reprogram.drain(..) {
+                    if let Err(e) = pci_bus.device_reloc.move_bar(
+                        params.old_base,
+                        params.new_base,
+                        params.len,
+                        device.deref_mut(),
+                        params.region_type,
+                    ) {
+                        error!(
+                            "Failed moving device BAR: {}: 0x{:x}->0x{:x}(0x{:x})",
+                            e, params.old_base, params.new_base, params.len
+                        );
+                    }
                 }
             }
 
-            // Update the register value
-            device.write_config_register(register, offset, data)
+            ret
         } else {
             None
         }
