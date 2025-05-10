@@ -907,9 +907,14 @@ impl PciConfiguration {
         (next + 3) & !3
     }
 
-    pub fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) {
+    pub fn write_config_register(
+        &mut self,
+        reg_idx: usize,
+        offset: u64,
+        data: &[u8],
+    ) -> Option<BarReprogrammingParams> {
         if offset as usize + data.len() > 4 {
-            return;
+            return None;
         }
 
         // Handle potential write to MSI-X message control register
@@ -938,13 +943,15 @@ impl PciConfiguration {
             4 => self.write_reg(reg_idx, LittleEndian::read_u32(data)),
             _ => (),
         }
+
+        self.detect_bar_reprogramming(reg_idx, data)
     }
 
     pub fn read_config_register(&self, reg_idx: usize) -> u32 {
         self.read_reg(reg_idx)
     }
 
-    pub fn detect_bar_reprogramming(
+    fn detect_bar_reprogramming(
         &mut self,
         reg_idx: usize,
         data: &[u8],
@@ -981,7 +988,7 @@ impl PciConfiguration {
 
                 info!(
                     "Detected BAR reprogramming: (BAR {}) 0x{:x}->0x{:x}",
-                    reg_idx, self.registers[reg_idx], value
+                    bar_idx, self.bars[bar_idx].addr, value
                 );
                 let old_base = u64::from(self.bars[bar_idx].addr & mask);
                 let new_base = u64::from(value & mask);
@@ -1007,7 +1014,7 @@ impl PciConfiguration {
             {
                 info!(
                     "Detected BAR reprogramming: (BAR {}) 0x{:x}->0x{:x}",
-                    reg_idx, self.registers[reg_idx], value
+                    bar_idx, self.bars[bar_idx].addr, value
                 );
                 let old_base = (u64::from(self.bars[bar_idx].addr & mask) << 32)
                     | u64::from(self.bars[bar_idx - 1].addr & self.writable_bits[reg_idx - 1]);
@@ -1036,8 +1043,8 @@ impl PciConfiguration {
             }
 
             info!(
-                "Detected ROM BAR reprogramming: (BAR {}) 0x{:x}->0x{:x}",
-                reg_idx, self.registers[reg_idx], value
+                "Detected ROM BAR reprogramming: (Expansion ROM BAR) 0x{:x}->0x{:x}",
+                self.rom_bar_addr, value
             );
             let old_base = u64::from(self.rom_bar_addr & mask);
             let new_base = u64::from(value & mask);
