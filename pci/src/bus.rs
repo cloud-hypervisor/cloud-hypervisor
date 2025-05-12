@@ -81,7 +81,7 @@ impl PciDevice for PciRoot {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> (Option<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
         (
             self.config.write_config_register(reg_idx, offset, data),
             None,
@@ -262,7 +262,7 @@ impl PciConfigIo {
             let (bar_reprogram, ret) = device.write_config_register(register, offset, data);
 
             // Move the device's BAR if needed
-            if let Some(params) = bar_reprogram {
+            for params in &bar_reprogram {
                 if let Err(e) = pci_bus.device_reloc.move_bar(
                     params.old_base,
                     params.new_base,
@@ -387,7 +387,7 @@ impl PciConfigMmio {
             let (bar_reprogram, _) = device.write_config_register(register, offset, data);
 
             // Move the device's BAR if needed
-            if let Some(params) = bar_reprogram {
+            for params in &bar_reprogram {
                 if let Err(e) = pci_bus.device_reloc.move_bar(
                     params.old_base,
                     params.new_base,
