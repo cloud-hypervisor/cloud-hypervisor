@@ -18,6 +18,8 @@ use crate::{MsixConfig, PciInterruptPin};
 // The number of 32bit registers in the config space, 4096 bytes.
 const NUM_CONFIGURATION_REGISTERS: usize = 1024;
 
+const COMMAND_REG: usize = 1;
+const COMMAND_REG_MEMORY_SPACE_MASK: u32 = 0x0000_0002;
 const STATUS_REG: usize = 1;
 const STATUS_REG_CAPABILITIES_USED_MASK: u32 = 0x0010_0000;
 const BAR0_REG: usize = 4;
@@ -436,6 +438,7 @@ pub struct PciConfiguration {
     last_capability: Option<(usize, usize)>,
     msix_cap_reg_idx: Option<usize>,
     msix_config: Option<Arc<Mutex<MsixConfig>>>,
+    pending_bar_reprogram: Vec<BarReprogrammingParams>,
 }
 
 /// See pci_regs.h in kernel
@@ -630,6 +633,7 @@ impl PciConfiguration {
             last_capability,
             msix_cap_reg_idx,
             msix_config,
+            pending_bar_reprogram: Vec::new(),
         }
     }
 
@@ -912,9 +916,9 @@ impl PciConfiguration {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> Option<BarReprogrammingParams> {
+    ) -> Vec<BarReprogrammingParams> {
         if offset as usize + data.len() > 4 {
-            return None;
+            return Vec::new();
         }
 
         // Handle potential write to MSI-X message control register
@@ -944,7 +948,29 @@ impl PciConfiguration {
             _ => (),
         }
 
-        self.detect_bar_reprogramming(reg_idx, data)
+        if let Some(param) = self.detect_bar_reprogramming(reg_idx, data) {
+            self.pending_bar_reprogram.push(param);
+        }
+
+        if !self.pending_bar_reprogram.is_empty() {
+            // Return bar reprogramming only if the MSE bit is enabled;
+            if self.read_config_register(COMMAND_REG) & COMMAND_REG_MEMORY_SPACE_MASK
+                == COMMAND_REG_MEMORY_SPACE_MASK
+            {
+                info!(
+                    "BAR reprogramming parameter is returned: {:x?}",
+                    self.pending_bar_reprogram
+                );
+                return self.pending_bar_reprogram.drain(..).collect();
+            } else {
+                info!(
+                    "MSE bit is disabled. No BAR reprogramming parameter is returned: {:x?}",
+                    self.pending_bar_reprogram
+                );
+            }
+        }
+
+        Vec::new()
     }
 
     pub fn read_config_register(&self, reg_idx: usize) -> u32 {

@@ -431,7 +431,7 @@ impl PciDevice for VfioUserPciDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> (Option<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
         self.common.write_config_register(reg_idx, offset, data)
     }
 

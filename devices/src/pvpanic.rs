@@ -90,7 +90,7 @@ impl PvPanicDevice {
         let command: [u8; 2] = [0x03, 0x01];
         let bar_reprogram = configuration.write_config_register(1, 0, &command);
         assert!(
-            bar_reprogram.is_none(),
+            bar_reprogram.is_empty(),
             "No bar reprogrammig is expected from writing to the COMMAND register"
         );
 
@@ -160,7 +160,7 @@ impl PciDevice for PvPanicDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> (Option<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
         (
             self.configuration
                 .write_config_register(reg_idx, offset, data),

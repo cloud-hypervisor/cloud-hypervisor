@@ -698,7 +698,7 @@ impl PciDevice for PvmemcontrolPciDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> (Option<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
         (
             self.configuration
                 .write_config_register(reg_idx, offset, data),

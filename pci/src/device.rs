@@ -48,7 +48,7 @@ impl Display for Error {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct BarReprogrammingParams {
     pub old_base: u64,
     pub new_base: u64,
@@ -87,7 +87,7 @@ pub trait PciDevice: Send {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> (Option<BarReprogrammingParams>, Option<Arc<Barrier>>);
+    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>);
     /// Gets a register from the configuration space.
     /// * `reg_idx` - The index of the config register to read.
     fn read_config_register(&mut self, reg_idx: usize) -> u32;
