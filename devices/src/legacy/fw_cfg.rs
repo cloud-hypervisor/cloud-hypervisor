@@ -63,11 +63,22 @@ const STAGE0_SIZE: usize = 0x20_0000;
 const E820_RAM: u32 = 1;
 const E820_RESERVED: u32 = 2;
 
-pub const PORT_FW_CFG_SELECTOR: u16 = 0x510;
-pub const PORT_FW_CFG_DATA: u16 = 0x511;
-pub const PORT_FW_CFG_DMA_HI: u16 = 0x514;
-pub const PORT_FW_CFG_DMA_LO: u16 = 0x518;
-
+#[cfg(target_arch = "x86_64")]
+pub const PORT_FW_CFG_SELECTOR: u64 = 0x510;
+#[cfg(target_arch = "x86_64")]
+pub const PORT_FW_CFG_DATA: u64 = 0x511;
+#[cfg(target_arch = "x86_64")]
+pub const PORT_FW_CFG_DMA_HI: u64 = 0x514;
+#[cfg(target_arch = "x86_64")]
+pub const PORT_FW_CFG_DMA_LO: u64 = 0x518;
+#[cfg(target_arch = "aarch64")]
+pub const PORT_FW_CFG_SELECTOR: u64 = 0x9020008;
+#[cfg(target_arch = "aarch64")]
+pub const PORT_FW_CFG_DATA: u64 = 0x9020000;
+#[cfg(target_arch = "aarch64")]
+pub const PORT_FW_CFG_DMA_HI: u64 = 0x9020010;
+#[cfg(target_arch = "aarch64")]
+pub const PORT_FW_CFG_DMA_LO: u64 = 0x9020014;
 pub const FW_CFG_SIGNATURE: u16 = 0x00;
 pub const FW_CFG_ID: u16 = 0x01;
 pub const FW_CFG_KERNEL_SIZE: u16 = 0x08;
@@ -488,7 +499,7 @@ impl FwCfg {
 
 impl BusDevice for FwCfg {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
-        let port = offset as u16 + PORT_FW_CFG_SELECTOR;
+        let port = offset + PORT_FW_CFG_SELECTOR;
         let size = data.len();
         match (port, size) {
             (PORT_FW_CFG_SELECTOR, _) => {
@@ -512,7 +523,7 @@ impl BusDevice for FwCfg {
     }
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        let port = offset as u16 + PORT_FW_CFG_SELECTOR;
+        let port = offset + PORT_FW_CFG_SELECTOR;
         let size = data.size();
         match (port, size) {
             (PORT_FW_CFG_SELECTOR, 2) => {

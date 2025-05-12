@@ -1895,6 +1895,26 @@ impl DeviceManager {
             .unwrap()
             .insert(id.clone(), device_node!(id, gpio_device));
 
+        #[cfg(feature = "fw_cfg")]
+        {
+            let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new(
+                self.memory_manager.lock().as_ref().unwrap().guest_memory(),
+            )));
+
+            self.fw_cfg = Some(fw_cfg.clone());
+
+            info!("allocating address space for fw_cfg");
+            // default address for fw_cfg on arm via mmio
+            // https://github.com/torvalds/linux/blob/master/drivers/firmware/qemu_fw_cfg.c#L27
+            self.address_manager
+                .io_bus
+                .insert(fw_cfg.clone(), 0x9020000, MMIO_LEN)
+                .map_err(DeviceManagerError::BusError)?;
+
+            self.bus_devices
+                .push(Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>);
+        }
+
         Ok(())
     }
 
