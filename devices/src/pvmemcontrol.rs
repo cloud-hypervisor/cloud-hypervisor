@@ -484,7 +484,7 @@ impl PvmemcontrolBusDevice {
     }
 
     fn set_vma_anon_name(&self, addr: u64, length: u64, name: u64) -> result::Result<(), Error> {
-        let name = (name != 0).then(|| CString::new(format!("pvmemcontrol-{}", name)).unwrap());
+        let name = (name != 0).then(|| CString::new(format!("pvmemcontrol-{name}")).unwrap());
         let name_ptr = if let Some(name) = &name {
             name.as_ptr()
         } else {

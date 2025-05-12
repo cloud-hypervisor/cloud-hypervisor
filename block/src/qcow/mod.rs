@@ -378,7 +378,7 @@ impl QcowHeader {
         }
 
         if let Some(backing_file_path) = self.backing_file_path.as_ref() {
-            write!(file, "{}", backing_file_path).map_err(Error::WritingHeader)?;
+            write!(file, "{backing_file_path}").map_err(Error::WritingHeader)?;
         }
 
         // Set the file length by seeking and writing a zero to the last byte. This avoids needing
