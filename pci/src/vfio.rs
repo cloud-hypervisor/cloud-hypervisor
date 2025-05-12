@@ -1292,7 +1292,26 @@ impl VfioCommon {
         // to the device region to update the MSI Enable bit.
         self.vfio_wrapper.write_config((reg + offset) as u32, data);
 
-        (Vec::new(), None)
+        // Return pending BAR repgrogramming if MSE bit is set
+        let mut ret_param = self.configuration.pending_bar_reprogram();
+        if !ret_param.is_empty() {
+            if self.read_config_register(crate::configuration::COMMAND_REG)
+                & crate::configuration::COMMAND_REG_MEMORY_SPACE_MASK
+                == crate::configuration::COMMAND_REG_MEMORY_SPACE_MASK
+            {
+                info!("BAR reprogramming parameter is returned: {:x?}", ret_param);
+                self.configuration.clear_pending_bar_reprogram();
+            } else {
+                info!(
+                    "MSE bit is disabled. No BAR reprogramming parameter is returned: {:x?}",
+                    ret_param
+                );
+
+                ret_param = Vec::new();
+            }
+        }
+
+        (ret_param, None)
     }
 
     pub(crate) fn read_config_register(&mut self, reg_idx: usize) -> u32 {
