@@ -265,11 +265,11 @@ pub enum DeviceManagerError {
 
     /// Cannot allocate PCI BARs
     #[error("Cannot allocate PCI BARs: {0}")]
-    AllocateBars(pci::PciDeviceError),
+    AllocateBars(#[source] pci::PciDeviceError),
 
     /// Could not free the BARs associated with a PCI device.
     #[error("Could not free the BARs associated with a PCI device: {0}")]
-    FreePciBars(pci::PciDeviceError),
+    FreePciBars(#[source] pci::PciDeviceError),
 
     /// Cannot register ioevent.
     #[error("Cannot register ioevent: {0}")]
