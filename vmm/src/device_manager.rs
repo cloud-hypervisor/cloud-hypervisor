@@ -216,7 +216,7 @@ pub enum DeviceManagerError {
 
     /// Cannot create virtio-vsock backend
     #[error("Cannot create virtio-vsock backend")]
-    CreateVsockBackend(virtio_devices::vsock::VsockUnixError),
+    CreateVsockBackend(#[source] virtio_devices::vsock::VsockUnixError),
 
     /// Cannot create virtio-iommu device
     #[error("Cannot create virtio-iommu device: {0}")]
