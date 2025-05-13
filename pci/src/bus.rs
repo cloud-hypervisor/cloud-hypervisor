@@ -10,6 +10,7 @@ use std::ops::DerefMut;
 use std::sync::{Arc, Barrier, Mutex};
 
 use byteorder::{ByteOrder, LittleEndian};
+use thiserror::Error;
 use vm_device::{Bus, BusDevice, BusDeviceSync};
 
 use crate::configuration::{
@@ -23,21 +24,28 @@ const DEVICE_ID_INTEL_VIRT_PCIE_HOST: u16 = 0x0d57;
 const NUM_DEVICE_IDS: usize = 32;
 
 /// Errors for device manager.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum PciRootError {
     /// Could not allocate device address space for the device.
-    AllocateDeviceAddrs(PciDeviceError),
+    #[error("Could not allocate device address space for the device: {0}")]
+    AllocateDeviceAddrs(#[source] PciDeviceError),
     /// Could not allocate an IRQ number.
+    #[error("Could not allocate an IRQ number")]
     AllocateIrq,
     /// Could not add a device to the port io bus.
-    PioInsert(vm_device::BusError),
+    #[error("Could not add a device to the port io bus: {0}")]
+    PioInsert(#[source] vm_device::BusError),
     /// Could not add a device to the mmio bus.
-    MmioInsert(vm_device::BusError),
+    #[error("Could not add a device to the mmio bus: {0}")]
+    MmioInsert(#[source] vm_device::BusError),
     /// Could not find an available device slot on the PCI bus.
+    #[error("Could not find an available device slot on the PCI bus")]
     NoPciDeviceSlotAvailable,
     /// Invalid PCI device identifier provided.
+    #[error("Invalid PCI device identifier provided")]
     InvalidPciDeviceSlot(usize),
     /// Valid PCI device identifier but already used.
+    #[error("Valid PCI device identifier but already used")]
     AlreadyInUsePciDeviceSlot(usize),
 }
 pub type Result<T> = std::result::Result<T, PciRootError>;
