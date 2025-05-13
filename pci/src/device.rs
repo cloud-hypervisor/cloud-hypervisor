@@ -7,6 +7,7 @@
 use std::any::Any;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{io, result};
+
 use thiserror::Error;
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::Resource;
