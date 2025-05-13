@@ -285,7 +285,7 @@ pub enum DeviceManagerError {
 
     /// Cannot add PCI device
     #[error("Cannot add PCI device")]
-    AddPciDevice(pci::PciRootError),
+    AddPciDevice(#[source] pci::PciRootError),
 
     /// Cannot open persistent memory file
     #[error("Cannot open persistent memory file")]
