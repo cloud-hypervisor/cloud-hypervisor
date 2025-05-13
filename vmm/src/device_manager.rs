@@ -382,7 +382,7 @@ pub enum DeviceManagerError {
 
     /// Error from a memory manager operation
     #[error("Error from a memory manager operation")]
-    MemoryManager(MemoryManagerError),
+    MemoryManager(#[source] MemoryManagerError),
 
     /// Failed to create new interrupt source group.
     #[error("Failed to create new interrupt source group")]

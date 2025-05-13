@@ -30,6 +30,7 @@ use libc::_SC_NPROCESSORS_ONLN;
 #[cfg(target_arch = "x86_64")]
 use libc::{MAP_NORESERVE, MAP_POPULATE, MAP_SHARED, PROT_READ, PROT_WRITE};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use tracer::trace_scoped;
 use virtio_devices::BlocksState;
 #[cfg(target_arch = "x86_64")]
@@ -202,145 +203,188 @@ pub struct MemoryManager {
     uefi_flash: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
     /// Failed to create shared file.
-    SharedFileCreate(io::Error),
+    #[error("Failed to create shared file: {0}")]
+    SharedFileCreate(#[source] io::Error),
 
     /// Failed to set shared file length.
-    SharedFileSetLen(io::Error),
+    #[error("Failed to set shared file length: {0}")]
+    SharedFileSetLen(#[source] io::Error),
 
     /// Mmap backed guest memory error
-    GuestMemory(MmapError),
+    #[error("Mmap backed guest memory error: {0}")]
+    GuestMemory(#[source] MmapError),
 
     /// Failed to allocate a memory range.
+    #[error("Failed to allocate a memory range")]
     MemoryRangeAllocation,
 
     /// Error from region creation
-    GuestMemoryRegion(MmapRegionError),
+    #[error("Error from region creation: {0}")]
+    GuestMemoryRegion(#[source] MmapRegionError),
 
     /// No ACPI slot available
+    #[error("No ACPI slot available")]
     NoSlotAvailable,
 
     /// Not enough space in the hotplug RAM region
+    #[error("Not enough space in the hotplug RAM region")]
     InsufficientHotplugRam,
 
     /// The requested hotplug memory addition is not a valid size
+    #[error("The requested hotplug memory addition is not a valid size")]
     InvalidSize,
 
     /// Failed to create the user memory region.
-    CreateUserMemoryRegion(hypervisor::HypervisorVmError),
+    #[error("Failed to create the user memory region: {0}")]
+    CreateUserMemoryRegion(#[source] hypervisor::HypervisorVmError),
 
     /// Failed to remove the user memory region.
-    RemoveUserMemoryRegion(hypervisor::HypervisorVmError),
+    #[error("Failed to remove the user memory region: {0}")]
+    RemoveUserMemoryRegion(#[source] hypervisor::HypervisorVmError),
 
     /// Failed to EventFd.
-    EventFdFail(io::Error),
+    #[error("Failed to EventFd: {0}")]
+    EventFdFail(#[source] io::Error),
 
     /// Eventfd write error
-    EventfdError(io::Error),
+    #[error("Eventfd write error: {0}")]
+    EventfdError(#[source] io::Error),
 
     /// Failed to virtio-mem resize
-    VirtioMemResizeFail(virtio_devices::mem::Error),
+    #[error("Failed to virtio-mem resize: {0}")]
+    VirtioMemResizeFail(#[source] virtio_devices::mem::Error),
 
     /// Cannot restore VM
-    Restore(MigratableError),
+    #[error("Cannot restore VM: {0}")]
+    Restore(#[source] MigratableError),
 
     /// Cannot restore VM because source URL is missing
+    #[error("Cannot restore VM because source URL is missing")]
     RestoreMissingSourceUrl,
 
     /// Cannot create the system allocator
+    #[error("Cannot create the system allocator")]
     CreateSystemAllocator,
 
     /// Invalid SGX EPC section size
     #[cfg(target_arch = "x86_64")]
+    #[error("Invalid SGX EPC section size")]
     EpcSectionSizeInvalid,
 
     /// Failed allocating SGX EPC region
     #[cfg(target_arch = "x86_64")]
+    #[error("Failed allocating SGX EPC region")]
     SgxEpcRangeAllocation,
 
     /// Failed opening SGX virtual EPC device
     #[cfg(target_arch = "x86_64")]
-    SgxVirtEpcOpen(io::Error),
+    #[error("Failed opening SGX virtual EPC device: {0}")]
+    SgxVirtEpcOpen(#[source] io::Error),
 
     /// Failed setting the SGX virtual EPC section size
     #[cfg(target_arch = "x86_64")]
-    SgxVirtEpcFileSetLen(io::Error),
+    #[error("Failed setting the SGX virtual EPC section size: {0}")]
+    SgxVirtEpcFileSetLen(#[source] io::Error),
 
     /// Failed opening SGX provisioning device
     #[cfg(target_arch = "x86_64")]
-    SgxProvisionOpen(io::Error),
+    #[error("Failed opening SGX provisioning device: {0}")]
+    SgxProvisionOpen(#[source] io::Error),
 
     /// Failed enabling SGX provisioning
     #[cfg(target_arch = "x86_64")]
-    SgxEnableProvisioning(hypervisor::HypervisorVmError),
+    #[error("Failed enabling SGX provisioning: {0}")]
+    SgxEnableProvisioning(#[source] hypervisor::HypervisorVmError),
 
     /// Failed creating a new MmapRegion instance.
     #[cfg(target_arch = "x86_64")]
-    NewMmapRegion(vm_memory::mmap::MmapRegionError),
+    #[error("Failed creating a new MmapRegion instance: {0}")]
+    NewMmapRegion(#[source] vm_memory::mmap::MmapRegionError),
 
     /// No memory zones found.
+    #[error("No memory zones found")]
     MissingMemoryZones,
 
     /// Memory configuration is not valid.
+    #[error("Memory configuration is not valid")]
     InvalidMemoryParameters,
 
     /// Forbidden operation. Impossible to resize guest memory if it is
     /// backed by user defined memory regions.
+    #[error("Impossible to resize guest memory if it is backed by user defined memory regions")]
     InvalidResizeWithMemoryZones,
 
     /// It's invalid to try applying a NUMA policy to a memory zone that is
     /// memory mapped with MAP_SHARED.
+    #[error("Invalid to try applying a NUMA policy to a memory zone that is memory mapped with MAP_SHARED")]
     InvalidSharedMemoryZoneWithHostNuma,
 
     /// Failed applying NUMA memory policy.
-    ApplyNumaPolicy(io::Error),
+    #[error("Failed applying NUMA memory policy: {0}")]
+    ApplyNumaPolicy(#[source] io::Error),
 
     /// Memory zone identifier is not unique.
+    #[error("Memory zone identifier is not unique")]
     DuplicateZoneId,
 
     /// No virtio-mem resizing handler found.
+    #[error("No virtio-mem resizing handler found")]
     MissingVirtioMemHandler,
 
     /// Unknown memory zone.
+    #[error("Unknown memory zone")]
     UnknownMemoryZone,
 
     /// Invalid size for resizing. Can be anything except 0.
+    #[error("Invalid size for resizing. Can be anything except 0")]
     InvalidHotplugSize,
 
     /// Invalid hotplug method associated with memory zones resizing capability.
+    #[error("Invalid hotplug method associated with memory zones resizing capability")]
     InvalidHotplugMethodWithMemoryZones,
 
     /// Could not find specified memory zone identifier from hash map.
+    #[error("Could not find specified memory zone identifier from hash map")]
     MissingZoneIdentifier,
 
     /// Resizing the memory zone failed.
+    #[error("Resizing the memory zone failed")]
     ResizeZone,
 
     /// Guest address overflow
+    #[error("Guest address overflow")]
     GuestAddressOverFlow,
 
     /// Error opening snapshot file
-    SnapshotOpen(io::Error),
+    #[error("Error opening snapshot file: {0}")]
+    SnapshotOpen(#[source] io::Error),
 
     // Error copying snapshot into region
-    SnapshotCopy(GuestMemoryError),
+    #[error("Error copying snapshot into region: {0}")]
+    SnapshotCopy(#[source] GuestMemoryError),
 
     /// Failed to allocate MMIO address
+    #[error("Failed to allocate MMIO address")]
     AllocateMmioAddress,
 
     #[cfg(target_arch = "aarch64")]
     /// Failed to create UEFI flash
-    CreateUefiFlash(HypervisorVmError),
+    #[error("Failed to create UEFI flash: {0}")]
+    CreateUefiFlash(#[source] HypervisorVmError),
 
     /// Using a directory as a backing file for memory is not supported
+    #[error("Using a directory as a backing file for memory is not supported")]
     DirectoryAsBackingFileForMemory,
 
     /// Failed to stat filesystem
-    GetFileSystemBlockSize(io::Error),
+    #[error("Failed to stat filesystem: {0}")]
+    GetFileSystemBlockSize(#[source] io::Error),
 
     /// Memory size is misaligned with default page size or its hugepage size
+    #[error("Memory size is misaligned with default page size or its hugepage size")]
     MisalignedMemorySize,
 }
 
