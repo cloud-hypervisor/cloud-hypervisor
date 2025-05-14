@@ -13,7 +13,7 @@ use vmm_sys_util::aio;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
+    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::DiskTopology;
 
@@ -50,8 +50,8 @@ impl DiskFile for RawFileDiskAio {
         }
     }
 
-    fn fd(&mut self) -> RawFd {
-        self.file.as_raw_fd()
+    fn fd(&mut self) -> BorrowedDiskFd {
+        BorrowedDiskFd::new(self.file.as_raw_fd())
     }
 }
 
