@@ -8,7 +8,6 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::mpsc::channel;
 use std::sync::Mutex;
 use std::{env, io};
-
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use event_monitor::event;
 use libc::EFD_NONBLOCK;
@@ -56,7 +55,7 @@ enum Error {
     #[error("Error creating VM: {0:?}")]
     VmCreate(vmm::api::ApiError),
     #[error("Error booting VM: {0:?}")]
-    VmBoot(vmm::api::ApiError),
+    VmBoot(#[source] vmm::api::ApiError),
     #[error("Error restoring VM: {0:?}")]
     VmRestore(vmm::api::ApiError),
     #[error("Error parsing restore: {0}")]
@@ -845,6 +844,20 @@ fn expand_fdtable() -> Result<(), FdTableError> {
     Ok(())
 }
 
+
+/// Print the error chain with indentation, similar to `anyhow`'s Debug output
+pub fn print_error_chain(err: &dyn std::error::Error) {
+    eprintln!("Error: {}", err);
+
+    let mut source = err.source();
+    let mut level = 1;
+    while let Some(err) = source {
+        eprintln!("{:>width$}{}", "", format!("Caused by: {}", err), width = level * 2);
+        source = err.source();
+        level += 1;
+    }
+}
+
 fn main() {
     #[cfg(all(feature = "tdx", feature = "sev_snp"))]
     compile_error!("Feature 'tdx' and 'sev_snp' are mutually exclusive.");
@@ -881,7 +894,7 @@ fn main() {
             0
         }
         Err(e) => {
-            eprintln!("{e}");
+            print_error_chain(&e);
             1
         }
     };
