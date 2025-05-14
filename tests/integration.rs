@@ -4445,7 +4445,7 @@ mod common_parallel {
                 )
                 .as_str(),
                 format!("path={}", vfio_disk_path.to_str().unwrap()).as_str(),
-                format!("path={},iommu=on", blk_file_path.to_str().unwrap()).as_str(),
+                format!("path={},iommu=on,readonly=true", blk_file_path.to_str().unwrap()).as_str(),
             ])
             .args([
                 "--cmdline",
@@ -5193,7 +5193,13 @@ mod common_parallel {
             assert!(!remote_command(
                 &api_socket,
                 "add-disk",
-                Some(format!("path={},id=test0", blk_file_path.to_str().unwrap()).as_str()),
+                Some(
+                    format!(
+                        "path={},id=test0,readonly=true",
+                        blk_file_path.to_str().unwrap()
+                    )
+                    .as_str()
+                ),
             ));
         });
 
@@ -5255,7 +5261,13 @@ mod common_parallel {
             let (cmd_success, cmd_output) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
-                Some(format!("path={},id=test0", blk_file_path.to_str().unwrap()).as_str()),
+                Some(
+                    format!(
+                        "path={},id=test0,readonly=true",
+                        blk_file_path.to_str().unwrap()
+                    )
+                    .as_str(),
+                ),
             );
             assert!(cmd_success);
             assert!(String::from_utf8_lossy(&cmd_output)
@@ -5296,7 +5308,13 @@ mod common_parallel {
             let (cmd_success, cmd_output) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
-                Some(format!("path={},id=test0", blk_file_path.to_str().unwrap()).as_str()),
+                Some(
+                    format!(
+                        "path={},id=test0,readonly=true",
+                        blk_file_path.to_str().unwrap()
+                    )
+                    .as_str(),
+                ),
             );
             assert!(cmd_success);
             assert!(String::from_utf8_lossy(&cmd_output)
