@@ -5,12 +5,14 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::AsRawFd;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::async_io::{AsyncIo, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult};
+use crate::async_io::{
+    AsyncIo, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
+};
 use crate::qcow::{QcowFile, RawFile, Result as QcowResult};
 use crate::AsyncAdaptor;
 
@@ -37,9 +39,9 @@ impl DiskFile for QcowDiskSync {
         Ok(Box::new(QcowSync::new(self.qcow_file.clone())) as Box<dyn AsyncIo>)
     }
 
-    fn fd(&mut self) -> RawFd {
+    fn fd(&mut self) -> BorrowedDiskFd {
         let lock = self.qcow_file.lock().unwrap();
-        lock.as_raw_fd()
+        BorrowedDiskFd::new(lock.as_raw_fd())
     }
 }
 

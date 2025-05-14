@@ -8,7 +8,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
+    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::fixed_vhd::FixedVhd;
 use crate::raw_sync::RawFileSync;
@@ -34,8 +34,8 @@ impl DiskFile for FixedVhdDiskSync {
         ) as Box<dyn AsyncIo>)
     }
 
-    fn fd(&mut self) -> RawFd {
-        self.0.as_raw_fd()
+    fn fd(&mut self) -> BorrowedDiskFd {
+        BorrowedDiskFd::new(self.0.as_raw_fd())
     }
 }
 
