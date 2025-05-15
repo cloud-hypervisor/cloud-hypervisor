@@ -875,7 +875,7 @@ fn main() {
         warn!("Error expanding FD table: {e}");
     }
 
-    let exit_code = match start_vmm(cmd_arguments) {
+    let exit_code = match start_vmm(cmd_arguments.clone()) {
         Ok(path) => {
             path.map(|s| std::fs::remove_file(s).ok());
             0
@@ -889,6 +889,9 @@ fn main() {
                 while let Some(sub_error) = error.source() {
                     error = sub_error;
                     eprintln!("  {level}: {error}", );
+                    if cmd_arguments.get_count("v") != 0 {
+                        eprintln!("     └{error:?}", );
+                    }
                     level += 1;
                 }
             } else {
