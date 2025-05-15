@@ -881,15 +881,19 @@ fn main() {
             0
         }
         Err(error) => {
-            // Print error chain
-            eprintln!("Error:");
-            eprintln!(" 0: {error}");
-            let mut level = 1;
-            let mut error: &dyn StdError = &error;
-            while let Some(sub_error) = error.source() {
-                error = sub_error;
-                eprintln!("{level:>2}: {error}", );
-                level += 1;
+            if error.source().is_some() {
+                eprintln!("Cloud Hypervisor exited with the following nested error:");
+                eprintln!("  0: {error}");
+                let mut level = 1;
+                let mut error: &dyn StdError = &error;
+                while let Some(sub_error) = error.source() {
+                    error = sub_error;
+                    eprintln!("  {level}: {error}", );
+                    level += 1;
+                }
+            } else {
+                eprintln!("Cloud Hypervisor exited with the following error:");
+                eprintln!("  {error}");
             }
 
             1
