@@ -153,12 +153,12 @@ pub const TX_RATE_LIMITER_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 6;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Failed to open taps: {0}")]
-    OpenTap(OpenTapError),
-    #[error("Using existing tap: {0}")]
-    TapError(TapError),
-    #[error("Error calling dup() on tap fd: {0}")]
-    DuplicateTapFd(std::io::Error),
+    #[error("Failed to open taps")]
+    OpenTap(#[source] OpenTapError),
+    #[error("Using existing tap")]
+    TapError(#[source] TapError),
+    #[error("Error calling dup() on tap fd")]
+    DuplicateTapFd(#[source] std::io::Error),
 }
 
 pub type Result<T> = result::Result<T, Error>;

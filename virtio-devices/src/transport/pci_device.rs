@@ -310,7 +310,7 @@ impl VirtioPciDeviceActivator {
 
 #[derive(Error, Debug)]
 pub enum VirtioPciDeviceError {
-    #[error("Failed creating VirtioPciDevice: {0}")]
+    #[error("Failed creating VirtioPciDevice")]
     CreateVirtioPciDevice(#[source] anyhow::Error),
 }
 pub type Result<T> = std::result::Result<T, VirtioPciDeviceError>;

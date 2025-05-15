@@ -18,9 +18,9 @@ use vm_device::BusDevice;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Emulator doesn't implement min required capabilities: {0}")]
+    #[error("Emulator doesn't implement min required capabilities")]
     CheckCaps(#[source] anyhow::Error),
-    #[error("Failed to initialize tpm: {0}")]
+    #[error("Failed to initialize tpm")]
     Init(#[source] anyhow::Error),
 }
 type Result<T> = anyhow::Result<T, Error>;

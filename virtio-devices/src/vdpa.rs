@@ -31,60 +31,60 @@ use crate::{
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Failed to create vhost-vdpa: {0}")]
-    CreateVhostVdpa(vhost::Error),
-    #[error("Failed to map DMA range: {0}")]
-    DmaMap(vhost::Error),
-    #[error("Failed to unmap DMA range: {0}")]
-    DmaUnmap(vhost::Error),
+    #[error("Failed to create vhost-vdpa")]
+    CreateVhostVdpa(#[source] vhost::Error),
+    #[error("Failed to map DMA range")]
+    DmaMap(#[source] vhost::Error),
+    #[error("Failed to unmap DMA range")]
+    DmaUnmap(#[source] vhost::Error),
     #[error("Failed to get address range")]
     GetAddressRange,
-    #[error("Failed to get the available index from the virtio queue: {0}")]
-    GetAvailableIndex(virtio_queue::Error),
-    #[error("Get virtio configuration size: {0}")]
-    GetConfigSize(vhost::Error),
-    #[error("Get virtio device identifier: {0}")]
-    GetDeviceId(vhost::Error),
-    #[error("Failed to get backend specific features: {0}")]
-    GetBackendFeatures(vhost::Error),
-    #[error("Failed to get virtio features: {0}")]
-    GetFeatures(vhost::Error),
-    #[error("Failed to get the IOVA range: {0}")]
-    GetIovaRange(vhost::Error),
-    #[error("Failed to get queue size: {0}")]
-    GetVringNum(vhost::Error),
+    #[error("Failed to get the available index from the virtio queue")]
+    GetAvailableIndex(#[source] virtio_queue::Error),
+    #[error("Get virtio configuration size")]
+    GetConfigSize(#[source] vhost::Error),
+    #[error("Get virtio device identifier")]
+    GetDeviceId(#[source] vhost::Error),
+    #[error("Failed to get backend specific features")]
+    GetBackendFeatures(#[source] vhost::Error),
+    #[error("Failed to get virtio features")]
+    GetFeatures(#[source] vhost::Error),
+    #[error("Failed to get the IOVA range")]
+    GetIovaRange(#[source] vhost::Error),
+    #[error("Failed to get queue size")]
+    GetVringNum(#[source] vhost::Error),
     #[error("Invalid IOVA range: {0}-{1}")]
     InvalidIovaRange(u64, u64),
     #[error("Missing VIRTIO_F_ACCESS_PLATFORM feature")]
     MissingAccessPlatformVirtioFeature,
-    #[error("Failed to reset owner: {0}")]
-    ResetOwner(vhost::Error),
-    #[error("Failed to set backend specific features: {0}")]
-    SetBackendFeatures(vhost::Error),
-    #[error("Failed to set backend configuration: {0}")]
-    SetConfig(vhost::Error),
-    #[error("Failed to set eventfd notifying about a configuration change: {0}")]
-    SetConfigCall(vhost::Error),
-    #[error("Failed to set virtio features: {0}")]
-    SetFeatures(vhost::Error),
-    #[error("Failed to set memory table: {0}")]
-    SetMemTable(vhost::Error),
-    #[error("Failed to set owner: {0}")]
-    SetOwner(vhost::Error),
-    #[error("Failed to set virtio status: {0}")]
-    SetStatus(vhost::Error),
-    #[error("Failed to set vring address: {0}")]
-    SetVringAddr(vhost::Error),
-    #[error("Failed to set vring base: {0}")]
-    SetVringBase(vhost::Error),
-    #[error("Failed to set vring eventfd when buffer are used: {0}")]
-    SetVringCall(vhost::Error),
-    #[error("Failed to enable/disable vring: {0}")]
-    SetVringEnable(vhost::Error),
-    #[error("Failed to set vring eventfd when new descriptors are available: {0}")]
-    SetVringKick(vhost::Error),
-    #[error("Failed to set vring size: {0}")]
-    SetVringNum(vhost::Error),
+    #[error("Failed to reset owner")]
+    ResetOwner(#[source] vhost::Error),
+    #[error("Failed to set backend specific features")]
+    SetBackendFeatures(#[source] vhost::Error),
+    #[error("Failed to set backend configuration")]
+    SetConfig(#[source] vhost::Error),
+    #[error("Failed to set eventfd notifying about a configuration change")]
+    SetConfigCall(#[source] vhost::Error),
+    #[error("Failed to set virtio features")]
+    SetFeatures(#[source] vhost::Error),
+    #[error("Failed to set memory table")]
+    SetMemTable(#[source] vhost::Error),
+    #[error("Failed to set owner")]
+    SetOwner(#[source] vhost::Error),
+    #[error("Failed to set virtio status")]
+    SetStatus(#[source] vhost::Error),
+    #[error("Failed to set vring address")]
+    SetVringAddr(#[source] vhost::Error),
+    #[error("Failed to set vring base")]
+    SetVringBase(#[source] vhost::Error),
+    #[error("Failed to set vring eventfd when buffer are used")]
+    SetVringCall(#[source] vhost::Error),
+    #[error("Failed to enable/disable vring")]
+    SetVringEnable(#[source] vhost::Error),
+    #[error("Failed to set vring eventfd when new descriptors are available")]
+    SetVringKick(#[source] vhost::Error),
+    #[error("Failed to set vring size")]
+    SetVringNum(#[source] vhost::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

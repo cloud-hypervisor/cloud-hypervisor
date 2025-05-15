@@ -3,3 +3,6 @@ authors = ["The Cloud Hypervisor Authors"]
 edition = "2021"
 name = "option_parser"
 version = "0.1.0"
+
+[dependencies]
+thiserror = "2.0.6"

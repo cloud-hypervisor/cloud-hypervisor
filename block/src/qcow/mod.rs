@@ -13,6 +13,7 @@ use std::cmp::{max, min};
 use std::fs::OpenOptions;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
+use std::os::fd::{AsRawFd, RawFd};
 use std::str;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -35,24 +36,24 @@ const MAX_NESTING_DEPTH: u32 = 10;
 #[sorted]
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("Backing file io error: {0}")]
-    BackingFileIo(io::Error),
-    #[error("Backing file open error: {0}")]
-    BackingFileOpen(Box<Error>),
+    #[error("Backing file io error")]
+    BackingFileIo(#[source] io::Error),
+    #[error("Backing file open error")]
+    BackingFileOpen(#[source] Box<Error>),
     #[error("Backing file name is too long: {0} bytes over")]
     BackingFileTooLong(usize),
     #[error("Compressed blocks not supported")]
     CompressedBlocksNotSupported,
-    #[error("Failed to evict cache: {0}")]
-    EvictingCache(io::Error),
+    #[error("Failed to evict cache")]
+    EvictingCache(#[source] io::Error),
     #[error("File larger than max of {MAX_QCOW_FILE_SIZE}: {0}")]
     FileTooBig(u64),
-    #[error("Failed to get file size: {0}")]
-    GettingFileSize(io::Error),
-    #[error("Failed to get refcount: {0}")]
-    GettingRefcount(refcount::Error),
-    #[error("Failed to parse filename: {0}")]
-    InvalidBackingFileName(str::Utf8Error),
+    #[error("Failed to get file size")]
+    GettingFileSize(#[source] io::Error),
+    #[error("Failed to get refcount")]
+    GettingRefcount(#[source] refcount::Error),
+    #[error("Failed to parse filename")]
+    InvalidBackingFileName(#[source] str::Utf8Error),
     #[error("Invalid cluster index")]
     InvalidClusterIndex,
     #[error("Invalid cluster size")]
@@ -79,30 +80,30 @@ pub enum Error {
     NoRefcountClusters,
     #[error("Not enough space for refcounts")]
     NotEnoughSpaceForRefcounts,
-    #[error("Failed to open file {0}")]
-    OpeningFile(io::Error),
-    #[error("Failed to read data: {0}")]
-    ReadingData(io::Error),
-    #[error("Failed to read header: {0}")]
-    ReadingHeader(io::Error),
-    #[error("Failed to read pointers: {0}")]
-    ReadingPointers(io::Error),
-    #[error("Failed to read ref count block: {0}")]
-    ReadingRefCountBlock(refcount::Error),
-    #[error("Failed to read ref counts: {0}")]
-    ReadingRefCounts(io::Error),
-    #[error("Failed to rebuild ref counts: {0}")]
-    RebuildingRefCounts(io::Error),
+    #[error("Failed to open file")]
+    OpeningFile(#[source] io::Error),
+    #[error("Failed to read data")]
+    ReadingData(#[source] io::Error),
+    #[error("Failed to read header")]
+    ReadingHeader(#[source] io::Error),
+    #[error("Failed to read pointers")]
+    ReadingPointers(#[source] io::Error),
+    #[error("Failed to read ref count block")]
+    ReadingRefCountBlock(#[source] refcount::Error),
+    #[error("Failed to read ref counts")]
+    ReadingRefCounts(#[source] io::Error),
+    #[error("Failed to rebuild ref counts")]
+    RebuildingRefCounts(#[source] io::Error),
     #[error("Refcount table offset past file end")]
     RefcountTableOffEnd,
     #[error("Too many clusters specified for refcount")]
     RefcountTableTooLarge,
-    #[error("Failed to seek file: {0}")]
-    SeekingFile(io::Error),
-    #[error("Failed to set file size: {0}")]
-    SettingFileSize(io::Error),
-    #[error("Failed to set refcount refcount: {0}")]
-    SettingRefcountRefcount(io::Error),
+    #[error("Failed to seek file")]
+    SeekingFile(#[source] io::Error),
+    #[error("Failed to set file size")]
+    SettingFileSize(#[source] io::Error),
+    #[error("Failed to set refcount refcount")]
+    SettingRefcountRefcount(#[source] io::Error),
     #[error("Size too small for number of clusters")]
     SizeTooSmallForNumberOfClusters,
     #[error("L1 entry table too large: {0}")]
@@ -113,10 +114,10 @@ pub enum Error {
     UnsupportedRefcountOrder,
     #[error("Unsupported version: {0}")]
     UnsupportedVersion(u32),
-    #[error("Failed to write data: {0}")]
-    WritingData(io::Error),
-    #[error("Failed to write header: {0}")]
-    WritingHeader(io::Error),
+    #[error("Failed to write data")]
+    WritingData(#[source] io::Error),
+    #[error("Failed to write header")]
+    WritingHeader(#[source] io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -1513,6 +1514,12 @@ impl QcowFile {
             self.raw_file.file_mut().sync_data()?;
         }
         Ok(())
+    }
+}
+
+impl AsRawFd for QcowFile {
+    fn as_raw_fd(&self) -> RawFd {
+        self.raw_file.as_raw_fd()
     }
 }
 

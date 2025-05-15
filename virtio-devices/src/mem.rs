@@ -101,8 +101,8 @@ const VIRTIO_MEM_F_ACPI_PXM: u8 = 0;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Guest gave us bad memory addresses: {0}")]
-    GuestMemory(GuestMemoryError),
+    #[error("Guest gave us bad memory addresses")]
+    GuestMemory(#[source] GuestMemoryError),
     #[error("Guest gave us a write only descriptor that protocol says to read from")]
     UnexpectedWriteOnlyDescriptor,
     #[error("Guest gave us a read only descriptor that protocol says to write to")]
@@ -113,32 +113,32 @@ pub enum Error {
     BufferLengthTooSmall,
     #[error("Guest sent us invalid request")]
     InvalidRequest,
-    #[error("Failed to EventFd write: {0}")]
-    EventFdWriteFail(std::io::Error),
-    #[error("Failed to EventFd try_clone: {0}")]
-    EventFdTryCloneFail(std::io::Error),
-    #[error("Failed to MpscRecv: {0}")]
-    MpscRecvFail(mpsc::RecvError),
-    #[error("Resize invalid argument: {0}")]
-    ResizeError(anyhow::Error),
-    #[error("Fail to resize trigger: {0}")]
-    ResizeTriggerFail(DeviceError),
-    #[error("Invalid configuration: {0}")]
-    ValidateError(anyhow::Error),
-    #[error("Failed discarding memory range: {0}")]
-    DiscardMemoryRange(std::io::Error),
-    #[error("Failed DMA mapping: {0}")]
-    DmaMap(std::io::Error),
-    #[error("Failed DMA unmapping: {0}")]
-    DmaUnmap(std::io::Error),
+    #[error("Failed to EventFd write")]
+    EventFdWriteFail(#[source] std::io::Error),
+    #[error("Failed to EventFd try_clone")]
+    EventFdTryCloneFail(#[source] std::io::Error),
+    #[error("Failed to MpscRecv")]
+    MpscRecvFail(#[source] mpsc::RecvError),
+    #[error("Resize invalid argument")]
+    ResizeError(#[source] anyhow::Error),
+    #[error("Fail to resize trigger")]
+    ResizeTriggerFail(#[source] DeviceError),
+    #[error("Invalid configuration")]
+    ValidateError(#[source] anyhow::Error),
+    #[error("Failed discarding memory range")]
+    DiscardMemoryRange(#[source] std::io::Error),
+    #[error("Failed DMA mapping")]
+    DmaMap(#[source] std::io::Error),
+    #[error("Failed DMA unmapping")]
+    DmaUnmap(#[source] std::io::Error),
     #[error("Invalid DMA mapping handler")]
     InvalidDmaMappingHandler,
     #[error("Not activated by the guest")]
     NotActivatedByGuest,
     #[error("Unknown request type: {0}")]
     UnknownRequestType(u16),
-    #[error("Failed adding used index: {0}")]
-    QueueAddUsed(virtio_queue::Error),
+    #[error("Failed adding used index")]
+    QueueAddUsed(#[source] virtio_queue::Error),
 }
 
 #[repr(C)]

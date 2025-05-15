@@ -18,10 +18,10 @@ version = "45.0.0"
 rust-version = "1.83.0"
 
 [profile.release]
-codegen-units = 1
-lto = true
-opt-level = "s"
-strip = true
+#codegen-units = 1
+#lto = true
+opt-level = 2
+#strip = true
 
 [profile.profiling]
 debug = true
@@ -36,7 +36,7 @@ dhat = { version = "0.3.3", optional = true }
 epoll = "4.3.3"
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
-libc = "0.2.167"
+libc = { version = "0.2.167", features = ["extra_traits"] }
 log = { version = "0.4.22", features = ["std"] }
 option_parser = { path = "option_parser" }
 seccompiler = { workspace = true }

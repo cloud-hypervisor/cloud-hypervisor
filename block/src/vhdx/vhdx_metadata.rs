@@ -75,7 +75,7 @@ pub enum VhdxMetadataError {
     InvalidValue,
     #[error("Not all required metadata found")]
     MissingMetadata,
-    #[error("Failed to read metadata headers {0}")]
+    #[error("Failed to read metadata headers")]
     ReadMetadata(#[source] io::Error),
     #[error("Reserved region has non-zero value")]
     ReservedIsNonZero,

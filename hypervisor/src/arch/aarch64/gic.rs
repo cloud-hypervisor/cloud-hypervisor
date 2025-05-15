@@ -16,14 +16,14 @@ use crate::{CpuState, HypervisorDeviceError, HypervisorVmError};
 #[derive(Debug, Error)]
 pub enum Error {
     /// Error while calling KVM ioctl for setting up the global interrupt controller.
-    #[error("Failed creating GIC device: {0}")]
-    CreateGic(HypervisorVmError),
+    #[error("Failed creating GIC device")]
+    CreateGic(#[source] HypervisorVmError),
     /// Error while setting device attributes for the GIC.
-    #[error("Failed setting device attributes for the GIC: {0}")]
-    SetDeviceAttribute(HypervisorDeviceError),
+    #[error("Failed setting device attributes for the GIC")]
+    SetDeviceAttribute(#[source] HypervisorDeviceError),
     /// Error while getting device attributes for the GIC.
-    #[error("Failed getting device attributes for the GIC: {0}")]
-    GetDeviceAttribute(HypervisorDeviceError),
+    #[error("Failed getting device attributes for the GIC")]
+    GetDeviceAttribute(#[source] HypervisorDeviceError),
 }
 pub type Result<T> = result::Result<T, Error>;
 

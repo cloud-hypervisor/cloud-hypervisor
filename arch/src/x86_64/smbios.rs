@@ -33,8 +33,8 @@ pub enum Error {
     #[error("Failure to write additional data to memory")]
     WriteData,
     /// Failure to parse uuid, uuid format may be error
-    #[error("Failure to parse uuid: {0}")]
-    ParseUuid(uuid::Error),
+    #[error("Failure to parse uuid")]
+    ParseUuid(#[source] uuid::Error),
 }
 
 pub type Result<T> = result::Result<T, Error>;
