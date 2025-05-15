@@ -49,7 +49,7 @@ pub enum VhdxHeaderError {
     InvalidHeaderSign,
     #[error("Not a valid VHDx region")]
     InvalidRegionSign,
-    #[error("Couldn't parse Uuid for region entry {0}")]
+    #[error("Couldn't parse Uuid for region entry")]
     InvalidUuid(#[source] uuid::Error),
     #[error("Not a VHDx file")]
     InvalidVHDXSign,
@@ -57,15 +57,15 @@ pub enum VhdxHeaderError {
     NoValidHeader,
     #[error("Cannot read checksum")]
     ReadChecksum,
-    #[error("Failed to read File Type Identifier {0}")]
+    #[error("Failed to read File Type Identifier")]
     ReadFileTypeIdentifier(#[source] io::Error),
-    #[error("Failed to read headers {0}")]
+    #[error("Failed to read headers")]
     ReadHeader(#[source] io::Error),
-    #[error("Failed to read metadata {0}")]
+    #[error("Failed to read metadata")]
     ReadMetadata(#[source] std::io::Error),
-    #[error("Failed to read region table entries {0}")]
+    #[error("Failed to read region table entries")]
     ReadRegionTableEntries(#[source] io::Error),
-    #[error("Failed to read region table header {0}")]
+    #[error("Failed to read region table header")]
     ReadRegionTableHeader(#[source] io::Error),
     #[error("Failed to read region entries")]
     RegionEntryCollectionFailed,
@@ -73,17 +73,17 @@ pub enum VhdxHeaderError {
     RegionOverlap,
     #[error("Reserved region has non-zero value")]
     ReservedIsNonZero,
-    #[error("Failed to seek in File Type Identifier {0}")]
+    #[error("Failed to seek in File Type Identifier")]
     SeekFileTypeIdentifier(#[source] io::Error),
-    #[error("Failed to seek in headers {0}")]
+    #[error("Failed to seek in headers")]
     SeekHeader(#[source] io::Error),
-    #[error("Failed to seek in region table entries {0}")]
+    #[error("Failed to seek in region table entries")]
     SeekRegionTableEntries(#[source] io::Error),
-    #[error("Failed to seek in region table header {0}")]
+    #[error("Failed to seek in region table header")]
     SeekRegionTableHeader(#[source] io::Error),
     #[error("We do not recognize this entry")]
     UnrecognizedRegionEntry,
-    #[error("Failed to write header {0}")]
+    #[error("Failed to write header")]
     WriteHeader(#[source] io::Error),
 }
 

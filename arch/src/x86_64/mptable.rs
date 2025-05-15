@@ -59,32 +59,32 @@ pub enum Error {
     #[error("The MP table has too little address space to be stored")]
     AddressOverflow,
     /// Failure while zeroing out the memory for the MP table.
-    #[error("Failure while zeroing out the memory for the MP table: {0}")]
-    Clear(GuestMemoryError),
+    #[error("Failure while zeroing out the memory for the MP table")]
+    Clear(#[source] GuestMemoryError),
     /// Number of CPUs exceeds the maximum supported CPUs
     #[error("Number of CPUs exceeds the maximum supported CPUs")]
     TooManyCpus,
     /// Failure to write the MP floating pointer.
-    #[error("Failure to write the MP floating pointer: {0}")]
-    WriteMpfIntel(GuestMemoryError),
+    #[error("Failure to write the MP floating pointer")]
+    WriteMpfIntel(#[source] GuestMemoryError),
     /// Failure to write MP CPU entry.
-    #[error("Failure to write MP CPU entry: {0}")]
-    WriteMpcCpu(GuestMemoryError),
+    #[error("Failure to write MP CPU entry")]
+    WriteMpcCpu(#[source] GuestMemoryError),
     /// Failure to write MP ioapic entry.
-    #[error("Failure to write MP ioapic entry: {0}")]
-    WriteMpcIoapic(GuestMemoryError),
+    #[error("Failure to write MP ioapic entry")]
+    WriteMpcIoapic(#[source] GuestMemoryError),
     /// Failure to write MP bus entry.
-    #[error("Failure to write MP bus entry: {0}")]
-    WriteMpcBus(GuestMemoryError),
+    #[error("Failure to write MP bus entry")]
+    WriteMpcBus(#[source] GuestMemoryError),
     /// Failure to write MP interrupt source entry.
-    #[error("Failure to write MP interrupt source entry: {0}")]
-    WriteMpcIntsrc(GuestMemoryError),
+    #[error("Failure to write MP interrupt source entry")]
+    WriteMpcIntsrc(#[source] GuestMemoryError),
     /// Failure to write MP local interrupt source entry.
-    #[error("Failure to write MP local interrupt source entry: {0}")]
-    WriteMpcLintsrc(GuestMemoryError),
+    #[error("Failure to write MP local interrupt source entry")]
+    WriteMpcLintsrc(#[source] GuestMemoryError),
     /// Failure to write MP table header.
-    #[error("Failure to write MP table header: {0}")]
-    WriteMpcTable(GuestMemoryError),
+    #[error("Failure to write MP table header")]
+    WriteMpcTable(#[source] GuestMemoryError),
 }
 
 pub type Result<T> = result::Result<T, Error>;

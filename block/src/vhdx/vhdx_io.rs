@@ -22,13 +22,13 @@ pub enum VhdxIoError {
     InvalidBatIndex,
     #[error("Invalid disk size")]
     InvalidDiskSize,
-    #[error("Failed reading sector blocks from file {0}")]
+    #[error("Failed reading sector blocks from file")]
     ReadSectorBlock(#[source] io::Error),
-    #[error("Failed changing file length {0}")]
+    #[error("Failed changing file length")]
     ResizeFile(#[source] io::Error),
     #[error("Differencing mode is not supported yet")]
     UnsupportedMode,
-    #[error("Failed writing BAT to file {0}")]
+    #[error("Failed writing BAT to file")]
     WriteBat(#[source] VhdxBatError),
 }
 

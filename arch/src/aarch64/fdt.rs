@@ -81,8 +81,8 @@ pub trait DeviceInfoForFdt {
 #[derive(Debug, Error)]
 pub enum Error {
     /// Failure in writing FDT in memory.
-    #[error("Failure in writing FDT in memory: {0}")]
-    WriteFdtToMemory(GuestMemoryError),
+    #[error("Failure in writing FDT in memory")]
+    WriteFdtToMemory(#[source] GuestMemoryError),
 }
 type Result<T> = result::Result<T, Error>;
 

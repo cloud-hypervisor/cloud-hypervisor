@@ -28,14 +28,14 @@ type GuestRegionMmap = vm_memory::GuestRegionMmap<vm_memory::bitmap::AtomicBitma
 #[derive(Debug, Error)]
 pub enum Error {
     #[cfg(target_arch = "x86_64")]
-    #[error("Platform specific error (x86_64): {0:?}")]
-    PlatformSpecific(x86_64::Error),
+    #[error("Platform specific error (x86_64)")]
+    PlatformSpecific(#[source] x86_64::Error),
     #[cfg(target_arch = "aarch64")]
-    #[error("Platform specific error (aarch64): {0:?}")]
-    PlatformSpecific(aarch64::Error),
+    #[error("Platform specific error (aarch64)")]
+    PlatformSpecific(#[source] aarch64::Error),
     #[cfg(target_arch = "riscv64")]
-    #[error("Platform specific error (riscv64): {0:?}")]
-    PlatformSpecific(riscv64::Error),
+    #[error("Platform specific error (riscv64)")]
+    PlatformSpecific(#[source] riscv64::Error),
     #[error("The memory map table extends past the end of guest memory")]
     MemmapTablePastRamEnd,
     #[error("Error writing memory map table to guest memory")]
@@ -46,7 +46,7 @@ pub enum Error {
     StartInfoSetup,
     #[error("Failed to compute initramfs address")]
     InitramfsAddress,
-    #[error("Error writing module entry to guest memory: {0}")]
+    #[error("Error writing module entry to guest memory")]
     ModlistSetup(#[source] vm_memory::GuestMemoryError),
     #[error("RSDP extends past the end of guest memory")]
     RsdpPastRamEnd,

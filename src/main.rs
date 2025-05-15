@@ -102,13 +102,13 @@ enum Error {
 #[derive(Error, Debug)]
 enum FdTableError {
     #[error("Failed to create event fd")]
-    CreateEventFd(std::io::Error),
+    CreateEventFd(#[source] std::io::Error),
     #[error("Failed to obtain file limit")]
-    GetRLimit(std::io::Error),
+    GetRLimit(#[source] std::io::Error),
     #[error("Error calling fcntl with F_GETFD")]
-    GetFd(std::io::Error),
+    GetFd(#[source] std::io::Error),
     #[error("Failed to duplicate file handle")]
-    Dup2(std::io::Error),
+    Dup2(#[source] std::io::Error),
 }
 
 struct Logger {

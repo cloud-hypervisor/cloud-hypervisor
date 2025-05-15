@@ -32,8 +32,8 @@ pub enum Error {
     SetupFdt,
 
     /// Failed to write FDT to memory.
-    #[error("Failed to write FDT to memory: {0}")]
-    WriteFdtToMemory(fdt::Error),
+    #[error("Failed to write FDT to memory")]
+    WriteFdtToMemory(#[source] fdt::Error),
 
     /// Failed to create a GIC.
     #[error("Failed to create a GIC")]
@@ -44,12 +44,12 @@ pub enum Error {
     InitramfsAddress,
 
     /// Error configuring the general purpose registers
-    #[error("Error configuring the general purpose registers: {0}")]
-    RegsConfiguration(hypervisor::HypervisorCpuError),
+    #[error("Error configuring the general purpose registers")]
+    RegsConfiguration(#[source] hypervisor::HypervisorCpuError),
 
     /// Error configuring the MPIDR register
-    #[error("Error configuring the MPIDR register: {0}")]
-    VcpuRegMpidr(hypervisor::HypervisorCpuError),
+    #[error("Error configuring the MPIDR register")]
+    VcpuRegMpidr(#[source] hypervisor::HypervisorCpuError),
 
     /// Error initializing PMU for vcpu
     #[error("Error initializing PMU for vcpu")]

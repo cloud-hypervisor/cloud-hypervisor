@@ -141,10 +141,10 @@ pub enum Error {
     #[error("VM state is poisoned")]
     PoisonedState,
 
-    #[error("Error from device manager: {0:?}")]
+    #[error("Error from device manager")]
     DeviceManager(#[source] DeviceManagerError),
 
-    #[error("Error initializing VM: {0:?}")]
+    #[error("Error initializing VM")]
     InitializeVm(#[source] hypervisor::HypervisorVmError),
 
     #[error("No device with id {0:?} to remove")]

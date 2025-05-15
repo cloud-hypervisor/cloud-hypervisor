@@ -36,7 +36,7 @@ const MINOR_VERSION: u64 = 0;
 #[derive(Error, Debug)]
 pub enum Error {
     // device errors
-    #[error("Guest gave us bad memory addresses: {0}")]
+    #[error("Guest gave us bad memory addresses")]
     GuestMemory(#[source] GuestMemoryError),
     #[error("Guest sent us invalid request")]
     InvalidRequest,
@@ -51,7 +51,7 @@ pub enum Error {
     InvalidArgument(u64),
     #[error("Unknown function code: {0}")]
     UnknownFunctionCode(u64),
-    #[error("Libc call fail: {0}")]
+    #[error("Libc call fail")]
     LibcFail(#[source] std::io::Error),
 }
 

@@ -42,86 +42,86 @@ pub use self::vu_common_ctrl::VhostUserConfig;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Failed accepting connection: {0}")]
-    AcceptConnection(io::Error),
+    #[error("Failed accepting connection")]
+    AcceptConnection(#[source] io::Error),
     #[error("Invalid available address")]
     AvailAddress,
     #[error("Queue number  is not correct")]
     BadQueueNum,
-    #[error("Failed binding vhost-user socket: {0}")]
-    BindSocket(io::Error),
-    #[error("Creating kill eventfd failed: {0}")]
-    CreateKillEventFd(io::Error),
-    #[error("Cloning kill eventfd failed: {0}")]
-    CloneKillEventFd(io::Error),
+    #[error("Failed binding vhost-user socket")]
+    BindSocket(#[source] io::Error),
+    #[error("Creating kill eventfd failed")]
+    CreateKillEventFd(#[source] io::Error),
+    #[error("Cloning kill eventfd failed")]
+    CloneKillEventFd(#[source] io::Error),
     #[error("Invalid descriptor table address")]
     DescriptorTableAddress,
-    #[error("Signal used queue failed: {0}")]
-    FailedSignalingUsedQueue(io::Error),
-    #[error("Failed to read vhost eventfd: {0}")]
-    MemoryRegions(MmapError),
-    #[error("Failed removing socket path: {0}")]
-    RemoveSocketPath(io::Error),
-    #[error("Failed to create frontend: {0}")]
-    VhostUserCreateFrontend(VhostError),
-    #[error("Failed to open vhost device: {0}")]
-    VhostUserOpen(VhostError),
+    #[error("Signal used queue failed")]
+    FailedSignalingUsedQueue(#[source] io::Error),
+    #[error("Failed to read vhost eventfd")]
+    MemoryRegions(#[source] MmapError),
+    #[error("Failed removing socket path")]
+    RemoveSocketPath(#[source] io::Error),
+    #[error("Failed to create frontend")]
+    VhostUserCreateFrontend(#[source] VhostError),
+    #[error("Failed to open vhost device")]
+    VhostUserOpen(#[source] VhostError),
     #[error("Connection to socket failed")]
     VhostUserConnect,
-    #[error("Get features failed: {0}")]
-    VhostUserGetFeatures(VhostError),
-    #[error("Get queue max number failed: {0}")]
-    VhostUserGetQueueMaxNum(VhostError),
-    #[error("Get protocol features failed: {0}")]
-    VhostUserGetProtocolFeatures(VhostError),
-    #[error("Get vring base failed: {0}")]
-    VhostUserGetVringBase(VhostError),
+    #[error("Get features failed")]
+    VhostUserGetFeatures(#[source] VhostError),
+    #[error("Get queue max number failed")]
+    VhostUserGetQueueMaxNum(#[source] VhostError),
+    #[error("Get protocol features failed")]
+    VhostUserGetProtocolFeatures(#[source] VhostError),
+    #[error("Get vring base failed")]
+    VhostUserGetVringBase(#[source] VhostError),
     #[error("Vhost-user Backend not support vhost-user protocol")]
     VhostUserProtocolNotSupport,
-    #[error("Set owner failed: {0}")]
-    VhostUserSetOwner(VhostError),
-    #[error("Reset owner failed: {0}")]
-    VhostUserResetOwner(VhostError),
-    #[error("Set features failed: {0}")]
-    VhostUserSetFeatures(VhostError),
-    #[error("Set protocol features failed: {0}")]
-    VhostUserSetProtocolFeatures(VhostError),
-    #[error("Set mem table failed: {0}")]
-    VhostUserSetMemTable(VhostError),
-    #[error("Set vring num failed: {0}")]
-    VhostUserSetVringNum(VhostError),
-    #[error("Set vring addr failed: {0}")]
-    VhostUserSetVringAddr(VhostError),
-    #[error("Set vring base failed: {0}")]
-    VhostUserSetVringBase(VhostError),
-    #[error("Set vring call failed: {0}")]
-    VhostUserSetVringCall(VhostError),
-    #[error("Set vring kick failed: {0}")]
-    VhostUserSetVringKick(VhostError),
-    #[error("Set vring enable failed: {0}")]
-    VhostUserSetVringEnable(VhostError),
-    #[error("Failed to create vhost eventfd: {0}")]
-    VhostIrqCreate(io::Error),
-    #[error("Failed to read vhost eventfd: {0}")]
-    VhostIrqRead(io::Error),
-    #[error("Failed to read vhost eventfd: {0}")]
-    VhostUserMemoryRegion(MmapError),
-    #[error("Failed to create the frontend request handler from backend: {0}")]
-    FrontendReqHandlerCreation(vhost::vhost_user::Error),
-    #[error("Set backend request fd failed: {0}")]
-    VhostUserSetBackendRequestFd(vhost::Error),
-    #[error("Add memory region failed: {0}")]
-    VhostUserAddMemReg(VhostError),
-    #[error("Failed getting the configuration: {0}")]
-    VhostUserGetConfig(VhostError),
-    #[error("Failed setting the configuration: {0}")]
-    VhostUserSetConfig(VhostError),
-    #[error("Failed getting inflight shm log: {0}")]
-    VhostUserGetInflight(VhostError),
-    #[error("Failed setting inflight shm log: {0}")]
-    VhostUserSetInflight(VhostError),
-    #[error("Failed setting the log base: {0}")]
-    VhostUserSetLogBase(VhostError),
+    #[error("Set owner failed")]
+    VhostUserSetOwner(#[source] VhostError),
+    #[error("Reset owner failed")]
+    VhostUserResetOwner(#[source] VhostError),
+    #[error("Set features failed")]
+    VhostUserSetFeatures(#[source] VhostError),
+    #[error("Set protocol features failed")]
+    VhostUserSetProtocolFeatures(#[source] VhostError),
+    #[error("Set mem table failed")]
+    VhostUserSetMemTable(#[source] VhostError),
+    #[error("Set vring num failed")]
+    VhostUserSetVringNum(#[source] VhostError),
+    #[error("Set vring addr failed")]
+    VhostUserSetVringAddr(#[source] VhostError),
+    #[error("Set vring base failed")]
+    VhostUserSetVringBase(#[source] VhostError),
+    #[error("Set vring call failed")]
+    VhostUserSetVringCall(#[source] VhostError),
+    #[error("Set vring kick failed")]
+    VhostUserSetVringKick(#[source] VhostError),
+    #[error("Set vring enable failed")]
+    VhostUserSetVringEnable(#[source] VhostError),
+    #[error("Failed to create vhost eventfd")]
+    VhostIrqCreate(#[source] io::Error),
+    #[error("Failed to read vhost eventfd")]
+    VhostIrqRead(#[source] io::Error),
+    #[error("Failed to read vhost eventfd")]
+    VhostUserMemoryRegion(#[source] MmapError),
+    #[error("Failed to create the frontend request handler from backend")]
+    FrontendReqHandlerCreation(#[source] vhost::vhost_user::Error),
+    #[error("Set backend request fd failed")]
+    VhostUserSetBackendRequestFd(#[source] vhost::Error),
+    #[error("Add memory region failed")]
+    VhostUserAddMemReg(#[source] VhostError),
+    #[error("Failed getting the configuration")]
+    VhostUserGetConfig(#[source] VhostError),
+    #[error("Failed setting the configuration")]
+    VhostUserSetConfig(#[source] VhostError),
+    #[error("Failed getting inflight shm log")]
+    VhostUserGetInflight(#[source] VhostError),
+    #[error("Failed setting inflight shm log")]
+    VhostUserSetInflight(#[source] VhostError),
+    #[error("Failed setting the log base")]
+    VhostUserSetLogBase(#[source] VhostError),
     #[error("Invalid used address")]
     UsedAddress,
     #[error("Invalid features provided from vhost-user backend")]
@@ -130,18 +130,18 @@ pub enum Error {
     MissingRegionFd,
     #[error("Missing IrqFd")]
     MissingIrqFd,
-    #[error("Failed getting the available index: {0}")]
-    GetAvailableIndex(QueueError),
+    #[error("Failed getting the available index")]
+    GetAvailableIndex(#[source] QueueError),
     #[error("Migration is not supported by this vhost-user device")]
     MigrationNotSupported,
-    #[error("Failed creating memfd: {0}")]
-    MemfdCreate(io::Error),
-    #[error("Failed truncating the file size to the expected size: {0}")]
-    SetFileSize(io::Error),
-    #[error("Failed to set the seals on the file: {0}")]
-    SetSeals(io::Error),
-    #[error("Failed creating new mmap region: {0}")]
-    NewMmapRegion(MmapRegionError),
+    #[error("Failed creating memfd")]
+    MemfdCreate(#[source] io::Error),
+    #[error("Failed truncating the file size to the expected size")]
+    SetFileSize(#[source] io::Error),
+    #[error("Failed to set the seals on the file")]
+    SetSeals(#[source] io::Error),
+    #[error("Failed creating new mmap region")]
+    NewMmapRegion(#[source] MmapRegionError),
     #[error("Could not find the shm log region")]
     MissingShmLogRegion,
 }

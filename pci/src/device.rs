@@ -19,13 +19,13 @@ use crate::PciBarConfiguration;
 pub enum Error {
     /// Setup of the device capabilities failed.
     #[error("Setup of the device capabilities failed")]
-    CapabilitiesSetup(configuration::Error),
+    CapabilitiesSetup(#[source] configuration::Error),
     /// Allocating space for an IO BAR failed.
     #[error("Allocating space for an IO BAR failed")]
     IoAllocationFailed(u64),
     /// Registering an IO BAR failed.
     #[error("Registering an IO BAR failed")]
-    IoRegistrationFailed(u64, configuration::Error),
+    IoRegistrationFailed(u64, #[source] configuration::Error),
     /// Expected resource not found.
     #[error("Expected resource not found")]
     MissingResource,

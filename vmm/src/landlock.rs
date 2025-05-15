@@ -17,7 +17,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum LandlockError {
     /// All RulesetErrors from Landlock library are wrapped in this error
-    #[error("Error creating/adding/restricting ruleset: {0}")]
+    #[error("Error creating/adding/restricting ruleset")]
     ManageRuleset(#[source] RulesetError),
 
     /// Error opening path
