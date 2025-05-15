@@ -8,6 +8,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::mpsc::channel;
 use std::sync::Mutex;
 use std::{env, io};
+use std::error::Error as StdError;
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use event_monitor::event;
 use libc::EFD_NONBLOCK;
@@ -39,35 +40,35 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 #[derive(Error, Debug)]
 enum Error {
-    #[error("Failed to create API EventFd: {0}")]
+    #[error("Failed to create API EventFd")]
     CreateApiEventFd(#[source] std::io::Error),
     #[cfg(feature = "guest_debug")]
-    #[error("Failed to create Debug EventFd: {0}")]
+    #[error("Failed to create Debug EventFd")]
     CreateDebugEventFd(#[source] std::io::Error),
-    #[error("Failed to create exit EventFd: {0}")]
+    #[error("Failed to create exit EventFd")]
     CreateExitEventFd(#[source] std::io::Error),
-    #[error("Failed to open hypervisor interface (is hypervisor interface available?): {0}")]
+    #[error("Failed to open hypervisor interface (is hypervisor interface available?)")]
     CreateHypervisor(#[source] hypervisor::HypervisorError),
-    #[error("Failed to start the VMM thread: {0}")]
+    #[error("Failed to start the VMM thread")]
     StartVmmThread(#[source] vmm::Error),
-    #[error("Error parsing config: {0}")]
-    ParsingConfig(vmm::config::Error),
-    #[error("Error creating VM: {0:?}")]
-    VmCreate(vmm::api::ApiError),
-    #[error("Error booting VM: {0:?}")]
+    #[error("Error parsing config")]
+    ParsingConfig(#[source] vmm::config::Error),
+    #[error("Error creating VM")]
+    VmCreate(#[source]vmm::api::ApiError),
+    #[error("Error booting VM")]
     VmBoot(#[source] vmm::api::ApiError),
-    #[error("Error restoring VM: {0:?}")]
-    VmRestore(vmm::api::ApiError),
-    #[error("Error parsing restore: {0}")]
-    ParsingRestore(vmm::config::Error),
+    #[error("Error restoring VM")]
+    VmRestore(#[source] vmm::api::ApiError),
+    #[error("Error parsing restore")]
+    ParsingRestore(#[source] vmm::config::Error),
     #[error("Failed to join on VMM thread: {0:?}")]
     ThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
-    #[error("VMM thread exited with error: {0}")]
+    #[error("VMM thread exited with error")]
     VmmThread(#[source] vmm::Error),
-    #[error("Error parsing --api-socket: {0}")]
-    ParsingApiSocket(std::num::ParseIntError),
-    #[error("Error parsing --event-monitor: {0}")]
-    ParsingEventMonitor(option_parser::OptionParserError),
+    #[error("Error parsing --api-socket")]
+    ParsingApiSocket(#[source] std::num::ParseIntError),
+    #[error("Error parsing --event-monitor")]
+    ParsingEventMonitor(#[source] option_parser::OptionParserError),
     #[cfg(feature = "dbus_api")]
     #[error("`--dbus-object-path` option isn't provided")]
     MissingDBusObjectPath,
@@ -76,37 +77,37 @@ enum Error {
     MissingDBusServiceName,
     #[error("Error parsing --event-monitor: path or fd required")]
     BareEventMonitor,
-    #[error("Error doing event monitor I/O: {0}")]
-    EventMonitorIo(std::io::Error),
-    #[error("Event monitor thread failed: {0}")]
+    #[error("Error doing event monitor I/O")]
+    EventMonitorIo(#[source] std::io::Error),
+    #[error("Event monitor thread failed")]
     EventMonitorThread(#[source] vmm::Error),
     #[cfg(feature = "guest_debug")]
-    #[error("Error parsing --gdb: {0}")]
-    ParsingGdb(option_parser::OptionParserError),
+    #[error("Error parsing --gdb")]
+    ParsingGdb(#[source] option_parser::OptionParserError),
     #[cfg(feature = "guest_debug")]
     #[error("Error parsing --gdb: path required")]
     BareGdb,
-    #[error("Error creating log file: {0}")]
-    LogFileCreation(std::io::Error),
-    #[error("Error setting up logger: {0}")]
-    LoggerSetup(log::SetLoggerError),
-    #[error("Failed to gracefully shutdown http api: {0}")]
+    #[error("Error creating log file")]
+    LogFileCreation(#[source] std::io::Error),
+    #[error("Error setting up logger")]
+    LoggerSetup(#[source] log::SetLoggerError),
+    #[error("Failed to gracefully shutdown http api")]
     HttpApiShutdown(#[source] vmm::Error),
-    #[error("Failed to create Landlock object: {0}")]
+    #[error("Failed to create Landlock object")]
     CreateLandlock(#[source] LandlockError),
-    #[error("Failed to apply Landlock: {0}")]
+    #[error("Failed to apply Landlock")]
     ApplyLandlock(#[source] LandlockError),
 }
 
 #[derive(Error, Debug)]
 enum FdTableError {
-    #[error("Failed to create event fd: {0}")]
+    #[error("Failed to create event fd")]
     CreateEventFd(std::io::Error),
-    #[error("Failed to obtain file limit: {0}")]
+    #[error("Failed to obtain file limit")]
     GetRLimit(std::io::Error),
-    #[error("Error calling fcntl with F_GETFD: {0}")]
+    #[error("Error calling fcntl with F_GETFD")]
     GetFd(std::io::Error),
-    #[error("Failed to duplicate file handle: {0}")]
+    #[error("Failed to duplicate file handle")]
     Dup2(std::io::Error),
 }
 
@@ -844,20 +845,6 @@ fn expand_fdtable() -> Result<(), FdTableError> {
     Ok(())
 }
 
-
-/// Print the error chain with indentation, similar to `anyhow`'s Debug output
-pub fn print_error_chain(err: &dyn std::error::Error) {
-    eprintln!("Error: {}", err);
-
-    let mut source = err.source();
-    let mut level = 1;
-    while let Some(err) = source {
-        eprintln!("{:>width$}{}", "", format!("Caused by: {}", err), width = level * 2);
-        source = err.source();
-        level += 1;
-    }
-}
-
 fn main() {
     #[cfg(all(feature = "tdx", feature = "sev_snp"))]
     compile_error!("Feature 'tdx' and 'sev_snp' are mutually exclusive.");
@@ -893,8 +880,18 @@ fn main() {
             path.map(|s| std::fs::remove_file(s).ok());
             0
         }
-        Err(e) => {
-            print_error_chain(&e);
+        Err(error) => {
+            // Print error chain
+            eprintln!("Error:");
+            eprintln!(" 0: {error}");
+            let mut level = 1;
+            let mut error: &dyn StdError = &error;
+            while let Some(sub_error) = error.source() {
+                error = sub_error;
+                eprintln!("{level:>2}: {error}", );
+                level += 1;
+            }
+
             1
         }
     };

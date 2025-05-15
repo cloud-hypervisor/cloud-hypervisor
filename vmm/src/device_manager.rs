@@ -642,7 +642,8 @@ pub enum DeviceManagerError {
     InvalidConsoleFd,
 
     /// Cannot lock images of all block devices.
-    DiskLockError(virtio_devices::block::Error),
+    #[error("Cannot lock images of all block device")]
+    DiskLockError(#[source] virtio_devices::block::Error),
 }
 
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;

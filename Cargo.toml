@@ -18,10 +18,10 @@ version = "45.0.0"
 rust-version = "1.83.0"
 
 [profile.release]
-codegen-units = 1
-lto = true
-opt-level = "s"
-strip = true
+#codegen-units = 1
+#lto = true
+opt-level = 2
+#strip = true
 
 [profile.profiling]
 debug = true
