@@ -880,26 +880,26 @@ fn main() {
             path.map(|s| std::fs::remove_file(s).ok());
             0
         }
-        Err(error) => {
-            if error.source().is_some() {
+        Err(top_error) => {
+            if top_error.source().is_some() {
                 eprintln!("Cloud Hypervisor exited with the following nested error:");
-                eprintln!("  0: {error}");
-                if cmd_arguments.get_count("v") != 0 {
-                    eprintln!("     └{error:?}", );
-                }
+                eprintln!("  0: {top_error}");
                 let mut level = 1;
-                let mut error: &dyn StdError = &error;
-                while let Some(sub_error) = error.source() {
-                    error = sub_error;
-                    eprintln!("  {level}: {error}", );
-                    if cmd_arguments.get_count("v") != 0 {
-                        eprintln!("     └{error:?}", );
-                    }
+                let mut next_error: &dyn StdError = &top_error;
+                while let Some(sub_error) = next_error.source() {
+                    next_error = sub_error;
+                    eprintln!("  {level}: {next_error}", );
                     level += 1;
+                }
+
+                if cmd_arguments.get_count("v") != 0 {
+                    eprintln!();
+                    eprintln!("Debug Info:");
+                    eprintln!("{top_error:#?}", );
                 }
             } else {
                 eprintln!("Cloud Hypervisor exited with the following error:");
-                eprintln!("  {error}");
+                eprintln!("  {top_error}");
             }
 
             1
