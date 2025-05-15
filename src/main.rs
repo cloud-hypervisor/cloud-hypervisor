@@ -884,6 +884,9 @@ fn main() {
             if error.source().is_some() {
                 eprintln!("Cloud Hypervisor exited with the following nested error:");
                 eprintln!("  0: {error}");
+                if cmd_arguments.get_count("v") != 0 {
+                    eprintln!("     └{error:?}", );
+                }
                 let mut level = 1;
                 let mut error: &dyn StdError = &error;
                 while let Some(sub_error) = error.source() {
