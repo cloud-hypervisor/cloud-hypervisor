@@ -197,6 +197,7 @@ impl RequestHandler for StubApiRequestHandler {
                 preserved_fds: None,
                 landlock_enable: false,
                 landlock_rules: None,
+                #[cfg(feature = "ivshmem")]
                 ivshmem: None,
             }),
             state: VmState::Running,

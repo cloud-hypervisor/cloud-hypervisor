@@ -646,14 +646,17 @@ impl ApplyLandlock for VsockConfig {
     }
 }
 
+#[cfg(feature = "ivshmem")]
 pub const DEFAULT_IVSHMEM_SIZE: usize = 128;
 
+#[cfg(feature = "ivshmem")]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct IvshmemConfig {
     pub path: PathBuf,
     pub size: usize,
 }
 
+#[cfg(feature = "ivshmem")]
 impl Default for IvshmemConfig {
     fn default() -> Self {
         Self {
@@ -836,6 +839,7 @@ pub struct VmConfig {
     #[serde(default)]
     pub landlock_enable: bool,
     pub landlock_rules: Option<Vec<LandlockConfig>>,
+    #[cfg(feature = "ivshmem")]
     pub ivshmem: Option<IvshmemConfig>,
 }
 
