@@ -14,6 +14,7 @@ mod muxer_killq;
 mod muxer_rxq;
 
 pub use muxer::VsockMuxer as VsockUnixBackend;
+use thiserror::Error;
 pub use Error as VsockUnixError;
 
 mod defs {
@@ -27,29 +28,40 @@ mod defs {
     pub const MUXER_KILLQ_SIZE: usize = 128;
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
     /// Error converting from UTF-8
-    ConvertFromUtf8(std::str::Utf8Error),
+    #[error("Error converting from UTF-8")]
+    ConvertFromUtf8(#[source] std::str::Utf8Error),
     /// Error registering a new epoll-listening FD.
-    EpollAdd(std::io::Error),
+    #[error("Error registering a new epoll-listening FD")]
+    EpollAdd(#[source] std::io::Error),
     /// Error creating an epoll FD.
-    EpollFdCreate(std::io::Error),
+    #[error("Error creating an epoll FD")]
+    EpollFdCreate(#[source] std::io::Error),
     /// The host made an invalid vsock port connection request.
+    #[error("The host made an invalid vsock port connection request")]
     InvalidPortRequest,
     /// Error parsing integer.
-    ParseInteger(std::num::ParseIntError),
+    #[error("Error parsing integer")]
+    ParseInteger(#[source] std::num::ParseIntError),
     /// Error reading stream port.
-    ReadStreamPort(Box<Error>),
+    #[error("Error reading stream port")]
+    ReadStreamPort(#[source] Box<Error>),
     /// Error accepting a new connection from the host-side Unix socket.
-    UnixAccept(std::io::Error),
+    #[error("Error accepting a new connection from the host-side Unix socket")]
+    UnixAccept(#[source] std::io::Error),
     /// Error binding to the host-side Unix socket.
-    UnixBind(std::io::Error),
+    #[error("Error binding to the host-side Unix socket")]
+    UnixBind(#[source] std::io::Error),
     /// Error connecting to a host-side Unix socket.
-    UnixConnect(std::io::Error),
+    #[error("Error connecting to a host-side Unix socket")]
+    UnixConnect(#[source] std::io::Error),
     /// Error reading from host-side Unix socket.
-    UnixRead(std::io::Error),
+    #[error("Error reading from host-side Unix socket")]
+    UnixRead(#[source] std::io::Error),
     /// Muxer connection limit reached.
+    #[error("Muxer connection limit reached")]
     TooManyConnections,
 }
 
