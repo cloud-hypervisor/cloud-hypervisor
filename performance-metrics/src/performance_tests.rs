@@ -79,7 +79,7 @@ fn direct_kernel_boot_path() -> PathBuf {
 
 fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
     let mut cmd = std::process::Command::new(clh_command("ch-remote"));
-    cmd.args([&format!("--api-socket={}", api_socket), command]);
+    cmd.args([&format!("--api-socket={api_socket}"), command]);
 
     if let Some(arg) = arg {
         cmd.arg(arg);
@@ -514,7 +514,7 @@ pub fn performance_restore_latency(control: &PerformanceTestControl) -> f64 {
         assert!(remote_command(
             &api_socket_source,
             "snapshot",
-            Some(format!("file://{}", snapshot_dir).as_str()),
+            Some(format!("file://{snapshot_dir}").as_str()),
         ));
 
         let _ = child.kill();
@@ -525,9 +525,9 @@ pub fn performance_restore_latency(control: &PerformanceTestControl) -> f64 {
         let c = cmd
             .args([
                 "--restore",
-                format!("source_url=file://{}", snapshot_dir).as_str(),
+                format!("source_url=file://{snapshot_dir}").as_str(),
             ])
-            .args(["--event-monitor", format!("path={}", event_path).as_str()]);
+            .args(["--event-monitor", format!("path={event_path}").as_str()]);
 
         measure_restore_time(c, event_path.as_str(), control.test_timeout).unwrap()
     });

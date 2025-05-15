@@ -6,6 +6,7 @@
 
 use std::io::{self, BufWriter, Seek, SeekFrom, Write};
 use std::mem::size_of;
+use std::os::fd::{AsRawFd, RawFd};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use vmm_sys_util::write_zeroes::WriteZeroes;
@@ -157,5 +158,11 @@ impl Clone for QcowRawFile {
             cluster_size: self.cluster_size,
             cluster_mask: self.cluster_mask,
         }
+    }
+}
+
+impl AsRawFd for QcowRawFile {
+    fn as_raw_fd(&self) -> RawFd {
+        self.file.as_raw_fd()
     }
 }

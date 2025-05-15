@@ -10,7 +10,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
+    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::DiskTopology;
 
@@ -42,6 +42,10 @@ impl DiskFile for RawFileDiskSync {
             warn!("Unable to get device topology. Using default topology");
             DiskTopology::default()
         }
+    }
+
+    fn fd(&mut self) -> BorrowedDiskFd {
+        BorrowedDiskFd::new(self.file.as_raw_fd())
     }
 }
 

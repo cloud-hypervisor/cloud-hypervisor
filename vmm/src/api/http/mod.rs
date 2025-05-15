@@ -70,8 +70,8 @@ impl Display for HttpError {
             NotFound => write!(f, "Not Found"),
             TooManyRequests => write!(f, "Too Many Requests"),
             InternalServerError => write!(f, "Internal Server Error"),
-            SerdeJsonDeserialize(serde_error) => write!(f, "{}", serde_error),
-            ApiError(api_error) => write!(f, "{}", api_error),
+            SerdeJsonDeserialize(serde_error) => write!(f, "{serde_error}"),
+            ApiError(api_error) => write!(f, "{api_error}"),
         }
     }
 }

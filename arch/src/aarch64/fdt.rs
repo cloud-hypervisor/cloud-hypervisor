@@ -586,15 +586,14 @@ fn create_memory_node(
                 && (first_region_end <= &mem_32bit_reserved_start))
             {
                 panic!(
-                    "Unexpected first memory region layout: (start: 0x{:08x}, end: 0x{:08x}).
-                    ram_start: 0x{:08x}, mem_32bit_reserved_start: 0x{:08x}",
-                    first_region_start, first_region_end, ram_start, mem_32bit_reserved_start
+                    "Unexpected first memory region layout: (start: 0x{first_region_start:08x}, end: 0x{first_region_end:08x}).
+                    ram_start: 0x{ram_start:08x}, mem_32bit_reserved_start: 0x{mem_32bit_reserved_start:08x}"
                 );
             }
 
             let mem_size = first_region_end - ram_start;
             let mem_reg_prop = [ram_start, mem_size];
-            let memory_node_name = format!("memory@{:x}", ram_start);
+            let memory_node_name = format!("memory@{ram_start:x}");
             let memory_node = fdt.begin_node(&memory_node_name)?;
             fdt.property_string("device_type", "memory")?;
             fdt.property_array_u64("reg", &mem_reg_prop)?;
@@ -607,14 +606,13 @@ fn create_memory_node(
 
             if second_region_start != &ram_64bit_start {
                 panic!(
-                    "Unexpected second memory region layout: start: 0x{:08x}, ram_64bit_start: 0x{:08x}",
-                    second_region_start, ram_64bit_start
+                    "Unexpected second memory region layout: start: 0x{second_region_start:08x}, ram_64bit_start: 0x{ram_64bit_start:08x}"
                 );
             }
 
             let mem_size = second_region_end - ram_64bit_start;
             let mem_reg_prop = [ram_64bit_start, mem_size];
-            let memory_node_name = format!("memory@{:x}", ram_64bit_start);
+            let memory_node_name = format!("memory@{ram_64bit_start:x}");
             let memory_node = fdt.begin_node(&memory_node_name)?;
             fdt.property_string("device_type", "memory")?;
             fdt.property_array_u64("reg", &mem_reg_prop)?;

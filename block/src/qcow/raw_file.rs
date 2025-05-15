@@ -369,3 +369,9 @@ impl Clone for RawFile {
         }
     }
 }
+
+impl AsRawFd for RawFile {
+    fn as_raw_fd(&self) -> RawFd {
+        self.file.as_raw_fd()
+    }
+}
