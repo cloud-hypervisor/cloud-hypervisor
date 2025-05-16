@@ -6,7 +6,7 @@
 // found in the THIRD-PARTY file.
 
 use std::collections::HashMap;
-use std::net::Ipv4Addr;
+use std::net::IpAddr;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
@@ -547,8 +547,8 @@ impl Net {
     pub fn new(
         id: String,
         if_name: Option<&str>,
-        ip_addr: Option<Ipv4Addr>,
-        netmask: Option<Ipv4Addr>,
+        ip_addr: Option<IpAddr>,
+        netmask: Option<IpAddr>,
         guest_mac: Option<MacAddr>,
         host_mac: &mut Option<MacAddr>,
         mtu: Option<u16>,

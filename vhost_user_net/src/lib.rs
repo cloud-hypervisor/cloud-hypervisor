@@ -6,7 +6,7 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::{Arc, Mutex, RwLock};
@@ -118,9 +118,9 @@ pub struct VhostUserNetBackend {
 impl VhostUserNetBackend {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        ip_addr: Ipv4Addr,
+        ip_addr: IpAddr,
         host_mac: MacAddr,
-        netmask: Ipv4Addr,
+        netmask: IpAddr,
         mtu: Option<u16>,
         num_queues: usize,
         queue_size: u16,
@@ -271,9 +271,9 @@ impl VhostUserBackendMut for VhostUserNetBackend {
 }
 
 pub struct VhostUserNetBackendConfig {
-    pub ip: Ipv4Addr,
+    pub ip: IpAddr,
     pub host_mac: MacAddr,
-    pub mask: Ipv4Addr,
+    pub mask: IpAddr,
     pub mtu: Option<u16>,
     pub socket: String,
     pub num_queues: usize,
@@ -303,7 +303,7 @@ impl VhostUserNetBackendConfig {
         let ip = parser
             .convert("ip")
             .map_err(Error::FailedConfigParse)?
-            .unwrap_or_else(|| Ipv4Addr::new(192, 168, 100, 1));
+            .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::new(192, 168, 100, 1)));
         let host_mac = parser
             .convert("host_mac")
             .map_err(Error::FailedConfigParse)?
@@ -311,7 +311,7 @@ impl VhostUserNetBackendConfig {
         let mask = parser
             .convert("mask")
             .map_err(Error::FailedConfigParse)?
-            .unwrap_or_else(|| Ipv4Addr::new(255, 255, 255, 0));
+            .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::new(255, 255, 255, 0)));
         let mtu = parser.convert("mtu").map_err(Error::FailedConfigParse)?;
         let queue_size = parser
             .convert("queue_size")

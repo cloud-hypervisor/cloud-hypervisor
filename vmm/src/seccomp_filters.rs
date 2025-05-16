@@ -67,13 +67,14 @@ const TUNGETFEATURES: u64 = 0x8004_54cf;
 
 // See include/uapi/linux/sockios.h in the kernel code.
 const SIOCGIFFLAGS: u64 = 0x8913;
-const SIOCGIFHWADDR: u64 = 0x8927;
 const SIOCSIFFLAGS: u64 = 0x8914;
 const SIOCSIFADDR: u64 = 0x8916;
+const SIOCSIFNETMASK: u64 = 0x891c;
 const SIOCGIFMTU: u64 = 0x8921;
 const SIOCSIFMTU: u64 = 0x8922;
 const SIOCSIFHWADDR: u64 = 0x8924;
-const SIOCSIFNETMASK: u64 = 0x891c;
+const SIOCGIFHWADDR: u64 = 0x8927;
+const SIOCGIFINDEX: u64 = 0x8933;
 
 // See include/uapi/linux/vfio.h in the kernel code.
 const VFIO_GET_API_VERSION: u64 = 0x3b64;
@@ -303,6 +304,7 @@ fn create_vmm_ioctl_seccomp_rule_common(
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFFLAGS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFHWADDR)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFMTU)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFINDEX)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFADDR)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFFLAGS)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFHWADDR)?],
@@ -672,6 +674,7 @@ fn vmm_thread_rules(
             or![
                 and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_UNIX as u64)?],
                 and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET as u64)?],
+                and![Cond::new(0, ArgLen::Dword, Eq, libc::AF_INET6 as u64)?],
             ],
         ),
         (libc::SYS_socketpair, vec![]),

@@ -935,9 +935,11 @@ components:
         ip:
           type: string
           default: "192.168.249.1"
+          description: IPv4 or IPv6 address
         mask:
           type: string
           default: "255.255.255.0"
+          description: Must be a valid IPv4 netmask if ip is an IPv4 address or a valid IPv6 netmask if ip is an IPv6 address.
         mac:
           type: string
         host_mac:
