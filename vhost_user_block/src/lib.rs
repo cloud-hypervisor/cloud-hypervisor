@@ -55,7 +55,7 @@ type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 #[derive(Debug)]
 enum Error {
     /// Failed to create kill eventfd
-    CreateKillEventFd(io::Error),
+    CreateKillEventFd(#[source] io::Error),
     /// Failed to parse configuration string
     FailedConfigParse(OptionParserError),
     /// Failed to handle event other than input event.

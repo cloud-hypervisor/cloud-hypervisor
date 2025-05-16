@@ -12,15 +12,15 @@ use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Error writing to or reading from HTTP socket: {0}")]
-    Socket(std::io::Error),
+    Socket(#[source] std::io::Error),
     #[error("Error sending file descriptors: {0}")]
-    SocketSendFds(vmm_sys_util::errno::Error),
+    SocketSendFds(#[source] vmm_sys_util::errno::Error),
     #[error("Error parsing HTTP status code: {0}")]
-    StatusCodeParsing(std::num::ParseIntError),
+    StatusCodeParsing(#[source] std::num::ParseIntError),
     #[error("HTTP output is missing protocol statement")]
     MissingProtocol,
     #[error("Error parsing HTTP Content-Length field: {0}")]
-    ContentLengthParsing(std::num::ParseIntError),
+    ContentLengthParsing(#[source] std::num::ParseIntError),
     #[error("Server responded with an error: {0:?}: {1:?}")]
     ServerResponse(StatusCode, Option<String>),
 }

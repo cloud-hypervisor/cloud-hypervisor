@@ -54,11 +54,11 @@ pub enum Error {
     #[error("pl011: DMA not implemented.")]
     DmaNotImplemented,
     #[error("Failed to trigger interrupt: {0}")]
-    InterruptFailure(io::Error),
+    InterruptFailure(#[source] io::Error),
     #[error("Failed to write: {0}")]
-    WriteAllFailure(io::Error),
+    WriteAllFailure(#[source] io::Error),
     #[error("Failed to flush: {0}")]
-    FlushFailure(io::Error),
+    FlushFailure(#[source] io::Error),
 }
 
 type Result<T> = result::Result<T, Error>;

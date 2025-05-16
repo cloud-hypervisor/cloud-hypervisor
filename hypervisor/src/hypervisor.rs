@@ -67,22 +67,22 @@ pub enum HypervisorError {
     ///
     /// Checking extensions failed
     ///
-    #[error("Checking extensions:{0}")]
+    #[error("Checking extensions: {0}")]
     CheckExtensions(#[source] anyhow::Error),
     ///
     /// Failed to retrieve TDX capabilities
     ///
-    #[error("Failed to retrieve TDX capabilities:{0}")]
+    #[error("Failed to retrieve TDX capabilities: {0}")]
     TdxCapabilities(#[source] anyhow::Error),
     ///
     /// Failed to set partition property
     ///
-    #[error("Failed to set partition property:{0}")]
+    #[error("Failed to set partition property: {0}")]
     SetPartitionProperty(#[source] anyhow::Error),
     ///
     /// Running on an unsupported CPU
     ///
-    #[error("Unsupported CPU:{0}")]
+    #[error("Unsupported CPU: {0}")]
     UnsupportedCpu(#[source] anyhow::Error),
     ///
     /// Launching a VM with unsupported VM Type

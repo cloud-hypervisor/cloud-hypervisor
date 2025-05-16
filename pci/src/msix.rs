@@ -8,6 +8,7 @@ use std::{io, result};
 
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use vm_device::interrupt::{
     InterruptIndex, InterruptSourceConfig, InterruptSourceGroup, MsiIrqSourceConfig,
 };
@@ -27,12 +28,14 @@ const MSIX_ENABLE_MASK: u16 = (1 << MSIX_ENABLE_BIT) as u16;
 pub const MSIX_TABLE_ENTRY_SIZE: usize = 16;
 pub const MSIX_CONFIG_ID: &str = "msix_config";
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
     /// Failed enabling the interrupt route.
-    EnableInterruptRoute(io::Error),
+    #[error("Failed enabling the interrupt route: {0}")]
+    EnableInterruptRoute(#[source] io::Error),
     /// Failed updating the interrupt route.
-    UpdateInterruptRoute(io::Error),
+    #[error("Failed updating the interrupt route: {0}")]
+    UpdateInterruptRoute(#[source] io::Error),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
