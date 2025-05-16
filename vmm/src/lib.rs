@@ -17,16 +17,17 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
+use std::sync::mpsc::{Receiver, RecvError, SendError, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "riscv64"))]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::{io, result, thread};
 
 use anyhow::anyhow;
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
 use api::http::HttpApiHandle;
+use arch::PAGE_SIZE;
 use console_devices::{pre_create_console_devices, ConsoleInfo};
 use landlock::LandlockError;
 use libc::{tcsetattr, termios, EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW};
@@ -221,6 +222,7 @@ pub enum EpollDispatch {
     Api = 2,
     ActivateVirtioDevices = 3,
     Debug = 4,
+    CheckMigration = 5,
     Unknown,
 }
 
@@ -233,6 +235,7 @@ impl From<u64> for EpollDispatch {
             2 => Api,
             3 => ActivateVirtioDevices,
             4 => Debug,
+            5 => CheckMigration,
             _ => Unknown,
         }
     }
@@ -638,6 +641,93 @@ impl VmmVersionInfo {
     }
 }
 
+#[derive(Debug, Clone)]
+struct MigrationState {
+    current_dirty_pages: u64,
+    downtime: Duration,
+    downtime_start: Instant,
+    iteration: u64,
+    iteration_cost_time: Duration,
+    iteration_start_time: Instant,
+    mb_per_sec: f64,
+    pages_per_second: u64,
+    pending_size: u64,
+    start_time: Instant,
+    threshold_size: u64,
+    total_time: Duration,
+    total_transferred_bytes: u64,
+    total_transferred_dirty_pages: u64,
+}
+
+impl MigrationState {
+    pub fn new() -> Self {
+        Self {
+            current_dirty_pages: 0,
+            downtime: Duration::default(),
+            downtime_start: Instant::now(),
+            iteration: 0,
+            iteration_cost_time: Duration::default(),
+            iteration_start_time: Instant::now(),
+            mb_per_sec: 0.0,
+            pages_per_second: 0,
+            pending_size: 0,
+            start_time: Instant::now(),
+            threshold_size: 0,
+            total_time: Duration::default(),
+            total_transferred_bytes: 0,
+            total_transferred_dirty_pages: 0,
+        }
+    }
+}
+
+struct VmGuard {
+    vm: Option<Arc<Mutex<Vm>>>,
+    sender: std::sync::mpsc::Sender<Option<Vm>>,
+    is_local: bool,
+    check_migration_evt: Option<EventFd>,
+}
+
+impl Drop for VmGuard {
+    fn drop(&mut self) {
+        // Return the VM only if the migration fails
+        if let Some(vm) = self.vm.take() {
+            if let Ok(mutex) = Arc::try_unwrap(vm) {
+                if let Ok(mut inner_vm) = mutex.into_inner() {
+                    // Stop logging dirty pages only for non-local migrations
+                    if !self.is_local {
+                        if let Err(e) = inner_vm.stop_dirty_log() {
+                            error!("Failed to stop dirty log in guard: {:?}", e);
+                        }
+                    }
+
+                    // If VM is paused, attempt to resume
+                    if inner_vm.get_state().unwrap_or(VmState::Paused) == VmState::Paused {
+                        if let Err(e) = inner_vm.resume() {
+                            error!("Failed to resume VM in guard: {:?}", e);
+                        }
+                    }
+
+                    info!("VmGuard returning VM to parent thread");
+                    if let Err(e) = self.sender.send(Some(inner_vm)) {
+                        error!("Failed to return VM to parent thread: {:?}", e);
+                    }
+
+                    // Trigger the event of checking migration results
+                    if let Some(evt) = &self.check_migration_evt {
+                        if let Err(e) = evt.write(1) {
+                            error!("Failed to trigger check migration event: {:?}", e);
+                        }
+                    }
+                } else {
+                    error!("Failed to get inner VM from mutex in guard");
+                }
+            } else {
+                error!("Failed to unwrap Arc in guard, VM may still be referenced elsewhere");
+            }
+        }
+    }
+}
+
 pub struct VmmThreadHandle {
     pub thread_handle: thread::JoinHandle<Result<()>>,
     #[cfg(feature = "dbus_api")]
@@ -665,6 +755,8 @@ pub struct Vmm {
     original_termios_opt: Arc<Mutex<Option<termios>>>,
     console_resize_pipe: Option<Arc<File>>,
     console_info: Option<ConsoleInfo>,
+    migration_receiver: Option<Receiver<Option<Vm>>>,
+    check_migration_evt: EventFd,
 }
 
 impl Vmm {
@@ -775,6 +867,7 @@ impl Vmm {
         let mut epoll = EpollContext::new().map_err(Error::Epoll)?;
         let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
         let activate_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
+        let check_migration_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
 
         epoll
             .add_event(&exit_evt, EpollDispatch::Exit)
@@ -797,6 +890,10 @@ impl Vmm {
             .add_event(&debug_evt, EpollDispatch::Debug)
             .map_err(Error::Epoll)?;
 
+        epoll
+            .add_event(&check_migration_evt, EpollDispatch::CheckMigration)
+            .map_err(Error::Epoll)?;
+
         Ok(Vmm {
             epoll,
             exit_evt,
@@ -817,6 +914,8 @@ impl Vmm {
             original_termios_opt: Arc::new(Mutex::new(None)),
             console_resize_pipe: None,
             console_info: None,
+            migration_receiver: None,
+            check_migration_evt,
         })
     }
 
@@ -1074,10 +1173,8 @@ impl Vmm {
     fn vm_maybe_send_dirty_pages(
         vm: &mut Vm,
         socket: &mut SocketStream,
+        table: MemoryRangeTable,
     ) -> result::Result<bool, MigratableError> {
-        // Send (dirty) memory table
-        let table = vm.dirty_log()?;
-
         // But if there are no regions go straight to pause
         if table.regions().is_empty() {
             return Ok(false);
@@ -1095,6 +1192,150 @@ impl Vmm {
         Ok(true)
     }
 
+    fn memory_copy_iterations(
+        vm: &mut Vm,
+        socket: &mut SocketStream,
+        s: &mut MigrationState,
+        migration_timeout: Duration,
+        migrate_downtime_limit: Duration,
+    ) -> result::Result<MemoryRangeTable, MigratableError> {
+        let mut bandwidth = 0.0;
+        let mut iteration_table;
+
+        loop {
+            // Update the start time of the iteration
+            s.iteration_start_time = Instant::now();
+
+            // Increment iteration counter
+            s.iteration += 1;
+
+            // Check if migration has timed out
+            // migration_timeout > 0 means enabling the timeout check, 0 means disabling the timeout check
+            if !migration_timeout.is_zero() && s.start_time.elapsed() > migration_timeout {
+                warn!("Migration timed out after {:?}", migration_timeout);
+                Request::abandon().write_to(socket)?;
+                Response::read_from(socket)?.ok_or_abandon(
+                    socket,
+                    MigratableError::MigrateSend(anyhow!("Migration timed out")),
+                )?;
+            }
+
+            // Get the dirty page table
+            iteration_table = vm.dirty_log()?;
+
+            // Update the pending size (amount of data to transfer)
+            s.pending_size = iteration_table
+                .regions()
+                .iter()
+                .map(|range| range.length)
+                .sum();
+
+            // Update thresholds
+            if bandwidth > 0.0 {
+                s.threshold_size = bandwidth as u64 * migrate_downtime_limit.as_millis() as u64;
+            }
+
+            // Enter the final stage of migration when the suspension conditions are met
+            if s.iteration > 1 && s.pending_size < s.threshold_size {
+                break;
+            }
+
+            // Update the number of dirty pages
+            s.total_transferred_bytes += s.pending_size;
+            s.current_dirty_pages = s.pending_size / PAGE_SIZE as u64;
+            s.total_transferred_dirty_pages += s.current_dirty_pages;
+
+            // Send the current dirty pages
+            let transfer_start = Instant::now();
+            Self::vm_maybe_send_dirty_pages(vm, socket, iteration_table.clone())?;
+            let transfer_time = transfer_start.elapsed().as_millis() as f64;
+
+            // Update bandwidth
+            if transfer_time > 0.0 && s.pending_size > 0 {
+                bandwidth = s.pending_size as f64 / transfer_time;
+                // Convert bandwidth to MB/s
+                s.mb_per_sec = (bandwidth * 1000.0) / (1024.0 * 1024.0);
+            }
+
+            // Update iteration cost time
+            s.iteration_cost_time = s.iteration_start_time.elapsed();
+            if s.iteration_cost_time.as_millis() > 0 {
+                s.pages_per_second =
+                    s.current_dirty_pages * 1000 / s.iteration_cost_time.as_millis() as u64;
+            }
+        }
+
+        Ok(iteration_table)
+    }
+
+    fn do_memory_migration(
+        vm: &mut Vm,
+        socket: &mut SocketStream,
+        s: &mut MigrationState,
+        send_data_migration: &VmSendMigrationData,
+    ) -> result::Result<(), MigratableError> {
+        // Start logging dirty pages
+        vm.start_dirty_log()?;
+
+        // Send memory table
+        let table = vm.memory_range_table()?;
+        Request::memory(table.length()).write_to(socket).unwrap();
+        table.write_to(socket)?;
+        // And then the memory itself
+        vm.send_memory_regions(&table, socket)?;
+        Response::read_from(socket)?.ok_or_abandon(
+            socket,
+            MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
+        )?;
+
+        // Define the maximum allowed downtime 2000 seconds(2000000 milliseconds)
+        const MAX_MIGRATE_DOWNTIME: u64 = 2000000;
+
+        // Verify that downtime must be between 1 and MAX_MIGRATE_DOWNTIME
+        if send_data_migration.downtime == 0 || send_data_migration.downtime > MAX_MIGRATE_DOWNTIME
+        {
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "downtime_limit must be an integer in the range of 1 to {} ms",
+                MAX_MIGRATE_DOWNTIME
+            )));
+        }
+
+        let migration_timeout = Duration::from_secs(send_data_migration.migration_timeout);
+        let migrate_downtime_limit = Duration::from_millis(send_data_migration.downtime);
+
+        // Verify that downtime must be less than the migration timeout
+        if !migration_timeout.is_zero() && migrate_downtime_limit >= migration_timeout {
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "downtime_limit {}ms must be less than migration_timeout {}ms",
+                send_data_migration.downtime,
+                send_data_migration.migration_timeout * 1000
+            )));
+        }
+
+        let iteration_table =
+            Self::memory_copy_iterations(vm, socket, s, migration_timeout, migrate_downtime_limit)?;
+
+        info!("Entering downtime phase");
+        s.downtime_start = Instant::now();
+        vm.pause()?;
+
+        // Send last batch of dirty pages
+        let mut final_table = vm.dirty_log()?;
+        final_table.extend(iteration_table.clone());
+        Self::vm_maybe_send_dirty_pages(vm, socket, final_table.clone())?;
+
+        // Update statistics
+        s.pending_size = final_table.regions().iter().map(|range| range.length).sum();
+        s.total_transferred_bytes += s.pending_size;
+        s.current_dirty_pages = s.pending_size / PAGE_SIZE as u64;
+        s.total_transferred_dirty_pages += s.current_dirty_pages;
+
+        // Stop logging dirty pages
+        vm.stop_dirty_log()?;
+
+        Ok(())
+    }
+
     fn send_migration(
         vm: &mut Vm,
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))] hypervisor: Arc<
@@ -1102,6 +1343,8 @@ impl Vmm {
         >,
         send_data_migration: VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
+        let mut s = MigrationState::new();
+
         // Set up the socket connection
         let mut socket = Self::send_migration_socket(&send_data_migration.destination_url)?;
 
@@ -1179,36 +1422,7 @@ impl Vmm {
             // Now pause VM
             vm.pause()?;
         } else {
-            // Start logging dirty pages
-            vm.start_dirty_log()?;
-
-            // Send memory table
-            let table = vm.memory_range_table()?;
-            Request::memory(table.length())
-                .write_to(&mut socket)
-                .unwrap();
-            table.write_to(&mut socket)?;
-            // And then the memory itself
-            vm.send_memory_regions(&table, &mut socket)?;
-            Response::read_from(&mut socket)?.ok_or_abandon(
-                &mut socket,
-                MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
-            )?;
-
-            // Try at most 5 passes of dirty memory sending
-            const MAX_DIRTY_MIGRATIONS: usize = 5;
-            for i in 0..MAX_DIRTY_MIGRATIONS {
-                info!("Dirty memory migration {} of {}", i, MAX_DIRTY_MIGRATIONS);
-                if !Self::vm_maybe_send_dirty_pages(vm, &mut socket)? {
-                    break;
-                }
-            }
-
-            // Now pause VM
-            vm.pause()?;
-
-            // Send last batch of dirty pages
-            Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
+            Self::do_memory_migration(vm, &mut socket, &mut s, &send_data_migration)?;
         }
 
         // We release the locks early to enable locking them on the destination host.
@@ -1235,10 +1449,16 @@ impl Vmm {
             MigratableError::MigrateSend(anyhow!("Error completing migration")),
         )?;
 
+        // Record downtime
+        s.downtime = s.downtime_start.elapsed();
+
         // Stop logging dirty pages
         if !send_data_migration.local {
             vm.stop_dirty_log()?;
         }
+
+        // Record total migration time
+        s.total_time = s.start_time.elapsed();
 
         info!("Migration complete");
 
@@ -1358,6 +1578,31 @@ impl Vmm {
         }
     }
 
+    fn check_migration_result(&mut self) {
+        if let Some(receiver) = &self.migration_receiver {
+            match receiver.try_recv() {
+                Ok(Some(vm)) => {
+                    info!("Migration failed, restoring VM");
+                    // Restore VM on migration failure
+                    self.vm = Some(vm);
+                    self.migration_receiver = None;
+                }
+                Ok(None) => {
+                    info!("Migration completed successfully, VM transferred");
+                    // VM successfully transferred, clean up receiver
+                    self.migration_receiver = None;
+                }
+                Err(TryRecvError::Empty) => {
+                    // Migration still in progress, continue waiting
+                }
+                Err(TryRecvError::Disconnected) => {
+                    warn!("Migration channel disconnected unexpectedly");
+                    self.migration_receiver = None;
+                }
+            }
+        }
+    }
+
     fn control_loop(
         &mut self,
         api_receiver: Rc<Receiver<ApiRequest>>,
@@ -1451,8 +1696,17 @@ impl Vmm {
                     }
                     #[cfg(not(feature = "guest_debug"))]
                     EpollDispatch::Debug => {}
+                    EpollDispatch::CheckMigration => {
+                        info!("VM migration check event");
+                        // Consume the event.
+                        self.check_migration_evt
+                            .read()
+                            .map_err(Error::EventFdRead)?;
+                        self.check_migration_result();
+                    }
                 }
             }
+            self.check_migration_result();
         }
 
         // Trigger the termination of the signal_handler thread
@@ -2272,6 +2526,13 @@ impl RequestHandler for Vmm {
             send_data_migration.destination_url, send_data_migration.local
         );
 
+        // Check if there is already a migration in progress
+        if self.migration_receiver.is_some() {
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "Another migration is already in progress"
+            )));
+        }
+
         if !self
             .vm_config
             .as_ref()
@@ -2286,42 +2547,98 @@ impl RequestHandler for Vmm {
             )));
         }
 
-        if let Some(vm) = self.vm.as_mut() {
-            Self::send_migration(
-                vm,
-                #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-                self.hypervisor.clone(),
-                send_data_migration.clone(),
-            )
-            .map_err(|migration_err| {
-                error!("Migration failed: {:?}", migration_err);
+        // Create a channel for VM ownership transfer
+        let (sender, receiver) = std::sync::mpsc::channel();
+        self.migration_receiver = Some(receiver);
 
-                // Stop logging dirty pages only for non-local migrations
-                if !send_data_migration.local {
-                    if let Err(e) = vm.stop_dirty_log() {
-                        return e;
-                    }
-                }
+        // Take VM ownership
+        let vm = match self.vm.take() {
+            Some(vm) => vm,
+            None => return Err(MigratableError::MigrateSend(anyhow!("VM is not running"))),
+        };
 
-                if vm.get_state().unwrap() == VmState::Paused {
-                    if let Err(e) = vm.resume() {
-                        return e;
-                    }
-                }
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        let hypervisor = self.hypervisor.clone();
+        let send_data = send_data_migration.clone();
 
-                migration_err
-            })?;
-
-            // Shutdown the VM after the migration succeeded
-            self.exit_evt.write(1).map_err(|e| {
-                MigratableError::MigrateSend(anyhow!(
-                    "Failed shutting down the VM after migration: {:?}",
+        // Clone required event descriptors
+        let exit_evt = match self.exit_evt.try_clone() {
+            Ok(evt) => evt,
+            Err(e) => {
+                // Return VM immediately if clone fails
+                self.vm = Some(vm);
+                return Err(MigratableError::MigrateSend(anyhow!(
+                    "Failed to clone exit eventfd: {}",
                     e
-                ))
+                )));
+            }
+        };
+
+        let check_migration_evt = match self.check_migration_evt.try_clone() {
+            Ok(evt) => evt,
+            Err(e) => {
+                // Return VM immediately if clone fails
+                self.vm = Some(vm);
+                return Err(MigratableError::MigrateSend(anyhow!(
+                    "Failed to clone exit eventfd: {}",
+                    e
+                )));
+            }
+        };
+
+        let vm = Arc::new(Mutex::new(vm));
+        let vm_clone = Arc::clone(&vm);
+
+        // Start migration thread
+        if let Err(e) = thread::Builder::new()
+            .name("migration".into())
+            .spawn(move || {
+                // Create a VM guard to return the VM in case of an exception
+                let vm_guard = VmGuard {
+                    vm: Some(vm),
+                    sender: sender.clone(),
+                    is_local: send_data.local,
+                    check_migration_evt: Some(check_migration_evt),
+                };
+
+                let result = {
+                    let vm_ref = vm_guard.vm.as_ref().unwrap();
+                    let mut vm_lock = vm_ref.lock().unwrap();
+
+                    Self::send_migration(
+                        &mut vm_lock,
+                        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+                        hypervisor,
+                        send_data.clone(),
+                    )
+                };
+
+                match result {
+                    Ok(_) => {
+                        // Shutdown the VM after the migration succeeded
+                        if let Err(e) = exit_evt.write(1) {
+                            error!("Failed shutting down the VM after migration: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Migration failed: {:?}", e);
+                        // VmGuard's drop will handle the VM return
+                    }
+                }
             })
-        } else {
-            Err(MigratableError::MigrateSend(anyhow!("VM is not running")))
+        {
+            // Return VM if thread creation fails
+            if let Ok(mutex) = Arc::try_unwrap(vm_clone) {
+                if let Ok(inner_vm) = mutex.into_inner() {
+                    self.vm = Some(inner_vm);
+                }
+            }
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "Failed to spawn migration thread: {}",
+                e
+            )));
         }
+        Ok(())
     }
 }
 
