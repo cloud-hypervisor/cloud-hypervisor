@@ -354,27 +354,27 @@ pub enum NetQueuePairError {
     #[error("No memory configured")]
     NoMemoryConfigured,
     #[error("Error registering listener: {0}")]
-    RegisterListener(io::Error),
+    RegisterListener(#[source] io::Error),
     #[error("Error unregistering listener: {0}")]
-    UnregisterListener(io::Error),
+    UnregisterListener(#[source] io::Error),
     #[error("Error writing to the TAP device: {0}")]
-    WriteTap(io::Error),
+    WriteTap(#[source] io::Error),
     #[error("Error reading from the TAP device: {0}")]
-    ReadTap(io::Error),
+    ReadTap(#[source] io::Error),
     #[error("Error related to guest memory: {0}")]
-    GuestMemory(vm_memory::GuestMemoryError),
+    GuestMemory(#[source] vm_memory::GuestMemoryError),
     #[error("Returned an error while iterating through the queue: {0}")]
-    QueueIteratorFailed(virtio_queue::Error),
+    QueueIteratorFailed(#[source] virtio_queue::Error),
     #[error("Descriptor chain is too short")]
     DescriptorChainTooShort,
     #[error("Descriptor chain does not contain valid descriptors")]
     DescriptorChainInvalid,
     #[error("Failed to determine if queue needed notification: {0}")]
-    QueueNeedsNotification(virtio_queue::Error),
+    QueueNeedsNotification(#[source] virtio_queue::Error),
     #[error("Failed to enable notification on the queue: {0}")]
-    QueueEnableNotification(virtio_queue::Error),
+    QueueEnableNotification(#[source] virtio_queue::Error),
     #[error("Failed to add used index to the queue: {0}")]
-    QueueAddUsed(virtio_queue::Error),
+    QueueAddUsed(#[source] virtio_queue::Error),
     #[error("Descriptor with invalid virtio-net header")]
     DescriptorInvalidHeader,
     #[error("Invalid virtio-net header")]

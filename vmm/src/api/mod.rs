@@ -40,6 +40,7 @@ use std::sync::mpsc::{channel, RecvError, SendError, Sender};
 
 use micro_http::Body;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use vm_migration::MigratableError;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -56,10 +57,10 @@ use crate::vm_config::{
 use crate::Error as VmmError;
 
 /// API errors are sent back from the VMM API server through the ApiResponse.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum ApiError {
     /// Cannot write to EventFd.
-    EventFdWrite(io::Error),
+    EventFdWrite(#[source] io::Error),
 
     /// API request send error
     RequestSend(SendError<ApiRequest>),

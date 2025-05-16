@@ -25,19 +25,19 @@ pub struct EpollHelper {
 #[derive(Error, Debug)]
 pub enum EpollHelperError {
     #[error("Failed to create Fd: {0}")]
-    CreateFd(std::io::Error),
+    CreateFd(#[source] std::io::Error),
     #[error("Failed to epoll_ctl: {0}")]
-    Ctl(std::io::Error),
+    Ctl(#[source] std::io::Error),
     #[error("IO error: {0}")]
-    IoError(std::io::Error),
+    IoError(#[source] std::io::Error),
     #[error("Failed to epoll_wait: {0}")]
-    Wait(std::io::Error),
+    Wait(#[source] std::io::Error),
     #[error("Failed to get virtio-queue index: {0}")]
-    QueueRingIndex(virtio_queue::Error),
+    QueueRingIndex(#[source] virtio_queue::Error),
     #[error("Failed to handle virtio device events: {0}")]
-    HandleEvent(anyhow::Error),
+    HandleEvent(#[source] anyhow::Error),
     #[error("Failed to handle timeout: {0}")]
-    HandleTimeout(anyhow::Error),
+    HandleTimeout(#[source] anyhow::Error),
 }
 
 pub const EPOLL_HELPER_EVENT_PAUSE: u16 = 0;

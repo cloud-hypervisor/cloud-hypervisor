@@ -36,11 +36,11 @@ type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 #[derive(Debug)]
 pub enum Error {
     /// Failed to create kill eventfd.
-    CreateKillEventFd(io::Error),
+    CreateKillEventFd(#[source] io::Error),
     /// Failed to parse configuration string.
     FailedConfigParse(OptionParserError),
     /// Failed to signal used queue.
-    FailedSignalingUsedQueue(io::Error),
+    FailedSignalingUsedQueue(#[source] io::Error),
     /// Failed to handle event other than input event.
     HandleEventNotEpollIn,
     /// Failed to handle unknown event.
@@ -52,7 +52,7 @@ pub enum Error {
     /// Underlying QueuePair error.
     NetQueuePair(net_util::NetQueuePairError),
     /// Failed to register the TAP listener.
-    RegisterTapListener(io::Error),
+    RegisterTapListener(#[source] io::Error),
 }
 
 pub const SYNTAX: &str = "vhost-user-net backend parameters \

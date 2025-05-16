@@ -66,25 +66,25 @@ pub enum Error {
     TooManyCpus,
     /// Failure to write the MP floating pointer.
     #[error("Failure to write the MP floating pointer: {0}")]
-    WriteMpfIntel(GuestMemoryError),
+    WriteMpfIntel(#[source] GuestMemoryError),
     /// Failure to write MP CPU entry.
     #[error("Failure to write MP CPU entry: {0}")]
-    WriteMpcCpu(GuestMemoryError),
+    WriteMpcCpu(#[source] GuestMemoryError),
     /// Failure to write MP ioapic entry.
     #[error("Failure to write MP ioapic entry: {0}")]
-    WriteMpcIoapic(GuestMemoryError),
+    WriteMpcIoapic(#[source] GuestMemoryError),
     /// Failure to write MP bus entry.
     #[error("Failure to write MP bus entry: {0}")]
-    WriteMpcBus(GuestMemoryError),
+    WriteMpcBus(#[source] GuestMemoryError),
     /// Failure to write MP interrupt source entry.
     #[error("Failure to write MP interrupt source entry: {0}")]
-    WriteMpcIntsrc(GuestMemoryError),
+    WriteMpcIntsrc(#[source] GuestMemoryError),
     /// Failure to write MP local interrupt source entry.
     #[error("Failure to write MP local interrupt source entry: {0}")]
-    WriteMpcLintsrc(GuestMemoryError),
+    WriteMpcLintsrc(#[source] GuestMemoryError),
     /// Failure to write MP table header.
     #[error("Failure to write MP table header: {0}")]
-    WriteMpcTable(GuestMemoryError),
+    WriteMpcTable(#[source] GuestMemoryError),
 }
 
 pub type Result<T> = result::Result<T, Error>;

@@ -8,6 +8,8 @@ use std::fmt;
 use std::num::ParseIntError;
 use std::str::FromStr;
 
+use thiserror::Error;
+
 #[derive(Default)]
 pub struct OptionParser {
     options: HashMap<String, OptionParserValue>,
@@ -18,7 +20,7 @@ struct OptionParserValue {
     requires_value: bool,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum OptionParserError {
     UnknownOption(String),
     InvalidSyntax(String),

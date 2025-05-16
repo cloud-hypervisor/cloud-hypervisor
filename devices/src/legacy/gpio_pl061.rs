@@ -46,7 +46,7 @@ pub enum Error {
     #[error("GPIO interrupt disabled by guest driver.")]
     GpioInterruptDisabled,
     #[error("Could not trigger GPIO interrupt: {0}.")]
-    GpioInterruptFailure(io::Error),
+    GpioInterruptFailure(#[source] io::Error),
     #[error("Invalid GPIO Input key triggered: {0}.")]
     GpioTriggerKeyFailure(u32),
 }

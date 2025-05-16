@@ -33,10 +33,10 @@ pub enum Error {
     TxBufFull,
     /// An I/O error occurred, when attempting to flush the connection TX buffer.
     #[error("Error flushing TX buffer: {0}")]
-    TxBufFlush(std::io::Error),
+    TxBufFlush(#[source] std::io::Error),
     /// An I/O error occurred, when attempting to write data to the host-side stream.
     #[error("Error writing to host side stream: {0}")]
-    StreamWrite(std::io::Error),
+    StreamWrite(#[source] std::io::Error),
 }
 
 type Result<T> = std::result::Result<T, Error>;

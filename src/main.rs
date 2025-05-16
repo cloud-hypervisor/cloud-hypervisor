@@ -52,23 +52,23 @@ enum Error {
     #[error("Failed to start the VMM thread: {0}")]
     StartVmmThread(#[source] vmm::Error),
     #[error("Error parsing config: {0}")]
-    ParsingConfig(vmm::config::Error),
+    ParsingConfig(#[source] vmm::config::Error),
     #[error("Error creating VM: {0:?}")]
-    VmCreate(vmm::api::ApiError),
+    VmCreate(#[source] vmm::api::ApiError),
     #[error("Error booting VM: {0:?}")]
-    VmBoot(vmm::api::ApiError),
+    VmBoot(#[source] vmm::api::ApiError),
     #[error("Error restoring VM: {0:?}")]
-    VmRestore(vmm::api::ApiError),
+    VmRestore(#[source] vmm::api::ApiError),
     #[error("Error parsing restore: {0}")]
-    ParsingRestore(vmm::config::Error),
+    ParsingRestore(#[source] vmm::config::Error),
     #[error("Failed to join on VMM thread: {0:?}")]
     ThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
     #[error("VMM thread exited with error: {0}")]
     VmmThread(#[source] vmm::Error),
     #[error("Error parsing --api-socket: {0}")]
-    ParsingApiSocket(std::num::ParseIntError),
+    ParsingApiSocket(#[source] std::num::ParseIntError),
     #[error("Error parsing --event-monitor: {0}")]
-    ParsingEventMonitor(option_parser::OptionParserError),
+    ParsingEventMonitor(#[source] option_parser::OptionParserError),
     #[cfg(feature = "dbus_api")]
     #[error("`--dbus-object-path` option isn't provided")]
     MissingDBusObjectPath,
@@ -78,7 +78,7 @@ enum Error {
     #[error("Error parsing --event-monitor: path or fd required")]
     BareEventMonitor,
     #[error("Error doing event monitor I/O: {0}")]
-    EventMonitorIo(std::io::Error),
+    EventMonitorIo(#[source] std::io::Error),
     #[error("Event monitor thread failed: {0}")]
     EventMonitorThread(#[source] vmm::Error),
     #[cfg(feature = "guest_debug")]
@@ -102,13 +102,13 @@ enum Error {
 #[derive(Error, Debug)]
 enum FdTableError {
     #[error("Failed to create event fd: {0}")]
-    CreateEventFd(std::io::Error),
+    CreateEventFd(#[source] std::io::Error),
     #[error("Failed to obtain file limit: {0}")]
-    GetRLimit(std::io::Error),
+    GetRLimit(#[source] std::io::Error),
     #[error("Error calling fcntl with F_GETFD: {0}")]
-    GetFd(std::io::Error),
+    GetFd(#[source] std::io::Error),
     #[error("Failed to duplicate file handle: {0}")]
-    Dup2(std::io::Error),
+    Dup2(#[source] std::io::Error),
 }
 
 struct Logger {
