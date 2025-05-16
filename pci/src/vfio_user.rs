@@ -426,22 +426,12 @@ impl PciDevice for VfioUserPciDevice {
         self
     }
 
-    fn detect_bar_reprogramming(
-        &mut self,
-        reg_idx: usize,
-        data: &[u8],
-    ) -> Option<BarReprogrammingParams> {
-        self.common
-            .configuration
-            .detect_bar_reprogramming(reg_idx, data)
-    }
-
     fn write_config_register(
         &mut self,
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> Option<Arc<Barrier>> {
+    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
         self.common.write_config_register(reg_idx, offset, data)
     }
 

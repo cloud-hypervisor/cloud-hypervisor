@@ -109,6 +109,8 @@ use vfio_ioctls::VfioDeviceFd;
 use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_ioc_nr, ioctl_iowr_nr};
 pub use {kvm_bindings, kvm_ioctls};
 
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::regs;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use crate::RegList;
 
@@ -2289,18 +2291,6 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     #[cfg(target_arch = "aarch64")]
     fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
-        #[allow(non_upper_case_globals)]
-        // PSR (Processor State Register) bits.
-        // Taken from arch/arm64/include/uapi/asm/ptrace.h.
-        const PSR_MODE_EL1h: u64 = 0x0000_0005;
-        const PSR_F_BIT: u64 = 0x0000_0040;
-        const PSR_I_BIT: u64 = 0x0000_0080;
-        const PSR_A_BIT: u64 = 0x0000_0100;
-        const PSR_D_BIT: u64 = 0x0000_0200;
-        // Taken from arch/arm64/kvm/inject_fault.c.
-        const PSTATE_FAULT_BITS_64: u64 =
-            PSR_MODE_EL1h | PSR_A_BIT | PSR_F_BIT | PSR_I_BIT | PSR_D_BIT;
-
         let kreg_off = offset_of!(kvm_regs, regs);
 
         // Get the register index of the PSTATE (Processor State) register.
@@ -2310,7 +2300,7 @@ impl cpu::Vcpu for KvmVcpu {
             .unwrap()
             .set_one_reg(
                 arm64_core_reg_id!(KVM_REG_SIZE_U64, pstate),
-                &PSTATE_FAULT_BITS_64.to_le_bytes(),
+                &regs::PSTATE_FAULT_BITS_64.to_le_bytes(),
             )
             .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
 

@@ -13,6 +13,7 @@ use std::cmp::{max, min};
 use std::fs::OpenOptions;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
+use std::os::fd::{AsRawFd, RawFd};
 use std::str;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
@@ -378,7 +379,7 @@ impl QcowHeader {
         }
 
         if let Some(backing_file_path) = self.backing_file_path.as_ref() {
-            write!(file, "{}", backing_file_path).map_err(Error::WritingHeader)?;
+            write!(file, "{backing_file_path}").map_err(Error::WritingHeader)?;
         }
 
         // Set the file length by seeking and writing a zero to the last byte. This avoids needing
@@ -1513,6 +1514,12 @@ impl QcowFile {
             self.raw_file.file_mut().sync_data()?;
         }
         Ok(())
+    }
+}
+
+impl AsRawFd for QcowFile {
+    fn as_raw_fd(&self) -> RawFd {
+        self.raw_file.as_raw_fd()
     }
 }
 

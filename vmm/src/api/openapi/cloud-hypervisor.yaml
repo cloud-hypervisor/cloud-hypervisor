@@ -160,6 +160,8 @@ paths:
           description: The VM instance was successfully resized.
         404:
           description: The VM instance could not be resized because it is not created.
+        429:
+          description: The VM instance could not be resized because a cpu removal is still pending.
 
   /vm.resize-zone:
     put:

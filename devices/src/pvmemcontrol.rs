@@ -484,7 +484,7 @@ impl PvmemcontrolBusDevice {
     }
 
     fn set_vma_anon_name(&self, addr: u64, length: u64, name: u64) -> result::Result<(), Error> {
-        let name = (name != 0).then(|| CString::new(format!("pvmemcontrol-{}", name)).unwrap());
+        let name = (name != 0).then(|| CString::new(format!("pvmemcontrol-{name}")).unwrap());
         let name_ptr = if let Some(name) = &name {
             name.as_ptr()
         } else {
@@ -698,10 +698,12 @@ impl PciDevice for PvmemcontrolPciDevice {
         reg_idx: usize,
         offset: u64,
         data: &[u8],
-    ) -> Option<Arc<Barrier>> {
-        self.configuration
-            .write_config_register(reg_idx, offset, data);
-        None
+    ) -> (Vec<BarReprogrammingParams>, Option<Arc<Barrier>>) {
+        (
+            self.configuration
+                .write_config_register(reg_idx, offset, data),
+            None,
+        )
     }
 
     fn read_config_register(&mut self, reg_idx: usize) -> u32 {
@@ -714,14 +716,6 @@ impl PciDevice for PvmemcontrolPciDevice {
 
     fn id(&self) -> Option<String> {
         Some(self.id.clone())
-    }
-
-    fn detect_bar_reprogramming(
-        &mut self,
-        reg_idx: usize,
-        data: &[u8],
-    ) -> Option<BarReprogrammingParams> {
-        self.configuration.detect_bar_reprogramming(reg_idx, data)
     }
 
     fn allocate_bars(

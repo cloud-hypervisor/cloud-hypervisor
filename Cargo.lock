@@ -1249,7 +1249,7 @@ dependencies = [
 [[package]]
 name = "micro_http"
 version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#ef96f623c46e221ebf9b6037567f97ec57683afd"
+source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#4f621532e81ee2ad096a9c9592fdacc40d19de48"
 dependencies = [
  "libc",
  "vmm-sys-util",
@@ -1272,9 +1272,9 @@ checksum = "9bec4598fddb13cc7b528819e697852653252b760f1228b7642679bf2ff2cd07"
 
 [[package]]
 name = "mshv-bindings"
-version = "0.3.5"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd4aa8157010f69f380a86a0ba087167b0a01e2e3f2bcca5b576bd26a9206dc8"
+checksum = "909de5fd4a5a3347a6c62872f6816e6279efd8615a753f10a3bc4daaef8a72ef"
 dependencies = [
  "libc",
  "num_enum",
@@ -1286,9 +1286,9 @@ dependencies = [
 
 [[package]]
 name = "mshv-ioctls"
-version = "0.3.5"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2bdc151fdc265efbb20f6c74e235dcdbce9a54e695655ac88b4db7385b26319"
+checksum = "8c7d94972588d562bd349b916de6a43f2ee268e6e9c91cfb5b30549ed4ea2751"
 dependencies = [
  "libc",
  "mshv-bindings",
@@ -2281,7 +2281,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vfio-bindings"
 version = "0.4.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#bdbb1cd486484faa23db48c82d51484e2ee43692"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#21d06ceb917ffce6768edefeab02e04d5e79615d"
 dependencies = [
  "vmm-sys-util",
 ]
@@ -2289,7 +2289,7 @@ dependencies = [
 [[package]]
 name = "vfio-ioctls"
 version = "0.2.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#bdbb1cd486484faa23db48c82d51484e2ee43692"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#21d06ceb917ffce6768edefeab02e04d5e79615d"
 dependencies = [
  "byteorder",
  "kvm-bindings",

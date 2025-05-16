@@ -13,13 +13,17 @@ use std::sync::{Arc, RwLock};
 use arc_swap::ArcSwap;
 use mshv_bindings::*;
 #[cfg(target_arch = "x86_64")]
-use mshv_ioctls::{set_registers_64, InterruptRequest};
-use mshv_ioctls::{Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
+use mshv_ioctls::InterruptRequest;
+use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
 #[cfg(feature = "sev_snp")]
 use vm_memory::bitmap::AtomicBitmap;
 
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::regs::{
+    AARCH64_ARCH_TIMER_VIRT_IRQ, AARCH64_MIN_PPI_IRQ, AARCH64_PMU_IRQ,
+};
 #[cfg(target_arch = "x86_64")]
 use crate::arch::emulator::PlatformEmulator;
 #[cfg(target_arch = "x86_64")]
@@ -44,6 +48,8 @@ use std::os::unix::io::AsRawFd;
 use std::sync::Mutex;
 
 #[cfg(target_arch = "aarch64")]
+use aarch64::gic::{MshvGicV2M, BASE_SPI_IRQ};
+#[cfg(target_arch = "aarch64")]
 pub use aarch64::VcpuMshvState;
 #[cfg(feature = "sev_snp")]
 use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
@@ -64,6 +70,8 @@ pub use {
 
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::regs;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
 #[cfg(target_arch = "x86_64")]
@@ -258,7 +266,7 @@ impl MshvHypervisor {
     ///
     /// Retrieve the list of MSRs supported by MSHV.
     ///
-    fn get_msr_list(&self) -> hypervisor::Result<MsrList> {
+    fn get_msr_list(&self) -> hypervisor::Result<Vec<u32>> {
         self.mshv
             .get_msr_index_list()
             .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))
@@ -291,67 +299,18 @@ impl MshvHypervisor {
             break;
         }
 
-        // Set additional partition property for SEV-SNP partition.
-        #[cfg(target_arch = "x86_64")]
-        if mshv_vm_type == VmType::Snp {
-            let snp_policy = snp::get_default_snp_guest_policy();
-            let vmgexit_offloads = snp::get_default_vmgexit_offload_features();
-            // SAFETY: access union fields
-            unsafe {
-                debug!(
-                    "Setting the partition isolation policy as: 0x{:x}",
-                    snp_policy.as_uint64
-                );
-                fd.set_partition_property(
-                    hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_POLICY,
-                    snp_policy.as_uint64,
-                )
-                .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-                debug!(
-                    "Setting the partition property to enable VMGEXIT offloads as : 0x{:x}",
-                    vmgexit_offloads.as_uint64
-                );
-                fd.set_partition_property(
-                    hv_partition_property_code_HV_PARTITION_PROPERTY_SEV_VMGEXIT_OFFLOADS,
-                    vmgexit_offloads.as_uint64,
-                )
-                .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-            }
-        }
-
-        // Default Microsoft Hypervisor behavior for unimplemented MSR is to
-        // send a fault to the guest if it tries to access it. It is possible
-        // to override this behavior with a more suitable option i.e., ignore
-        // writes from the guest and return zero in attempt to read unimplemented
-        // MSR.
-        #[cfg(target_arch = "x86_64")]
-        fd.set_partition_property(
-            hv_partition_property_code_HV_PARTITION_PROPERTY_UNIMPLEMENTED_MSR_ACTION,
-            hv_unimplemented_msr_action_HV_UNIMPLEMENTED_MSR_ACTION_IGNORE_WRITE_READ_ZERO as u64,
-        )
-        .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-
-        // Always create a frozen partition
-        fd.set_partition_property(
-            hv_partition_property_code_HV_PARTITION_PROPERTY_TIME_FREEZE,
-            1u64,
-        )
-        .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
-
         let vm_fd = Arc::new(fd);
 
         #[cfg(target_arch = "x86_64")]
         {
             let msr_list = self.get_msr_list()?;
-            let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
             let mut msrs: Vec<MsrEntry> = vec![
                 MsrEntry {
                     ..Default::default()
                 };
-                num_msrs
+                msr_list.len()
             ];
-            let indices = msr_list.as_slice();
-            for (pos, index) in indices.iter().enumerate() {
+            for (pos, index) in msr_list.iter().enumerate() {
                 msrs[pos].index = *index;
             }
 
@@ -502,13 +461,13 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     ///
     fn get_host_ipa_limit(&self) -> i32 {
         let host_ipa = self.mshv.get_host_partition_property(
-            hv_partition_property_code_HV_PARTITION_PROPERTY_PHYSICAL_ADDRESS_WIDTH as u64,
+            hv_partition_property_code_HV_PARTITION_PROPERTY_PHYSICAL_ADDRESS_WIDTH,
         );
 
         match host_ipa {
-            Ok(ipa) => ipa,
+            Ok(ipa) => ipa.try_into().unwrap(),
             Err(e) => {
-                panic!("Failed to get host IPA limit: {:?}", e);
+                panic!("Failed to get host IPA limit: {e:?}");
             }
         }
     }
@@ -715,18 +674,7 @@ impl cpu::Vcpu for MshvVcpu {
                      */
                     match port {
                         0x402 | 0x510 | 0x511 | 0x514 => {
-                            let insn_len = info.header.instruction_length() as u64;
-
-                            /* Advance RIP and update RAX */
-                            let arr_reg_name_value = [
-                                (
-                                    hv_register_name_HV_X64_REGISTER_RIP,
-                                    info.header.rip + insn_len,
-                                ),
-                                (hv_register_name_HV_X64_REGISTER_RAX, ret_rax),
-                            ];
-                            set_registers_64!(self.fd, arr_reg_name_value)
-                                .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+                            self.advance_rip_update_rax(&info, ret_rax)?;
                             return Ok(cpu::VmExit::Ignore);
                         }
                         _ => {}
@@ -764,18 +712,7 @@ impl cpu::Vcpu for MshvVcpu {
                         ret_rax = eax as u64;
                     }
 
-                    let insn_len = info.header.instruction_length() as u64;
-
-                    /* Advance RIP and update RAX */
-                    let arr_reg_name_value = [
-                        (
-                            hv_register_name_HV_X64_REGISTER_RIP,
-                            info.header.rip + insn_len,
-                        ),
-                        (hv_register_name_HV_X64_REGISTER_RAX, ret_rax),
-                    ];
-                    set_registers_64!(self.fd, arr_reg_name_value)
-                        .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+                    self.advance_rip_update_rax(&info, ret_rax)?;
                     Ok(cpu::VmExit::Ignore)
                 }
                 #[cfg(target_arch = "aarch64")]
@@ -1128,8 +1065,7 @@ impl cpu::Vcpu for MshvVcpu {
                                         }
                                         _ => {
                                             panic!(
-                                                "SVM_EXITCODE_HV_DOORBELL_PAGE: Unhandled exit code: {:0x}",
-                                                exit_info1
+                                                "SVM_EXITCODE_HV_DOORBELL_PAGE: Unhandled exit code: {exit_info1:0x}"
                                             );
                                         }
                                     }
@@ -1289,13 +1225,12 @@ impl cpu::Vcpu for MshvVcpu {
                                     // Clear the SW_EXIT_INFO1 register to indicate no error
                                     self.clear_swexit_info1()?;
                                 }
-                                _ => panic!(
-                                    "GHCB_INFO_NORMAL: Unhandled exit code: {:0x}",
-                                    exit_code
-                                ),
+                                _ => {
+                                    panic!("GHCB_INFO_NORMAL: Unhandled exit code: {exit_code:0x}")
+                                }
                             }
                         }
-                        _ => panic!("Unsupported VMGEXIT operation: {:0x}", ghcb_op),
+                        _ => panic!("Unsupported VMGEXIT operation: {ghcb_op:0x}"),
                     }
 
                     Ok(cpu::VmExit::Ignore)
@@ -1318,22 +1253,50 @@ impl cpu::Vcpu for MshvVcpu {
 
     #[cfg(target_arch = "aarch64")]
     fn init_pmu(&self, _irq: u32) -> cpu::Result<()> {
-        unimplemented!()
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
     fn has_pmu_support(&self) -> bool {
-        unimplemented!()
+        true
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn setup_regs(&self, _cpu_id: u8, _boot_ip: u64, _fdt_start: u64) -> cpu::Result<()> {
-        unimplemented!()
+    fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
+        let arr_reg_name_value = [(
+            hv_register_name_HV_ARM64_REGISTER_PSTATE,
+            regs::PSTATE_FAULT_BITS_64,
+        )];
+        set_registers_64!(self.fd, arr_reg_name_value)
+            .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+
+        if cpu_id == 0 {
+            let arr_reg_name_value = [
+                (hv_register_name_HV_ARM64_REGISTER_PC, boot_ip),
+                (hv_register_name_HV_ARM64_REGISTER_X0, fdt_start),
+            ];
+            set_registers_64!(self.fd, arr_reg_name_value)
+                .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+        }
+
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn get_sys_reg(&self, _sys_reg: u32) -> cpu::Result<u64> {
-        unimplemented!()
+    fn get_sys_reg(&self, sys_reg: u32) -> cpu::Result<u64> {
+        let mshv_reg = self.sys_reg_to_mshv_reg(sys_reg)?;
+
+        let mut reg_assocs = [hv_register_assoc {
+            name: mshv_reg,
+            ..Default::default()
+        }];
+        self.fd
+            .get_reg(&mut reg_assocs)
+            .map_err(|e| cpu::HypervisorCpuError::GetRegister(e.into()))?;
+
+        // SAFETY: Accessing a union element from bindgen generated definition.
+        let res = unsafe { reg_assocs[0].value.reg64 };
+        Ok(res)
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -1343,17 +1306,17 @@ impl cpu::Vcpu for MshvVcpu {
 
     #[cfg(target_arch = "aarch64")]
     fn vcpu_init(&self, _kvi: &crate::VcpuInit) -> cpu::Result<()> {
-        unimplemented!()
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
     fn vcpu_finalize(&self, _feature: i32) -> cpu::Result<()> {
-        unimplemented!()
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
     fn vcpu_get_finalized_features(&self) -> i32 {
-        unimplemented!()
+        0
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -1363,12 +1326,12 @@ impl cpu::Vcpu for MshvVcpu {
         _kvi: &mut crate::VcpuInit,
         _id: u8,
     ) -> cpu::Result<()> {
-        unimplemented!()
+        Ok(())
     }
 
     #[cfg(target_arch = "aarch64")]
     fn create_vcpu_init(&self) -> crate::VcpuInit {
-        unimplemented!();
+        MshvVcpuInit {}.into()
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -1595,6 +1558,24 @@ impl cpu::Vcpu for MshvVcpu {
             .request_virtual_interrupt(&cfg)
             .map_err(|e| cpu::HypervisorCpuError::Nmi(e.into()))
     }
+    ///
+    /// Set the GICR base address for the vcpu.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn set_gic_redistributor_addr(&self, gicr_base_addr: u64) -> cpu::Result<()> {
+        debug!(
+            "Setting GICR base address to: {:#x}, for vp_index: {:?}",
+            gicr_base_addr, self.vp_index
+        );
+        let arr_reg_name_value = [(
+            hv_register_name_HV_ARM64_REGISTER_GICR_BASE_GPA,
+            gicr_base_addr,
+        )];
+        set_registers_64!(self.fd, arr_reg_name_value)
+            .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+
+        Ok(())
+    }
 }
 
 impl MshvVcpu {
@@ -1711,6 +1692,50 @@ impl MshvVcpu {
         }
 
         Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn advance_rip_update_rax(
+        &self,
+        info: &hv_x64_io_port_intercept_message,
+        ret_rax: u64,
+    ) -> cpu::Result<()> {
+        let insn_len = info.header.instruction_length() as u64;
+        /*
+         * Advance RIP and update RAX
+         * First, try to update the registers using VP register page
+         * which is mapped into user space for faster access.
+         * If the register page is not available, fall back to regular
+         * IOCTL to update the registers.
+         */
+        if let Some(reg_page) = self.fd.get_vp_reg_page() {
+            let vp_reg_page = reg_page.0;
+            set_gp_regs_field_ptr!(vp_reg_page, rax, ret_rax);
+            // SAFETY: access union fields
+            unsafe {
+                (*vp_reg_page).__bindgen_anon_1.__bindgen_anon_1.rip = info.header.rip + insn_len;
+                (*vp_reg_page).dirty |= 1 << HV_X64_REGISTER_CLASS_IP;
+            }
+        } else {
+            let arr_reg_name_value = [
+                (
+                    hv_register_name_HV_X64_REGISTER_RIP,
+                    info.header.rip + insn_len,
+                ),
+                (hv_register_name_HV_X64_REGISTER_RAX, ret_rax),
+            ];
+            set_registers_64!(self.fd, arr_reg_name_value)
+                .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+        }
+        Ok(())
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn sys_reg_to_mshv_reg(&self, sys_regs: u32) -> cpu::Result<u32> {
+        match sys_regs {
+            regs::MPIDR_EL1 => Ok(hv_register_name_HV_ARM64_REGISTER_MPIDR_EL1),
+            _ => Err(cpu::HypervisorCpuError::UnsupportedSysReg(sys_regs)),
+        }
     }
 }
 
@@ -2003,9 +2028,20 @@ impl vm::Vm for MshvVm {
                 data: cfg.data,
             }
             .into(),
+            #[cfg(target_arch = "x86_64")]
             _ => {
                 unreachable!()
             }
+            #[cfg(target_arch = "aarch64")]
+            InterruptSourceConfig::LegacyIrq(cfg) => mshv_user_irq_entry {
+                gsi,
+                // In order to get IRQ line we need to add `BASE_SPI_IRQ` to the pin number
+                // as `BASE_SPI_IRQ` is the base SPI interrupt number exposed via FDT to the
+                // guest.
+                data: cfg.pin + BASE_SPI_IRQ,
+                ..Default::default()
+            }
+            .into(),
         }
     }
 
@@ -2204,13 +2240,37 @@ impl vm::Vm for MshvVm {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn create_vgic(&self, _config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
-        unimplemented!()
+    fn create_vgic(&self, config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
+        let gic_device = MshvGicV2M::new(self, config)
+            .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {:?}", e)))?;
+
+        // Register GICD address with the hypervisor
+        self.fd
+            .set_partition_property(
+                hv_partition_property_code_HV_PARTITION_PROPERTY_GICD_BASE_ADDRESS,
+                gic_device.dist_addr,
+            )
+            .map_err(|e| {
+                vm::HypervisorVmError::CreateVgic(anyhow!("Failed to set GICD address: {}", e))
+            })?;
+
+        // Register GITS address with the hypervisor
+        self.fd
+            .set_partition_property(
+                // spellchecker:disable-line
+                hv_partition_property_code_HV_PARTITION_PROPERTY_GITS_TRANSLATER_BASE_ADDRESS,
+                gic_device.gits_addr,
+            )
+            .map_err(|e| {
+                vm::HypervisorVmError::CreateVgic(anyhow!("Failed to set GITS address: {}", e))
+            })?;
+
+        Ok(Arc::new(Mutex::new(gic_device)))
     }
 
     #[cfg(target_arch = "aarch64")]
     fn get_preferred_target(&self, _kvi: &mut crate::VcpuInit) -> vm::Result<()> {
-        unimplemented!()
+        Ok(())
     }
 
     /// Pause the VM
@@ -2307,6 +2367,104 @@ impl vm::Vm for MshvVm {
                 });
             }
         }
+
+        Ok(())
+    }
+
+    fn init(&self) -> vm::Result<()> {
+        #[cfg(target_arch = "aarch64")]
+        {
+            self.fd
+                .set_partition_property(
+                    hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_LPI_INT_ID_BITS,
+                    0,
+                )
+                .map_err(|e| {
+                    vm::HypervisorVmError::InitializeVm(anyhow!(
+                        "Failed to set GIC LPI support: {}",
+                        e
+                    ))
+                })?;
+
+            self.fd
+                .set_partition_property(
+                    hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_PPI_OVERFLOW_INTERRUPT_FROM_CNTV,
+                    (AARCH64_ARCH_TIMER_VIRT_IRQ + AARCH64_MIN_PPI_IRQ) as u64,
+                )
+                .map_err(|e| {
+                    vm::HypervisorVmError::InitializeVm(anyhow!(
+                        "Failed to set arch timer interrupt ID: {}",
+                        e
+                    ))
+                })?;
+
+            self.fd
+                .set_partition_property(
+                    hv_partition_property_code_HV_PARTITION_PROPERTY_GIC_PPI_PERFORMANCE_MONITORS_INTERRUPT,
+                    (AARCH64_PMU_IRQ + AARCH64_MIN_PPI_IRQ) as u64,
+                )
+                .map_err(|e| {
+                    vm::HypervisorVmError::InitializeVm(anyhow!(
+                        "Failed to set PMU interrupt ID: {}",
+                        e
+                    ))
+                })?;
+        }
+
+        self.fd
+            .initialize()
+            .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
+
+        // Set additional partition property for SEV-SNP partition.
+        #[cfg(feature = "sev_snp")]
+        if self.sev_snp_enabled {
+            let snp_policy = snp::get_default_snp_guest_policy();
+            let vmgexit_offloads = snp::get_default_vmgexit_offload_features();
+            // SAFETY: access union fields
+            unsafe {
+                debug!(
+                    "Setting the partition isolation policy as: 0x{:x}",
+                    snp_policy.as_uint64
+                );
+                self.fd
+                    .set_partition_property(
+                        hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_POLICY,
+                        snp_policy.as_uint64,
+                    )
+                    .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
+                debug!(
+                    "Setting the partition property to enable VMGEXIT offloads as : 0x{:x}",
+                    vmgexit_offloads.as_uint64
+                );
+                self.fd
+                    .set_partition_property(
+                        hv_partition_property_code_HV_PARTITION_PROPERTY_SEV_VMGEXIT_OFFLOADS,
+                        vmgexit_offloads.as_uint64,
+                    )
+                    .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
+            }
+        }
+        // Default Microsoft Hypervisor behavior for unimplemented MSR is to
+        // send a fault to the guest if it tries to access it. It is possible
+        // to override this behavior with a more suitable option i.e., ignore
+        // writes from the guest and return zero in attempt to read unimplemented
+        // MSR.
+        #[cfg(target_arch = "x86_64")]
+        self.fd
+            .set_partition_property(
+                hv_partition_property_code_HV_PARTITION_PROPERTY_UNIMPLEMENTED_MSR_ACTION,
+                hv_unimplemented_msr_action_HV_UNIMPLEMENTED_MSR_ACTION_IGNORE_WRITE_READ_ZERO
+                    as u64,
+            )
+            .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
+
+        // Always create a frozen partition
+        self.fd
+            .set_partition_property(
+                hv_partition_property_code_HV_PARTITION_PROPERTY_TIME_FREEZE,
+                1u64,
+            )
+            .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
 
         Ok(())
     }

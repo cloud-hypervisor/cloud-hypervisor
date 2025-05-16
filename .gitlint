@@ -1,6 +1,7 @@
 [general]
-extra-path=scripts/gitlint/rules.py
+extra-path=scripts/gitlint/rules
 regex-style-search=true
+ignore=body-max-line-length
 
 [ignore-by-author-name]
 regex=dependabot
@@ -10,11 +11,3 @@ ignore=all
 [title-max-length]
 line-length=72
 
-# default 80
-[body-max-line-length]
-line-length=72
-
-# Allow developers to add long links to useful resources
-[ignore-by-body]
-regex=^https?:\/\/
-ignore=body-max-line-length

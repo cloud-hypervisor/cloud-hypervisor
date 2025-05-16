@@ -6,8 +6,6 @@
 pub mod fdt;
 /// Layout for this aarch64 system.
 pub mod layout;
-/// Module for system registers definition
-pub mod regs;
 /// Module for loading UEFI binary.
 pub mod uefi;
 
@@ -16,6 +14,7 @@ use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
 use hypervisor::arch::aarch64::gic::Vgic;
+use hypervisor::arch::aarch64::regs::MPIDR_EL1;
 use log::{log_enabled, Level};
 use thiserror::Error;
 use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryAtomic};
@@ -86,9 +85,7 @@ pub fn configure_vcpu(
         .map_err(Error::RegsConfiguration)?;
     }
 
-    let mpidr = vcpu
-        .get_sys_reg(regs::MPIDR_EL1)
-        .map_err(Error::VcpuRegMpidr)?;
+    let mpidr = vcpu.get_sys_reg(MPIDR_EL1).map_err(Error::VcpuRegMpidr)?;
     Ok(mpidr)
 }
 

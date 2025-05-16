@@ -39,6 +39,8 @@ use devices::AcpiNotificationFlags;
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
+#[cfg(target_arch = "aarch64")]
+use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
 use hypervisor::{HypervisorVmError, VmOps};
 use libc::{termios, SIGWINCH};
 use linux_loader::cmdline::Cmdline;
@@ -143,6 +145,9 @@ pub enum Error {
 
     #[error("Error from device manager: {0:?}")]
     DeviceManager(DeviceManagerError),
+
+    #[error("Error initializing VM: {0:?}")]
+    InitializeVm(hypervisor::HypervisorVmError),
 
     #[error("No device with id {0:?} to remove")]
     NoDeviceToRemove(String),
@@ -330,6 +335,9 @@ pub enum Error {
     #[error("Error creating console devices")]
     CreateConsoleDevices(ConsoleDeviceError),
 
+    #[error("Error locking the disk images")]
+    LockingError(DeviceManagerError),
+
     #[error("Fw Cfg missing kernel file")]
     FwCfgKernelFile,
 
@@ -515,13 +523,6 @@ impl Vm {
             .validate()
             .map_err(Error::ConfigValidation)?;
 
-        #[cfg(not(feature = "igvm"))]
-        let load_payload_handle = if snapshot.is_none() {
-            Self::load_payload_async(&memory_manager, &config)?
-        } else {
-            None
-        };
-
         info!("Booting VM from config: {:?}", &config);
 
         // Create NUMA nodes based on NumaConfig.
@@ -586,25 +587,6 @@ impl Vm {
             )
             .map_err(Error::CpuManager)?;
 
-        // Loading the igvm file is pushed down here because
-        // igvm parser needs cpu_manager to retrieve cpuid leaf.
-        // For the regular case, we can start loading early, but for
-        // igvm case we have to wait until cpu_manager is created.
-        // Currently, Microsoft Hypervisor does not provide any
-        // Hypervisor specific common cpuid, we need to call get_cpuid_values
-        // per cpuid through cpu_manager.
-        #[cfg(feature = "igvm")]
-        let load_payload_handle = if snapshot.is_none() {
-            Self::load_payload_async(
-                &memory_manager,
-                &config,
-                &cpu_manager,
-                #[cfg(feature = "sev_snp")]
-                sev_snp_enabled,
-            )?
-        } else {
-            None
-        };
         // The initial TDX configuration must be done before the vCPUs are
         // created
         #[cfg(feature = "tdx")]
@@ -615,24 +597,21 @@ impl Vm {
                 .map_err(Error::InitializeTdxVm)?;
         }
 
-        cpu_manager
-            .lock()
-            .unwrap()
-            .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
-            .map_err(Error::CpuManager)?;
-
-        // This initial SEV-SNP configuration must be done immediately after
-        // vCPUs are created. As part of this initialization we are
-        // transitioning the guest into secure state.
-        #[cfg(feature = "sev_snp")]
-        if sev_snp_enabled {
-            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
-        }
-
         #[cfg(feature = "tdx")]
         let dynamic = !tdx_enabled;
         #[cfg(not(feature = "tdx"))]
         let dynamic = true;
+
+        #[cfg(feature = "kvm")]
+        let is_kvm = matches!(
+            hypervisor.hypervisor_type(),
+            hypervisor::HypervisorType::Kvm
+        );
+        #[cfg(feature = "mshv")]
+        let is_mshv = matches!(
+            hypervisor.hypervisor_type(),
+            hypervisor::HypervisorType::Mshv
+        );
 
         let device_manager = DeviceManager::new(
             io_bus,
@@ -655,11 +634,98 @@ impl Vm {
         )
         .map_err(Error::DeviceManager)?;
 
-        device_manager
+        // For MSHV, we need to create the interrupt controller before we initialize the VM.
+        // Because we need to set the base address of GICD before we initialize the VM.
+        #[cfg(feature = "mshv")]
+        {
+            if is_mshv {
+                let ic = device_manager
+                    .lock()
+                    .unwrap()
+                    .create_interrupt_controller()
+                    .map_err(Error::DeviceManager)?;
+
+                vm.init().map_err(Error::InitializeVm)?;
+
+                device_manager
+                    .lock()
+                    .unwrap()
+                    .create_devices(
+                        console_info.clone(),
+                        console_resize_pipe.clone(),
+                        original_termios.clone(),
+                        ic,
+                    )
+                    .map_err(Error::DeviceManager)?;
+            }
+        }
+
+        memory_manager
             .lock()
             .unwrap()
-            .create_devices(console_info, console_resize_pipe, original_termios)
-            .map_err(Error::DeviceManager)?;
+            .allocate_address_space()
+            .map_err(Error::MemoryManager)?;
+
+        #[cfg(target_arch = "aarch64")]
+        memory_manager
+            .lock()
+            .unwrap()
+            .add_uefi_flash()
+            .map_err(Error::MemoryManager)?;
+
+        // Loading the igvm file is pushed down here because
+        // igvm parser needs cpu_manager to retrieve cpuid leaf.
+        // Currently, Microsoft Hypervisor does not provide any
+        // Hypervisor specific common cpuid, we need to call get_cpuid_values
+        // per cpuid through cpu_manager.
+        let load_payload_handle = if snapshot.is_none() {
+            Self::load_payload_async(
+                &memory_manager,
+                &config,
+                #[cfg(feature = "igvm")]
+                &cpu_manager,
+                #[cfg(feature = "sev_snp")]
+                sev_snp_enabled,
+            )?
+        } else {
+            None
+        };
+
+        cpu_manager
+            .lock()
+            .unwrap()
+            .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
+            .map_err(Error::CpuManager)?;
+
+        // For KVM, we need to create interrupt controller after we create boot vcpus.
+        // Because we restore GIC state from the snapshot as part of boot vcpu creation.
+        // This means that we need to create interrupt controller after we restore in case of KVM guests.
+        #[cfg(feature = "kvm")]
+        {
+            if is_kvm {
+                let ic = device_manager
+                    .lock()
+                    .unwrap()
+                    .create_interrupt_controller()
+                    .map_err(Error::DeviceManager)?;
+
+                vm.init().map_err(Error::InitializeVm)?;
+
+                device_manager
+                    .lock()
+                    .unwrap()
+                    .create_devices(console_info, console_resize_pipe, original_termios, ic)
+                    .map_err(Error::DeviceManager)?;
+            }
+        }
+
+        // This initial SEV-SNP configuration must be done immediately after
+        // vCPUs are created. As part of this initialization we are
+        // transitioning the guest into secure state.
+        #[cfg(feature = "sev_snp")]
+        if sev_snp_enabled {
+            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
+        }
 
         #[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
         {
@@ -1459,7 +1525,7 @@ impl Vm {
             .cpu_manager
             .lock()
             .unwrap()
-            .init_pmu(arch::aarch64::fdt::AARCH64_PMU_IRQ + 16)
+            .init_pmu(AARCH64_PMU_IRQ + 16)
             .map_err(|_| {
                 Error::ConfigureSystem(arch::Error::PlatformSpecific(
                     arch::aarch64::Error::VcpuInitPmu,
@@ -2253,6 +2319,14 @@ impl Vm {
             return self.resume().map_err(Error::Resume);
         }
 
+        // We acquire all advisory disk image locks here and not on device creation
+        // to enable live-migration without locking issues.
+        self.device_manager
+            .lock()
+            .unwrap()
+            .try_lock_disks()
+            .map_err(Error::LockingError)?;
+
         let new_state = if self.stop_on_boot {
             VmState::BreakPoint
         } else {
@@ -2296,6 +2370,21 @@ impl Vm {
         #[cfg(feature = "tdx")]
         let tdx_enabled = self.config.lock().unwrap().is_tdx_enabled();
 
+        #[cfg(target_arch = "aarch64")]
+        let vgic = self
+            .device_manager
+            .lock()
+            .unwrap()
+            .get_interrupt_controller()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .get_vgic()
+            .unwrap();
+
+        #[cfg(target_arch = "aarch64")]
+        let redist_addr = vgic.lock().unwrap().device_properties();
+
         // Configure the vcpus that have been created
         let vcpus = self.cpu_manager.lock().unwrap().vcpus();
         for vcpu in vcpus {
@@ -2304,7 +2393,13 @@ impl Vm {
             self.cpu_manager
                 .lock()
                 .unwrap()
-                .configure_vcpu(vcpu, boot_setup)
+                .configure_vcpu(vcpu.clone(), boot_setup)
+                .map_err(Error::CpuManager)?;
+
+            #[cfg(target_arch = "aarch64")]
+            vcpu.lock()
+                .unwrap()
+                .set_gic_redistributor_addr(redist_addr[2], redist_addr[3])
                 .map_err(Error::CpuManager)?;
         }
 
@@ -2342,18 +2437,6 @@ impl Vm {
         #[cfg(target_arch = "riscv64")]
         self.configure_system().unwrap();
 
-        #[cfg(target_arch = "x86_64")]
-        // Note: For x86, always call this function before invoking start boot vcpus.
-        // Otherwise guest would fail to boot because we haven't created the
-        // userspace mappings to update the hypervisor about the memory mappings.
-        // These mappings must be created before we start the vCPU threads for
-        // the very first time.
-        self.memory_manager
-            .lock()
-            .unwrap()
-            .allocate_address_space()
-            .map_err(Error::MemoryManager)?;
-
         #[cfg(feature = "tdx")]
         if let Some(hob_address) = hob_address {
             // With the HOB address extracted the vCPUs can have
@@ -2390,17 +2473,12 @@ impl Vm {
     pub fn restore(&mut self) -> Result<()> {
         event!("vm", "restoring");
 
-        #[cfg(target_arch = "x86_64")]
-        // Note: For x86, always call this function before invoking start boot vcpus.
-        // Otherwise guest would fail to boot because we haven't created the
-        // userspace mappings to update the hypervisor about the memory mappings.
-        // These mappings must be created before we start the vCPU threads for
-        // the very first time for the restored VM.
-        self.memory_manager
+        // We acquire all advisory disk image locks again.
+        self.device_manager
             .lock()
             .unwrap()
-            .allocate_address_space()
-            .map_err(Error::MemoryManager)?;
+            .try_lock_disks()
+            .map_err(Error::LockingError)?;
 
         // Now we can start all vCPUs from here.
         self.cpu_manager
@@ -2513,6 +2591,21 @@ impl Vm {
 
     pub fn device_tree(&self) -> Arc<Mutex<DeviceTree>> {
         self.device_manager.lock().unwrap().device_tree()
+    }
+
+    /// Release all advisory locks held for the disk images.
+    ///
+    /// This should only be called when the VM is stopped and the VMM supposed
+    /// to shut down. A new VMM, either after a live migration or a
+    /// state save/resume cycle, should then acquire all locks before the VM
+    /// starts to run.
+    pub fn release_disk_locks(&self) -> Result<()> {
+        self.device_manager
+            .lock()
+            .unwrap()
+            .release_disk_locks()
+            .map_err(Error::LockingError)?;
+        Ok(())
     }
 
     pub fn activate_virtio_devices(&self) -> Result<()> {
