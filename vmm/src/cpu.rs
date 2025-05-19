@@ -2962,6 +2962,7 @@ mod tests {
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
     #[cfg(feature = "kvm")]
     use std::mem;
 
@@ -3027,14 +3028,14 @@ mod tests {
 
         // Must fail when vcpu is not initialized yet.
         assert_eq!(
-            format!("{}", vcpu.get_regs().unwrap_err()),
-            "Failed to get aarch64 core register: Exec format error (os error 8)"
+            format!("{}", vcpu.get_regs().unwrap_err().source().unwrap()),
+            "Exec format error (os error 8)"
         );
 
         let mut state = vcpu.create_standard_regs();
         assert_eq!(
-            format!("{}", vcpu.set_regs(&state).unwrap_err()),
-            "Failed to set aarch64 core register: Exec format error (os error 8)"
+            format!("{}", vcpu.set_regs().unwrap_err().source().unwrap()),
+            "Exec format error (os error 8)"
         );
 
         vcpu.vcpu_init(&kvi).unwrap();
