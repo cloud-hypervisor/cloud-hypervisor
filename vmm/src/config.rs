@@ -516,6 +516,8 @@ pub struct VmParams<'a> {
     pub host_data: Option<&'a str>,
     pub landlock_enable: bool,
     pub landlock_rules: Option<Vec<&'a str>>,
+    #[cfg(feature = "fw_cfg")]
+    pub fw_cfg: Option<Vec<&'a str>>,
 }
 
 impl<'a> VmParams<'a> {
@@ -587,7 +589,10 @@ impl<'a> VmParams<'a> {
         let landlock_rules: Option<Vec<&str>> = args
             .get_many::<String>("landlock-rules")
             .map(|x| x.map(|y| y as &str).collect());
-
+        #[cfg(feature = "fw_cfg")]
+        let fw_cfg: Option<Vec<&str>> = args
+            .get_many::<String>("fw_cfg")
+            .map(|x| x.map(|y| y as &str).collect());
         VmParams {
             cpus,
             memory,
@@ -629,6 +634,8 @@ impl<'a> VmParams<'a> {
             host_data,
             landlock_enable,
             landlock_rules,
+            #[cfg(feature = "fw_cfg")]
+            fw_cfg,
         }
     }
 }
@@ -1736,6 +1743,21 @@ impl FsConfig {
     }
 }
 
+#[cfg(feature = "fw_cfg")]
+impl FwCfgItem {
+    pub const SYNTAX: &'static str = "FwCfg Device Files \
+    \"name=<backing_file_path>,file=<file_path>\"";
+    pub fn parse(fw_cfg: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser.add("name").add("file");
+        parser.parse(fw_cfg).map_err(Error::ParseDisk)?;
+
+        let name = parser.get("name").map(String::from);
+        let file = parser.get("file").map(PathBuf::from);
+        Ok(FwCfgItem { name, file })
+    }
+}
+
 impl PmemConfig {
     pub const SYNTAX: &'static str = "Persistent memory parameters \
     \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
@@ -2794,6 +2816,18 @@ impl VmConfig {
             disks = Some(disk_config_list);
         }
 
+        #[cfg(feature = "fw_cfg")]
+        let mut fw_cfg: Option<Vec<FwCfgItem>> = None;
+        #[cfg(feature = "fw_cfg")]
+        if let Some(fw_cfg_list) = &vm_params.fw_cfg {
+            let mut fw_cfg_items_list = Vec::new();
+            for item in fw_cfg_list.iter() {
+                let fw_cfg_item = FwCfgItem::parse(item)?;
+                fw_cfg_items_list.push(fw_cfg_item);
+            }
+            fw_cfg = Some(fw_cfg_items_list);
+        }
+
         let mut net: Option<Vec<NetConfig>> = None;
         if let Some(net_list) = &vm_params.net {
             let mut net_config_list = Vec::new();
@@ -2991,6 +3025,8 @@ impl VmConfig {
             preserved_fds: None,
             landlock_enable: vm_params.landlock_enable,
             landlock_rules,
+            #[cfg(feature = "fw_cfg")]
+            fw_cfg,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -3120,6 +3156,8 @@ impl Clone for VmConfig {
                 // SAFETY: FFI call with valid FDs
                 .map(|fds| fds.iter().map(|fd| unsafe { libc::dup(*fd) }).collect()),
             landlock_rules: self.landlock_rules.clone(),
+            #[cfg(feature = "fw_cfg")]
+            fw_cfg: self.fw_cfg.clone(),
             ..*self
         }
     }
@@ -3924,6 +3962,8 @@ mod tests {
             ]),
             landlock_enable: false,
             landlock_rules: None,
+            #[cfg(feature = "fw_cfg")]
+            fw_cfg: None,
         };
 
         let valid_config = RestoreConfig {
@@ -4117,6 +4157,8 @@ mod tests {
             preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
+            #[cfg(feature = "fw_cfg")]
+            fw_cfg: None,
         };
 
         valid_config.validate().unwrap();
