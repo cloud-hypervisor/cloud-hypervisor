@@ -14,13 +14,13 @@ use crate::{AiaState, HypervisorDeviceError, HypervisorVmError};
 pub enum Error {
     /// Error while calling KVM ioctl for setting up the global interrupt controller.
     #[error("Failed creating AIA device: {0}")]
-    CreateAia(HypervisorVmError),
+    CreateAia(#[source] HypervisorVmError),
     /// Error while setting device attributes for the AIA.
     #[error("Failed setting device attributes for the AIA: {0}")]
-    SetDeviceAttribute(HypervisorDeviceError),
+    SetDeviceAttribute(#[source] HypervisorDeviceError),
     /// Error while getting device attributes for the AIA.
     #[error("Failed getting device attributes for the AIA: {0}")]
-    GetDeviceAttribute(HypervisorDeviceError),
+    GetDeviceAttribute(#[source] HypervisorDeviceError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
