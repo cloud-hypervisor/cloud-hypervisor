@@ -461,35 +461,42 @@ impl FwCfg {
         Ok(())
     }
 
-    fn read_content(content: &FwCfgContent, offset: u32) -> Option<u8> {
+    fn read_content(content: &FwCfgContent, offset: u32, data: &mut [u8], size: u32) -> Option<u8> {
+        let start = offset as usize;
+        let end = start + size as usize;
         match content {
-            FwCfgContent::Bytes(b) => b.get(offset as usize).copied(),
-            FwCfgContent::Slice(s) => s.get(offset as usize).copied(),
-            FwCfgContent::File(o, f) => {
-                let mut buf = [0u8];
-                match f.read_exact_at(&mut buf, o + offset as u64) {
-                    Ok(_) => Some(buf[0]),
-                    Err(e) => {
-                        error!("fw_cfg: reading {f:?}: {e:?}");
-                        None
-                    }
+            FwCfgContent::Bytes(b) => {
+                if b.len() >= size as usize {
+                    data.copy_from_slice(&b[start..end]);
                 }
             }
-            FwCfgContent::U32(n) => n.to_le_bytes().get(offset as usize).copied(),
-        }
+            FwCfgContent::Slice(s) => {
+                if s.len() >= size as usize {
+                    data.copy_from_slice(&s[start..end]);
+                }
+            }
+            FwCfgContent::File(o, f) => {
+                f.read_exact_at(data, o + offset as u64).ok()?;
+            }
+            FwCfgContent::U32(n) => {
+                let bytes = n.to_le_bytes();
+                data.copy_from_slice(&bytes[start..end]);
+            }
+        };
+        return Some(size as u8);
     }
 
-    fn read_data(&mut self) -> u8 {
+    fn read_data(&mut self, data: &mut [u8], size: u32) -> u8 {
         let ret = if let Some(content) = self.known_items.get(self.selector as usize) {
-            Self::read_content(content, self.data_offset)
+            Self::read_content(content, self.data_offset, data, size)
         } else if let Some(item) = self.items.get((self.selector - FW_CFG_FILE_FIRST) as usize) {
-            Self::read_content(&item.content, self.data_offset)
+            Self::read_content(&item.content, self.data_offset, data, size)
         } else {
             error!("fw_cfg: selector {:#x} does not exist.", self.selector);
             None
         };
         if let Some(val) = ret {
-            self.data_offset += 1;
+            self.data_offset += size;
             val
         } else {
             0
@@ -505,7 +512,7 @@ impl BusDevice for FwCfg {
             (PORT_FW_CFG_SELECTOR, _) => {
                 error!("fw_cfg: selector register is write-only.");
             }
-            (PORT_FW_CFG_DATA, 1) => data[0] = self.read_data(),
+            (PORT_FW_CFG_DATA, _) => _ = self.read_data(data, size as u32),
             (PORT_FW_CFG_DMA_HI, 4) => {
                 let addr = self.dma_address;
                 let addr_hi = (addr >> 32) as u32;
