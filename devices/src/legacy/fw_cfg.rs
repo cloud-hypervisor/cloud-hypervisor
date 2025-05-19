@@ -31,6 +31,7 @@ use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{
     ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
 };
+use vm_migration::{Migratable, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::sock_ctrl_msg::IntoIovec;
 use zerocopy::{FromBytes, FromZeros, IntoBytes};
 
@@ -106,6 +107,8 @@ pub const FW_CFG_KNOWN_ITEMS: usize = 0x20;
 
 pub const FW_CFG_FILE_FIRST: u16 = 0x20;
 pub const FW_CFG_DMA_SIGNATURE: [u8; 8] = *b"QEMU CFG";
+// https://github.com/torvalds/linux/blob/master/include/uapi/linux/qemu_fw_cfg.h
+pub const FW_CFG_ACPI_ID: &str = "QEMU0002";
 // bit 1 must always be enabled, bit 2 enables DMA
 pub const FW_CFG_FEATURE: [u8; 4] = [0b11, 0, 0, 0];
 
@@ -577,6 +580,10 @@ impl BusDevice for FwCfg {
     }
 }
 
+impl Snapshottable for FwCfg {}
+impl Pausable for FwCfg {}
+impl Transportable for FwCfg {}
+impl Migratable for FwCfg {}
 #[cfg(test)]
 mod tests {
     use std::ffi::CString;
