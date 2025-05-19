@@ -34,6 +34,8 @@ use arch::PciSpaceInfo;
 use arch::{get_host_cpu_phys_bits, EntryPoint, NumaNode, NumaNodes};
 #[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller;
+#[cfg(feature = "fw_cfg")]
+use devices::legacy::fw_cfg::FwCfgItem;
 use devices::AcpiNotificationFlags;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
@@ -346,6 +348,9 @@ pub enum Error {
 
     #[error("Fw Cfg missing kernel cmdline")]
     FwCfgCmdline,
+
+    #[error("Fw Cfg file not found")]
+    FwCfgCliFile,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -795,6 +800,26 @@ impl Vm {
                     .lock()
                     .unwrap()
                     .add_initramfs_data(&initramfs_file);
+            }
+            let fw_cfg_files_opt = config.lock().unwrap().fw_cfg.clone();
+            if let Some(fw_cfg_files) = fw_cfg_files_opt {
+                for fw_cfg_file in fw_cfg_files {
+                    let _ = device_manager
+                        .lock()
+                        .unwrap()
+                        .fw_cfg()
+                        .expect("fw_cfg device must be present")
+                        .lock()
+                        .unwrap()
+                        .add_item(FwCfgItem {
+                            name: fw_cfg_file.name.unwrap(),
+                            content: devices::legacy::fw_cfg::FwCfgContent::File(
+                                0,
+                                File::open(fw_cfg_file.file.unwrap())
+                                    .map_err(|_| Error::FwCfgCliFile)?,
+                            ),
+                        });
+                }
             }
         }
 
