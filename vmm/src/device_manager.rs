@@ -53,6 +53,8 @@ use devices::gic;
 use devices::interrupt_controller::InterruptController;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
+#[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
+use devices::legacy::fw_cfg::FW_CFG_ACPI_ID;
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
 #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
@@ -1495,11 +1497,29 @@ impl DeviceManager {
         // default address for fw_cfg on arm via mmio
         // https://github.com/torvalds/linux/blob/master/drivers/firmware/qemu_fw_cfg.c#L27
         #[cfg(target_arch = "aarch64")]
-        self.address_manager
-            .mmio_bus
-            .insert(fw_cfg.clone(), PORT_FW_CFG_BASE, PORT_FW_CFG_WIDTH)
-            .map_err(DeviceManagerError::ErrorAddingFwCfgToBus)?;
+        {
+            self.address_manager
+                .mmio_bus
+                .insert(fw_cfg.clone(), PORT_FW_CFG_BASE, PORT_FW_CFG_WIDTH)
+                .map_err(DeviceManagerError::ErrorAddingFwCfgToBus)?;
 
+            let fw_cfg_irq = self
+                .address_manager
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_irq()
+                .unwrap();
+
+            self.id_to_dev_info.insert(
+                (DeviceType::FwCfg, "fw-cfg".to_string()),
+                MmioDeviceInfo {
+                    addr: PORT_FW_CFG_BASE,
+                    len: PORT_FW_CFG_WIDTH,
+                    irq: fw_cfg_irq,
+                },
+            );
+        }
         Ok(())
     }
 
@@ -5002,6 +5022,27 @@ impl Aml for DeviceManager {
             ],
         )
         .to_aml_bytes(sink);
+
+        #[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
+        if self.fw_cfg.is_some() {
+            aml::Device::new(
+                "_SB_.FWCF".into(),
+                vec![
+                    &aml::Name::new("_HID".into(), &FW_CFG_ACPI_ID.to_string()),
+                    &aml::Name::new("_STA".into(), &0xB_usize),
+                    &aml::Name::new(
+                        "_CRS".into(),
+                        &aml::ResourceTemplate::new(vec![&aml::IO::new(
+                            PORT_FW_CFG_BASE as u16,
+                            PORT_FW_CFG_BASE as u16,
+                            0x01,
+                            PORT_FW_CFG_WIDTH as u8,
+                        )]),
+                    ),
+                ],
+            )
+            .to_aml_bytes(sink);
+        }
 
         // Serial device
         #[cfg(target_arch = "x86_64")]
