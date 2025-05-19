@@ -1131,8 +1131,8 @@ fn main() {
         }
     };
 
-    if let Err(e) = target_api.do_command(&matches) {
-        eprintln!("Error running command: {e}");
+    if let Err(top_error) = target_api.do_command(&matches) {
+        cloud_hypervisor::cli_print_error_chain(&top_error, "ch-remote");
         process::exit(1)
     };
 }

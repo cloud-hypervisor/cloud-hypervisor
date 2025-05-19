@@ -883,8 +883,8 @@ fn main() {
             path.map(|s| std::fs::remove_file(s).ok());
             0
         }
-        Err(e) => {
-            eprintln!("{e}");
+        Err(top_error) => {
+            cloud_hypervisor::cli_print_error_chain(&top_error, "Cloud Hypervisor");
             1
         }
     };
