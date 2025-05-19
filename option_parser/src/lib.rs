@@ -4,9 +4,10 @@
 //
 
 use std::collections::HashMap;
-use std::fmt;
 use std::num::ParseIntError;
 use std::str::FromStr;
+
+use thiserror::Error;
 
 #[derive(Default)]
 pub struct OptionParser {
@@ -18,25 +19,16 @@ struct OptionParserValue {
     requires_value: bool,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum OptionParserError {
+    #[error("unknown option: {0}")]
     UnknownOption(String),
+    #[error("unknown option: {0}")]
     InvalidSyntax(String),
-    Conversion(String, String),
+    #[error("unable to convert {1} for {0}")]
+    Conversion(String /* field */, String /* value */),
+    #[error("invalid value: {0}")]
     InvalidValue(String),
-}
-
-impl fmt::Display for OptionParserError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            OptionParserError::UnknownOption(s) => write!(f, "unknown option: {s}"),
-            OptionParserError::InvalidSyntax(s) => write!(f, "invalid syntax:{s}"),
-            OptionParserError::Conversion(field, value) => {
-                write!(f, "unable to convert {value} for {field}")
-            }
-            OptionParserError::InvalidValue(s) => write!(f, "invalid value: {s}"),
-        }
-    }
 }
 type OptionParserResult<T> = std::result::Result<T, OptionParserError>;
 
