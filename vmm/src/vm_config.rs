@@ -4,6 +4,8 @@
 //
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
+#[cfg(feature = "fw_cfg")]
+use std::str::FromStr;
 use std::{fs, result};
 
 use net_util::MacAddr;
@@ -697,6 +699,72 @@ pub struct PayloadConfig {
     #[cfg(feature = "sev_snp")]
     #[serde(default)]
     pub host_data: Option<String>,
+    #[cfg(feature = "fw_cfg")]
+    pub fw_cfg_config: Option<FwCfgConfig>,
+}
+
+#[cfg(feature = "fw_cfg")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FwCfgConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub e820: bool,
+    #[serde(default)]
+    pub kernel: bool,
+    #[serde(default)]
+    pub cmdline: bool,
+    #[serde(default)]
+    pub initramfs: bool,
+    #[serde(default)]
+    pub acpi_tables: bool,
+    pub items: Option<FwCfgItemList>,
+}
+
+#[cfg(feature = "fw_cfg")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FwCfgItemList {
+    #[serde(default)]
+    pub item_list: Vec<FwCfgItem>,
+}
+
+#[cfg(feature = "fw_cfg")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FwCfgItem {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub file: Option<PathBuf>,
+}
+
+#[cfg(feature = "fw_cfg")]
+pub enum FwCfgItemError {
+    InvalidValue(String),
+}
+
+#[cfg(feature = "fw_cfg")]
+impl FromStr for FwCfgItemList {
+    type Err = FwCfgItemError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let body = s
+            .trim()
+            .strip_prefix('[')
+            .and_then(|s| s.strip_suffix(']'))
+            .ok_or_else(|| FwCfgItemError::InvalidValue(s.to_string()))?;
+
+        let mut fw_cfg_items: Vec<FwCfgItem> = vec![];
+        let items: Vec<&str> = body.split(':').collect();
+        for item in items {
+            fw_cfg_items.push(
+                FwCfgItem::parse(item)
+                    .map_err(|_| FwCfgItemError::InvalidValue(item.to_string()))?,
+            );
+        }
+        Ok(FwCfgItemList {
+            item_list: fw_cfg_items,
+        })
+    }
 }
 
 impl ApplyLandlock for PayloadConfig {
