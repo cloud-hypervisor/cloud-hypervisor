@@ -44,6 +44,6 @@ arch = { path = "../arch" }
 
 [features]
 default = []
-fw_cfg = ["bitfield-struct", "linux-loader", "zerocopy"]
+fw_cfg = ["arch/fw_cfg", "bitfield-struct", "linux-loader", "zerocopy"]
 kvm = ["arch/kvm"]
 pvmemcontrol = []

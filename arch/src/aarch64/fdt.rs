@@ -850,6 +850,21 @@ fn create_gpio_node<T: DeviceInfoForFdt + Clone + Debug>(
     Ok(())
 }
 
+// https://www.kernel.org/doc/Documentation/devicetree/bindings/arm/fw-cfg.txt
+#[cfg(feature = "fw_cfg")]
+fn create_fw_cfg_node<T: DeviceInfoForFdt + Clone + Debug>(
+    fdt: &mut FdtWriter,
+    dev_info: &T,
+) -> FdtWriterResult<()> {
+    // FwCfg node
+    let fw_cfg_node = fdt.begin_node(&format!("fw-cfg@{:x}", dev_info.addr()))?;
+    fdt.property("compatible", b"qemu,fw-cfg-mmio\0")?;
+    fdt.property_array_u64("reg", &[dev_info.addr(), dev_info.length()])?;
+    fdt.end_node(fw_cfg_node)?;
+
+    Ok(())
+}
+
 fn create_devices_node<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
     fdt: &mut FdtWriter,
     dev_info: &HashMap<(DeviceType, String), T, S>,
@@ -865,6 +880,8 @@ fn create_devices_node<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Buil
             DeviceType::Virtio(_) => {
                 ordered_virtio_device.push(info);
             }
+            #[cfg(feature = "fw_cfg")]
+            DeviceType::FwCfg => create_fw_cfg_node(fdt, info)?,
         }
     }
 
