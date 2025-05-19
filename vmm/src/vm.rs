@@ -333,7 +333,7 @@ pub enum Error {
     #[error("Error creating console devices")]
     CreateConsoleDevices(ConsoleDeviceError),
 
-    #[error("Error locking the disk images")]
+    #[error("Error locking disk images: Another instance likely holds a lock")]
     LockingError(DeviceManagerError),
 }
 pub type Result<T> = result::Result<T, Error>;
