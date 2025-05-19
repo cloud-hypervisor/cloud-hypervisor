@@ -204,7 +204,7 @@ pub enum Error {
 
     #[cfg(target_arch = "x86_64")]
     #[error("Failed to inject NMI")]
-    NmiError(hypervisor::HypervisorCpuError),
+    NmiError(#[source] hypervisor::HypervisorCpuError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
