@@ -1027,7 +1027,6 @@ pub fn create_acpi_tables_for_fw_cfg(
         table_checksums: checksums,
         table_pointers: pointers,
     };
-    info!("created acpi table, now add to fw_cfg");
     let _ = device_manager
         .lock()
         .unwrap()
