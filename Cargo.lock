@@ -2253,15 +2253,15 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vfio-bindings"
 version = "0.4.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#21d06ceb917ffce6768edefeab02e04d5e79615d"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#3d158a14460cac7ca3c99c2effa0a46880935cb0"
 dependencies = [
  "vmm-sys-util",
 ]
 
 [[package]]
 name = "vfio-ioctls"
-version = "0.2.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#21d06ceb917ffce6768edefeab02e04d5e79615d"
+version = "0.4.0"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#3d158a14460cac7ca3c99c2effa0a46880935cb0"
 dependencies = [
  "byteorder",
  "kvm-bindings",
