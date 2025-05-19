@@ -91,6 +91,8 @@ const FW_CFG_KNOWN_ITEMS: usize = 0x20;
 
 pub const FW_CFG_FILE_FIRST: u16 = 0x20;
 pub const FW_CFG_DMA_SIGNATURE: [u8; 8] = *b"QEMU CFG";
+// https://github.com/torvalds/linux/blob/master/include/uapi/linux/qemu_fw_cfg.h
+pub const FW_CFG_ACPI_ID: &str = "QEMU0002";
 // Reserved (must be enabled)
 const FW_CFG_F_RESERVED: u8 = 1 << 0;
 // DMA Toggle Bit (enabled by default)

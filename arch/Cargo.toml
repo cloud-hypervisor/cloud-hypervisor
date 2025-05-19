@@ -6,6 +6,7 @@ version = "0.1.0"
 
 [features]
 default = []
+fw_cfg = []
 kvm = ["hypervisor/kvm"]
 sev_snp = []
 tdx = []
