@@ -178,7 +178,6 @@ pub struct FwCfgItem {
 }
 
 /// https://www.qemu.org/docs/master/specs/fw_cfg.html
-#[derive(Debug, Default)]
 pub struct FwCfg {
     selector: u16,
     data_offset: u32,
