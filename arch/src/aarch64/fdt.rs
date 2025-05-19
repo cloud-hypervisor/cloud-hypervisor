@@ -850,6 +850,8 @@ fn create_gpio_node<T: DeviceInfoForFdt + Clone + Debug>(
     Ok(())
 }
 
+// https://www.kernel.org/doc/Documentation/devicetree/bindings/arm/fw-cfg.txt
+#[cfg(feature = "fw_cfg")]
 fn create_fw_cfg_node<T: DeviceInfoForFdt + Clone + Debug>(
     fdt: &mut FdtWriter,
     dev_info: &T,
@@ -878,6 +880,7 @@ fn create_devices_node<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Buil
             DeviceType::Virtio(_) => {
                 ordered_virtio_device.push(info);
             }
+            #[cfg(feature = "fw_cfg")]
             DeviceType::FwCfg => create_fw_cfg_node(fdt, info)?,
         }
     }
