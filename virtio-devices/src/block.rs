@@ -62,25 +62,25 @@ pub const MINIMUM_BLOCK_QUEUE_SIZE: u16 = 2;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed to parse the request: {0}")]
-    RequestParsing(block::Error),
+    RequestParsing(#[source] block::Error),
     #[error("Failed to execute the request: {0}")]
-    RequestExecuting(block::ExecuteError),
+    RequestExecuting(#[source] block::ExecuteError),
     #[error("Failed to complete the request: {0}")]
-    RequestCompleting(block::Error),
+    RequestCompleting(#[source] block::Error),
     #[error("Missing the expected entry in the list of requests")]
     MissingEntryRequestList,
     #[error("The asynchronous request returned with failure")]
     AsyncRequestFailure,
     #[error("Failed synchronizing the file: {0}")]
-    Fsync(AsyncIoError),
+    Fsync(#[source] AsyncIoError),
     #[error("Failed adding used index: {0}")]
-    QueueAddUsed(virtio_queue::Error),
+    QueueAddUsed(#[source] virtio_queue::Error),
     #[error("Failed creating an iterator over the queue: {0}")]
-    QueueIterator(virtio_queue::Error),
+    QueueIterator(#[source] virtio_queue::Error),
     #[error("Failed to update request status: {0}")]
-    RequestStatus(GuestMemoryError),
+    RequestStatus(#[source] GuestMemoryError),
     #[error("Failed to enable notification: {0}")]
-    QueueEnableNotification(virtio_queue::Error),
+    QueueEnableNotification(#[source] virtio_queue::Error),
     #[error("Failed to get {lock_type:?} lock for disk image {path}: {error}")]
     LockDiskImage {
         /// The underlying error.
