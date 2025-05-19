@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::error::Error as StdError;
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::mpsc::channel;
@@ -880,8 +881,26 @@ fn main() {
             path.map(|s| std::fs::remove_file(s).ok());
             0
         }
-        Err(e) => {
-            eprintln!("{e}");
+        Err(top_error) => {
+            eprint!("Error: ");
+            if top_error.source().is_none() {
+                eprintln!("Cloud Hypervisor exited with the following error:");
+                eprintln!("  {top_error}");
+            } else {
+                eprintln!("Cloud Hypervisor exited with the following chain of errors:");
+                eprintln!("  0: {top_error}");
+                let mut level = 1;
+                let mut next_error: &dyn StdError = &top_error;
+                while let Some(sub_error) = next_error.source() {
+                    next_error = sub_error;
+                    eprintln!("  {level}: {next_error}",);
+                    level += 1;
+                }
+            }
+
+            eprintln!();
+            eprintln!("Debug Info: {top_error:#?}");
+
             1
         }
     };
