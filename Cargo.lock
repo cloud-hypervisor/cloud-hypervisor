@@ -2353,6 +2353,7 @@ dependencies = [
  "log",
  "net_util",
  "option_parser",
+ "thiserror 2.0.6",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",

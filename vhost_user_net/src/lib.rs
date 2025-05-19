@@ -10,7 +10,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::{Arc, Mutex, RwLock};
-use std::{fmt, io, process};
+use std::{io, process};
 
 use libc::EFD_NONBLOCK;
 use log::*;
@@ -18,6 +18,7 @@ use net_util::{
     open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio,
 };
 use option_parser::{OptionParser, OptionParserError, Toggle};
+use thiserror::Error;
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
 use vhost_user_backend::bitmap::BitmapMmapRegion;
@@ -33,39 +34,40 @@ type GuestMemoryMmap = vm_memory::GuestMemoryMmap<BitmapMmapRegion>;
 pub type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
     /// Failed to create kill eventfd.
-    CreateKillEventFd(io::Error),
+    #[error("Failed to create kill eventfd: {0}")]
+    CreateKillEventFd(#[source] io::Error),
     /// Failed to parse configuration string.
-    FailedConfigParse(OptionParserError),
+    #[error("Failed to parse configuration string: {0}")]
+    FailedConfigParse(#[source] OptionParserError),
     /// Failed to signal used queue.
-    FailedSignalingUsedQueue(io::Error),
+    #[error("Failed to signal used queue: {0}")]
+    FailedSignalingUsedQueue(#[source] io::Error),
     /// Failed to handle event other than input event.
+    #[error("Failed to handle event other than input event")]
     HandleEventNotEpollIn,
     /// Failed to handle unknown event.
+    #[error("Failed to handle unknown event")]
     HandleEventUnknownEvent,
     /// Failed to open tap device.
-    OpenTap(OpenTapError),
+    #[error("Failed to open tap device: {0}")]
+    OpenTap(#[source] OpenTapError),
     /// No socket provided.
+    #[error("No socket provided")]
     SocketParameterMissing,
     /// Underlying QueuePair error.
-    NetQueuePair(net_util::NetQueuePairError),
+    #[error("Underlying QueuePair error: {0}")]
+    NetQueuePair(#[source] net_util::NetQueuePairError),
     /// Failed to register the TAP listener.
-    RegisterTapListener(io::Error),
+    #[error("Failed to register the TAP listener: {0}")]
+    RegisterTapListener(#[source] io::Error),
 }
 
 pub const SYNTAX: &str = "vhost-user-net backend parameters \
 \"ip=<ip_addr>,mask=<net_mask>,socket=<socket_path>,client=on|off,\
 num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,tap=<if_name>\"";
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "vhost_user_net_error: {self:?}")
-    }
-}
-
-impl std::error::Error for Error {}
 
 impl std::convert::From<Error> for std::io::Error {
     fn from(e: Error) -> Self {
