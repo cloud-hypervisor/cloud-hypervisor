@@ -114,7 +114,7 @@ pub enum Error {
 
     #[cfg(target_arch = "aarch64")]
     #[error("Cannot load the UEFI binary in memory: {0:?}")]
-    UefiLoad(arch::aarch64::uefi::Error),
+    UefiLoad(#[source] arch::aarch64::uefi::Error),
 
     #[error("Cannot load the initramfs into memory")]
     InitramfsLoad,
@@ -136,7 +136,7 @@ pub enum Error {
 
     #[cfg(target_arch = "aarch64")]
     #[error("Cannot enable interrupt controller: {0:?}")]
-    EnableInterruptController(interrupt_controller::Error),
+    EnableInterruptController(#[source] interrupt_controller::Error),
 
     #[error("VM state is poisoned")]
     PoisonedState,
@@ -277,7 +277,7 @@ pub enum Error {
 
     #[cfg(feature = "tdx")]
     #[error("Error allocating TDVF memory: {0:?}")]
-    AllocatingTdvfMemory(crate::memory_manager::Error),
+    AllocatingTdvfMemory(#[source] crate::memory_manager::Error),
 
     #[cfg(feature = "tdx")]
     #[error("Error enabling TDX VM: {0}")]
@@ -301,7 +301,7 @@ pub enum Error {
 
     #[cfg(feature = "guest_debug")]
     #[error("Error debugging VM: {0:?}")]
-    Debug(DebuggableError),
+    Debug(#[source] DebuggableError),
 
     #[error("Error spawning kernel loading thread")]
     KernelLoadThreadSpawn(#[source] std::io::Error),

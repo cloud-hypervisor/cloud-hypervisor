@@ -83,14 +83,14 @@ enum Error {
     EventMonitorThread(#[source] vmm::Error),
     #[cfg(feature = "guest_debug")]
     #[error("Error parsing --gdb: {0}")]
-    ParsingGdb(option_parser::OptionParserError),
+    ParsingGdb(#[source] option_parser::OptionParserError),
     #[cfg(feature = "guest_debug")]
     #[error("Error parsing --gdb: path required")]
     BareGdb,
     #[error("Error creating log file: {0}")]
-    LogFileCreation(std::io::Error),
+    LogFileCreation(#[source] std::io::Error),
     #[error("Error setting up logger: {0}")]
-    LoggerSetup(log::SetLoggerError),
+    LoggerSetup(#[source] log::SetLoggerError),
     #[error("Failed to gracefully shutdown http api: {0}")]
     HttpApiShutdown(#[source] vmm::Error),
     #[error("Failed to create Landlock object: {0}")]
