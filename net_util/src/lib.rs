@@ -41,7 +41,7 @@ pub use tap::{Error as TapError, Tap};
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed to create a socket: {0}")]
-    CreateSocket(IoError),
+    CreateSocket(#[source] IoError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
