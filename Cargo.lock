@@ -2333,6 +2333,7 @@ dependencies = [
  "libc",
  "log",
  "option_parser",
+ "thiserror 2.0.6",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
