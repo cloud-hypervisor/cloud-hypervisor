@@ -16,13 +16,14 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::time::Instant;
-use std::{convert, error, fmt, io, process, result};
+use std::{convert, io, process, result};
 
 use block::qcow::{self, ImageType, QcowFile};
 use block::{build_serial, Request, VirtioBlockConfig};
 use libc::EFD_NONBLOCK;
 use log::*;
 use option_parser::{OptionParser, OptionParserError, Toggle};
+use thiserror::Error;
 use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
 use vhost_user_backend::bitmap::BitmapMmapRegion;
@@ -52,19 +53,25 @@ type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Error, Debug)]
 enum Error {
     /// Failed to create kill eventfd
-    CreateKillEventFd(io::Error),
+    #[error("Failed to create kill eventfd: {0}")]
+    CreateKillEventFd(#[source] io::Error),
     /// Failed to parse configuration string
-    FailedConfigParse(OptionParserError),
+    #[error("Failed to parse configuration string: {0}")]
+    FailedConfigParse(#[source] OptionParserError),
     /// Failed to handle event other than input event.
+    #[error("Failed to handle event other than input event")]
     HandleEventNotEpollIn,
     /// Failed to handle unknown event.
+    #[error("Failed to handle unknown event")]
     HandleEventUnknownEvent,
     /// No path provided
+    #[error("No path provided")]
     PathParameterMissing,
     /// No socket provided
+    #[error("No socket provided")]
     SocketParameterMissing,
 }
 
@@ -72,14 +79,6 @@ pub const SYNTAX: &str = "vhost-user-block backend parameters \
  \"path=<image_path>,socket=<socket_path>,num_queues=<number_of_queues>,\
  queue_size=<size_of_each_queue>,readonly=true|false,direct=true|false,\
  poll_queue=true|false\"";
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "vhost_user_block_error: {self:?}")
-    }
-}
-
-impl error::Error for Error {}
 
 impl convert::From<Error> for io::Error {
     fn from(e: Error) -> Self {
