@@ -69,9 +69,20 @@ pub enum HttpError {
 
 const HTTP_ROOT: &str = "/api/v1";
 
+/// Creates the error response's body meant to be sent back to an API client.
+/// The error message contained in the response is supposed to be user-facing,
+/// thus insightful and helpful while balancing technical accuracy and
+/// simplicity.
 pub fn error_response(error: HttpError, status: StatusCode) -> Response {
     let mut response = Response::new(Version::Http11, status);
-    response.set_body(Body::new(format!("{error}")));
+    // We must use debug output here without `#`, as it is currently the only
+    // feasible option to get all relevant error details to the receiver,
+    // i.e., ch-remote, in a balanced form. The Display impl is not guaranteed
+    // to hold all relevant or helpful data.
+    //
+    // TODO: We might print a nice error chain here as well and send it to the
+    // remote, similar to the normal error reporting?
+    response.set_body(Body::new(format!("{error:?}")));
 
     response
 }
