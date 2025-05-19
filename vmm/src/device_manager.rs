@@ -5012,6 +5012,37 @@ impl Aml for DeviceManager {
         )
         .to_aml_bytes(sink);
 
+        #[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
+        aml::Device::new(
+            "_SB_.FWCF".into(),
+            vec![
+                &aml::Name::new("_HID".into(), &"QEMU0002"),
+                &aml::Name::new("_STA".into(), &0xB_usize),
+                &aml::Name::new(
+                    "_CRS".into(),
+                    &aml::ResourceTemplate::new(vec![&aml::IO::new(0x510, 0x510, 0x01, 0x10)]),
+                ),
+            ],
+        )
+        .to_aml_bytes(sink);
+        #[cfg(all(feature = "fw_cfg", target_arch = "aarch64"))]
+        aml::Device::new(
+            "_SB_.FWCF".into(),
+            vec![
+                &aml::Name::new("_HID".into(), &"QEMU0002"),
+                &aml::Name::new("_STA".into(), &0xB_usize),
+                &aml::Name::new(
+                    "_CRS".into(),
+                    &aml::ResourceTemplate::new(vec![&aml::Memory32Fixed::new(
+                        true,
+                        0x9020000,
+                        MMIO_LEN as u32,
+                    )]),
+                ),
+            ],
+        )
+        .to_aml_bytes(sink);
+
         // Serial device
         #[cfg(target_arch = "x86_64")]
         let serial_irq = 4;
