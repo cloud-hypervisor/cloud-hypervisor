@@ -163,6 +163,10 @@ pub enum Error {
     /// Missing fields in Landlock rules
     #[error("Error parsing --landlock-rules: path/access field missing")]
     ParseLandlockMissingFields,
+    #[cfg(feature = "fw_cfg")]
+    /// Failed Parsing FwCfgItem config
+    #[error("Error parsing --fw-cfg-config items")]
+    ParseFwCfgItem(#[source] OptionParserError),
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]
@@ -318,6 +322,18 @@ pub enum ValidationError {
     /// Invalid block device serial length
     #[error("Block device serial length ({0}) exceeds maximum allowed length ({1})")]
     InvalidSerialLength(usize, usize),
+    #[cfg(feature = "fw_cfg")]
+    /// FwCfg missing kernel
+    #[error("Error --fw-cfg-config: missing --kernel")]
+    FwCfgMissingKernel,
+    #[cfg(feature = "fw_cfg")]
+    /// FwCfg missing cmdline
+    #[error("Error --fw-cfg-config: missing --cmdline")]
+    FwCfgMissingCmdline,
+    #[cfg(feature = "fw_cfg")]
+    /// FwCfg missing initramfs
+    #[error("Error --fw-cfg-config: missing --initramfs")]
+    FwCfgMissingInitramfs,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -373,6 +389,8 @@ pub struct VmParams<'a> {
     pub host_data: Option<&'a str>,
     pub landlock_enable: bool,
     pub landlock_rules: Option<Vec<&'a str>>,
+    #[cfg(feature = "fw_cfg")]
+    pub fw_cfg_config: Option<&'a str>,
 }
 
 impl<'a> VmParams<'a> {
@@ -444,7 +462,9 @@ impl<'a> VmParams<'a> {
         let landlock_rules: Option<Vec<&str>> = args
             .get_many::<String>("landlock-rules")
             .map(|x| x.map(|y| y as &str).collect());
-
+        #[cfg(feature = "fw_cfg")]
+        let fw_cfg_config: Option<&str> =
+            args.get_one::<String>("fw-cfg-config").map(|x| x as &str);
         VmParams {
             cpus,
             memory,
@@ -486,6 +506,8 @@ impl<'a> VmParams<'a> {
             host_data,
             landlock_enable,
             landlock_rules,
+            #[cfg(feature = "fw_cfg")]
+            fw_cfg_config,
         }
     }
 }
@@ -1603,6 +1625,102 @@ impl FsConfig {
     }
 }
 
+#[cfg(feature = "fw_cfg")]
+impl FwCfgConfig {
+    pub const SYNTAX: &'static str = "Boot params to pass to FW CFG device \
+    \"e820=on|off,kernel=on|off,cmdline=on|off,initramfs=on|off,acpi_table=on|off, \
+    items=[name0=<backing_file_path>,file0=<file_path>:name1=<backing_file_path>,file1=<file_path>]\"";
+    pub fn parse(fw_cfg_config: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser
+            .add("e820")
+            .add("kernel")
+            .add("cmdline")
+            .add("initramfs")
+            .add("acpi_table")
+            .add("items");
+        parser.parse(fw_cfg_config).map_err(Error::ParseFwCfgItem)?;
+        let e820 = parser
+            .convert::<Toggle>("e820")
+            .map_err(Error::ParseFwCfgItem)?
+            .unwrap_or(Toggle(true))
+            .0;
+        let kernel = parser
+            .convert::<Toggle>("kernel")
+            .map_err(Error::ParseFwCfgItem)?
+            .unwrap_or(Toggle(true))
+            .0;
+        let cmdline = parser
+            .convert::<Toggle>("cmdline")
+            .map_err(Error::ParseFwCfgItem)?
+            .unwrap_or(Toggle(true))
+            .0;
+        let initramfs = parser
+            .convert::<Toggle>("initramfs")
+            .map_err(Error::ParseFwCfgItem)?
+            .unwrap_or(Toggle(true))
+            .0;
+        let acpi_tables = parser
+            .convert::<Toggle>("acpi_table")
+            .map_err(Error::ParseFwCfgItem)?
+            .unwrap_or(Toggle(true))
+            .0;
+        let items = if parser.is_set("items") {
+            Some(
+                parser
+                    .convert::<FwCfgItemList>("items")
+                    .map_err(Error::ParseFwCfgItem)?
+                    .unwrap(),
+            )
+        } else {
+            None
+        };
+
+        Ok(FwCfgConfig {
+            e820,
+            kernel,
+            cmdline,
+            initramfs,
+            acpi_tables,
+            items,
+        })
+    }
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        let payload = vm_config.payload.as_ref().unwrap();
+        if self.kernel && payload.kernel.is_none() {
+            return Err(ValidationError::FwCfgMissingKernel);
+        } else if self.cmdline && payload.cmdline.is_none() {
+            return Err(ValidationError::FwCfgMissingCmdline);
+        } else if self.initramfs && payload.initramfs.is_none() {
+            return Err(ValidationError::FwCfgMissingInitramfs);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "fw_cfg")]
+impl FwCfgItem {
+    pub fn parse(fw_cfg: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser.add("name").add("file");
+        parser.parse(fw_cfg).map_err(Error::ParseFwCfgItem)?;
+
+        let name =
+            parser
+                .get("name")
+                .ok_or(Error::ParseFwCfgItem(OptionParserError::InvalidValue(
+                    "missing FwCfgItem name".to_string(),
+                )))?;
+        let file = parser
+            .get("file")
+            .map(PathBuf::from)
+            .ok_or(Error::ParseFwCfgItem(OptionParserError::InvalidValue(
+                "missing FwCfgItem file path".to_string(),
+            )))?;
+        Ok(FwCfgItem { name, file })
+    }
+}
+
 impl PmemConfig {
     pub const SYNTAX: &'static str = "Persistent memory parameters \
     \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
@@ -2661,6 +2779,14 @@ impl VmConfig {
             disks = Some(disk_config_list);
         }
 
+        #[cfg(feature = "fw_cfg")]
+        let fw_cfg_config = if let Some(fw_cfg_config_str) = vm_params.fw_cfg_config {
+            let fw_cfg_config = FwCfgConfig::parse(fw_cfg_config_str)?;
+            Some(fw_cfg_config)
+        } else {
+            None
+        };
+
         let mut net: Option<Vec<NetConfig>> = None;
         if let Some(net_list) = &vm_params.net {
             let mut net_config_list = Vec::new();
@@ -2797,6 +2923,8 @@ impl VmConfig {
                 igvm: vm_params.igvm.map(PathBuf::from),
                 #[cfg(feature = "sev_snp")]
                 host_data: vm_params.host_data.map(|s| s.to_string()),
+                #[cfg(feature = "fw_cfg")]
+                fw_cfg_config,
             })
         } else {
             None
@@ -3939,6 +4067,8 @@ mod tests {
                 host_data: Some(
                     "243eb7dc1a21129caa91dcbb794922b933baecb5823a377eb431188673288c07".to_string(),
                 ),
+                #[cfg(feature = "fw_cfg")]
+                fw_cfg_config: None,
             }),
             rate_limit_groups: None,
             disks: None,
@@ -4556,6 +4686,8 @@ mod tests {
                 igvm: None,
                 #[cfg(feature = "sev_snp")]
                 host_data: Some("".to_string()),
+                #[cfg(feature = "fw_cfg")]
+                fw_cfg_config: None,
             });
             config_with_no_host_data.validate().unwrap_err();
 
@@ -4570,6 +4702,8 @@ mod tests {
                 igvm: None,
                 #[cfg(feature = "sev_snp")]
                 host_data: None,
+                #[cfg(feature = "fw_cfg")]
+                fw_cfg_config: None,
             });
             valid_config_with_no_host_data.validate().unwrap();
 
@@ -4586,6 +4720,8 @@ mod tests {
                 host_data: Some(
                     "243eb7dc1a21129caa91dcbb794922b933baecb5823a377eb43118867328".to_string(),
                 ),
+                #[cfg(feature = "fw_cfg")]
+                fw_cfg_config: None,
             });
             config_with_invalid_host_data.validate().unwrap_err();
         }
@@ -4614,6 +4750,51 @@ mod tests {
                 path: PathBuf::from("/dir/path1"),
                 access: "rw".to_string(),
             }
+        );
+        Ok(())
+    }
+    #[test]
+    #[cfg(feature = "fw_cfg")]
+    fn test_fw_cfg_config_item_list_parsing() -> Result<()> {
+        // Empty list
+        FwCfgConfig::parse("items=[]").unwrap_err();
+        // Missing closing bracket
+        FwCfgConfig::parse("items=[name=opt/org.test/fw_cfg_test_item,file=/tmp/fw_cfg_test_item")
+            .unwrap_err();
+        // Single Item
+        assert_eq!(
+            FwCfgConfig::parse(
+                "items=[name=opt/org.test/fw_cfg_test_item,file=/tmp/fw_cfg_test_item]"
+            )?,
+            FwCfgConfig {
+                items: Some(FwCfgItemList {
+                    item_list: vec![FwCfgItem {
+                        name: "opt/org.test/fw_cfg_test_item".to_string(),
+                        file: PathBuf::from("/tmp/fw_cfg_test_item"),
+                    }]
+                }),
+                ..Default::default()
+            },
+        );
+        // Multiple Items
+        assert_eq!(
+            FwCfgConfig::parse(
+                "items=[name=opt/org.test/fw_cfg_test_item,file=/tmp/fw_cfg_test_item:name=opt/org.test/fw_cfg_test_item2,file=/tmp/fw_cfg_test_item2]"
+            )?,
+            FwCfgConfig {
+                items: Some(FwCfgItemList {
+                    item_list: vec![FwCfgItem {
+                        name: "opt/org.test/fw_cfg_test_item".to_string(),
+                        file: PathBuf::from("/tmp/fw_cfg_test_item"),
+                    },
+                    FwCfgItem {
+                        name: "opt/org.test/fw_cfg_test_item2".to_string(),
+                        file: PathBuf::from("/tmp/fw_cfg_test_item2"),
+                    }]
+                }),
+                ..Default::default()
+        },
+
         );
         Ok(())
     }

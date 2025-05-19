@@ -27,6 +27,8 @@ use vmm::api::ApiAction;
 use vmm::config::{RestoreConfig, VmParams};
 use vmm::landlock::{Landlock, LandlockError};
 use vmm::vm_config;
+#[cfg(feature = "fw_cfg")]
+use vmm::vm_config::FwCfgConfig;
 #[cfg(target_arch = "x86_64")]
 use vmm::vm_config::SgxEpcConfig;
 use vmm::vm_config::{
@@ -269,6 +271,12 @@ fn get_cli_options_sorted(
             .help(FsConfig::SYNTAX)
             .num_args(1..)
             .group("vm-config"),
+        #[cfg(feature = "fw_cfg")]
+        Arg::new("fw-cfg-config")
+            .long("fw-cfg-config")
+            .help(FwCfgConfig::SYNTAX)
+            .num_args(1)
+            .group("vm-payload"),
         #[cfg(feature = "guest_debug")]
         Arg::new("gdb")
             .long("gdb")
@@ -979,6 +987,8 @@ mod unit_tests {
                 igvm: None,
                 #[cfg(feature = "sev_snp")]
                 host_data: None,
+                #[cfg(feature = "fw_cfg")]
+                fw_cfg_config: None,
             }),
             rate_limit_groups: None,
             disks: None,
