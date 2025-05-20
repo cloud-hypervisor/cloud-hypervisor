@@ -104,8 +104,10 @@ members = [
 [workspace.dependencies]
 # rust-vmm crates
 acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main" }
-kvm-bindings = "0.10.0"
-kvm-ioctls = "0.19.1"
+kvm-bindings ={ path = "../kvm-rs/kvm-bindings" }
+#kvm-bindings = "0.10.0"
+kvm-ioctls = { path = "../kvm-rs/kvm-ioctls" }
+# kvm-ioctls = { git = "https://github.com/phip1611/kvm-rs.git", branch = "nested-state" }
 linux-loader = "0.13.0"
 mshv-bindings = "0.5.1"
 mshv-ioctls = "0.5.1"
@@ -128,3 +130,7 @@ igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main" }
 
 # serde crates
 serde_json = "1.0.120"
+
+[patch.crates-io]
+kvm-bindings = { path = "../kvm-rs/kvm-bindings" }
+kvm-ioctls = { path = "../kvm-rs/kvm-ioctls" }

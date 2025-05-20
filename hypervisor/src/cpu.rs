@@ -334,6 +334,10 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to inject NMI")]
     Nmi(#[source] anyhow::Error),
+    #[error("Failed to get nested guest state: {0}")]
+    GetNestedState(#[source] anyhow::Error),
+    #[error("Failed to set nested guest state: {0}")]
+    SetNestedState(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]
@@ -514,6 +518,14 @@ pub trait Vcpu: Send + Sync {
     /// This function is necessary to snapshot the VM
     ///
     fn state(&self) -> Result<CpuState>;
+
+    /// TODO add doc
+    #[cfg(target_arch = "x86_64")]
+    fn nested_state(&self) -> Result<NestedState>;
+
+    /// TODO add doc
+    #[cfg(target_arch = "x86_64")]
+    fn set_nested_state(&self, state: &NestedState) -> Result<()>;
     ///
     /// Set the vCPU state.
     /// This function is required when restoring the VM
