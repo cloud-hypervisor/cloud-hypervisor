@@ -71,6 +71,10 @@ pub const PORT_FW_CFG_DATA: u64 = 0x511;
 pub const PORT_FW_CFG_DMA_HI: u64 = 0x514;
 #[cfg(target_arch = "x86_64")]
 pub const PORT_FW_CFG_DMA_LO: u64 = 0x518;
+#[cfg(target_arch = "x86_64")]
+pub const PORT_FW_CFG_BASE: u64 = 0x510;
+#[cfg(target_arch = "x86_64")]
+pub const PORT_FW_CFG_WIDTH: u64 = 0xc;
 #[cfg(target_arch = "aarch64")]
 pub const PORT_FW_CFG_SELECTOR: u64 = 0x9020008;
 #[cfg(target_arch = "aarch64")]
@@ -79,6 +83,10 @@ pub const PORT_FW_CFG_DATA: u64 = 0x9020000;
 pub const PORT_FW_CFG_DMA_HI: u64 = 0x9020010;
 #[cfg(target_arch = "aarch64")]
 pub const PORT_FW_CFG_DMA_LO: u64 = 0x9020014;
+#[cfg(target_arch = "aarch64")]
+pub const PORT_FW_CFG_BASE: u64 = 0x9020000;
+#[cfg(target_arch = "aarch64")]
+pub const PORT_FW_CFG_WIDTH: u64 = 0x10;
 pub const FW_CFG_SIGNATURE: u16 = 0x00;
 pub const FW_CFG_ID: u16 = 0x01;
 pub const FW_CFG_KERNEL_SIZE: u16 = 0x08;
@@ -94,6 +102,8 @@ pub const FW_CFG_KNOWN_ITEMS: usize = 0x20;
 
 pub const FW_CFG_FILE_FIRST: u16 = 0x20;
 pub const FW_CFG_DMA_SIGNATURE: [u8; 8] = *b"QEMU CFG";
+// https://github.com/torvalds/linux/blob/master/include/uapi/linux/qemu_fw_cfg.h
+pub const FW_CFG_ACPI_ID: &str = "QEMU0002";
 // bit 1 must always be enabled, bit 2 enables DMA
 pub const FW_CFG_FEATURE: [u8; 4] = [0b11, 0, 0, 0];
 
@@ -506,7 +516,7 @@ impl FwCfg {
 
 impl BusDevice for FwCfg {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
-        let port = offset + PORT_FW_CFG_SELECTOR;
+        let port = offset + PORT_FW_CFG_BASE;
         let size = data.len();
         match (port, size) {
             (PORT_FW_CFG_SELECTOR, _) => {

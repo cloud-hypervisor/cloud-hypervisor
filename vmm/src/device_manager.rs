@@ -53,12 +53,15 @@ use devices::gic;
 use devices::interrupt_controller::InterruptController;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
-#[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
-use devices::legacy::FwCfg;
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
 #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
 use devices::legacy::Serial;
+#[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
+use devices::legacy::{
+    fw_cfg::{FW_CFG_ACPI_ID, PORT_FW_CFG_BASE, PORT_FW_CFG_WIDTH},
+    FwCfg,
+};
 #[cfg(feature = "pvmemcontrol")]
 use devices::pvmemcontrol::{PvmemcontrolBusDevice, PvmemcontrolPciDevice};
 use devices::{interrupt_controller, AcpiNotificationFlags};
@@ -1901,7 +1904,7 @@ impl DeviceManager {
 
                 self.address_manager
                     .io_bus
-                    .insert(fw_cfg, 0x510, 0x10)
+                    .insert(fw_cfg, PORT_FW_CFG_BASE, PORT_FW_CFG_WIDTH)
                     .map_err(DeviceManagerError::BusError)?;
             }
 
@@ -2046,7 +2049,7 @@ impl DeviceManager {
             // https://github.com/torvalds/linux/blob/master/drivers/firmware/qemu_fw_cfg.c#L27
             self.address_manager
                 .io_bus
-                .insert(fw_cfg.clone(), 0x9020000, MMIO_LEN)
+                .insert(fw_cfg.clone(), PORT_FW_CFG_BASE, MMIO_LEN)
                 .map_err(DeviceManagerError::BusError)?;
 
             self.bus_devices
@@ -5012,31 +5015,26 @@ impl Aml for DeviceManager {
         )
         .to_aml_bytes(sink);
 
-        #[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
+        #[cfg(feature = "fw_cfg")]
         aml::Device::new(
             "_SB_.FWCF".into(),
             vec![
-                &aml::Name::new("_HID".into(), &"QEMU0002"),
+                &aml::Name::new("_HID".into(), &FW_CFG_ACPI_ID.to_string()),
                 &aml::Name::new("_STA".into(), &0xB_usize),
                 &aml::Name::new(
                     "_CRS".into(),
-                    &aml::ResourceTemplate::new(vec![&aml::IO::new(0x510, 0x510, 0x01, 0x10)]),
-                ),
-            ],
-        )
-        .to_aml_bytes(sink);
-        #[cfg(all(feature = "fw_cfg", target_arch = "aarch64"))]
-        aml::Device::new(
-            "_SB_.FWCF".into(),
-            vec![
-                &aml::Name::new("_HID".into(), &"QEMU0002"),
-                &aml::Name::new("_STA".into(), &0xB_usize),
-                &aml::Name::new(
-                    "_CRS".into(),
+                    #[cfg(target_arch = "x86_64")]
+                    &aml::ResourceTemplate::new(vec![&aml::IO::new(
+                        PORT_FW_CFG_BASE as u16,
+                        PORT_FW_CFG_BASE as u16,
+                        0x01,
+                        PORT_FW_CFG_WIDTH as u8,
+                    )]),
+                    #[cfg(target_arch = "aarch64")]
                     &aml::ResourceTemplate::new(vec![&aml::Memory32Fixed::new(
                         true,
-                        0x9020000,
-                        MMIO_LEN as u32,
+                        PORT_FW_CFG_BASE as u32,
+                        PORT_FW_CFG_WIDTH as u32,
                     )]),
                 ),
             ],

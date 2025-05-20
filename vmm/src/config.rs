@@ -634,6 +634,7 @@ impl<'a> VmParams<'a> {
             host_data,
             landlock_enable,
             landlock_rules,
+            #[cfg(feature = "fw_cfg")]
             fw_cfg,
         }
     }

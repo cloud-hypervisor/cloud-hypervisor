@@ -348,6 +348,9 @@ pub enum Error {
 
     #[error("Fw Cfg missing kernel cmdline")]
     FwCfgCmdline,
+
+    #[error("Fw Cfg file not found")]
+    FwCfgCliFile,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -812,7 +815,8 @@ impl Vm {
                             name: fw_cfg_file.name.unwrap(),
                             content: devices::legacy::fw_cfg::FwCfgContent::File(
                                 0,
-                                File::open(fw_cfg_file.file.unwrap()).unwrap(),
+                                File::open(fw_cfg_file.file.unwrap())
+                                    .map_err(|_| Error::FwCfgCliFile)?,
                             ),
                         });
                 }
