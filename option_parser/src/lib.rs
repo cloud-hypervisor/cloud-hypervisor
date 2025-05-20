@@ -19,7 +19,7 @@ struct OptionParserValue {
     requires_value: bool,
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error, PartialEq)]
 pub enum OptionParserError {
     #[error("unknown option: {0}")]
     UnknownOption(String),

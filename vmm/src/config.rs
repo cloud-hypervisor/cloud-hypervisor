@@ -24,7 +24,7 @@ const MAX_NUM_PCI_SEGMENTS: u16 = 96;
 const MAX_IOMMU_ADDRESS_WIDTH_BITS: u8 = 64;
 
 /// Errors associated with VM configuration parameters.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum Error {
     /// Filesystem tag is missing
     ParseFsTagMissing,
@@ -1419,14 +1419,19 @@ impl NetConfig {
         parser.parse(net).map_err(Error::ParseNetwork)?;
 
         let tap = parser.get("tap");
-        let ip = parser
-            .convert("ip")
-            .map_err(Error::ParseNetwork)?
-            .unwrap_or_else(default_netconfig_ip);
-        let mask = parser
-            .convert("mask")
-            .map_err(Error::ParseNetwork)?
-            .unwrap_or_else(default_netconfig_mask);
+        let ip = parser.convert("ip").map_err(Error::ParseNetwork)?;
+        let parsed_masked = parser.convert("mask").map_err(Error::ParseNetwork)?;
+
+        let mask = match (ip, parsed_masked) {
+            (None, Some(_)) => {
+                return Err(Error::ParseNetwork(OptionParserError::InvalidValue(
+                    "mask provided without an ip".to_string(),
+                )));
+            }
+            (Some(_), Some(parsed)) => Some(parsed),
+            (_, None) => None,
+        };
+
         let mac = parser
             .convert("mac")
             .map_err(Error::ParseNetwork)?
@@ -3138,7 +3143,6 @@ impl Drop for VmConfig {
 #[cfg(test)]
 mod tests {
     use std::fs::File;
-    use std::net::{IpAddr, Ipv4Addr};
     use std::os::unix::io::AsRawFd;
 
     use net_util::MacAddr;
@@ -3468,8 +3472,8 @@ mod tests {
     fn net_fixture() -> NetConfig {
         NetConfig {
             tap: None,
-            ip: IpAddr::V4(Ipv4Addr::new(192, 168, 249, 1)),
-            mask: IpAddr::V4(Ipv4Addr::new(255, 255, 255, 0)),
+            ip: None,
+            mask: None,
             mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
             host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
             mtu: None,
@@ -3511,8 +3515,8 @@ mod tests {
             )?,
             NetConfig {
                 tap: Some("tap0".to_owned()),
-                ip: "192.168.100.1".parse().unwrap(),
-                mask: "255.255.255.128".parse().unwrap(),
+                ip: Some("192.168.100.1".parse().unwrap()),
+                mask: Some("255.255.255.128".parse().unwrap()),
                 ..net_fixture()
             }
         );
@@ -3546,6 +3550,13 @@ mod tests {
                 num_queues: 4,
                 ..net_fixture()
             }
+        );
+
+        assert_eq!(
+            NetConfig::parse("mac=de:ad:be:ef:12:34,mask=255.255.255.0").unwrap_err(),
+            Error::ParseNetwork(OptionParserError::InvalidValue(
+                "mask provided without an ip".to_string(),
+            ))
         );
 
         Ok(())
