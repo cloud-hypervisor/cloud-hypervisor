@@ -28,59 +28,59 @@ use crate::console_devices::ConsoleOutput;
 #[derive(Debug, Error)]
 pub enum Error {
     /// Cannot clone File.
-    #[error("Error cloning File: {0}")]
+    #[error("Error cloning File")]
     FileClone(#[source] io::Error),
 
     /// Cannot create epoll context.
-    #[error("Error creating epoll context: {0}")]
+    #[error("Error creating epoll context")]
     Epoll(#[source] io::Error),
 
     /// Cannot handle the VM input stream.
-    #[error("Error handling VM input: {0:?}")]
+    #[error("Error handling VM input")]
     ReadInput(#[source] io::Error),
 
     /// Cannot queue input to the serial device.
-    #[error("Error queuing input to the serial device: {0}")]
+    #[error("Error queuing input to the serial device")]
     QueueInput(#[source] vmm_sys_util::errno::Error),
 
     /// Cannot flush output on the serial buffer.
-    #[error("Error flushing serial device's output buffer: {0}")]
+    #[error("Error flushing serial device's output buffer")]
     FlushOutput(#[source] io::Error),
 
     /// Cannot make the file descriptor non-blocking.
-    #[error("Error making input file descriptor non-blocking: {0}")]
+    #[error("Error making input file descriptor non-blocking")]
     SetNonBlocking(#[source] io::Error),
 
     /// Cannot create EventFd.
-    #[error("Error creating EventFd: {0}")]
+    #[error("Error creating EventFd")]
     EventFd(#[source] io::Error),
 
     /// Cannot spawn SerialManager thread.
-    #[error("Error spawning SerialManager thread: {0}")]
+    #[error("Error spawning SerialManager thread")]
     SpawnSerialManager(#[source] io::Error),
 
     /// Cannot bind to Unix socket
-    #[error("Error binding to socket: {0}")]
+    #[error("Error binding to socket")]
     BindUnixSocket(#[source] io::Error),
 
     /// Cannot accept connection from Unix socket
-    #[error("Error accepting connection: {0}")]
+    #[error("Error accepting connection")]
     AcceptConnection(#[source] io::Error),
 
     /// Cannot clone the UnixStream
-    #[error("Error cloning UnixStream: {0}")]
+    #[error("Error cloning UnixStream")]
     CloneUnixStream(#[source] io::Error),
 
     /// Cannot shutdown the connection
-    #[error("Error shutting down a connection: {0}")]
+    #[error("Error shutting down a connection")]
     ShutdownConnection(#[source] io::Error),
 
     /// Cannot remove the serial socket
-    #[error("Error removing serial socket: {0}")]
+    #[error("Error removing serial socket")]
     RemoveUnixSocket(#[source] io::Error),
 
     /// Cannot duplicate file descriptor
-    #[error("Error duplicating file descriptor: {0}")]
+    #[error("Error duplicating file descriptor")]
     DupFd(#[source] io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;

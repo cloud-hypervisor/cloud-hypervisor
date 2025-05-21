@@ -38,21 +38,21 @@ type ArchUsize = u64;
 
 #[derive(Error, Debug)]
 pub enum DebuggableError {
-    #[error("Setting debug failed: {0}")]
+    #[error("Setting debug failed")]
     SetDebug(#[source] hypervisor::HypervisorCpuError),
-    #[error("Pausing failed: {0}")]
+    #[error("Pausing failed")]
     Pause(#[source] vm_migration::MigratableError),
-    #[error("Resuming failed: {0}")]
+    #[error("Resuming failed")]
     Resume(#[source] vm_migration::MigratableError),
-    #[error("Reading registers failed: {0}")]
+    #[error("Reading registers failed")]
     ReadRegs(#[source] crate::cpu::Error),
-    #[error("Writing registers failed: {0}")]
+    #[error("Writing registers failed")]
     WriteRegs(#[source] crate::cpu::Error),
-    #[error("Reading memory failed: {0}")]
+    #[error("Reading memory failed")]
     ReadMem(#[source] GuestMemoryError),
-    #[error("Writing memory failed: {0}")]
+    #[error("Writing memory failed")]
     WriteMem(#[source] GuestMemoryError),
-    #[error("Translating GVA failed: {0}")]
+    #[error("Translating GVA failed")]
     TranslateGva(#[source] crate::cpu::Error),
     #[error("The lock is poisened")]
     PoisonedState,
@@ -92,15 +92,15 @@ pub trait Debuggable: vm_migration::Pausable {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("VM failed: {0}")]
+    #[error("VM failed")]
     Vm(#[source] crate::vm::Error),
     #[error("GDB request failed")]
     GdbRequest,
-    #[error("GDB couldn't be notified: {0}")]
+    #[error("GDB couldn't be notified")]
     GdbResponseNotify(#[source] std::io::Error),
-    #[error("GDB response failed: {0}")]
+    #[error("GDB response failed")]
     GdbResponse(#[source] mpsc::RecvError),
-    #[error("GDB response timeout: {0}")]
+    #[error("GDB response timeout")]
     GdbResponseTimeout(#[source] mpsc::RecvTimeoutError),
 }
 type GdbResult<T> = std::result::Result<T, Error>;

@@ -98,118 +98,119 @@ type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
 #[derive(Debug, Error)]
 pub enum Error {
     /// API request receive error
-    #[error("Error receiving API request: {0}")]
+    #[error("Error receiving API request")]
     ApiRequestRecv(#[source] RecvError),
 
     /// API response send error
-    #[error("Error sending API request: {0}")]
+    #[error("Error sending API request")]
     ApiResponseSend(#[source] SendError<ApiResponse>),
 
     /// Cannot bind to the UNIX domain socket path
-    #[error("Error binding to UNIX domain socket: {0}")]
+    #[error("Error binding to UNIX domain socket")]
     Bind(#[source] io::Error),
 
     /// Cannot clone EventFd.
-    #[error("Error cloning EventFd: {0}")]
+    #[error("Error cloning EventFd")]
     EventFdClone(#[source] io::Error),
 
     /// Cannot create EventFd.
-    #[error("Error creating EventFd: {0}")]
+    #[error("Error creating EventFd")]
     EventFdCreate(#[source] io::Error),
 
     /// Cannot read from EventFd.
-    #[error("Error reading from EventFd: {0}")]
+    #[error("Error reading from EventFd")]
     EventFdRead(#[source] io::Error),
 
     /// Cannot create epoll context.
-    #[error("Error creating epoll context: {0}")]
+    #[error("Error creating epoll context")]
     Epoll(#[source] io::Error),
 
     /// Cannot create HTTP thread
-    #[error("Error spawning HTTP thread: {0}")]
+    #[error("Error spawning HTTP thread")]
     HttpThreadSpawn(#[source] io::Error),
 
     /// Cannot create D-Bus thread
     #[cfg(feature = "dbus_api")]
-    #[error("Error spawning D-Bus thread: {0}")]
+    #[error("Error spawning D-Bus thread")]
     DBusThreadSpawn(#[source] io::Error),
 
     /// Cannot start D-Bus session
     #[cfg(feature = "dbus_api")]
-    #[error("Error starting D-Bus session: {0}")]
+    #[error("Error starting D-Bus session")]
     CreateDBusSession(#[source] zbus::Error),
 
     /// Cannot create `event-monitor` thread
-    #[error("Error spawning `event-monitor` thread: {0}")]
+    #[error("Error spawning `event-monitor` thread")]
     EventMonitorThreadSpawn(#[source] io::Error),
 
     /// Cannot handle the VM STDIN stream
-    #[error("Error handling VM stdin: {0:?}")]
+    #[error("Error handling VM stdin")]
     Stdin(#[source] VmError),
 
     /// Cannot handle the VM pty stream
-    #[error("Error handling VM pty: {0:?}")]
+    #[error("Error handling VM pty")]
     Pty(#[source] VmError),
 
     /// Cannot reboot the VM
-    #[error("Error rebooting VM: {0:?}")]
+    #[error("Error rebooting VM")]
     VmReboot(#[source] VmError),
 
     /// Cannot create VMM thread
-    #[error("Error spawning VMM thread {0:?}")]
+    #[error("Error spawning VMM thread")]
     VmmThreadSpawn(#[source] io::Error),
 
     /// Cannot shut the VMM down
-    #[error("Error shutting down VMM: {0:?}")]
+    #[error("Error shutting down VMM")]
     VmmShutdown(#[source] VmError),
 
     /// Cannot create seccomp filter
-    #[error("Error creating seccomp filter: {0}")]
+    #[error("Error creating seccomp filter")]
     CreateSeccompFilter(#[source] seccompiler::Error),
 
     /// Cannot apply seccomp filter
-    #[error("Error applying seccomp filter: {0}")]
+    #[error("Error applying seccomp filter")]
     ApplySeccompFilter(#[source] seccompiler::Error),
 
     /// Error activating virtio devices
-    #[error("Error activating virtio devices: {0:?}")]
+    #[error("Error activating virtio devices")]
     ActivateVirtioDevices(#[source] VmError),
 
     /// Error creating API server
-    #[error("Error creating API server {0:?}")]
-    // TODO #[source]  once the type implements Error
+    // TODO We should add #[source] here once the type implements Error.
+    // Then we also can remove the `: {}` to align with the other errors.
+    #[error("Error creating API server: {0}")]
     CreateApiServer(micro_http::ServerError),
 
     /// Error binding API server socket
-    #[error("Error creation API server's socket {0:?}")]
+    #[error("Error creation API server's socket")]
     CreateApiServerSocket(#[source] io::Error),
 
     #[cfg(feature = "guest_debug")]
-    #[error("Failed to start the GDB thread: {0}")]
+    #[error("Failed to start the GDB thread")]
     GdbThreadSpawn(#[source] io::Error),
 
     /// GDB request receive error
     #[cfg(feature = "guest_debug")]
-    #[error("Error receiving GDB request: {0}")]
+    #[error("Error receiving GDB request")]
     GdbRequestRecv(#[source] RecvError),
 
     /// GDB response send error
     #[cfg(feature = "guest_debug")]
-    #[error("Error sending GDB request: {0}")]
+    #[error("Error sending GDB request")]
     GdbResponseSend(#[source] SendError<gdb::GdbResponse>),
 
-    #[error("Cannot spawn a signal handler thread: {0}")]
+    #[error("Cannot spawn a signal handler thread")]
     SignalHandlerSpawn(#[source] io::Error),
 
     #[error("Failed to join on threads: {0:?}")]
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
     /// Cannot create Landlock object
-    #[error("Error creating landlock object: {0}")]
+    #[error("Error creating landlock object")]
     CreateLandlock(#[source] LandlockError),
 
     /// Cannot apply landlock based sandboxing
-    #[error("Error applying landlock: {0}")]
+    #[error("Error applying landlock")]
     ApplyLandlock(#[source] LandlockError),
 }
 pub type Result<T> = result::Result<T, Error>;
