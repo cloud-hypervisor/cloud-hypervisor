@@ -45,7 +45,7 @@ pub enum Error {
     BadWriteOffset(u64),
     #[error("GPIO interrupt disabled by guest driver")]
     GpioInterruptDisabled,
-    #[error("Could not trigger GPIO interrupt: {0}")]
+    #[error("Could not trigger GPIO interrupt")]
     GpioInterruptFailure(#[source] io::Error),
     #[error("Invalid GPIO Input key triggered: {0}")]
     GpioTriggerKeyFailure(u32),
