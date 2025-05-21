@@ -65,7 +65,7 @@ seccompiler = { workspace = true }
 serde = { version = "1.0.208", features = ["derive", "rc"] }
 serde_json = { workspace = true }
 serial_buffer = { path = "../serial_buffer" }
-signal-hook = "0.3.17"
+signal-hook = "0.3.18"
 thiserror = "2.0.6"
 tracer = { path = "../tracer" }
 uuid = "1.12.1"
