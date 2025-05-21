@@ -6,6 +6,7 @@
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::io;
+use std::os::fd::FromRawFd;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::ptr::null_mut;
@@ -256,6 +257,14 @@ impl Interrupt {
         }
 
         false
+    }
+
+    fn msix_vector_num(&self) -> u32 {
+        if let Some(ref msix) = &self.msix {
+            return msix.bar.vector_num;
+        }
+
+        0
     }
 }
 
@@ -1095,12 +1104,28 @@ impl VfioCommon {
     pub(crate) fn enable_msix(&self) -> Result<(), VfioPciError> {
         if let Some(msix) = &self.interrupt.msix {
             let mut irq_fds: Vec<EventFd> = Vec::new();
-            for i in 0..msix.bar.table_entries.len() {
+            let vector_num = msix.bar.vector_num;
+
+            debug!(
+                "enable msix msix_table entries {} enabled {}",
+                msix.bar.table_entries.len(),
+                vector_num
+            );
+
+            for i in 0..vector_num {
                 if let Some(eventfd) = msix.interrupt_source_group.notifier(i as InterruptIndex) {
                     irq_fds.push(eventfd);
                 } else {
                     return Err(VfioPciError::MissingNotifier);
                 }
+            }
+
+            // Here we just get MSI-X enabled, but no vector enabled, by setting vector
+            // with an invalid fd to kernel.
+            // To avoid assert in OwnedFd, set -2 here rather than -1 as usual.
+            if 0 == vector_num {
+                // SAFETY: It's safe here because fd is an invalid fd as we intended.
+                irq_fds.push(unsafe { EventFd::from_raw_fd(-2) });
             }
 
             self.vfio_wrapper
@@ -1216,12 +1241,23 @@ impl VfioCommon {
         let addr = base + offset;
         if let Some(region) = self.find_region(addr) {
             let offset = addr - region.start.raw_value();
+            let old_vectors = self.interrupt.msix_vector_num();
 
             // If the MSI-X table is written to, we need to update our cache.
             if self.interrupt.msix_table_accessed(region.index, offset) {
                 self.interrupt.msix_write_table(offset, data);
             } else {
                 self.vfio_wrapper.region_write(region.index, offset, data);
+            }
+
+            if self.interrupt.msix_vector_num() > old_vectors {
+                debug!(
+                    "resizing vectors {} to {}",
+                    old_vectors,
+                    self.interrupt.msix_vector_num()
+                );
+                self.disable_msix();
+                self.enable_msix().ok()?;
             }
         }
 
