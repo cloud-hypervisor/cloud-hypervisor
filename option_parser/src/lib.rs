@@ -155,7 +155,9 @@ impl OptionParser {
 
 pub struct Toggle(pub bool);
 
+#[derive(Error, Debug)]
 pub enum ToggleParseError {
+    #[error("invalid value: {0}")]
     InvalidValue(String),
 }
 
@@ -176,8 +178,9 @@ impl FromStr for Toggle {
 
 pub struct ByteSized(pub u64);
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum ByteSizedParseError {
+    #[error("invalid value: {0}")]
     InvalidValue(String),
 }
 
@@ -207,7 +210,9 @@ impl FromStr for ByteSized {
 
 pub struct IntegerList(pub Vec<u64>);
 
+#[derive(Error, Debug)]
 pub enum IntegerListParseError {
+    #[error("invalid value: {0}")]
     InvalidValue(String),
 }
 
@@ -297,11 +302,16 @@ impl TupleValue for Vec<usize> {
 
 pub struct Tuple<S, T>(pub Vec<(S, T)>);
 
+#[derive(Error, Debug)]
 pub enum TupleError {
+    #[error("invalid value: {0}")]
     InvalidValue(String),
-    SplitOutsideBrackets(OptionParserError),
-    InvalidIntegerList(IntegerListParseError),
-    InvalidInteger(ParseIntError),
+    #[error("split outside brackets: {0}")]
+    SplitOutsideBrackets(#[source] OptionParserError),
+    #[error("invalid integer list: {0}")]
+    InvalidIntegerList(#[source] IntegerListParseError),
+    #[error("invalid integer: {0}")]
+    InvalidInteger(#[source] ParseIntError),
 }
 
 impl<S: FromStr, T: TupleValue> FromStr for Tuple<S, T> {
@@ -339,7 +349,9 @@ impl<S: FromStr, T: TupleValue> FromStr for Tuple<S, T> {
 #[derive(Default)]
 pub struct StringList(pub Vec<String>);
 
+#[derive(Error, Debug)]
 pub enum StringListParseError {
+    #[error("invalid value: {0}")]
     InvalidValue(String),
 }
 
