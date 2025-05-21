@@ -1411,6 +1411,7 @@ fn update_cpuid_topology(
         u32::from(dies_per_package * cores_per_die * threads_per_core),
     );
     CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(1), CpuidReg::ECX, 2 << 8);
+    CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(1), CpuidReg::EDX, x2apic_id);
 
     // CPU Topology leaf 0x1f
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(0), CpuidReg::EAX, thread_width);
