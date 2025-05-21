@@ -113,48 +113,48 @@ pub const CPU_MANAGER_ACPI_SIZE: usize = 0xc;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("Error creating vCPU: {0}")]
+    #[error("Error creating vCPU")]
     VcpuCreate(#[source] anyhow::Error),
 
-    #[error("Error running vCPU: {0}")]
+    #[error("Error running vCPU")]
     VcpuRun(#[source] anyhow::Error),
 
-    #[error("Error spawning vCPU thread: {0}")]
+    #[error("Error spawning vCPU thread")]
     VcpuSpawn(#[source] io::Error),
 
-    #[error("Error generating common CPUID: {0}")]
+    #[error("Error generating common CPUID")]
     CommonCpuId(#[source] arch::Error),
 
-    #[error("Error configuring vCPU: {0}")]
+    #[error("Error configuring vCPU")]
     VcpuConfiguration(#[source] arch::Error),
 
     #[error("Still pending removed vCPU")]
     VcpuPendingRemovedVcpu,
 
     #[cfg(target_arch = "aarch64")]
-    #[error("Error fetching preferred target: {0}")]
+    #[error("Error fetching preferred target")]
     VcpuArmPreferredTarget(#[source] hypervisor::HypervisorVmError),
 
     #[cfg(target_arch = "aarch64")]
-    #[error("Error setting vCPU processor features: {0}")]
+    #[error("Error setting vCPU processor features")]
     VcpuSetProcessorFeatures(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(target_arch = "aarch64")]
-    #[error("Error initialising vCPU: {0}")]
+    #[error("Error initialising vCPU")]
     VcpuArmInit(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(target_arch = "aarch64")]
-    #[error("Error finalising vCPU: {0}")]
+    #[error("Error finalising vCPU")]
     VcpuArmFinalize(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(target_arch = "aarch64")]
-    #[error("Error initialising GICR base address: {0}")]
+    #[error("Error initialising GICR base address")]
     VcpuSetGicrBaseAddr(#[source] hypervisor::HypervisorCpuError),
 
     #[error("Failed to join on vCPU threads: {0:?}")]
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
-    #[error("Error adding CpuManager to MMIO bus: {0}")]
+    #[error("Error adding CpuManager to MMIO bus")]
     BusError(#[source] vm_device::BusError),
 
     #[error("Requested zero vCPUs")]
@@ -163,13 +163,13 @@ pub enum Error {
     #[error("Requested vCPUs exceed maximum")]
     DesiredVCpuCountExceedsMax,
 
-    #[error("Cannot create seccomp filter: {0}")]
+    #[error("Cannot create seccomp filter")]
     CreateSeccompFilter(#[source] seccompiler::Error),
 
-    #[error("Cannot apply seccomp filter: {0}")]
+    #[error("Cannot apply seccomp filter")]
     ApplySeccompFilter(#[source] seccompiler::Error),
 
-    #[error("Error starting vCPU after restore: {0}")]
+    #[error("Error starting vCPU after restore")]
     StartRestoreVcpu(#[source] anyhow::Error),
 
     #[error("Unexpected VmExit")]
@@ -179,30 +179,30 @@ pub enum Error {
     AllocateMmmioAddress,
 
     #[cfg(feature = "tdx")]
-    #[error("Error initializing TDX: {0}")]
+    #[error("Error initializing TDX")]
     InitializeTdx(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(target_arch = "aarch64")]
-    #[error("Error initializing PMU: {0}")]
+    #[error("Error initializing PMU")]
     InitPmu(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(feature = "guest_debug")]
-    #[error("Error during CPU debug: {0}")]
+    #[error("Error during CPU debug")]
     CpuDebug(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(feature = "guest_debug")]
-    #[error("Error translating virtual address: {0}")]
+    #[error("Error translating virtual address")]
     TranslateVirtualAddress(#[source] anyhow::Error),
 
     #[cfg(target_arch = "x86_64")]
-    #[error("Error setting up AMX: {0}")]
+    #[error("Error setting up AMX")]
     AmxEnable(#[source] anyhow::Error),
 
     #[error("Maximum number of vCPUs exceeds host limit")]
     MaximumVcpusExceeded,
 
     #[cfg(feature = "sev_snp")]
-    #[error("Failed to set sev control register: {0}")]
+    #[error("Failed to set sev control register")]
     SetSevControlRegister(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(target_arch = "x86_64")]

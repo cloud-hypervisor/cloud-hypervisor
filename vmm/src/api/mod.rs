@@ -58,11 +58,11 @@ use crate::Error as VmmError;
 #[derive(Error, Debug)]
 pub enum ApiError {
     /// Cannot write to EventFd.
-    #[error("Cannot write to EventFd: {0}")]
+    #[error("Cannot write to EventFd")]
     EventFdWrite(#[source] io::Error),
 
     /// API request send error
-    #[error("API request send error: {0}")]
+    #[error("API request send error")]
     RequestSend(#[source] SendError<ApiRequest>),
 
     /// Wrong response payload type
@@ -70,31 +70,31 @@ pub enum ApiError {
     ResponsePayloadType,
 
     /// API response receive error
-    #[error("API response receive error: {0}")]
+    #[error("API response receive error")]
     ResponseRecv(#[source] RecvError),
 
     /// The VM could not boot.
-    #[error("The VM could not boot: {0}")]
+    #[error("The VM could not boot")]
     VmBoot(#[source] VmError),
 
     /// The VM could not be created.
-    #[error("The VM could not be created: {0}")]
+    #[error("The VM could not be created")]
     VmCreate(#[source] VmError),
 
     /// The VM could not be deleted.
-    #[error("The VM could not be deleted: {0}")]
+    #[error("The VM could not be deleted")]
     VmDelete(#[source] VmError),
 
     /// The VM info is not available.
-    #[error("The VM info is not available: {0}")]
+    #[error("The VM info is not available")]
     VmInfo(#[source] VmError),
 
     /// The VM could not be paused.
-    #[error("The VM could not be paused: {0}")]
+    #[error("The VM could not be paused")]
     VmPause(#[source] VmError),
 
     /// The VM could not resume.
-    #[error("The VM could not resume: {0}")]
+    #[error("The VM could not resume")]
     VmResume(#[source] VmError),
 
     /// The VM is not booted.
@@ -106,95 +106,95 @@ pub enum ApiError {
     VmNotCreated,
 
     /// The VM could not shutdown.
-    #[error("The VM could not shutdown: {0}")]
+    #[error("The VM could not shutdown")]
     VmShutdown(#[source] VmError),
 
     /// The VM could not reboot.
-    #[error("The VM could not reboot: {0}")]
+    #[error("The VM could not reboot")]
     VmReboot(#[source] VmError),
 
     /// The VM could not be snapshotted.
-    #[error("The VM could not be snapshotted: {0}")]
+    #[error("The VM could not be snapshotted")]
     VmSnapshot(#[source] VmError),
 
     /// The VM could not restored.
-    #[error("The VM could not restored: {0}")]
+    #[error("The VM could not restored")]
     VmRestore(#[source] VmError),
 
     /// The VM could not be coredumped.
-    #[error("The VM could not be coredumped: {0}")]
+    #[error("The VM could not be coredumped")]
     VmCoredump(#[source] VmError),
 
     /// The VMM could not shutdown.
-    #[error("The VMM could not shutdown: {0}")]
+    #[error("The VMM could not shutdown")]
     VmmShutdown(#[source] VmError),
 
     /// The VM could not be resized
-    #[error("The VM could not be resized: {0}")]
+    #[error("The VM could not be resized")]
     VmResize(#[source] VmError),
 
     /// The memory zone could not be resized.
-    #[error("The memory zone could not be resized: {0}")]
+    #[error("The memory zone could not be resized")]
     VmResizeZone(#[source] VmError),
 
     /// The device could not be added to the VM.
-    #[error("The device could not be added to the VM: {0}")]
+    #[error("The device could not be added to the VM")]
     VmAddDevice(#[source] VmError),
 
     /// The user device could not be added to the VM.
-    #[error("The user device could not be added to the VM: {0}")]
+    #[error("The user device could not be added to the VM")]
     VmAddUserDevice(#[source] VmError),
 
     /// The device could not be removed from the VM.
-    #[error("The device could not be removed from the VM: {0}")]
+    #[error("The device could not be removed from the VM")]
     VmRemoveDevice(#[source] VmError),
 
     /// Cannot create seccomp filter
-    #[error("Cannot create seccomp filter: {0}")]
+    #[error("Cannot create seccomp filter")]
     CreateSeccompFilter(#[source] seccompiler::Error),
 
     /// Cannot apply seccomp filter
-    #[error("Cannot apply seccomp filter: {0}")]
+    #[error("Cannot apply seccomp filter")]
     ApplySeccompFilter(#[source] seccompiler::Error),
 
     /// The disk could not be added to the VM.
-    #[error("The disk could not be added to the VM: {0}")]
+    #[error("The disk could not be added to the VM")]
     VmAddDisk(#[source] VmError),
 
     /// The fs could not be added to the VM.
-    #[error("The fs could not be added to the VM: {0}")]
+    #[error("The fs could not be added to the VM")]
     VmAddFs(#[source] VmError),
 
     /// The pmem device could not be added to the VM.
-    #[error("The pmem device could not be added to the VM: {0}")]
+    #[error("The pmem device could not be added to the VM")]
     VmAddPmem(#[source] VmError),
 
     /// The network device could not be added to the VM.
-    #[error("The network device could not be added to the VM: {0}")]
+    #[error("The network device could not be added to the VM")]
     VmAddNet(#[source] VmError),
 
     /// The vDPA device could not be added to the VM.
-    #[error("The vDPA device could not be added to the VM: {0}")]
+    #[error("The vDPA device could not be added to the VM")]
     VmAddVdpa(#[source] VmError),
 
     /// The vsock device could not be added to the VM.
-    #[error("The vsock device could not be added to the VM: {0}")]
+    #[error("The vsock device could not be added to the VM")]
     VmAddVsock(#[source] VmError),
 
     /// Error starting migration receiver
-    #[error("Error starting migration receiver: {0}")]
+    #[error("Error starting migration receiver")]
     VmReceiveMigration(#[source] MigratableError),
 
     /// Error starting migration sender
-    #[error("Error starting migration sender: {0}")]
+    #[error("Error starting migration sender")]
     VmSendMigration(#[source] MigratableError),
 
     /// Error triggering power button
-    #[error("Error triggering power button: {0}")]
+    #[error("Error triggering power button")]
     VmPowerButton(#[source] VmError),
 
     /// Error triggering NMI
-    #[error("Error triggering NMI: {0}")]
+    #[error("Error triggering NMI")]
     VmNmi(#[source] VmError),
 }
 pub type ApiResult<T> = Result<T, ApiError>;
