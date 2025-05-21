@@ -91,6 +91,16 @@ impl SystemAllocator {
         self.gsi_allocator.allocate_gsi().ok()
     }
 
+    /// Free the GSI no used.
+    pub fn free_gsi(&mut self, gsi: u32) {
+        self.gsi_allocator.free_gsi(gsi);
+    }
+
+    /// Enable GSI bitmap
+    pub fn enable_gsi_bit(&mut self, gsi: u32) {
+        self.gsi_allocator.enable_gsi_bit(gsi);
+    }
+
     /// Reserves a section of `size` bytes of IO address space.
     pub fn allocate_io_addresses(
         &mut self,
