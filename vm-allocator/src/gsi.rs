@@ -5,6 +5,10 @@
 #[cfg(target_arch = "x86_64")]
 use std::collections::btree_map::BTreeMap;
 use std::result;
+use std::sync::{Arc, Mutex};
+
+/// According to the value set kernel
+const KVM_MAX_IRQ_ROUTES: usize = 4096;
 
 #[derive(Debug)]
 pub enum Error {
@@ -86,7 +90,7 @@ pub struct GsiAllocator {
     #[cfg(target_arch = "x86_64")]
     apics: BTreeMap<u32, u32>,
     next_irq: u32,
-    next_gsi: u32,
+    gsi_bitmap: Arc<Mutex<GsiBitmap>>,
 }
 
 impl GsiAllocator {
@@ -96,16 +100,12 @@ impl GsiAllocator {
         let mut allocator = GsiAllocator {
             apics: BTreeMap::new(),
             next_irq: 0xffff_ffff,
-            next_gsi: 0,
+            gsi_bitmap: Arc::new(Mutex::new(GsiBitmap::new(KVM_MAX_IRQ_ROUTES))),
         };
 
         for apic in &apics {
             if apic.base < allocator.next_irq {
                 allocator.next_irq = apic.base;
-            }
-
-            if apic.base + apic.irqs > allocator.next_gsi {
-                allocator.next_gsi = apic.base + apic.irqs;
             }
 
             allocator.apics.insert(apic.base, apic.irqs);
@@ -125,9 +125,26 @@ impl GsiAllocator {
 
     /// Allocate a GSI
     pub fn allocate_gsi(&mut self) -> Result<u32> {
-        let gsi = self.next_gsi;
-        self.next_gsi = self.next_gsi.checked_add(1).ok_or(Error::Overflow)?;
+        let mut gsi_bitmap = self.gsi_bitmap.lock().unwrap();
+        let gsi = gsi_bitmap.get_first_free_gsi().ok_or(Error::Overflow)?;
+        gsi_bitmap.enable(gsi as usize);
+
         Ok(gsi)
+    }
+
+    /// Free a GSI
+    pub fn free_gsi(&mut self, gsi: u32) {
+        self.gsi_bitmap.lock().unwrap().disable(gsi as usize);
+    }
+
+    /// Enable gsi bit
+    pub fn enable_gsi_bit(&mut self, gsi: u32) {
+        self.gsi_bitmap.lock().unwrap().enable(gsi as usize);
+    }
+
+    /// Disable gsi bit
+    pub fn disable_gsi_bit(&mut self, gsi: u32) {
+        self.gsi_bitmap.lock().unwrap().disable(gsi as usize);
     }
 
     #[cfg(target_arch = "x86_64")]
