@@ -43,34 +43,34 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 #[derive(Error, Debug)]
 enum Error {
-    #[error("Failed to create API EventFd: {0}")]
+    #[error("Failed to create API EventFd")]
     CreateApiEventFd(#[source] std::io::Error),
     #[cfg(feature = "guest_debug")]
-    #[error("Failed to create Debug EventFd: {0}")]
+    #[error("Failed to create Debug EventFd")]
     CreateDebugEventFd(#[source] std::io::Error),
-    #[error("Failed to create exit EventFd: {0}")]
+    #[error("Failed to create exit EventFd")]
     CreateExitEventFd(#[source] std::io::Error),
-    #[error("Failed to open hypervisor interface (is hypervisor interface available?): {0}")]
+    #[error("Failed to open hypervisor interface (is hypervisor interface available?)")]
     CreateHypervisor(#[source] hypervisor::HypervisorError),
-    #[error("Failed to start the VMM thread: {0}")]
+    #[error("Failed to start the VMM thread")]
     StartVmmThread(#[source] vmm::Error),
-    #[error("Error parsing config: {0}")]
+    #[error("Error parsing config")]
     ParsingConfig(#[source] vmm::config::Error),
-    #[error("Error creating VM: {0:?}")]
+    #[error("Error creating VM")]
     VmCreate(#[source] vmm::api::ApiError),
-    #[error("Error booting VM: {0:?}")]
+    #[error("Error booting VM")]
     VmBoot(#[source] vmm::api::ApiError),
-    #[error("Error restoring VM: {0:?}")]
+    #[error("Error restoring VM")]
     VmRestore(#[source] vmm::api::ApiError),
-    #[error("Error parsing restore: {0}")]
+    #[error("Error parsing restore")]
     ParsingRestore(#[source] vmm::config::Error),
     #[error("Failed to join on VMM thread: {0:?}")]
     ThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
-    #[error("VMM thread exited with error: {0}")]
+    #[error("VMM thread exited with error")]
     VmmThread(#[source] vmm::Error),
-    #[error("Error parsing --api-socket: {0}")]
+    #[error("Error parsing --api-socket")]
     ParsingApiSocket(#[source] std::num::ParseIntError),
-    #[error("Error parsing --event-monitor: {0}")]
+    #[error("Error parsing --event-monitor")]
     ParsingEventMonitor(#[source] option_parser::OptionParserError),
     #[cfg(feature = "dbus_api")]
     #[error("`--dbus-object-path` option isn't provided")]
@@ -80,37 +80,37 @@ enum Error {
     MissingDBusServiceName,
     #[error("Error parsing --event-monitor: path or fd required")]
     BareEventMonitor,
-    #[error("Error doing event monitor I/O: {0}")]
+    #[error("Error doing event monitor I/O")]
     EventMonitorIo(#[source] std::io::Error),
-    #[error("Event monitor thread failed: {0}")]
+    #[error("Event monitor thread failed")]
     EventMonitorThread(#[source] vmm::Error),
     #[cfg(feature = "guest_debug")]
-    #[error("Error parsing --gdb: {0}")]
+    #[error("Error parsing --gdb")]
     ParsingGdb(#[source] option_parser::OptionParserError),
     #[cfg(feature = "guest_debug")]
     #[error("Error parsing --gdb: path required")]
     BareGdb,
-    #[error("Error creating log file: {0}")]
+    #[error("Error creating log file")]
     LogFileCreation(#[source] std::io::Error),
-    #[error("Error setting up logger: {0}")]
+    #[error("Error setting up logger")]
     LoggerSetup(#[source] log::SetLoggerError),
-    #[error("Failed to gracefully shutdown http api: {0}")]
+    #[error("Failed to gracefully shutdown http api")]
     HttpApiShutdown(#[source] vmm::Error),
-    #[error("Failed to create Landlock object: {0}")]
+    #[error("Failed to create Landlock object")]
     CreateLandlock(#[source] LandlockError),
-    #[error("Failed to apply Landlock: {0}")]
+    #[error("Failed to apply Landlock")]
     ApplyLandlock(#[source] LandlockError),
 }
 
 #[derive(Error, Debug)]
 enum FdTableError {
-    #[error("Failed to create event fd: {0}")]
+    #[error("Failed to create event fd")]
     CreateEventFd(#[source] std::io::Error),
-    #[error("Failed to obtain file limit: {0}")]
+    #[error("Failed to obtain file limit")]
     GetRLimit(#[source] std::io::Error),
-    #[error("Error calling fcntl with F_GETFD: {0}")]
+    #[error("Error calling fcntl with F_GETFD")]
     GetFd(#[source] std::io::Error),
-    #[error("Failed to duplicate file handle: {0}")]
+    #[error("Failed to duplicate file handle")]
     Dup2(#[source] std::io::Error),
 }
 
