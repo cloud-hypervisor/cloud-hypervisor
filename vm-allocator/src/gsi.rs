@@ -29,6 +29,58 @@ impl GsiApic {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+pub struct GsiBitmap {
+    bits: Vec<u64>,
+    capacity: usize,
+}
+
+impl GsiBitmap {
+    pub fn new(capacity: usize) -> Self {
+        let len = (capacity + 63) / 64;
+        GsiBitmap {
+            bits: vec![0; len],
+            capacity,
+        }
+    }
+
+    pub fn enable(&mut self, pos: usize) {
+        if pos > self.capacity {
+            return;
+        }
+
+        let block = pos / 64;
+        let offset = pos % 64;
+
+        self.bits[block] |= 1 << offset;
+    }
+
+    pub fn disable(&mut self, pos: usize) {
+        if pos > self.capacity {
+            return;
+        }
+
+        let block = pos / 64;
+        let offset = pos % 64;
+
+        self.bits[block] &= !(1 << offset);
+    }
+
+    pub fn get_first_free_gsi(&self) -> Option<u32> {
+        for (idx, &block) in self.bits.iter().enumerate() {
+            if block != u64::MAX {
+                for offset in 0..64 {
+                    if 0 == (block & 1 << offset) {
+                        return Some((idx * 64 + offset) as u32);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+}
+
 /// GsiAllocator
 pub struct GsiAllocator {
     #[cfg(target_arch = "x86_64")]
