@@ -60,7 +60,7 @@ pub enum Error {
     AddressOverflow,
     /// Failure while zeroing out the memory for the MP table.
     #[error("Failure while zeroing out the memory for the MP table: {0}")]
-    Clear(GuestMemoryError),
+    Clear(#[source] GuestMemoryError),
     /// Number of CPUs exceeds the maximum supported CPUs
     #[error("Number of CPUs exceeds the maximum supported CPUs")]
     TooManyCpus,
