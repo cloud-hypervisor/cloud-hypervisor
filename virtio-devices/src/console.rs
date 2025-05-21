@@ -51,15 +51,15 @@ const VIRTIO_CONSOLE_F_SIZE: u64 = 0;
 enum Error {
     #[error("Descriptor chain too short")]
     DescriptorChainTooShort,
-    #[error("Failed to read from guest memory: {0}")]
+    #[error("Failed to read from guest memory")]
     GuestMemoryRead(#[source] vm_memory::guest_memory::Error),
-    #[error("Failed to write to guest memory: {0}")]
+    #[error("Failed to write to guest memory")]
     GuestMemoryWrite(#[source] vm_memory::guest_memory::Error),
-    #[error("Failed to write_all output: {0}")]
+    #[error("Failed to write_all output")]
     OutputWriteAll(#[source] io::Error),
-    #[error("Failed to flush output: {0}")]
+    #[error("Failed to flush output")]
     OutputFlush(#[source] io::Error),
-    #[error("Failed to add used index: {0}")]
+    #[error("Failed to add used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
 }
 

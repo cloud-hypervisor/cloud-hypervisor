@@ -41,9 +41,9 @@ enum Error {
     DescriptorChainTooShort,
     #[error("Invalid descriptor")]
     InvalidDescriptor,
-    #[error("Failed to write to guest memory: {0}")]
+    #[error("Failed to write to guest memory")]
     GuestMemoryWrite(#[source] vm_memory::guest_memory::Error),
-    #[error("Failed adding used index: {0}")]
+    #[error("Failed adding used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
 }
 

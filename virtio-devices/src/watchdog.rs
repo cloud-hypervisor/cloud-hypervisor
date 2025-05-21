@@ -48,15 +48,15 @@ const WATCHDOG_TIMEOUT: u64 = WATCHDOG_TIMER_INTERVAL as u64 + 5;
 
 #[derive(Error, Debug)]
 enum Error {
-    #[error("Error programming timer fd: {0}")]
+    #[error("Error programming timer fd")]
     TimerfdSetup(#[source] io::Error),
     #[error("Descriptor chain too short")]
     DescriptorChainTooShort,
-    #[error("Failed adding used index: {0}")]
+    #[error("Failed adding used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
     #[error("Invalid descriptor")]
     InvalidDescriptor,
-    #[error("Failed to write to guest memory: {0}")]
+    #[error("Failed to write to guest memory")]
     GuestMemoryWrite(#[source] vm_memory::guest_memory::Error),
 }
 
