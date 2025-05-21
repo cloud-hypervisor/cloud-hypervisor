@@ -40,17 +40,17 @@ pub struct VfioUserPciDevice {
 
 #[derive(Error, Debug)]
 pub enum VfioUserPciDeviceError {
-    #[error("Client error: {0}")]
+    #[error("Client error")]
     Client(#[source] VfioUserError),
-    #[error("Failed to map VFIO PCI region into guest: {0}")]
+    #[error("Failed to map VFIO PCI region into guest")]
     MapRegionGuest(#[source] HypervisorVmError),
-    #[error("Failed to DMA map: {0}")]
+    #[error("Failed to DMA map")]
     DmaMap(#[source] VfioUserError),
-    #[error("Failed to DMA unmap: {0}")]
+    #[error("Failed to DMA unmap")]
     DmaUnmap(#[source] VfioUserError),
-    #[error("Failed to initialize legacy interrupts: {0}")]
+    #[error("Failed to initialize legacy interrupts")]
     InitializeLegacyInterrupts(#[source] VfioPciError),
-    #[error("Failed to create VfioCommon: {0}")]
+    #[error("Failed to create VfioCommon")]
     CreateVfioCommon(#[source] VfioPciError),
 }
 
