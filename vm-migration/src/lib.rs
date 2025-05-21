@@ -13,43 +13,43 @@ pub mod protocol;
 
 #[derive(Error, Debug)]
 pub enum MigratableError {
-    #[error("Failed to pause migratable component: {0}")]
+    #[error("Failed to pause migratable component")]
     Pause(#[source] anyhow::Error),
 
-    #[error("Failed to resume migratable component: {0}")]
+    #[error("Failed to resume migratable component")]
     Resume(#[source] anyhow::Error),
 
-    #[error("Failed to snapshot migratable component: {0}")]
+    #[error("Failed to snapshot migratable component")]
     Snapshot(#[source] anyhow::Error),
 
-    #[error("Failed to restore migratable component: {0}")]
+    #[error("Failed to restore migratable component")]
     Restore(#[source] anyhow::Error),
 
-    #[error("Failed to send migratable component snapshot: {0}")]
+    #[error("Failed to send migratable component snapshot")]
     MigrateSend(#[source] anyhow::Error),
 
-    #[error("Failed to receive migratable component snapshot: {0}")]
+    #[error("Failed to receive migratable component snapshot")]
     MigrateReceive(#[source] anyhow::Error),
 
-    #[error("Socket error: {0}")]
+    #[error("Socket error")]
     MigrateSocket(#[source] std::io::Error),
 
-    #[error("Failed to start migration for migratable component: {0}")]
+    #[error("Failed to start migration for migratable component")]
     StartDirtyLog(#[source] anyhow::Error),
 
-    #[error("Failed to stop migration for migratable component: {0}")]
+    #[error("Failed to stop migration for migratable component")]
     StopDirtyLog(#[source] anyhow::Error),
 
-    #[error("Failed to retrieve dirty ranges for migratable component: {0}")]
+    #[error("Failed to retrieve dirty ranges for migratable component")]
     DirtyLog(#[source] anyhow::Error),
 
-    #[error("Failed to start migration for migratable component: {0}")]
+    #[error("Failed to start migration for migratable component")]
     StartMigration(#[source] anyhow::Error),
 
-    #[error("Failed to complete migration for migratable component: {0}")]
+    #[error("Failed to complete migration for migratable component")]
     CompleteMigration(#[source] anyhow::Error),
 
-    #[error("Failed to release a disk lock before the migration: {0}")]
+    #[error("Failed to release a disk lock before the migration")]
     UnlockError(#[source] anyhow::Error),
 }
 
