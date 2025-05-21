@@ -31,10 +31,10 @@ pub const MSIX_CONFIG_ID: &str = "msix_config";
 #[derive(Error, Debug)]
 pub enum Error {
     /// Failed enabling the interrupt route.
-    #[error("Failed enabling the interrupt route: {0}")]
+    #[error("Failed enabling the interrupt route")]
     EnableInterruptRoute(#[source] io::Error),
     /// Failed updating the interrupt route.
-    #[error("Failed updating the interrupt route: {0}")]
+    #[error("Failed updating the interrupt route")]
     UpdateInterruptRoute(#[source] io::Error),
 }
 

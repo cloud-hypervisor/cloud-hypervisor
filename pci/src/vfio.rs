@@ -47,17 +47,17 @@ pub(crate) const VFIO_COMMON_ID: &str = "vfio_common";
 
 #[derive(Debug, Error)]
 pub enum VfioPciError {
-    #[error("Failed to create user memory region: {0}")]
+    #[error("Failed to create user memory region")]
     CreateUserMemoryRegion(#[source] HypervisorVmError),
     #[error("Failed to DMA map: {0} for device {1} (guest BDF: {2})")]
     DmaMap(#[source] vfio_ioctls::VfioError, PathBuf, PciBdf),
     #[error("Failed to DMA unmap: {0} for device {1} (guest BDF: {2})")]
     DmaUnmap(#[source] vfio_ioctls::VfioError, PathBuf, PciBdf),
-    #[error("Failed to enable INTx: {0}")]
+    #[error("Failed to enable INTx")]
     EnableIntx(#[source] VfioError),
-    #[error("Failed to enable MSI: {0}")]
+    #[error("Failed to enable MSI")]
     EnableMsi(#[source] VfioError),
-    #[error("Failed to enable MSI-x: {0}")]
+    #[error("Failed to enable MSI-x")]
     EnableMsix(#[source] VfioError),
     #[error("Failed to mmap the area")]
     MmapArea,
@@ -67,13 +67,13 @@ pub enum VfioPciError {
     RegionAlignment,
     #[error("Invalid region size")]
     RegionSize,
-    #[error("Failed to retrieve MsiConfigState: {0}")]
+    #[error("Failed to retrieve MsiConfigState")]
     RetrieveMsiConfigState(#[source] anyhow::Error),
-    #[error("Failed to retrieve MsixConfigState: {0}")]
+    #[error("Failed to retrieve MsixConfigState")]
     RetrieveMsixConfigState(#[source] anyhow::Error),
-    #[error("Failed to retrieve PciConfigurationState: {0}")]
+    #[error("Failed to retrieve PciConfigurationState")]
     RetrievePciConfigurationState(#[source] anyhow::Error),
-    #[error("Failed to retrieve VfioCommonState: {0}")]
+    #[error("Failed to retrieve VfioCommonState")]
     RetrieveVfioCommonState(#[source] anyhow::Error),
 }
 
@@ -318,9 +318,9 @@ impl MmioRegionRange for Vec<MmioRegion> {
 
 #[derive(Debug, Error)]
 pub enum VfioError {
-    #[error("Kernel VFIO error: {0}")]
+    #[error("Kernel VFIO error")]
     KernelVfio(#[source] vfio_ioctls::VfioError),
-    #[error("VFIO user error: {0}")]
+    #[error("VFIO user error")]
     VfioUser(#[source] vfio_user::Error),
 }
 
