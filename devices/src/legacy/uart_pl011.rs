@@ -51,7 +51,7 @@ const AMBA_ID_HIGH: u64 = 0x401;
 pub enum Error {
     #[error("pl011_write: Bad Write Offset: {0}")]
     BadWriteOffset(u64),
-    #[error("pl011: DMA not implemented.")]
+    #[error("pl011: DMA not implemented")]
     DmaNotImplemented,
     #[error("Failed to trigger interrupt: {0}")]
     InterruptFailure(#[source] io::Error),
