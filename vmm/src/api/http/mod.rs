@@ -3,9 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use core::fmt;
 use std::collections::BTreeMap;
-use std::fmt::Display;
 use std::fs::File;
 use std::os::unix::io::{IntoRawFd, RawFd};
 use std::os::unix::net::UnixListener;
@@ -21,6 +19,7 @@ use micro_http::{
 use once_cell::sync::Lazy;
 use seccompiler::{apply_filter, SeccompAction};
 use serde_json::Error as SerdeError;
+use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
 use self::http_endpoint::{VmActionHandler, VmCreate, VmInfo, VmmPing, VmmShutdown};
@@ -41,39 +40,31 @@ pub mod http_endpoint;
 pub type HttpApiHandle = (thread::JoinHandle<Result<()>>, EventFd);
 
 /// Errors associated with VMM management
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum HttpError {
     /// API request receive error
-    SerdeJsonDeserialize(SerdeError),
+    #[error("Failed to deserialize JSON: {0}")]
+    SerdeJsonDeserialize(#[source] SerdeError),
 
     /// Attempt to access unsupported HTTP method
+    #[error("Bad Request")]
     BadRequest,
 
     /// Undefined endpoints
+    #[error("Not Found")]
     NotFound,
 
     /// Too many requests
+    #[error("Too Many Requests")]
     TooManyRequests,
 
     /// Internal Server Error
+    #[error("Internal Server Error")]
     InternalServerError,
 
     /// Error from internal API
-    ApiError(ApiError),
-}
-
-impl Display for HttpError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::HttpError::*;
-        match self {
-            BadRequest => write!(f, "Bad Request"),
-            NotFound => write!(f, "Not Found"),
-            TooManyRequests => write!(f, "Too Many Requests"),
-            InternalServerError => write!(f, "Internal Server Error"),
-            SerdeJsonDeserialize(serde_error) => write!(f, "{serde_error}"),
-            ApiError(api_error) => write!(f, "{api_error}"),
-        }
-    }
+    #[error("Error from API: {0}")]
+    ApiError(#[source] ApiError),
 }
 
 impl From<serde_json::Error> for HttpError {
