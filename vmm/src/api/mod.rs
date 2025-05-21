@@ -33,8 +33,6 @@
 pub mod dbus;
 pub mod http;
 
-use core::fmt;
-use std::fmt::Display;
 use std::io;
 use std::sync::mpsc::{channel, RecvError, SendError, Sender};
 
@@ -60,154 +58,146 @@ use crate::Error as VmmError;
 #[derive(Error, Debug)]
 pub enum ApiError {
     /// Cannot write to EventFd.
+    #[error("Cannot write to EventFd: {0}")]
     EventFdWrite(#[source] io::Error),
 
     /// API request send error
-    RequestSend(SendError<ApiRequest>),
+    #[error("API request send error: {0}")]
+    RequestSend(#[source] SendError<ApiRequest>),
 
     /// Wrong response payload type
+    #[error("Wrong response payload type")]
     ResponsePayloadType,
 
     /// API response receive error
-    ResponseRecv(RecvError),
+    #[error("API response receive error: {0}")]
+    ResponseRecv(#[source] RecvError),
 
     /// The VM could not boot.
-    VmBoot(VmError),
+    #[error("The VM could not boot: {0}")]
+    VmBoot(#[source] VmError),
 
     /// The VM could not be created.
-    VmCreate(VmError),
+    #[error("The VM could not be created: {0}")]
+    VmCreate(#[source] VmError),
 
     /// The VM could not be deleted.
-    VmDelete(VmError),
+    #[error("The VM could not be deleted: {0}")]
+    VmDelete(#[source] VmError),
 
     /// The VM info is not available.
-    VmInfo(VmError),
+    #[error("The VM info is not available: {0}")]
+    VmInfo(#[source] VmError),
 
     /// The VM could not be paused.
-    VmPause(VmError),
+    #[error("The VM could not be paused: {0}")]
+    VmPause(#[source] VmError),
 
     /// The VM could not resume.
-    VmResume(VmError),
+    #[error("The VM could not resume: {0}")]
+    VmResume(#[source] VmError),
 
     /// The VM is not booted.
+    #[error("The VM is not booted")]
     VmNotBooted,
 
     /// The VM is not created.
+    #[error("The VM is not created")]
     VmNotCreated,
 
     /// The VM could not shutdown.
-    VmShutdown(VmError),
+    #[error("The VM could not shutdown: {0}")]
+    VmShutdown(#[source] VmError),
 
     /// The VM could not reboot.
-    VmReboot(VmError),
+    #[error("The VM could not reboot: {0}")]
+    VmReboot(#[source] VmError),
 
     /// The VM could not be snapshotted.
-    VmSnapshot(VmError),
+    #[error("The VM could not be snapshotted: {0}")]
+    VmSnapshot(#[source] VmError),
 
     /// The VM could not restored.
-    VmRestore(VmError),
+    #[error("The VM could not restored: {0}")]
+    VmRestore(#[source] VmError),
 
     /// The VM could not be coredumped.
-    VmCoredump(VmError),
+    #[error("The VM could not be coredumped: {0}")]
+    VmCoredump(#[source] VmError),
 
     /// The VMM could not shutdown.
-    VmmShutdown(VmError),
+    #[error("The VMM could not shutdown: {0}")]
+    VmmShutdown(#[source] VmError),
 
     /// The VM could not be resized
-    VmResize(VmError),
+    #[error("The VM could not be resized: {0}")]
+    VmResize(#[source] VmError),
 
     /// The memory zone could not be resized.
-    VmResizeZone(VmError),
+    #[error("The memory zone could not be resized: {0}")]
+    VmResizeZone(#[source] VmError),
 
     /// The device could not be added to the VM.
-    VmAddDevice(VmError),
+    #[error("The device could not be added to the VM: {0}")]
+    VmAddDevice(#[source] VmError),
 
     /// The user device could not be added to the VM.
-    VmAddUserDevice(VmError),
+    #[error("The user device could not be added to the VM: {0}")]
+    VmAddUserDevice(#[source] VmError),
 
     /// The device could not be removed from the VM.
-    VmRemoveDevice(VmError),
+    #[error("The device could not be removed from the VM: {0}")]
+    VmRemoveDevice(#[source] VmError),
 
     /// Cannot create seccomp filter
-    CreateSeccompFilter(seccompiler::Error),
+    #[error("Cannot create seccomp filter: {0}")]
+    CreateSeccompFilter(#[source] seccompiler::Error),
 
     /// Cannot apply seccomp filter
-    ApplySeccompFilter(seccompiler::Error),
+    #[error("Cannot apply seccomp filter: {0}")]
+    ApplySeccompFilter(#[source] seccompiler::Error),
 
     /// The disk could not be added to the VM.
-    VmAddDisk(VmError),
+    #[error("The disk could not be added to the VM: {0}")]
+    VmAddDisk(#[source] VmError),
 
     /// The fs could not be added to the VM.
-    VmAddFs(VmError),
+    #[error("The fs could not be added to the VM: {0}")]
+    VmAddFs(#[source] VmError),
 
     /// The pmem device could not be added to the VM.
-    VmAddPmem(VmError),
+    #[error("The pmem device could not be added to the VM: {0}")]
+    VmAddPmem(#[source] VmError),
 
     /// The network device could not be added to the VM.
-    VmAddNet(VmError),
+    #[error("The network device could not be added to the VM: {0}")]
+    VmAddNet(#[source] VmError),
 
     /// The vDPA device could not be added to the VM.
-    VmAddVdpa(VmError),
+    #[error("The vDPA device could not be added to the VM: {0}")]
+    VmAddVdpa(#[source] VmError),
 
     /// The vsock device could not be added to the VM.
-    VmAddVsock(VmError),
+    #[error("The vsock device could not be added to the VM: {0}")]
+    VmAddVsock(#[source] VmError),
 
     /// Error starting migration receiver
-    VmReceiveMigration(MigratableError),
+    #[error("Error starting migration receiver: {0}")]
+    VmReceiveMigration(#[source] MigratableError),
 
     /// Error starting migration sender
-    VmSendMigration(MigratableError),
+    #[error("Error starting migration sender: {0}")]
+    VmSendMigration(#[source] MigratableError),
 
     /// Error triggering power button
-    VmPowerButton(VmError),
+    #[error("Error triggering power button: {0}")]
+    VmPowerButton(#[source] VmError),
 
     /// Error triggering NMI
-    VmNmi(VmError),
+    #[error("Error triggering NMI: {0}")]
+    VmNmi(#[source] VmError),
 }
 pub type ApiResult<T> = Result<T, ApiError>;
-
-impl Display for ApiError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::ApiError::*;
-        match self {
-            EventFdWrite(serde_error) => write!(f, "{serde_error}"),
-            RequestSend(send_error) => write!(f, "{send_error}"),
-            ResponsePayloadType => write!(f, "Wrong response payload type"),
-            ResponseRecv(recv_error) => write!(f, "{recv_error}"),
-            VmBoot(vm_error) => write!(f, "{vm_error}"),
-            VmCreate(vm_error) => write!(f, "{vm_error}"),
-            VmDelete(vm_error) => write!(f, "{vm_error}"),
-            VmInfo(vm_error) => write!(f, "{vm_error}"),
-            VmPause(vm_error) => write!(f, "{vm_error}"),
-            VmResume(vm_error) => write!(f, "{vm_error}"),
-            VmNotBooted => write!(f, "VM is not booted"),
-            VmNotCreated => write!(f, "VM is not created"),
-            VmShutdown(vm_error) => write!(f, "{vm_error}"),
-            VmReboot(vm_error) => write!(f, "{vm_error}"),
-            VmSnapshot(vm_error) => write!(f, "{vm_error}"),
-            VmRestore(vm_error) => write!(f, "{vm_error}"),
-            VmCoredump(vm_error) => write!(f, "{vm_error}"),
-            VmmShutdown(vm_error) => write!(f, "{vm_error}"),
-            VmResize(vm_error) => write!(f, "{vm_error}"),
-            VmResizeZone(vm_error) => write!(f, "{vm_error}"),
-            VmAddDevice(vm_error) => write!(f, "{vm_error}"),
-            VmAddUserDevice(vm_error) => write!(f, "{vm_error}"),
-            VmRemoveDevice(vm_error) => write!(f, "{vm_error}"),
-            CreateSeccompFilter(seccomp_error) => write!(f, "{seccomp_error}"),
-            ApplySeccompFilter(seccomp_error) => write!(f, "{seccomp_error}"),
-            VmAddDisk(vm_error) => write!(f, "{vm_error}"),
-            VmAddFs(vm_error) => write!(f, "{vm_error}"),
-            VmAddPmem(vm_error) => write!(f, "{vm_error}"),
-            VmAddNet(vm_error) => write!(f, "{vm_error}"),
-            VmAddVdpa(vm_error) => write!(f, "{vm_error}"),
-            VmAddVsock(vm_error) => write!(f, "{vm_error}"),
-            VmReceiveMigration(migratable_error) => write!(f, "{migratable_error}"),
-            VmSendMigration(migratable_error) => write!(f, "{migratable_error}"),
-            VmPowerButton(vm_error) => write!(f, "{vm_error}"),
-            VmNmi(vm_error) => write!(f, "{vm_error}"),
-        }
-    }
-}
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct VmInfoResponse {
