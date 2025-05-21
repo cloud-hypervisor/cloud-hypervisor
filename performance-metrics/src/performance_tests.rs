@@ -10,6 +10,7 @@ use std::time::Duration;
 use std::{fs, thread};
 
 use test_infra::{Error as InfraError, *};
+use thiserror::Error;
 
 use crate::{mean, PerformanceTestControl};
 
@@ -19,10 +20,13 @@ pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0-update-tool.raw";
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Error, Debug)]
 enum Error {
+    #[error("boot time could not be parsed")]
     BootTimeParse,
-    Infra(InfraError),
+    #[error("infrastructure failure: {0}")]
+    Infra(#[source] InfraError),
+    #[error("restore time could not be parsed")]
     RestoreTimeParse,
 }
 
