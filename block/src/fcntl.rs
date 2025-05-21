@@ -13,34 +13,24 @@
 //!
 //! [0]: <https://apenwarr.ca/log/20101213>.
 
-use std::error::Error;
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::Debug;
 use std::io;
 use std::os::fd::{AsRawFd, RawFd};
 
+use thiserror::Error;
+
 /// Errors that can happen when working with file locks.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum LockError {
     /// The file is already locked.
     ///
     /// A call to [`get_lock_state`] can help to identify the reason.
+    #[error("The file is already locked")]
     AlreadyLocked,
     /// IO error.
-    Io(io::Error),
+    #[error("The lock state could not be checked or set: {0}")]
+    Io(#[source] io::Error),
 }
-
-impl Display for LockError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LockError::AlreadyLocked => f.write_str("The file is already locked"),
-            LockError::Io(e) => {
-                write!(f, "{e}")
-            }
-        }
-    }
-}
-
-impl Error for LockError {}
 
 /// Commands for use with [`fcntl`].
 #[allow(non_camel_case_types)]
