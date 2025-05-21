@@ -18,11 +18,11 @@ pub enum HypervisorDeviceError {
     ///
     /// Set device attribute error
     ///
-    #[error("Failed to set device attribute: {0}")]
+    #[error("Failed to set device attribute")]
     SetDeviceAttribute(#[source] anyhow::Error),
     ///
     /// Get device attribute error
     ///
-    #[error("Failed to get device attribute: {0}")]
+    #[error("Failed to get device attribute")]
     GetDeviceAttribute(#[source] anyhow::Error),
 }

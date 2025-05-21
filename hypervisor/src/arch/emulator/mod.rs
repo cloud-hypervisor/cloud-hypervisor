@@ -36,58 +36,58 @@ impl<T: Debug> Display for Exception<T> {
 
 #[derive(Error, Debug)]
 pub enum PlatformError {
-    #[error("Invalid address: {0}")]
+    #[error("Invalid address")]
     InvalidAddress(#[source] anyhow::Error),
 
-    #[error("Invalid register: {0}")]
+    #[error("Invalid register")]
     InvalidRegister(#[source] anyhow::Error),
 
-    #[error("Invalid state: {0}")]
+    #[error("Invalid state")]
     InvalidState(#[source] anyhow::Error),
 
-    #[error("Memory read failure: {0}")]
+    #[error("Memory read failure")]
     MemoryReadFailure(#[source] anyhow::Error),
 
-    #[error("Memory write failure: {0}")]
+    #[error("Memory write failure")]
     MemoryWriteFailure(#[source] anyhow::Error),
 
-    #[error("Get CPU state failure: {0}")]
+    #[error("Get CPU state failure")]
     GetCpuStateFailure(#[source] anyhow::Error),
 
-    #[error("Set CPU state failure: {0}")]
+    #[error("Set CPU state failure")]
     SetCpuStateFailure(#[source] anyhow::Error),
 
-    #[error("Translate virtual address: {0}")]
+    #[error("Translate virtual address")]
     TranslateVirtualAddress(#[source] anyhow::Error),
 
-    #[error("Unsupported CPU Mode: {0}")]
+    #[error("Unsupported CPU Mode")]
     UnsupportedCpuMode(#[source] anyhow::Error),
 
-    #[error("Invalid instruction operand: {0}")]
+    #[error("Invalid instruction operand")]
     InvalidOperand(#[source] anyhow::Error),
 }
 
 #[derive(Error, Debug)]
 pub enum EmulationError<T: Debug> {
-    #[error("Unsupported instruction: {0}")]
+    #[error("Unsupported instruction")]
     UnsupportedInstruction(#[source] anyhow::Error),
 
-    #[error("Unsupported memory size: {0}")]
+    #[error("Unsupported memory size")]
     UnsupportedMemorySize(#[source] anyhow::Error),
 
-    #[error("Invalid operand: {0}")]
+    #[error("Invalid operand")]
     InvalidOperand(#[source] anyhow::Error),
 
-    #[error("Wrong number of operands: {0}")]
+    #[error("Wrong number of operands")]
     WrongNumberOperands(#[source] anyhow::Error),
 
-    #[error("Instruction Exception: {0}")]
+    #[error("Instruction Exception")]
     InstructionException(#[source] Exception<T>),
 
-    #[error("Instruction fetching error: {0}")]
+    #[error("Instruction fetching error")]
     InstructionFetchingError(#[source] anyhow::Error),
 
-    #[error("Platform emulation error: {0}")]
+    #[error("Platform emulation error")]
     PlatformEmulationError(#[source] PlatformError),
 
     #[error(transparent)]
