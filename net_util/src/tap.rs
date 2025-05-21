@@ -22,21 +22,21 @@ use crate::mac::MAC_ADDR_LEN;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Couldn't open /dev/net/tun: {0}")]
+    #[error("Couldn't open /dev/net/tun")]
     OpenTun(#[source] IoError),
-    #[error("Unable to configure tap interface: {0}")]
+    #[error("Unable to configure tap interface")]
     ConfigureTap(#[source] IoError),
-    #[error("Unable to retrieve features: {0}")]
+    #[error("Unable to retrieve features")]
     GetFeatures(#[source] IoError),
     #[error("Missing multiqueue support in the kernel")]
     MultiQueueKernelSupport,
     #[error("ioctl ({0}) failed: {1}")]
     IoctlError(c_ulong, #[source] IoError),
-    #[error("Failed to create a socket: {0}")]
+    #[error("Failed to create a socket")]
     NetUtil(#[source] NetUtilError),
     #[error("Invalid interface name")]
     InvalidIfname,
-    #[error("Error parsing MAC data: {0}")]
+    #[error("Error parsing MAC data")]
     MacParsing(#[source] IoError),
     #[error("Invalid netmask")]
     InvalidNetmask,

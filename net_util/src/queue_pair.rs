@@ -353,27 +353,27 @@ pub struct NetCounters {
 pub enum NetQueuePairError {
     #[error("No memory configured")]
     NoMemoryConfigured,
-    #[error("Error registering listener: {0}")]
+    #[error("Error registering listener")]
     RegisterListener(#[source] io::Error),
-    #[error("Error unregistering listener: {0}")]
+    #[error("Error unregistering listener")]
     UnregisterListener(#[source] io::Error),
-    #[error("Error writing to the TAP device: {0}")]
+    #[error("Error writing to the TAP device")]
     WriteTap(#[source] io::Error),
-    #[error("Error reading from the TAP device: {0}")]
+    #[error("Error reading from the TAP device")]
     ReadTap(#[source] io::Error),
-    #[error("Error related to guest memory: {0}")]
+    #[error("Error related to guest memory")]
     GuestMemory(#[source] vm_memory::GuestMemoryError),
-    #[error("Returned an error while iterating through the queue: {0}")]
+    #[error("Returned an error while iterating through the queue")]
     QueueIteratorFailed(#[source] virtio_queue::Error),
     #[error("Descriptor chain is too short")]
     DescriptorChainTooShort,
     #[error("Descriptor chain does not contain valid descriptors")]
     DescriptorChainInvalid,
-    #[error("Failed to determine if queue needed notification: {0}")]
+    #[error("Failed to determine if queue needed notification")]
     QueueNeedsNotification(#[source] virtio_queue::Error),
-    #[error("Failed to enable notification on the queue: {0}")]
+    #[error("Failed to enable notification on the queue")]
     QueueEnableNotification(#[source] virtio_queue::Error),
-    #[error("Failed to add used index to the queue: {0}")]
+    #[error("Failed to add used index to the queue")]
     QueueAddUsed(#[source] virtio_queue::Error),
     #[error("Descriptor with invalid virtio-net header")]
     DescriptorInvalidHeader,
