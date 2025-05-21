@@ -37,13 +37,13 @@ type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
 #[derive(Error, Debug)]
 pub enum Error {
     /// Failed to create kill eventfd.
-    #[error("Failed to create kill eventfd: {0}")]
+    #[error("Failed to create kill eventfd")]
     CreateKillEventFd(#[source] io::Error),
     /// Failed to parse configuration string.
-    #[error("Failed to parse configuration string: {0}")]
+    #[error("Failed to parse configuration string")]
     FailedConfigParse(#[source] OptionParserError),
     /// Failed to signal used queue.
-    #[error("Failed to signal used queue: {0}")]
+    #[error("Failed to signal used queue")]
     FailedSignalingUsedQueue(#[source] io::Error),
     /// Failed to handle event other than input event.
     #[error("Failed to handle event other than input event")]
@@ -52,16 +52,16 @@ pub enum Error {
     #[error("Failed to handle unknown event")]
     HandleEventUnknownEvent,
     /// Failed to open tap device.
-    #[error("Failed to open tap device: {0}")]
+    #[error("Failed to open tap device")]
     OpenTap(#[source] OpenTapError),
     /// No socket provided.
     #[error("No socket provided")]
     SocketParameterMissing,
     /// Underlying QueuePair error.
-    #[error("Underlying QueuePair error: {0}")]
+    #[error("Underlying QueuePair error")]
     NetQueuePair(#[source] net_util::NetQueuePairError),
     /// Failed to register the TAP listener.
-    #[error("Failed to register the TAP listener: {0}")]
+    #[error("Failed to register the TAP listener")]
     RegisterTapListener(#[source] io::Error),
 }
 
