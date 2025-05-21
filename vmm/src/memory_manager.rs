@@ -2765,7 +2765,7 @@ impl Migratable for MemoryManager {
         })?;
 
         for r in self.guest_memory.memory().iter() {
-            r.bitmap().reset();
+            (**r).bitmap().reset();
         }
 
         Ok(())
@@ -2792,7 +2792,7 @@ impl Migratable for MemoryManager {
                 Some(region) => {
                     assert!(region.start_addr().raw_value() == r.gpa);
                     assert!(region.len() == r.size);
-                    region.bitmap().get_and_reset()
+                    (**region).bitmap().get_and_reset()
                 }
                 None => {
                     return Err(MigratableError::MigrateSend(anyhow!(
