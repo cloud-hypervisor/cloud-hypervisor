@@ -40,7 +40,7 @@ pub use tap::{Error as TapError, Tap};
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Failed to create a socket: {0}")]
+    #[error("Failed to create a socket")]
     CreateSocket(#[source] IoError),
 }
 
