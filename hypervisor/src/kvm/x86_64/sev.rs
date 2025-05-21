@@ -21,6 +21,8 @@ use kvm_bindings::kvm_sev_cmd;
 use kvm_ioctls::VmFd;
 use vmm_sys_util::errno;
 
+use crate::kvm::x86_64::SevFd;
+
 pub(crate) type Result<T> = std::result::Result<T, errno::Error>;
 
 const KVM_SEV_INIT2: u32 = 22;
@@ -32,11 +34,6 @@ const KVM_SEV_SNP_LAUNCH_FINISH: u32 = 102;
 // https://www.amd.com/content/dam/amd/en/documents/epyc-technical-docs/specifications/56860.pdf
 pub const GPA_METADATA_PADDING: u32 = 12;
 pub const SEV_VMSA_PAGE_TYPE: u32 = 2;
-
-#[derive(Debug)]
-pub struct SevFd {
-    pub fd: OwnedFd,
-}
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default)]

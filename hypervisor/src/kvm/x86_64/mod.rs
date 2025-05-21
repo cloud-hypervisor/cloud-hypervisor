@@ -31,6 +31,13 @@ use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 #[cfg(feature = "sev_snp")]
 pub(crate) mod sev;
 
+// Don't feature guard SevFd to allow us to build kvm + sev_snp binaries
+// and run non-snp workloads with same binary
+#[derive(Debug)]
+pub struct SevFd {
+    pub fd: std::os::fd::OwnedFd,
+}
+
 ///
 /// Check KVM extension for Linux
 ///

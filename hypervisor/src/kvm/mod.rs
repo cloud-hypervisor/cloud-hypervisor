@@ -559,8 +559,9 @@ pub struct KvmVm {
     fd: Arc<VmFd>,
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
-    #[cfg(feature = "sev_snp")]
-    sev_fd: Option<x86_64::sev::SevFd>,
+    #[cfg(target_arch = "x86_64")]
+    #[allow(dead_code)]
+    sev_fd: Option<x86_64::SevFd>,
     dirty_log_slots: Arc<RwLock<HashMap<u32, KvmDirtyLogSlot>>>,
     #[cfg(target_arch = "x86_64")]
     memfd: Option<OwnedFd>,
@@ -602,18 +603,12 @@ impl KvmVm {
         }
     }
     /// Get flag for kvm_userspace_memory_region based on memfd support.
-    #[cfg(target_arch = "x86_64")]
     fn get_kvm_userspace_memory_region_flag(&self, flag: u32) -> u32 {
         flag | if self.kvm_guest_memfd_supported {
             KVM_MEM_GUEST_MEMFD
         } else {
             0
         }
-    }
-    /// Get flag for kvm_userspace_memory_region based on memfd support.
-    #[cfg(target_arch = "aarch64")]
-    fn get_kvm_userspace_memory_region_flag(&self, flag: u32) -> u32 {
-        flag
     }
 }
 
@@ -648,19 +643,19 @@ impl vm::Vm for KvmVm {
         pfns: &[u64],
         uaddrs: &[u64],
     ) -> vm::Result<()> {
-        assert_eq!(pfns.len(), uaddrs.len());
         if pfns.is_empty() {
             return Ok(());
         }
+        assert_eq!(pfns.len(), uaddrs.len());
         // VMSA pages are not supported by launch_update
         // https://elixir.bootlin.com/linux/v6.11/source/arch/x86/kvm/svm/sev.c#L2377
         if page_type == sev::SEV_VMSA_PAGE_TYPE {
             return Ok(());
         }
-        for (pfn, uaddr) in pfns.iter().zip(uaddrs.iter()) {
+        for i in 0..pfns.len() {
             self.fd
                 .set_memory_attributes(kvm_bindings::kvm_memory_attributes {
-                    address: *pfn << sev::GPA_METADATA_PADDING,
+                    address: pfns[i] << sev::GPA_METADATA_PADDING,
                     size: page_size as u64,
                     attributes: kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
                     // Flags must be zero o/w error (flags aren't being used here yet)
@@ -670,7 +665,7 @@ impl vm::Vm for KvmVm {
             self.sev_fd
                 .as_ref()
                 .unwrap()
-                .launch_update(&self.fd, *uaddr, page_size as u64, *pfn, page_type)
+                .launch_update(&self.fd, uaddrs[i], page_size as u64, pfns[i], page_type)
                 .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
         }
 
@@ -1409,26 +1404,37 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         }
 
         let vm_fd = Arc::new(fd);
-
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            Ok(Arc::new(KvmVm {
+                fd: vm_fd,
+                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                kvm_guest_memfd_supported: false,
+            }))
+        }
         #[cfg(target_arch = "x86_64")]
         {
             // TODO: Check capability instead of VM type for guest memfd support once supported in kvm-ioctls.
-            let kvm_guest_memfd_supported =
+            let is_protected_vm =
                 vm_type == KVM_X86_SW_PROTECTED_VM as u64 || vm_type == KVM_X86_SNP_VM as u64;
-            let msr_list = self.get_msr_list()?;
-            let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
-            let mut msrs: Vec<MsrEntry> = vec![
-                MsrEntry {
-                    ..Default::default()
-                };
-                num_msrs
-            ];
-            let indices = msr_list.as_slice();
-            for (pos, index) in indices.iter().enumerate() {
-                msrs[pos].index = *index;
-            }
-
-            let memfd = if kvm_guest_memfd_supported {
+            let mut msrs: Vec<MsrEntry> = vec![];
+            let mut memfd = None;
+            #[allow(unused_mut)]
+            let mut sev_fd = None;
+            if is_protected_vm {
+                let msr_list = self.get_msr_list()?;
+                let num_msrs = msr_list.as_fam_struct_ref().nmsrs as usize;
+                msrs = vec![
+                    MsrEntry {
+                        ..Default::default()
+                    };
+                    num_msrs
+                ];
+                let indices = msr_list.as_slice();
+                for (pos, index) in indices.iter().enumerate() {
+                    msrs[pos].index = *index;
+                }
+                memfd =
                 // TODO: Refactor to create memfd when the memory region is created so
                 // that the size is appropriate.
                 unsafe {
@@ -1440,15 +1446,9 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                             })
                             .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?,
                     ))
-                }
-            } else {
-                None
-            };
-
-            #[cfg(feature = "sev_snp")]
-            {
-                let sev_snp_enabled = vm_type == KVM_X86_SNP_VM as u64;
-                if sev_snp_enabled {
+                };
+                #[cfg(feature = "sev_snp")]
+                if vm_type == KVM_X86_SNP_VM as u64 {
                     let mask = self.kvm.check_extension_int(crate::kvm::Cap::ExitHypercall);
                     let cap = kvm_bindings::kvm_enable_cap {
                         cap: kvm_bindings::KVM_CAP_EXIT_HYPERCALL,
@@ -1458,49 +1458,24 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                     vm_fd
                         .enable_cap(&cap)
                         .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
-                    // TODO: Fix sev device path flag as setting the environment variable is not working
-                }
-                let sev_fd = if sev_snp_enabled {
-                    let sev_dev = x86_64::sev::SevFd::new(&"/dev/sev".to_string())
+                    let sev_dev = x86_64::SevFd::new(&"/dev/sev".to_string())
                         .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilities(e.into()))?;
                     // This ioctl initializes the sev context and must be called right after opening the sev device.
                     info!("Calling KVM_SEV_INIT2");
                     sev_dev
                         .init2(&vm_fd)
                         .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
-                    Some(sev_dev)
-                } else {
-                    None
-                };
-
-                Ok(Arc::new(KvmVm {
-                    fd: vm_fd,
-                    msrs,
-                    dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
-                    sev_fd,
-                    memfd,
-                    kvm_guest_memfd_supported,
-                }))
+                    sev_fd = Some(sev_dev);
+                }
             }
 
-            #[cfg(not(feature = "sev_snp"))]
-            {
-                Ok(Arc::new(KvmVm {
-                    fd: vm_fd,
-                    msrs,
-                    dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
-                    memfd,
-                    kvm_guest_memfd_supported,
-                }))
-            }
-        }
-
-        #[cfg(not(target_arch = "x86_64"))]
-        {
             Ok(Arc::new(KvmVm {
                 fd: vm_fd,
+                msrs,
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
-                kvm_guest_memfd_supported: false,
+                sev_fd,
+                memfd,
+                kvm_guest_memfd_supported: is_protected_vm,
             }))
         }
     }

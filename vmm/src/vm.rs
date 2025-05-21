@@ -615,15 +615,6 @@ impl Vm {
                 .map_err(Error::InitializeTdxVm)?;
         }
 
-        // This initial SEV-SNP configuration must be done immediately after
-        // vCPUs are created. As part of this initialization we are
-        // transitioning the guest into secure state.
-        #[cfg(feature = "sev_snp")]
-        if sev_snp_enabled {
-            vm.sev_snp_init(Vm::get_default_sev_snp_guest_policy())
-                .map_err(Error::InitializeSevSnpVm)?;
-        }
-
         #[cfg(feature = "tdx")]
         let dynamic = !tdx_enabled;
         #[cfg(not(feature = "tdx"))]
@@ -699,6 +690,14 @@ impl Vm {
             .unwrap()
             .add_uefi_flash()
             .map_err(Error::MemoryManager)?;
+
+        // Must be called before load_payload_async since finish
+        // launching snp guest in load_igvm
+        #[cfg(feature = "sev_snp")]
+        if sev_snp_enabled {
+            vm.sev_snp_init(Vm::get_default_sev_snp_guest_policy())
+                .map_err(Error::InitializeSevSnpVm)?;
+        }
 
         // Loading the igvm file is pushed down here because
         // igvm parser needs cpu_manager to retrieve cpuid leaf.
@@ -966,18 +965,6 @@ impl Vm {
             )
             .map_err(Error::MemoryManager)?
         };
-
-        #[cfg(target_arch = "x86_64")]
-        // Note: For x86, always call this function before invoking start boot vcpus.
-        // Otherwise guest would fail to boot because we haven't created the
-        // userspace mappings to update the hypervisor about the memory mappings.
-        // These mappings must be created before we start the vCPU threads for
-        // the very first time.
-        memory_manager
-            .lock()
-            .unwrap()
-            .allocate_address_space()
-            .map_err(Error::MemoryManager)?;
 
         Vm::new_from_memory_manager(
             vm_config,
