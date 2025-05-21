@@ -151,35 +151,35 @@ const VIRTIO_PCI_DEVICE_NAME_PREFIX: &str = "_virtio-pci";
 #[derive(Error, Debug)]
 pub enum DeviceManagerError {
     /// Cannot create EventFd.
-    #[error("Cannot create EventFd: {0}")]
+    #[error("Cannot create EventFd")]
     EventFd(#[source] io::Error),
 
     /// Cannot open disk path
-    #[error("Cannot open disk path: {0}")]
+    #[error("Cannot open disk path")]
     Disk(#[source] io::Error),
 
     /// Cannot create vhost-user-net device
-    #[error("Cannot create vhost-user-net device: {0}")]
+    #[error("Cannot create vhost-user-net device")]
     CreateVhostUserNet(#[source] virtio_devices::vhost_user::Error),
 
     /// Cannot create virtio-blk device
-    #[error("Cannot create virtio-blk device: {0}")]
+    #[error("Cannot create virtio-blk device")]
     CreateVirtioBlock(#[source] io::Error),
 
     /// Cannot create virtio-net device
-    #[error("Cannot create virtio-net device: {0}")]
+    #[error("Cannot create virtio-net device")]
     CreateVirtioNet(#[source] virtio_devices::net::Error),
 
     /// Cannot create virtio-console device
-    #[error("Cannot create virtio-console device: {0}")]
+    #[error("Cannot create virtio-console device")]
     CreateVirtioConsole(#[source] io::Error),
 
     /// Cannot create virtio-rng device
-    #[error("Cannot create virtio-rng device: {0}")]
+    #[error("Cannot create virtio-rng device")]
     CreateVirtioRng(#[source] io::Error),
 
     /// Cannot create virtio-fs device
-    #[error("Cannot create virtio-fs device: {0}")]
+    #[error("Cannot create virtio-fs device")]
     CreateVirtioFs(#[source] virtio_devices::vhost_user::Error),
 
     /// Virtio-fs device was created without a socket.
@@ -187,23 +187,23 @@ pub enum DeviceManagerError {
     NoVirtioFsSock,
 
     /// Cannot create vhost-user-blk device
-    #[error("Cannot create vhost-user-blk device: {0}")]
+    #[error("Cannot create vhost-user-blk device")]
     CreateVhostUserBlk(#[source] virtio_devices::vhost_user::Error),
 
     /// Cannot create virtio-pmem device
-    #[error("Cannot create virtio-pmem device: {0}")]
+    #[error("Cannot create virtio-pmem device")]
     CreateVirtioPmem(#[source] io::Error),
 
     /// Cannot create vDPA device
-    #[error("Cannot create vdpa device: {0}")]
+    #[error("Cannot create vdpa device")]
     CreateVdpa(#[source] virtio_devices::vdpa::Error),
 
     /// Cannot create virtio-vsock device
-    #[error("Cannot create virtio-vsock device: {0}")]
+    #[error("Cannot create virtio-vsock device")]
     CreateVirtioVsock(#[source] io::Error),
 
     /// Cannot create tpm device
-    #[error("Cannot create tmp device: {0}")]
+    #[error("Cannot create tmp device")]
     CreateTpmDevice(#[source] anyhow::Error),
 
     /// Failed to convert Path to &str for the vDPA device.
@@ -215,44 +215,44 @@ pub enum DeviceManagerError {
     CreateVsockConvertPath,
 
     /// Cannot create virtio-vsock backend
-    #[error("Cannot create virtio-vsock backend: {0}")]
+    #[error("Cannot create virtio-vsock backend")]
     CreateVsockBackend(#[source] virtio_devices::vsock::VsockUnixError),
 
     /// Cannot create virtio-iommu device
-    #[error("Cannot create virtio-iommu device: {0}")]
+    #[error("Cannot create virtio-iommu device")]
     CreateVirtioIommu(#[source] io::Error),
 
     /// Cannot create virtio-balloon device
-    #[error("Cannot create virtio-balloon device: {0}")]
+    #[error("Cannot create virtio-balloon device")]
     CreateVirtioBalloon(#[source] io::Error),
 
     /// Cannot create pvmemcontrol device
     #[cfg(feature = "pvmemcontrol")]
-    #[error("Cannot create pvmemcontrol device: {0}")]
+    #[error("Cannot create pvmemcontrol device")]
     CreatePvmemcontrol(#[source] io::Error),
 
     /// Cannot create virtio-watchdog device
-    #[error("Cannot create virtio-watchdog device: {0}")]
+    #[error("Cannot create virtio-watchdog device")]
     CreateVirtioWatchdog(#[source] io::Error),
 
     /// Failed to parse disk image format
-    #[error("Failed to parse disk image format: {0}")]
+    #[error("Failed to parse disk image format")]
     DetectImageType(#[source] io::Error),
 
     /// Cannot open qcow disk path
-    #[error("Cannot open qcow disk path: {0}")]
+    #[error("Cannot open qcow disk path")]
     QcowDeviceCreate(#[source] qcow::Error),
 
     /// Cannot create serial manager
-    #[error("Cannot create serial manager: {0}")]
+    #[error("Cannot create serial manager")]
     CreateSerialManager(#[source] SerialManagerError),
 
     /// Cannot spawn the serial manager thread
-    #[error("Cannot spawn serial manager thread: {0}")]
+    #[error("Cannot spawn serial manager thread")]
     SpawnSerialManager(#[source] SerialManagerError),
 
     /// Cannot open tap interface
-    #[error("Cannot open tap interface: {0}")]
+    #[error("Cannot open tap interface")]
     OpenTap(#[source] net_util::TapError),
 
     /// Cannot allocate IRQ.
@@ -260,39 +260,39 @@ pub enum DeviceManagerError {
     AllocateIrq,
 
     /// Cannot configure the IRQ.
-    #[error("Cannot configure the IRQ: {0}")]
+    #[error("Cannot configure the IRQ")]
     Irq(#[source] vmm_sys_util::errno::Error),
 
     /// Cannot allocate PCI BARs
-    #[error("Cannot allocate PCI BARs: {0}")]
+    #[error("Cannot allocate PCI BARs")]
     AllocateBars(#[source] pci::PciDeviceError),
 
     /// Could not free the BARs associated with a PCI device.
-    #[error("Could not free the BARs associated with a PCI device: {0}")]
+    #[error("Could not free the BARs associated with a PCI device")]
     FreePciBars(#[source] pci::PciDeviceError),
 
     /// Cannot register ioevent.
-    #[error("Cannot register ioevent: {0}")]
+    #[error("Cannot register ioevent")]
     RegisterIoevent(#[source] anyhow::Error),
 
     /// Cannot unregister ioevent.
-    #[error("Cannot unregister ioevent: {0}")]
+    #[error("Cannot unregister ioevent")]
     UnRegisterIoevent(#[source] anyhow::Error),
 
     /// Cannot create virtio device
-    #[error("Cannot create virtio device: {0}")]
+    #[error("Cannot create virtio device")]
     VirtioDevice(#[source] virtio_devices::transport::VirtioPciDeviceError),
 
     /// Cannot add PCI device
-    #[error("Cannot add PCI device: {0}")]
+    #[error("Cannot add PCI device")]
     AddPciDevice(#[source] pci::PciRootError),
 
     /// Cannot open persistent memory file
-    #[error("Cannot open persistent memory file: {0}")]
+    #[error("Cannot open persistent memory file")]
     PmemFileOpen(#[source] io::Error),
 
     /// Cannot set persistent memory file size
-    #[error("Cannot set persistent memory file size: {0}")]
+    #[error("Cannot set persistent memory file size")]
     PmemFileSetLen(#[source] io::Error),
 
     /// Cannot find a memory range for persistent memory
@@ -304,68 +304,68 @@ pub enum DeviceManagerError {
     FsRangeAllocation,
 
     /// Error creating serial output file
-    #[error("Error creating serial output file: {0}")]
+    #[error("Error creating serial output file")]
     SerialOutputFileOpen(#[source] io::Error),
 
     /// Error creating debug-console output file
     #[cfg(target_arch = "x86_64")]
-    #[error("Error creating debug-console output file: {0}")]
+    #[error("Error creating debug-console output file")]
     DebugconOutputFileOpen(#[source] io::Error),
 
     /// Error creating console output file
-    #[error("Error creating console output file: {0}")]
+    #[error("Error creating console output file")]
     ConsoleOutputFileOpen(#[source] io::Error),
 
     /// Error creating serial pty
-    #[error("Error creating serial pty: {0}")]
+    #[error("Error creating serial pty")]
     SerialPtyOpen(#[source] io::Error),
 
     /// Error creating console pty
-    #[error("Error creating console pty: {0}")]
+    #[error("Error creating console pty")]
     ConsolePtyOpen(#[source] io::Error),
 
     /// Error creating debugcon pty
-    #[error("Error creating console pty: {0}")]
+    #[error("Error creating console pty")]
     DebugconPtyOpen(#[source] io::Error),
 
     /// Error setting pty raw mode
-    #[error("Error setting pty raw mode: {0}")]
+    #[error("Error setting pty raw mode")]
     SetPtyRaw(#[source] ConsoleDeviceError),
 
     /// Error getting pty peer
-    #[error("Error getting pty peer: {0}")]
+    #[error("Error getting pty peer")]
     GetPtyPeer(#[source] vmm_sys_util::errno::Error),
 
     /// Cannot create a VFIO device
-    #[error("Cannot create a VFIO device: {0}")]
+    #[error("Cannot create a VFIO device")]
     VfioCreate(#[source] vfio_ioctls::VfioError),
 
     /// Cannot create a VFIO PCI device
-    #[error("Cannot create a VFIO PCI device: {0}")]
+    #[error("Cannot create a VFIO PCI device")]
     VfioPciCreate(#[source] pci::VfioPciError),
 
     /// Failed to map VFIO MMIO region.
-    #[error("Failed to map VFIO MMIO region: {0}")]
+    #[error("Failed to map VFIO MMIO region")]
     VfioMapRegion(#[source] pci::VfioPciError),
 
     /// Failed to DMA map VFIO device.
-    #[error("Failed to DMA map VFIO device: {0}")]
+    #[error("Failed to DMA map VFIO device")]
     VfioDmaMap(#[source] vfio_ioctls::VfioError),
 
     /// Failed to DMA unmap VFIO device.
-    #[error("Failed to DMA unmap VFIO device: {0}")]
+    #[error("Failed to DMA unmap VFIO device")]
     VfioDmaUnmap(#[source] pci::VfioPciError),
 
     /// Failed to create the passthrough device.
-    #[error("Failed to create the passthrough device: {0}")]
+    #[error("Failed to create the passthrough device")]
     CreatePassthroughDevice(#[source] anyhow::Error),
 
     /// Failed to memory map.
-    #[error("Failed to memory map: {0}")]
+    #[error("Failed to memory map")]
     Mmap(#[source] io::Error),
 
     /// Cannot add legacy device to Bus.
-    #[error("Cannot add legacy device to Bus: {0}")]
+    #[error("Cannot add legacy device to Bus")]
     BusError(#[source] vm_device::BusError),
 
     /// Failed to allocate IO port
@@ -377,27 +377,27 @@ pub enum DeviceManagerError {
     AllocateMmioAddress,
 
     /// Failed to make hotplug notification
-    #[error("Failed to make hotplug notification: {0}")]
+    #[error("Failed to make hotplug notification")]
     HotPlugNotification(#[source] io::Error),
 
     /// Error from a memory manager operation
-    #[error("Error from a memory manager operation: {0}")]
+    #[error("Error from a memory manager operation")]
     MemoryManager(#[source] MemoryManagerError),
 
     /// Failed to create new interrupt source group.
-    #[error("Failed to create new interrupt source group: {0}")]
+    #[error("Failed to create new interrupt source group")]
     CreateInterruptGroup(#[source] io::Error),
 
     /// Failed to update interrupt source group.
-    #[error("Failed to update interrupt source group: {0}")]
+    #[error("Failed to update interrupt source group")]
     UpdateInterruptGroup(#[source] io::Error),
 
     /// Failed to create interrupt controller.
-    #[error("Failed to create interrupt controller: {0}")]
+    #[error("Failed to create interrupt controller")]
     CreateInterruptController(#[source] interrupt_controller::Error),
 
     /// Failed to create a new MmapRegion instance.
-    #[error("Failed to create a new MmapRegion instance: {0}")]
+    #[error("Failed to create a new MmapRegion instance")]
     NewMmapRegion(#[source] vm_memory::mmap::MmapRegionError),
 
     /// Failed to clone a File.
@@ -405,15 +405,15 @@ pub enum DeviceManagerError {
     CloneFile(#[source] io::Error),
 
     /// Failed to create socket file
-    #[error("Failed to create socket file: {0}")]
+    #[error("Failed to create socket file")]
     CreateSocketFile(#[source] io::Error),
 
     /// Failed to spawn the network backend
-    #[error("Failed to spawn the network backend: {0}")]
+    #[error("Failed to spawn the network backend")]
     SpawnNetBackend(#[source] io::Error),
 
     /// Failed to spawn the block backend
-    #[error("Failed to spawn the block backend: {0}")]
+    #[error("Failed to spawn the block backend")]
     SpawnBlockBackend(#[source] io::Error),
 
     /// Missing PCI bus.
@@ -429,15 +429,15 @@ pub enum DeviceManagerError {
     MissingPciDevice,
 
     /// Failed to remove a PCI device from the PCI bus.
-    #[error("Failed to remove a PCI device from the PCI bus: {0}")]
+    #[error("Failed to remove a PCI device from the PCI bus")]
     RemoveDeviceFromPciBus(#[source] pci::PciRootError),
 
     /// Failed to remove a bus device from the IO bus.
-    #[error("Failed to remove a bus device from the IO bus: {0}")]
+    #[error("Failed to remove a bus device from the IO bus")]
     RemoveDeviceFromIoBus(#[source] vm_device::BusError),
 
     /// Failed to remove a bus device from the MMIO bus.
-    #[error("Failed to remove a bus device from the MMIO bus: {0}")]
+    #[error("Failed to remove a bus device from the MMIO bus")]
     RemoveDeviceFromMmioBus(#[source] vm_device::BusError),
 
     /// Failed to find the device corresponding to a specific PCI b/d/f.
@@ -453,15 +453,15 @@ pub enum DeviceManagerError {
     UnknownDeviceId(String),
 
     /// Failed to find an available PCI device ID.
-    #[error("Failed to find an available PCI device ID: {0}")]
+    #[error("Failed to find an available PCI device ID")]
     NextPciDeviceId(#[source] pci::PciRootError),
 
     /// Could not reserve the PCI device ID.
-    #[error("Could not reserve the PCI device ID: {0}")]
+    #[error("Could not reserve the PCI device ID")]
     GetPciDeviceId(#[source] pci::PciRootError),
 
     /// Could not give the PCI device ID back.
-    #[error("Could not give the PCI device ID back: {0}")]
+    #[error("Could not give the PCI device ID back")]
     PutPciDeviceId(#[source] pci::PciRootError),
 
     /// No disk path was specified when one was expected
@@ -469,11 +469,11 @@ pub enum DeviceManagerError {
     NoDiskPath,
 
     /// Failed to update guest memory for virtio device.
-    #[error("Failed to update guest memory for virtio device: {0}")]
+    #[error("Failed to update guest memory for virtio device")]
     UpdateMemoryForVirtioDevice(#[source] virtio_devices::Error),
 
     /// Cannot create virtio-mem device
-    #[error("Cannot create virtio-mem device: {0}")]
+    #[error("Cannot create virtio-mem device")]
     CreateVirtioMem(#[source] io::Error),
 
     /// Cannot find a memory range for virtio-mem memory
@@ -481,7 +481,7 @@ pub enum DeviceManagerError {
     VirtioMemRangeAllocation,
 
     /// Failed to update guest memory for VFIO PCI device.
-    #[error("Failed to update guest memory for VFIO PCI device: {0}")]
+    #[error("Failed to update guest memory for VFIO PCI device")]
     UpdateMemoryForVfioPciDevice(#[source] vfio_ioctls::VfioError),
 
     /// Trying to use a directory for pmem but no size specified
@@ -517,7 +517,7 @@ pub enum DeviceManagerError {
     NoSocketOptionSupportForConsoleDevice,
 
     /// Failed to resize virtio-balloon
-    #[error("Failed to resize virtio-balloon: {0}")]
+    #[error("Failed to resize virtio-balloon")]
     VirtioBalloonResize(#[source] virtio_devices::balloon::Error),
 
     /// Missing virtio-balloon, can't proceed as expected.
@@ -529,12 +529,12 @@ pub enum DeviceManagerError {
     MissingVirtualIommu,
 
     /// Failed to do power button notification
-    #[error("Failed to do power button notification: {0}")]
+    #[error("Failed to do power button notification")]
     PowerButtonNotification(#[source] io::Error),
 
     /// Failed to do AArch64 GPIO power button notification
     #[cfg(target_arch = "aarch64")]
-    #[error("Failed to do AArch64 GPIO power button notification: {0}")]
+    #[error("Failed to do AArch64 GPIO power button notification")]
     AArch64PowerButtonNotification(#[source] devices::legacy::GpioDeviceError),
 
     /// Failed to set O_DIRECT flag to file descriptor
@@ -542,63 +542,63 @@ pub enum DeviceManagerError {
     SetDirectIo,
 
     /// Failed to create FixedVhdDiskAsync
-    #[error("Failed to create FixedVhdDiskAsync: {0}")]
+    #[error("Failed to create FixedVhdDiskAsync")]
     CreateFixedVhdDiskAsync(#[source] io::Error),
 
     /// Failed to create FixedVhdDiskSync
-    #[error("Failed to create FixedVhdDiskSync: {0}")]
+    #[error("Failed to create FixedVhdDiskSync")]
     CreateFixedVhdDiskSync(#[source] io::Error),
 
     /// Failed to create QcowDiskSync
-    #[error("Failed to create QcowDiskSync: {0}")]
+    #[error("Failed to create QcowDiskSync")]
     CreateQcowDiskSync(#[source] qcow::Error),
 
     /// Failed to create FixedVhdxDiskSync
-    #[error("Failed to create FixedVhdxDiskSync: {0}")]
+    #[error("Failed to create FixedVhdxDiskSync")]
     CreateFixedVhdxDiskSync(#[source] vhdx::VhdxError),
 
     /// Failed to add DMA mapping handler to virtio-mem device.
-    #[error("Failed to add DMA mapping handler to virtio-mem device: {0}")]
+    #[error("Failed to add DMA mapping handler to virtio-mem device")]
     AddDmaMappingHandlerVirtioMem(#[source] virtio_devices::mem::Error),
 
     /// Failed to remove DMA mapping handler from virtio-mem device.
-    #[error("Failed to remove DMA mapping handler from virtio-mem device: {0}")]
+    #[error("Failed to remove DMA mapping handler from virtio-mem device")]
     RemoveDmaMappingHandlerVirtioMem(#[source] virtio_devices::mem::Error),
 
     /// Failed to create vfio-user client
-    #[error("Failed to create vfio-user client: {0}")]
+    #[error("Failed to create vfio-user client")]
     VfioUserCreateClient(#[source] vfio_user::Error),
 
     /// Failed to create VFIO user device
-    #[error("Failed to create VFIO user device: {0}")]
+    #[error("Failed to create VFIO user device")]
     VfioUserCreate(#[source] VfioUserPciDeviceError),
 
     /// Failed to map region from VFIO user device into guest
-    #[error("Failed to map region from VFIO user device into guest: {0}")]
+    #[error("Failed to map region from VFIO user device into guest")]
     VfioUserMapRegion(#[source] VfioUserPciDeviceError),
 
     /// Failed to DMA map VFIO user device.
-    #[error("Failed to DMA map VFIO user device: {0}")]
+    #[error("Failed to DMA map VFIO user device")]
     VfioUserDmaMap(#[source] VfioUserPciDeviceError),
 
     /// Failed to DMA unmap VFIO user device.
-    #[error("Failed to DMA unmap VFIO user device: {0}")]
+    #[error("Failed to DMA unmap VFIO user device")]
     VfioUserDmaUnmap(#[source] VfioUserPciDeviceError),
 
     /// Failed to update memory mappings for VFIO user device
-    #[error("Failed to update memory mappings for VFIO user device: {0}")]
+    #[error("Failed to update memory mappings for VFIO user device")]
     UpdateMemoryForVfioUserPciDevice(#[source] VfioUserPciDeviceError),
 
     /// Cannot duplicate file descriptor
-    #[error("Cannot duplicate file descriptor: {0}")]
+    #[error("Cannot duplicate file descriptor")]
     DupFd(#[source] vmm_sys_util::errno::Error),
 
     /// Failed to DMA map virtio device.
-    #[error("Failed to DMA map virtio device: {0}")]
+    #[error("Failed to DMA map virtio device")]
     VirtioDmaMap(#[source] std::io::Error),
 
     /// Failed to DMA unmap virtio device.
-    #[error("Failed to DMA unmap virtio device: {0}")]
+    #[error("Failed to DMA unmap virtio device")]
     VirtioDmaUnmap(#[source] std::io::Error),
 
     /// Cannot hotplug device behind vIOMMU
@@ -614,23 +614,23 @@ pub enum DeviceManagerError {
     InvalidIdentifier(String),
 
     /// Error activating virtio device
-    #[error("Error activating virtio device: {0}")]
+    #[error("Error activating virtio device")]
     VirtioActivate(#[source] ActivateError),
 
     /// Failed retrieving device state from snapshot
-    #[error("Failed retrieving device state from snapshot: {0}")]
+    #[error("Failed retrieving device state from snapshot")]
     RestoreGetState(#[source] MigratableError),
 
     /// Cannot create a PvPanic device
-    #[error("Cannot create a PvPanic device: {0}")]
+    #[error("Cannot create a PvPanic device")]
     PvPanicCreate(#[source] devices::pvpanic::PvPanicError),
 
     /// Cannot create a RateLimiterGroup
-    #[error("Cannot create a RateLimiterGroup: {0}")]
+    #[error("Cannot create a RateLimiterGroup")]
     RateLimiterGroupCreate(#[source] rate_limiter::group::Error),
 
     /// Cannot start sigwinch listener
-    #[error("Cannot start sigwinch listener: {0}")]
+    #[error("Cannot start sigwinch listener")]
     StartSigwinchListener(#[source] std::io::Error),
 
     // Invalid console info
@@ -642,7 +642,7 @@ pub enum DeviceManagerError {
     InvalidConsoleFd,
 
     /// Cannot lock images of all block devices.
-    #[error("Cannot lock images of all block devices: {0}")]
+    #[error("Cannot lock images of all block devices")]
     DiskLockError(#[source] virtio_devices::block::Error),
 }
 

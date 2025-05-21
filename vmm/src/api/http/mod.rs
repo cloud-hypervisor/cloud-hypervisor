@@ -43,7 +43,7 @@ pub type HttpApiHandle = (thread::JoinHandle<Result<()>>, EventFd);
 #[derive(Error, Debug)]
 pub enum HttpError {
     /// API request receive error
-    #[error("Failed to deserialize JSON: {0}")]
+    #[error("Failed to deserialize JSON")]
     SerdeJsonDeserialize(#[from] SerdeError),
 
     /// Attempt to access unsupported HTTP method
@@ -63,7 +63,7 @@ pub enum HttpError {
     InternalServerError,
 
     /// Error from internal API
-    #[error("Error from API: {0}")]
+    #[error("Error from API")]
     ApiError(#[source] ApiError),
 }
 
