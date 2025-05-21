@@ -43,11 +43,11 @@ const N_GPIOS: u32 = 8;
 pub enum Error {
     #[error("Bad Write Offset: {0}")]
     BadWriteOffset(u64),
-    #[error("GPIO interrupt disabled by guest driver.")]
+    #[error("GPIO interrupt disabled by guest driver")]
     GpioInterruptDisabled,
-    #[error("Could not trigger GPIO interrupt: {0}.")]
+    #[error("Could not trigger GPIO interrupt: {0}")]
     GpioInterruptFailure(#[source] io::Error),
-    #[error("Invalid GPIO Input key triggered: {0}.")]
+    #[error("Invalid GPIO Input key triggered: {0}")]
     GpioTriggerKeyFailure(u32),
 }
 

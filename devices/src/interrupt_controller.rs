@@ -37,19 +37,19 @@ pub enum Error {
     #[cfg(target_arch = "aarch64")]
     /// Failed creating GIC device.
     #[error("Failed creating GIC device: {0}")]
-    CreateGic(hypervisor::HypervisorVmError),
+    CreateGic(#[source] hypervisor::HypervisorVmError),
     #[cfg(target_arch = "aarch64")]
     /// Failed restoring GIC device.
     #[error("Failed restoring GIC device: {0}")]
-    RestoreGic(hypervisor::arch::aarch64::gic::Error),
+    RestoreGic(#[source] hypervisor::arch::aarch64::gic::Error),
     #[cfg(target_arch = "riscv64")]
     /// Failed creating AIA device.
     #[error("Failed creating AIA device: {0}")]
-    CreateAia(hypervisor::HypervisorVmError),
+    CreateAia(#[source] hypervisor::HypervisorVmError),
     #[cfg(target_arch = "riscv64")]
     /// Failed restoring AIA device.
     #[error("Failed restoring AIA device: {0}")]
-    RestoreAia(hypervisor::arch::riscv64::aia::Error),
+    RestoreAia(#[source] hypervisor::arch::riscv64::aia::Error),
 }
 
 type Result<T> = result::Result<T, Error>;
