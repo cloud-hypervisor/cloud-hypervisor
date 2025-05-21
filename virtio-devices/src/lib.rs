@@ -87,19 +87,19 @@ const VIRTIO_F_NOTIFICATION_DATA: u32 = 38;
 pub enum ActivateError {
     #[error("Failed to activate virtio device")]
     BadActivate,
-    #[error("Failed to clone exit event fd: {0}")]
+    #[error("Failed to clone exit event fd")]
     CloneExitEventFd(#[source] std::io::Error),
-    #[error("Failed to spawn thread: {0}")]
+    #[error("Failed to spawn thread")]
     ThreadSpawn(#[source] std::io::Error),
-    #[error("Failed to setup vhost-user-fs daemon: {0}")]
+    #[error("Failed to setup vhost-user-fs daemon")]
     VhostUserFsSetup(#[source] vhost_user::Error),
-    #[error("Failed to setup vhost-user daemon: {0}")]
+    #[error("Failed to setup vhost-user daemon")]
     VhostUserSetup(#[source] vhost_user::Error),
-    #[error("Failed to create seccomp filter: {0}")]
+    #[error("Failed to create seccomp filter")]
     CreateSeccompFilter(#[source] seccompiler::Error),
-    #[error("Failed to create rate limiter: {0}")]
+    #[error("Failed to create rate limiter")]
     CreateRateLimiter(#[source] std::io::Error),
-    #[error("Failed to activate the vDPA device: {0}")]
+    #[error("Failed to activate the vDPA device")]
     ActivateVdpa(#[source] vdpa::Error),
 }
 
@@ -109,21 +109,21 @@ pub type DeviceEventT = u16;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Failed to single used queue: {0}")]
+    #[error("Failed to single used queue")]
     FailedSignalingUsedQueue(#[source] io::Error),
-    #[error("I/O Error: {0}")]
+    #[error("I/O Error")]
     IoError(#[source] io::Error),
-    #[error("Failed to update memory vhost-user: {0}")]
+    #[error("Failed to update memory vhost-user")]
     VhostUserUpdateMemory(#[source] vhost_user::Error),
-    #[error("Failed to add memory region vhost-user: {0}")]
+    #[error("Failed to add memory region vhost-user")]
     VhostUserAddMemoryRegion(#[source] vhost_user::Error),
     #[error("Failed to set shared memory region")]
     SetShmRegionsNotSupported,
-    #[error("Failed to process net queue: {0}")]
+    #[error("Failed to process net queue")]
     NetQueuePair(#[source] ::net_util::NetQueuePairError),
-    #[error("Failed to : {0}")]
+    #[error("Failed to ")]
     QueueAddUsed(#[source] virtio_queue::Error),
-    #[error("Failed to : {0}")]
+    #[error("Failed to ")]
     QueueIterator(#[source] virtio_queue::Error),
 }
 

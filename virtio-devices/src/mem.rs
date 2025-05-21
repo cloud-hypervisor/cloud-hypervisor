@@ -101,7 +101,7 @@ const VIRTIO_MEM_F_ACPI_PXM: u8 = 0;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Guest gave us bad memory addresses: {0}")]
+    #[error("Guest gave us bad memory addresses")]
     GuestMemory(#[source] GuestMemoryError),
     #[error("Guest gave us a write only descriptor that protocol says to read from")]
     UnexpectedWriteOnlyDescriptor,
@@ -113,23 +113,23 @@ pub enum Error {
     BufferLengthTooSmall,
     #[error("Guest sent us invalid request")]
     InvalidRequest,
-    #[error("Failed to EventFd write: {0}")]
+    #[error("Failed to EventFd write")]
     EventFdWriteFail(#[source] std::io::Error),
-    #[error("Failed to EventFd try_clone: {0}")]
+    #[error("Failed to EventFd try_clone")]
     EventFdTryCloneFail(#[source] std::io::Error),
-    #[error("Failed to MpscRecv: {0}")]
+    #[error("Failed to MpscRecv")]
     MpscRecvFail(#[source] mpsc::RecvError),
-    #[error("Resize invalid argument: {0}")]
+    #[error("Resize invalid argument")]
     ResizeError(#[source] anyhow::Error),
-    #[error("Fail to resize trigger: {0}")]
+    #[error("Fail to resize trigger")]
     ResizeTriggerFail(#[source] DeviceError),
-    #[error("Invalid configuration: {0}")]
+    #[error("Invalid configuration")]
     ValidateError(#[source] anyhow::Error),
-    #[error("Failed discarding memory range: {0}")]
+    #[error("Failed discarding memory range")]
     DiscardMemoryRange(#[source] std::io::Error),
-    #[error("Failed DMA mapping: {0}")]
+    #[error("Failed DMA mapping")]
     DmaMap(#[source] std::io::Error),
-    #[error("Failed DMA unmapping: {0}")]
+    #[error("Failed DMA unmapping")]
     DmaUnmap(#[source] std::io::Error),
     #[error("Invalid DMA mapping handler")]
     InvalidDmaMappingHandler,
@@ -137,7 +137,7 @@ pub enum Error {
     NotActivatedByGuest,
     #[error("Unknown request type: {0}")]
     UnknownRequestType(u16),
-    #[error("Failed adding used index: {0}")]
+    #[error("Failed adding used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
 }
 
