@@ -5,6 +5,14 @@
 #[cfg(target_arch = "x86_64")]
 use std::collections::btree_map::BTreeMap;
 use std::result;
+use std::sync::{Arc, Mutex};
+
+use bit_vec::BitVec;
+
+/// According to the value set kernel
+const KVM_MAX_IRQ_ROUTES: usize = 4096;
+/// Invalid gsi num
+pub const GSI_INVALID: u32 = u32::MAX;
 
 #[derive(Debug)]
 pub enum Error {
@@ -34,7 +42,8 @@ pub struct GsiAllocator {
     #[cfg(target_arch = "x86_64")]
     apics: BTreeMap<u32, u32>,
     next_irq: u32,
-    next_gsi: u32,
+    gsi_base: u32,
+    gsi_bitmap: Arc<Mutex<BitVec>>,
 }
 
 impl GsiAllocator {
@@ -44,16 +53,13 @@ impl GsiAllocator {
         let mut allocator = GsiAllocator {
             apics: BTreeMap::new(),
             next_irq: 0xffff_ffff,
-            next_gsi: 0,
+            gsi_base: 0,
+            gsi_bitmap: Arc::new(Mutex::new(BitVec::from_elem(KVM_MAX_IRQ_ROUTES, false))),
         };
 
         for apic in &apics {
             if apic.base < allocator.next_irq {
                 allocator.next_irq = apic.base;
-            }
-
-            if apic.base + apic.irqs > allocator.next_gsi {
-                allocator.next_gsi = apic.base + apic.irqs;
             }
 
             allocator.apics.insert(apic.base, apic.irqs);
@@ -67,15 +73,34 @@ impl GsiAllocator {
     pub fn new() -> Self {
         GsiAllocator {
             next_irq: arch::IRQ_BASE,
-            next_gsi: arch::IRQ_BASE,
+            gsi_base: arch::IRQ_BASE,
+            gsi_bitmap: Arc::new(Mutex::new(BitVec::from_elem(KVM_MAX_IRQ_ROUTES, false))),
         }
     }
 
     /// Allocate a GSI
     pub fn allocate_gsi(&mut self) -> Result<u32> {
-        let gsi = self.next_gsi;
-        self.next_gsi = self.next_gsi.checked_add(1).ok_or(Error::Overflow)?;
+        let mut gsi_bitmap = self.gsi_bitmap.lock().unwrap();
+        let mut gsi = GSI_INVALID;
+        for i in self.gsi_base as usize..gsi_bitmap.len() {
+            if !gsi_bitmap[i] {
+                gsi = i as u32;
+                break;
+            }
+        }
+        gsi_bitmap.set(gsi as usize, true);
+
         Ok(gsi)
+    }
+
+    /// Free a GSI
+    pub fn free_gsi(&mut self, gsi: u32) {
+        self.gsi_bitmap.lock().unwrap().set(gsi as usize, false);
+    }
+
+    /// Enable gsi bit
+    pub fn enable_gsi_bit(&mut self, gsi: u32) {
+        self.gsi_bitmap.lock().unwrap().set(gsi as usize, true);
     }
 
     #[cfg(target_arch = "x86_64")]

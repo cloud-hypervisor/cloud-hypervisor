@@ -24,12 +24,16 @@ struct InterruptRoute {
     gsi: u32,
     irq_fd: EventFd,
     registered: AtomicBool,
+    allocator: Arc<Mutex<SystemAllocator>>,
 }
 
 impl InterruptRoute {
-    pub fn new(allocator: &mut SystemAllocator) -> Result<Self> {
+    pub fn new(allocator: Arc<Mutex<SystemAllocator>>) -> Result<Self> {
         let irq_fd = EventFd::new(libc::EFD_NONBLOCK)?;
+
         let gsi = allocator
+            .lock()
+            .unwrap()
             .allocate_gsi()
             .ok_or_else(|| io::Error::other("Failed allocating new GSI"))?;
 
@@ -37,6 +41,7 @@ impl InterruptRoute {
             gsi,
             irq_fd,
             registered: AtomicBool::new(false),
+            allocator,
         })
     }
 
@@ -44,6 +49,8 @@ impl InterruptRoute {
         if !self.registered.load(Ordering::Acquire) {
             vm.register_irqfd(&self.irq_fd, self.gsi)
                 .map_err(|e| io::Error::other(format!("Failed registering irq_fd: {e}")))?;
+
+            self.allocator.lock().unwrap().enable_gsi_bit(self.gsi);
 
             // Update internals to track the irq_fd as "registered".
             self.registered.store(true, Ordering::Release);
@@ -56,6 +63,8 @@ impl InterruptRoute {
         if self.registered.load(Ordering::Acquire) {
             vm.unregister_irqfd(&self.irq_fd, self.gsi)
                 .map_err(|e| io::Error::other(format!("Failed unregistering irq_fd: {e}")))?;
+
+            self.allocator.lock().unwrap().free_gsi(self.gsi);
 
             // Update internals to track the irq_fd as "unregistered".
             self.registered.store(false, Ordering::Release);
@@ -292,11 +301,10 @@ impl InterruptManager for MsiInterruptManager {
     type GroupConfig = MsiIrqGroupConfig;
 
     fn create_group(&self, config: Self::GroupConfig) -> Result<Arc<dyn InterruptSourceGroup>> {
-        let mut allocator = self.allocator.lock().unwrap();
         let mut irq_routes: HashMap<InterruptIndex, InterruptRoute> =
             HashMap::with_capacity(config.count as usize);
         for i in config.base..config.base + config.count {
-            irq_routes.insert(i, InterruptRoute::new(&mut allocator)?);
+            irq_routes.insert(i, InterruptRoute::new(self.allocator.clone())?);
         }
 
         Ok(Arc::new(MsiInterruptGroup::new(
