@@ -31,34 +31,34 @@ mod defs {
 #[derive(Error, Debug)]
 pub enum Error {
     /// Error converting from UTF-8
-    #[error("Error converting from UTF-8: {0}")]
+    #[error("Error converting from UTF-8")]
     ConvertFromUtf8(#[source] std::str::Utf8Error),
     /// Error registering a new epoll-listening FD.
-    #[error("Error registering a new epoll-listening FD: {0}")]
+    #[error("Error registering a new epoll-listening FD")]
     EpollAdd(#[source] std::io::Error),
     /// Error creating an epoll FD.
-    #[error("Error creating an epoll FD: {0}")]
+    #[error("Error creating an epoll FD")]
     EpollFdCreate(#[source] std::io::Error),
     /// The host made an invalid vsock port connection request.
     #[error("The host made an invalid vsock port connection request")]
     InvalidPortRequest,
     /// Error parsing integer.
-    #[error("Error parsing integer: {0}")]
+    #[error("Error parsing integer")]
     ParseInteger(#[source] std::num::ParseIntError),
     /// Error reading stream port.
-    #[error("Error reading stream port: {0}")]
+    #[error("Error reading stream port")]
     ReadStreamPort(#[source] Box<Error>),
     /// Error accepting a new connection from the host-side Unix socket.
-    #[error("Error accepting a new connection from the host-side Unix socket: {0}")]
+    #[error("Error accepting a new connection from the host-side Unix socket")]
     UnixAccept(#[source] std::io::Error),
     /// Error binding to the host-side Unix socket.
-    #[error("Error binding to the host-side Unix socket: {0}")]
+    #[error("Error binding to the host-side Unix socket")]
     UnixBind(#[source] std::io::Error),
     /// Error connecting to a host-side Unix socket.
-    #[error("Error connecting to a host-side Unix socket: {0}")]
+    #[error("Error connecting to a host-side Unix socket")]
     UnixConnect(#[source] std::io::Error),
     /// Error reading from host-side Unix socket.
-    #[error("Error reading from host-side Unix socket: {0}")]
+    #[error("Error reading from host-side Unix socket")]
     UnixRead(#[source] std::io::Error),
     /// Muxer connection limit reached.
     #[error("Muxer connection limit reached")]

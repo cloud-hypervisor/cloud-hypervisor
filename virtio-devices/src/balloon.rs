@@ -64,27 +64,27 @@ const VIRTIO_BALLOON_F_REPORTING: u64 = 5;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Guest gave us bad memory addresses.: {0}")]
+    #[error("Guest gave us bad memory addresses.")]
     GuestMemory(#[source] GuestMemoryError),
     #[error("Guest gave us a write only descriptor that protocol says to read from")]
     UnexpectedWriteOnlyDescriptor,
     #[error("Guest sent us invalid request")]
     InvalidRequest,
-    #[error("Fallocate fail.: {0}")]
+    #[error("Fallocate fail.")]
     FallocateFail(#[source] std::io::Error),
-    #[error("Madvise fail.: {0}")]
+    #[error("Madvise fail.")]
     MadviseFail(#[source] std::io::Error),
-    #[error("Failed to EventFd write.: {0}")]
+    #[error("Failed to EventFd write.")]
     EventFdWriteFail(#[source] std::io::Error),
     #[error("Invalid queue index: {0}")]
     InvalidQueueIndex(usize),
-    #[error("Fail tp signal: {0}")]
+    #[error("Fail tp signal")]
     FailedSignal(#[source] io::Error),
     #[error("Descriptor chain is too short")]
     DescriptorChainTooShort,
-    #[error("Failed adding used index: {0}")]
+    #[error("Failed adding used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
-    #[error("Failed creating an iterator over the queue: {0}")]
+    #[error("Failed creating an iterator over the queue")]
     QueueIterator(#[source] virtio_queue::Error),
 }
 
