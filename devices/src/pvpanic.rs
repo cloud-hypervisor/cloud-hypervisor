@@ -31,9 +31,9 @@ const PVPANIC_CRASH_LOADED: u8 = 1 << 1;
 
 #[derive(Debug, Error)]
 pub enum PvPanicError {
-    #[error("Failed creating PvPanicDevice: {0}")]
+    #[error("Failed creating PvPanicDevice")]
     CreatePvPanicDevice(#[source] anyhow::Error),
-    #[error("Failed to retrieve PciConfigurationState: {0}")]
+    #[error("Failed to retrieve PciConfigurationState")]
     RetrievePciConfigurationState(#[source] anyhow::Error),
 }
 
