@@ -10,6 +10,7 @@ kvm = ["arch/kvm"]
 
 [dependencies]
 libc = { workspace = true }
+bit-vec = "0.8.0"
 vm-memory = { workspace = true }
 
 [target.'cfg(any(target_arch = "aarch64", target_arch = "riscv64"))'.dependencies]
