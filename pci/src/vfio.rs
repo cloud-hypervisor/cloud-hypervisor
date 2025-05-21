@@ -19,9 +19,7 @@ use log::{error, info};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
-use vfio_ioctls::{
-    VfioContainer, VfioDevice, VfioIrq, VfioRegionInfoCap, VfioRegionSparseMmapArea,
-};
+use vfio_ioctls::{VfioDevice, VfioIrq, VfioOps, VfioRegionInfoCap, VfioRegionSparseMmapArea};
 use vm_allocator::page_size::{
     align_page_size_down, align_page_size_up, is_4k_aligned, is_4k_multiple, is_page_size_aligned,
 };
@@ -1468,7 +1466,7 @@ pub struct VfioPciDevice {
     id: String,
     vm: Arc<dyn hypervisor::Vm>,
     device: Arc<VfioDevice>,
-    container: Arc<VfioContainer>,
+    container: Arc<dyn VfioOps>,
     common: VfioCommon,
     iommu_attached: bool,
     memory_slot_allocator: MemorySlotAllocator,
@@ -1483,7 +1481,7 @@ impl VfioPciDevice {
         id: String,
         vm: Arc<dyn hypervisor::Vm>,
         device: VfioDevice,
-        container: Arc<VfioContainer>,
+        container: Arc<dyn VfioOps>,
         msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         iommu_attached: bool,
@@ -2000,7 +1998,7 @@ impl Migratable for VfioPciDevice {}
 /// be used when the caller tries to provide a way to update the mappings
 /// associated with a specific VFIO container.
 pub struct VfioDmaMapping<M: GuestAddressSpace> {
-    container: Arc<VfioContainer>,
+    container: Arc<dyn VfioOps>,
     memory: Arc<M>,
     mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
 }
@@ -2012,7 +2010,7 @@ impl<M: GuestAddressSpace> VfioDmaMapping<M> {
     /// * `memory`: guest memory to mmap.
     /// * `mmio_regions`: mmio_regions to mmap.
     pub fn new(
-        container: Arc<VfioContainer>,
+        container: Arc<dyn VfioOps>,
         memory: Arc<M>,
         mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
     ) -> Self {
