@@ -157,6 +157,9 @@ pub enum Error {
     #[error("Error adding CpuManager to MMIO bus: {0}")]
     BusError(#[source] vm_device::BusError),
 
+    #[error("Requested zero vCPUs")]
+    DesiredVCpuCountIsZero,
+
     #[error("Requested vCPUs exceed maximum")]
     DesiredVCpuCountExceedsMax,
 
@@ -1318,6 +1321,10 @@ impl CpuManager {
 
         if !self.dynamic {
             return Ok(false);
+        }
+
+        if desired_vcpus < 1 {
+            return Err(Error::DesiredVCpuCountIsZero);
         }
 
         if self.check_pending_removed_vcpu() {
