@@ -46,7 +46,7 @@ pub enum Commands {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Failed converting buf to PTM : {0}")]
+    #[error("Failed converting buf to PTM ")]
     ConvertToPtm(#[source] anyhow::Error),
 }
 type Result<T> = anyhow::Result<T, Error>;
