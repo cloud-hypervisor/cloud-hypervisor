@@ -58,196 +58,196 @@ pub enum HypervisorVmError {
     ///
     /// Create Vcpu error
     ///
-    #[error("Failed to create Vcpu: {0}")]
+    #[error("Failed to create Vcpu")]
     CreateVcpu(#[source] anyhow::Error),
     ///
     /// Identity map address error
     ///
-    #[error("Failed to set identity map address: {0}")]
+    #[error("Failed to set identity map address")]
     SetIdentityMapAddress(#[source] anyhow::Error),
     ///
     /// TSS address error
     ///
-    #[error("Failed to set TSS address: {0}")]
+    #[error("Failed to set TSS address")]
     SetTssAddress(#[source] anyhow::Error),
     ///
     /// Create interrupt controller error
     ///
-    #[error("Failed to create interrupt controller: {0}")]
+    #[error("Failed to create interrupt controller")]
     CreateIrq(#[source] anyhow::Error),
     ///
     /// Register interrupt event error
     ///
-    #[error("Failed to register interrupt event: {0}")]
+    #[error("Failed to register interrupt event")]
     RegisterIrqFd(#[source] anyhow::Error),
     ///
     /// Un register interrupt event error
     ///
-    #[error("Failed to unregister interrupt event: {0}")]
+    #[error("Failed to unregister interrupt event")]
     UnregisterIrqFd(#[source] anyhow::Error),
     ///
     /// Register IO event error
     ///
-    #[error("Failed to register IO event: {0}")]
+    #[error("Failed to register IO event")]
     RegisterIoEvent(#[source] anyhow::Error),
     ///
     /// Unregister IO event error
     ///
-    #[error("Failed to unregister IO event: {0}")]
+    #[error("Failed to unregister IO event")]
     UnregisterIoEvent(#[source] anyhow::Error),
     ///
     /// Set GSI routing error
     ///
-    #[error("Failed to set GSI routing: {0}")]
+    #[error("Failed to set GSI routing")]
     SetGsiRouting(#[source] anyhow::Error),
     ///
     /// Create user memory error
     ///
-    #[error("Failed to create user memory: {0}")]
+    #[error("Failed to create user memory")]
     CreateUserMemory(#[source] anyhow::Error),
     ///
     /// Remove user memory region error
     ///
-    #[error("Failed to remove user memory: {0}")]
+    #[error("Failed to remove user memory")]
     RemoveUserMemory(#[source] anyhow::Error),
     ///
     /// Create device error
     ///
-    #[error("Failed to set GSI routing: {0}")]
+    #[error("Failed to set GSI routing")]
     CreateDevice(#[source] anyhow::Error),
     ///
     /// Get preferred target error
     ///
-    #[error("Failed to get preferred target: {0}")]
+    #[error("Failed to get preferred target")]
     GetPreferredTarget(#[source] anyhow::Error),
     ///
     /// Enable split Irq error
     ///
-    #[error("Failed to enable split Irq: {0}")]
+    #[error("Failed to enable split Irq")]
     EnableSplitIrq(#[source] anyhow::Error),
     ///
     /// Enable SGX attribute error
     ///
-    #[error("Failed to enable SGX attribute: {0}")]
+    #[error("Failed to enable SGX attribute")]
     EnableSgxAttribute(#[source] anyhow::Error),
     ///
     /// Get clock error
     ///
-    #[error("Failed to get clock: {0}")]
+    #[error("Failed to get clock")]
     GetClock(#[source] anyhow::Error),
     ///
     /// Set clock error
     ///
-    #[error("Failed to set clock: {0}")]
+    #[error("Failed to set clock")]
     SetClock(#[source] anyhow::Error),
     ///
     /// Create passthrough device
     ///
-    #[error("Failed to create passthrough device: {0}")]
+    #[error("Failed to create passthrough device")]
     CreatePassthroughDevice(#[source] anyhow::Error),
     /// Write to Guest memory
     ///
-    #[error("Failed to write to guest memory: {0}")]
+    #[error("Failed to write to guest memory")]
     GuestMemWrite(#[source] anyhow::Error),
     ///
     /// Read Guest memory
     ///
-    #[error("Failed to read guest memory: {0}")]
+    #[error("Failed to read guest memory")]
     GuestMemRead(#[source] anyhow::Error),
     ///
     /// Read from MMIO Bus
     ///
-    #[error("Failed to read from MMIO Bus: {0}")]
+    #[error("Failed to read from MMIO Bus")]
     MmioBusRead(#[source] anyhow::Error),
     ///
     /// Write to MMIO Bus
     ///
-    #[error("Failed to write to MMIO Bus: {0}")]
+    #[error("Failed to write to MMIO Bus")]
     MmioBusWrite(#[source] anyhow::Error),
     ///
     /// Read from IO Bus
     ///
-    #[error("Failed to read from IO Bus: {0}")]
+    #[error("Failed to read from IO Bus")]
     IoBusRead(#[source] anyhow::Error),
     ///
     /// Write to IO Bus
     ///
-    #[error("Failed to write to IO Bus: {0}")]
+    #[error("Failed to write to IO Bus")]
     IoBusWrite(#[source] anyhow::Error),
     ///
     /// Start dirty log error
     ///
-    #[error("Failed to get dirty log: {0}")]
+    #[error("Failed to get dirty log")]
     StartDirtyLog(#[source] anyhow::Error),
     ///
     /// Stop dirty log error
     ///
-    #[error("Failed to get dirty log: {0}")]
+    #[error("Failed to get dirty log")]
     StopDirtyLog(#[source] anyhow::Error),
     ///
     /// Get dirty log error
     ///
-    #[error("Failed to get dirty log: {0}")]
+    #[error("Failed to get dirty log")]
     GetDirtyLog(#[source] anyhow::Error),
     ///
     /// Assert virtual interrupt error
     ///
-    #[error("Failed to assert virtual Interrupt: {0}")]
+    #[error("Failed to assert virtual Interrupt")]
     AssertVirtualInterrupt(#[source] anyhow::Error),
 
     #[cfg(feature = "sev_snp")]
     ///
     /// Error initializing SEV-SNP on the VM
     ///
-    #[error("Failed to initialize SEV-SNP: {0}")]
+    #[error("Failed to initialize SEV-SNP")]
     InitializeSevSnp(#[source] std::io::Error),
 
     #[cfg(feature = "tdx")]
     ///
     /// Error initializing TDX on the VM
     ///
-    #[error("Failed to initialize TDX: {0}")]
+    #[error("Failed to initialize TDX")]
     InitializeTdx(#[source] std::io::Error),
     #[cfg(feature = "tdx")]
     ///
     /// Error finalizing the TDX configuration on the VM
     ///
-    #[error("Failed to finalize TDX: {0}")]
+    #[error("Failed to finalize TDX")]
     FinalizeTdx(#[source] std::io::Error),
     #[cfg(feature = "tdx")]
     ///
     /// Error initializing the TDX memory region
     ///
-    #[error("Failed to initialize memory region TDX: {0}")]
+    #[error("Failed to initialize memory region TDX")]
     InitMemRegionTdx(#[source] std::io::Error),
     ///
     /// Create Vgic error
     ///
-    #[error("Failed to create Vgic: {0}")]
+    #[error("Failed to create Vgic")]
     CreateVgic(#[source] anyhow::Error),
     ///
     /// Create Vaia error
     ///
-    #[error("Failed to create Vaia: {0}")]
+    #[error("Failed to create Vaia")]
     CreateVaia(#[source] anyhow::Error),
     ///
     /// Import isolated pages error
     ///
-    #[error("Failed to import isolated pages: {0}")]
+    #[error("Failed to import isolated pages")]
     ImportIsolatedPages(#[source] anyhow::Error),
     /// Failed to complete isolated import
     ///
-    #[error("Failed to complete isolated import: {0}")]
+    #[error("Failed to complete isolated import")]
     CompleteIsolatedImport(#[source] anyhow::Error),
     /// Failed to set VM property
     ///
-    #[error("Failed to set VM property: {0}")]
+    #[error("Failed to set VM property")]
     SetVmProperty(#[source] anyhow::Error),
     ///
     /// Modify GPA host access error
     ///
     #[cfg(feature = "sev_snp")]
-    #[error("Failed to modify GPA host access: {0}")]
+    #[error("Failed to modify GPA host access")]
     ModifyGpaHostAccess(#[source] anyhow::Error),
     ///
     /// Failed to mmap
@@ -258,7 +258,7 @@ pub enum HypervisorVmError {
     ///
     /// Failed to initialize VM
     ///
-    #[error("Failed to initialize VM: {0}")]
+    #[error("Failed to initialize VM")]
     InitializeVm(#[source] anyhow::Error),
 }
 ///
