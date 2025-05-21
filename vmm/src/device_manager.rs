@@ -1032,7 +1032,7 @@ pub struct DeviceManager {
     // VFIO container
     // Only one container can be created, therefore it is stored as part of the
     // DeviceManager to be reused.
-    vfio_container: Option<Arc<VfioContainer>>,
+    vfio_container: Option<Arc<dyn VfioOps>>,
 
     // Paravirtualized IOMMU
     iommu_device: Option<Arc<Mutex<virtio_devices::Iommu>>>,
@@ -3798,7 +3798,7 @@ impl DeviceManager {
         self.add_vfio_device(device_cfg)
     }
 
-    fn create_vfio_container(&self) -> DeviceManagerResult<Arc<VfioContainer>> {
+    fn create_vfio_container(&self) -> DeviceManagerResult<Arc<dyn VfioOps>> {
         let passthrough_device = self
             .passthrough_device
             .as_ref()
