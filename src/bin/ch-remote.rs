@@ -6,7 +6,7 @@
 use std::io::Read;
 use std::marker::PhantomData;
 use std::os::unix::net::UnixStream;
-use std::{fmt, process};
+use std::process;
 
 use api_client::{
     simple_api_command, simple_api_command_with_fds, simple_api_full_command,
@@ -14,6 +14,7 @@ use api_client::{
 };
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use option_parser::{ByteSized, ByteSizedParseError};
+use thiserror::Error;
 use vmm::config::RestoreConfig;
 use vmm::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
@@ -24,50 +25,41 @@ use zbus::{proxy, zvariant::Optional};
 
 type ApiResult = Result<(), Error>;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 enum Error {
-    HttpApiClient(ApiClientError),
+    #[error("http client error: {0}")]
+    HttpApiClient(#[source] ApiClientError),
     #[cfg(feature = "dbus_api")]
-    DBusApiClient(zbus::Error),
-    InvalidCpuCount(std::num::ParseIntError),
-    InvalidMemorySize(ByteSizedParseError),
-    InvalidBalloonSize(ByteSizedParseError),
-    AddDeviceConfig(vmm::config::Error),
-    AddDiskConfig(vmm::config::Error),
-    AddFsConfig(vmm::config::Error),
-    AddPmemConfig(vmm::config::Error),
-    AddNetConfig(vmm::config::Error),
-    AddUserDeviceConfig(vmm::config::Error),
-    AddVdpaConfig(vmm::config::Error),
-    AddVsockConfig(vmm::config::Error),
-    Restore(vmm::config::Error),
-    ReadingStdin(std::io::Error),
-    ReadingFile(std::io::Error),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use Error::*;
-        match self {
-            HttpApiClient(e) => e.fmt(f),
-            #[cfg(feature = "dbus_api")]
-            DBusApiClient(e) => write!(f, "Error D-Bus proxy: {e}"),
-            InvalidCpuCount(e) => write!(f, "Error parsing CPU count: {e}"),
-            InvalidMemorySize(e) => write!(f, "Error parsing memory size: {e:?}"),
-            InvalidBalloonSize(e) => write!(f, "Error parsing balloon size: {e:?}"),
-            AddDeviceConfig(e) => write!(f, "Error parsing device syntax: {e}"),
-            AddDiskConfig(e) => write!(f, "Error parsing disk syntax: {e}"),
-            AddFsConfig(e) => write!(f, "Error parsing filesystem syntax: {e}"),
-            AddPmemConfig(e) => write!(f, "Error parsing persistent memory syntax: {e}"),
-            AddNetConfig(e) => write!(f, "Error parsing network syntax: {e}"),
-            AddUserDeviceConfig(e) => write!(f, "Error parsing user device syntax: {e}"),
-            AddVdpaConfig(e) => write!(f, "Error parsing vDPA device syntax: {e}"),
-            AddVsockConfig(e) => write!(f, "Error parsing vsock syntax: {e}"),
-            Restore(e) => write!(f, "Error parsing restore syntax: {e}"),
-            ReadingStdin(e) => write!(f, "Error reading from stdin: {e}"),
-            ReadingFile(e) => write!(f, "Error reading from file: {e}"),
-        }
-    }
+    #[error("dbus api client error: {0}")]
+    DBusApiClient(#[source] zbus::Error),
+    #[error("Error parsing CPU count: {0}")]
+    InvalidCpuCount(#[source] std::num::ParseIntError),
+    #[error("Error parsing memory size: {0}")]
+    InvalidMemorySize(#[source] ByteSizedParseError),
+    #[error("Error parsing balloon size: {0}")]
+    InvalidBalloonSize(#[source] ByteSizedParseError),
+    #[error("Error parsing device syntax: {0}")]
+    AddDeviceConfig(#[source] vmm::config::Error),
+    #[error("Error parsing disk syntax: {0}")]
+    AddDiskConfig(#[source] vmm::config::Error),
+    #[error("Error parsing filesystem syntax: {0}")]
+    AddFsConfig(#[source] vmm::config::Error),
+    #[error("Error parsing persistent memory syntax: {0}")]
+    AddPmemConfig(#[source] vmm::config::Error),
+    #[error("Error parsing network syntax: {0}")]
+    AddNetConfig(#[source] vmm::config::Error),
+    #[error("Error parsing user device syntax: {0}")]
+    AddUserDeviceConfig(#[source] vmm::config::Error),
+    #[error("Error parsing vDPA device syntax: {0}")]
+    AddVdpaConfig(#[source] vmm::config::Error),
+    #[error("Error parsing vsock syntax: {0}")]
+    AddVsockConfig(#[source] vmm::config::Error),
+    #[error("Error parsing restore syntax: {0}")]
+    Restore(#[source] vmm::config::Error),
+    #[error("Error reading from stdin: {0}")]
+    ReadingStdin(#[source] std::io::Error),
+    #[error("Error reading from file: {0}")]
+    ReadingFile(#[source] std::io::Error),
 }
 
 enum TargetApi<'a> {
