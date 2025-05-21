@@ -27,37 +27,37 @@ pub enum HypervisorError {
     ///
     /// Hypervisor availability check error
     ///
-    #[error("Failed to check availability of the hypervisor: {0}")]
+    #[error("Failed to check availability of the hypervisor")]
     HypervisorAvailableCheck(#[source] anyhow::Error),
     ///
     /// hypervisor creation error
     ///
-    #[error("Failed to create the hypervisor: {0}")]
+    #[error("Failed to create the hypervisor")]
     HypervisorCreate(#[source] anyhow::Error),
     ///
     /// Vm creation failure
     ///
-    #[error("Failed to create Vm: {0}")]
+    #[error("Failed to create Vm")]
     VmCreate(#[source] anyhow::Error),
     ///
     /// Vm setup failure
     ///
-    #[error("Failed to setup Vm: {0}")]
+    #[error("Failed to setup Vm")]
     VmSetup(#[source] anyhow::Error),
     ///
     /// API version error
     ///
-    #[error("Failed to get API Version: {0}")]
+    #[error("Failed to get API Version")]
     GetApiVersion(#[source] anyhow::Error),
     ///
     /// CpuId error
     ///
-    #[error("Failed to get cpuid: {0}")]
+    #[error("Failed to get cpuid")]
     GetCpuId(#[source] anyhow::Error),
     ///
     /// Failed to retrieve list of MSRs.
     ///
-    #[error("Failed to get the list of supported MSRs: {0}")]
+    #[error("Failed to get the list of supported MSRs")]
     GetMsrList(#[source] anyhow::Error),
     ///
     /// API version is not compatible
@@ -67,22 +67,22 @@ pub enum HypervisorError {
     ///
     /// Checking extensions failed
     ///
-    #[error("Checking extensions: {0}")]
+    #[error("Checking extensions")]
     CheckExtensions(#[source] anyhow::Error),
     ///
     /// Failed to retrieve TDX capabilities
     ///
-    #[error("Failed to retrieve TDX capabilities: {0}")]
+    #[error("Failed to retrieve TDX capabilities")]
     TdxCapabilities(#[source] anyhow::Error),
     ///
     /// Failed to set partition property
     ///
-    #[error("Failed to set partition property: {0}")]
+    #[error("Failed to set partition property")]
     SetPartitionProperty(#[source] anyhow::Error),
     ///
     /// Running on an unsupported CPU
     ///
-    #[error("Unsupported CPU: {0}")]
+    #[error("Unsupported CPU")]
     UnsupportedCpu(#[source] anyhow::Error),
     ///
     /// Launching a VM with unsupported VM Type
