@@ -23,23 +23,23 @@ pub enum Error {
     ThreadSpawn(#[source] io::Error),
 
     /// Cannot create epoll context.
-    #[error("Error creating epoll context: {0}")]
+    #[error("Error creating epoll context")]
     Epoll(#[source] io::Error),
 
     /// Cannot create EventFd.
-    #[error("Error creating EventFd: {0}")]
+    #[error("Error creating EventFd")]
     EventFd(#[source] io::Error),
 
     /// Cannot create RateLimiter.
-    #[error("Error creating RateLimiter: {0}")]
+    #[error("Error creating RateLimiter")]
     RateLimiter(#[source] io::Error),
 
     /// Cannot read from EventFd.
-    #[error("Error reading from EventFd: {0}")]
+    #[error("Error reading from EventFd")]
     EventFdRead(#[source] io::Error),
 
     /// Cannot write to EventFd.
-    #[error("Error writing to EventFd: {0}")]
+    #[error("Error writing to EventFd")]
     EventFdWrite(#[source] io::Error),
 }
 
