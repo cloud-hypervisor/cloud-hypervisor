@@ -493,7 +493,7 @@ impl FwCfg {
                 data.copy_from_slice(&bytes[start..end]);
             }
         };
-        return Some(size as u8);
+        Some(size as u8)
     }
 
     fn read_data(&mut self, data: &mut [u8], size: u32) -> u8 {
@@ -540,7 +540,7 @@ impl BusDevice for FwCfg {
     }
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        let port = offset + PORT_FW_CFG_SELECTOR;
+        let port = offset + PORT_FW_CFG_BASE;
         let size = data.size();
         match (port, size) {
             (PORT_FW_CFG_SELECTOR, 2) => {
@@ -584,6 +584,19 @@ mod tests {
 
     use super::*;
 
+    #[cfg(target_arch = "x86_64")]
+    const SELECTOR_OFFSET: u64 = 0;
+    #[cfg(target_arch = "aarch64")]
+    const SELECTOR_OFFSET: u64 = 8;
+    #[cfg(target_arch = "x86_64")]
+    const DATA_OFFSET: u64 = 1;
+    #[cfg(target_arch = "aarch64")]
+    const DATA_OFFSET: u64 = 0;
+    #[cfg(target_arch = "x86_64")]
+    const DMA_OFFSET: u64 = 4;
+    #[cfg(target_arch = "aarch64")]
+    const DMA_OFFSET: u64 = 16;
+
     #[test]
     fn test_signature() {
         let gm = GuestMemoryAtomic::new(
@@ -595,10 +608,10 @@ mod tests {
         let mut data = vec![0u8];
 
         let mut sig_iter = FW_CFG_DMA_SIGNATURE.into_iter();
-        fw_cfg.write(0, 0, &[FW_CFG_SIGNATURE as u8, 0]);
+        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_SIGNATURE as u8, 0]);
         loop {
             if let Some(char) = sig_iter.next() {
-                fw_cfg.read(0, 1, &mut data);
+                fw_cfg.read(0, DATA_OFFSET, &mut data);
                 assert_eq!(data[0], char);
             } else {
                 return;
@@ -620,10 +633,10 @@ mod tests {
         let mut data = vec![0u8];
 
         let mut cmdline_iter = cmdline.into_iter();
-        fw_cfg.write(0, 0, &[FW_CFG_CMDLINE_DATA as u8, 0]);
+        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_CMDLINE_DATA as u8, 0]);
         loop {
             if let Some(char) = cmdline_iter.next() {
-                fw_cfg.read(0, 1, &mut data);
+                fw_cfg.read(0, DATA_OFFSET, &mut data);
                 assert_eq!(data[0], char);
             } else {
                 return;
@@ -650,10 +663,10 @@ mod tests {
         let mut data = vec![0u8];
 
         let mut initram_iter = (*initram_content).into_iter();
-        fw_cfg.write(0, 0, &[FW_CFG_INITRD_DATA as u8, 0]);
+        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_INITRD_DATA as u8, 0]);
         loop {
             if let Some(char) = initram_iter.next() {
-                fw_cfg.read(0, 1, &mut data);
+                fw_cfg.read(0, DATA_OFFSET, &mut data);
                 assert_eq!(data[0], char);
             } else {
                 return;
@@ -711,9 +724,9 @@ mod tests {
         let _ = mem.read(&mut data, GuestAddress(code_address));
         assert_ne!(data, code);
 
-        fw_cfg.write(0, 0, &[FW_CFG_FILE_FIRST as u8, 0]);
-        fw_cfg.write(0, 4, &dma_lo);
-        fw_cfg.write(0, 8, &dma_hi);
+        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_FILE_FIRST as u8, 0]);
+        fw_cfg.write(0, DMA_OFFSET, &dma_lo);
+        fw_cfg.write(0, DMA_OFFSET + 4, &dma_hi);
         let _ = mem.read(&mut data, GuestAddress(code_address));
         assert_eq!(data, code);
     }
