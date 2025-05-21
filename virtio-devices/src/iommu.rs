@@ -292,7 +292,7 @@ unsafe impl ByteValued for VirtioIommuFault {}
 
 #[derive(Error, Debug)]
 enum Error {
-    #[error("Guest gave us bad memory addresses: {0}")]
+    #[error("Guest gave us bad memory addresses")]
     GuestMemory(#[source] GuestMemoryError),
     #[error("Guest gave us a write only descriptor that protocol says to read from")]
     UnexpectedWriteOnlyDescriptor,
@@ -322,11 +322,11 @@ enum Error {
     InvalidUnmapRequestMissingDomain,
     #[error("Guest sent us invalid PROBE request")]
     InvalidProbeRequest,
-    #[error("Failed to performing external mapping: {0}")]
+    #[error("Failed to performing external mapping")]
     ExternalMapping(#[source] io::Error),
-    #[error("Failed to performing external unmapping: {0}")]
+    #[error("Failed to performing external unmapping")]
     ExternalUnmapping(#[source] io::Error),
-    #[error("Failed adding used index: {0}")]
+    #[error("Failed adding used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
 }
 

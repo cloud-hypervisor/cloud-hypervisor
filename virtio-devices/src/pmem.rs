@@ -75,7 +75,7 @@ unsafe impl ByteValued for VirtioPmemResp {}
 
 #[derive(Error, Debug)]
 enum Error {
-    #[error("Bad guest memory addresses: {0}")]
+    #[error("Bad guest memory addresses")]
     GuestMemory(#[source] GuestMemoryError),
     #[error("Unexpected write-only descriptor")]
     UnexpectedWriteOnlyDescriptor,
@@ -87,7 +87,7 @@ enum Error {
     BufferLengthTooSmall,
     #[error("Invalid request")]
     InvalidRequest,
-    #[error("Failed adding used index: {0}")]
+    #[error("Failed adding used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
 }
 
