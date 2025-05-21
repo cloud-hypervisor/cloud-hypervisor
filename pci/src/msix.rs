@@ -14,7 +14,7 @@ use vm_device::interrupt::{
 use vm_memory::ByteValued;
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
 
-use crate::{PciCapability, PciCapabilityId};
+use crate::{PciBdf, PciCapability, PciCapabilityId};
 
 const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
 const MSIX_TABLE_ENTRIES_MODULO: u64 = 16;
@@ -75,6 +75,7 @@ pub struct MsixConfig {
     interrupt_source_group: Arc<dyn InterruptSourceGroup>,
     masked: bool,
     enabled: bool,
+    pub vector_num: u32,
 }
 
 impl MsixConfig {
@@ -138,6 +139,7 @@ impl MsixConfig {
             interrupt_source_group,
             masked,
             enabled,
+            vector_num: 0,
         })
     }
 
@@ -326,6 +328,9 @@ impl MsixConfig {
                 data: table_entry.msg_data,
                 devid: self.devid,
             };
+
+            self.vector_num += 1;
+            debug!("devid {} index {} vector_num {}", PciBdf::from(self.devid), index, self.vector_num);
 
             if let Err(e) = self.interrupt_source_group.update(
                 index as InterruptIndex,
