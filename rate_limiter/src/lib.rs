@@ -52,18 +52,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use thiserror::Error;
 use vmm_sys_util::timerfd::TimerFd;
 
 /// Module for group rate limiting.
 pub mod group;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 /// Describes the errors that may occur while handling rate limiter events.
 pub enum Error {
     /// The event handler was called spuriously.
+    #[error("Event handler was called spuriously: {0}")]
     SpuriousRateLimiterEvent(&'static str),
     /// The event handler encounters while TimerFd::wait()
-    TimerFdWaitError(std::io::Error),
+    #[error("Failed to wait for the timer: {0}")]
+    TimerFdWaitError(#[source] std::io::Error),
 }
 
 // Interval at which the refill timer will run when limiter is at capacity.
