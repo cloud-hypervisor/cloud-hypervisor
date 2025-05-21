@@ -202,7 +202,7 @@ pub enum Error {
     /// Error retrieving TDX capabilities through the hypervisor (kvm/mshv) API
     #[cfg(feature = "tdx")]
     #[error("Error retrieving TDX capabilities through the hypervisor API: {0}")]
-    TdxCapabilities(HypervisorError),
+    TdxCapabilities(#[source] HypervisorError),
 
     /// Failed to configure E820 map for bzImage
     #[error("Failed to configure E820 map for bzImage")]
