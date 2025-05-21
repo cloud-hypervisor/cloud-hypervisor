@@ -65,7 +65,7 @@ pub enum Error {
     #[error("Event handler was called spuriously: {0}")]
     SpuriousRateLimiterEvent(&'static str),
     /// The event handler encounters while TimerFd::wait()
-    #[error("Failed to wait for the timer: {0}")]
+    #[error("Failed to wait for the timer")]
     TimerFdWaitError(#[source] std::io::Error),
 }
 
