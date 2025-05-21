@@ -2068,6 +2068,7 @@ dependencies = [
  "serde",
  "serde_json",
  "ssh2",
+ "thiserror 2.0.6",
  "vmm-sys-util",
  "wait-timeout",
 ]

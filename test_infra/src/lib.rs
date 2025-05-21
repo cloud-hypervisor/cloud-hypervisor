@@ -21,27 +21,40 @@ use std::{env, fmt, fs, io, thread};
 use once_cell::sync::Lazy;
 use serde_json::Value;
 use ssh2::Session;
+use thiserror::Error;
 use vmm_sys_util::tempdir::TempDir;
 use wait_timeout::ChildExt;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum WaitTimeoutError {
+    #[error("timeout")]
     Timedout,
+    #[error("exit status indicates failure")]
     ExitStatus,
-    General(std::io::Error),
+    #[error("general failure: {0}")]
+    General(#[source] std::io::Error),
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
-    Parsing(std::num::ParseIntError),
-    SshCommand(SshCommandError),
-    WaitForBoot(WaitForBootError),
-    EthrLogFile(std::io::Error),
+    #[error("Failed to parse: {0}")]
+    Parsing(#[source] std::num::ParseIntError),
+    #[error("ssh command failed: {0}")]
+    SshCommand(#[source] SshCommandError),
+    #[error("waiting for boot failed: {0}")]
+    WaitForBoot(#[source] WaitForBootError),
+    #[error("reading log file failed: {0}")]
+    EthrLogFile(#[source] std::io::Error),
+    #[error("parsing log file failed")]
     EthrLogParse,
+    #[error("parsing fio output failed")]
     FioOutputParse,
+    #[error("parsing iperf3 output failed")]
     Iperf3Parse,
-    Spawn(std::io::Error),
-    WaitTimeout(WaitTimeoutError),
+    #[error("spawning process failed: {0}")]
+    Spawn(#[source] std::io::Error),
+    #[error("waiting for timeout failed: {0}")]
+    WaitTimeout(#[source] WaitTimeoutError),
 }
 
 impl From<SshCommandError> for Error {
@@ -67,13 +80,18 @@ pub const DEFAULT_TCP_LISTENER_MESSAGE: &str = "booted";
 pub const DEFAULT_TCP_LISTENER_PORT: u16 = 8000;
 pub const DEFAULT_TCP_LISTENER_TIMEOUT: i32 = 120;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum WaitForBootError {
-    EpollWait(std::io::Error),
-    Listen(std::io::Error),
+    #[error("Failed to wait for epoll: {0}")]
+    EpollWait(#[source] std::io::Error),
+    #[error("Failed to listen for boot: {0}")]
+    Listen(#[source] std::io::Error),
+    #[error("Epoll wait timeout")]
     EpollWaitTimeout,
+    #[error("wrong guest address")]
     WrongGuestAddr,
-    Accept(std::io::Error),
+    #[error("Failed to accept a TCP request: {0}")]
+    Accept(#[source] std::io::Error),
 }
 
 impl GuestNetworkConfig {
@@ -532,21 +550,34 @@ pub struct PasswordAuth {
 pub const DEFAULT_SSH_RETRIES: u8 = 6;
 pub const DEFAULT_SSH_TIMEOUT: u8 = 10;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum SshCommandError {
-    Connection(std::io::Error),
-    Handshake(ssh2::Error),
-    Authentication(ssh2::Error),
-    ChannelSession(ssh2::Error),
-    Command(ssh2::Error),
-    ExitStatus(ssh2::Error),
+    #[error("ssh connection failed: {0}")]
+    Connection(#[source] std::io::Error),
+    #[error("ssh handshake failed: {0}")]
+    Handshake(#[source] ssh2::Error),
+    #[error("ssh authentication failed: {0}")]
+    Authentication(#[source] ssh2::Error),
+    #[error("ssh channel session failed: {0}")]
+    ChannelSession(#[source] ssh2::Error),
+    #[error("ssh command failed: {0}")]
+    Command(#[source] ssh2::Error),
+    #[error("retrieving exit status from ssh command failed: {0}")]
+    ExitStatus(#[source] ssh2::Error),
+    #[error("the exit code indicates failure: {0}")]
     NonZeroExitStatus(i32),
-    FileRead(std::io::Error),
-    FileMetadata(std::io::Error),
-    ScpSend(ssh2::Error),
-    WriteAll(std::io::Error),
-    SendEof(ssh2::Error),
-    WaitEof(ssh2::Error),
+    #[error("failed to read file: {0}")]
+    FileRead(#[source] std::io::Error),
+    #[error("failed to read metadata: {0}")]
+    FileMetadata(#[source] std::io::Error),
+    #[error("scp send failed: {0}")]
+    ScpSend(#[source] ssh2::Error),
+    #[error("scp write failed: {0}")]
+    WriteAll(#[source] std::io::Error),
+    #[error("scp send EOF failed: {0}")]
+    SendEof(#[source] ssh2::Error),
+    #[error("scp wait EOF failed: {0}")]
+    WaitEof(#[source] ssh2::Error),
 }
 
 fn scp_to_guest_with_auth(
