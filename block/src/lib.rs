@@ -68,9 +68,9 @@ pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Guest gave us bad memory addresses")]
-    GuestMemory(GuestMemoryError),
+    GuestMemory(#[source] GuestMemoryError),
     #[error("Guest gave us offsets that would have overflowed a usize")]
-    CheckedOffset(GuestAddress, usize),
+    CheckedOffset(GuestAddress, usize /* sector offset */),
     #[error("Guest gave us a write only descriptor that protocol says to read from")]
     UnexpectedWriteOnlyDescriptor,
     #[error("Guest gave us a read only descriptor that protocol says to write to")]
@@ -80,21 +80,21 @@ pub enum Error {
     #[error("Guest gave us a descriptor that was too short to use")]
     DescriptorLengthTooSmall,
     #[error("Failed to detect image type: {0}")]
-    DetectImageType(std::io::Error),
+    DetectImageType(#[source] std::io::Error),
     #[error("Failure in fixed vhd: {0}")]
-    FixedVhdError(std::io::Error),
+    FixedVhdError(#[source] std::io::Error),
     #[error("Getting a block's metadata fails for any reason")]
     GetFileMetadata,
     #[error("The requested operation would cause a seek beyond disk end")]
     InvalidOffset,
     #[error("Failure in qcow: {0}")]
-    QcowError(qcow::Error),
+    QcowError(#[source] qcow::Error),
     #[error("Failure in raw file: {0}")]
-    RawFileError(std::io::Error),
+    RawFileError(#[source] std::io::Error),
     #[error("The requested operation does not support multiple descriptors")]
     TooManyDescriptors,
     #[error("Failure in vhdx: {0}")]
-    VhdxError(VhdxError),
+    VhdxError(#[source] VhdxError),
 }
 
 fn build_device_id(disk_path: &Path) -> result::Result<String, Error> {
@@ -132,33 +132,33 @@ pub fn build_serial(disk_path: &Path) -> Vec<u8> {
 #[derive(Error, Debug)]
 pub enum ExecuteError {
     #[error("Bad request: {0}")]
-    BadRequest(Error),
+    BadRequest(#[source] Error),
     #[error("Failed to flush: {0}")]
-    Flush(io::Error),
+    Flush(#[source] io::Error),
     #[error("Failed to read: {0}")]
-    Read(GuestMemoryError),
+    Read(#[source] GuestMemoryError),
     #[error("Failed to read_exact: {0}")]
-    ReadExact(io::Error),
+    ReadExact(#[source] io::Error),
     #[error("Failed to seek: {0}")]
-    Seek(io::Error),
+    Seek(#[source] io::Error),
     #[error("Failed to write: {0}")]
-    Write(GuestMemoryError),
+    Write(#[source] GuestMemoryError),
     #[error("Failed to write_all: {0}")]
-    WriteAll(io::Error),
+    WriteAll(#[source] io::Error),
     #[error("Unsupported request: {0}")]
     Unsupported(u32),
     #[error("Failed to submit io uring: {0}")]
-    SubmitIoUring(io::Error),
+    SubmitIoUring(#[source] io::Error),
     #[error("Failed to get guest address: {0}")]
-    GetHostAddress(GuestMemoryError),
+    GetHostAddress(#[source] GuestMemoryError),
     #[error("Failed to async read: {0}")]
-    AsyncRead(AsyncIoError),
+    AsyncRead(#[source] AsyncIoError),
     #[error("Failed to async write: {0}")]
-    AsyncWrite(AsyncIoError),
+    AsyncWrite(#[source] AsyncIoError),
     #[error("failed to async flush: {0}")]
-    AsyncFlush(AsyncIoError),
+    AsyncFlush(#[source] AsyncIoError),
     #[error("Failed allocating a temporary buffer: {0}")]
-    TemporaryBufferAllocation(io::Error),
+    TemporaryBufferAllocation(#[source] io::Error),
 }
 
 impl ExecuteError {

@@ -157,6 +157,9 @@ pub enum Error {
     #[error("Error adding CpuManager to MMIO bus: {0}")]
     BusError(#[source] vm_device::BusError),
 
+    #[error("Requested zero vCPUs")]
+    DesiredVCpuCountIsZero,
+
     #[error("Requested vCPUs exceed maximum")]
     DesiredVCpuCountExceedsMax,
 
@@ -204,7 +207,7 @@ pub enum Error {
 
     #[cfg(target_arch = "x86_64")]
     #[error("Failed to inject NMI")]
-    NmiError(hypervisor::HypervisorCpuError),
+    NmiError(#[source] hypervisor::HypervisorCpuError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1318,6 +1321,10 @@ impl CpuManager {
 
         if !self.dynamic {
             return Ok(false);
+        }
+
+        if desired_vcpus < 1 {
+            return Err(Error::DesiredVCpuCountIsZero);
         }
 
         if self.check_pending_removed_vcpu() {

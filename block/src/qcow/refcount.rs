@@ -16,7 +16,7 @@ use crate::qcow::vec_cache::{CacheMap, Cacheable, VecCache};
 pub enum Error {
     /// `EvictingCache` - Error writing a refblock from the cache to disk.
     #[error("Failed to write a refblock from the cache to disk: {0}")]
-    EvictingRefCounts(io::Error),
+    EvictingRefCounts(#[source] io::Error),
     /// `InvalidIndex` - Address requested isn't within the range of the disk.
     #[error("Address requested is not within the range of the disk")]
     InvalidIndex,
@@ -28,7 +28,7 @@ pub enum Error {
     NeedNewCluster,
     /// `ReadingRefCounts` - Error reading the file into the refcount cache.
     #[error("Failed to read the file into the refcount cache: {0}")]
-    ReadingRefCounts(io::Error),
+    ReadingRefCounts(#[source] io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

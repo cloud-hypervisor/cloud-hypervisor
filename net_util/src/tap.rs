@@ -7,7 +7,7 @@
 
 use std::fs::File;
 use std::io::{Error as IoError, Read, Result as IoResult, Write};
-use std::net;
+use std::net::{IpAddr, Ipv6Addr};
 use std::os::raw::*;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 
@@ -23,21 +23,23 @@ use crate::mac::MAC_ADDR_LEN;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Couldn't open /dev/net/tun: {0}")]
-    OpenTun(IoError),
+    OpenTun(#[source] IoError),
     #[error("Unable to configure tap interface: {0}")]
-    ConfigureTap(IoError),
+    ConfigureTap(#[source] IoError),
     #[error("Unable to retrieve features: {0}")]
-    GetFeatures(IoError),
+    GetFeatures(#[source] IoError),
     #[error("Missing multiqueue support in the kernel")]
     MultiQueueKernelSupport,
     #[error("ioctl ({0}) failed: {1}")]
-    IoctlError(c_ulong, IoError),
+    IoctlError(c_ulong, #[source] IoError),
     #[error("Failed to create a socket: {0}")]
-    NetUtil(NetUtilError),
+    NetUtil(#[source] NetUtilError),
     #[error("Invalid interface name")]
     InvalidIfname,
     #[error("Error parsing MAC data: {0}")]
-    MacParsing(IoError),
+    MacParsing(#[source] IoError),
+    #[error("Invalid netmask")]
+    InvalidNetmask,
 }
 
 pub type Result<T> = ::std::result::Result<T, Error>;
@@ -86,6 +88,37 @@ fn build_terminated_if_name(if_name: &str) -> Result<Vec<u8>> {
     terminated_if_name[..if_name.len()].copy_from_slice(if_name);
 
     Ok(terminated_if_name)
+}
+
+fn ipv6_mask_to_prefix(mask: Ipv6Addr) -> Result<u8> {
+    let mask = mask.segments();
+    let mut iter = mask.iter();
+
+    let mut prefix = 0;
+    for &segment in &mut iter {
+        if segment == 0xffff {
+            prefix += 16;
+        } else if segment == 0 {
+            break;
+        } else {
+            let prefix_bits = segment.leading_ones() as u8;
+            if segment << prefix_bits != 0 {
+                return Err(Error::InvalidNetmask);
+            }
+
+            prefix += prefix_bits;
+            break;
+        }
+    }
+
+    // Check that remaining bits are all unset
+    for &segment in iter {
+        if segment != 0 {
+            return Err(Error::InvalidNetmask);
+        }
+    }
+
+    Ok(prefix)
 }
 
 impl Tap {
@@ -235,16 +268,78 @@ impl Tap {
     }
 
     /// Set the host-side IP address for the tap interface.
-    pub fn set_ip_addr(&self, ip_addr: net::Ipv4Addr) -> Result<()> {
-        let sock = create_inet_socket().map_err(Error::NetUtil)?;
-        let addr = create_sockaddr(ip_addr);
+    pub fn set_ip_addr(&self, ip_addr: IpAddr, netmask: Option<IpAddr>) -> Result<()> {
+        let sock = create_inet_socket(ip_addr).map_err(Error::NetUtil)?;
 
         let mut ifreq = self.get_ifreq();
 
-        ifreq.ifr_ifru.ifru_addr = addr;
+        match ip_addr {
+            IpAddr::V4(addr) => {
+                let addr = create_sockaddr(addr);
 
-        // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
-        unsafe { Self::ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFADDR as c_ulong, &ifreq) }
+                ifreq.ifr_ifru.ifru_addr = addr;
+
+                // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
+                unsafe {
+                    Self::ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFADDR as c_ulong, &ifreq)?;
+                }
+
+                if let Some(IpAddr::V4(mask)) = netmask {
+                    ifreq.ifr_ifru.ifru_netmask = create_sockaddr(mask);
+
+                    // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
+                    unsafe {
+                        Self::ioctl_with_ref(
+                            &sock,
+                            net_gen::sockios::SIOCSIFNETMASK as c_ulong,
+                            &ifreq,
+                        )?;
+                    }
+                };
+
+                Ok(())
+            }
+            IpAddr::V6(addr) => {
+                let ifindex = {
+                    // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
+                    unsafe {
+                        Self::ioctl_with_ref(
+                            &sock,
+                            net_gen::sockios::SIOCGIFINDEX as c_ulong,
+                            &ifreq,
+                        )?;
+                    }
+
+                    // SAFETY: ifru_ivalue contains the ifindex and is set by the previous ioctl
+                    unsafe {
+                        match ifreq.ifr_ifru.ifru_ivalue {
+                            0 => return Err(Error::InvalidIfname),
+                            i => i,
+                        }
+                    }
+                };
+
+                let prefixlen = match netmask {
+                    Some(IpAddr::V6(netmask)) => ipv6_mask_to_prefix(netmask)?,
+                    Some(IpAddr::V4(_)) => return Err(Error::InvalidNetmask),
+                    None => 0,
+                };
+
+                let ifreq = net_gen::in6_ifreq {
+                    // SAFETY: addr can be safely transmuted to in6_addr
+                    ifr6_addr: unsafe {
+                        std::mem::transmute::<[u8; 16], net_gen::ipv6::in6_addr>(addr.octets())
+                    },
+                    ifr6_prefixlen: prefixlen as u32,
+                    ifr6_ifindex: ifindex,
+                };
+
+                // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
+                unsafe {
+                    Self::ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFADDR as c_ulong, &ifreq)
+                }
+            }
+        }
     }
 
     /// Set mac addr for tap interface.
@@ -292,19 +387,6 @@ impl Tap {
                 .map_err(Error::MacParsing)?
         };
         Ok(addr)
-    }
-
-    /// Set the netmask for the subnet that the tap interface will exist on.
-    pub fn set_netmask(&self, netmask: net::Ipv4Addr) -> Result<()> {
-        let sock = create_inet_socket().map_err(Error::NetUtil)?;
-        let addr = create_sockaddr(netmask);
-
-        let mut ifreq = self.get_ifreq();
-
-        ifreq.ifr_ifru.ifru_addr = addr;
-
-        // SAFETY: ioctl is safe. Called with a valid sock fd, and we check the return.
-        unsafe { Self::ioctl_with_ref(&sock, net_gen::sockios::SIOCSIFNETMASK as c_ulong, &ifreq) }
     }
 
     #[cfg(not(fuzzing))]
@@ -602,11 +684,22 @@ mod tests {
         let tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
 
         let tap = Tap::new(1).unwrap();
-        let ip_addr: net::Ipv4Addr = (*tap_ip_guard).parse().unwrap();
-        let netmask: net::Ipv4Addr = SUBNET_MASK.parse().unwrap();
+        let ip_addr = IpAddr::V4((*tap_ip_guard).parse().unwrap());
+        let netmask = IpAddr::V4(SUBNET_MASK.parse().unwrap());
 
-        tap.set_ip_addr(ip_addr).unwrap();
-        tap.set_netmask(netmask).unwrap();
+        tap.set_ip_addr(ip_addr, Some(netmask)).unwrap();
+    }
+
+    #[test]
+    fn test_tap_configure_ipv6() {
+        let tap_ip6_lock: Mutex<&'static str> = Mutex::new("2001:db8:85a3::8a2e:370:7334");
+        let tap_ip6_guard = tap_ip6_lock.lock().unwrap();
+
+        let tap = Tap::new(1).unwrap();
+        let ip_addr = IpAddr::V6((*tap_ip6_guard).parse().unwrap());
+        let netmask = IpAddr::V6("ffff:ffff::".parse().unwrap());
+
+        tap.set_ip_addr(ip_addr, Some(netmask)).unwrap();
     }
 
     #[test]
@@ -640,8 +733,9 @@ mod tests {
         let tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
 
         let mut tap = Tap::new(1).unwrap();
-        tap.set_ip_addr((*tap_ip_guard).parse().unwrap()).unwrap();
-        tap.set_netmask(SUBNET_MASK.parse().unwrap()).unwrap();
+        let ip_addr = IpAddr::V4((*tap_ip_guard).parse().unwrap());
+        let netmask = IpAddr::V4(SUBNET_MASK.parse().unwrap());
+        tap.set_ip_addr(ip_addr, Some(netmask)).unwrap();
         tap.enable().unwrap();
 
         // Send a packet to the interface. We expect to be able to receive it on the associated fd.
@@ -698,8 +792,9 @@ mod tests {
         let tap_ip_guard = TAP_IP_LOCK.lock().unwrap();
 
         let mut tap = Tap::new(1).unwrap();
-        tap.set_ip_addr((*tap_ip_guard).parse().unwrap()).unwrap();
-        tap.set_netmask(SUBNET_MASK.parse().unwrap()).unwrap();
+        let ip_addr = IpAddr::V4((*tap_ip_guard).parse().unwrap());
+        let netmask = IpAddr::V4(SUBNET_MASK.parse().unwrap());
+        tap.set_ip_addr(ip_addr, Some(netmask)).unwrap();
         tap.enable().unwrap();
 
         let (mac, _, mut rx) = pnet_get_mac_tx_rx(tap_name_to_string(&tap));

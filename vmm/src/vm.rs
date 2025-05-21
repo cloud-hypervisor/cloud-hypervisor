@@ -118,7 +118,7 @@ pub enum Error {
 
     #[cfg(target_arch = "aarch64")]
     #[error("Cannot load the UEFI binary in memory: {0:?}")]
-    UefiLoad(arch::aarch64::uefi::Error),
+    UefiLoad(#[source] arch::aarch64::uefi::Error),
 
     #[error("Cannot load the initramfs into memory")]
     InitramfsLoad,
@@ -140,16 +140,16 @@ pub enum Error {
 
     #[cfg(target_arch = "aarch64")]
     #[error("Cannot enable interrupt controller: {0:?}")]
-    EnableInterruptController(interrupt_controller::Error),
+    EnableInterruptController(#[source] interrupt_controller::Error),
 
     #[error("VM state is poisoned")]
     PoisonedState,
 
     #[error("Error from device manager: {0:?}")]
-    DeviceManager(DeviceManagerError),
+    DeviceManager(#[source] DeviceManagerError),
 
     #[error("Error initializing VM: {0:?}")]
-    InitializeVm(hypervisor::HypervisorVmError),
+    InitializeVm(#[source] hypervisor::HypervisorVmError),
 
     #[error("No device with id {0:?} to remove")]
     NoDeviceToRemove(String),
@@ -200,7 +200,7 @@ pub enum Error {
     Resume(#[source] MigratableError),
 
     #[error("Memory manager error: {0:?}")]
-    MemoryManager(MemoryManagerError),
+    MemoryManager(#[source] MemoryManagerError),
 
     #[error("Eventfd write error: {0}")]
     EventfdError(#[source] std::io::Error),
@@ -239,16 +239,16 @@ pub enum Error {
     ResizeZone,
 
     #[error("Cannot activate virtio devices: {0:?}")]
-    ActivateVirtioDevices(DeviceManagerError),
+    ActivateVirtioDevices(#[source] DeviceManagerError),
 
     #[error("Error triggering power button: {0:?}")]
-    PowerButton(DeviceManagerError),
+    PowerButton(#[source] DeviceManagerError),
 
     #[error("Kernel lacks PVH header")]
     KernelMissingPvhHeader,
 
     #[error("Failed to allocate firmware RAM: {0:?}")]
-    AllocateFirmwareMemory(MemoryManagerError),
+    AllocateFirmwareMemory(#[source] MemoryManagerError),
 
     #[error("Error manipulating firmware file: {0}")]
     FirmwareFile(#[source] std::io::Error),
@@ -281,7 +281,7 @@ pub enum Error {
 
     #[cfg(feature = "tdx")]
     #[error("Error allocating TDVF memory: {0:?}")]
-    AllocatingTdvfMemory(crate::memory_manager::Error),
+    AllocatingTdvfMemory(#[source] crate::memory_manager::Error),
 
     #[cfg(feature = "tdx")]
     #[error("Error enabling TDX VM: {0}")]
@@ -305,10 +305,10 @@ pub enum Error {
 
     #[cfg(feature = "guest_debug")]
     #[error("Error debugging VM: {0:?}")]
-    Debug(DebuggableError),
+    Debug(#[source] DebuggableError),
 
     #[error("Error spawning kernel loading thread")]
-    KernelLoadThreadSpawn(std::io::Error),
+    KernelLoadThreadSpawn(#[source] std::io::Error),
 
     #[error("Error joining kernel loading thread")]
     KernelLoadThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
@@ -318,7 +318,7 @@ pub enum Error {
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     #[error("Error coredumping VM: {0:?}")]
-    Coredump(GuestDebuggableError),
+    Coredump(#[source] GuestDebuggableError),
 
     #[cfg(feature = "igvm")]
     #[error("Cannot open igvm file: {0}")]
@@ -335,10 +335,10 @@ pub enum Error {
     ResumeVm(#[source] hypervisor::HypervisorVmError),
 
     #[error("Error creating console devices")]
-    CreateConsoleDevices(ConsoleDeviceError),
+    CreateConsoleDevices(#[source] ConsoleDeviceError),
 
-    #[error("Error locking the disk images")]
-    LockingError(DeviceManagerError),
+    #[error("Error locking disk images: Another instance likely holds a lock")]
+    LockingError(#[source] DeviceManagerError),
 
     #[error("Fw Cfg missing kernel file")]
     FwCfgKernelFile,

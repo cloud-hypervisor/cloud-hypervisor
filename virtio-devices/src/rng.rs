@@ -42,9 +42,9 @@ enum Error {
     #[error("Invalid descriptor")]
     InvalidDescriptor,
     #[error("Failed to write to guest memory: {0}")]
-    GuestMemoryWrite(vm_memory::guest_memory::Error),
+    GuestMemoryWrite(#[source] vm_memory::guest_memory::Error),
     #[error("Failed adding used index: {0}")]
-    QueueAddUsed(virtio_queue::Error),
+    QueueAddUsed(#[source] virtio_queue::Error),
 }
 
 struct RngEpollHandler {

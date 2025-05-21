@@ -52,15 +52,15 @@ enum Error {
     #[error("Descriptor chain too short")]
     DescriptorChainTooShort,
     #[error("Failed to read from guest memory: {0}")]
-    GuestMemoryRead(vm_memory::guest_memory::Error),
+    GuestMemoryRead(#[source] vm_memory::guest_memory::Error),
     #[error("Failed to write to guest memory: {0}")]
-    GuestMemoryWrite(vm_memory::guest_memory::Error),
+    GuestMemoryWrite(#[source] vm_memory::guest_memory::Error),
     #[error("Failed to write_all output: {0}")]
-    OutputWriteAll(io::Error),
+    OutputWriteAll(#[source] io::Error),
     #[error("Failed to flush output: {0}")]
-    OutputFlush(io::Error),
+    OutputFlush(#[source] io::Error),
     #[error("Failed to add used index: {0}")]
-    QueueAddUsed(virtio_queue::Error),
+    QueueAddUsed(#[source] virtio_queue::Error),
 }
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]

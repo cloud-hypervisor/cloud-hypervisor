@@ -31,7 +31,7 @@ pub enum Error {
 
     /// Failed to write FDT to memory.
     #[error("Failed to write FDT to memory: {0}")]
-    WriteFdtToMemory(fdt::Error),
+    WriteFdtToMemory(#[source] fdt::Error),
 
     /// Failed to create a AIA.
     #[error("Failed to create a AIA")]
@@ -43,7 +43,7 @@ pub enum Error {
 
     /// Error configuring the general purpose registers
     #[error("Error configuring the general purpose registers: {0}")]
-    RegsConfiguration(hypervisor::HypervisorCpuError),
+    RegsConfiguration(#[source] hypervisor::HypervisorCpuError),
 }
 
 impl From<Error> for super::Error {

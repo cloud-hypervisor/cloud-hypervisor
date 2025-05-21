@@ -9,6 +9,7 @@ use std::io::Write;
 #[cfg(target_arch = "x86_64")]
 use hypervisor::arch::x86::{DescriptorTable, SegmentRegister};
 use linux_loader::elf;
+use thiserror::Error;
 use vm_memory::ByteValued;
 
 #[derive(Clone)]
@@ -33,12 +34,16 @@ pub struct DumpState {
     pub file: Option<File>,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum GuestDebuggableError {
-    Coredump(anyhow::Error),
-    CoredumpFile(std::io::Error),
-    Pause(vm_migration::MigratableError),
-    Resume(vm_migration::MigratableError),
+    #[error("coredump: {0}")]
+    Coredump(#[source] anyhow::Error),
+    #[error("coredump file: {0}")]
+    CoredumpFile(#[source] std::io::Error),
+    #[error("Failed to pause: {0}")]
+    Pause(#[source] vm_migration::MigratableError),
+    #[error("Failed to resume: {0}")]
+    Resume(#[source] vm_migration::MigratableError),
 }
 
 pub trait GuestDebuggable: vm_migration::Pausable {

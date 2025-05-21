@@ -1022,7 +1022,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "igvm"
 version = "0.3.4"
-source = "git+https://github.com/microsoft/igvm?branch=main#d062818ffbe9d289e7a7914a262e90bd536ad2a7"
+source = "git+https://github.com/microsoft/igvm?branch=main#01daa631a596459cb4de58505881007dd13d4410"
 dependencies = [
  "bitfield-struct",
  "crc32fast",
@@ -1039,7 +1039,7 @@ dependencies = [
 [[package]]
 name = "igvm_defs"
 version = "0.3.4"
-source = "git+https://github.com/microsoft/igvm?branch=main#d062818ffbe9d289e7a7914a262e90bd536ad2a7"
+source = "git+https://github.com/microsoft/igvm?branch=main#01daa631a596459cb4de58505881007dd13d4410"
 dependencies = [
  "bitfield-struct",
  "open-enum",
@@ -1257,9 +1257,9 @@ dependencies = [
 
 [[package]]
 name = "miniz_oxide"
-version = "0.8.0"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2d80299ef12ff69b16a84bb182e3b9df68b5a91574d3d4fa6e41b65deec4df1"
+checksum = "3be647b768db090acb35d5ec5db2b0e1f1de11133ca123b9eacf5137868f892a"
 dependencies = [
  "adler2",
 ]
@@ -1450,6 +1450,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "option_parser"
 version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.6",
+]
 
 [[package]]
 name = "ordered-stream"
@@ -2281,15 +2284,15 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vfio-bindings"
 version = "0.4.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#21d06ceb917ffce6768edefeab02e04d5e79615d"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#3d158a14460cac7ca3c99c2effa0a46880935cb0"
 dependencies = [
  "vmm-sys-util",
 ]
 
 [[package]]
 name = "vfio-ioctls"
-version = "0.2.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#21d06ceb917ffce6768edefeab02e04d5e79615d"
+version = "0.4.0"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#3d158a14460cac7ca3c99c2effa0a46880935cb0"
 dependencies = [
  "byteorder",
  "kvm-bindings",
@@ -2358,6 +2361,7 @@ dependencies = [
  "libc",
  "log",
  "option_parser",
+ "thiserror 2.0.6",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -2377,6 +2381,7 @@ dependencies = [
  "log",
  "net_util",
  "option_parser",
+ "thiserror 2.0.6",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
