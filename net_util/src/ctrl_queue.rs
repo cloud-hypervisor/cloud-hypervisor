@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use libc::c_uint;
+use thiserror::Error;
 use virtio_bindings::virtio_net::{
     VIRTIO_NET_CTRL_GUEST_OFFLOADS, VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET, VIRTIO_NET_CTRL_MQ,
     VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN,
@@ -18,22 +19,29 @@ use vm_virtio::{AccessPlatform, Translatable};
 
 use crate::{GuestMemoryMmap, Tap};
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
     /// Read queue failed.
-    GuestMemory(GuestMemoryError),
+    #[error("Read queue failed")]
+    GuestMemory(#[source] GuestMemoryError),
     /// No control header descriptor
+    #[error("No control header descriptor")]
     NoControlHeaderDescriptor,
     /// Missing the data descriptor in the chain.
+    #[error("Missing the data descriptor in the chain")]
     NoDataDescriptor,
     /// No status descriptor
+    #[error("No status descriptor")]
     NoStatusDescriptor,
     /// Failed adding used index
-    QueueAddUsed(virtio_queue::Error),
+    #[error("Failed adding used index")]
+    QueueAddUsed(#[source] virtio_queue::Error),
     /// Failed creating an iterator over the queue
-    QueueIterator(virtio_queue::Error),
+    #[error("Failed creating an iterator over the queue")]
+    QueueIterator(#[source] virtio_queue::Error),
     /// Failed enabling notification for the queue
-    QueueEnableNotification(virtio_queue::Error),
+    #[error("Failed enabling notification for the queue")]
+    QueueEnableNotification(#[source] virtio_queue::Error),
 }
 
 type Result<T> = std::result::Result<T, Error>;
