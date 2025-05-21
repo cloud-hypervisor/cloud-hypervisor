@@ -30,7 +30,7 @@ pub enum Error {
     SetupFdt,
 
     /// Failed to write FDT to memory.
-    #[error("Failed to write FDT to memory: {0}")]
+    #[error("Failed to write FDT to memory")]
     WriteFdtToMemory(#[source] fdt::Error),
 
     /// Failed to create a AIA.
@@ -42,7 +42,7 @@ pub enum Error {
     InitramfsAddress,
 
     /// Error configuring the general purpose registers
-    #[error("Error configuring the general purpose registers: {0}")]
+    #[error("Error configuring the general purpose registers")]
     RegsConfiguration(#[source] hypervisor::HypervisorCpuError),
 }
 
