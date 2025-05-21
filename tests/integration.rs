@@ -11,6 +11,7 @@
 extern crate test_infra;
 
 use std::collections::HashMap;
+use std::ffi::CStr;
 use std::io::{BufRead, Read, Seek, Write};
 use std::net::TcpListener;
 use std::os::unix::io::AsRawFd;
@@ -2339,6 +2340,90 @@ fn make_guest_panic(guest: &Guest) {
 
     // Trigger guest a panic
     guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
+}
+
+fn _test_ivshmem(guest: &Guest, ivshmem_file_path: String, file_size: &str) {
+    let device_id_line = String::from(
+        guest
+            .ssh_command("lspci -D | grep \"Inter-VM shared memory\"")
+            .unwrap()
+            .trim(),
+    );
+    // Check if ivshmem exists
+    assert!(!device_id_line.is_empty());
+    let device_id = device_id_line.split(" ").next().unwrap();
+    // Check shard memory size
+    assert_eq!(
+        guest
+            .ssh_command(
+                format!("lspci -vv -s {device_id} | grep -c \"Region 2.*size={file_size}\"")
+                    .as_str(),
+            )
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap_or_default(),
+        1
+    );
+
+    let test_message = "ivshmem test data";
+
+    // guest don't have gcc or g++, try to use python to test :(
+    let ivshmem_test_program = format!(
+        r#"
+import os
+import mmap
+from ctypes import create_string_buffer, c_char, memmove
+
+if __name__ == "__main__":
+    test_message = "{test_message}"
+    device_path = f"/sys/bus/pci/devices/{device_id}/resource2"
+    fd = os.open(device_path, os.O_RDWR)
+
+    with mmap.mmap(fd, 1024, flags=mmap.MAP_SHARED,
+                      prot=mmap.PROT_READ | mmap.PROT_WRITE, offset=0) as shmem:
+        c_buf = (c_char * 1024).from_buffer(shmem)
+        c_str = c_buf.raw.split(b'\x00', 1)[0]
+        print(c_str.decode('utf-8', errors='ignore'), end="")
+
+        encoded_msg = test_message.encode('utf-8')[:999]
+        encoded_msg += b'\x00'
+        memmove(c_buf, encoded_msg, len(encoded_msg))
+        del c_buf
+
+    os.close(fd)
+    "#
+    );
+    let output = Command::new("cat")
+        .args([ivshmem_file_path.as_str()])
+        .output()
+        .unwrap();
+    let nul_pos = output.stdout.iter().position(|&b| b == 0).unwrap();
+    let c_str = CStr::from_bytes_until_nul(&output.stdout[..=nul_pos]).unwrap();
+    let probe_message = c_str.to_string_lossy().to_string();
+
+    guest
+        .ssh_command(
+            format!(
+                r#"cat << EOF > test.py
+{ivshmem_test_program}
+EOF
+"#
+            )
+            .as_str(),
+        )
+        .unwrap();
+
+    let message = guest.ssh_command("sudo python3 test.py").unwrap();
+    // Check the probe message in host and guest
+    assert_eq!(probe_message, message);
+
+    let output = fs::read_to_string(ivshmem_file_path.as_str()).unwrap();
+    let nul_pos = output.as_bytes().iter().position(|&b| b == 0).unwrap();
+    let c_str = CStr::from_bytes_until_nul(&output.as_bytes()[..=nul_pos]).unwrap();
+    let file_message = c_str.to_string_lossy().to_string();
+    // Check to send data from guest to host
+    assert_eq!(test_message, file_message);
 }
 
 mod common_parallel {
@@ -7167,6 +7252,61 @@ mod common_parallel {
 
         handle_child_output(r, &output);
     }
+
+    #[test]
+    fn test_ivshmem() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let kernel_path = direct_kernel_boot_path();
+
+        let ivshmem_file_path = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("ivshmem.data")
+                .to_str()
+                .unwrap(),
+        );
+        let file_size = "1M";
+
+        // Create a file to be used as the shared memory
+        Command::new("dd")
+            .args([
+                "if=/dev/zero",
+                format!("of={ivshmem_file_path}").as_str(),
+                format!("bs={file_size}").as_str(),
+                "count=1",
+            ])
+            .status()
+            .unwrap();
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .default_net()
+            .args([
+                "--ivshmem",
+                format!("path={ivshmem_file_path},size={file_size}").as_str(),
+            ])
+            .args(["--api-socket", &api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+            _test_ivshmem(&guest, ivshmem_file_path, file_size);
+        });
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
 }
 
 mod dbus_api {
@@ -7824,20 +7964,50 @@ mod common_sequential {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_snapshot_restore_pvpanic() {
-        _test_snapshot_restore_devices(true);
+        _test_snapshot_restore_devices(true, false);
     }
 
-    fn _test_snapshot_restore_devices(pvpanic: bool) {
+    #[test]
+    #[cfg(feature = "ivshmem")]
+    fn test_snapshot_restore_ivshmem() {
+        _test_snapshot_restore_devices(false, true);
+    }
+
+    fn _test_snapshot_restore_devices(pvpanic: bool, ivshmem: bool) {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
         let kernel_path = direct_kernel_boot_path();
 
         let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
 
+        let ivshmem_file_path = String::from(
+            guest
+                .tmp_dir
+                .as_path()
+                .join("ivshmem.data")
+                .to_str()
+                .unwrap(),
+        );
+        let file_size = "1M";
+
         let device_params = {
             let mut data = vec![];
             if pvpanic {
-                data.push("--pvpanic");
+                data.push(String::from("--pvpanic"));
+            }
+            if ivshmem {
+                // Create a file to be used as the shared memory
+                Command::new("dd")
+                    .args([
+                        "if=/dev/zero",
+                        format!("of={ivshmem_file_path}").as_str(),
+                        format!("bs={file_size}").as_str(),
+                        "count=1",
+                    ])
+                    .status()
+                    .unwrap();
+                data.push(String::from("--ivshmem"));
+                data.push(format!("path={ivshmem_file_path},size={file_size}"))
             }
             data
         };
@@ -7960,6 +8130,15 @@ mod common_sequential {
                     &expected_sequential_events,
                     &event_path_restored
                 ));
+            }
+
+            if ivshmem {
+                // Modify backend file data before function test
+                Command::new("echo")
+                    .args([format!("'restore data' > {ivshmem_file_path}").as_str()])
+                    .status()
+                    .unwrap();
+                _test_ivshmem(&guest, ivshmem_file_path, file_size);
             }
         });
         // Shutdown the target VM and check console output
