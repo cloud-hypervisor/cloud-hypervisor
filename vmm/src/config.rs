@@ -41,81 +41,81 @@ pub enum Error {
     /// Missing restore source_url parameter.
     ParseRestoreSourceUrlMissing,
     /// Error parsing CPU options
-    ParseCpus(OptionParserError),
+    ParseCpus(#[source] OptionParserError),
     /// Invalid CPU features
     InvalidCpuFeatures(String),
     /// Error parsing memory options
-    ParseMemory(OptionParserError),
+    ParseMemory(#[source] OptionParserError),
     /// Error parsing memory zone options
-    ParseMemoryZone(OptionParserError),
+    ParseMemoryZone(#[source] OptionParserError),
     /// Missing 'id' from memory zone
     ParseMemoryZoneIdMissing,
     /// Error parsing rate-limiter group options
-    ParseRateLimiterGroup(OptionParserError),
+    ParseRateLimiterGroup(#[source] OptionParserError),
     /// Error parsing disk options
-    ParseDisk(OptionParserError),
+    ParseDisk(#[source] OptionParserError),
     /// Error parsing network options
-    ParseNetwork(OptionParserError),
+    ParseNetwork(#[source] OptionParserError),
     /// Error parsing RNG options
-    ParseRng(OptionParserError),
+    ParseRng(#[source] OptionParserError),
     /// Error parsing balloon options
-    ParseBalloon(OptionParserError),
+    ParseBalloon(#[source] OptionParserError),
     /// Error parsing filesystem parameters
-    ParseFileSystem(OptionParserError),
+    ParseFileSystem(#[source] OptionParserError),
     /// Error parsing persistent memory parameters
-    ParsePersistentMemory(OptionParserError),
+    ParsePersistentMemory(#[source] OptionParserError),
     /// Failed parsing console
-    ParseConsole(OptionParserError),
+    ParseConsole(#[source] OptionParserError),
     #[cfg(target_arch = "x86_64")]
     /// Failed parsing debug-console
-    ParseDebugConsole(OptionParserError),
+    ParseDebugConsole(#[source] OptionParserError),
     /// No mode given for console
     ParseConsoleInvalidModeGiven,
     /// Failed parsing device parameters
-    ParseDevice(OptionParserError),
+    ParseDevice(#[source] OptionParserError),
     /// Missing path from device,
     ParseDevicePathMissing,
     /// Failed parsing vsock parameters
-    ParseVsock(OptionParserError),
+    ParseVsock(#[source] OptionParserError),
     /// Failed parsing restore parameters
-    ParseRestore(OptionParserError),
+    ParseRestore(#[source] OptionParserError),
     /// Failed parsing SGX EPC parameters
     #[cfg(target_arch = "x86_64")]
-    ParseSgxEpc(OptionParserError),
+    ParseSgxEpc(#[source] OptionParserError),
     /// Missing 'id' from SGX EPC section
     #[cfg(target_arch = "x86_64")]
     ParseSgxEpcIdMissing,
     /// Failed parsing NUMA parameters
-    ParseNuma(OptionParserError),
+    ParseNuma(#[source] OptionParserError),
     /// Failed validating configuration
-    Validation(ValidationError),
+    Validation(#[source] ValidationError),
     #[cfg(feature = "sev_snp")]
     /// Failed parsing SEV-SNP config
-    ParseSevSnp(OptionParserError),
+    ParseSevSnp(#[source] OptionParserError),
     #[cfg(feature = "tdx")]
     /// Failed parsing TDX config
-    ParseTdx(OptionParserError),
+    ParseTdx(#[source] OptionParserError),
     #[cfg(feature = "tdx")]
     /// No TDX firmware
     FirmwarePathMissing,
     /// Failed parsing userspace device
-    ParseUserDevice(OptionParserError),
+    ParseUserDevice(#[source] OptionParserError),
     /// Missing socket for userspace device
     ParseUserDeviceSocketMissing,
     /// Error parsing pci segment options
-    ParsePciSegment(OptionParserError),
+    ParsePciSegment(#[source] OptionParserError),
     /// Failed parsing platform parameters
-    ParsePlatform(OptionParserError),
+    ParsePlatform(#[source] OptionParserError),
     /// Failed parsing vDPA device
-    ParseVdpa(OptionParserError),
+    ParseVdpa(#[source] OptionParserError),
     /// Missing path for vDPA device
     ParseVdpaPathMissing,
     /// Failed parsing TPM device
-    ParseTpm(OptionParserError),
+    ParseTpm(#[source] OptionParserError),
     /// Missing path for TPM device
     ParseTpmPathMissing,
     /// Error parsing Landlock rules
-    ParseLandlockRules(OptionParserError),
+    ParseLandlockRules(#[source] OptionParserError),
     /// Missing fields in Landlock rules
     ParseLandlockMissingFields,
 }
@@ -3138,7 +3138,7 @@ impl Drop for VmConfig {
 #[cfg(test)]
 mod tests {
     use std::fs::File;
-    use std::net::Ipv4Addr;
+    use std::net::{IpAddr, Ipv4Addr};
     use std::os::unix::io::AsRawFd;
 
     use net_util::MacAddr;
@@ -3468,8 +3468,8 @@ mod tests {
     fn net_fixture() -> NetConfig {
         NetConfig {
             tap: None,
-            ip: Ipv4Addr::new(192, 168, 249, 1),
-            mask: Ipv4Addr::new(255, 255, 255, 0),
+            ip: IpAddr::V4(Ipv4Addr::new(192, 168, 249, 1)),
+            mask: IpAddr::V4(Ipv4Addr::new(255, 255, 255, 0)),
             mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
             host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
             mtu: None,

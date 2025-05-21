@@ -5,6 +5,7 @@
 use std::collections::btree_map::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::os::fd::{AsRawFd, RawFd};
 
 use byteorder::{BigEndian, ByteOrder};
 use remain::sorted;
@@ -25,19 +26,19 @@ mod vhdx_metadata;
 #[sorted]
 #[derive(Error, Debug)]
 pub enum VhdxError {
-    #[error("Not a VHDx file {0}")]
+    #[error("Not a VHDx file: {0}")]
     NotVhdx(#[source] VhdxHeaderError),
-    #[error("Failed to parse VHDx header {0}")]
+    #[error("Failed to parse VHDx header: {0}")]
     ParseVhdxHeader(#[source] VhdxHeaderError),
-    #[error("Failed to parse VHDx metadata {0}")]
+    #[error("Failed to parse VHDx metadata: {0}")]
     ParseVhdxMetadata(#[source] VhdxMetadataError),
-    #[error("Failed to parse VHDx region entries {0}")]
+    #[error("Failed to parse VHDx region entries: {0}")]
     ParseVhdxRegionEntry(#[source] VhdxHeaderError),
-    #[error("Failed reading metadata {0}")]
+    #[error("Failed reading metadata: {0}")]
     ReadBatEntry(#[source] VhdxBatError),
-    #[error("Failed reading sector from disk {0}")]
+    #[error("Failed reading sector from disk: {0}")]
     ReadFailed(#[source] VhdxIoError),
-    #[error("Failed writing to sector on disk {0}")]
+    #[error("Failed writing to sector on disk: {0}")]
     WriteFailed(#[source] VhdxIoError),
 }
 
@@ -219,6 +220,12 @@ impl Clone for Vhdx {
             current_offset: self.current_offset,
             first_write: self.first_write,
         }
+    }
+}
+
+impl AsRawFd for Vhdx {
+    fn as_raw_fd(&self) -> RawFd {
+        self.file.as_raw_fd()
     }
 }
 

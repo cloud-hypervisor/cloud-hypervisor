@@ -3188,7 +3188,7 @@ As part of our general effort to offload paravirtualized I/O to external
 processes, we added support for
 [vhost-user-net](https://access.redhat.com/solutions/3394851) backends. This
 enables `cloud-hypervisor` users to plug a `vhost-user` based networking device
-(e.g. [DPDK](https://dpdk.org)) into the VMM as their virtio network backend.
+(e.g. [DPDK](https://www.dpdk.org)) into the VMM as their virtio network backend.
 
 ### Minimal hardware-reduced ACPI
 

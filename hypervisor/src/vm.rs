@@ -257,6 +257,11 @@ pub enum HypervisorVmError {
     #[cfg(feature = "sev_snp")]
     #[error("Failed to mmap:")]
     MmapToRoot,
+    ///
+    /// Failed to initialize VM
+    ///
+    #[error("Failed to initialize VM: {0}")]
+    InitializeVm(#[source] anyhow::Error),
 }
 ///
 /// Result type for returning from a function
@@ -418,7 +423,10 @@ pub trait Vm: Send + Sync + Any {
     ) -> Result<()> {
         unimplemented!()
     }
-
+    /// Initialize the VM
+    fn init(&self) -> Result<()> {
+        Ok(())
+    }
     /// Pause the VM
     fn pause(&self) -> Result<()> {
         Ok(())

@@ -25,8 +25,6 @@ use std::{cmp, io, result, thread};
 use acpi_tables::sdt::Sdt;
 use acpi_tables::{aml, Aml};
 use anyhow::anyhow;
-#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
-use arch::aarch64::regs;
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::get_x2apic_id;
 use arch::{EntryPoint, NumaNodes};
@@ -37,6 +35,8 @@ use devices::interrupt_controller::InterruptController;
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use gdbstub_arch::x86::reg::{X86SegmentRegs, X86_64CoreRegs as CoreRegs};
+#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
+use hypervisor::arch::aarch64::regs::{ID_AA64MMFR0_EL1, TCR_EL1, TTBR1_EL1};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use hypervisor::arch::x86::msr_index;
 #[cfg(target_arch = "x86_64")]
@@ -147,11 +147,18 @@ pub enum Error {
     #[error("Error finalising vCPU: {0}")]
     VcpuArmFinalize(#[source] hypervisor::HypervisorCpuError),
 
+    #[cfg(target_arch = "aarch64")]
+    #[error("Error initialising GICR base address: {0}")]
+    VcpuSetGicrBaseAddr(#[source] hypervisor::HypervisorCpuError),
+
     #[error("Failed to join on vCPU threads: {0:?}")]
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
     #[error("Error adding CpuManager to MMIO bus: {0}")]
     BusError(#[source] vm_device::BusError),
+
+    #[error("Requested zero vCPUs")]
+    DesiredVCpuCountIsZero,
 
     #[error("Requested vCPUs exceed maximum")]
     DesiredVCpuCountExceedsMax,
@@ -200,7 +207,7 @@ pub enum Error {
 
     #[cfg(target_arch = "x86_64")]
     #[error("Failed to inject NMI")]
-    NmiError(hypervisor::HypervisorCpuError),
+    NmiError(#[source] hypervisor::HypervisorCpuError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -480,6 +487,23 @@ impl Vcpu {
                 vmsa,
             )
             .map_err(Error::SetSevControlRegister)
+    }
+
+    ///
+    /// Sets the vCPU's GIC redistributor base address.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    pub fn set_gic_redistributor_addr(
+        &self,
+        base_redist_addr: u64,
+        redist_size: u64,
+    ) -> Result<()> {
+        let gicr_base = base_redist_addr + (arch::layout::GIC_V3_REDIST_SIZE * self.id as u64);
+        assert!(gicr_base + arch::layout::GIC_V3_REDIST_SIZE <= base_redist_addr + redist_size);
+        self.vcpu
+            .set_gic_redistributor_addr(gicr_base)
+            .map_err(Error::VcpuSetGicrBaseAddr)?;
+        Ok(())
     }
 }
 
@@ -1326,6 +1350,10 @@ impl CpuManager {
             return Ok(false);
         }
 
+        if desired_vcpus < 1 {
+            return Err(Error::DesiredVCpuCountIsZero);
+        }
+
         if self.check_pending_removed_vcpu() {
             return Err(Error::VcpuPendingRemovedVcpu);
         }
@@ -1730,19 +1758,19 @@ impl CpuManager {
             .lock()
             .unwrap()
             .vcpu
-            .get_sys_reg(regs::TCR_EL1)
+            .get_sys_reg(TCR_EL1)
             .map_err(|e| Error::TranslateVirtualAddress(e.into()))?;
         let ttbr1_el1: u64 = self.vcpus[usize::from(cpu_id)]
             .lock()
             .unwrap()
             .vcpu
-            .get_sys_reg(regs::TTBR1_EL1)
+            .get_sys_reg(TTBR1_EL1)
             .map_err(|e| Error::TranslateVirtualAddress(e.into()))?;
         let id_aa64mmfr0_el1: u64 = self.vcpus[usize::from(cpu_id)]
             .lock()
             .unwrap()
             .vcpu
-            .get_sys_reg(regs::ID_AA64MMFR0_EL1)
+            .get_sys_reg(ID_AA64MMFR0_EL1)
             .map_err(|e| Error::TranslateVirtualAddress(e.into()))?;
 
         // Bit 55 of the VA determines the range, high (0xFFFxxx...)
@@ -2964,8 +2992,8 @@ mod tests {
     #[cfg(feature = "kvm")]
     use std::mem;
 
-    use arch::aarch64::regs;
     use arch::layout;
+    use hypervisor::arch::aarch64::regs::MPIDR_EL1;
     #[cfg(feature = "kvm")]
     use hypervisor::kvm::aarch64::is_system_register;
     #[cfg(feature = "kvm")]
@@ -3000,10 +3028,10 @@ mod tests {
         vm.get_preferred_target(&mut kvi).unwrap();
 
         // Must fail when vcpu is not initialized yet.
-        vcpu.get_sys_reg(regs::MPIDR_EL1).unwrap_err();
+        vcpu.get_sys_reg(MPIDR_EL1).unwrap_err();
 
         vcpu.vcpu_init(&kvi).unwrap();
-        assert_eq!(vcpu.get_sys_reg(regs::MPIDR_EL1).unwrap(), 0x80000000);
+        assert_eq!(vcpu.get_sys_reg(MPIDR_EL1).unwrap(), 0x80000000);
     }
 
     #[cfg(feature = "kvm")]

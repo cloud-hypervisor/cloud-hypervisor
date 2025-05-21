@@ -916,9 +916,8 @@ fn check_sequential_events(expected_events: &[&MetaEvent], event_file: &str) -> 
     if !ret {
         eprintln!(
             "\n\n==== Start 'check_sequential_events' failed ==== \
-             \n\nexpected_events={:?}\nactual_events={:?} \
+             \n\nexpected_events={expected_events:?}\nactual_events={json_events:?} \
              \n\n==== End 'check_sequential_events' failed ====",
-            expected_events, json_events,
         );
     }
 
@@ -936,9 +935,8 @@ fn check_sequential_events_exact(expected_events: &[&MetaEvent], event_file: &st
         if !expected_events[idx].match_with_json_event(e) {
             eprintln!(
                 "\n\n==== Start 'check_sequential_events_exact' failed ==== \
-                 \n\nexpected_events={:?}\nactual_events={:?} \
+                 \n\nexpected_events={expected_events:?}\nactual_events={json_events:?} \
                  \n\n==== End 'check_sequential_events_exact' failed ====",
-                expected_events, json_events,
             );
 
             return false;
@@ -959,9 +957,8 @@ fn check_latest_events_exact(latest_events: &[&MetaEvent], event_file: &str) -> 
         if !latest_events[idx].match_with_json_event(e) {
             eprintln!(
                 "\n\n==== Start 'check_latest_events_exact' failed ==== \
-                 \n\nexpected_events={:?}\nactual_events={:?} \
+                 \n\nexpected_events={latest_events:?}\nactual_events={json_events:?} \
                  \n\n==== End 'check_latest_events_exact' failed ====",
-                latest_events, json_events,
             );
 
             return false;
@@ -4448,7 +4445,7 @@ mod common_parallel {
                 )
                 .as_str(),
                 format!("path={}", vfio_disk_path.to_str().unwrap()).as_str(),
-                format!("path={},iommu=on", blk_file_path.to_str().unwrap()).as_str(),
+                format!("path={},iommu=on,readonly=true", blk_file_path.to_str().unwrap()).as_str(),
             ])
             .args([
                 "--cmdline",
@@ -5196,7 +5193,13 @@ mod common_parallel {
             assert!(!remote_command(
                 &api_socket,
                 "add-disk",
-                Some(format!("path={},id=test0", blk_file_path.to_str().unwrap()).as_str()),
+                Some(
+                    format!(
+                        "path={},id=test0,readonly=true",
+                        blk_file_path.to_str().unwrap()
+                    )
+                    .as_str()
+                ),
             ));
         });
 
@@ -5225,7 +5228,7 @@ mod common_parallel {
         if landlock_enabled {
             cmd.args(["--landlock"]).args([
                 "--landlock-rules",
-                format!("path={:?},access=rw", blk_file_path).as_str(),
+                format!("path={blk_file_path:?},access=rw").as_str(),
             ]);
         }
 
@@ -5258,7 +5261,13 @@ mod common_parallel {
             let (cmd_success, cmd_output) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
-                Some(format!("path={},id=test0", blk_file_path.to_str().unwrap()).as_str()),
+                Some(
+                    format!(
+                        "path={},id=test0,readonly=true",
+                        blk_file_path.to_str().unwrap()
+                    )
+                    .as_str(),
+                ),
             );
             assert!(cmd_success);
             assert!(String::from_utf8_lossy(&cmd_output)
@@ -5299,7 +5308,13 @@ mod common_parallel {
             let (cmd_success, cmd_output) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
-                Some(format!("path={},id=test0", blk_file_path.to_str().unwrap()).as_str()),
+                Some(
+                    format!(
+                        "path={},id=test0,readonly=true",
+                        blk_file_path.to_str().unwrap()
+                    )
+                    .as_str(),
+                ),
             );
             assert!(cmd_success);
             assert!(String::from_utf8_lossy(&cmd_output)
@@ -6330,7 +6345,9 @@ mod common_parallel {
         use std::str::FromStr;
         let taps = net_util::open_tap(
             Some("chtap0"),
-            Some(std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap()),
+            Some(std::net::IpAddr::V4(
+                std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap(),
+            )),
             None,
             &mut None,
             None,
@@ -7597,7 +7614,9 @@ mod common_sequential {
         use std::str::FromStr;
         let taps = net_util::open_tap(
             Some(tap_name),
-            Some(std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap()),
+            Some(std::net::IpAddr::V4(
+                std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap(),
+            )),
             None,
             &mut None,
             None,
@@ -7626,7 +7645,7 @@ mod common_sequential {
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket_source])
             .args(["--event-monitor", format!("path={event_path}").as_str()])
-            .args(["--cpus", format!("boot={}", n_cpu).as_str()])
+            .args(["--cpus", format!("boot={n_cpu}").as_str()])
             .args(["--memory", "size=1G"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args([
@@ -7695,7 +7714,9 @@ mod common_sequential {
 
         let taps = net_util::open_tap(
             Some(tap_name),
-            Some(std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap()),
+            Some(std::net::IpAddr::V4(
+                std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap(),
+            )),
             None,
             &mut None,
             None,
@@ -7826,13 +7847,13 @@ mod common_sequential {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket_source])
-            .args(["--event-monitor", format!("path={}", event_path).as_str()])
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
             .args(["--cpus", "boot=2"])
             .args(["--memory", "size=1G"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .default_disks()
             .default_net()
-            .args(["--vsock", format!("cid=3,socket={}", socket).as_str()])
+            .args(["--vsock", format!("cid=3,socket={socket}").as_str()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(device_params)
             .capture_output()
@@ -10355,9 +10376,9 @@ mod live_migration {
         // Start the 'receive-migration' command on the destination
         let mut receive_migration = Command::new(clh_command("ch-remote"))
             .args([
-                &format!("--api-socket={}", dest_api_socket),
+                &format!("--api-socket={dest_api_socket}"),
                 "receive-migration",
-                &format!("tcp:0.0.0.0:{}", migration_port),
+                &format!("tcp:0.0.0.0:{migration_port}"),
             ])
             .stdin(Stdio::null())
             .stderr(Stdio::piped())
@@ -10371,9 +10392,9 @@ mod live_migration {
         // Start the 'send-migration' command on the source
         let mut send_migration = Command::new(clh_command("ch-remote"))
             .args([
-                &format!("--api-socket={}", src_api_socket),
+                &format!("--api-socket={src_api_socket}"),
                 "send-migration",
-                &format!("tcp:{}:{}", host_ip, migration_port),
+                &format!("tcp:{host_ip}:{migration_port}"),
             ])
             .stdin(Stdio::null())
             .stderr(Stdio::piped())
@@ -10452,7 +10473,7 @@ mod live_migration {
         src_vm_cmd
             .args([
                 "--cpus",
-                format!("boot={},max={}", boot_vcpus, max_vcpus).as_str(),
+                format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
             ])
             .args(memory_param)
             .args(["--kernel", kernel_path.to_str().unwrap()])
@@ -10957,7 +10978,7 @@ mod rate_limiter {
             let test_img_path = String::from(
                 test_img_dir
                     .as_path()
-                    .join(format!("blk{}.img", i))
+                    .join(format!("blk{i}.img"))
                     .to_str()
                     .unwrap(),
             );

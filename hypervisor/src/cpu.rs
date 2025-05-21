@@ -323,7 +323,13 @@ pub enum HypervisorCpuError {
     #[cfg(feature = "sev_snp")]
     #[error("Failed to set sev control register: {0}")]
     SetSevControlRegister(#[source] anyhow::Error),
-
+    ///
+    /// Unsupported SysReg registers
+    ///
+    #[cfg(target_arch = "aarch64")]
+    #[error("Unsupported SysReg registers: {0}")]
+    UnsupportedSysReg(u32),
+    ///
     /// Error injecting NMI
     ///
     #[error("Failed to inject NMI")]
@@ -588,7 +594,13 @@ pub trait Vcpu: Send + Sync {
     ) -> Result<()> {
         unimplemented!()
     }
-
+    ///
+    /// Sets the value of GIC redistributor address
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn set_gic_redistributor_addr(&self, _gicr_base_addr: u64) -> Result<()> {
+        Ok(())
+    }
     #[cfg(target_arch = "x86_64")]
     ///
     /// Trigger NMI interrupt

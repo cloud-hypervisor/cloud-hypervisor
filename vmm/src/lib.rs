@@ -145,15 +145,15 @@ pub enum Error {
 
     /// Cannot handle the VM STDIN stream
     #[error("Error handling VM stdin: {0:?}")]
-    Stdin(VmError),
+    Stdin(#[source] VmError),
 
     /// Cannot handle the VM pty stream
     #[error("Error handling VM pty: {0:?}")]
-    Pty(VmError),
+    Pty(#[source] VmError),
 
     /// Cannot reboot the VM
     #[error("Error rebooting VM: {0:?}")]
-    VmReboot(VmError),
+    VmReboot(#[source] VmError),
 
     /// Cannot create VMM thread
     #[error("Error spawning VMM thread {0:?}")]
@@ -161,22 +161,23 @@ pub enum Error {
 
     /// Cannot shut the VMM down
     #[error("Error shutting down VMM: {0:?}")]
-    VmmShutdown(VmError),
+    VmmShutdown(#[source] VmError),
 
     /// Cannot create seccomp filter
     #[error("Error creating seccomp filter: {0}")]
-    CreateSeccompFilter(seccompiler::Error),
+    CreateSeccompFilter(#[source] seccompiler::Error),
 
     /// Cannot apply seccomp filter
     #[error("Error applying seccomp filter: {0}")]
-    ApplySeccompFilter(seccompiler::Error),
+    ApplySeccompFilter(#[source] seccompiler::Error),
 
     /// Error activating virtio devices
     #[error("Error activating virtio devices: {0:?}")]
-    ActivateVirtioDevices(VmError),
+    ActivateVirtioDevices(#[source] VmError),
 
     /// Error creating API server
     #[error("Error creating API server {0:?}")]
+    // TODO #[source]  once the type implements Error
     CreateApiServer(micro_http::ServerError),
 
     /// Error binding API server socket
@@ -185,7 +186,7 @@ pub enum Error {
 
     #[cfg(feature = "guest_debug")]
     #[error("Failed to start the GDB thread: {0}")]
-    GdbThreadSpawn(io::Error),
+    GdbThreadSpawn(#[source] io::Error),
 
     /// GDB request receive error
     #[cfg(feature = "guest_debug")]
@@ -205,11 +206,11 @@ pub enum Error {
 
     /// Cannot create Landlock object
     #[error("Error creating landlock object: {0}")]
-    CreateLandlock(LandlockError),
+    CreateLandlock(#[source] LandlockError),
 
     /// Cannot apply landlock based sandboxing
     #[error("Error applying landlock: {0}")]
-    ApplyLandlock(LandlockError),
+    ApplyLandlock(#[source] LandlockError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1210,6 +1211,12 @@ impl Vmm {
             // Send last batch of dirty pages
             Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
         }
+
+        // We release the locks early to enable locking them on the destination host.
+        // The VM is already stopped.
+        vm.release_disk_locks()
+            .map_err(|e| MigratableError::UnlockError(anyhow!("{e}")))?;
+
         // Capture snapshot and send it
         let vm_snapshot = vm.snapshot()?;
         let snapshot_data = serde_json::to_vec(&vm_snapshot).unwrap();
@@ -1222,6 +1229,7 @@ impl Vmm {
             MigratableError::MigrateSend(anyhow!("Error during state migration")),
         )?;
         // Complete the migration
+        // At this step, the receiving VMM will acquire disk locks again.
         Request::complete().write_to(&mut socket)?;
         Response::read_from(&mut socket)?.ok_or_abandon(
             &mut socket,

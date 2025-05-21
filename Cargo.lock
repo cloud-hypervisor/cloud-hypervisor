@@ -1020,7 +1020,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "igvm"
 version = "0.3.4"
-source = "git+https://github.com/microsoft/igvm?branch=main#d062818ffbe9d289e7a7914a262e90bd536ad2a7"
+source = "git+https://github.com/microsoft/igvm?branch=main#01daa631a596459cb4de58505881007dd13d4410"
 dependencies = [
  "bitfield-struct",
  "crc32fast",
@@ -1037,7 +1037,7 @@ dependencies = [
 [[package]]
 name = "igvm_defs"
 version = "0.3.4"
-source = "git+https://github.com/microsoft/igvm?branch=main#d062818ffbe9d289e7a7914a262e90bd536ad2a7"
+source = "git+https://github.com/microsoft/igvm?branch=main#01daa631a596459cb4de58505881007dd13d4410"
 dependencies = [
  "bitfield-struct",
  "open-enum",
@@ -1241,7 +1241,7 @@ dependencies = [
 [[package]]
 name = "micro_http"
 version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#ef96f623c46e221ebf9b6037567f97ec57683afd"
+source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#4f621532e81ee2ad096a9c9592fdacc40d19de48"
 dependencies = [
  "libc",
  "vmm-sys-util",
@@ -1249,9 +1249,9 @@ dependencies = [
 
 [[package]]
 name = "miniz_oxide"
-version = "0.8.0"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2d80299ef12ff69b16a84bb182e3b9df68b5a91574d3d4fa6e41b65deec4df1"
+checksum = "3be647b768db090acb35d5ec5db2b0e1f1de11133ca123b9eacf5137868f892a"
 dependencies = [
  "adler2",
 ]
@@ -1264,9 +1264,9 @@ checksum = "9bec4598fddb13cc7b528819e697852653252b760f1228b7642679bf2ff2cd07"
 
 [[package]]
 name = "mshv-bindings"
-version = "0.3.5"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd4aa8157010f69f380a86a0ba087167b0a01e2e3f2bcca5b576bd26a9206dc8"
+checksum = "909de5fd4a5a3347a6c62872f6816e6279efd8615a753f10a3bc4daaef8a72ef"
 dependencies = [
  "libc",
  "num_enum",
@@ -1278,9 +1278,9 @@ dependencies = [
 
 [[package]]
 name = "mshv-ioctls"
-version = "0.3.5"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2bdc151fdc265efbb20f6c74e235dcdbce9a54e695655ac88b4db7385b26319"
+checksum = "8c7d94972588d562bd349b916de6a43f2ee268e6e9c91cfb5b30549ed4ea2751"
 dependencies = [
  "libc",
  "mshv-bindings",
@@ -1442,6 +1442,9 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "option_parser"
 version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.6",
+]
 
 [[package]]
 name = "ordered-stream"
@@ -2260,15 +2263,15 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vfio-bindings"
 version = "0.4.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#bdbb1cd486484faa23db48c82d51484e2ee43692"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#3d158a14460cac7ca3c99c2effa0a46880935cb0"
 dependencies = [
  "vmm-sys-util",
 ]
 
 [[package]]
 name = "vfio-ioctls"
-version = "0.2.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#bdbb1cd486484faa23db48c82d51484e2ee43692"
+version = "0.4.0"
+source = "git+https://github.com/rust-vmm/vfio?branch=main#3d158a14460cac7ca3c99c2effa0a46880935cb0"
 dependencies = [
  "byteorder",
  "kvm-bindings",
@@ -2337,6 +2340,7 @@ dependencies = [
  "libc",
  "log",
  "option_parser",
+ "thiserror 2.0.6",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -2356,6 +2360,7 @@ dependencies = [
  "log",
  "net_util",
  "option_parser",
+ "thiserror 2.0.6",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",

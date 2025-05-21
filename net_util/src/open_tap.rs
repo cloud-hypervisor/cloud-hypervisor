@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::net::Ipv4Addr;
+use std::net::IpAddr;
 use std::path::Path;
 use std::{fs, io};
 
@@ -13,29 +13,27 @@ use super::{vnet_hdr_len, MacAddr, Tap, TapError};
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed to convert an hexadecimal string into an integer: {0}")]
-    ConvertHexStringToInt(std::num::ParseIntError),
+    ConvertHexStringToInt(#[source] std::num::ParseIntError),
     #[error("Error related to the multiqueue support (no support TAP side)")]
     MultiQueueNoTapSupport,
     #[error("Error related to the multiqueue support (no support device side)")]
     MultiQueueNoDeviceSupport,
     #[error("Failed to read the TAP flags from sysfs: {0}")]
-    ReadSysfsTunFlags(io::Error),
+    ReadSysfsTunFlags(#[source] io::Error),
     #[error("Open tap device failed: {0}")]
-    TapOpen(TapError),
-    #[error("Setting tap IP failed: {0}")]
-    TapSetIp(TapError),
-    #[error("Setting tap netmask failed: {0}")]
-    TapSetNetmask(TapError),
+    TapOpen(#[source] TapError),
+    #[error("Setting tap IP and/or netmask failed: {0}")]
+    TapSetIpNetmask(#[source] TapError),
     #[error("Setting MAC address failed: {0}")]
-    TapSetMac(TapError),
+    TapSetMac(#[source] TapError),
     #[error("Getting MAC address failed: {0}")]
-    TapGetMac(TapError),
+    TapGetMac(#[source] TapError),
     #[error("Setting vnet header size failed: {0}")]
-    TapSetVnetHdrSize(TapError),
+    TapSetVnetHdrSize(#[source] TapError),
     #[error("Setting MTU failed: {0}")]
-    TapSetMtu(TapError),
+    TapSetMtu(#[source] TapError),
     #[error("Enabling tap interface failed: {0}")]
-    TapEnable(TapError),
+    TapEnable(#[source] TapError),
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -64,8 +62,8 @@ fn check_mq_support(if_name: &Option<&str>, queue_pairs: usize) -> Result<()> {
 /// netmask.
 pub fn open_tap(
     if_name: Option<&str>,
-    ip_addr: Option<Ipv4Addr>,
-    netmask: Option<Ipv4Addr>,
+    ip_addr: Option<IpAddr>,
+    netmask: Option<IpAddr>,
     host_mac: &mut Option<MacAddr>,
     mtu: Option<u16>,
     num_rx_q: usize,
@@ -94,10 +92,8 @@ pub fn open_tap(
             // Don't overwrite ip configuration of existing interfaces:
             if !tap_existed {
                 if let Some(ip) = ip_addr {
-                    tap.set_ip_addr(ip).map_err(Error::TapSetIp)?;
-                }
-                if let Some(mask) = netmask {
-                    tap.set_netmask(mask).map_err(Error::TapSetNetmask)?;
+                    tap.set_ip_addr(ip, netmask)
+                        .map_err(Error::TapSetIpNetmask)?;
                 }
             } else {
                 warn!(

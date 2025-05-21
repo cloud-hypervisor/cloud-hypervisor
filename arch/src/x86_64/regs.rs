@@ -24,40 +24,40 @@ use crate::{EntryPoint, GuestMemoryMmap};
 pub enum Error {
     /// Failed to get SREGs for this CPU.
     #[error("Failed to get SREGs for this CPU: {0}")]
-    GetStatusRegisters(hypervisor::HypervisorCpuError),
+    GetStatusRegisters(#[source] hypervisor::HypervisorCpuError),
     /// Failed to set base registers for this CPU.
     #[error("Failed to set base registers for this CPU: {0}")]
-    SetBaseRegisters(hypervisor::HypervisorCpuError),
+    SetBaseRegisters(#[source] hypervisor::HypervisorCpuError),
     /// Failed to configure the FPU.
     #[error("Failed to configure the FPU: {0}")]
-    SetFpuRegisters(hypervisor::HypervisorCpuError),
+    SetFpuRegisters(#[source] hypervisor::HypervisorCpuError),
     /// Setting up MSRs failed.
     #[error("Setting up MSRs failed: {0}")]
-    SetModelSpecificRegisters(hypervisor::HypervisorCpuError),
+    SetModelSpecificRegisters(#[source] hypervisor::HypervisorCpuError),
     /// Failed to set SREGs for this CPU.
     #[error("Failed to set SREGs for this CPU: {0}")]
-    SetStatusRegisters(hypervisor::HypervisorCpuError),
+    SetStatusRegisters(#[source] hypervisor::HypervisorCpuError),
     /// Checking the GDT address failed.
     #[error("Checking the GDT address failed")]
     CheckGdtAddr,
     /// Writing the GDT to RAM failed.
     #[error("Writing the GDT to RAM failed: {0}")]
-    WriteGdt(GuestMemoryError),
+    WriteGdt(#[source] GuestMemoryError),
     /// Writing the IDT to RAM failed.
     #[error("Writing the IDT to RAM failed: {0}")]
-    WriteIdt(GuestMemoryError),
+    WriteIdt(#[source] GuestMemoryError),
     /// Writing PDPTE to RAM failed.
     #[error("Writing PDPTE to RAM failed: {0}")]
-    WritePdpteAddress(GuestMemoryError),
+    WritePdpteAddress(#[source] GuestMemoryError),
     /// Writing PDE to RAM failed.
     #[error("Writing PDE to RAM failed: {0}")]
-    WritePdeAddress(GuestMemoryError),
+    WritePdeAddress(#[source] GuestMemoryError),
     /// Writing PML4 to RAM failed.
     #[error("Writing PML4 to RAM failed: {0}")]
-    WritePml4Address(GuestMemoryError),
+    WritePml4Address(#[source] GuestMemoryError),
     /// Writing PML5 to RAM failed.
     #[error("Writing PML5 to RAM failed: {0}")]
-    WritePml5Address(GuestMemoryError),
+    WritePml5Address(#[source] GuestMemoryError),
 }
 
 pub type Result<T> = result::Result<T, Error>;

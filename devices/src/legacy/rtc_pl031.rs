@@ -46,7 +46,7 @@ pub enum Error {
     #[error("Bad Write Offset: {0}")]
     BadWriteOffset(u64),
     #[error("Failed to trigger interrupt: {0}")]
-    InterruptFailure(io::Error),
+    InterruptFailure(#[source] io::Error),
 }
 
 type Result<T> = result::Result<T, Error>;

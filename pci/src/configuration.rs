@@ -4,11 +4,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::fmt::{self, Display};
 use std::sync::{Arc, Mutex};
 
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use vm_device::PciBarType;
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
 
@@ -18,6 +18,8 @@ use crate::{MsixConfig, PciInterruptPin};
 // The number of 32bit registers in the config space, 4096 bytes.
 const NUM_CONFIGURATION_REGISTERS: usize = 1024;
 
+pub(crate) const COMMAND_REG: usize = 1;
+pub(crate) const COMMAND_REG_MEMORY_SPACE_MASK: u32 = 0x0000_0002;
 const STATUS_REG: usize = 1;
 const STATUS_REG_CAPABILITIES_USED_MASK: u32 = 0x0010_0000;
 const BAR0_REG: usize = 4;
@@ -436,6 +438,7 @@ pub struct PciConfiguration {
     last_capability: Option<(usize, usize)>,
     msix_cap_reg_idx: Option<usize>,
     msix_config: Option<Arc<Mutex<MsixConfig>>>,
+    pending_bar_reprogram: Vec<BarReprogrammingParams>,
 }
 
 /// See pci_regs.h in kernel
@@ -490,59 +493,44 @@ pub struct PciBarConfiguration {
     prefetchable: PciBarPrefetchable,
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum Error {
+    #[error("address {0} size {1} too big")]
     BarAddressInvalid(u64, u64),
+    #[error("bar {0} already used")]
     BarInUse(usize),
+    #[error("64bit bar {0} already used (requires two regs)")]
     BarInUse64(usize),
+    #[error("bar {0} invalid, max {max}", max = NUM_BAR_REGS - 1)]
     BarInvalid(usize),
+    #[error("64bitbar {0} invalid, requires two regs, max {max}", max = NUM_BAR_REGS - 1)]
     BarInvalid64(usize),
+    #[error("bar address {0} not a power of two")]
     BarSizeInvalid(u64),
+    #[error("empty capabilities are invalid")]
     CapabilityEmpty,
+    #[error("Invalid capability length {0}")]
     CapabilityLengthInvalid(usize),
+    #[error("capability of size {0} doesn't fit")]
     CapabilitySpaceFull(usize),
+    #[error("failed to decode 32 bits BAR size")]
     Decode32BarSize,
+    #[error("failed to decode 64 bits BAR size")]
     Decode64BarSize,
+    #[error("failed to encode 32 bits BAR size")]
     Encode32BarSize,
+    #[error("failed to encode 64 bits BAR size")]
     Encode64BarSize,
+    #[error("address {0} size {1} too big")]
     RomBarAddressInvalid(u64, u64),
+    #[error("rom bar {0} already used")]
     RomBarInUse(usize),
+    #[error("rom bar {0} invalid, max {max}", max = NUM_BAR_REGS - 1)]
     RomBarInvalid(usize),
+    #[error("rom bar address {0} not a power of two")]
     RomBarSizeInvalid(u64),
 }
 pub type Result<T> = std::result::Result<T, Error>;
-
-impl std::error::Error for Error {}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::Error::*;
-        match self {
-            BarAddressInvalid(a, s) => write!(f, "address {a} size {s} too big"),
-            BarInUse(b) => write!(f, "bar {b} already used"),
-            BarInUse64(b) => write!(f, "64bit bar {b} already used(requires two regs)"),
-            BarInvalid(b) => write!(f, "bar {} invalid, max {}", b, NUM_BAR_REGS - 1),
-            BarInvalid64(b) => write!(
-                f,
-                "64bitbar {} invalid, requires two regs, max {}",
-                b,
-                NUM_BAR_REGS - 1
-            ),
-            BarSizeInvalid(s) => write!(f, "bar address {s} not a power of two"),
-            CapabilityEmpty => write!(f, "empty capabilities are invalid"),
-            CapabilityLengthInvalid(l) => write!(f, "Invalid capability length {l}"),
-            CapabilitySpaceFull(s) => write!(f, "capability of size {s} doesn't fit"),
-            Decode32BarSize => write!(f, "failed to decode 32 bits BAR size"),
-            Decode64BarSize => write!(f, "failed to decode 64 bits BAR size"),
-            Encode32BarSize => write!(f, "failed to encode 32 bits BAR size"),
-            Encode64BarSize => write!(f, "failed to encode 64 bits BAR size"),
-            RomBarAddressInvalid(a, s) => write!(f, "address {a} size {s} too big"),
-            RomBarInUse(b) => write!(f, "rom bar {b} already used"),
-            RomBarInvalid(b) => write!(f, "rom bar {} invalid, max {}", b, NUM_BAR_REGS - 1),
-            RomBarSizeInvalid(s) => write!(f, "rom bar address {s} not a power of two"),
-        }
-    }
-}
 
 impl PciConfiguration {
     #[allow(clippy::too_many_arguments)]
@@ -630,6 +618,7 @@ impl PciConfiguration {
             last_capability,
             msix_cap_reg_idx,
             msix_config,
+            pending_bar_reprogram: Vec::new(),
         }
     }
 
@@ -907,9 +896,14 @@ impl PciConfiguration {
         (next + 3) & !3
     }
 
-    pub fn write_config_register(&mut self, reg_idx: usize, offset: u64, data: &[u8]) {
+    pub fn write_config_register(
+        &mut self,
+        reg_idx: usize,
+        offset: u64,
+        data: &[u8],
+    ) -> Vec<BarReprogrammingParams> {
         if offset as usize + data.len() > 4 {
-            return;
+            return Vec::new();
         }
 
         // Handle potential write to MSI-X message control register
@@ -938,13 +932,37 @@ impl PciConfiguration {
             4 => self.write_reg(reg_idx, LittleEndian::read_u32(data)),
             _ => (),
         }
+
+        if let Some(param) = self.detect_bar_reprogramming(reg_idx, data) {
+            self.pending_bar_reprogram.push(param);
+        }
+
+        if !self.pending_bar_reprogram.is_empty() {
+            // Return bar reprogramming only if the MSE bit is enabled;
+            if self.read_config_register(COMMAND_REG) & COMMAND_REG_MEMORY_SPACE_MASK
+                == COMMAND_REG_MEMORY_SPACE_MASK
+            {
+                info!(
+                    "BAR reprogramming parameter is returned: {:x?}",
+                    self.pending_bar_reprogram
+                );
+                return self.pending_bar_reprogram.drain(..).collect();
+            } else {
+                info!(
+                    "MSE bit is disabled. No BAR reprogramming parameter is returned: {:x?}",
+                    self.pending_bar_reprogram
+                );
+            }
+        }
+
+        Vec::new()
     }
 
     pub fn read_config_register(&self, reg_idx: usize) -> u32 {
         self.read_reg(reg_idx)
     }
 
-    pub fn detect_bar_reprogramming(
+    fn detect_bar_reprogramming(
         &mut self,
         reg_idx: usize,
         data: &[u8],
@@ -981,7 +999,7 @@ impl PciConfiguration {
 
                 info!(
                     "Detected BAR reprogramming: (BAR {}) 0x{:x}->0x{:x}",
-                    reg_idx, self.registers[reg_idx], value
+                    bar_idx, self.bars[bar_idx].addr, value
                 );
                 let old_base = u64::from(self.bars[bar_idx].addr & mask);
                 let new_base = u64::from(value & mask);
@@ -1007,7 +1025,7 @@ impl PciConfiguration {
             {
                 info!(
                     "Detected BAR reprogramming: (BAR {}) 0x{:x}->0x{:x}",
-                    reg_idx, self.registers[reg_idx], value
+                    bar_idx, self.bars[bar_idx].addr, value
                 );
                 let old_base = (u64::from(self.bars[bar_idx].addr & mask) << 32)
                     | u64::from(self.bars[bar_idx - 1].addr & self.writable_bits[reg_idx - 1]);
@@ -1036,8 +1054,8 @@ impl PciConfiguration {
             }
 
             info!(
-                "Detected ROM BAR reprogramming: (BAR {}) 0x{:x}->0x{:x}",
-                reg_idx, self.registers[reg_idx], value
+                "Detected ROM BAR reprogramming: (Expansion ROM BAR) 0x{:x}->0x{:x}",
+                self.rom_bar_addr, value
             );
             let old_base = u64::from(self.rom_bar_addr & mask);
             let new_base = u64::from(value & mask);
@@ -1059,6 +1077,14 @@ impl PciConfiguration {
         }
 
         None
+    }
+
+    pub(crate) fn pending_bar_reprogram(&self) -> Vec<BarReprogrammingParams> {
+        self.pending_bar_reprogram.clone()
+    }
+
+    pub(crate) fn clear_pending_bar_reprogram(&mut self) {
+        self.pending_bar_reprogram = Vec::new();
     }
 }
 

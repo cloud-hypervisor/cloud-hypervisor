@@ -15,14 +15,18 @@ use std::{cmp, fs, result, str};
 
 use byteorder::{BigEndian, ByteOrder};
 use hypervisor::arch::aarch64::gic::Vgic;
+use hypervisor::arch::aarch64::regs::{
+    AARCH64_ARCH_TIMER_HYP_IRQ, AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ,
+    AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ, AARCH64_ARCH_TIMER_VIRT_IRQ, AARCH64_PMU_IRQ,
+};
 use thiserror::Error;
 use vm_fdt::{FdtWriter, FdtWriterResult};
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryRegion};
 
 use super::super::{DeviceType, GuestMemoryMmap, InitramfsConfig};
 use super::layout::{
-    IRQ_BASE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, MEM_PCI_IO_SIZE, MEM_PCI_IO_START,
-    PCI_HIGH_BASE, PCI_MMIO_CONFIG_SIZE_PER_SEGMENT,
+    GIC_V2M_COMPATIBLE, IRQ_BASE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, MEM_PCI_IO_SIZE,
+    MEM_PCI_IO_START, PCI_HIGH_BASE, PCI_MMIO_CONFIG_SIZE_PER_SEGMENT, SPI_BASE, SPI_NUM,
 };
 use crate::{NumaNodes, PciSpaceInfo};
 
@@ -59,9 +63,6 @@ const GIC_FDT_IRQ_TYPE_PPI: u32 = 1;
 const IRQ_TYPE_EDGE_RISING: u32 = 1;
 const IRQ_TYPE_LEVEL_HI: u32 = 4;
 
-// PMU PPI interrupt number
-pub const AARCH64_PMU_IRQ: u32 = 7;
-
 // Keys and Buttons
 // System Power Down
 const KEY_POWER: u32 = 116;
@@ -81,7 +82,7 @@ pub trait DeviceInfoForFdt {
 pub enum Error {
     /// Failure in writing FDT in memory.
     #[error("Failure in writing FDT in memory: {0}")]
-    WriteFdtToMemory(GuestMemoryError),
+    WriteFdtToMemory(#[source] GuestMemoryError),
 }
 type Result<T> = result::Result<T, Error>;
 
@@ -585,15 +586,14 @@ fn create_memory_node(
                 && (first_region_end <= &mem_32bit_reserved_start))
             {
                 panic!(
-                    "Unexpected first memory region layout: (start: 0x{:08x}, end: 0x{:08x}).
-                    ram_start: 0x{:08x}, mem_32bit_reserved_start: 0x{:08x}",
-                    first_region_start, first_region_end, ram_start, mem_32bit_reserved_start
+                    "Unexpected first memory region layout: (start: 0x{first_region_start:08x}, end: 0x{first_region_end:08x}).
+                    ram_start: 0x{ram_start:08x}, mem_32bit_reserved_start: 0x{mem_32bit_reserved_start:08x}"
                 );
             }
 
             let mem_size = first_region_end - ram_start;
             let mem_reg_prop = [ram_start, mem_size];
-            let memory_node_name = format!("memory@{:x}", ram_start);
+            let memory_node_name = format!("memory@{ram_start:x}");
             let memory_node = fdt.begin_node(&memory_node_name)?;
             fdt.property_string("device_type", "memory")?;
             fdt.property_array_u64("reg", &mem_reg_prop)?;
@@ -606,14 +606,13 @@ fn create_memory_node(
 
             if second_region_start != &ram_64bit_start {
                 panic!(
-                    "Unexpected second memory region layout: start: 0x{:08x}, ram_64bit_start: 0x{:08x}",
-                    second_region_start, ram_64bit_start
+                    "Unexpected second memory region layout: start: 0x{second_region_start:08x}, ram_64bit_start: 0x{ram_64bit_start:08x}"
                 );
             }
 
             let mem_size = second_region_end - ram_64bit_start;
             let mem_reg_prop = [ram_64bit_start, mem_size];
-            let memory_node_name = format!("memory@{:x}", ram_64bit_start);
+            let memory_node_name = format!("memory@{ram_64bit_start:x}");
             let memory_node = fdt.begin_node(&memory_node_name)?;
             fdt.property_string("device_type", "memory")?;
             fdt.property_array_u64("reg", &mem_reg_prop)?;
@@ -670,11 +669,19 @@ fn create_gic_node(fdt: &mut FdtWriter, gic_device: &Arc<Mutex<dyn Vgic>>) -> Fd
 
     if gic_device.lock().unwrap().msi_compatible() {
         let msic_node = fdt.begin_node("msic")?;
-        fdt.property_string("compatible", gic_device.lock().unwrap().msi_compatibility())?;
+        let msi_compatibility = gic_device.lock().unwrap().msi_compatibility().to_string();
+
+        fdt.property_string("compatible", msi_compatibility.as_str())?;
         fdt.property_null("msi-controller")?;
         fdt.property_u32("phandle", MSI_PHANDLE)?;
         let msi_reg_prop = gic_device.lock().unwrap().msi_properties();
         fdt.property_array_u64("reg", &msi_reg_prop)?;
+
+        if msi_compatibility == GIC_V2M_COMPATIBLE {
+            fdt.property_u32("arm,msi-base-spi", SPI_BASE)?;
+            fdt.property_u32("arm,msi-num-spis", SPI_NUM)?;
+        }
+
         fdt.end_node(msic_node)?;
     }
 
@@ -701,9 +708,14 @@ fn create_clock_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
 
 fn create_timer_node(fdt: &mut FdtWriter) -> FdtWriterResult<()> {
     // See
-    // https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/interrupt-controller/arch_timer.txt
+    // https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/timer/arm%2Carch_timer.yaml
     // These are fixed interrupt numbers for the timer device.
-    let irqs = [13, 14, 11, 10];
+    let irqs = [
+        AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ,
+        AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ,
+        AARCH64_ARCH_TIMER_VIRT_IRQ,
+        AARCH64_ARCH_TIMER_HYP_IRQ,
+    ];
     let compatible = "arm,armv8-timer";
 
     let mut timer_reg_cells: Vec<u32> = Vec::new();

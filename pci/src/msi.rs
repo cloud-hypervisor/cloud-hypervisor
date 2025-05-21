@@ -40,9 +40,9 @@ pub fn msi_num_enabled_vectors(msg_ctl: u16) -> usize {
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed enabling the interrupt route: {0}")]
-    EnableInterruptRoute(io::Error),
+    EnableInterruptRoute(#[source] io::Error),
     #[error("Failed updating the interrupt route: {0}")]
-    UpdateInterruptRoute(io::Error),
+    UpdateInterruptRoute(#[source] io::Error),
 }
 
 pub const MSI_CONFIG_ID: &str = "msi_config";
