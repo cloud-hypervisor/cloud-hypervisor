@@ -59,31 +59,31 @@ pub enum Error {
     #[error("The MP table has too little address space to be stored")]
     AddressOverflow,
     /// Failure while zeroing out the memory for the MP table.
-    #[error("Failure while zeroing out the memory for the MP table: {0}")]
+    #[error("Failure while zeroing out the memory for the MP table")]
     Clear(#[source] GuestMemoryError),
     /// Number of CPUs exceeds the maximum supported CPUs
     #[error("Number of CPUs exceeds the maximum supported CPUs")]
     TooManyCpus,
     /// Failure to write the MP floating pointer.
-    #[error("Failure to write the MP floating pointer: {0}")]
+    #[error("Failure to write the MP floating pointer")]
     WriteMpfIntel(#[source] GuestMemoryError),
     /// Failure to write MP CPU entry.
-    #[error("Failure to write MP CPU entry: {0}")]
+    #[error("Failure to write MP CPU entry")]
     WriteMpcCpu(#[source] GuestMemoryError),
     /// Failure to write MP ioapic entry.
-    #[error("Failure to write MP ioapic entry: {0}")]
+    #[error("Failure to write MP ioapic entry")]
     WriteMpcIoapic(#[source] GuestMemoryError),
     /// Failure to write MP bus entry.
-    #[error("Failure to write MP bus entry: {0}")]
+    #[error("Failure to write MP bus entry")]
     WriteMpcBus(#[source] GuestMemoryError),
     /// Failure to write MP interrupt source entry.
-    #[error("Failure to write MP interrupt source entry: {0}")]
+    #[error("Failure to write MP interrupt source entry")]
     WriteMpcIntsrc(#[source] GuestMemoryError),
     /// Failure to write MP local interrupt source entry.
-    #[error("Failure to write MP local interrupt source entry: {0}")]
+    #[error("Failure to write MP local interrupt source entry")]
     WriteMpcLintsrc(#[source] GuestMemoryError),
     /// Failure to write MP table header.
-    #[error("Failure to write MP table header: {0}")]
+    #[error("Failure to write MP table header")]
     WriteMpcTable(#[source] GuestMemoryError),
 }
 

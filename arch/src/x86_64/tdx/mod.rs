@@ -13,11 +13,11 @@ use crate::GuestMemoryMmap;
 
 #[derive(Error, Debug)]
 pub enum TdvfError {
-    #[error("Failed read TDVF descriptor: {0}")]
+    #[error("Failed read TDVF descriptor")]
     ReadDescriptor(#[source] std::io::Error),
-    #[error("Failed read TDVF descriptor offset: {0}")]
+    #[error("Failed read TDVF descriptor offset")]
     ReadDescriptorOffset(#[source] std::io::Error),
-    #[error("Failed read GUID table: {0}")]
+    #[error("Failed read GUID table")]
     ReadGuidTable(#[source] std::io::Error),
     #[error("Invalid descriptor signature")]
     InvalidDescriptorSignature,
@@ -25,9 +25,9 @@ pub enum TdvfError {
     InvalidDescriptorSize,
     #[error("Invalid descriptor version")]
     InvalidDescriptorVersion,
-    #[error("Failed to write HOB details to guest memory: {0}")]
+    #[error("Failed to write HOB details to guest memory")]
     GuestMemoryWriteHob(#[source] GuestMemoryError),
-    #[error("Failed to create Uuid: {0}")]
+    #[error("Failed to create Uuid")]
     UuidCreation(#[source] uuid::Error),
 }
 

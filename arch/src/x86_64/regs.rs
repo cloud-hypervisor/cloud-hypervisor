@@ -23,40 +23,40 @@ use crate::{EntryPoint, GuestMemoryMmap};
 #[derive(Debug, Error)]
 pub enum Error {
     /// Failed to get SREGs for this CPU.
-    #[error("Failed to get SREGs for this CPU: {0}")]
+    #[error("Failed to get SREGs for this CPU")]
     GetStatusRegisters(#[source] hypervisor::HypervisorCpuError),
     /// Failed to set base registers for this CPU.
-    #[error("Failed to set base registers for this CPU: {0}")]
+    #[error("Failed to set base registers for this CPU")]
     SetBaseRegisters(#[source] hypervisor::HypervisorCpuError),
     /// Failed to configure the FPU.
-    #[error("Failed to configure the FPU: {0}")]
+    #[error("Failed to configure the FPU")]
     SetFpuRegisters(#[source] hypervisor::HypervisorCpuError),
     /// Setting up MSRs failed.
-    #[error("Setting up MSRs failed: {0}")]
+    #[error("Setting up MSRs failed")]
     SetModelSpecificRegisters(#[source] hypervisor::HypervisorCpuError),
     /// Failed to set SREGs for this CPU.
-    #[error("Failed to set SREGs for this CPU: {0}")]
+    #[error("Failed to set SREGs for this CPU")]
     SetStatusRegisters(#[source] hypervisor::HypervisorCpuError),
     /// Checking the GDT address failed.
     #[error("Checking the GDT address failed")]
     CheckGdtAddr,
     /// Writing the GDT to RAM failed.
-    #[error("Writing the GDT to RAM failed: {0}")]
+    #[error("Writing the GDT to RAM failed")]
     WriteGdt(#[source] GuestMemoryError),
     /// Writing the IDT to RAM failed.
-    #[error("Writing the IDT to RAM failed: {0}")]
+    #[error("Writing the IDT to RAM failed")]
     WriteIdt(#[source] GuestMemoryError),
     /// Writing PDPTE to RAM failed.
-    #[error("Writing PDPTE to RAM failed: {0}")]
+    #[error("Writing PDPTE to RAM failed")]
     WritePdpteAddress(#[source] GuestMemoryError),
     /// Writing PDE to RAM failed.
-    #[error("Writing PDE to RAM failed: {0}")]
+    #[error("Writing PDE to RAM failed")]
     WritePdeAddress(#[source] GuestMemoryError),
     /// Writing PML4 to RAM failed.
-    #[error("Writing PML4 to RAM failed: {0}")]
+    #[error("Writing PML4 to RAM failed")]
     WritePml4Address(#[source] GuestMemoryError),
     /// Writing PML5 to RAM failed.
-    #[error("Writing PML5 to RAM failed: {0}")]
+    #[error("Writing PML5 to RAM failed")]
     WritePml5Address(#[source] GuestMemoryError),
 }
 
