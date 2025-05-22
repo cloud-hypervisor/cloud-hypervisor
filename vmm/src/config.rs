@@ -2893,6 +2893,7 @@ impl VmConfig {
         #[cfg(target_arch = "x86_64")]
         {
             if let Some(sgx_epc_list) = &vm_params.sgx_epc {
+                warn!("SGX support is deprecated and will be removed in a future release.");
                 let mut sgx_epc_config_list = Vec::new();
                 for item in sgx_epc_list.iter() {
                     let sgx_epc_config = SgxEpcConfig::parse(item)?;
