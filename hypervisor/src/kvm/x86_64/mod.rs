@@ -76,6 +76,7 @@ pub struct VcpuKvmState {
     pub xcrs: ExtendedControlRegisters,
     pub mp_state: MpState,
     pub tsc_khz: Option<u32>,
+    pub nested_state: Vec<u8>,
 }
 
 impl From<SegmentRegister> for kvm_segment {

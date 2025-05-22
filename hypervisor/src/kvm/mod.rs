@@ -23,7 +23,7 @@ use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
-use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
+use kvm_ioctls::{KvmNestedStateBuffer, NoDatamatch, VcpuFd, VmFd};
 use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(target_arch = "aarch64")]
@@ -2423,6 +2423,7 @@ impl cpu::Vcpu for KvmVcpu {
         let xcrs = self.get_xcrs()?;
         let lapic_state = self.get_lapic()?;
         let fpu = self.get_fpu()?;
+        let nested_state = self.nested_state()?;
 
         // Try to get all MSRs based on the list previously retrieved from KVM.
         // If the number of MSRs obtained from GET_MSRS is different from the
@@ -2497,6 +2498,7 @@ impl cpu::Vcpu for KvmVcpu {
             xcrs,
             mp_state,
             tsc_khz,
+            nested_state,
         }
         .into())
     }
@@ -2663,6 +2665,11 @@ impl cpu::Vcpu for KvmVcpu {
         self.set_xcrs(&state.xcrs)?;
         self.set_lapic(&state.lapic_state)?;
         self.set_fpu(&state.fpu)?;
+        
+        // Only when nested virtualisation was used
+        if !state.nested_state.is_empty() {
+            self.set_nested_state(&state.nested_state)?;
+        }
 
         if let Some(freq) = state.tsc_khz {
             self.set_tsc_khz(freq)?;
@@ -2931,6 +2938,46 @@ impl cpu::Vcpu for KvmVcpu {
                 }
             }
             Ok(_) => Ok(()),
+        }
+    }
+
+    fn nested_state(&self) -> cpu::Result<Vec<u8>> {
+        let mut buffer = KvmNestedStateBuffer::new_empty();
+        let vcpufd = self.fd.lock().unwrap();
+        let maybe_state_length = vcpufd
+            .get_nested_state(&mut buffer)
+            .map_err(|e| cpu::HypervisorCpuError::GetNestedState(e.into()))?;
+        match maybe_state_length {
+            None => {
+                // No nested state available.
+                Ok(Vec::new())
+            }
+            Some(length) => {
+                let mut vec = Vec::with_capacity(length);
+                vec.extend_from_slice(buffer.as_actual_raw_state());
+                Ok(vec)
+            }
+        }
+    }
+
+    fn set_nested_state(&self, state: &[u8]) -> cpu::Result<()> {
+        if state.as_ptr().align_offset(4) == 0 {
+            Ok(self
+                .fd
+                .lock()
+                .unwrap()
+                .set_nested_state(state)
+                .map_err(|e| cpu::HypervisorCpuError::GetNestedState(e.into()))?
+                .into())
+        } else {
+            let buffer = KvmNestedStateBuffer::from_raw_state(state);
+            Ok(self
+                .fd
+                .lock()
+                .unwrap()
+                .set_nested_state(&buffer)
+                .map_err(|e| cpu::HypervisorCpuError::GetNestedState(e.into()))?
+                .into())
         }
     }
 }
