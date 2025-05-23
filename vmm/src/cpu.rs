@@ -3033,6 +3033,7 @@ mod tests {
         );
 
         let mut state = vcpu.create_standard_regs();
+        panic!("WAAAH: {:#?}", vcpu.set_regs().unwrap_err());
         assert_eq!(
             format!("{}", vcpu.set_regs().unwrap_err().source().unwrap()),
             "Exec format error (os error 8)"
