@@ -306,11 +306,11 @@ pub struct Tuple<S, T>(pub Vec<(S, T)>);
 pub enum TupleError {
     #[error("invalid value: {0}")]
     InvalidValue(String),
-    #[error("split outside brackets: {0}")]
+    #[error("split outside brackets")]
     SplitOutsideBrackets(#[source] OptionParserError),
-    #[error("invalid integer list: {0}")]
+    #[error("invalid integer list")]
     InvalidIntegerList(#[source] IntegerListParseError),
-    #[error("invalid integer: {0}")]
+    #[error("invalid integer")]
     InvalidInteger(#[source] ParseIntError),
 }
 
