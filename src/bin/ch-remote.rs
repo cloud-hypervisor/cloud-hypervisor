@@ -31,38 +31,38 @@ type ApiResult = Result<(), Error>;
 
 #[derive(Error, Debug)]
 enum Error {
-    #[error("http client error: {0}")]
+    #[error("http client error")]
     HttpApiClient(#[source] ApiClientError),
     #[cfg(feature = "dbus_api")]
-    #[error("dbus api client error: {0}")]
+    #[error("dbus api client error")]
     DBusApiClient(#[source] zbus::Error),
-    #[error("Error parsing CPU count: {0}")]
+    #[error("Error parsing CPU count")]
     InvalidCpuCount(#[source] std::num::ParseIntError),
-    #[error("Error parsing memory size: {0}")]
+    #[error("Error parsing memory size")]
     InvalidMemorySize(#[source] ByteSizedParseError),
-    #[error("Error parsing balloon size: {0}")]
+    #[error("Error parsing balloon size")]
     InvalidBalloonSize(#[source] ByteSizedParseError),
-    #[error("Error parsing device syntax: {0}")]
+    #[error("Error parsing device syntax")]
     AddDeviceConfig(#[source] vmm::config::Error),
-    #[error("Error parsing disk syntax: {0}")]
+    #[error("Error parsing disk syntax")]
     AddDiskConfig(#[source] vmm::config::Error),
-    #[error("Error parsing filesystem syntax: {0}")]
+    #[error("Error parsing filesystem syntax")]
     AddFsConfig(#[source] vmm::config::Error),
-    #[error("Error parsing persistent memory syntax: {0}")]
+    #[error("Error parsing persistent memory syntax")]
     AddPmemConfig(#[source] vmm::config::Error),
-    #[error("Error parsing network syntax: {0}")]
+    #[error("Error parsing network syntax")]
     AddNetConfig(#[source] vmm::config::Error),
-    #[error("Error parsing user device syntax: {0}")]
+    #[error("Error parsing user device syntax")]
     AddUserDeviceConfig(#[source] vmm::config::Error),
-    #[error("Error parsing vDPA device syntax: {0}")]
+    #[error("Error parsing vDPA device syntax")]
     AddVdpaConfig(#[source] vmm::config::Error),
-    #[error("Error parsing vsock syntax: {0}")]
+    #[error("Error parsing vsock syntax")]
     AddVsockConfig(#[source] vmm::config::Error),
-    #[error("Error parsing restore syntax: {0}")]
+    #[error("Error parsing restore syntax")]
     Restore(#[source] vmm::config::Error),
-    #[error("Error reading from stdin: {0}")]
+    #[error("Error reading from stdin")]
     ReadingStdin(#[source] std::io::Error),
-    #[error("Error reading from file: {0}")]
+    #[error("Error reading from file")]
     ReadingFile(#[source] std::io::Error),
 }
 
