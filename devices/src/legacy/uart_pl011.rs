@@ -53,11 +53,11 @@ pub enum Error {
     BadWriteOffset(u64),
     #[error("pl011: DMA not implemented")]
     DmaNotImplemented,
-    #[error("Failed to trigger interrupt: {0}")]
+    #[error("Failed to trigger interrupt")]
     InterruptFailure(#[source] io::Error),
-    #[error("Failed to write: {0}")]
+    #[error("Failed to write")]
     WriteAllFailure(#[source] io::Error),
-    #[error("Failed to flush: {0}")]
+    #[error("Failed to flush")]
     FlushFailure(#[source] io::Error),
 }
 

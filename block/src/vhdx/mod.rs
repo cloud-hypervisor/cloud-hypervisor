@@ -26,19 +26,19 @@ mod vhdx_metadata;
 #[sorted]
 #[derive(Error, Debug)]
 pub enum VhdxError {
-    #[error("Not a VHDx file: {0}")]
+    #[error("Not a VHDx file")]
     NotVhdx(#[source] VhdxHeaderError),
-    #[error("Failed to parse VHDx header: {0}")]
+    #[error("Failed to parse VHDx header")]
     ParseVhdxHeader(#[source] VhdxHeaderError),
-    #[error("Failed to parse VHDx metadata: {0}")]
+    #[error("Failed to parse VHDx metadata")]
     ParseVhdxMetadata(#[source] VhdxMetadataError),
-    #[error("Failed to parse VHDx region entries: {0}")]
+    #[error("Failed to parse VHDx region entries")]
     ParseVhdxRegionEntry(#[source] VhdxHeaderError),
-    #[error("Failed reading metadata: {0}")]
+    #[error("Failed reading metadata")]
     ReadBatEntry(#[source] VhdxBatError),
-    #[error("Failed reading sector from disk: {0}")]
+    #[error("Failed reading sector from disk")]
     ReadFailed(#[source] VhdxIoError),
-    #[error("Failed writing to sector on disk: {0}")]
+    #[error("Failed writing to sector on disk")]
     WriteFailed(#[source] VhdxIoError),
 }
 

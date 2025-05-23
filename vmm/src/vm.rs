@@ -103,54 +103,54 @@ use crate::{
 /// Errors associated with VM management
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("Cannot open kernel file: {0}")]
+    #[error("Cannot open kernel file")]
     KernelFile(#[source] io::Error),
 
-    #[error("Cannot open initramfs file: {0}")]
+    #[error("Cannot open initramfs file")]
     InitramfsFile(#[source] io::Error),
 
-    #[error("Cannot load the kernel into memory: {0}")]
+    #[error("Cannot load the kernel into memory")]
     KernelLoad(#[source] linux_loader::loader::Error),
 
     #[cfg(target_arch = "aarch64")]
-    #[error("Cannot load the UEFI binary in memory: {0:?}")]
+    #[error("Cannot load the UEFI binary in memory")]
     UefiLoad(#[source] arch::aarch64::uefi::Error),
 
     #[error("Cannot load the initramfs into memory")]
     InitramfsLoad,
 
-    #[error("Cannot load the kernel command line in memory: {0}")]
+    #[error("Cannot load the kernel command line in memory")]
     LoadCmdLine(#[source] linux_loader::loader::Error),
 
-    #[error("Failed to apply landlock config during vm_create: {0}")]
+    #[error("Failed to apply landlock config during vm_create")]
     ApplyLandlock(#[source] LandlockError),
 
-    #[error("Cannot modify the kernel command line: {0}")]
+    #[error("Cannot modify the kernel command line")]
     CmdLineInsertStr(#[source] linux_loader::cmdline::Error),
 
-    #[error("Cannot create the kernel command line: {0}")]
+    #[error("Cannot create the kernel command line")]
     CmdLineCreate(#[source] linux_loader::cmdline::Error),
 
-    #[error("Cannot configure system: {0}")]
+    #[error("Cannot configure system")]
     ConfigureSystem(#[source] arch::Error),
 
     #[cfg(target_arch = "aarch64")]
-    #[error("Cannot enable interrupt controller: {0:?}")]
+    #[error("Cannot enable interrupt controller")]
     EnableInterruptController(#[source] interrupt_controller::Error),
 
     #[error("VM state is poisoned")]
     PoisonedState,
 
-    #[error("Error from device manager: {0:?}")]
+    #[error("Error from device manager")]
     DeviceManager(#[source] DeviceManagerError),
 
-    #[error("Error initializing VM: {0:?}")]
+    #[error("Error initializing VM")]
     InitializeVm(#[source] hypervisor::HypervisorVmError),
 
     #[error("No device with id {0:?} to remove")]
     NoDeviceToRemove(String),
 
-    #[error("Cannot spawn a signal handler thread: {0}")]
+    #[error("Cannot spawn a signal handler thread")]
     SignalHandlerSpawn(#[source] io::Error),
 
     #[error("Failed to join on threads: {0:?}")]
@@ -168,127 +168,127 @@ pub enum Error {
     #[error("VM is not running")]
     VmNotRunning,
 
-    #[error("Cannot clone EventFd: {0}")]
+    #[error("Cannot clone EventFd")]
     EventFdClone(#[source] io::Error),
 
     #[error("invalid VM state transition: {0:?} to {1:?}")]
     InvalidStateTransition(VmState, VmState),
 
-    #[error("Error from CPU manager: {0}")]
+    #[error("Error from CPU manager")]
     CpuManager(#[source] cpu::Error),
 
-    #[error("Cannot pause devices: {0}")]
+    #[error("Cannot pause devices")]
     PauseDevices(#[source] MigratableError),
 
-    #[error("Cannot resume devices: {0}")]
+    #[error("Cannot resume devices")]
     ResumeDevices(#[source] MigratableError),
 
-    #[error("Cannot pause CPUs: {0}")]
+    #[error("Cannot pause CPUs")]
     PauseCpus(#[source] MigratableError),
 
-    #[error("Cannot resume cpus: {0}")]
+    #[error("Cannot resume cpus")]
     ResumeCpus(#[source] MigratableError),
 
-    #[error("Cannot pause VM: {0}")]
+    #[error("Cannot pause VM")]
     Pause(#[source] MigratableError),
 
-    #[error("Cannot resume VM: {0}")]
+    #[error("Cannot resume VM")]
     Resume(#[source] MigratableError),
 
-    #[error("Memory manager error: {0:?}")]
+    #[error("Memory manager error")]
     MemoryManager(#[source] MemoryManagerError),
 
-    #[error("Eventfd write error: {0}")]
+    #[error("Eventfd write error")]
     EventfdError(#[source] std::io::Error),
 
-    #[error("Cannot snapshot VM: {0}")]
+    #[error("Cannot snapshot VM")]
     Snapshot(#[source] MigratableError),
 
-    #[error("Cannot restore VM: {0}")]
+    #[error("Cannot restore VM")]
     Restore(#[source] MigratableError),
 
-    #[error("Cannot send VM snapshot: {0}")]
+    #[error("Cannot send VM snapshot")]
     SnapshotSend(#[source] MigratableError),
 
     #[error("Invalid restore source URL")]
     InvalidRestoreSourceUrl,
 
-    #[error("Failed to validate config: {0}")]
+    #[error("Failed to validate config")]
     ConfigValidation(#[source] ValidationError),
 
     #[error("Too many virtio-vsock devices")]
     TooManyVsockDevices,
 
-    #[error("Failed serializing into JSON: {0}")]
+    #[error("Failed serializing into JSON")]
     SerializeJson(#[source] serde_json::Error),
 
     #[error("Invalid NUMA configuration")]
     InvalidNumaConfig,
 
-    #[error("Cannot create seccomp filter: {0}")]
+    #[error("Cannot create seccomp filter")]
     CreateSeccompFilter(#[source] seccompiler::Error),
 
-    #[error("Cannot apply seccomp filter: {0}")]
+    #[error("Cannot apply seccomp filter")]
     ApplySeccompFilter(#[source] seccompiler::Error),
 
     #[error("Failed resizing a memory zone")]
     ResizeZone,
 
-    #[error("Cannot activate virtio devices: {0:?}")]
+    #[error("Cannot activate virtio devices")]
     ActivateVirtioDevices(#[source] DeviceManagerError),
 
-    #[error("Error triggering power button: {0:?}")]
+    #[error("Error triggering power button")]
     PowerButton(#[source] DeviceManagerError),
 
     #[error("Kernel lacks PVH header")]
     KernelMissingPvhHeader,
 
-    #[error("Failed to allocate firmware RAM: {0:?}")]
+    #[error("Failed to allocate firmware RAM")]
     AllocateFirmwareMemory(#[source] MemoryManagerError),
 
-    #[error("Error manipulating firmware file: {0}")]
+    #[error("Error manipulating firmware file")]
     FirmwareFile(#[source] std::io::Error),
 
     #[error("Firmware too big")]
     FirmwareTooLarge,
 
-    #[error("Failed to copy firmware to memory: {0}")]
+    #[error("Failed to copy firmware to memory")]
     FirmwareLoad(#[source] vm_memory::GuestMemoryError),
 
     #[cfg(feature = "sev_snp")]
-    #[error("Error enabling SEV-SNP VM: {0}")]
+    #[error("Error enabling SEV-SNP VM")]
     InitializeSevSnpVm(#[source] hypervisor::HypervisorVmError),
 
     #[cfg(feature = "tdx")]
-    #[error("Error performing I/O on TDX firmware file: {0}")]
+    #[error("Error performing I/O on TDX firmware file")]
     LoadTdvf(#[source] std::io::Error),
 
     #[cfg(feature = "tdx")]
-    #[error("Error performing I/O on the TDX payload file: {0}")]
+    #[error("Error performing I/O on the TDX payload file")]
     LoadPayload(#[source] std::io::Error),
 
     #[cfg(feature = "tdx")]
-    #[error("Error parsing TDVF: {0}")]
+    #[error("Error parsing TDVF")]
     ParseTdvf(#[source] arch::x86_64::tdx::TdvfError),
 
     #[cfg(feature = "tdx")]
-    #[error("Error populating TDX HOB: {0}")]
+    #[error("Error populating TDX HOB")]
     PopulateHob(#[source] arch::x86_64::tdx::TdvfError),
 
     #[cfg(feature = "tdx")]
-    #[error("Error allocating TDVF memory: {0:?}")]
+    #[error("Error allocating TDVF memory")]
     AllocatingTdvfMemory(#[source] crate::memory_manager::Error),
 
     #[cfg(feature = "tdx")]
-    #[error("Error enabling TDX VM: {0}")]
+    #[error("Error enabling TDX VM")]
     InitializeTdxVm(#[source] hypervisor::HypervisorVmError),
 
     #[cfg(feature = "tdx")]
-    #[error("Error enabling TDX memory region: {0}")]
+    #[error("Error enabling TDX memory region")]
     InitializeTdxMemoryRegion(#[source] hypervisor::HypervisorVmError),
 
     #[cfg(feature = "tdx")]
-    #[error("Error finalizing TDX VM: {0}")]
+    #[error("Error finalizing TDX VM")]
     FinalizeTdx(#[source] hypervisor::HypervisorVmError),
 
     #[cfg(feature = "tdx")]
@@ -300,7 +300,7 @@ pub enum Error {
     InvalidPayloadType,
 
     #[cfg(feature = "guest_debug")]
-    #[error("Error debugging VM: {0:?}")]
+    #[error("Error debugging VM")]
     Debug(#[source] DebuggableError),
 
     #[error("Error spawning kernel loading thread")]
@@ -313,21 +313,21 @@ pub enum Error {
     InvalidPayload,
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-    #[error("Error coredumping VM: {0:?}")]
+    #[error("Error coredumping VM")]
     Coredump(#[source] GuestDebuggableError),
 
     #[cfg(feature = "igvm")]
-    #[error("Cannot open igvm file: {0}")]
+    #[error("Cannot open igvm file")]
     IgvmFile(#[source] io::Error),
 
     #[cfg(feature = "igvm")]
-    #[error("Cannot load the igvm into memory: {0}")]
+    #[error("Cannot load the igvm into memory")]
     IgvmLoad(#[source] igvm_loader::Error),
 
     #[error("Error injecting NMI")]
     ErrorNmi,
 
-    #[error("Error resuming the VM: {0}")]
+    #[error("Error resuming the VM")]
     ResumeVm(#[source] hypervisor::HypervisorVmError),
 
     #[error("Error creating console devices")]

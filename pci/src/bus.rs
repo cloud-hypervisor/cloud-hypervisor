@@ -27,16 +27,16 @@ const NUM_DEVICE_IDS: usize = 32;
 #[derive(Error, Debug)]
 pub enum PciRootError {
     /// Could not allocate device address space for the device.
-    #[error("Could not allocate device address space for the device: {0}")]
+    #[error("Could not allocate device address space for the device")]
     AllocateDeviceAddrs(#[source] PciDeviceError),
     /// Could not allocate an IRQ number.
     #[error("Could not allocate an IRQ number")]
     AllocateIrq,
     /// Could not add a device to the port io bus.
-    #[error("Could not add a device to the port io bus: {0}")]
+    #[error("Could not add a device to the port io bus")]
     PioInsert(#[source] vm_device::BusError),
     /// Could not add a device to the mmio bus.
-    #[error("Could not add a device to the mmio bus: {0}")]
+    #[error("Could not add a device to the mmio bus")]
     MmioInsert(#[source] vm_device::BusError),
     /// Could not find an available device slot on the PCI bus.
     #[error("Could not find an available device slot on the PCI bus")]
