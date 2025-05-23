@@ -78,6 +78,7 @@ pub struct MsixConfig {
     interrupt_source_group: Arc<dyn InterruptSourceGroup>,
     masked: bool,
     enabled: bool,
+    pub vector_num: u32,
 }
 
 impl MsixConfig {
@@ -141,6 +142,7 @@ impl MsixConfig {
             interrupt_source_group,
             masked,
             enabled,
+            vector_num: 0,
         })
     }
 
@@ -179,6 +181,11 @@ impl MsixConfig {
                         data: table_entry.msg_data,
                         devid: self.devid,
                     };
+
+                    if !table_entry.masked() {
+                        self.vector_num += 1;
+                        debug!("MSI-X devid 0x{:x} vector_num {}", self.devid, self.vector_num);
+                    }
 
                     if let Err(e) = self.interrupt_source_group.update(
                         idx as InterruptIndex,
@@ -329,6 +336,9 @@ impl MsixConfig {
                 data: table_entry.msg_data,
                 devid: self.devid,
             };
+
+            self.vector_num += 1;
+            debug!("devid 0x{:x} index {} vector_num {}", self.devid, index, self.vector_num);
 
             if let Err(e) = self.interrupt_source_group.update(
                 index as InterruptIndex,
