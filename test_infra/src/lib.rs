@@ -31,19 +31,19 @@ pub enum WaitTimeoutError {
     Timedout,
     #[error("exit status indicates failure")]
     ExitStatus,
-    #[error("general failure: {0}")]
+    #[error("general failure")]
     General(#[source] std::io::Error),
 }
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Failed to parse: {0}")]
+    #[error("Failed to parse")]
     Parsing(#[source] std::num::ParseIntError),
-    #[error("ssh command failed: {0}")]
+    #[error("ssh command failed")]
     SshCommand(#[from] SshCommandError),
-    #[error("waiting for boot failed: {0}")]
+    #[error("waiting for boot failed")]
     WaitForBoot(#[source] WaitForBootError),
-    #[error("reading log file failed: {0}")]
+    #[error("reading log file failed")]
     EthrLogFile(#[source] std::io::Error),
     #[error("parsing log file failed")]
     EthrLogParse,
@@ -51,9 +51,9 @@ pub enum Error {
     FioOutputParse,
     #[error("parsing iperf3 output failed")]
     Iperf3Parse,
-    #[error("spawning process failed: {0}")]
+    #[error("spawning process failed")]
     Spawn(#[source] std::io::Error),
-    #[error("waiting for timeout failed: {0}")]
+    #[error("waiting for timeout failed")]
     WaitTimeout(#[source] WaitTimeoutError),
 }
 
@@ -76,15 +76,15 @@ pub const DEFAULT_TCP_LISTENER_TIMEOUT: i32 = 120;
 
 #[derive(Error, Debug)]
 pub enum WaitForBootError {
-    #[error("Failed to wait for epoll: {0}")]
+    #[error("Failed to wait for epoll")]
     EpollWait(#[source] std::io::Error),
-    #[error("Failed to listen for boot: {0}")]
+    #[error("Failed to listen for boot")]
     Listen(#[source] std::io::Error),
     #[error("Epoll wait timeout")]
     EpollWaitTimeout,
     #[error("wrong guest address")]
     WrongGuestAddr,
-    #[error("Failed to accept a TCP request: {0}")]
+    #[error("Failed to accept a TCP request")]
     Accept(#[source] std::io::Error),
 }
 
@@ -546,31 +546,31 @@ pub const DEFAULT_SSH_TIMEOUT: u8 = 10;
 
 #[derive(Error, Debug)]
 pub enum SshCommandError {
-    #[error("ssh connection failed: {0}")]
+    #[error("ssh connection failed")]
     Connection(#[source] std::io::Error),
-    #[error("ssh handshake failed: {0}")]
+    #[error("ssh handshake failed")]
     Handshake(#[source] ssh2::Error),
-    #[error("ssh authentication failed: {0}")]
+    #[error("ssh authentication failed")]
     Authentication(#[source] ssh2::Error),
-    #[error("ssh channel session failed: {0}")]
+    #[error("ssh channel session failed")]
     ChannelSession(#[source] ssh2::Error),
-    #[error("ssh command failed: {0}")]
+    #[error("ssh command failed")]
     Command(#[source] ssh2::Error),
-    #[error("retrieving exit status from ssh command failed: {0}")]
+    #[error("retrieving exit status from ssh command failed")]
     ExitStatus(#[source] ssh2::Error),
     #[error("the exit code indicates failure: {0}")]
     NonZeroExitStatus(i32),
-    #[error("failed to read file: {0}")]
+    #[error("failed to read file")]
     FileRead(#[source] std::io::Error),
-    #[error("failed to read metadata: {0}")]
+    #[error("failed to read metadata")]
     FileMetadata(#[source] std::io::Error),
-    #[error("scp send failed: {0}")]
+    #[error("scp send failed")]
     ScpSend(#[source] ssh2::Error),
-    #[error("scp write failed: {0}")]
+    #[error("scp write failed")]
     WriteAll(#[source] std::io::Error),
-    #[error("scp send EOF failed: {0}")]
+    #[error("scp send EOF failed")]
     SendEof(#[source] ssh2::Error),
-    #[error("scp wait EOF failed: {0}")]
+    #[error("scp wait EOF failed")]
     WaitEof(#[source] ssh2::Error),
 }
 
