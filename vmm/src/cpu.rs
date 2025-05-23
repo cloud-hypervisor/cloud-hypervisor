@@ -3027,15 +3027,15 @@ mod tests {
         vm.get_preferred_target(&mut kvi).unwrap();
 
         // Must fail when vcpu is not initialized yet.
+        panic!("WAAAH: {:#?}", vcpu.get_regs().unwrap_err());
         assert_eq!(
             format!("{}", vcpu.get_regs().unwrap_err().source().unwrap()),
             "Exec format error (os error 8)"
         );
 
         let mut state = vcpu.create_standard_regs();
-        panic!("WAAAH: {:#?}", vcpu.set_regs().unwrap_err());
         assert_eq!(
-            format!("{}", vcpu.set_regs().unwrap_err().source().unwrap()),
+            format!("{}", vcpu.set_regs(&state).unwrap_err().source().unwrap()),
             "Exec format error (os error 8)"
         );
 
