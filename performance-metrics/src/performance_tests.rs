@@ -24,7 +24,7 @@ pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-
 enum Error {
     #[error("boot time could not be parsed")]
     BootTimeParse,
-    #[error("infrastructure failure: {0}")]
+    #[error("infrastructure failure")]
     Infra(#[from] InfraError),
     #[error("restore time could not be parsed")]
     RestoreTimeParse,
