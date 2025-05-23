@@ -79,12 +79,6 @@ pub enum Error {
     ParseVsock(#[source] OptionParserError),
     /// Failed parsing restore parameters
     ParseRestore(#[source] OptionParserError),
-    /// Failed parsing SGX EPC parameters
-    #[cfg(target_arch = "x86_64")]
-    ParseSgxEpc(#[source] OptionParserError),
-    /// Missing 'id' from SGX EPC section
-    #[cfg(target_arch = "x86_64")]
-    ParseSgxEpcIdMissing,
     /// Failed parsing NUMA parameters
     ParseNuma(#[source] OptionParserError),
     /// Failed validating configuration
@@ -431,10 +425,6 @@ impl fmt::Display for Error {
             ParseRng(o) => write!(f, "Error parsing --rng: {o}"),
             ParseBalloon(o) => write!(f, "Error parsing --balloon: {o}"),
             ParseRestore(o) => write!(f, "Error parsing --restore: {o}"),
-            #[cfg(target_arch = "x86_64")]
-            ParseSgxEpc(o) => write!(f, "Error parsing --sgx-epc: {o}"),
-            #[cfg(target_arch = "x86_64")]
-            ParseSgxEpcIdMissing => write!(f, "Error parsing --sgx-epc: id missing"),
             ParseNuma(o) => write!(f, "Error parsing --numa: {o}"),
             ParseRestoreSourceUrlMissing => {
                 write!(f, "Error parsing --restore: source_url missing")
@@ -501,8 +491,6 @@ pub struct VmParams<'a> {
     #[cfg(feature = "pvmemcontrol")]
     pub pvmemcontrol: bool,
     pub pvpanic: bool,
-    #[cfg(target_arch = "x86_64")]
-    pub sgx_epc: Option<Vec<&'a str>>,
     pub numa: Option<Vec<&'a str>>,
     pub watchdog: bool,
     #[cfg(feature = "guest_debug")]
@@ -564,10 +552,6 @@ impl<'a> VmParams<'a> {
         #[cfg(feature = "pvmemcontrol")]
         let pvmemcontrol = args.get_flag("pvmemcontrol");
         let pvpanic = args.get_flag("pvpanic");
-        #[cfg(target_arch = "x86_64")]
-        let sgx_epc: Option<Vec<&str>> = args
-            .get_many::<String>("sgx-epc")
-            .map(|x| x.map(|y| y as &str).collect());
         let numa: Option<Vec<&str>> = args
             .get_many::<String>("numa")
             .map(|x| x.map(|y| y as &str).collect());
@@ -614,8 +598,6 @@ impl<'a> VmParams<'a> {
             #[cfg(feature = "pvmemcontrol")]
             pvmemcontrol,
             pvpanic,
-            #[cfg(target_arch = "x86_64")]
-            sgx_epc,
             numa,
             watchdog,
             #[cfg(feature = "guest_debug")]
@@ -2127,37 +2109,10 @@ impl VsockConfig {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
-impl SgxEpcConfig {
-    pub const SYNTAX: &'static str = "SGX EPC parameters \
-        \"id=<epc_section_identifier>,size=<epc_section_size>,prefault=on|off\"";
-
-    pub fn parse(sgx_epc: &str) -> Result<Self> {
-        let mut parser = OptionParser::new();
-        parser.add("id").add("size").add("prefault");
-        parser.parse(sgx_epc).map_err(Error::ParseSgxEpc)?;
-
-        let id = parser.get("id").ok_or(Error::ParseSgxEpcIdMissing)?;
-        let size = parser
-            .convert::<ByteSized>("size")
-            .map_err(Error::ParseSgxEpc)?
-            .unwrap_or(ByteSized(0))
-            .0;
-        let prefault = parser
-            .convert::<Toggle>("prefault")
-            .map_err(Error::ParseSgxEpc)?
-            .unwrap_or(Toggle(false))
-            .0;
-
-        Ok(SgxEpcConfig { id, size, prefault })
-    }
-}
-
 impl NumaConfig {
     pub const SYNTAX: &'static str = "Settings related to a given NUMA node \
         \"guest_numa_id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>,\
-        memory_zones=<list_of_memory_zones>,sgx_epc_sections=<list_of_sgx_epc_sections>,\
-        pci_segments=<list_of_pci_segments>\"";
+        memory_zones=<list_of_memory_zones>,pci_segments=<list_of_pci_segments>\"";
 
     pub fn parse(numa: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2166,7 +2121,6 @@ impl NumaConfig {
             .add("cpus")
             .add("distances")
             .add("memory_zones")
-            .add("sgx_epc_sections")
             .add("pci_segments");
 
         parser.parse(numa).map_err(Error::ParseNuma)?;
@@ -2194,11 +2148,6 @@ impl NumaConfig {
             .convert::<StringList>("memory_zones")
             .map_err(Error::ParseNuma)?
             .map(|v| v.0);
-        #[cfg(target_arch = "x86_64")]
-        let sgx_epc_sections = parser
-            .convert::<StringList>("sgx_epc_sections")
-            .map_err(Error::ParseNuma)?
-            .map(|v| v.0);
         let pci_segments = parser
             .convert::<IntegerList>("pci_segments")
             .map_err(Error::ParseNuma)?
@@ -2208,8 +2157,6 @@ impl NumaConfig {
             cpus,
             distances,
             memory_zones,
-            #[cfg(target_arch = "x86_64")]
-            sgx_epc_sections,
             pci_segments,
         })
     }
@@ -2743,14 +2690,6 @@ impl VmConfig {
             }
         }
 
-        #[cfg(target_arch = "x86_64")]
-        if let Some(sgx_epcs) = &self.sgx_epc {
-            for sgx_epc in sgx_epcs.iter() {
-                let id = sgx_epc.id.clone();
-                Self::validate_identifier(&mut id_list, &Some(id))?;
-            }
-        }
-
         if let Some(pci_segments) = &self.pci_segments {
             for pci_segment in pci_segments {
                 pci_segment.validate(self)?;
@@ -2888,21 +2827,6 @@ impl VmConfig {
 
         let platform = vm_params.platform.map(PlatformConfig::parse).transpose()?;
 
-        #[cfg(target_arch = "x86_64")]
-        let mut sgx_epc: Option<Vec<SgxEpcConfig>> = None;
-        #[cfg(target_arch = "x86_64")]
-        {
-            if let Some(sgx_epc_list) = &vm_params.sgx_epc {
-                warn!("SGX support is deprecated and will be removed in a future release.");
-                let mut sgx_epc_config_list = Vec::new();
-                for item in sgx_epc_list.iter() {
-                    let sgx_epc_config = SgxEpcConfig::parse(item)?;
-                    sgx_epc_config_list.push(sgx_epc_config);
-                }
-                sgx_epc = Some(sgx_epc_config_list);
-            }
-        }
-
         let mut numa: Option<Vec<NumaConfig>> = None;
         if let Some(numa_list) = &vm_params.numa {
             let mut numa_config_list = Vec::new();
@@ -2979,8 +2903,6 @@ impl VmConfig {
             pvmemcontrol,
             pvpanic: vm_params.pvpanic,
             iommu: false, // updated in VmConfig::validate()
-            #[cfg(target_arch = "x86_64")]
-            sgx_epc,
             numa,
             watchdog: vm_params.watchdog,
             #[cfg(feature = "guest_debug")]
@@ -3108,8 +3030,6 @@ impl Clone for VmConfig {
             user_devices: self.user_devices.clone(),
             vdpa: self.vdpa.clone(),
             vsock: self.vsock.clone(),
-            #[cfg(target_arch = "x86_64")]
-            sgx_epc: self.sgx_epc.clone(),
             numa: self.numa.clone(),
             pci_segments: self.pci_segments.clone(),
             platform: self.platform.clone(),
@@ -3893,8 +3813,6 @@ mod tests {
             pvmemcontrol: None,
             pvpanic: false,
             iommu: false,
-            #[cfg(target_arch = "x86_64")]
-            sgx_epc: None,
             numa: None,
             watchdog: false,
             #[cfg(feature = "guest_debug")]
@@ -4034,8 +3952,6 @@ mod tests {
             cpus: None,
             distances: None,
             memory_zones: None,
-            #[cfg(target_arch = "x86_64")]
-            sgx_epc_sections: None,
             pci_segments: None,
         }
     }
@@ -4105,8 +4021,6 @@ mod tests {
             pvmemcontrol: None,
             pvpanic: false,
             iommu: false,
-            #[cfg(target_arch = "x86_64")]
-            sgx_epc: None,
             numa: None,
             watchdog: false,
             #[cfg(feature = "guest_debug")]

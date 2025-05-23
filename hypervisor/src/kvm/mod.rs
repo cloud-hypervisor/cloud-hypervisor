@@ -12,10 +12,6 @@
 
 use std::any::Any;
 use std::collections::HashMap;
-#[cfg(target_arch = "x86_64")]
-use std::fs::File;
-#[cfg(target_arch = "x86_64")]
-use std::os::unix::io::AsRawFd;
 #[cfg(feature = "tdx")]
 use std::os::unix::io::RawFd;
 use std::result;
@@ -113,9 +109,6 @@ pub use {kvm_bindings, kvm_ioctls};
 use crate::arch::aarch64::regs;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use crate::RegList;
-
-#[cfg(target_arch = "x86_64")]
-const KVM_CAP_SGX_ATTRIBUTE: u32 = 196;
 
 #[cfg(target_arch = "x86_64")]
 use vmm_sys_util::ioctl_io_nr;
@@ -829,19 +822,6 @@ impl vm::Vm for KvmVm {
         self.fd
             .enable_cap(&cap)
             .map_err(|e| vm::HypervisorVmError::EnableSplitIrq(e.into()))?;
-        Ok(())
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    fn enable_sgx_attribute(&self, file: File) -> vm::Result<()> {
-        let mut cap = kvm_enable_cap {
-            cap: KVM_CAP_SGX_ATTRIBUTE,
-            ..Default::default()
-        };
-        cap.args[0] = file.as_raw_fd() as u64;
-        self.fd
-            .enable_cap(&cap)
-            .map_err(|e| vm::HypervisorVmError::EnableSgxAttribute(e.into()))?;
         Ok(())
     }
 

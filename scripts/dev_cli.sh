@@ -193,7 +193,6 @@ cmd_help() {
     echo "        Run the Cloud Hypervisor tests."
     echo "        --unit                       Run the unit tests."
     echo "        --integration                Run the integration tests."
-    echo "        --integration-sgx            Run the SGX integration tests."
     echo "        --integration-vfio           Run the VFIO integration tests."
     echo "        --integration-windows        Run the Windows guest integration tests."
     echo "        --integration-live-migration Run the live-migration integration tests."
@@ -327,7 +326,6 @@ cmd_clean() {
 cmd_tests() {
     unit=false
     integration=false
-    integration_sgx=false
     integration_vfio=false
     integration_windows=false
     integration_live_migration=false
@@ -346,7 +344,6 @@ cmd_tests() {
         } ;;
         "--unit") { unit=true; } ;;
         "--integration") { integration=true; } ;;
-        "--integration-sgx") { integration_sgx=true; } ;;
         "--integration-vfio") { integration_vfio=true; } ;;
         "--integration-windows") { integration_windows=true; } ;;
         "--integration-live-migration") { integration_live_migration=true; } ;;
@@ -447,29 +444,6 @@ cmd_tests() {
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             "$CTR_IMAGE" \
             dbus-run-session ./scripts/run_integration_tests_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
-    fi
-
-    if [ "$integration_sgx" = true ]; then
-        say "Running SGX integration tests for $target..."
-        $DOCKER_RUNTIME run \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+"$exported_volumes"} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
-            "$CTR_IMAGE" \
-            ./scripts/run_integration_tests_sgx.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration_vfio" = true ]; then

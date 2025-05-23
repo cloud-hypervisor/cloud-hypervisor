@@ -110,4 +110,4 @@ from the restored VM.
 
 ## Limitations
 
-VFIO devices and Intel SGX are out of scope.
+VFIO devices are out of scope.

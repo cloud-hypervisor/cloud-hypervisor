@@ -24,8 +24,6 @@ use vmm::api::ApiAction;
 use vmm::config::{RestoreConfig, VmParams};
 use vmm::landlock::{Landlock, LandlockError};
 use vmm::vm_config;
-#[cfg(target_arch = "x86_64")]
-use vmm::vm_config::SgxEpcConfig;
 use vmm::vm_config::{
     BalloonConfig, DeviceConfig, DiskConfig, FsConfig, LandlockConfig, NetConfig, NumaConfig,
     PciSegmentConfig, PmemConfig, RateLimiterGroupConfig, TpmConfig, UserDeviceConfig, VdpaConfig,
@@ -409,12 +407,6 @@ fn get_cli_options_sorted(
             .long("serial")
             .help("Control serial port: off|null|pty|tty|file=</path/to/a/file>|socket=</path/to/a/file>")
             .default_value("null")
-            .group("vm-config"),
-        #[cfg(target_arch = "x86_64")]
-        Arg::new("sgx-epc")
-            .long("sgx-epc")
-            .help(SgxEpcConfig::SYNTAX)
-            .num_args(1..)
             .group("vm-config"),
         Arg::new("tpm")
             .long("tpm")
@@ -1007,8 +999,6 @@ mod unit_tests {
             #[cfg(feature = "pvmemcontrol")]
             pvmemcontrol: None,
             iommu: false,
-            #[cfg(target_arch = "x86_64")]
-            sgx_epc: None,
             numa: None,
             watchdog: false,
             #[cfg(feature = "guest_debug")]
