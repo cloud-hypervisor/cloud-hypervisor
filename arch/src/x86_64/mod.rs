@@ -888,7 +888,7 @@ pub fn configure_vcpu(
     }
 
     for c in &cpuid {
-        info!("{}", c);
+        debug!("{}", c);
     }
 
     vcpu.set_cpuid2(&cpuid)
