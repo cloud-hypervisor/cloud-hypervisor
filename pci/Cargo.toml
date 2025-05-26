@@ -16,7 +16,7 @@ hypervisor = { path = "../hypervisor" }
 libc = "0.2.167"
 log = "0.4.22"
 serde = { version = "1.0.208", features = ["derive"] }
-thiserror = "2.0.6"
+thiserror = { workspace = true }
 vfio-bindings = { workspace = true, features = ["fam-wrappers"] }
 vfio-ioctls = { workspace = true, default-features = false }
 vfio_user = { workspace = true }

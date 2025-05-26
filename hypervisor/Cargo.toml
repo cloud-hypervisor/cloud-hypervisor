@@ -36,7 +36,7 @@ serde_json = { workspace = true }
 serde_with = { version = "3.9.0", default-features = false, features = [
   "macros",
 ] }
-thiserror = "2.0.6"
+thiserror = { workspace = true }
 vfio-ioctls = { workspace = true, default-features = false }
 vm-memory = { workspace = true, features = [
   "backend-atomic",
