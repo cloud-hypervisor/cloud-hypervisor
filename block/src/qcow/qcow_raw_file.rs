@@ -36,7 +36,7 @@ impl QcowRawFile {
     }
 
     /// Reads `count` 64 bit offsets and returns them as a vector.
-    /// `mask` optionally ands out some of the bits on the file.
+    /// `mask` optionally `&`s out some of the bits on the file.
     pub fn read_pointer_table(
         &mut self,
         offset: u64,
@@ -55,7 +55,7 @@ impl QcowRawFile {
     }
 
     /// Reads a cluster's worth of 64 bit offsets and returns them as a vector.
-    /// `mask` optionally ands out some of the bits on the file.
+    /// `mask` optionally `&`s out some of the bits on the file.
     pub fn read_pointer_cluster(&mut self, offset: u64, mask: Option<u64>) -> io::Result<Vec<u64>> {
         let count = self.cluster_size / size_of::<u64>() as u64;
         self.read_pointer_table(offset, count, mask)
