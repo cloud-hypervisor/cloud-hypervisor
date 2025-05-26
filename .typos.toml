@@ -7,15 +7,17 @@ extend-exclude = [
 ]
 
 [default.extend-words]
-ba = "ba"
 CLASSE = "CLASSE"
-conectix = "conectix"
 Dake = "Dake"
 EXTINT = "EXTINT"
 INOUT = "INOUT"
+SME = "SME" # Secure Memory Encryption
+THR = "THR" # Transmitter Holding Register
+TRANSLATER = "TRANSLATER"
+ba = "ba"
+conectix = "conectix"
 liness = "liness"
 outout = "outout"
-TRANSLATER = "TRANSLATER"
 
 [default.extend-identifiers]
 fo = "fo"
