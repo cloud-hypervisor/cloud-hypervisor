@@ -13,7 +13,7 @@ libc = "0.2.167"
 log = "0.4.22"
 net_util = { path = "../net_util" }
 option_parser = { path = "../option_parser" }
-thiserror = "2.0.6"
+thiserror = { workspace = true }
 vhost = { workspace = true, features = ["vhost-user-backend"] }
 vhost-user-backend = { workspace = true }
 virtio-bindings = { workspace = true }

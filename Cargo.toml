@@ -42,7 +42,7 @@ option_parser = { path = "option_parser" }
 seccompiler = { workspace = true }
 serde_json = { workspace = true }
 signal-hook = "0.3.18"
-thiserror = "2.0.6"
+thiserror = { workspace = true }
 tpm = { path = "tpm" }
 tracer = { path = "tracer" }
 vm-memory = { workspace = true }
@@ -128,3 +128,6 @@ igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main" }
 
 # serde crates
 serde_json = "1.0.120"
+
+# other crates
+thiserror = "2.0.12"
