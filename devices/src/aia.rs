@@ -12,8 +12,8 @@ use arch::layout;
 use hypervisor::arch::riscv64::aia::{Vaia, VaiaConfig};
 use hypervisor::{AiaState, CpuState};
 use vm_device::interrupt::{
-    InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
-    LegacyIrqSourceConfig, MsiIrqGroupConfig,
+    get_irq_masked_state, InterruptIndex, InterruptManager, InterruptSourceConfig,
+    InterruptSourceGroup, LegacyIrqSourceConfig, MsiIrqGroupConfig,
 };
 use vm_memory::address::Address;
 use vm_migration::{Migratable, Pausable, Snapshottable, Transportable};
@@ -95,7 +95,7 @@ impl Aia {
                 .update(
                     i as InterruptIndex,
                     InterruptSourceConfig::LegacyIrq(config),
-                    false,
+                    get_irq_masked_state(true, false),
                     false,
                 )
                 .map_err(Error::EnableInterrupt)?;

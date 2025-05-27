@@ -13,7 +13,7 @@ use hypervisor::IrqRoutingEntry;
 use vm_allocator::SystemAllocator;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
-    LegacyIrqGroupConfig, MsiIrqGroupConfig,
+    LegacyIrqGroupConfig, MsiIrqGroupConfig, IRQ_KEEP_MASKED, IRQ_UNMASKED_TO_MASKED,
 };
 use vmm_sys_util::eventfd::EventFd;
 
@@ -167,9 +167,10 @@ impl InterruptSourceGroup for MsiInterruptGroup {
         &self,
         index: InterruptIndex,
         config: InterruptSourceConfig,
-        masked: bool,
+        masked_state: usize,
         set_gsi: bool,
     ) -> Result<()> {
+        let masked = (masked_state & (IRQ_UNMASKED_TO_MASKED | IRQ_KEEP_MASKED)) != 0;
         if let Some(route) = self.irq_routes.get(&index) {
             let entry = RoutingEntry {
                 route: self.vm.make_routing_entry(route.gsi, &config),
@@ -235,7 +236,7 @@ impl InterruptSourceGroup for LegacyUserspaceInterruptGroup {
         &self,
         _index: InterruptIndex,
         _config: InterruptSourceConfig,
-        _masked: bool,
+        _masked_state: usize,
         _set_gsi: bool,
     ) -> Result<()> {
         Ok(())

@@ -10,7 +10,8 @@ use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::interrupt::{
-    InterruptIndex, InterruptSourceConfig, InterruptSourceGroup, MsiIrqSourceConfig,
+    get_irq_masked_state, InterruptIndex, InterruptSourceConfig, InterruptSourceGroup,
+    MsiIrqSourceConfig,
 };
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
 
@@ -202,7 +203,7 @@ impl MsiConfig {
                         .update(
                             idx as InterruptIndex,
                             InterruptSourceConfig::MsiIrq(config),
-                            state.cap.vector_masked(idx),
+                            get_irq_masked_state(true, state.cap.vector_masked(idx)),
                             false,
                         )
                         .map_err(Error::UpdateInterruptRoute)?;
@@ -264,7 +265,7 @@ impl MsiConfig {
                 if let Err(e) = self.interrupt_source_group.update(
                     idx as InterruptIndex,
                     InterruptSourceConfig::MsiIrq(config),
-                    self.cap.vector_masked(idx),
+                    get_irq_masked_state(true, self.cap.vector_masked(idx)),
                     true,
                 ) {
                     error!("Failed updating vector: {:?}", e);

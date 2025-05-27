@@ -68,6 +68,11 @@ pub type Result<T> = std::io::Result<T>;
 /// Data type to store an interrupt source identifier.
 pub type InterruptIndex = u32;
 
+pub const IRQ_KEEP_MASKED: usize = 1 << 0;
+pub const IRQ_KEEP_UNMASKED: usize = 1 << 1;
+pub const IRQ_MASKED_TO_UNMASKED: usize = 1 << 2;
+pub const IRQ_UNMASKED_TO_MASKED: usize = 1 << 3;
+
 /// Configuration data for legacy, pin based interrupt groups.
 ///
 /// A legacy interrupt group only takes one irq number as its configuration.
@@ -147,16 +152,25 @@ pub trait InterruptSourceGroup: Send + Sync {
     /// # Arguments
     /// * index: sub-index into the group.
     /// * config: configuration data for the interrupt source.
-    /// * masked: if the interrupt is masked
+    /// * masked_state: if the interrupt was/is masked
     /// * set_gsi: whether update the GSI routing table.
     fn update(
         &self,
         index: InterruptIndex,
         config: InterruptSourceConfig,
-        masked: bool,
+        masked_state: usize,
         set_gsi: bool,
     ) -> Result<()>;
 
     /// Set the interrupt group GSI routing table.
     fn set_gsi(&self) -> Result<()>;
+}
+
+pub fn get_irq_masked_state(was_masked: bool, is_masked: bool) -> usize {
+    match (was_masked, is_masked) {
+        (true, true) => IRQ_KEEP_MASKED,
+        (false, false) => IRQ_KEEP_UNMASKED,
+        (true, false) => IRQ_MASKED_TO_UNMASKED,
+        (false, true) => IRQ_UNMASKED_TO_MASKED,
+    }
 }

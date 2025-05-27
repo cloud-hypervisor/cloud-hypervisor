@@ -59,7 +59,7 @@ impl InterruptSourceGroup for TestInterrupt {
         &self,
         _index: InterruptIndex,
         _config: InterruptSourceConfig,
-        _masked: bool,
+        _masked_state: usize,
         _set_gsi: bool,
     ) -> Result<(), std::io::Error> {
         Ok(())
