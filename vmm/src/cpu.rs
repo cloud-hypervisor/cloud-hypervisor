@@ -116,7 +116,7 @@ pub enum Error {
     #[error("Error creating vCPU: {0}")]
     VcpuCreate(#[source] anyhow::Error),
 
-    #[error("Error running bCPU: {0}")]
+    #[error("Error running vCPU: {0}")]
     VcpuRun(#[source] anyhow::Error),
 
     #[error("Error spawning vCPU thread: {0}")]
@@ -128,7 +128,7 @@ pub enum Error {
     #[error("Error configuring vCPU: {0}")]
     VcpuConfiguration(#[source] arch::Error),
 
-    #[error("Still pending removed vcpu")]
+    #[error("Still pending removed vCPU")]
     VcpuPendingRemovedVcpu,
 
     #[cfg(target_arch = "aarch64")]
