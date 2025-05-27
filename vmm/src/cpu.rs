@@ -2973,6 +2973,7 @@ mod tests {
     use hypervisor::kvm::kvm_bindings::{
         user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
     };
+    use hypervisor::HypervisorCpuError;
     #[cfg(feature = "kvm")]
     use hypervisor::{arm64_core_reg_id, offset_of};
 
@@ -3025,17 +3026,40 @@ mod tests {
         let mut kvi = vcpu.create_vcpu_init();
         vm.get_preferred_target(&mut kvi).unwrap();
 
-        // Must fail when vcpu is not initialized yet.
-        assert_eq!(
-            format!("{}", vcpu.get_regs().unwrap_err()),
-            "Failed to get aarch64 core register: Exec format error (os error 8)"
-        );
+        fn hypervisor_cpu_error_to_raw_os_error(error: &anyhow::Error) -> libc::c_int {
+            let cause = error.chain().next().expect("should have root cause");
+            cause
+                .downcast_ref::<vmm_sys_util::errno::Error>()
+                .unwrap_or_else(|| panic!("should be io::Error but is: {cause:?}"))
+                .errno() as libc::c_int
+        }
 
+        // test get_regs
+        {
+            let error = vcpu
+                .get_regs()
+                .expect_err("should fail as vCPU is not initialized");
+            let io_error_raw = if let HypervisorCpuError::GetAarchCoreRegister(error) = error {
+                hypervisor_cpu_error_to_raw_os_error(&error)
+            } else {
+                panic!("get_regs() must fail with error HypervisorCpuError::GetAarchCoreRegister");
+            };
+            assert_eq!(io_error_raw, libc::ENOEXEC);
+        }
+
+        // test set_regs
         let mut state = vcpu.create_standard_regs();
-        assert_eq!(
-            format!("{}", vcpu.set_regs(&state).unwrap_err()),
-            "Failed to set aarch64 core register: Exec format error (os error 8)"
-        );
+        {
+            let error = vcpu
+                .set_regs(&state)
+                .expect_err("should fail as vCPU is not initialized");
+            let io_error_raw = if let HypervisorCpuError::SetAarchCoreRegister(error) = error {
+                hypervisor_cpu_error_to_raw_os_error(&error)
+            } else {
+                panic!("set_regs() must fail with error HypervisorCpuError::SetAarchCoreRegister");
+            };
+            assert_eq!(io_error_raw, libc::ENOEXEC);
+        }
 
         vcpu.vcpu_init(&kvi).unwrap();
         state = vcpu.get_regs().unwrap();
