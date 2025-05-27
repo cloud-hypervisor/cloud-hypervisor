@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use devices::interrupt_controller::InterruptController;
@@ -21,7 +21,7 @@ use vmm_sys_util::eventfd::EventFd;
 pub type Result<T> = std::io::Result<T>;
 
 struct InterruptRoute {
-    gsi: u32,
+    gsi: Arc<AtomicU32>,
     irq_fd: EventFd,
     registered: AtomicBool,
     allocator: Arc<Mutex<SystemAllocator>>,
@@ -38,7 +38,7 @@ impl InterruptRoute {
             .ok_or_else(|| io::Error::other("Failed allocating new GSI"))?;
 
         Ok(InterruptRoute {
-            gsi,
+            gsi: Arc::new(AtomicU32::new(gsi)),
             irq_fd,
             registered: AtomicBool::new(false),
             allocator,
@@ -47,10 +47,10 @@ impl InterruptRoute {
 
     pub fn enable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         if !self.registered.load(Ordering::Acquire) {
-            vm.register_irqfd(&self.irq_fd, self.gsi)
+            vm.register_irqfd(&self.irq_fd, self.gsi.load(Ordering::Acquire))
                 .map_err(|e| io::Error::other(format!("Failed registering irq_fd: {e}")))?;
 
-            self.allocator.lock().unwrap().enable_gsi_bit(self.gsi);
+            self.allocator.lock().unwrap().enable_gsi_bit(self.gsi.load(Ordering::SeqCst));
 
             // Update internals to track the irq_fd as "registered".
             self.registered.store(true, Ordering::Release);
@@ -61,10 +61,10 @@ impl InterruptRoute {
 
     pub fn disable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         if self.registered.load(Ordering::Acquire) {
-            vm.unregister_irqfd(&self.irq_fd, self.gsi)
+            vm.unregister_irqfd(&self.irq_fd, self.gsi.load(Ordering::Acquire))
                 .map_err(|e| io::Error::other(format!("Failed unregistering irq_fd: {e}")))?;
 
-            self.allocator.lock().unwrap().free_gsi(self.gsi);
+            self.allocator.lock().unwrap().free_gsi(self.gsi.load(Ordering::SeqCst));
 
             // Update internals to track the irq_fd as "unregistered".
             self.registered.store(false, Ordering::Release);
@@ -173,7 +173,9 @@ impl InterruptSourceGroup for MsiInterruptGroup {
         let masked = (masked_state & (IRQ_UNMASKED_TO_MASKED | IRQ_KEEP_MASKED)) != 0;
         if let Some(route) = self.irq_routes.get(&index) {
             let entry = RoutingEntry {
-                route: self.vm.make_routing_entry(route.gsi, &config),
+                route: self
+                    .vm
+                    .make_routing_entry(route.gsi.load(Ordering::Acquire), &config),
                 masked,
             };
 
@@ -186,7 +188,7 @@ impl InterruptSourceGroup for MsiInterruptGroup {
             }
 
             let mut routes = self.gsi_msi_routes.lock().unwrap();
-            routes.insert(route.gsi, entry);
+            routes.insert(route.gsi.load(Ordering::SeqCst), entry);
             if set_gsi {
                 self.set_gsi_routes(&routes)?;
             }
