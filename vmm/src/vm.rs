@@ -141,7 +141,7 @@ pub enum Error {
     #[error("VM state is poisoned")]
     PoisonedState,
 
-    #[error("Error from device manager: {0:?}")]
+    #[error("Failed to create the VMs devices: {0:?}")]
     DeviceManager(#[source] DeviceManagerError),
 
     #[error("Error initializing VM: {0:?}")]
