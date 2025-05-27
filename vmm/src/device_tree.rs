@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::sync::{Arc, Mutex};
 
 use pci::PciBdf;
@@ -23,6 +24,12 @@ pub struct DeviceNode {
     pub pci_bdf: Option<PciBdf>,
     #[serde(skip)]
     pub pci_device_handle: Option<PciDeviceHandle>,
+}
+
+impl Debug for DeviceNode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DeviceNode({})", self.id)
+    }
 }
 
 impl DeviceNode {
@@ -52,7 +59,7 @@ macro_rules! device_node {
     };
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct DeviceTree(HashMap<String, DeviceNode>);
 
 impl DeviceTree {

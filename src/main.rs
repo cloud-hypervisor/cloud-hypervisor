@@ -882,27 +882,7 @@ fn main() {
             0
         }
         Err(top_error) => {
-            eprint!("Error: ");
-            if top_error.source().is_none() {
-                eprintln!("Cloud Hypervisor exited with the following error:");
-                eprintln!("  {top_error}");
-            } else {
-                eprintln!("Cloud Hypervisor exited with the following chain of errors:");
-                eprintln!("  0: {top_error}");
-                let mut level = 1;
-                let mut next_error: &dyn StdError = &top_error;
-                // Due to lifetime errors' we unfortunately can't simplify this using
-                // `std::iter::successors`.
-                while let Some(sub_error) = next_error.source() {
-                    next_error = sub_error;
-                    eprintln!("  {level}: {next_error}",);
-                    level += 1;
-                }
-            }
-
-            eprintln!();
-            eprintln!("Debug Info: {top_error:?}");
-
+            cloud_hypervisor::cli_print_error_chain(&top_error, "Cloud Hypervisor");
             1
         }
     };

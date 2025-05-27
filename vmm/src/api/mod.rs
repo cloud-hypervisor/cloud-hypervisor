@@ -158,7 +158,7 @@ pub enum ApiError {
     ApplySeccompFilter(#[source] seccompiler::Error),
 
     /// The disk could not be added to the VM.
-    #[error("The disk could not be added to the VM")]
+    #[error("The disk could not be added to the VM: {0}")]
     VmAddDisk(#[source] VmError),
 
     /// The fs could not be added to the VM.
@@ -199,7 +199,7 @@ pub enum ApiError {
 }
 pub type ApiResult<T> = Result<T, ApiError>;
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VmInfoResponse {
     pub config: Box<VmConfig>,
     pub state: VmState,
@@ -207,7 +207,7 @@ pub struct VmInfoResponse {
     pub device_tree: Option<DeviceTree>,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VmmPingResponse {
     pub build_version: String,
     pub version: String,
@@ -260,6 +260,7 @@ pub struct VmSendMigrationData {
     pub local: bool,
 }
 
+#[derive(Debug)]
 pub enum ApiResponsePayload {
     /// No data is sent on the channel.
     Empty,

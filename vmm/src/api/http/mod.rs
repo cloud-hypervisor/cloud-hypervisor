@@ -77,7 +77,14 @@ const HTTP_ROOT: &str = "/api/v1";
 
 pub fn error_response(error: HttpError, status: StatusCode) -> Response {
     let mut response = Response::new(Version::Http11, status);
-    response.set_body(Body::new(format!("{error}")));
+    // We must use a comprehensive debug output here, as it is currently the
+    // only feasible option to get all relevant error details to the receiver,
+    // i.e., ch-remote. The Display impl is not guaranteed to hold all relevant
+    // or helpful data.
+    //
+    // TODO: We might print a nice error chain here as well and send it to the
+    // remote!
+    response.set_body(Body::new(format!("{error:?}")));
 
     response
 }

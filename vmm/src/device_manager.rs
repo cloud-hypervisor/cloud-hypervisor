@@ -10,6 +10,7 @@
 //
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fmt::{Debug, Formatter};
 use std::fs::{File, OpenOptions};
 use std::io::{self, stdout, IsTerminal, Seek, SeekFrom};
 use std::num::Wrapping;
@@ -862,6 +863,12 @@ pub enum PciDeviceHandle {
     Vfio(Arc<Mutex<VfioPciDevice>>),
     Virtio(Arc<Mutex<VirtioPciDevice>>),
     VfioUser(Arc<Mutex<VfioUserPciDevice>>),
+}
+
+impl Debug for PciDeviceHandle {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PciDeviceHandle(omitted)")
+    }
 }
 
 #[derive(Clone)]
