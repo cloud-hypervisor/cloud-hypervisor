@@ -9,7 +9,8 @@ use std::{io, result};
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
 use vm_device::interrupt::{
-    InterruptIndex, InterruptSourceConfig, InterruptSourceGroup, MsiIrqSourceConfig,
+    get_irq_masked_state, InterruptIndex, InterruptSourceConfig, InterruptSourceGroup,
+    MsiIrqSourceConfig,
 };
 use vm_memory::ByteValued;
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
@@ -104,7 +105,7 @@ impl MsixConfig {
                         .update(
                             idx as InterruptIndex,
                             InterruptSourceConfig::MsiIrq(config),
-                            state.masked,
+                            get_irq_masked_state(true, state.masked),
                             true,
                         )
                         .map_err(Error::UpdateInterruptRoute)?;
@@ -180,7 +181,7 @@ impl MsixConfig {
                     if let Err(e) = self.interrupt_source_group.update(
                         idx as InterruptIndex,
                         InterruptSourceConfig::MsiIrq(config),
-                        table_entry.masked(),
+                        get_irq_masked_state(true, table_entry.masked()),
                         true,
                     ) {
                         error!("Failed updating vector: {:?}", e);
@@ -330,7 +331,7 @@ impl MsixConfig {
             if let Err(e) = self.interrupt_source_group.update(
                 index as InterruptIndex,
                 InterruptSourceConfig::MsiIrq(config),
-                table_entry.masked(),
+                get_irq_masked_state(old_entry.masked(), table_entry.masked()),
                 true,
             ) {
                 error!("Failed updating vector: {:?}", e);
