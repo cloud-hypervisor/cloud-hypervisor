@@ -315,6 +315,9 @@ impl VhostUserHandle {
         self.vu
             .get_features()
             .map_err(Error::VhostUserGetFeatures)?;
+        self.vu
+            .get_protocol_features()
+            .map_err(Error::VhostUserGetProtocolFeatures)?;
 
         if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
             if let Some(acked_protocol_features) =
