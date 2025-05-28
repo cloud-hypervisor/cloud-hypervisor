@@ -36,23 +36,23 @@ const MAX_NESTING_DEPTH: u32 = 10;
 #[sorted]
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("Backing file io error: {0}")]
+    #[error("Backing file io error")]
     BackingFileIo(#[source] io::Error),
-    #[error("Backing file open error: {0}")]
+    #[error("Backing file open error")]
     BackingFileOpen(#[source] Box<Error>),
     #[error("Backing file name is too long: {0} bytes over")]
     BackingFileTooLong(usize),
     #[error("Compressed blocks not supported")]
     CompressedBlocksNotSupported,
-    #[error("Failed to evict cache: {0}")]
+    #[error("Failed to evict cache")]
     EvictingCache(#[source] io::Error),
     #[error("File larger than max of {MAX_QCOW_FILE_SIZE}: {0}")]
     FileTooBig(u64),
-    #[error("Failed to get file size: {0}")]
+    #[error("Failed to get file size")]
     GettingFileSize(#[source] io::Error),
-    #[error("Failed to get refcount: {0}")]
+    #[error("Failed to get refcount")]
     GettingRefcount(#[source] refcount::Error),
-    #[error("Failed to parse filename: {0}")]
+    #[error("Failed to parse filename")]
     InvalidBackingFileName(#[source] str::Utf8Error),
     #[error("Invalid cluster index")]
     InvalidClusterIndex,
@@ -82,27 +82,27 @@ pub enum Error {
     NotEnoughSpaceForRefcounts,
     #[error("Failed to open file {0}")]
     OpeningFile(#[source] io::Error),
-    #[error("Failed to read data: {0}")]
+    #[error("Failed to read data")]
     ReadingData(#[source] io::Error),
-    #[error("Failed to read header: {0}")]
+    #[error("Failed to read header")]
     ReadingHeader(#[source] io::Error),
-    #[error("Failed to read pointers: {0}")]
+    #[error("Failed to read pointers")]
     ReadingPointers(#[source] io::Error),
-    #[error("Failed to read ref count block: {0}")]
+    #[error("Failed to read ref count block")]
     ReadingRefCountBlock(#[source] refcount::Error),
-    #[error("Failed to read ref counts: {0}")]
+    #[error("Failed to read ref counts")]
     ReadingRefCounts(#[source] io::Error),
-    #[error("Failed to rebuild ref counts: {0}")]
+    #[error("Failed to rebuild ref counts")]
     RebuildingRefCounts(#[source] io::Error),
     #[error("Refcount table offset past file end")]
     RefcountTableOffEnd,
     #[error("Too many clusters specified for refcount")]
     RefcountTableTooLarge,
-    #[error("Failed to seek file: {0}")]
+    #[error("Failed to seek file")]
     SeekingFile(#[source] io::Error),
-    #[error("Failed to set file size: {0}")]
+    #[error("Failed to set file size")]
     SettingFileSize(#[source] io::Error),
-    #[error("Failed to set refcount refcount: {0}")]
+    #[error("Failed to set refcount refcount")]
     SettingRefcountRefcount(#[source] io::Error),
     #[error("Size too small for number of clusters")]
     SizeTooSmallForNumberOfClusters,
@@ -114,9 +114,9 @@ pub enum Error {
     UnsupportedRefcountOrder,
     #[error("Unsupported version: {0}")]
     UnsupportedVersion(u32),
-    #[error("Failed to write data: {0}")]
+    #[error("Failed to write data")]
     WritingData(#[source] io::Error),
-    #[error("Failed to write header: {0}")]
+    #[error("Failed to write header")]
     WritingHeader(#[source] io::Error),
 }
 
