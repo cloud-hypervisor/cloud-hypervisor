@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use devices::interrupt_controller::InterruptController;
 use hypervisor::IrqRoutingEntry;
-use vm_allocator::SystemAllocator;
+use vm_allocator::{SystemAllocator, GSI_INVALID};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
     LegacyIrqGroupConfig, MsiIrqGroupConfig, IRQ_KEEP_MASKED, IRQ_UNMASKED_TO_MASKED,
@@ -31,26 +31,46 @@ impl InterruptRoute {
     pub fn new(allocator: Arc<Mutex<SystemAllocator>>) -> Result<Self> {
         let irq_fd = EventFd::new(libc::EFD_NONBLOCK)?;
 
-        let gsi = allocator
-            .lock()
-            .unwrap()
-            .allocate_gsi()
-            .ok_or_else(|| io::Error::other("Failed allocating new GSI"))?;
-
         Ok(InterruptRoute {
-            gsi: Arc::new(AtomicU32::new(gsi)),
+            gsi: Arc::new(AtomicU32::new(GSI_INVALID)),
             irq_fd,
             registered: AtomicBool::new(false),
             allocator,
         })
     }
 
+    pub fn get_gsi(&self) -> Option<u32> {
+        let mut gsi = self.gsi.load(Ordering::SeqCst);
+        if GSI_INVALID == gsi {
+            gsi = self
+                .allocator
+                .lock()
+                .unwrap()
+                .allocate_gsi()
+                .unwrap_or(GSI_INVALID);
+
+            self.gsi.store(gsi, Ordering::SeqCst);
+        }
+
+        Some(gsi)
+    }
+
     pub fn enable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         if !self.registered.load(Ordering::Acquire) {
-            vm.register_irqfd(&self.irq_fd, self.gsi.load(Ordering::Acquire))
+            let mut gsi = self.gsi.load(Ordering::SeqCst);
+
+            if GSI_INVALID == gsi {
+                gsi = self
+                    .allocator
+                    .lock()
+                    .unwrap()
+                    .allocate_gsi()
+                    .ok_or_else(|| io::Error::other("Failed allocating new GSI"))?;
+            }
+            vm.register_irqfd(&self.irq_fd, gsi)
                 .map_err(|e| io::Error::other(format!("Failed registering irq_fd: {e}")))?;
 
-            self.allocator.lock().unwrap().enable_gsi_bit(self.gsi.load(Ordering::SeqCst));
+            self.gsi.store(gsi, Ordering::SeqCst);
 
             // Update internals to track the irq_fd as "registered".
             self.registered.store(true, Ordering::Release);
@@ -61,10 +81,13 @@ impl InterruptRoute {
 
     pub fn disable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
         if self.registered.load(Ordering::Acquire) {
-            vm.unregister_irqfd(&self.irq_fd, self.gsi.load(Ordering::Acquire))
+            let gsi = self.gsi.load(Ordering::SeqCst);
+
+            vm.unregister_irqfd(&self.irq_fd, gsi)
                 .map_err(|e| io::Error::other(format!("Failed unregistering irq_fd: {e}")))?;
 
-            self.allocator.lock().unwrap().free_gsi(self.gsi.load(Ordering::SeqCst));
+            self.gsi.store(GSI_INVALID, Ordering::SeqCst);
+            self.allocator.lock().unwrap().free_gsi(gsi);
 
             // Update internals to track the irq_fd as "unregistered".
             self.registered.store(false, Ordering::Release);
@@ -172,10 +195,10 @@ impl InterruptSourceGroup for MsiInterruptGroup {
     ) -> Result<()> {
         let masked = (masked_state & (IRQ_UNMASKED_TO_MASKED | IRQ_KEEP_MASKED)) != 0;
         if let Some(route) = self.irq_routes.get(&index) {
+            let gsi = route.get_gsi().unwrap();
+
             let entry = RoutingEntry {
-                route: self
-                    .vm
-                    .make_routing_entry(route.gsi.load(Ordering::Acquire), &config),
+                route: self.vm.make_routing_entry(gsi, &config),
                 masked,
             };
 
@@ -188,7 +211,7 @@ impl InterruptSourceGroup for MsiInterruptGroup {
             }
 
             let mut routes = self.gsi_msi_routes.lock().unwrap();
-            routes.insert(route.gsi.load(Ordering::SeqCst), entry);
+            routes.insert(gsi, entry);
             if set_gsi {
                 self.set_gsi_routes(&routes)?;
             }
