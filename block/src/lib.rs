@@ -79,21 +79,21 @@ pub enum Error {
     DescriptorChainTooShort,
     #[error("Guest gave us a descriptor that was too short to use")]
     DescriptorLengthTooSmall,
-    #[error("Failed to detect image type: {0}")]
+    #[error("Failed to detect image type")]
     DetectImageType(#[source] std::io::Error),
-    #[error("Failure in fixed vhd: {0}")]
+    #[error("Failure in fixed vhd")]
     FixedVhdError(#[source] std::io::Error),
     #[error("Getting a block's metadata fails for any reason")]
     GetFileMetadata,
     #[error("The requested operation would cause a seek beyond disk end")]
     InvalidOffset,
-    #[error("Failure in qcow: {0}")]
+    #[error("Failure in qcow")]
     QcowError(#[source] qcow::Error),
-    #[error("Failure in raw file: {0}")]
+    #[error("Failure in raw file")]
     RawFileError(#[source] std::io::Error),
     #[error("The requested operation does not support multiple descriptors")]
     TooManyDescriptors,
-    #[error("Failure in vhdx: {0}")]
+    #[error("Failure in vhdx")]
     VhdxError(#[source] VhdxError),
 }
 
@@ -131,33 +131,33 @@ pub fn build_serial(disk_path: &Path) -> Vec<u8> {
 
 #[derive(Error, Debug)]
 pub enum ExecuteError {
-    #[error("Bad request: {0}")]
+    #[error("Bad request")]
     BadRequest(#[source] Error),
-    #[error("Failed to flush: {0}")]
+    #[error("Failed to flush")]
     Flush(#[source] io::Error),
-    #[error("Failed to read: {0}")]
+    #[error("Failed to read")]
     Read(#[source] GuestMemoryError),
-    #[error("Failed to read_exact: {0}")]
+    #[error("Failed to read_exact")]
     ReadExact(#[source] io::Error),
-    #[error("Failed to seek: {0}")]
+    #[error("Failed to seek")]
     Seek(#[source] io::Error),
-    #[error("Failed to write: {0}")]
+    #[error("Failed to write")]
     Write(#[source] GuestMemoryError),
-    #[error("Failed to write_all: {0}")]
+    #[error("Failed to write_all")]
     WriteAll(#[source] io::Error),
     #[error("Unsupported request: {0}")]
     Unsupported(u32),
-    #[error("Failed to submit io uring: {0}")]
+    #[error("Failed to submit io uring")]
     SubmitIoUring(#[source] io::Error),
-    #[error("Failed to get guest address: {0}")]
+    #[error("Failed to get guest address")]
     GetHostAddress(#[source] GuestMemoryError),
-    #[error("Failed to async read: {0}")]
+    #[error("Failed to async read")]
     AsyncRead(#[source] AsyncIoError),
-    #[error("Failed to async write: {0}")]
+    #[error("Failed to async write")]
     AsyncWrite(#[source] AsyncIoError),
-    #[error("failed to async flush: {0}")]
+    #[error("failed to async flush")]
     AsyncFlush(#[source] AsyncIoError),
-    #[error("Failed allocating a temporary buffer: {0}")]
+    #[error("Failed allocating a temporary buffer")]
     TemporaryBufferAllocation(#[source] io::Error),
 }
 
