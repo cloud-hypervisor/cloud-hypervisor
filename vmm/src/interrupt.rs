@@ -13,7 +13,8 @@ use hypervisor::IrqRoutingEntry;
 use vm_allocator::{SystemAllocator, GSI_INVALID};
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
-    LegacyIrqGroupConfig, MsiIrqGroupConfig, IRQ_KEEP_MASKED, IRQ_UNMASKED_TO_MASKED,
+    LegacyIrqGroupConfig, MsiIrqGroupConfig, IRQ_KEEP_MASKED, IRQ_MASKED_TO_UNMASKED,
+    IRQ_UNMASKED_TO_MASKED,
 };
 use vmm_sys_util::eventfd::EventFd;
 
@@ -107,6 +108,10 @@ impl InterruptRoute {
                 .expect("Failed cloning interrupt's EventFd"),
         )
     }
+
+    pub fn registered(&self) -> bool {
+        self.registered.load(Ordering::SeqCst)
+    }
 }
 
 pub struct RoutingEntry {
@@ -193,8 +198,17 @@ impl InterruptSourceGroup for MsiInterruptGroup {
         masked_state: usize,
         set_gsi: bool,
     ) -> Result<()> {
-        let masked = (masked_state & (IRQ_UNMASKED_TO_MASKED | IRQ_KEEP_MASKED)) != 0;
+        let masked = match masked_state {
+            IRQ_UNMASKED_TO_MASKED | IRQ_KEEP_MASKED => true,
+            IRQ_MASKED_TO_UNMASKED => false,
+            _ => return Ok(()),
+        };
+
         if let Some(route) = self.irq_routes.get(&index) {
+            if masked && !route.registered() {
+                return Ok(());
+            }
+
             let gsi = route.get_gsi().unwrap();
 
             let entry = RoutingEntry {
