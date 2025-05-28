@@ -33,9 +33,9 @@ pub enum VhdxBatError {
     InvalidBatEntry,
     #[error("Invalid BAT entry count")]
     InvalidEntryCount,
-    #[error("Failed to read BAT entry: {0}")]
+    #[error("Failed to read BAT entry")]
     ReadBat(#[source] io::Error),
-    #[error("Failed to write BAT entry: {0}")]
+    #[error("Failed to write BAT entry")]
     WriteBat(#[source] io::Error),
 }
 

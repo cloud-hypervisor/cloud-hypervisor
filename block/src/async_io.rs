@@ -13,10 +13,10 @@ use crate::DiskTopology;
 #[derive(Error, Debug)]
 pub enum DiskFileError {
     /// Failed getting disk file size.
-    #[error("Failed getting disk file size: {0}")]
+    #[error("Failed getting disk file size")]
     Size(#[source] std::io::Error),
     /// Failed creating a new AsyncIo.
-    #[error("Failed creating a new AsyncIo: {0}")]
+    #[error("Failed creating a new AsyncIo")]
     NewAsyncIo(#[source] std::io::Error),
 }
 
@@ -71,13 +71,13 @@ pub trait DiskFile: Send {
 #[derive(Error, Debug)]
 pub enum AsyncIoError {
     /// Failed vectored reading from file.
-    #[error("Failed vectored reading from file: {0}")]
+    #[error("Failed vectored reading from file")]
     ReadVectored(#[source] std::io::Error),
     /// Failed vectored writing to file.
-    #[error("Failed vectored writing to file: {0}")]
+    #[error("Failed vectored writing to file")]
     WriteVectored(#[source] std::io::Error),
     /// Failed synchronizing file.
-    #[error("Failed synchronizing file: {0}")]
+    #[error("Failed synchronizing file")]
     Fsync(#[source] std::io::Error),
 }
 
