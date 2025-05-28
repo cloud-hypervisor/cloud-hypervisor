@@ -81,7 +81,7 @@ pub enum Error {
     RequestStatus(#[source] GuestMemoryError),
     #[error("Failed to enable notification")]
     QueueEnableNotification(#[source] virtio_queue::Error),
-    #[error("Failed to get {lock_type:?} lock for disk image {path}: {error}")]
+    #[error("Failed to get {lock_type:?} lock for disk image: {path}")]
     LockDiskImage {
         /// The underlying error.
         #[source]
