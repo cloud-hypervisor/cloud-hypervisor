@@ -98,11 +98,6 @@ impl GsiAllocator {
         self.gsi_bitmap.lock().unwrap().set(gsi as usize, false);
     }
 
-    /// Enable gsi bit
-    pub fn enable_gsi_bit(&mut self, gsi: u32) {
-        self.gsi_bitmap.lock().unwrap().set(gsi as usize, true);
-    }
-
     #[cfg(target_arch = "x86_64")]
     /// Allocate an IRQ
     pub fn allocate_irq(&mut self) -> Result<u32> {
