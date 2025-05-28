@@ -212,22 +212,29 @@ impl BlockEpollHandler {
 
             request.set_writeback(self.writeback.load(Ordering::Acquire));
 
-            if request
-                .execute_async(
-                    desc_chain.memory(),
-                    self.disk_nsectors,
-                    self.disk_image.as_mut(),
-                    &self.serial,
-                    desc_chain.head_index() as u64,
-                )
-                .map_err(Error::RequestExecuting)?
-            {
+            let result = request.execute_async(
+                desc_chain.memory(),
+                self.disk_nsectors,
+                self.disk_image.as_mut(),
+                &self.serial,
+                desc_chain.head_index() as u64,
+            );
+
+            if let Ok(true) = result {
                 self.inflight_requests
                     .push_back((desc_chain.head_index(), request));
             } else {
+                let status = match result {
+                    Ok(_) => VIRTIO_BLK_S_OK,
+                    Err(e) => {
+                        error!("Request failed: {:x?} {:?}", request, e);
+                        VIRTIO_BLK_S_IOERR
+                    }
+                };
+
                 desc_chain
                     .memory()
-                    .write_obj(VIRTIO_BLK_S_OK as u8, request.status_addr)
+                    .write_obj(status as u8, request.status_addr)
                     .map_err(Error::RequestStatus)?;
 
                 // If no asynchronous operation has been submitted, we can
@@ -394,7 +401,7 @@ impl BlockEpollHandler {
                     request,
                     io::Error::from_raw_os_error(-result)
                 );
-                return Err(Error::AsyncRequestFailure);
+                (VIRTIO_BLK_S_IOERR as u8, 0)
             };
 
             mem.write_obj(status, request.status_addr)
