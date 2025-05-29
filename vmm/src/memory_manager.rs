@@ -206,15 +206,15 @@ pub struct MemoryManager {
 #[derive(Error, Debug)]
 pub enum Error {
     /// Failed to create shared file.
-    #[error("Failed to create shared file: {0}")]
+    #[error("Failed to create shared file")]
     SharedFileCreate(#[source] io::Error),
 
     /// Failed to set shared file length.
-    #[error("Failed to set shared file length: {0}")]
+    #[error("Failed to set shared file length")]
     SharedFileSetLen(#[source] io::Error),
 
     /// Mmap backed guest memory error
-    #[error("Mmap backed guest memory error: {0}")]
+    #[error("Mmap backed guest memory error")]
     GuestMemory(#[source] MmapError),
 
     /// Failed to allocate a memory range.
@@ -222,7 +222,7 @@ pub enum Error {
     MemoryRangeAllocation,
 
     /// Error from region creation
-    #[error("Error from region creation: {0}")]
+    #[error("Error from region creation")]
     GuestMemoryRegion(#[source] MmapRegionError),
 
     /// No ACPI slot available
@@ -238,27 +238,27 @@ pub enum Error {
     InvalidSize,
 
     /// Failed to create the user memory region.
-    #[error("Failed to create the user memory region: {0}")]
+    #[error("Failed to create the user memory region")]
     CreateUserMemoryRegion(#[source] hypervisor::HypervisorVmError),
 
     /// Failed to remove the user memory region.
-    #[error("Failed to remove the user memory region: {0}")]
+    #[error("Failed to remove the user memory region")]
     RemoveUserMemoryRegion(#[source] hypervisor::HypervisorVmError),
 
     /// Failed to EventFd.
-    #[error("Failed to EventFd: {0}")]
+    #[error("Failed to EventFd")]
     EventFdFail(#[source] io::Error),
 
     /// Eventfd write error
-    #[error("Eventfd write error: {0}")]
+    #[error("Eventfd write error")]
     EventfdError(#[source] io::Error),
 
     /// Failed to virtio-mem resize
-    #[error("Failed to virtio-mem resize: {0}")]
+    #[error("Failed to virtio-mem resize")]
     VirtioMemResizeFail(#[source] virtio_devices::mem::Error),
 
     /// Cannot restore VM
-    #[error("Cannot restore VM: {0}")]
+    #[error("Cannot restore VM")]
     Restore(#[source] MigratableError),
 
     /// Cannot restore VM because source URL is missing
@@ -281,27 +281,27 @@ pub enum Error {
 
     /// Failed opening SGX virtual EPC device
     #[cfg(target_arch = "x86_64")]
-    #[error("Failed opening SGX virtual EPC device: {0}")]
+    #[error("Failed opening SGX virtual EPC device")]
     SgxVirtEpcOpen(#[source] io::Error),
 
     /// Failed setting the SGX virtual EPC section size
     #[cfg(target_arch = "x86_64")]
-    #[error("Failed setting the SGX virtual EPC section size: {0}")]
+    #[error("Failed setting the SGX virtual EPC section size")]
     SgxVirtEpcFileSetLen(#[source] io::Error),
 
     /// Failed opening SGX provisioning device
     #[cfg(target_arch = "x86_64")]
-    #[error("Failed opening SGX provisioning device: {0}")]
+    #[error("Failed opening SGX provisioning device")]
     SgxProvisionOpen(#[source] io::Error),
 
     /// Failed enabling SGX provisioning
     #[cfg(target_arch = "x86_64")]
-    #[error("Failed enabling SGX provisioning: {0}")]
+    #[error("Failed enabling SGX provisioning")]
     SgxEnableProvisioning(#[source] hypervisor::HypervisorVmError),
 
     /// Failed creating a new MmapRegion instance.
     #[cfg(target_arch = "x86_64")]
-    #[error("Failed creating a new MmapRegion instance: {0}")]
+    #[error("Failed creating a new MmapRegion instance")]
     NewMmapRegion(#[source] vm_memory::mmap::MmapRegionError),
 
     /// No memory zones found.
@@ -323,7 +323,7 @@ pub enum Error {
     InvalidSharedMemoryZoneWithHostNuma,
 
     /// Failed applying NUMA memory policy.
-    #[error("Failed applying NUMA memory policy: {0}")]
+    #[error("Failed applying NUMA memory policy")]
     ApplyNumaPolicy(#[source] io::Error),
 
     /// Memory zone identifier is not unique.
@@ -359,11 +359,11 @@ pub enum Error {
     GuestAddressOverFlow,
 
     /// Error opening snapshot file
-    #[error("Error opening snapshot file: {0}")]
+    #[error("Error opening snapshot file")]
     SnapshotOpen(#[source] io::Error),
 
     // Error copying snapshot into region
-    #[error("Error copying snapshot into region: {0}")]
+    #[error("Error copying snapshot into region")]
     SnapshotCopy(#[source] GuestMemoryError),
 
     /// Failed to allocate MMIO address
@@ -372,7 +372,7 @@ pub enum Error {
 
     #[cfg(target_arch = "aarch64")]
     /// Failed to create UEFI flash
-    #[error("Failed to create UEFI flash: {0}")]
+    #[error("Failed to create UEFI flash")]
     CreateUefiFlash(#[source] HypervisorVmError),
 
     /// Using a directory as a backing file for memory is not supported
@@ -380,7 +380,7 @@ pub enum Error {
     DirectoryAsBackingFileForMemory,
 
     /// Failed to stat filesystem
-    #[error("Failed to stat filesystem: {0}")]
+    #[error("Failed to stat filesystem")]
     GetFileSystemBlockSize(#[source] io::Error),
 
     /// Memory size is misaligned with default page size or its hugepage size

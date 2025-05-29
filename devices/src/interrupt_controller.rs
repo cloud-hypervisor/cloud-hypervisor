@@ -17,38 +17,38 @@ pub enum Error {
     #[error("Invalid delivery mode")]
     InvalidDeliveryMode,
     /// Failed creating the interrupt source group.
-    #[error("Failed creating the interrupt source group: {0}")]
+    #[error("Failed creating the interrupt source group")]
     CreateInterruptSourceGroup(#[source] io::Error),
     /// Failed triggering the interrupt.
-    #[error("Failed triggering the interrupt: {0}")]
+    #[error("Failed triggering the interrupt")]
     TriggerInterrupt(#[source] io::Error),
     /// Failed masking the interrupt.
-    #[error("Failed masking the interrupt: {0}")]
+    #[error("Failed masking the interrupt")]
     MaskInterrupt(#[source] io::Error),
     /// Failed unmasking the interrupt.
-    #[error("Failed unmasking the interrupt: {0}")]
+    #[error("Failed unmasking the interrupt")]
     UnmaskInterrupt(#[source] io::Error),
     /// Failed updating the interrupt.
-    #[error("Failed updating the interrupt: {0}")]
+    #[error("Failed updating the interrupt")]
     UpdateInterrupt(#[source] io::Error),
     /// Failed enabling the interrupt.
-    #[error("Failed enabling the interrupt: {0}")]
+    #[error("Failed enabling the interrupt")]
     EnableInterrupt(#[source] io::Error),
     #[cfg(target_arch = "aarch64")]
     /// Failed creating GIC device.
-    #[error("Failed creating GIC device: {0}")]
+    #[error("Failed creating GIC device")]
     CreateGic(#[source] hypervisor::HypervisorVmError),
     #[cfg(target_arch = "aarch64")]
     /// Failed restoring GIC device.
-    #[error("Failed restoring GIC device: {0}")]
+    #[error("Failed restoring GIC device")]
     RestoreGic(#[source] hypervisor::arch::aarch64::gic::Error),
     #[cfg(target_arch = "riscv64")]
     /// Failed creating AIA device.
-    #[error("Failed creating AIA device: {0}")]
+    #[error("Failed creating AIA device")]
     CreateAia(#[source] hypervisor::HypervisorVmError),
     #[cfg(target_arch = "riscv64")]
     /// Failed restoring AIA device.
-    #[error("Failed restoring AIA device: {0}")]
+    #[error("Failed restoring AIA device")]
     RestoreAia(#[source] hypervisor::arch::riscv64::aia::Error),
 }
 

@@ -28,7 +28,7 @@ pub enum LockError {
     #[error("The file is already locked")]
     AlreadyLocked,
     /// IO error.
-    #[error("The lock state could not be checked or set: {0}")]
+    #[error("The lock state could not be checked or set")]
     Io(#[source] io::Error),
 }
 

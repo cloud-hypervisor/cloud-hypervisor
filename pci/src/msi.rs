@@ -39,9 +39,9 @@ pub fn msi_num_enabled_vectors(msg_ctl: u16) -> usize {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Failed enabling the interrupt route: {0}")]
+    #[error("Failed enabling the interrupt route")]
     EnableInterruptRoute(#[source] io::Error),
-    #[error("Failed updating the interrupt route: {0}")]
+    #[error("Failed updating the interrupt route")]
     UpdateInterruptRoute(#[source] io::Error),
 }
 
