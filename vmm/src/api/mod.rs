@@ -258,6 +258,12 @@ pub struct VmSendMigrationData {
     /// Send memory across socket without copying
     #[serde(default)]
     pub local: bool,
+    /// Downtime
+    #[serde(default)]
+    pub downtime: u64,
+    /// Timeout for migration
+    #[serde(default)]
+    pub migration_timeout: u64,
 }
 
 pub enum ApiResponsePayload {

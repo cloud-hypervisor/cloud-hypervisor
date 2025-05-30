@@ -474,6 +474,16 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                     .subcommand_matches("send-migration")
                     .unwrap()
                     .get_flag("send_migration_local"),
+                *matches
+                    .subcommand_matches("send-migration")
+                    .unwrap()
+                    .get_one::<u64>("downtime")
+                    .unwrap_or(&500),
+                *matches
+                    .subcommand_matches("send-migration")
+                    .unwrap()
+                    .get_one::<u64>("migration_timeout")
+                    .unwrap_or(&3600),
             );
             simple_api_command(socket, "PUT", "send-migration", Some(&send_migration_data))
                 .map_err(Error::HttpApiClient)
@@ -688,6 +698,16 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
                     .subcommand_matches("send-migration")
                     .unwrap()
                     .get_flag("send_migration_local"),
+                *matches
+                    .subcommand_matches("send-migration")
+                    .unwrap()
+                    .get_one::<u64>("downtime")
+                    .unwrap_or(&500),
+                *matches
+                    .subcommand_matches("send-migration")
+                    .unwrap()
+                    .get_one::<u64>("migration_timeout")
+                    .unwrap_or(&3600),
             );
             proxy.api_vm_send_migration(&send_migration_data)
         }
@@ -877,10 +897,12 @@ fn receive_migration_data(url: &str) -> String {
     serde_json::to_string(&receive_migration_data).unwrap()
 }
 
-fn send_migration_data(url: &str, local: bool) -> String {
+fn send_migration_data(url: &str, local: bool, downtime: u64, migration_timeout: u64) -> String {
     let send_migration_data = vmm::api::VmSendMigrationData {
         destination_url: url.to_owned(),
         local,
+        downtime,
+        migration_timeout,
     };
 
     serde_json::to_string(&send_migration_data).unwrap()
@@ -1070,6 +1092,22 @@ fn main() {
                         .long("local")
                         .num_args(0)
                         .action(ArgAction::SetTrue),
+                )
+                .arg(
+                    Arg::new("downtime")
+                        .long("downtime")
+                        .help("Set the expected maximum downtime in milliseconds")
+                        .num_args(1)
+                        .value_parser(clap::value_parser!(u64).range(1..))
+                        .default_value("500"),
+                )
+                .arg(
+                    Arg::new("migration_timeout")
+                        .long("migration-timeout")
+                        .help("Set the maximum allowed migration time in seconds")
+                        .num_args(1)
+                        .value_parser(clap::value_parser!(u64))
+                        .default_value("3600"),
                 ),
         )
         .subcommand(
