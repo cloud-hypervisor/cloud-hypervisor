@@ -16,6 +16,12 @@ pub(crate) type Result<T> = std::result::Result<T, errno::Error>;
 
 const KVM_SEV_INIT2: u32 = 22;
 const KVM_SEV_SNP_LAUNCH_START: u32 = 100;
+const KVM_SEV_SNP_LAUNCH_UPDATE: u32 = 101;
+// See AMD Spec Section 8.17 - SNP_LAUNCH_UPDATE
+// The last 12 bits are metadata about the guest context
+// https://tinyurl.com/sev-guest-policy
+pub const GPA_METADATA_PADDING: u32 = 12;
+pub const SEV_VMSA_PAGE_TYPE: u32 = 2;
 
 #[derive(Debug)]
 pub struct SevFd {
@@ -40,6 +46,19 @@ pub(crate) struct KvmSevSnpLaunchStart {
     pub flags: u16,
     pub pad0: [u8; 6],
     pub pad1: [u64; 4],
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Default)]
+pub(crate) struct KvmSevSnpLaunchUpdate {
+    pub gfn_start: u64,
+    pub uaddr: u64,
+    pub len: u64,
+    pub type_: u8,
+    pub pad0: u8,
+    pub flags: u16,
+    pub pad1: u32,
+    pub pad2: [u64; 4],
 }
 
 impl SevFd {
@@ -81,6 +100,32 @@ impl SevFd {
         let mut sev_cmd = kvm_sev_cmd {
             id: KVM_SEV_SNP_LAUNCH_START,
             data: &mut start as *mut KvmSevSnpLaunchStart as _,
+            sev_fd: self.fd.as_raw_fd() as _,
+            ..Default::default()
+        };
+        vm.encrypt_op_sev(&mut sev_cmd)
+    }
+
+    pub(crate) fn launch_update(
+        &self,
+        vm: &VmFd,
+        // host virtual address
+        hva: u64,
+        size: u64,
+        // guest frame number
+        gfn_start: u64,
+        page_type: u32,
+    ) -> Result<()> {
+        let mut update = KvmSevSnpLaunchUpdate {
+            gfn_start,
+            uaddr: hva,
+            len: size,
+            type_: page_type as u8,
+            ..Default::default()
+        };
+        let mut sev_cmd = kvm_sev_cmd {
+            id: KVM_SEV_SNP_LAUNCH_UPDATE,
+            data: &mut update as *mut KvmSevSnpLaunchUpdate as _,
             sev_fd: self.fd.as_raw_fd() as _,
             ..Default::default()
         };
