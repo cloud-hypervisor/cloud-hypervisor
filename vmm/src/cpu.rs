@@ -1932,6 +1932,11 @@ impl CpuManager {
         self.sev_snp_enabled
     }
 
+    #[cfg(feature = "igvm")]
+    pub(crate) fn hypervisor_type(&self) -> HypervisorType {
+        self.hypervisor.hypervisor_type()
+    }
+
     pub(crate) fn nmi(&self) -> Result<()> {
         self.vcpus_kick_signalled.store(true, Ordering::SeqCst);
 
