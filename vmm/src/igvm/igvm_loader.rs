@@ -8,6 +8,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 
+use hypervisor::HypervisorType;
 use igvm::snp_defs::SevVmsa;
 use igvm::{IgvmDirectiveHeader, IgvmFile, IgvmPlatformHeader, IsolationType};
 use igvm_defs::{
@@ -17,6 +18,8 @@ use igvm_defs::{
 use igvm_defs::{MemoryMapEntryType, IGVM_VHS_MEMORY_MAP_ENTRY};
 use mshv_bindings::*;
 use thiserror::Error;
+#[cfg(feature = "sev_snp")]
+use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory};
 use zerocopy::IntoBytes;
 
 use crate::cpu::CpuManager;
@@ -136,6 +139,7 @@ pub fn load_igvm(
     cmdline: &str,
     #[cfg(feature = "sev_snp")] host_data: &Option<String>,
 ) -> Result<Box<IgvmLoadedInfo>, Error> {
+    let hypervisor_type = cpu_manager.lock().unwrap().hypervisor_type();
     let mut loaded_info: Box<IgvmLoadedInfo> = Box::default();
     let command_line = CString::new(cmdline).map_err(Error::InvalidCommandLine)?;
     let mut file_contents = Vec::new();
@@ -452,6 +456,21 @@ pub fn load_igvm(
                 .iter()
                 .map(|gpa| gpa.gpa >> HV_HYP_PAGE_SHIFT)
                 .collect();
+            let mut _uaddrs = vec![];
+            #[cfg(feature = "kvm")]
+            if hypervisor_type == HypervisorType::Kvm {
+                let guest_memory = memory_manager.lock().unwrap().guest_memory().memory();
+                _uaddrs = group
+                    .iter()
+                    .map(|gpa| {
+                        let guest_region_mmap = guest_memory.to_region_addr(GuestAddress(gpa.gpa));
+                        let uaddr_base = guest_region_mmap.unwrap().0.as_ptr() as u64;
+                        let uaddr_offset: u64 = guest_region_mmap.unwrap().1 .0;
+                        let uaddr = uaddr_base + uaddr_offset;
+                        uaddr
+                    })
+                    .collect();
+            }
             memory_manager
                 .lock()
                 .unwrap()
@@ -460,6 +479,7 @@ pub fn load_igvm(
                     group[0].page_type,
                     hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
                     &pfns,
+                    &_uaddrs,
                 )
                 .map_err(Error::ImportIsolatedPages)?;
         }
