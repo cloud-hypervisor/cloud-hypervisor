@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::{fs, result};
 
@@ -300,10 +300,8 @@ pub fn default_diskconfig_queue_size() -> u16 {
 pub struct NetConfig {
     #[serde(default = "default_netconfig_tap")]
     pub tap: Option<String>,
-    #[serde(default = "default_netconfig_ip")]
-    pub ip: IpAddr,
-    #[serde(default = "default_netconfig_mask")]
-    pub mask: IpAddr,
+    pub ip: Option<IpAddr>,
+    pub mask: Option<IpAddr>,
     #[serde(default = "default_netconfig_mac")]
     pub mac: MacAddr,
     #[serde(default)]
@@ -347,14 +345,6 @@ pub fn default_netconfig_true() -> bool {
 
 pub fn default_netconfig_tap() -> Option<String> {
     None
-}
-
-pub fn default_netconfig_ip() -> IpAddr {
-    IpAddr::V4(Ipv4Addr::new(192, 168, 249, 1))
-}
-
-pub fn default_netconfig_mask() -> IpAddr {
-    IpAddr::V4(Ipv4Addr::new(255, 255, 255, 0))
 }
 
 pub fn default_netconfig_mac() -> MacAddr {
