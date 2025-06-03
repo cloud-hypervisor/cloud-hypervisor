@@ -37,11 +37,12 @@ use vmm_sys_util::sock_ctrl_msg::IntoIovec;
 use zerocopy::{FromBytes, FromZeros, IntoBytes};
 
 use crate::acpi::{create_acpi_loader, AcpiTable};
+// TODO: make arm64_image_header public in linux loader crate
+// https://github.com/rust-vmm/linux-loader/blob/main/src/loader/pe/mod.rs#L78
 #[cfg(target_arch = "aarch64")]
 #[repr(C, packed)]
 #[derive(Debug, Copy, Clone, Default)]
-// TODO: make arm64_image_header public in linux loader crate
-// https://github.com/rust-vmm/linux-loader/blob/main/src/loader/pe/mod.rs#L78
+
 struct boot_params {
     code0: u32,
     code1: u32,
@@ -54,6 +55,7 @@ struct boot_params {
     magic: u32,
     res5: u32,
 }
+// SAFETY: boot_params is only data, reading it from data is a safe initialization.
 #[cfg(target_arch = "aarch64")]
 unsafe impl ByteValued for boot_params {}
 
