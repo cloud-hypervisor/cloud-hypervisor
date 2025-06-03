@@ -131,3 +131,4 @@ serde_json = "1.0.120"
 
 # other crates
 thiserror = "2.0.12"
+zerocopy = { version = "0.8.24", default-features = false }

@@ -44,7 +44,7 @@ vm-memory = { workspace = true, features = [
   "backend-mmap",
 ] }
 vmm-sys-util = { workspace = true, features = ["with-serde"] }
-zerocopy = { version = "0.8.24", features = ["derive"] }
+zerocopy = { workspace = true, features = ["derive"] }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies.iced-x86]
 default-features = false
