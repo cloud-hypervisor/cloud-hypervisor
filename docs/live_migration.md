@@ -171,7 +171,13 @@ After a few seconds the VM should be up and you can interact with it.
 Initiate the Migration over TCP:
 
 ```console
-src $ ch-remote --api-socket=/tmp/api send-migration  tcp:{dst}:{port}
+src $ ch-remote --api-socket=/tmp/api send-migration tcp:{dst}:{port}
+```
+
+With migration parameters:
+
+```console
+src $ ch-remote --api-socket=/tmp/api send-migration tcp:{dst}:{port} --migration-timeout 60 --downtime 5000
 ```
 
 > Replace {dst}:{port} with the actual IP address and port of your destination host.
@@ -180,3 +186,24 @@ After completing the above commands, the source VM will be migrated to
 the destination host and continue running there. The source VM instance
 will terminate normally. All ongoing processes and connections within
 the VM should remain intact after the migration.
+
+#### Migration Parameters
+
+Cloud Hypervisor supports additional parameters to control the
+migration process:
+
+- `migration-timeout <seconds>`
+Sets the maximum time (in seconds) allowed for the migration process.
+If the migration takes longer than this timeout, it will be aborted. A
+value of 0 means no timeout limit.
+- `downtime <milliseconds>`
+Sets the maximum acceptable downtime (in milliseconds) during the
+migration. This parameter helps control the trade-off between migration
+time and VM downtime.
+
+> The downtime limit is related to the cost of serialization
+(deserialization) of vCPU and device state. Therefore, the expected
+downtime is always shorter than the actual downtime.
+
+These parameters can be used with the `send-migration` command to
+fine-tune the migration behavior according to your requirements.
