@@ -718,10 +718,18 @@ impl Vm {
             None
         };
 
+        #[cfg(target_arch = "x86_64")]
         cpu_manager
             .lock()
             .unwrap()
             .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
+            .map_err(Error::CpuManager)?;
+
+        #[cfg(target_arch = "aarch64")]
+        cpu_manager
+            .lock()
+            .unwrap()
+            .create_max_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
             .map_err(Error::CpuManager)?;
 
         // For KVM, we need to create interrupt controller after we create boot vcpus.
@@ -1461,7 +1469,14 @@ impl Vm {
             self.config.lock().unwrap().payload.as_ref().unwrap(),
             &self.device_manager,
         )?;
-        let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_mpidrs();
+        //let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_mpidrs();
+        let vcpu_mpidrs = {
+            let cpu_manager = self.cpu_manager.lock().unwrap();
+            let mut mpidrs = cpu_manager.get_mpidrs();
+            mpidrs.extend(cpu_manager.get_parked_mpidrs());
+            mpidrs
+            //self.cpu_manager.lock().unwrap().get_parked_mpidrs()
+        };
         let vcpu_topology = self.cpu_manager.lock().unwrap().get_vcpu_topology();
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
         let mut pci_space_info: Vec<PciSpaceInfo> = Vec::new();
@@ -2418,6 +2433,20 @@ impl Vm {
                 .unwrap()
                 .set_gic_redistributor_addr(redist_addr[2], redist_addr[3])
                 .map_err(Error::CpuManager)?;
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            let parked_vcpus = self.cpu_manager.lock().unwrap().parked_vcpus();
+            for vcpu in parked_vcpus {
+                let guest_memory = &self.memory_manager.lock().as_ref().unwrap().guest_memory();
+                let boot_setup = entry_point.map(|e| (e, guest_memory));
+                self.cpu_manager
+                    .lock()
+                    .unwrap()
+                    .configure_vcpu(vcpu, boot_setup)
+                    .map_err(Error::CpuManager)?;
+            }
         }
 
         #[cfg(feature = "tdx")]

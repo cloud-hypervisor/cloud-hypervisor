@@ -526,6 +526,7 @@ pub struct CpuManager {
     vcpu_states: Vec<VcpuState>,
     selected_cpu: u8,
     vcpus: Vec<Arc<Mutex<Vcpu>>>,
+    parked_vcpus: Vec<Arc<Mutex<Vcpu>>>,
     seccomp_action: SeccompAction,
     vm_ops: Arc<dyn VmOps>,
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
@@ -786,6 +787,8 @@ impl CpuManager {
             vm_debug_evt,
             selected_cpu: 0,
             vcpus: Vec::with_capacity(max_vcpus),
+            #[cfg(target_arch = "aarch64")]
+            parked_vcpus: Vec::with_capacity(usize::from(config.max_vcpus)),
             seccomp_action,
             vm_ops,
             acpi_address: None,
@@ -859,7 +862,21 @@ impl CpuManager {
         let vcpu = Arc::new(Mutex::new(vcpu));
 
         // Adding vCPU to the CpuManager's vCPU list.
+        debug!(
+            "vcpus push start... cpu_id = {}, boot_vcpus = {}, max_vcpus = {}",
+            cpu_id,
+            self.config.boot_vcpus,
+            self.config.max_vcpus
+        );
+        #[cfg(target_arch = "x86_64")]
         self.vcpus.push(vcpu.clone());
+        #[cfg(target_arch = "aarch64")]
+        if cpu_id < self.config.boot_vcpus {
+            self.vcpus.push(vcpu.clone());
+        } else {
+            self.parked_vcpus.push(vcpu.clone());
+        }
+        debug!("vcpus push end... ");
 
         Ok(vcpu)
     }
@@ -931,10 +948,11 @@ impl CpuManager {
     ) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
         let mut vcpus: Vec<Arc<Mutex<Vcpu>>> = vec![];
         info!(
-            "Request to create new vCPUs: desired = {}, max = {}, allocated = {}, present = {}",
+            "Request to create new vCPUs: desired = {}, max = {}, allocated = {}, parked allocated = {}, present = {}",
             desired_vcpus,
             self.config.max_vcpus,
             self.vcpus.len(),
+            self.parked_vcpus.len(),
             self.present_vcpus()
         );
 
@@ -976,6 +994,10 @@ impl CpuManager {
 
     pub fn vcpus(&self) -> Vec<Arc<Mutex<Vcpu>>> {
         self.vcpus.clone()
+    }
+
+    pub fn parked_vcpus(&self) -> Vec<Arc<Mutex<Vcpu>>> {
+        self.parked_vcpus.clone()
     }
 
     fn start_vcpu(
@@ -1324,6 +1346,15 @@ impl CpuManager {
         self.create_vcpus(self.boot_vcpus(), snapshot)
     }
 
+    pub fn create_max_vcpus(
+        &mut self,
+        snapshot: Option<Snapshot>,
+    ) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
+        trace_scoped!("create_max_vcpus");
+
+        self.create_vcpus(self.max_vcpus(), snapshot)
+    }
+
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
     pub fn start_boot_vcpus(&mut self, paused: bool) -> Result<()> {
         self.activate_vcpus(self.boot_vcpus(), false, Some(paused))
@@ -1357,9 +1388,12 @@ impl CpuManager {
 
         match desired_vcpus.cmp(&self.present_vcpus()) {
             cmp::Ordering::Greater => {
-                let vcpus = self.create_vcpus(desired_vcpus, None)?;
-                for vcpu in vcpus {
-                    self.configure_vcpu(vcpu, None)?
+                #[cfg(target_arch = "x86_64")]
+                {
+                    let vcpus = self.create_vcpus(desired_vcpus, None)?;
+                    for vcpu in vcpus {
+                        self.configure_vcpu(vcpu, None)?
+                    }
                 }
                 self.activate_vcpus(desired_vcpus, true, None)?;
                 Ok(true)
