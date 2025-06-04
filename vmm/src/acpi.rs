@@ -780,7 +780,7 @@ pub fn create_acpi_tables(
         let slit_offset = srat_offset.checked_add(srat.len() as u64).unwrap();
         guest_mem
             .write_slice(slit.as_slice(), slit_offset)
-            .expect("Error writing SRAT table");
+            .expect("Error writing SLIT table");
         tables.push(slit_offset.0);
 
         prev_tbl_len = slit.len() as u64;
