@@ -1300,17 +1300,33 @@ impl CpuManager {
         }
 
         info!(
-            "Starting vCPUs: desired = {}, allocated = {}, present = {}, paused = {}",
+            "Starting vCPUs: desired = {}, vcpu allocated = {}, parked vcpu allocated = {}, present = {}, paused = {}",
             desired_vcpus,
             self.vcpus.len(),
+            self.parked_vcpus.len(),
             self.present_vcpus(),
             self.vcpus_pause_signalled.load(Ordering::SeqCst)
         );
 
         // This reuses any inactive vCPUs as well as any that were newly created
         for vcpu_id in self.present_vcpus()..desired_vcpus {
-            let vcpu = Arc::clone(&self.vcpus[vcpu_id as usize]);
-            self.start_vcpu(vcpu, vcpu_id, vcpu_thread_barrier.clone(), inserting)?;
+            #[cfg(target_arch = "x86_64")]
+            {
+                let vcpu = Arc::clone(&self.vcpus[vcpu_id as usize]);
+                self.start_vcpu(vcpu, vcpu_id, vcpu_thread_barrier.clone(), inserting)?;
+            }
+            #[cfg(target_arch = "aarch64")]
+            if vcpu_id < self.config.boot_vcpus {
+                let vcpu = Arc::clone(&self.vcpus[vcpu_id as usize]);
+                self.start_vcpu(vcpu, vcpu_id, vcpu_thread_barrier.clone(), inserting)?;
+            } else {
+                debug!(
+                    "parked vcpus = {}, get id = {} ", self.parked_vcpus.len(), vcpu_id - self.config.boot_vcpus
+                );
+
+                let vcpu = Arc::clone(&self.parked_vcpus[(vcpu_id - self.config.boot_vcpus) as usize]);
+                self.start_vcpu(vcpu, vcpu_id, vcpu_thread_barrier.clone(), inserting)?;
+            }
         }
 
         // Unblock all CPU threads.
