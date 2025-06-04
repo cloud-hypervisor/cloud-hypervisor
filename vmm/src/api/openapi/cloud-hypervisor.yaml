@@ -1272,6 +1272,16 @@ components:
           type: string
         local:
           type: boolean
+        downtime:
+          type: integer
+          format: int64
+          description: Maximum downtime in milliseconds during migration
+          default: 500
+        migration_timeout:
+          type: integer
+          format: int64
+          description: Total timeout for migration in milliseconds (0 = no limit)
+          default: 0
 
     VmAddUserDevice:
       required:
