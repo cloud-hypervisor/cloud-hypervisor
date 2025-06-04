@@ -989,6 +989,22 @@ impl CpuManager {
             }
         }
 
+        if self.config.max_vcpus > self.config.boot_vcpus {
+            for cpu in self.parked_vcpus.iter() {
+                let cpu = cpu.lock().unwrap();
+                // Check if PMU attr is available, if not, log the information.
+                if cpu.vcpu.has_pmu_support() {
+                    cpu.vcpu.init_pmu(irq).map_err(Error::InitPmu)?;
+                } else {
+                    debug!(
+                        "PMU attribute is not supported in vCPU{}, skip PMU init!",
+                        cpu.id
+                    );
+                    return Ok(false);
+                }
+            }
+        }
+
         Ok(true)
     }
 

@@ -1555,7 +1555,7 @@ impl DeviceManager {
     fn get_msi_iova_space(&mut self) -> (u64, u64) {
         #[cfg(target_arch = "aarch64")]
         {
-            let vcpus = self.config.lock().unwrap().cpus.boot_vcpus;
+            let vcpus = self.config.lock().unwrap().cpus.max_vcpus;
             let vgic_config = gic::Gic::create_default_config(vcpus.into());
             (
                 vgic_config.msi_addr,
@@ -1694,7 +1694,7 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
         let interrupt_controller: Arc<Mutex<gic::Gic>> = Arc::new(Mutex::new(
             gic::Gic::new(
-                self.config.lock().unwrap().cpus.boot_vcpus,
+                self.config.lock().unwrap().cpus.max_vcpus,
                 Arc::clone(&self.msi_interrupt_manager),
                 self.address_manager.vm.clone(),
             )
