@@ -1507,6 +1507,22 @@ impl CpuManager {
             .collect()
     }
 
+    #[cfg(target_arch = "aarch64")]
+    pub fn get_parked_mpidrs(&self) -> Vec<u64> {
+        self.parked_vcpus
+            .iter()
+            .map(|cpu| cpu.lock().unwrap().get_mpidr())
+            .collect()
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    pub fn get_parked_saved_states(&self) -> Vec<CpuState> {
+        self.parked_vcpus
+            .iter()
+            .map(|cpu| cpu.lock().unwrap().get_saved_state().unwrap())
+            .collect()
+    }
+
     pub fn get_vcpu_topology(&self) -> Option<(u16, u16, u16, u16)> {
         self.config.topology.clone().map(|t| {
             (
