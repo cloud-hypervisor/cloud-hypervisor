@@ -33,7 +33,7 @@ const TIOCGPTPEER: libc::c_int = 0x5441;
 #[derive(Debug, Error)]
 pub enum ConsoleDeviceError {
     /// Error creating console device
-    #[error("Error creating console device: {0}")]
+    #[error("Error creating console device")]
     CreateConsoleDevice(#[source] io::Error),
 
     /// No socket option support for console device
@@ -41,15 +41,15 @@ pub enum ConsoleDeviceError {
     NoSocketOptionSupportForConsoleDevice,
 
     /// Error setting pty raw mode
-    #[error("Error setting pty raw mode: {0}")]
+    #[error("Error setting pty raw mode")]
     SetPtyRaw(#[source] vmm_sys_util::errno::Error),
 
     /// Cannot duplicate file descriptor
-    #[error("Cannot duplicate file descriptor: {0}")]
+    #[error("Cannot duplicate file descriptor")]
     DupFd(#[source] vmm_sys_util::errno::Error),
 
     /// Error starting sigwinch listener
-    #[error("Error starting sigwinch listener: {0}")]
+    #[error("Error starting sigwinch listener")]
     StartSigwinchListener(#[source] std::io::Error),
 }
 

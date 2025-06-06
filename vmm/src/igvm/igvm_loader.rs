@@ -40,11 +40,11 @@ pub enum Error {
     Loader(#[source] crate::igvm::loader::Error),
     #[error("parameter too large for parameter area")]
     ParameterTooLarge,
-    #[error("Error importing isolated pages: {0}")]
+    #[error("Error importing isolated pages")]
     ImportIsolatedPages(#[source] hypervisor::HypervisorVmError),
-    #[error("Error completing importing isolated pages: {0}")]
+    #[error("Error completing importing isolated pages")]
     CompleteIsolatedImport(#[source] hypervisor::HypervisorVmError),
-    #[error("Error decoding host data: {0}")]
+    #[error("Error decoding host data")]
     FailedToDecodeHostData(#[source] hex::FromHexError),
 }
 
