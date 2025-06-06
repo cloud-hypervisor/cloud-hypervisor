@@ -699,6 +699,15 @@ pub struct PayloadConfig {
     pub host_data: Option<String>,
 }
 
+#[cfg(feature = "fw_cfg")]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FwCfgItem {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub file: Option<PathBuf>,
+}
+
 impl ApplyLandlock for PayloadConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         // Payload only needs read access
@@ -819,6 +828,8 @@ pub struct VmConfig {
     #[serde(default)]
     pub landlock_enable: bool,
     pub landlock_rules: Option<Vec<LandlockConfig>>,
+    #[cfg(feature = "fw_cfg")]
+    pub fw_cfg: Option<Vec<FwCfgItem>>,
 }
 
 impl VmConfig {

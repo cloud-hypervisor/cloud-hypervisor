@@ -24,6 +24,8 @@ use vmm::api::ApiAction;
 use vmm::config::{RestoreConfig, VmParams};
 use vmm::landlock::{Landlock, LandlockError};
 use vmm::vm_config;
+#[cfg(feature = "fw_cfg")]
+use vmm::vm_config::FwCfgItem;
 #[cfg(target_arch = "x86_64")]
 use vmm::vm_config::SgxEpcConfig;
 use vmm::vm_config::{
@@ -261,6 +263,12 @@ fn get_cli_options_sorted(
             .help("Path to firmware that is loaded in an architectural specific way")
             .num_args(1)
             .group("vm-payload"),
+        #[cfg(feature = "fw_cfg")]
+        Arg::new("fw_cfg")
+            .long("fw_cfg")
+            .help(FwCfgItem::SYNTAX)
+            .num_args(1..)
+            .group("vm-config"),
         Arg::new("fs")
             .long("fs")
             .help(FsConfig::SYNTAX)
@@ -1019,6 +1027,8 @@ mod unit_tests {
             preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
+            #[cfg(feature = "fw_cfg")]
+            fw_cfg: None,
         };
 
         assert_eq!(expected_vm_config, result_vm_config);
