@@ -194,4 +194,11 @@ if [ $RES -eq 0 ]; then
     RES=$?
 fi
 
+if [ $RES -eq 0 ]; then
+    cargo build --features ivshmem --all --release --target "$BUILD_TARGET"
+    export RUST_BACKTRACE=1
+    time cargo test $test_features "ivshmem::$test_filter" -- ${test_binary_args[*]}
+    RES=$?
+fi
+
 exit $RES
