@@ -175,6 +175,11 @@ pub enum Error {
     #[error("Error activating virtio devices: {0:?}")]
     ActivateVirtioDevices(#[source] VmError),
 
+    #[cfg(feature = "ivshmem")]
+    /// Error activating virtio devices
+    #[error("Error pci bar reprogramming: {0:?}")]
+    Reprogram(#[source] VmError),
+
     /// Error creating API server
     #[error("Error creating API server {0:?}")]
     // TODO #[source]  once the type implements Error
@@ -222,6 +227,7 @@ pub enum EpollDispatch {
     Api = 2,
     ActivateVirtioDevices = 3,
     Debug = 4,
+    ReProgram = 5,
     Unknown,
 }
 
@@ -234,6 +240,7 @@ impl From<u64> for EpollDispatch {
             2 => Api,
             3 => ActivateVirtioDevices,
             4 => Debug,
+            5 => ReProgram,
             _ => Unknown,
         }
     }
@@ -655,6 +662,8 @@ pub struct Vmm {
     debug_evt: EventFd,
     #[cfg(feature = "guest_debug")]
     vm_debug_evt: EventFd,
+    #[cfg(feature = "ivshmem")]
+    reprogram_evt: EventFd,
     version: VmmVersionInfo,
     vm: Option<Vm>,
     vm_config: Option<Arc<Mutex<VmConfig>>>,
@@ -776,6 +785,8 @@ impl Vmm {
         let mut epoll = EpollContext::new().map_err(Error::Epoll)?;
         let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
         let activate_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
+        #[cfg(feature = "ivshmem")]
+        let reprogram_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
 
         epoll
             .add_event(&exit_evt, EpollDispatch::Exit)
@@ -798,6 +809,11 @@ impl Vmm {
             .add_event(&debug_evt, EpollDispatch::Debug)
             .map_err(Error::Epoll)?;
 
+        #[cfg(feature = "ivshmem")]
+        epoll
+            .add_event(&reprogram_evt, EpollDispatch::ReProgram)
+            .map_err(Error::Epoll)?;
+
         Ok(Vmm {
             epoll,
             exit_evt,
@@ -807,6 +823,8 @@ impl Vmm {
             debug_evt,
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
+            #[cfg(feature = "ivshmem")]
+            reprogram_evt,
             version: vmm_version,
             vm: None,
             vm_config: None,
@@ -943,6 +961,11 @@ impl Vmm {
             MigratableError::MigrateReceive(anyhow!("Error cloning activate EventFd: {}", e))
         })?;
 
+        #[cfg(feature = "ivshmem")]
+        let reprogram_evt = self.activate_evt.try_clone().map_err(|e| {
+            MigratableError::MigrateReceive(anyhow!("Error cloning reprogram EventFd: {}", e))
+        })?;
+
         #[cfg(not(target_arch = "riscv64"))]
         let timestamp = Instant::now();
         let hypervisor_vm = mm.lock().unwrap().vm.clone();
@@ -954,6 +977,8 @@ impl Vmm {
             reset_evt,
             #[cfg(feature = "guest_debug")]
             debug_evt,
+            #[cfg(feature = "ivshmem")]
+            reprogram_evt,
             &self.seccomp_action,
             self.hypervisor.clone(),
             activate_evt,
@@ -1321,12 +1346,20 @@ impl Vmm {
             .try_clone()
             .map_err(VmError::EventFdClone)?;
 
+        #[cfg(feature = "ivshmem")]
+        let reprogram_evt = self
+            .reprogram_evt
+            .try_clone()
+            .map_err(VmError::EventFdClone)?;
+
         let vm = Vm::new(
             vm_config,
             exit_evt,
             reset_evt,
             #[cfg(feature = "guest_debug")]
             debug_evt,
+            #[cfg(feature = "ivshmem")]
+            reprogram_evt,
             &self.seccomp_action,
             self.hypervisor.clone(),
             activate_evt,
@@ -1452,6 +1485,16 @@ impl Vmm {
                     }
                     #[cfg(not(feature = "guest_debug"))]
                     EpollDispatch::Debug => {}
+                    #[cfg(feature = "ivshmem")]
+                    EpollDispatch::ReProgram => {
+                        if let Some(ref vm) = self.vm {
+                            self.reprogram_evt.read().map_err(Error::EventFdRead)?;
+                            info!("Remap memory region for reprogramming event");
+                            vm.reprogramming_pci_bar().map_err(Error::Reprogram)?;
+                        }
+                    }
+                    #[cfg(not(feature = "ivshmem"))]
+                    EpollDispatch::ReProgram => {}
                 }
             }
         }
@@ -1532,6 +1575,12 @@ impl RequestHandler for Vmm {
                     .try_clone()
                     .map_err(VmError::EventFdClone)?;
 
+                #[cfg(feature = "ivshmem")]
+                let reprogram_evt = self
+                    .reprogram_evt
+                    .try_clone()
+                    .map_err(VmError::EventFdClone)?;
+
                 if let Some(ref vm_config) = self.vm_config {
                     let vm = Vm::new(
                         Arc::clone(vm_config),
@@ -1539,6 +1588,8 @@ impl RequestHandler for Vmm {
                         reset_evt,
                         #[cfg(feature = "guest_debug")]
                         vm_debug_evt,
+                        #[cfg(feature = "ivshmem")]
+                        reprogram_evt,
                         &self.seccomp_action,
                         self.hypervisor.clone(),
                         activate_evt,
@@ -1698,6 +1749,12 @@ impl RequestHandler for Vmm {
             .try_clone()
             .map_err(VmError::EventFdClone)?;
 
+        #[cfg(feature = "ivshmem")]
+        let reprogram_evt = self
+            .reprogram_evt
+            .try_clone()
+            .map_err(VmError::EventFdClone)?;
+
         // The Linux kernel fires off an i8042 reset after doing the ACPI reset so there may be
         // an event sitting in the shared reset_evt. Without doing this we get very early reboots
         // during the boot process.
@@ -1715,6 +1772,8 @@ impl RequestHandler for Vmm {
             reset_evt,
             #[cfg(feature = "guest_debug")]
             debug_evt,
+            #[cfg(feature = "ivshmem")]
+            reprogram_evt,
             &self.seccomp_action,
             self.hypervisor.clone(),
             activate_evt,
@@ -2433,6 +2492,8 @@ mod unit_tests {
             preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
+            #[cfg(feature = "ivshmem")]
+            ivshmem: None,
         })
     }
 
