@@ -490,7 +490,7 @@ macro_rules! gen_handler_match {
 }
 
 impl<T: CpuStateManager> Emulator<'_, T> {
-    pub fn new(platform: &mut dyn PlatformEmulator<CpuState = T>) -> Emulator<T> {
+    pub fn new(platform: &mut dyn PlatformEmulator<CpuState = T>) -> Emulator<'_, T> {
         Emulator { platform }
     }
 

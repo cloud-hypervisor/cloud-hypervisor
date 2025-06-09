@@ -39,7 +39,7 @@ impl DiskFile for QcowDiskSync {
         Ok(Box::new(QcowSync::new(self.qcow_file.clone())) as Box<dyn AsyncIo>)
     }
 
-    fn fd(&mut self) -> BorrowedDiskFd {
+    fn fd(&mut self) -> BorrowedDiskFd<'_> {
         let lock = self.qcow_file.lock().unwrap();
         BorrowedDiskFd::new(lock.as_raw_fd())
     }
@@ -63,7 +63,7 @@ impl QcowSync {
 }
 
 impl AsyncAdaptor<QcowFile> for Arc<Mutex<QcowFile>> {
-    fn file(&mut self) -> MutexGuard<QcowFile> {
+    fn file(&mut self) -> MutexGuard<'_, QcowFile> {
         self.lock().unwrap()
     }
 }

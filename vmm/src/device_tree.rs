@@ -74,10 +74,10 @@ impl DeviceTree {
     pub fn remove(&mut self, k: &str) -> Option<DeviceNode> {
         self.0.remove(k)
     }
-    pub fn iter(&self) -> std::collections::hash_map::Iter<String, DeviceNode> {
+    pub fn iter(&self) -> std::collections::hash_map::Iter<'_, String, DeviceNode> {
         self.0.iter()
     }
-    pub fn breadth_first_traversal(&self) -> BftIter {
+    pub fn breadth_first_traversal(&self) -> BftIter<'_> {
         BftIter::new(&self.0)
     }
     pub fn pci_devices(&self) -> Vec<&DeviceNode> {
