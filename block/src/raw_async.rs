@@ -47,7 +47,7 @@ impl DiskFile for RawFileDisk {
         }
     }
 
-    fn fd(&mut self) -> BorrowedDiskFd {
+    fn fd(&mut self) -> BorrowedDiskFd<'_> {
         BorrowedDiskFd::new(self.file.as_raw_fd())
     }
 }

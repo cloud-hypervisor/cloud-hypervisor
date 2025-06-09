@@ -286,7 +286,7 @@ pub mod tests {
             }
         }
 
-        pub fn create_epoll_handler_context(&self) -> EpollHandlerContext {
+        pub fn create_epoll_handler_context(&self) -> EpollHandlerContext<'_> {
             const QSIZE: u16 = 2;
 
             let guest_rxvq = GuestQ::new(GuestAddress(0x0010_0000), &self.mem, QSIZE);

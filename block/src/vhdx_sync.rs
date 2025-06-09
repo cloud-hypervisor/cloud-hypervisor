@@ -39,7 +39,7 @@ impl DiskFile for VhdxDiskSync {
         )
     }
 
-    fn fd(&mut self) -> BorrowedDiskFd {
+    fn fd(&mut self) -> BorrowedDiskFd<'_> {
         let lock = self.vhdx_file.lock().unwrap();
         BorrowedDiskFd::new(lock.as_raw_fd())
     }
@@ -62,7 +62,7 @@ impl VhdxSync {
 }
 
 impl AsyncAdaptor<Vhdx> for Arc<Mutex<Vhdx>> {
-    fn file(&mut self) -> MutexGuard<Vhdx> {
+    fn file(&mut self) -> MutexGuard<'_, Vhdx> {
         self.lock().unwrap()
     }
 }

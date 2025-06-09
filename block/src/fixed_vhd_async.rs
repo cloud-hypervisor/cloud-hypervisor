@@ -34,7 +34,7 @@ impl DiskFile for FixedVhdDiskAsync {
         ) as Box<dyn AsyncIo>)
     }
 
-    fn fd(&mut self) -> BorrowedDiskFd {
+    fn fd(&mut self) -> BorrowedDiskFd<'_> {
         BorrowedDiskFd::new(self.0.as_raw_fd())
     }
 }

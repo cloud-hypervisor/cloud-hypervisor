@@ -111,7 +111,7 @@ impl<T: Cacheable> CacheMap<T> {
         self.map.get_mut(&index)
     }
 
-    pub fn iter_mut(&mut self) -> IterMut<usize, T> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, usize, T> {
         self.map.iter_mut()
     }
 
