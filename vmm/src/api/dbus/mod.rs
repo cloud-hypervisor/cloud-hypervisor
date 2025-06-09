@@ -12,9 +12,10 @@ use futures::{executor, FutureExt};
 use hypervisor::HypervisorType;
 use seccompiler::{apply_filter, SeccompAction};
 use vmm_sys_util::eventfd::EventFd;
+use zbus::connection::Builder;
 use zbus::fdo::{self, Result};
+use zbus::interface;
 use zbus::zvariant::Optional;
-use zbus::{interface, ConnectionBuilder};
 
 use super::{ApiAction, ApiRequest};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -302,7 +303,10 @@ impl DBusApi {
 
     // implementation of this function is provided by the `#[zbus(signal)]` macro call
     #[zbus(signal)]
-    async fn event(ctxt: &zbus::SignalContext<'_>, event: Arc<String>) -> zbus::Result<()>;
+    async fn event(
+        ctxt: &zbus::object_server::SignalEmitter<'_>,
+        event: Arc<String>,
+    ) -> zbus::Result<()>;
 }
 
 pub fn start_dbus_thread(
@@ -316,9 +320,9 @@ pub fn start_dbus_thread(
     let dbus_iface = DBusApi::new(api_notifier, api_sender);
     let (connection, iface_ref) = executor::block_on(async move {
         let conn_builder = if dbus_options.system_bus {
-            ConnectionBuilder::system()?
+            Builder::system()?
         } else {
-            ConnectionBuilder::session()?
+            Builder::session()?
         };
 
         let conn = conn_builder
@@ -374,7 +378,7 @@ pub fn start_dbus_thread(
                             },
                             ret = dbus_options.event_monitor_rx.recv_async() => {
                                 if let Ok(event) = ret {
-                                    DBusApi::event(iface_ref.signal_context(), event).await.ok();
+                                    DBusApi::event(iface_ref.signal_emitter(), event).await.ok();
                                 }
                             }
                         }
