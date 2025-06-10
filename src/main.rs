@@ -884,7 +884,7 @@ fn main() {
             0
         }
         Err(top_error) => {
-            cloud_hypervisor::cli_print_error_chain(&top_error, "Cloud Hypervisor");
+            cloud_hypervisor::cli_print_error_chain(&top_error, "Cloud Hypervisor", |_, _, _| None);
             1
         }
     };

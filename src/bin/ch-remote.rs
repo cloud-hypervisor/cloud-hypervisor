@@ -1132,7 +1132,70 @@ fn main() {
     };
 
     if let Err(top_error) = target_api.do_command(&matches) {
-        cloud_hypervisor::cli_print_error_chain(&top_error, "ch-remote");
+        // Helper to join strings with a newline.
+        fn join_strs(mut acc: String, next: String) -> String {
+            if !acc.is_empty() {
+                acc.push('\n');
+            }
+            acc.push_str(&next);
+            acc
+        }
+
+        // This function helps to modify the Display representation of remote
+        // API failures so that it aligns with the regular output of error
+        // messages. As we transfer a deep/rich chain of errors as String via
+        // the HTTP API, the nested error chain is lost. We retrieve it from
+        // the error response.
+        //
+        // In case the repose itself is broken, the error is printed directly
+        // by using the `X` level.
+        fn server_api_error_display_modifier(
+            level: usize,
+            indention: usize,
+            error: &(dyn std::error::Error + 'static),
+        ) -> Option<String> {
+            if let Some(api_client::Error::ServerResponse(status_code, body)) =
+                error.downcast_ref::<api_client::Error>()
+            {
+                let body = body.as_ref().map(|body| body.as_str()).unwrap_or("");
+
+                // Retrieve the list of error messages back.
+                let lines: Vec<&str> = match serde_json::from_str(body) {
+                    Ok(json) => json,
+                    Err(e) => {
+                        return Some(format!(
+                            "{idention}X: Can't get remote's error messages from JSON response: {e}: body='{body}'",
+                            idention = " ".repeat(indention)
+                        ));
+                    }
+                };
+
+                let error_status = format!("Server responded with {status_code:?}");
+                // Prepend the error status line to the lines iter.
+                let lines = std::iter::once(error_status.as_str()).chain(lines);
+                let error_msg_multiline = lines
+                    .enumerate()
+                    .map(|(index, error_msg)| (index + level, error_msg))
+                    .map(|(level, error_msg)| {
+                        format!(
+                            "{idention}{level}: {error_msg}",
+                            idention = " ".repeat(indention)
+                        )
+                    })
+                    .fold(String::new(), join_strs);
+
+                return Some(error_msg_multiline);
+            }
+
+            None
+        }
+
+        let top_error: &dyn std::error::Error = &top_error;
+        cloud_hypervisor::cli_print_error_chain(
+            top_error,
+            "ch-remote",
+            server_api_error_display_modifier,
+        );
         process::exit(1)
     };
 }
