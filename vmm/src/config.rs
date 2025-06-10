@@ -165,6 +165,9 @@ pub enum ValidationError {
     /// CPU Hotplug is not permitted with TDX
     #[cfg(feature = "tdx")]
     TdxNoCpuHotplug,
+    /// Invalid mrconfigid for TDX guest
+    #[cfg(feature = "tdx")]
+    TdxInvalidMrConfigId,
     /// Missing firmware for TDX
     #[cfg(feature = "tdx")]
     TdxFirmwareMissing,
@@ -271,6 +274,10 @@ impl fmt::Display for ValidationError {
             #[cfg(feature = "tdx")]
             TdxNoCpuHotplug => {
                 write!(f, "CPU hotplug is not permitted with TDX")
+            }
+            #[cfg(feature = "tdx")]
+            TdxInvalidMrConfigId => {
+                write!(f, "Invalid mrconfigid for TDX guest")
             }
             #[cfg(feature = "tdx")]
             TdxFirmwareMissing => {
@@ -514,6 +521,8 @@ pub struct VmParams<'a> {
     pub igvm: Option<&'a str>,
     #[cfg(feature = "sev_snp")]
     pub host_data: Option<&'a str>,
+    #[cfg(feature = "tdx")]
+    pub mrconfigid: Option<&'a str>,
     pub landlock_enable: bool,
     pub landlock_rules: Option<Vec<&'a str>>,
 }
@@ -583,6 +592,8 @@ impl<'a> VmParams<'a> {
         let igvm = args.get_one::<String>("igvm").map(|x| x as &str);
         #[cfg(feature = "sev_snp")]
         let host_data = args.get_one::<String>("host-data").map(|x| x as &str);
+        #[cfg(feature = "tdx")]
+        let mrconfigid = args.get_one::<String>("mrconfigid").map(|x| x as &str);
         let landlock_enable = args.get_flag("landlock");
         let landlock_rules: Option<Vec<&str>> = args
             .get_many::<String>("landlock-rules")
@@ -627,6 +638,8 @@ impl<'a> VmParams<'a> {
             igvm,
             #[cfg(feature = "sev_snp")]
             host_data,
+            #[cfg(feature = "tdx")]
+            mrconfigid,
             landlock_enable,
             landlock_rules,
         }
@@ -2467,6 +2480,13 @@ impl VmConfig {
             if tdx_enabled && (self.cpus.max_vcpus != self.cpus.boot_vcpus) {
                 return Err(ValidationError::TdxNoCpuHotplug);
             }
+
+            let mrconfigid_opt = &self.payload.as_ref().unwrap().mrconfigid;
+            if let Some(mrconfigid) = mrconfigid_opt {
+                if mrconfigid.len() != 96 {
+                    return Err(ValidationError::TdxInvalidMrConfigId);
+                }
+            }
         }
 
         #[cfg(feature = "sev_snp")]
@@ -2930,6 +2950,8 @@ impl VmConfig {
                 igvm: vm_params.igvm.map(PathBuf::from),
                 #[cfg(feature = "sev_snp")]
                 host_data: vm_params.host_data.map(|s| s.to_string()),
+                #[cfg(feature = "tdx")]
+                mrconfigid: vm_params.mrconfigid.map(|s| s.to_string()),
             })
         } else {
             None
@@ -4071,6 +4093,10 @@ mod tests {
                 #[cfg(feature = "sev_snp")]
                 host_data: Some(
                     "243eb7dc1a21129caa91dcbb794922b933baecb5823a377eb431188673288c07".to_string(),
+                ),
+                #[cfg(feature = "tdx")]
+                mrconfigid: Some(
+                    "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f".to_string(),
                 ),
             }),
             rate_limit_groups: None,

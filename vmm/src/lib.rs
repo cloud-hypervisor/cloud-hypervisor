@@ -2388,6 +2388,8 @@ mod unit_tests {
                 igvm: None,
                 #[cfg(feature = "sev_snp")]
                 host_data: None,
+                #[cfg(feature = "tdx")]
+                mrconfigid: None,
             }),
             rate_limit_groups: None,
             disks: None,

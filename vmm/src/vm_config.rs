@@ -697,6 +697,9 @@ pub struct PayloadConfig {
     #[cfg(feature = "sev_snp")]
     #[serde(default)]
     pub host_data: Option<String>,
+    #[cfg(feature = "tdx")]
+    #[serde(default)]
+    pub mrconfigid: Option<String>,
 }
 
 impl ApplyLandlock for PayloadConfig {

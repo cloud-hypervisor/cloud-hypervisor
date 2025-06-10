@@ -343,6 +343,12 @@ fn get_cli_options_sorted(
             )
             .num_args(1..)
             .group("vm-config"),
+        #[cfg(feature = "tdx")]
+        Arg::new("mrconfigid")
+            .long("mrconfigid")
+            .help("Host specific data to TDX guest")
+            .num_args(1)
+            .group("vm-config"),
         Arg::new("net")
             .long("net")
             .help(NetConfig::SYNTAX)
@@ -974,6 +980,8 @@ mod unit_tests {
                 igvm: None,
                 #[cfg(feature = "sev_snp")]
                 host_data: None,
+                #[cfg(feature = "tdx")]
+                mrconfigid: None,
             }),
             rate_limit_groups: None,
             disks: None,

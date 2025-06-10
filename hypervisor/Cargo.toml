@@ -21,6 +21,7 @@ cfg-if = "1.0.0"
 concat-idents = "1.1.5"
 igvm = { workspace = true, optional = true }
 igvm_defs = { workspace = true, optional = true }
+hex = "0.4"
 kvm-bindings = { workspace = true, optional = true, features = ["serde"] }
 kvm-ioctls = { workspace = true, optional = true }
 libc = "0.2.167"
