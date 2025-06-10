@@ -592,7 +592,7 @@ impl CpusConfig {
         // ref type in the match.
         // The issue will go away once kvm_hyperv is moved under the features
         // list as it will always be checked for.
-        #[allow(unused_mut)]
+        #[allow(unused_mut, clippy::never_loop)]
         let mut features = CpuFeatures::default();
         for s in features_list.0 {
             match <std::string::String as AsRef<str>>::as_ref(&s) {

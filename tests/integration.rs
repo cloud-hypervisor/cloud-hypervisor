@@ -520,8 +520,7 @@ fn temp_snapshot_dir_path(tmp_dir: &TempDir) -> String {
 }
 
 fn temp_vmcore_file_path(tmp_dir: &TempDir) -> String {
-    let vmcore_file = String::from(tmp_dir.as_path().join("vmcore").to_str().unwrap());
-    vmcore_file
+    String::from(tmp_dir.as_path().join("vmcore").to_str().unwrap())
 }
 
 // Creates the path for direct kernel boot and return the path.
