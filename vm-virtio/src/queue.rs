@@ -12,7 +12,8 @@ pub mod testing {
     use std::marker::PhantomData;
     use std::mem;
 
-    use virtio_queue::{Queue, QueueT, VirtqUsedElem};
+    use virtio_queue::desc::split::VirtqUsedElem;
+    use virtio_queue::{Queue, QueueT};
     use vm_memory::bitmap::AtomicBitmap;
     use vm_memory::{Address, Bytes, GuestAddress, GuestUsize};
 
