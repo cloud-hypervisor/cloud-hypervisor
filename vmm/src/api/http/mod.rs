@@ -4,6 +4,7 @@
 //
 
 use std::collections::BTreeMap;
+use std::error::Error;
 use std::fs::File;
 use std::os::unix::io::{IntoRawFd, RawFd};
 use std::os::unix::net::UnixListener;
@@ -69,20 +70,29 @@ pub enum HttpError {
 
 const HTTP_ROOT: &str = "/api/v1";
 
-/// Creates the error response's body meant to be sent back to an API client.
+/// Creates the error response's JSON body meant to be sent back to an API client.
+///
 /// The error message contained in the response is supposed to be user-facing,
 /// thus insightful and helpful while balancing technical accuracy and
 /// simplicity.
 pub fn error_response(error: HttpError, status: StatusCode) -> Response {
     let mut response = Response::new(Version::Http11, status);
-    // We must use debug output here without `#`, as it is currently the only
-    // feasible option to get all relevant error details to the receiver,
-    // i.e., ch-remote, in a balanced form. The Display impl is not guaranteed
-    // to hold all relevant or helpful data.
-    //
-    // TODO: We might print a nice error chain here as well and send it to the
-    // remote, similar to the normal error reporting?
-    response.set_body(Body::new(format!("{error:?}")));
+
+    let error: &dyn Error = &error;
+    // Write the Display::display() output all errors (from top to root).
+    let error_messages = std::iter::successors(Some(error), |sub_error| {
+        // Dereference necessary to mitigate rustc compiler bug.
+        // See <https://github.com/rust-lang/rust/issues/141673>
+        (*sub_error).source()
+    })
+    .map(|error| format!("{error}"))
+    .collect::<Vec<_>>();
+
+    // TODO: Move `api` module from `vmm` to dedicated crate and use a common type definition
+    let json = serde_json::to_string(&error_messages).unwrap();
+
+    let body = Body::new(json);
+    response.set_body(body);
 
     response
 }

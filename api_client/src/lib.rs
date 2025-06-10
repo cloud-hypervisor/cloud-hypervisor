@@ -21,8 +21,14 @@ pub enum Error {
     MissingProtocol,
     #[error("Error parsing HTTP Content-Length field")]
     ContentLengthParsing(#[source] std::num::ParseIntError),
-    #[error("Server responded with an error: {0:?}: {1:?}")]
-    ServerResponse(StatusCode, Option<String>),
+    #[error("Server responded with error {0:?}: {1:?}")]
+    ServerResponse(
+        StatusCode,
+        // TODO: Move `api` module from `vmm` to dedicated crate and use a common type definition
+        Option<
+            String, /* Untyped: Currently Vec<String> of error messages from top to root cause */
+        >,
+    ),
 }
 
 #[derive(Clone, Copy, Debug)]
