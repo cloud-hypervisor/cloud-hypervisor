@@ -18,7 +18,8 @@ use vhost::vhost_user::{
     Frontend, FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler,
 };
 use vhost::{VhostBackend, VhostUserDirtyLogRegion, VhostUserMemoryRegionInfo, VringConfigData};
-use virtio_queue::{Descriptor, Queue, QueueT};
+use virtio_queue::desc::RawDescriptor;
+use virtio_queue::{Queue, QueueT};
 use vm_memory::{
     Address, Error as MmapError, FileOffset, GuestAddress, GuestMemory, GuestMemoryRegion,
 };
@@ -212,7 +213,7 @@ impl VhostUserHandle {
                 desc_table_addr: get_host_address_range(
                     mem,
                     GuestAddress(queue.desc_table()),
-                    actual_size * std::mem::size_of::<Descriptor>(),
+                    actual_size * std::mem::size_of::<RawDescriptor>(),
                 )
                 .ok_or(Error::DescriptorTableAddress)? as u64,
                 // The used ring is {flags: u16; idx: u16; virtq_used_elem [{id: u16, len: u16}; actual_size]},
