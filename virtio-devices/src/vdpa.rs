@@ -16,7 +16,8 @@ use vhost::vhost_kern::vdpa::VhostKernVdpa;
 use vhost::vhost_kern::vhost_binding::VHOST_BACKEND_F_SUSPEND;
 use vhost::vhost_kern::VhostKernFeatures;
 use vhost::{VhostBackend, VringConfigData};
-use virtio_queue::{Descriptor, Queue, QueueT};
+use virtio_queue::desc::RawDescriptor;
+use virtio_queue::{Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -245,7 +246,7 @@ impl Vdpa {
                 flags: 0u32,
                 desc_table_addr: queue.desc_table().translate_gpa(
                     self.common.access_platform.as_ref(),
-                    queue_size as usize * std::mem::size_of::<Descriptor>(),
+                    queue_size as usize * std::mem::size_of::<RawDescriptor>(),
                 ),
                 used_ring_addr: queue.used_ring().translate_gpa(
                     self.common.access_platform.as_ref(),
