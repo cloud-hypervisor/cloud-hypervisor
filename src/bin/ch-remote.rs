@@ -913,14 +913,14 @@ fn get_cli_args() -> Box<[Arg]> {
             .help("HTTP API socket path (UNIX domain socket).")
             .num_args(1),
         #[cfg(feature = "dbus_api")]
-        Arg::new("dbus-service-name")
-            .long("dbus-service-name")
-            .help("Well known name of the dbus service")
-            .num_args(1),
-        #[cfg(feature = "dbus_api")]
         Arg::new("dbus-object-path")
             .long("dbus-object-path")
             .help("Object path which the interface is being served at")
+            .num_args(1),
+        #[cfg(feature = "dbus_api")]
+        Arg::new("dbus-service-name")
+            .long("dbus-service-name")
+            .help("Well known name of the dbus service")
             .num_args(1),
         #[cfg(feature = "dbus_api")]
         Arg::new("dbus-system-bus")
@@ -953,6 +953,9 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
                     .index(1)
                     .help(vmm::vm_config::FsConfig::SYNTAX),
             ),
+        Command::new("add-net")
+            .about("Add network device")
+            .arg(Arg::new("net_config").index(1).help(NetConfig::SYNTAX)),
         Command::new("add-pmem")
             .about("Add persistent memory device")
             .arg(
@@ -960,9 +963,6 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
                     .index(1)
                     .help(vmm::vm_config::PmemConfig::SYNTAX),
             ),
-        Command::new("add-net")
-            .about("Add network device")
-            .arg(Arg::new("net_config").index(1).help(NetConfig::SYNTAX)),
         Command::new("add-user-device")
             .about("Add userspace device")
             .arg(
@@ -976,16 +976,39 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
         Command::new("add-vsock")
             .about("Add vsock device")
             .arg(Arg::new("vsock_config").index(1).help(VsockConfig::SYNTAX)),
+        Command::new("boot").about("Boot a created VM"),
+        Command::new("coredump")
+            .about("Create a coredump from VM")
+            .arg(Arg::new("coredump_config").index(1).help("<file_path>")),
+        Command::new("counters").about("Counters from the VM"),
+        Command::new("create")
+            .about("Create VM from a JSON configuration")
+            .arg(Arg::new("path").index(1).default_value("-")),
+        Command::new("delete").about("Delete a VM"),
+        Command::new("info").about("Info on the VM"),
+        Command::new("nmi").about("Trigger NMI"),
+        Command::new("pause").about("Pause the VM"),
+        Command::new("ping").about("Ping the VMM to check for API server availability"),
+        Command::new("power-button").about("Trigger a power button in the VM"),
+        Command::new("reboot").about("Reboot the VM"),
+        Command::new("receive-migration")
+            .about("Receive a VM migration")
+            .arg(
+                Arg::new("receive_migration_config")
+                    .index(1)
+                    .help("<receiver_url>"),
+            ),
         Command::new("remove-device")
             .about("Remove VFIO and PCI device")
             .arg(Arg::new("id").index(1).help("<device_id>")),
-        Command::new("info").about("Info on the VM"),
-        Command::new("counters").about("Counters from the VM"),
-        Command::new("pause").about("Pause the VM"),
-        Command::new("reboot").about("Reboot the VM"),
-        Command::new("power-button").about("Trigger a power button in the VM"),
         Command::new("resize")
             .about("Resize the VM")
+            .arg(
+                Arg::new("balloon")
+                    .long("balloon")
+                    .help("New balloon size in bytes (supports K/M/G suffix)")
+                    .num_args(1),
+            )
             .arg(
                 Arg::new("cpus")
                     .long("cpus")
@@ -996,12 +1019,6 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
                 Arg::new("memory")
                     .long("memory")
                     .help("New memory size in bytes (supports K/M/G suffix)")
-                    .num_args(1),
-            )
-            .arg(
-                Arg::new("balloon")
-                    .long("balloon")
-                    .help("New balloon size in bytes (supports K/M/G suffix)")
                     .num_args(1),
             ),
         Command::new("resize-zone")
@@ -1018,17 +1035,6 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
                     .help("New memory zone size in bytes (supports K/M/G suffix)")
                     .num_args(1),
             ),
-        Command::new("resume").about("Resume the VM"),
-        Command::new("boot").about("Boot a created VM"),
-        Command::new("delete").about("Delete a VM"),
-        Command::new("shutdown").about("Shutdown the VM"),
-        Command::new("snapshot")
-            .about("Create a snapshot from VM")
-            .arg(
-                Arg::new("snapshot_config")
-                    .index(1)
-                    .help("<destination_url>"),
-            ),
         Command::new("restore")
             .about("Restore VM from a snapshot")
             .arg(
@@ -1036,9 +1042,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
                     .index(1)
                     .help(RestoreConfig::SYNTAX),
             ),
-        Command::new("coredump")
-            .about("Create a coredump from VM")
-            .arg(Arg::new("coredump_config").index(1).help("<file_path>")),
+        Command::new("resume").about("Resume the VM"),
         Command::new("send-migration")
             .about("Initiate a VM migration")
             .arg(
@@ -1052,19 +1056,15 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
                     .num_args(0)
                     .action(ArgAction::SetTrue),
             ),
-        Command::new("receive-migration")
-            .about("Receive a VM migration")
-            .arg(
-                Arg::new("receive_migration_config")
-                    .index(1)
-                    .help("<receiver_url>"),
-            ),
-        Command::new("create")
-            .about("Create VM from a JSON configuration")
-            .arg(Arg::new("path").index(1).default_value("-")),
-        Command::new("ping").about("Ping the VMM to check for API server availability"),
+        Command::new("shutdown").about("Shutdown the VM"),
         Command::new("shutdown-vmm").about("Shutdown the VMM"),
-        Command::new("nmi").about("Trigger NMI"),
+        Command::new("snapshot")
+            .about("Create a snapshot from VM")
+            .arg(
+                Arg::new("snapshot_config")
+                    .index(1)
+                    .help("<destination_url>"),
+            ),
     ]
     .to_vec()
     .into_boxed_slice()
