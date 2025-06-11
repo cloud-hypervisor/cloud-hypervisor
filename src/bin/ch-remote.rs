@@ -3,6 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#[cfg(test)]
+#[path = "../test_util.rs"]
+mod test_util;
+
 use std::io::Read;
 use std::marker::PhantomData;
 use std::os::unix::net::UnixStream;
@@ -1131,4 +1135,40 @@ fn main() {
         eprintln!("Error running command: {e}");
         process::exit(1)
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cmp::Ordering;
+
+    use super::*;
+    use crate::test_util::tests::assert_args_sorted;
+
+    #[test]
+    fn test_cli_args_sorted() {
+        let args = get_cli_args();
+        assert_args_sorted(|| args.iter());
+    }
+
+    #[test]
+    fn test_cli_commands_sorted() {
+        let commands = get_cli_commands_sorted();
+
+        // check commands itself are sorted
+        let iter = commands.iter().zip(commands.iter().skip(1));
+        for (command, next) in iter {
+            assert_ne!(
+                command.get_name().cmp(next.get_name()),
+                Ordering::Greater,
+                "commands not alphabetically sorted: command={}, next={}",
+                command.get_name(),
+                next.get_name()
+            );
+        }
+
+        // check args of commands sorted
+        for command in commands {
+            assert_args_sorted(|| command.get_arguments());
+        }
+    }
 }
