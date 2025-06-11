@@ -3,6 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#[cfg(test)]
+mod test_util;
+
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::mpsc::channel;
@@ -894,7 +897,6 @@ fn main() {
 
 #[cfg(test)]
 mod unit_tests {
-    use std::cmp::Ordering;
     use std::path::PathBuf;
 
     use vmm::config::VmParams;
@@ -905,6 +907,7 @@ mod unit_tests {
         PayloadConfig, RngConfig, VmConfig,
     };
 
+    use crate::test_util::tests::assert_args_sorted;
     use crate::{create_app, get_cli_options_sorted, prepare_default_values};
 
     fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {
@@ -2014,15 +2017,6 @@ mod unit_tests {
         let (default_vcpus, default_memory, default_rng) = prepare_default_values();
         let args = get_cli_options_sorted(default_vcpus, default_memory, default_rng);
 
-        let iter = args.iter().zip(args.iter().skip(1));
-        for (elem, next) in iter {
-            assert_ne!(
-                elem.get_id().cmp(next.get_id()),
-                Ordering::Greater,
-                "items not alphabetically sorted: elem={}, next={}",
-                elem.get_id(),
-                next.get_id()
-            );
-        }
+        assert_args_sorted(|| args.iter())
     }
 }
