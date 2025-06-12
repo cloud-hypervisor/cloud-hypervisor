@@ -4622,6 +4622,54 @@ mod tests {
             Err(ValidationError::InvalidRateLimiterGroup)
         );
 
+        // Test serial length validation
+        let mut valid_serial_config = valid_config.clone();
+        valid_serial_config.disks = Some(vec![DiskConfig {
+            serial: Some("valid_serial".to_string()),
+            ..disk_fixture()
+        }]);
+        valid_serial_config.validate().unwrap();
+
+        // Test empty string serial (should be valid)
+        let mut empty_serial_config = valid_config.clone();
+        empty_serial_config.disks = Some(vec![DiskConfig {
+            serial: Some("".to_string()),
+            ..disk_fixture()
+        }]);
+        empty_serial_config.validate().unwrap();
+
+        // Test None serial (should be valid)
+        let mut none_serial_config = valid_config.clone();
+        none_serial_config.disks = Some(vec![DiskConfig {
+            serial: None,
+            ..disk_fixture()
+        }]);
+        none_serial_config.validate().unwrap();
+
+        // Test maximum length serial (exactly VIRTIO_BLK_ID_BYTES)
+        let max_serial = "a".repeat(VIRTIO_BLK_ID_BYTES as usize);
+        let mut max_serial_config = valid_config.clone();
+        max_serial_config.disks = Some(vec![DiskConfig {
+            serial: Some(max_serial),
+            ..disk_fixture()
+        }]);
+        max_serial_config.validate().unwrap();
+
+        // Test serial length exceeding VIRTIO_BLK_ID_BYTES
+        let long_serial = "a".repeat(VIRTIO_BLK_ID_BYTES as usize + 1);
+        let mut invalid_serial_config = valid_config.clone();
+        invalid_serial_config.disks = Some(vec![DiskConfig {
+            serial: Some(long_serial.clone()),
+            ..disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_serial_config.validate(),
+            Err(ValidationError::InvalidSerialLength(
+                long_serial.len(),
+                VIRTIO_BLK_ID_BYTES as usize
+            ))
+        );
+
         let mut still_valid_config = valid_config.clone();
         still_valid_config.devices = Some(vec![
             DeviceConfig {
