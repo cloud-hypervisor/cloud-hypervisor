@@ -46,12 +46,6 @@ pub enum Error {
     RegsConfiguration(#[source] hypervisor::HypervisorCpuError),
 }
 
-impl From<Error> for super::Error {
-    fn from(e: Error) -> super::Error {
-        super::Error::PlatformSpecific(e)
-    }
-}
-
 #[derive(Debug, Copy, Clone)]
 /// Specifies the entry point address where the guest must start
 /// executing code.

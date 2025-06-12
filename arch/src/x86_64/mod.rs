@@ -209,12 +209,6 @@ pub enum Error {
     E820Configuration,
 }
 
-impl From<Error> for super::Error {
-    fn from(e: Error) -> super::Error {
-        super::Error::PlatformSpecific(e)
-    }
-}
-
 pub fn get_x2apic_id(cpu_id: u32, topology: Option<(u8, u8, u8)>) -> u32 {
     if let Some(t) = topology {
         let thread_mask_width = u8::BITS - (t.0 - 1).leading_zeros();

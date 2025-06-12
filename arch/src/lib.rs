@@ -29,13 +29,13 @@ type GuestRegionMmap = vm_memory::GuestRegionMmap<vm_memory::bitmap::AtomicBitma
 pub enum Error {
     #[cfg(target_arch = "x86_64")]
     #[error("Platform specific error (x86_64): {0}")]
-    PlatformSpecific(#[source] x86_64::Error),
+    PlatformSpecific(#[from] x86_64::Error),
     #[cfg(target_arch = "aarch64")]
     #[error("Platform specific error (aarch64): {0:?}")]
-    PlatformSpecific(#[source] aarch64::Error),
+    PlatformSpecific(#[from] aarch64::Error),
     #[cfg(target_arch = "riscv64")]
     #[error("Platform specific error (riscv64): {0:?}")]
-    PlatformSpecific(#[source] riscv64::Error),
+    PlatformSpecific(#[from] riscv64::Error),
     #[error("The memory map table extends past the end of guest memory")]
     MemmapTablePastRamEnd,
     #[error("Error writing memory map table to guest memory")]
