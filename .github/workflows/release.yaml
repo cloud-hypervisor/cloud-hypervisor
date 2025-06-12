@@ -39,7 +39,7 @@ jobs:
           matrix.platform.target == 'x86_64-unknown-linux-gnu'
         run: rsync -rv --exclude=.git . ../cloud-hypervisor-${{ github.event.ref }}
       - name: Build ${{ matrix.platform.target }}
-        uses: houseabsolute/actions-rust-cross@v0
+        uses: houseabsolute/actions-rust-cross@v1
         with:
           command: build
           target: ${{ matrix.platform.target }}
