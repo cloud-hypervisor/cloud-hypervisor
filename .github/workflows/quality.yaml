@@ -111,7 +111,12 @@ jobs:
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples --features "tracing" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
-
+      - name: Clippy (default features + fw_cfg)
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
+          command: clippy
+          args: --target=${{ matrix.target }} --locked --all --all-targets --tests --examples --features "fw_cfg" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
       - name: Clippy (sev_snp)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: houseabsolute/actions-rust-cross@v1
