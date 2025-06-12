@@ -11069,3 +11069,55 @@ mod rate_limiter {
         _test_rate_limiter_group_block(false, 2, 2);
     }
 }
+
+#[cfg(not(target_arch = "riscv64"))]
+mod fw_cfg {
+    use crate::*;
+
+    #[test]
+    fn test_fw_cfg() {
+        let jammy = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(jammy));
+        let mut cmd = GuestCommand::new(&guest);
+
+        let kernel_path = direct_kernel_boot_path();
+        let cmd_line = DIRECT_KERNEL_BOOT_CMDLINE;
+
+        let test_file = guest.tmp_dir.as_path().join("test-file");
+        std::fs::write(&test_file, "test-file-content").unwrap();
+
+        cmd.args(["--cpus", "boot=4"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", cmd_line])
+            .default_disks()
+            .default_net()
+            .args([
+                "--fw-cfg-config",
+                &format!(
+                    "initramfs=off,items=[name=opt/org.test/test-file,file={}]",
+                    test_file.to_str().unwrap()
+                ),
+            ])
+            .capture_output();
+
+        let mut child = cmd.spawn().unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+            // Wait a while for guest
+            thread::sleep(std::time::Duration::new(3, 0));
+            let result = guest
+                .ssh_command(
+                    "sudo cat /sys/firmware/qemu_fw_cfg/by_name/opt/org.test/test-file/raw",
+                )
+                .unwrap();
+            assert_eq!(result, "test-file-content");
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+}
