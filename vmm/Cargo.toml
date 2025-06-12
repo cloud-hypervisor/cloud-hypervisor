@@ -71,6 +71,7 @@ tracer = { path = "../tracer" }
 uuid = "1.12.1"
 vfio-ioctls = { workspace = true, default-features = false }
 vfio_user = { workspace = true }
+virtio-bindings = { workspace = true }
 virtio-devices = { path = "../virtio-devices" }
 virtio-queue = { workspace = true }
 vm-allocator = { path = "../vm-allocator" }

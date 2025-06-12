@@ -2472,6 +2472,7 @@ dependencies = [
  "uuid",
  "vfio-ioctls",
  "vfio_user",
+ "virtio-bindings",
  "virtio-devices",
  "virtio-queue",
  "vm-allocator",

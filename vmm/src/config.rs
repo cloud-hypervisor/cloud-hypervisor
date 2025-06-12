@@ -14,6 +14,7 @@ use option_parser::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use virtio_bindings::virtio_blk::VIRTIO_BLK_ID_BYTES;
 use virtio_devices::block::MINIMUM_BLOCK_QUEUE_SIZE;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
 
@@ -221,6 +222,8 @@ pub enum ValidationError {
     LandlockPathDoesNotExist(PathBuf),
     /// Access provided in landlock-rules in invalid
     InvalidLandlockAccess(String),
+    /// Invalid block device serial length
+    InvalidSerialLength(usize, usize),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -390,6 +393,12 @@ impl fmt::Display for ValidationError {
             }
             InvalidLandlockAccess(s) => {
                 write!(f, "{s}")
+            }
+            InvalidSerialLength(actual, max) => {
+                write!(
+                    f,
+                    "Block device serial length ({actual}) exceeds maximum allowed length ({max})"
+                )
             }
         }
     }
@@ -1356,6 +1365,16 @@ impl DiskConfig {
 
         if self.rate_limiter_config.is_some() && self.rate_limit_group.is_some() {
             return Err(ValidationError::InvalidRateLimiterGroup);
+        }
+
+        // Check Block device serial length
+        if let Some(ref serial) = self.serial {
+            if serial.len() > VIRTIO_BLK_ID_BYTES as usize {
+                return Err(ValidationError::InvalidSerialLength(
+                    serial.len(),
+                    VIRTIO_BLK_ID_BYTES as usize,
+                ));
+            }
         }
 
         Ok(())
