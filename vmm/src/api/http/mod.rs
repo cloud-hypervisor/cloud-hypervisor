@@ -44,7 +44,7 @@ pub type HttpApiHandle = (thread::JoinHandle<Result<()>>, EventFd);
 pub enum HttpError {
     /// API request receive error
     #[error("Failed to deserialize JSON: {0}")]
-    SerdeJsonDeserialize(#[source] SerdeError),
+    SerdeJsonDeserialize(#[from] SerdeError),
 
     /// Attempt to access unsupported HTTP method
     #[error("Bad Request")]
@@ -65,12 +65,6 @@ pub enum HttpError {
     /// Error from internal API
     #[error("Error from API: {0}")]
     ApiError(#[source] ApiError),
-}
-
-impl From<serde_json::Error> for HttpError {
-    fn from(e: serde_json::Error) -> Self {
-        HttpError::SerdeJsonDeserialize(e)
-    }
 }
 
 const HTTP_ROOT: &str = "/api/v1";

@@ -40,7 +40,7 @@ pub enum Error {
     #[error("Failed to parse: {0}")]
     Parsing(#[source] std::num::ParseIntError),
     #[error("ssh command failed: {0}")]
-    SshCommand(#[source] SshCommandError),
+    SshCommand(#[from] SshCommandError),
     #[error("waiting for boot failed: {0}")]
     WaitForBoot(#[source] WaitForBootError),
     #[error("reading log file failed: {0}")]
@@ -55,12 +55,6 @@ pub enum Error {
     Spawn(#[source] std::io::Error),
     #[error("waiting for timeout failed: {0}")]
     WaitTimeout(#[source] WaitTimeoutError),
-}
-
-impl From<SshCommandError> for Error {
-    fn from(e: SshCommandError) -> Self {
-        Self::SshCommand(e)
-    }
 }
 
 pub struct GuestNetworkConfig {

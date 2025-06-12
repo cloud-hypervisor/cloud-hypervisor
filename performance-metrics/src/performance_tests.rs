@@ -25,15 +25,9 @@ enum Error {
     #[error("boot time could not be parsed")]
     BootTimeParse,
     #[error("infrastructure failure: {0}")]
-    Infra(#[source] InfraError),
+    Infra(#[from] InfraError),
     #[error("restore time could not be parsed")]
     RestoreTimeParse,
-}
-
-impl From<InfraError> for Error {
-    fn from(e: InfraError) -> Self {
-        Self::Infra(e)
-    }
 }
 
 const BLK_IO_TEST_IMG: &str = "/var/tmp/ch-blk-io-test.img";
