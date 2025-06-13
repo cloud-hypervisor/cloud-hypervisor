@@ -106,7 +106,7 @@ const CPU_STEPPING: u32 = 0x600;
 const CPU_FEATURE_APIC: u32 = 0x200;
 const CPU_FEATURE_FPU: u32 = 0x001;
 
-fn compute_checksum<T: Copy>(v: &T) -> u8 {
+fn compute_checksum<T: Copy + ByteValued>(v: &T) -> u8 {
     // SAFETY: we are only reading the bytes within the size of the `T` reference `v`.
     let v_slice = unsafe { slice::from_raw_parts(v as *const T as *const u8, mem::size_of::<T>()) };
     let mut checksum: u8 = 0;
