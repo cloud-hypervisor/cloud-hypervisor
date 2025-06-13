@@ -720,10 +720,7 @@ impl vm::Vm for KvmVm {
             .map_err(|e| vm::HypervisorVmError::SetGsiRouting(e.into()))
     }
 
-    ///
-    /// Creates a memory region structure that can be used with {create/remove}_user_memory_region
-    ///
-    fn make_user_memory_region(
+    unsafe fn make_user_memory_region(
         &self,
         slot: u32,
         guest_phys_addr: u64,
@@ -747,10 +744,10 @@ impl vm::Vm for KvmVm {
         .into()
     }
 
-    ///
-    /// Creates a guest physical memory region.
-    ///
-    fn create_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
+    unsafe fn create_user_memory_region(
+        &self,
+        user_memory_region: UserMemoryRegion,
+    ) -> vm::Result<()> {
         let mut region: kvm_userspace_memory_region = user_memory_region.into();
 
         if (region.flags & KVM_MEM_LOG_DIRTY_PAGES) != 0 {
@@ -776,7 +773,7 @@ impl vm::Vm for KvmVm {
             region.flags = 0;
         }
 
-        // SAFETY: Safe because guest regions are guaranteed not to overlap.
+        // SAFETY: Safe because caller promised this is safe.
         unsafe {
             self.fd
                 .set_user_memory_region(region)
@@ -784,10 +781,10 @@ impl vm::Vm for KvmVm {
         }
     }
 
-    ///
-    /// Removes a guest physical memory region.
-    ///
-    fn remove_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
+    unsafe fn remove_user_memory_region(
+        &self,
+        user_memory_region: UserMemoryRegion,
+    ) -> vm::Result<()> {
         let mut region: kvm_userspace_memory_region = user_memory_region.into();
 
         // Remove the corresponding entry from "self.dirty_log_slots" if needed
@@ -795,7 +792,7 @@ impl vm::Vm for KvmVm {
 
         // Setting the size to 0 means "remove"
         region.memory_size = 0;
-        // SAFETY: Safe because guest regions are guaranteed not to overlap.
+        // SAFETY: Safe because caller promised this is safe.
         unsafe {
             self.fd
                 .set_user_memory_region(region)
