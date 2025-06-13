@@ -1916,8 +1916,8 @@ impl vm::Vm for MshvVm {
         &self,
         _slot: u32,
         guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
+        memory_size: usize,
+        userspace_addr: *mut u8,
         readonly: bool,
         _log_dirty_pages: bool,
     ) -> vm::Result<()> {
@@ -1929,8 +1929,8 @@ impl vm::Vm for MshvVm {
         let user_memory_region = mshv_user_mem_region {
             flags,
             guest_pfn: guest_phys_addr >> PAGE_SHIFT,
-            size: memory_size,
-            userspace_addr,
+            size: memory_size.try_into().unwrap(),
+            userspace_addr: (userspace_addr as usize).try_into().unwrap(),
             ..Default::default()
         };
         // No matter read only or not we keep track the slots.
@@ -1960,8 +1960,8 @@ impl vm::Vm for MshvVm {
         &self,
         _slot: u32,
         guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
+        memory_size: usize,
+        userspace_addr: *mut u8,
         readonly: bool,
         _log_dirty_pages: bool,
     ) -> vm::Result<()> {
@@ -1973,8 +1973,8 @@ impl vm::Vm for MshvVm {
         let user_memory_region = mshv_user_mem_region {
             flags,
             guest_pfn: guest_phys_addr >> PAGE_SHIFT,
-            size: memory_size,
-            userspace_addr,
+            size: memory_size.try_into().unwrap(),
+            userspace_addr: (userspace_addr as usize).try_into().unwrap(),
             ..Default::default()
         };
         // Remove the corresponding entry from "self.dirty_log_slots" if needed
