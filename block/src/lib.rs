@@ -401,14 +401,20 @@ impl Request {
 
         let mut iovecs: SmallVec<[libc::iovec; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
             SmallVec::with_capacity(self.data_descriptors.len());
-        for (data_addr, data_len) in &self.data_descriptors {
-            if *data_len == 0 {
+        for &(data_addr, data_len) in &self.data_descriptors {
+            let _: u32 = data_len; // compiler-checked documentation
+            const _: () = assert!(
+                core::mem::size_of::<u32>() <= core::mem::size_of::<usize>(),
+                "unsupported platform"
+            );
+            if data_len == 0 {
                 continue;
             }
-            let mut top: u64 = u64::from(*data_len) / SECTOR_SIZE;
-            if u64::from(*data_len) % SECTOR_SIZE != 0 {
+            let mut top: u64 = u64::from(data_len) / SECTOR_SIZE;
+            if u64::from(data_len) % SECTOR_SIZE != 0 {
                 top += 1;
             }
+            let data_len = data_len as usize;
             top = top
                 .checked_add(sector)
                 .ok_or(ExecuteError::BadRequest(Error::InvalidOffset))?;
@@ -417,7 +423,7 @@ impl Request {
             }
 
             let origin_ptr = mem
-                .get_slice(*data_addr, *data_len as usize)
+                .get_slice(data_addr, data_len)
                 .map_err(ExecuteError::GetHostAddress)?
                 .ptr_guard();
 
@@ -426,8 +432,7 @@ impl Request {
             // created with the correct alignment, and a copy from/to the
             // origin buffer is performed, depending on the type of operation.
             let iov_base = if (origin_ptr.as_ptr() as u64) % SECTOR_SIZE != 0 {
-                let layout =
-                    Layout::from_size_align(*data_len as usize, SECTOR_SIZE as usize).unwrap();
+                let layout = Layout::from_size_align(data_len, SECTOR_SIZE as usize).unwrap();
                 // SAFETY: layout has non-zero size
                 let aligned_ptr = unsafe { alloc_zeroed(layout) };
                 if aligned_ptr.is_null() {
@@ -441,7 +446,7 @@ impl Request {
                 if request_type == RequestType::Out {
                     // SAFETY: destination buffer has been allocated with
                     // the proper size.
-                    unsafe { std::ptr::copy(origin_ptr.as_ptr(), aligned_ptr, *data_len as usize) };
+                    unsafe { std::ptr::copy(origin_ptr.as_ptr(), aligned_ptr, data_len) };
                 }
 
                 // Store both origin and aligned pointers for complete_async()
@@ -449,7 +454,7 @@ impl Request {
                 self.aligned_operations.push(AlignedOperation {
                     origin_ptr: origin_ptr.as_ptr() as u64,
                     aligned_ptr: aligned_ptr as u64,
-                    size: *data_len as usize,
+                    size: data_len,
                     layout,
                 });
 
@@ -460,7 +465,7 @@ impl Request {
 
             let iovec = libc::iovec {
                 iov_base,
-                iov_len: *data_len as libc::size_t,
+                iov_len: data_len as libc::size_t,
             };
             iovecs.push(iovec);
         }
