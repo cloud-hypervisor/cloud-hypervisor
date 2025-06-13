@@ -143,4 +143,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # Executes "typos ."
-      - uses: crate-ci/typos@v1.32.0
+      - uses: crate-ci/typos@v1.33.1
