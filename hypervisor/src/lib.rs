@@ -77,6 +77,22 @@ pub enum HypervisorType {
     Mshv,
 }
 
+pub fn usize_to_u64(i: usize) -> u64 {
+    const _: () = assert!(
+        matches!(core::mem::size_of::<usize>(), 4 | 8),
+        "unsupported size for usize"
+    );
+    i as _
+}
+
+pub fn u32_to_usize(i: u32) -> usize {
+    const _: () = assert!(
+        matches!(core::mem::size_of::<usize>(), 4 | 8),
+        "unsupported size for usize"
+    );
+    i as _
+}
+
 pub fn new() -> std::result::Result<Arc<dyn Hypervisor>, HypervisorError> {
     #[cfg(feature = "kvm")]
     if kvm::KvmHypervisor::is_available()? {
