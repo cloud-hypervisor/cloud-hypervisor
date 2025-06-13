@@ -345,8 +345,8 @@ pub trait Vm: Send + Sync + Any {
         &self,
         slot: u32,
         guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
+        memory_size: usize,
+        userspace_addr: *mut u8,
         readonly: bool,
         log_dirty_pages: bool,
     ) -> Result<()>;
@@ -359,8 +359,8 @@ pub trait Vm: Send + Sync + Any {
         &self,
         slot: u32,
         guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
+        memory_size: usize,
+        userspace_addr: *mut u8,
         readonly: bool,
         log_dirty_pages: bool,
     ) -> Result<()>;

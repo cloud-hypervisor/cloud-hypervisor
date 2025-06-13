@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self};
-use std::ops::{BitAnd, Deref, Not, Sub};
+use std::ops::{BitAnd, Not, Sub};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::os::fd::AsFd;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
@@ -906,13 +906,12 @@ impl MemoryManager {
 
         for (zone_id, regions) in list {
             for (region, virtio_mem) in regions {
-                // SAFETY: regions only holds valid addresses.
-                // TODO: encapsulate this unsafety in a small part of the file.
+                // SAFETY: guaranteed by GuestRegionMmap invariants
                 let slot = unsafe {
                     self.create_userspace_mapping(
                         region.start_addr().raw_value(),
-                        region.len(),
-                        region.as_ptr() as u64,
+                        region.len().try_into().unwrap(),
+                        region.as_ptr(),
                         self.mergeable,
                         false,
                         self.log_dirty,
@@ -968,13 +967,16 @@ impl MemoryManager {
             arch::layout::UEFI_START,
         )
         .unwrap();
+        const _: () = assert!(core::mem::size_of::<usize>() == core::mem::size_of::<u64>());
+
+        // SAFETY: guaranteed by GuestRegionMmap
         unsafe {
             self.vm
                 .create_user_memory_region(
                     uefi_mem_slot,
                     uefi_region.start_addr().raw_value(),
-                    uefi_region.len(),
-                    uefi_region.as_ptr() as u64,
+                    uefi_region.len() as usize,
+                    uefi_region.as_ptr(),
                     false,
                     false,
                 )
@@ -1370,10 +1372,9 @@ impl MemoryManager {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn create_ram_region(
+    pub fn create_ram_region_raw(
         backing_file: &Option<PathBuf>,
         file_offset: u64,
-        start_addr: GuestAddress,
         size: usize,
         prefault: bool,
         shared: bool,
@@ -1382,7 +1383,7 @@ impl MemoryManager {
         host_numa_node: Option<u32>,
         existing_memory_file: Option<File>,
         thp: bool,
-    ) -> Result<Arc<GuestRegionMmap>, Error> {
+    ) -> Result<MmapRegion<AtomicBitmap>, Error> {
         let mut mmap_flags = libc::MAP_NORESERVE;
 
         // The duplication of mmap_flags ORing here is unfortunate but it also makes
@@ -1409,17 +1410,13 @@ impl MemoryManager {
             None
         };
 
-        let region = GuestRegionMmap::new(
-            MmapRegion::build(fo, size, libc::PROT_READ | libc::PROT_WRITE, mmap_flags)
-                .map_err(Error::GuestMemoryRegion)?,
-            start_addr,
-        )
-        .map_err(Error::GuestMemory)?;
+        let region = MmapRegion::build(fo, size, libc::PROT_READ | libc::PROT_WRITE, mmap_flags)
+            .map_err(Error::GuestMemoryRegion)?;
 
         // Apply NUMA policy if needed.
         if let Some(node) = host_numa_node {
-            let addr = region.deref().as_ptr();
-            let len = region.deref().size() as u64;
+            let addr = region.as_ptr();
+            let len = region.size() as u64;
             let mode = MPOL_BIND;
             let mut nodemask: Vec<u64> = Vec::new();
             let flags = MPOL_MF_STRICT | MPOL_MF_MOVE;
@@ -1507,7 +1504,39 @@ impl MemoryManager {
             }
         }
 
-        Ok(Arc::new(region))
+        Ok(region)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_ram_region(
+        backing_file: &Option<PathBuf>,
+        file_offset: u64,
+        start_addr: GuestAddress,
+        size: usize,
+        prefault: bool,
+        shared: bool,
+        hugepages: bool,
+        hugepage_size: Option<u64>,
+        host_numa_node: Option<u32>,
+        existing_memory_file: Option<File>,
+        thp: bool,
+    ) -> Result<Arc<GuestRegionMmap>, Error> {
+        let r = Self::create_ram_region_raw(
+            backing_file,
+            file_offset,
+            size,
+            prefault,
+            shared,
+            hugepages,
+            hugepage_size,
+            host_numa_node,
+            existing_memory_file,
+            thp,
+        )?;
+
+        Ok(Arc::new(
+            GuestRegionMmap::new(r, start_addr).map_err(Error::GuestMemory)?,
+        ))
     }
 
     // Duplicate of `memory_zone_get_align_size` that does not require a `zone`
@@ -1621,12 +1650,12 @@ impl MemoryManager {
         )?;
 
         // Map it into the guest
-        // SAFETY: create_ram_region only produces valid mappings.
+        // SAFETY: guaranteed by GuestMmapRegion invariants
         let slot = unsafe {
             self.create_userspace_mapping(
                 region.start_addr().0,
-                region.len(),
-                region.as_ptr() as u64,
+                region.len().try_into().unwrap(),
+                region.as_ptr(),
                 self.mergeable,
                 false,
                 self.log_dirty,
@@ -1731,8 +1760,8 @@ impl MemoryManager {
     pub unsafe fn create_userspace_mapping(
         &mut self,
         guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
+        memory_size: usize,
+        userspace_addr: *mut u8,
         mergeable: bool,
         readonly: bool,
         log_dirty: bool,
@@ -1741,7 +1770,7 @@ impl MemoryManager {
 
         info!(
             "Creating userspace mapping: {:x} -> {:x} {:x}, slot {}",
-            guest_phys_addr, userspace_addr, memory_size, slot
+            guest_phys_addr, userspace_addr as usize, memory_size, slot
         );
 
         self.vm
@@ -1796,7 +1825,7 @@ impl MemoryManager {
 
         info!(
             "Created userspace mapping: {:x} -> {:x} {:x}",
-            guest_phys_addr, userspace_addr, memory_size
+            guest_phys_addr, userspace_addr as usize, memory_size
         );
 
         Ok(slot)
@@ -1814,8 +1843,8 @@ impl MemoryManager {
     pub unsafe fn remove_userspace_mapping(
         &mut self,
         guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
+        memory_size: usize,
+        userspace_addr: *mut u8,
         mergeable: bool,
         slot: u32,
     ) -> Result<(), Error> {
@@ -1858,7 +1887,7 @@ impl MemoryManager {
 
         info!(
             "Removed userspace mapping: {:x} -> {:x} {:x}",
-            guest_phys_addr, userspace_addr, memory_size
+            guest_phys_addr, userspace_addr as usize, memory_size
         );
 
         Ok(())
