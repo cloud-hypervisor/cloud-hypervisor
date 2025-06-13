@@ -33,7 +33,7 @@ const IVSHMEM_DEVICE_ID: u16 = 0x1110;
 
 const IVSHMEM_REG_BAR_SIZE: u64 = 0x100;
 
-type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
+type MmapRegion = vm_memory::MmapRegion<AtomicBitmap>;
 
 #[derive(Debug, Error)]
 pub enum IvshmemError {
@@ -68,7 +68,7 @@ pub trait IvshmemOps: Send + Sync {
         start_addr: u64,
         size: usize,
         backing_file: Option<PathBuf>,
-    ) -> Result<(Arc<GuestRegionMmap>, UserspaceMapping), IvshmemError>;
+    ) -> Result<(Arc<MmapRegion>, UserspaceMapping), IvshmemError>;
 
     fn unmap_ram_region(&mut self, mapping: UserspaceMapping) -> Result<(), IvshmemError>;
 }
@@ -95,7 +95,7 @@ pub struct IvshmemDevice {
     region_size: u64,
     ivshmem_ops: Arc<Mutex<dyn IvshmemOps>>,
     backend_file: Option<PathBuf>,
-    region: Option<Arc<GuestRegionMmap>>,
+    region: Option<Arc<MmapRegion>>,
     userspace_mapping: Option<UserspaceMapping>,
 }
 
@@ -180,11 +180,7 @@ impl IvshmemDevice {
         Ok(device)
     }
 
-    pub fn set_region(
-        &mut self,
-        region: Arc<GuestRegionMmap>,
-        userspace_mapping: UserspaceMapping,
-    ) {
+    pub fn set_region(&mut self, region: Arc<MmapRegion>, userspace_mapping: UserspaceMapping) {
         self.region = Some(region);
         self.userspace_mapping = Some(userspace_mapping);
     }

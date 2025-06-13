@@ -115,10 +115,9 @@ fn create_dummy_pmem() -> Pmem {
     .unwrap();
     let guest_addr = GuestAddress(0);
     let dummy_user_mapping = UserspaceMapping {
-        host_addr: dummy_mmap_region.as_ptr() as u64,
         mem_slot: 0,
         addr: guest_addr,
-        len: dummy_mapping_size as u64,
+        mapping: Arc::new(dummy_mmap_region),
         mergeable: false,
     };
 
@@ -127,7 +126,6 @@ fn create_dummy_pmem() -> Pmem {
         file,
         guest_addr,
         dummy_user_mapping,
-        dummy_mmap_region,
         false,
         SeccompAction::Allow,
         EventFd::new(EFD_NONBLOCK).unwrap(),

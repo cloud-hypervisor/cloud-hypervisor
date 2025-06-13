@@ -97,8 +97,10 @@ use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
 use vm_device::{Bus, BusDevice, BusDeviceSync, Resource, UserspaceMapping};
+#[cfg(feature = "ivshmem")]
+use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::{Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion};
+use vm_memory::{Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion, VolatileMemory};
 #[cfg(target_arch = "x86_64")]
 use vm_memory::{GuestAddressSpace, GuestMemory};
 use vm_migration::protocol::MemoryRangeTable;
@@ -817,15 +819,15 @@ impl DeviceRelocation for AddressManager {
                 if let Some(mut shm_regions) = virtio_dev.get_shm_regions()
                     && shm_regions.addr.raw_value() == old_base
                 {
-                    // SAFETY: TODO what are the invariants here?
+                    // SAFETY: guaranteed by MmapRegion invariants
                     unsafe {
                         // Remove old mapping
                         self.vm
                             .remove_user_memory_region(
                                 shm_regions.mem_slot,
                                 old_base,
-                                shm_regions.len,
-                                shm_regions.host_addr,
+                                shm_regions.mapping.len(),
+                                shm_regions.mapping.as_ptr(),
                                 false,
                                 false,
                             )
@@ -834,17 +836,14 @@ impl DeviceRelocation for AddressManager {
                                     "failed to remove user memory region: {e:?}"
                                 ))
                             })?;
-                    }
 
-                    // SAFETY: TODO what are the invariants here?
-                    unsafe {
                         // Create new mapping by inserting new region to KVM.
                         self.vm
                             .create_user_memory_region(
                                 shm_regions.mem_slot,
                                 new_base,
-                                shm_regions.len,
-                                shm_regions.host_addr,
+                                shm_regions.mapping.len(),
+                                shm_regions.mapping.as_ptr(),
                                 false,
                                 false,
                             )
@@ -3249,10 +3248,11 @@ impl DeviceManager {
                 },
         )
         .map_err(DeviceManagerError::NewMmapRegion)?;
-        let host_addr: u64 = mmap_region.as_ptr() as u64;
+        let host_addr = mmap_region.as_ptr();
 
         // SAFETY: host_addr points to region_size bytes of mmap-allocated memory.
         let mem_slot = unsafe {
+            let region_size = region_size.try_into().unwrap();
             self.memory_manager
                 .lock()
                 .unwrap()
@@ -3261,10 +3261,9 @@ impl DeviceManager {
         }?;
 
         let mapping = UserspaceMapping {
-            host_addr,
             mem_slot,
             addr: GuestAddress(region_base),
-            len: region_size,
+            mapping: Arc::new(mmap_region),
             mergeable: false,
         };
 
@@ -3274,7 +3273,6 @@ impl DeviceManager {
                 file,
                 GuestAddress(region_base),
                 mapping,
-                mmap_region,
                 self.force_iommu | pmem_cfg.iommu,
                 self.seccomp_action.clone(),
                 self.exit_evt
@@ -4010,16 +4008,13 @@ impl DeviceManager {
             resources,
         )?;
 
-        // SAFETY: TODO
         // Note it is required to call 'add_pci_device()' in advance to have the list of
         // mmio regions provisioned correctly
-        unsafe {
-            vfio_user_pci_device
-                .lock()
-                .unwrap()
-                .map_mmio_regions()
-                .map_err(DeviceManagerError::VfioUserMapRegion)
-        }?;
+        vfio_user_pci_device
+            .lock()
+            .unwrap()
+            .map_mmio_regions()
+            .map_err(DeviceManagerError::VfioUserMapRegion)?;
 
         let mut node = device_node!(vfio_user_name, vfio_user_pci_device);
 
@@ -4747,8 +4742,8 @@ impl DeviceManager {
                         .unwrap()
                         .remove_userspace_mapping(
                             mapping.addr.raw_value(),
-                            mapping.len,
-                            mapping.host_addr,
+                            mapping.mapping.size(),
+                            mapping.mapping.as_ptr() as _,
                             mapping.mergeable,
                             mapping.mem_slot,
                         )
@@ -5002,13 +4997,12 @@ impl IvshmemOps for IvshmemHandler {
         start_addr: u64,
         size: usize,
         backing_file: Option<PathBuf>,
-    ) -> Result<(Arc<GuestRegionMmap>, UserspaceMapping), IvshmemError> {
+    ) -> Result<(Arc<MmapRegion<AtomicBitmap>>, UserspaceMapping), IvshmemError> {
         info!("Creating ivshmem mem region at 0x{start_addr:x}");
 
-        let region: Arc<GuestRegionMmap> = MemoryManager::create_ram_region(
+        let region = MemoryManager::create_ram_region_raw(
             &backing_file,
             0,
-            GuestAddress(start_addr),
             size,
             false,
             true,
@@ -5021,12 +5015,12 @@ impl IvshmemOps for IvshmemHandler {
         .map_err(|_| IvshmemError::CreateUserMemoryRegion)?;
         let mem_slot = {
             let mut manager = self.memory_manager.lock().unwrap();
-            // SAFETY: guaranteed by GuestRegionMmap invariants
+            // SAFETY: guaranteed by MmapRegion invariants
             unsafe {
                 manager.create_userspace_mapping(
-                    region.start_addr().0,
+                    start_addr,
                     region.len(),
-                    region.as_ptr() as u64,
+                    region.as_ptr(),
                     false,
                     false,
                     false,
@@ -5034,11 +5028,11 @@ impl IvshmemOps for IvshmemHandler {
             }
         }
         .map_err(|_| IvshmemError::CreateUserspaceMapping)?;
+        let region = Arc::new(region);
         let mapping = UserspaceMapping {
-            host_addr: region.as_ptr() as u64,
+            mapping: region.clone(),
             mem_slot,
-            addr: GuestAddress(region.start_addr().0),
-            len: region.len(),
+            addr: GuestAddress(start_addr),
             mergeable: false,
         };
         Ok((region, mapping))
@@ -5050,8 +5044,8 @@ impl IvshmemOps for IvshmemHandler {
         unsafe {
             manager.remove_userspace_mapping(
                 mapping.addr.raw_value(),
-                mapping.len,
-                mapping.host_addr,
+                mapping.mapping.len(),
+                mapping.mapping.as_ptr(),
                 mapping.mergeable,
                 mapping.mem_slot,
             )
