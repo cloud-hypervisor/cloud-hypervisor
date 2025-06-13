@@ -1948,7 +1948,10 @@ impl vm::Vm for MshvVm {
     }
 
     /// Creates a guest physical memory region.
-    fn create_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
+    unsafe fn create_user_memory_region(
+        &self,
+        user_memory_region: UserMemoryRegion,
+    ) -> vm::Result<()> {
         let user_memory_region: mshv_user_mem_region = user_memory_region.into();
         // No matter read only or not we keep track the slots.
         // For readonly hypervisor can enable the dirty bits,
@@ -1968,7 +1971,10 @@ impl vm::Vm for MshvVm {
     }
 
     /// Removes a guest physical memory region.
-    fn remove_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
+    unsafe fn remove_user_memory_region(
+        &self,
+        user_memory_region: UserMemoryRegion,
+    ) -> vm::Result<()> {
         let user_memory_region: mshv_user_mem_region = user_memory_region.into();
         // Remove the corresponding entry from "self.dirty_log_slots" if needed
         self.dirty_log_slots
@@ -1982,7 +1988,7 @@ impl vm::Vm for MshvVm {
         Ok(())
     }
 
-    fn make_user_memory_region(
+    unsafe fn make_user_memory_region(
         &self,
         _slot: u32,
         guest_phys_addr: u64,
