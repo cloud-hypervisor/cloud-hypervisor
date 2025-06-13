@@ -756,10 +756,7 @@ impl vm::Vm for KvmVm {
             .map_err(|e| vm::HypervisorVmError::SetGsiRouting(e.into()))
     }
 
-    ///
-    /// Creates a memory region structure that can be used with {create/remove}_user_memory_region
-    ///
-    fn make_user_memory_region(
+    unsafe fn make_user_memory_region(
         &self,
         slot: u32,
         guest_phys_addr: u64,
@@ -783,10 +780,20 @@ impl vm::Vm for KvmVm {
         .into()
     }
 
-    ///
     /// Creates a guest physical memory region.
     ///
-    fn create_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
+    /// # Safety
+    ///
+    /// `user_memory_region.userspace_addr` must point to `memory_size`
+    /// bytes of memory that will stay mapped until a successful call to
+    /// `remove_user_memory_region()`.  Freeing them with `munmap()`
+    /// before then will cause undefined guest behavior but at least
+    /// should not cause undefined behavior in the host.  In theory,
+    /// at least.
+    unsafe fn create_user_memory_region(
+        &self,
+        user_memory_region: UserMemoryRegion,
+    ) -> vm::Result<()> {
         let mut region: kvm_userspace_memory_region = user_memory_region.into();
 
         if (region.flags & KVM_MEM_LOG_DIRTY_PAGES) != 0 {
@@ -812,7 +819,7 @@ impl vm::Vm for KvmVm {
             region.flags = 0;
         }
 
-        // SAFETY: Safe because guest regions are guaranteed not to overlap.
+        // SAFETY: Safe because caller promised this is safe.
         unsafe {
             self.fd
                 .set_user_memory_region(region)
@@ -820,10 +827,17 @@ impl vm::Vm for KvmVm {
         }
     }
 
-    ///
     /// Removes a guest physical memory region.
     ///
-    fn remove_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
+    /// # Safety
+    ///
+    /// `user_memory_region.userspace_addr` must point to
+    /// `memory_size` bytes of memory, and `add_user_memory_region()`
+    /// must have been successfully called.
+    unsafe fn remove_user_memory_region(
+        &self,
+        user_memory_region: UserMemoryRegion,
+    ) -> vm::Result<()> {
         let mut region: kvm_userspace_memory_region = user_memory_region.into();
 
         // Remove the corresponding entry from "self.dirty_log_slots" if needed
@@ -831,7 +845,7 @@ impl vm::Vm for KvmVm {
 
         // Setting the size to 0 means "remove"
         region.memory_size = 0;
-        // SAFETY: Safe because guest regions are guaranteed not to overlap.
+        // SAFETY: Safe because caller promised this is safe.
         unsafe {
             self.fd
                 .set_user_memory_region(region)
