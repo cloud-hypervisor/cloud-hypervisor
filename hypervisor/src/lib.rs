@@ -39,6 +39,8 @@ pub mod kvm;
 #[cfg(feature = "mshv")]
 pub mod mshv;
 
+pub mod mmap;
+
 /// Hypervisor related module
 mod hypervisor;
 
