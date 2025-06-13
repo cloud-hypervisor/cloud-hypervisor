@@ -29,7 +29,7 @@ use crate::arch::riscv64::aia::{Vaia, VaiaConfig};
 #[cfg(feature = "tdx")]
 use crate::arch::x86::CpuIdEntry;
 use crate::cpu::Vcpu;
-use crate::{IoEventAddress, IrqRoutingEntry, UserMemoryRegion};
+use crate::{IoEventAddress, IrqRoutingEntry};
 
 ///
 /// I/O events data matches (32 or 64 bits).
@@ -335,8 +335,13 @@ pub trait Vm: Send + Sync + Any {
     fn make_routing_entry(&self, gsi: u32, config: &InterruptSourceConfig) -> IrqRoutingEntry;
     /// Sets the GSI routing table entries, overwriting any previously set
     fn set_gsi_routing(&self, entries: &[IrqRoutingEntry]) -> Result<()>;
-    /// Creates a memory region structure that can be used with {create/remove}_user_memory_region
-    fn make_user_memory_region(
+    /// Creates a guest physical memory slot.
+    ///
+    /// # Safety
+    ///
+    /// `[userspace_addr, userspace_addr + memory_size)` must be valid memory,
+    /// and that address range must remain valid until [`Vm::remove_user_memory_region`] is called.
+    unsafe fn create_user_memory_region(
         &self,
         slot: u32,
         guest_phys_addr: u64,
@@ -344,11 +349,21 @@ pub trait Vm: Send + Sync + Any {
         userspace_addr: u64,
         readonly: bool,
         log_dirty_pages: bool,
-    ) -> UserMemoryRegion;
-    /// Creates a guest physical memory slot.
-    fn create_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> Result<()>;
+    ) -> Result<()>;
     /// Removes a guest physical memory slot.
-    fn remove_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> Result<()>;
+    ///
+    /// # Safety
+    ///
+    /// `[userspace_addr, userspace_addr + memory_size)` must be valid memory,
+    unsafe fn remove_user_memory_region(
+        &self,
+        slot: u32,
+        guest_phys_addr: u64,
+        memory_size: u64,
+        userspace_addr: u64,
+        readonly: bool,
+        log_dirty_pages: bool,
+    ) -> Result<()>;
     /// Returns the preferred CPU target type which can be emulated by KVM on underlying host.
     #[cfg(target_arch = "aarch64")]
     fn get_preferred_target(&self, kvi: &mut crate::VcpuInit) -> Result<()>;

@@ -74,34 +74,9 @@ use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 use crate::arch::aarch64::regs;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
-use crate::{
-    CpuState, IoEventAddress, IrqRoutingEntry, MpState, USER_MEMORY_REGION_ADJUSTABLE,
-    USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
-    UserMemoryRegion,
-};
+use crate::{CpuState, IoEventAddress, IrqRoutingEntry, MpState};
 
 pub const PAGE_SHIFT: usize = 12;
-
-impl From<mshv_user_mem_region> for UserMemoryRegion {
-    fn from(region: mshv_user_mem_region) -> Self {
-        let mut flags: u32 = USER_MEMORY_REGION_READ | USER_MEMORY_REGION_ADJUSTABLE;
-        if region.flags & (1 << MSHV_SET_MEM_BIT_WRITABLE) != 0 {
-            flags |= USER_MEMORY_REGION_WRITE;
-        }
-        if region.flags & (1 << MSHV_SET_MEM_BIT_EXECUTABLE) != 0 {
-            flags |= USER_MEMORY_REGION_EXECUTE;
-        }
-
-        UserMemoryRegion {
-            guest_phys_addr: (region.guest_pfn << PAGE_SHIFT as u64)
-                + (region.userspace_addr & ((1 << PAGE_SHIFT) - 1)),
-            memory_size: region.size,
-            userspace_addr: region.userspace_addr,
-            flags,
-            ..Default::default()
-        }
-    }
-}
 
 #[cfg(target_arch = "x86_64")]
 impl From<MshvClockData> for ClockData {
@@ -118,26 +93,6 @@ impl From<ClockData> for MshvClockData {
             /* Needed in case other hypervisors are enabled */
             #[allow(unreachable_patterns)]
             _ => unreachable!("MSHV clock data is not valid"),
-        }
-    }
-}
-
-impl From<UserMemoryRegion> for mshv_user_mem_region {
-    fn from(region: UserMemoryRegion) -> Self {
-        let mut flags: u8 = 0;
-        if region.flags & USER_MEMORY_REGION_WRITE != 0 {
-            flags |= 1 << MSHV_SET_MEM_BIT_WRITABLE;
-        }
-        if region.flags & USER_MEMORY_REGION_EXECUTE != 0 {
-            flags |= 1 << MSHV_SET_MEM_BIT_EXECUTABLE;
-        }
-
-        mshv_user_mem_region {
-            guest_pfn: region.guest_phys_addr >> PAGE_SHIFT,
-            size: region.memory_size,
-            userspace_addr: region.userspace_addr,
-            flags,
-            ..Default::default()
         }
     }
 }
@@ -1918,8 +1873,36 @@ impl vm::Vm for MshvVm {
     }
 
     /// Creates a guest physical memory region.
-    fn create_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
-        let user_memory_region: mshv_user_mem_region = user_memory_region.into();
+    ///
+    /// # Safety
+    ///
+    /// `userspace_addr` must point to `memory_size` bytes of memory
+    /// that will stay mapped until a successful call to
+    /// `remove_user_memory_region().`  Freeing them with `munmap()`
+    /// before then will cause undefined guest behavior but at least
+    /// should not cause undefined behavior in the host.  In theory,
+    /// at least.
+    unsafe fn create_user_memory_region(
+        &self,
+        _slot: u32,
+        guest_phys_addr: u64,
+        memory_size: u64,
+        userspace_addr: u64,
+        readonly: bool,
+        _log_dirty_pages: bool,
+    ) -> vm::Result<()> {
+        let mut flags = 1 << MSHV_SET_MEM_BIT_EXECUTABLE;
+        if !readonly {
+            flags |= 1 << MSHV_SET_MEM_BIT_WRITABLE;
+        }
+
+        let user_memory_region = mshv_user_mem_region {
+            flags,
+            guest_pfn: guest_phys_addr >> PAGE_SHIFT,
+            size: memory_size,
+            userspace_addr,
+            ..Default::default()
+        };
         // No matter read only or not we keep track the slots.
         // For readonly hypervisor can enable the dirty bits,
         // but a VM exit happens before setting the dirty bits
@@ -1938,8 +1921,32 @@ impl vm::Vm for MshvVm {
     }
 
     /// Removes a guest physical memory region.
-    fn remove_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
-        let user_memory_region: mshv_user_mem_region = user_memory_region.into();
+    ///
+    /// # Safety
+    ///
+    /// `userspace_addr` must point to `memory_size` bytes of memory,
+    /// and `add_user_memory_region()` must have been successfully called.
+    unsafe fn remove_user_memory_region(
+        &self,
+        _slot: u32,
+        guest_phys_addr: u64,
+        memory_size: u64,
+        userspace_addr: u64,
+        readonly: bool,
+        _log_dirty_pages: bool,
+    ) -> vm::Result<()> {
+        let mut flags = 1 << MSHV_SET_MEM_BIT_EXECUTABLE;
+        if !readonly {
+            flags |= 1 << MSHV_SET_MEM_BIT_WRITABLE;
+        }
+
+        let user_memory_region = mshv_user_mem_region {
+            flags,
+            guest_pfn: guest_phys_addr >> PAGE_SHIFT,
+            size: memory_size,
+            userspace_addr,
+            ..Default::default()
+        };
         // Remove the corresponding entry from "self.dirty_log_slots" if needed
         self.dirty_log_slots
             .write()
@@ -1950,30 +1957,6 @@ impl vm::Vm for MshvVm {
             .unmap_user_memory(user_memory_region)
             .map_err(|e| vm::HypervisorVmError::RemoveUserMemory(e.into()))?;
         Ok(())
-    }
-
-    fn make_user_memory_region(
-        &self,
-        _slot: u32,
-        guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
-        readonly: bool,
-        _log_dirty_pages: bool,
-    ) -> UserMemoryRegion {
-        let mut flags = 1 << MSHV_SET_MEM_BIT_EXECUTABLE;
-        if !readonly {
-            flags |= 1 << MSHV_SET_MEM_BIT_WRITABLE;
-        }
-
-        mshv_user_mem_region {
-            flags,
-            guest_pfn: guest_phys_addr >> PAGE_SHIFT,
-            size: memory_size,
-            userspace_addr,
-            ..Default::default()
-        }
-        .into()
     }
 
     fn create_passthrough_device(&self) -> vm::Result<VfioDeviceFd> {

@@ -2521,7 +2521,7 @@ impl VmConfig {
         #[cfg(target_arch = "x86_64")]
         if self.debug_console.mode == ConsoleOutputMode::Tty {
             tty_consoles.push("debug-console");
-        };
+        }
         if tty_consoles.len() > 1 {
             warn!("Using TTY output for multiple consoles: {tty_consoles:?}");
         }
