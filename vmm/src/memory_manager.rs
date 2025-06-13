@@ -947,14 +947,18 @@ impl MemoryManager {
 
         for (zone_id, regions) in list {
             for (region, virtio_mem) in regions {
-                let slot = self.create_userspace_mapping(
-                    region.start_addr().raw_value(),
-                    region.len(),
-                    region.as_ptr() as u64,
-                    self.mergeable,
-                    false,
-                    self.log_dirty,
-                )?;
+                // SAFETY: regions only holds valid addresses.
+                // TODO: encapsulate this unsafety in a small part of the file.
+                let slot = unsafe {
+                    self.create_userspace_mapping(
+                        region.start_addr().raw_value(),
+                        region.len(),
+                        region.as_ptr() as u64,
+                        self.mergeable,
+                        false,
+                        self.log_dirty,
+                    )
+                }?;
 
                 let file_offset = if let Some(file_offset) = region.file_offset() {
                     file_offset.start()
@@ -1005,18 +1009,19 @@ impl MemoryManager {
             arch::layout::UEFI_START,
         )
         .unwrap();
-        let uefi_mem_region = self.vm.make_user_memory_region(
-            uefi_mem_slot,
-            uefi_region.start_addr().raw_value(),
-            uefi_region.len(),
-            uefi_region.as_ptr() as u64,
-            false,
-            false,
-        );
-        self.vm
-            .create_user_memory_region(uefi_mem_region)
-            .map_err(Error::CreateUefiFlash)?;
-
+        unsafe {
+            let uefi_mem_region = self.vm.make_user_memory_region(
+                uefi_mem_slot,
+                uefi_region.start_addr().raw_value(),
+                uefi_region.len(),
+                uefi_region.as_ptr() as u64,
+                false,
+                false,
+            );
+            self.vm
+                .create_user_memory_region(uefi_mem_region)
+                .map_err(Error::CreateUefiFlash)?;
+        }
         let uefi_flash =
             GuestMemoryAtomic::new(GuestMemoryMmap::from_regions(vec![uefi_region]).unwrap());
 
@@ -1669,14 +1674,17 @@ impl MemoryManager {
         )?;
 
         // Map it into the guest
-        let slot = self.create_userspace_mapping(
-            region.start_addr().0,
-            region.len(),
-            region.as_ptr() as u64,
-            self.mergeable,
-            false,
-            self.log_dirty,
-        )?;
+        // SAFETY: create_ram_region only produces valid mappings.
+        let slot = unsafe {
+            self.create_userspace_mapping(
+                region.start_addr().0,
+                region.len(),
+                region.as_ptr() as u64,
+                self.mergeable,
+                false,
+                self.log_dirty,
+            )
+        }?;
         self.guest_ram_mappings.push(GuestRamMapping {
             gpa: region.start_addr().raw_value(),
             size: region.len(),
@@ -1769,7 +1777,11 @@ impl MemoryManager {
         self.memory_slot_allocator().next_memory_slot()
     }
 
-    pub fn create_userspace_mapping(
+    /// # Safety
+    ///
+    /// `userspace_addr` and `memory_size` must be and remain valid
+    /// until `remove_userspace_mapping` is called.
+    pub unsafe fn create_userspace_mapping(
         &mut self,
         guest_phys_addr: u64,
         memory_size: u64,
@@ -1844,7 +1856,16 @@ impl MemoryManager {
         Ok(slot)
     }
 
-    pub fn remove_userspace_mapping(
+    /// # Safety
+    ///
+    /// `userspace_addr` and `memory_size` must have previously been passed
+    /// to `create_userspace_mapping`.
+    ///
+    /// # Errors
+    ///
+    /// If this function fails there is no way to clean up resources and you
+    /// should probably crash the process.
+    pub unsafe fn remove_userspace_mapping(
         &mut self,
         guest_phys_addr: u64,
         memory_size: u64,
@@ -2061,14 +2082,19 @@ impl MemoryManager {
                 epc_section_start, epc_section.size
             );
 
-            let _mem_slot = self.create_userspace_mapping(
-                epc_section_start,
-                epc_section.size,
-                host_addr as u64,
-                false,
-                false,
-                false,
-            )?;
+            // SAFETY: host_addr points to epc_section.size bytes of memory
+            // allocated by mmap(), or to MAP_FAILED which the kernel will
+            // safely reject.
+            let _mem_slot = unsafe {
+                self.create_userspace_mapping(
+                    epc_section_start,
+                    epc_section.size,
+                    (host_addr as usize).try_into().unwrap(),
+                    false,
+                    false,
+                    false,
+                )
+            }?;
 
             sgx_epc_region.insert(
                 epc_section.id.clone(),
