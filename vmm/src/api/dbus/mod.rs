@@ -356,7 +356,7 @@ pub fn start_dbus_thread(
                 apply_filter(&api_seccomp_filter)
                     .map_err(VmmError::ApplySeccompFilter)
                     .map_err(|e| {
-                        error!("Error applying seccomp filter: {:?}", e);
+                        error!("Error applying seccomp filter: {e:?}");
                         exit_evt.write(1).ok();
                         e
                     })?;
@@ -383,7 +383,7 @@ pub fn start_dbus_thread(
                             }
                         }
                     }
-                })
+                });
             }))
             .map_err(|_| {
                 error!("dbus-api thread panicked");

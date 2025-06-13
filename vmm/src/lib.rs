@@ -1128,7 +1128,7 @@ impl Vmm {
                 return Err(MigratableError::MigrateSend(anyhow!(
                     "Live Migration is not supported when TDX is enabled"
                 )));
-            };
+            }
 
             let amx = vm_config.lock().unwrap().cpus.features.amx;
             let phys_bits = vm::physical_bits(
@@ -1265,7 +1265,7 @@ impl Vmm {
             return Err(MigratableError::MigrateReceive(anyhow!(
                 "Live Migration is not supported when TDX is enabled"
             )));
-        };
+        }
 
         // We check the `CPUID` compatibility of between the source vm and destination, which is
         // mostly about feature compatibility.

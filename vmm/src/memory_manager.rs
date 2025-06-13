@@ -900,14 +900,18 @@ impl MemoryManager {
 
         for (zone_id, regions) in list {
             for (region, virtio_mem) in regions {
-                let slot = self.create_userspace_mapping(
-                    region.start_addr().raw_value(),
-                    region.len(),
-                    region.as_ptr() as u64,
-                    self.mergeable,
-                    false,
-                    self.log_dirty,
-                )?;
+                // SAFETY: regions only holds valid addresses.
+                // TODO: encapsulate this unsafety in a small part of the file.
+                let slot = unsafe {
+                    self.create_userspace_mapping(
+                        region.start_addr().raw_value(),
+                        region.len(),
+                        region.as_ptr() as u64,
+                        self.mergeable,
+                        false,
+                        self.log_dirty,
+                    )
+                }?;
 
                 let file_offset = if let Some(file_offset) = region.file_offset() {
                     file_offset.start()
@@ -958,18 +962,18 @@ impl MemoryManager {
             arch::layout::UEFI_START,
         )
         .unwrap();
-        let uefi_mem_region = self.vm.make_user_memory_region(
-            uefi_mem_slot,
-            uefi_region.start_addr().raw_value(),
-            uefi_region.len(),
-            uefi_region.as_ptr() as u64,
-            false,
-            false,
-        );
-        self.vm
-            .create_user_memory_region(uefi_mem_region)
-            .map_err(Error::CreateUefiFlash)?;
-
+        unsafe {
+            self.vm
+                .create_user_memory_region(
+                    uefi_mem_slot,
+                    uefi_region.start_addr().raw_value(),
+                    uefi_region.len(),
+                    uefi_region.as_ptr() as u64,
+                    false,
+                    false,
+                )
+                .map_err(Error::CreateUefiFlash)?;
+        }
         let uefi_flash =
             GuestMemoryAtomic::new(GuestMemoryMmap::from_regions(vec![uefi_region]).unwrap());
 
@@ -1608,14 +1612,17 @@ impl MemoryManager {
         )?;
 
         // Map it into the guest
-        let slot = self.create_userspace_mapping(
-            region.start_addr().0,
-            region.len(),
-            region.as_ptr() as u64,
-            self.mergeable,
-            false,
-            self.log_dirty,
-        )?;
+        // SAFETY: create_ram_region only produces valid mappings.
+        let slot = unsafe {
+            self.create_userspace_mapping(
+                region.start_addr().0,
+                region.len(),
+                region.as_ptr() as u64,
+                self.mergeable,
+                false,
+                self.log_dirty,
+            )
+        }?;
         self.guest_ram_mappings.push(GuestRamMapping {
             gpa: region.start_addr().raw_value(),
             size: region.len(),
@@ -1708,7 +1715,11 @@ impl MemoryManager {
         self.memory_slot_allocator().next_memory_slot()
     }
 
-    pub fn create_userspace_mapping(
+    /// # Safety
+    ///
+    /// `userspace_addr` and `memory_size` must be and remain valid
+    /// until `remove_userspace_mapping` is called.
+    pub unsafe fn create_userspace_mapping(
         &mut self,
         guest_phys_addr: u64,
         memory_size: u64,
@@ -1718,22 +1729,24 @@ impl MemoryManager {
         log_dirty: bool,
     ) -> Result<u32, Error> {
         let slot = self.allocate_memory_slot();
-        let mem_region = self.vm.make_user_memory_region(
-            slot,
-            guest_phys_addr,
-            memory_size,
-            userspace_addr,
-            readonly,
-            log_dirty,
-        );
 
         info!(
             "Creating userspace mapping: {guest_phys_addr:x} -> {userspace_addr:x} {memory_size:x}, slot {slot}"
         );
 
-        self.vm
-            .create_user_memory_region(mem_region)
-            .map_err(Error::CreateUserMemoryRegion)?;
+        // SAFETY: promised by caller
+        unsafe {
+            self.vm
+                .create_user_memory_region(
+                    slot,
+                    guest_phys_addr,
+                    memory_size,
+                    userspace_addr,
+                    readonly,
+                    log_dirty,
+                )
+                .map_err(Error::CreateUserMemoryRegion)?;
+        }
 
         // SAFETY: the address and size are valid since the
         // mmap succeeded.
@@ -1781,7 +1794,16 @@ impl MemoryManager {
         Ok(slot)
     }
 
-    pub fn remove_userspace_mapping(
+    /// # Safety
+    ///
+    /// `userspace_addr` and `memory_size` must have previously been passed
+    /// to `create_userspace_mapping`.
+    ///
+    /// # Errors
+    ///
+    /// If this function fails there is no way to clean up resources and you
+    /// should probably crash the process.
+    pub unsafe fn remove_userspace_mapping(
         &mut self,
         guest_phys_addr: u64,
         memory_size: u64,
@@ -1789,18 +1811,19 @@ impl MemoryManager {
         mergeable: bool,
         slot: u32,
     ) -> Result<(), Error> {
-        let mem_region = self.vm.make_user_memory_region(
-            slot,
-            guest_phys_addr,
-            memory_size,
-            userspace_addr,
-            false, /* readonly -- don't care */
-            false, /* log dirty */
-        );
-
-        self.vm
-            .remove_user_memory_region(mem_region)
-            .map_err(Error::RemoveUserMemoryRegion)?;
+        // SAFETY: The caller promises that the parameters are correct.
+        unsafe {
+            self.vm
+                .remove_user_memory_region(
+                    slot,
+                    guest_phys_addr,
+                    memory_size,
+                    userspace_addr,
+                    false, /* readonly -- don't care */
+                    false, /* log dirty */
+                )
+                .map_err(Error::RemoveUserMemoryRegion)?;
+        }
 
         // Mark the pages as unmergeable if there were previously marked as
         // mergeable.
