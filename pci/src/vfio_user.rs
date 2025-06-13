@@ -4,8 +4,8 @@
 //
 
 use std::any::Any;
+use std::os::fd::AsFd;
 use std::os::unix::prelude::AsRawFd;
-use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
 
 use hypervisor::HypervisorVmError;
@@ -24,6 +24,7 @@ use vm_memory::{
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::mmap::MmapRegion;
 use crate::vfio::{UserMemoryRegion, VFIO_COMMON_ID, Vfio, VfioCommon, VfioError};
 use crate::{
     BarReprogrammingParams, PciBarConfiguration, PciBdf, PciDevice, PciDeviceError, PciSubclass,
@@ -52,6 +53,8 @@ pub enum VfioUserPciDeviceError {
     InitializeLegacyInterrupts(#[source] VfioPciError),
     #[error("Failed to create VfioCommon")]
     CreateVfioCommon(#[source] VfioPciError),
+    #[error("Other OS error")]
+    Other(#[source] std::io::Error),
 }
 
 #[derive(Copy, Clone)]
@@ -110,10 +113,8 @@ impl VfioUserPciDevice {
         })
     }
 
-    /// # Safety
-    ///
-    /// Not known yet (TODO)
-    pub unsafe fn map_mmio_regions(&mut self) -> Result<(), VfioUserPciDeviceError> {
+    /// Map all of the MMIO regions.
+    pub fn map_mmio_regions(&mut self) -> Result<(), VfioUserPciDeviceError> {
         for mmio_region in &mut self.common.mmio_regions {
             let region_flags = self
                 .client
@@ -158,43 +159,39 @@ impl VfioUserPciDevice {
                     sparse_areas
                 };
 
-                for s in mmaps.iter() {
-                    // SAFETY: FFI call with correct arguments
-                    let host_addr = unsafe {
-                        libc::mmap(
-                            null_mut(),
-                            s.size as usize,
-                            prot,
-                            libc::MAP_SHARED,
-                            file_offset.as_ref().unwrap().file().as_raw_fd(),
-                            file_offset.as_ref().unwrap().start() as libc::off_t
-                                + s.offset as libc::off_t,
-                        )
-                    };
+                let file_offset = file_offset.as_ref().unwrap();
 
-                    if std::ptr::eq(host_addr, libc::MAP_FAILED) {
-                        error!(
-                            "Could not mmap regions, error:{}",
-                            std::io::Error::last_os_error()
-                        );
-                        continue;
-                    }
+                for s in mmaps.iter() {
+                    let mapping = match MmapRegion::mmap(
+                        s.size,
+                        prot,
+                        file_offset.file().as_fd(),
+                        file_offset.start(),
+                        s.offset,
+                    ) {
+                        Ok(mapping) => Arc::new(mapping),
+                        Err(e) => {
+                            error!(
+                                "Could not mmap sparse area (offset = 0x{:x}, size = 0x{:x}): {}",
+                                s.offset, s.size, e
+                            );
+                            return Err(VfioUserPciDeviceError::Other(e));
+                        }
+                    };
 
                     let user_memory_region = UserMemoryRegion {
                         slot: self.memory_slot_allocator.next_memory_slot(),
                         start: mmio_region.start.0 + s.offset,
-                        size: s.size,
-                        host_addr: host_addr as u64,
+                        mapping,
                     };
 
-                    // SAFETY: host_addr was just allocated with mmap()
-                    // and points to size bytes of valid address.
+                    // SAFETY: validity of len and host_addr guaranteed by hypervisor::mmap::MmapRegion
                     unsafe {
                         self.vm.create_user_memory_region(
                             user_memory_region.slot,
                             user_memory_region.start,
-                            user_memory_region.size,
-                            user_memory_region.host_addr,
+                            user_memory_region.mapping.len(),
+                            user_memory_region.mapping.addr(),
                             false,
                             false,
                         )
@@ -209,17 +206,17 @@ impl VfioUserPciDevice {
         Ok(())
     }
 
-    pub fn unmap_mmio_regions(&mut self) {
-        for mmio_region in self.common.mmio_regions.iter() {
-            for user_memory_region in mmio_region.user_memory_regions.iter() {
+    fn unmap_mmio_regions(&mut self) {
+        for mmio_region in self.common.mmio_regions.iter_mut() {
+            for user_memory_region in mmio_region.user_memory_regions.drain(..) {
                 // Remove region
-                // SAFETY: only valid regions are in user_memory_regions
+                // SAFETY: guaranteed by hypervisor::mmap::MmapRegion invariants
                 if let Err(e) = unsafe {
                     self.vm.remove_user_memory_region(
                         user_memory_region.slot,
                         user_memory_region.start,
-                        user_memory_region.size,
-                        user_memory_region.host_addr,
+                        user_memory_region.mapping.len(),
+                        user_memory_region.mapping.addr(),
                         false,
                         false,
                     )
@@ -229,22 +226,7 @@ impl VfioUserPciDevice {
 
                 self.memory_slot_allocator
                     .free_memory_slot(user_memory_region.slot);
-
-                // Remove mmaps
-                // SAFETY: FFI call with correct arguments
-                let ret = unsafe {
-                    libc::munmap(
-                        user_memory_region.host_addr as *mut libc::c_void,
-                        user_memory_region.size as usize,
-                    )
-                };
-                if ret != 0 {
-                    error!(
-                        "Could not unmap region {}, error:{}",
-                        mmio_region.index,
-                        std::io::Error::last_os_error()
-                    );
-                }
+                // memory will be unmapped on drop
             }
         }
     }
@@ -465,8 +447,8 @@ impl PciDevice for VfioUserPciDevice {
                         self.vm.remove_user_memory_region(
                             user_memory_region.slot,
                             user_memory_region.start,
-                            user_memory_region.size,
-                            user_memory_region.host_addr,
+                            user_memory_region.mapping.len(),
+                            user_memory_region.mapping.addr(),
                             false,
                             false,
                         )
@@ -486,8 +468,8 @@ impl PciDevice for VfioUserPciDevice {
                         self.vm.create_user_memory_region(
                             user_memory_region.slot,
                             user_memory_region.start,
-                            user_memory_region.size,
-                            user_memory_region.host_addr,
+                            user_memory_region.mapping.len(),
+                            user_memory_region.mapping.addr(),
                             false,
                             false,
                         )

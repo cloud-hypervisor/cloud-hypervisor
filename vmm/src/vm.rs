@@ -3469,8 +3469,8 @@ mod unit_tests {
                 vm.create_user_memory_region(
                     index as u32,
                     region.start_addr().raw_value(),
-                    region.len(),
-                    region.as_ptr() as u64,
+                    region.len().try_into().unwrap(),
+                    region.as_ptr(),
                     false,
                     false,
                 )
@@ -3607,8 +3607,8 @@ pub fn test_vm() {
             vm.create_user_memory_region(
                 index as u32,
                 region.start_addr().raw_value(),
-                region.len(),
-                region.as_ptr() as u64,
+                region.len().try_into().unwrap(),
+                region.as_ptr() as _,
                 false,
                 false,
             )

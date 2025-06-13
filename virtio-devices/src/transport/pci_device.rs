@@ -1028,7 +1028,7 @@ impl PciDevice for VirtioPciDevice {
             let bar = PciBarConfiguration::default()
                 .set_index(VIRTIO_SHM_BAR_INDEX)
                 .set_address(shm_list.addr.raw_value())
-                .set_size(shm_list.len);
+                .set_size(shm_list.mapping.size() as _);
 
             // The creation of the PCI BAR and its associated capabilities must
             // happen only during the creation of a brand new VM. When a VM is

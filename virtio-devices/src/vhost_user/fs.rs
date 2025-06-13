@@ -356,10 +356,9 @@ impl VirtioDevice for Fs {
         let mut mappings = Vec::new();
         if let Some(cache) = self.cache.as_ref() {
             mappings.push(UserspaceMapping {
-                host_addr: cache.0.host_addr,
                 mem_slot: cache.0.mem_slot,
                 addr: cache.0.addr,
-                len: cache.0.len,
+                mapping: cache.0.mapping.clone(),
                 mergeable: false,
             });
         }
