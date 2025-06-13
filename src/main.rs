@@ -907,7 +907,7 @@ mod unit_tests {
         PayloadConfig, RngConfig, VmConfig,
     };
 
-    use crate::test_util::tests::assert_args_sorted;
+    use crate::test_util::assert_args_sorted;
     use crate::{create_app, get_cli_options_sorted, prepare_default_values};
 
     fn get_vm_config_from_vec(args: &[&str]) -> VmConfig {

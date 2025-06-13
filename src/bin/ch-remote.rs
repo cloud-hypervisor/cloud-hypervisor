@@ -1142,7 +1142,7 @@ mod tests {
     use std::cmp::Ordering;
 
     use super::*;
-    use crate::test_util::tests::assert_args_sorted;
+    use crate::test_util::assert_args_sorted;
 
     #[test]
     fn test_cli_args_sorted() {
