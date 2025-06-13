@@ -16,13 +16,13 @@ use std::thread;
 use libc::EFD_NONBLOCK;
 use virtio_queue::Queue;
 use vm_device::UserspaceMapping;
-use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestUsize};
+use vm_memory::{GuestAddress, GuestMemoryAtomic};
 use vm_migration::{MigratableError, Pausable};
 use vm_virtio::{AccessPlatform, VirtioDeviceType};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{
-    ActivateError, ActivateResult, Error, GuestMemoryMmap, GuestRegionMmap,
+    ActivateError, ActivateResult, Error, GuestMemoryMmap, GuestRegionMmap, MmapRegion,
     VIRTIO_F_RING_INDIRECT_DESC,
 };
 
@@ -46,10 +46,9 @@ pub struct VirtioSharedMemory {
 
 #[derive(Clone)]
 pub struct VirtioSharedMemoryList {
-    pub host_addr: u64,
     pub mem_slot: u32,
     pub addr: GuestAddress,
-    pub len: GuestUsize,
+    pub mapping: Arc<MmapRegion>,
     pub region_list: Vec<VirtioSharedMemory>,
 }
 

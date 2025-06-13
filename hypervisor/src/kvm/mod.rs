@@ -718,8 +718,8 @@ impl vm::Vm for KvmVm {
         &self,
         slot: u32,
         guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
+        memory_size: usize,
+        userspace_addr: *mut u8,
         readonly: bool,
         log_dirty_pages: bool,
     ) -> vm::Result<()> {
@@ -736,8 +736,8 @@ impl vm::Vm for KvmVm {
         let mut region = kvm_userspace_memory_region {
             slot,
             guest_phys_addr,
-            memory_size,
-            userspace_addr,
+            memory_size: memory_size as u64,
+            userspace_addr: userspace_addr as usize as u64,
             flags,
         };
 
@@ -782,8 +782,8 @@ impl vm::Vm for KvmVm {
         &self,
         slot: u32,
         guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
+        memory_size: usize,
+        userspace_addr: *mut u8,
         readonly: bool,
         log_dirty_pages: bool,
     ) -> vm::Result<()> {
@@ -800,8 +800,8 @@ impl vm::Vm for KvmVm {
         let mut region = kvm_userspace_memory_region {
             slot,
             guest_phys_addr,
-            memory_size,
-            userspace_addr,
+            memory_size: memory_size as u64,
+            userspace_addr: userspace_addr as usize as u64,
             flags,
         };
 

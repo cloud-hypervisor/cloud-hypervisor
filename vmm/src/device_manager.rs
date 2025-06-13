@@ -99,7 +99,7 @@ use vm_device::interrupt::{
 };
 use vm_device::{Bus, BusDevice, BusDeviceSync, Resource, UserspaceMapping};
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::{Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion};
+use vm_memory::{Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion, VolatileMemory};
 #[cfg(target_arch = "x86_64")]
 use vm_memory::{GuestAddressSpace, GuestMemory};
 use vm_migration::protocol::MemoryRangeTable;
@@ -816,15 +816,15 @@ impl DeviceRelocation for AddressManager {
                 let mut virtio_dev = virtio_dev.lock().unwrap();
                 if let Some(mut shm_regions) = virtio_dev.get_shm_regions() {
                     if shm_regions.addr.raw_value() == old_base {
-                        // SAFETY: TODO what are the invariants here?
+                        // SAFETY: guaranteed by MmapRegion invariants
                         unsafe {
                             // Remove old mapping
                             self.vm
                                 .remove_user_memory_region(
                                     shm_regions.mem_slot,
                                     old_base,
-                                    shm_regions.len,
-                                    shm_regions.host_addr,
+                                    shm_regions.mapping.len(),
+                                    shm_regions.mapping.as_ptr(),
                                     false,
                                     false,
                                 )
@@ -839,8 +839,8 @@ impl DeviceRelocation for AddressManager {
                                 .create_user_memory_region(
                                     shm_regions.mem_slot,
                                     new_base,
-                                    shm_regions.len,
-                                    shm_regions.host_addr,
+                                    shm_regions.mapping.len(),
+                                    shm_regions.mapping.as_ptr(),
                                     false,
                                     false,
                                 )
@@ -3252,10 +3252,11 @@ impl DeviceManager {
                 },
         )
         .map_err(DeviceManagerError::NewMmapRegion)?;
-        let host_addr: u64 = mmap_region.as_ptr() as u64;
+        let host_addr = mmap_region.as_ptr();
 
         // SAFETY: host_addr points to region_size bytes of mmap-allocated memory.
         let mem_slot = unsafe {
+            let region_size = region_size.try_into().unwrap();
             self.memory_manager
                 .lock()
                 .unwrap()
@@ -3264,10 +3265,9 @@ impl DeviceManager {
         }?;
 
         let mapping = UserspaceMapping {
-            host_addr,
             mem_slot,
             addr: GuestAddress(region_base),
-            len: region_size,
+            mapping: Arc::new(mmap_region),
             mergeable: false,
         };
 
@@ -3277,7 +3277,6 @@ impl DeviceManager {
                 file,
                 GuestAddress(region_base),
                 mapping,
-                mmap_region,
                 self.force_iommu | pmem_cfg.iommu,
                 self.seccomp_action.clone(),
                 self.exit_evt
@@ -4013,16 +4012,13 @@ impl DeviceManager {
             resources,
         )?;
 
-        // SAFETY: TODO
         // Note it is required to call 'add_pci_device()' in advance to have the list of
         // mmio regions provisioned correctly
-        unsafe {
-            vfio_user_pci_device
-                .lock()
-                .unwrap()
-                .map_mmio_regions()
-                .map_err(DeviceManagerError::VfioUserMapRegion)
-        }?;
+        vfio_user_pci_device
+            .lock()
+            .unwrap()
+            .map_mmio_regions()
+            .map_err(DeviceManagerError::VfioUserMapRegion)?;
 
         let mut node = device_node!(vfio_user_name, vfio_user_pci_device);
 
@@ -4727,8 +4723,8 @@ impl DeviceManager {
                         .unwrap()
                         .remove_userspace_mapping(
                             mapping.addr.raw_value(),
-                            mapping.len,
-                            mapping.host_addr,
+                            mapping.mapping.size(),
+                            mapping.mapping.as_ptr() as _,
                             mapping.mergeable,
                             mapping.mem_slot,
                         )

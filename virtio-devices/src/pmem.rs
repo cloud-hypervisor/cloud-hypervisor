@@ -34,7 +34,7 @@ use super::{
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
-use crate::{GuestMemoryMmap, MmapRegion, VirtioInterrupt, VirtioInterruptType};
+use crate::{GuestMemoryMmap, VirtioInterrupt, VirtioInterruptType};
 
 const QUEUE_SIZE: u16 = 256;
 const QUEUE_SIZES: &[u16] = &[QUEUE_SIZE];
@@ -271,10 +271,6 @@ pub struct Pmem {
     mapping: UserspaceMapping,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
-
-    // Hold ownership of the memory that is allocated for the device
-    // which will be automatically dropped when the device is dropped
-    _region: MmapRegion,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -291,7 +287,6 @@ impl Pmem {
         disk: File,
         addr: GuestAddress,
         mapping: UserspaceMapping,
-        _region: MmapRegion,
         iommu: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
@@ -308,7 +303,7 @@ impl Pmem {
         } else {
             let config = VirtioPmemConfig {
                 start: addr.raw_value().to_le(),
-                size: (_region.size() as u64).to_le(),
+                size: (mapping.mapping.size() as u64).to_le(),
             };
 
             let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
@@ -335,7 +330,6 @@ impl Pmem {
             config,
             mapping,
             seccomp_action,
-            _region,
             exit_evt,
         })
     }
