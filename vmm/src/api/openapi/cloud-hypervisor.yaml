@@ -554,6 +554,8 @@ components:
           type: string
         host_data:
           type: string
+        mrconfigid:
+          type: string
       description: Payloads to boot in guest
 
     VmConfig:
