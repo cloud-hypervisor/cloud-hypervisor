@@ -283,6 +283,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitfield"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5acf59e2452f0c4b968b15ce4b9468f57b45f7733b919d68b19fcc39264bfb8"
+
+[[package]]
 name = "bitfield-struct"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -528,11 +534,13 @@ dependencies = [
  "acpi_tables",
  "anyhow",
  "arch",
+ "bitfield",
  "bitflags 2.9.0",
  "byteorder",
  "event_monitor",
  "hypervisor",
  "libc",
+ "linux-loader",
  "log",
  "num_enum",
  "pci",
@@ -544,6 +552,7 @@ dependencies = [
  "vm-memory",
  "vm-migration",
  "vmm-sys-util",
+ "zerocopy 0.8.24",
 ]
 
 [[package]]
@@ -1989,9 +1998,9 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "syn"
-version = "2.0.87"
+version = "2.0.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25aa4ce346d03a6dcd68dd8b4010bcb74e54e62c90c573f394c46eae99aba32d"
+checksum = "b09a44accad81e1ba1cd74a32461ba89dee89095ba17b32f5d03683b1b1fc2a0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2000,14 +2009,14 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.12.0"
+version = "3.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04cbcdd0c794ebb0d4cf35e88edd2f7d2c4c3e9a5a6dab322839b321c6a87a64"
+checksum = "7437ac7763b9b123ccf33c338a5cc1bac6f69b45a136c19bdd8a65e3916435bf"
 dependencies = [
- "cfg-if",
  "fastrand",
+ "getrandom 0.3.1",
  "once_cell",
- "rustix 0.38.34",
+ "rustix 1.0.7",
  "windows-sys 0.59.0",
 ]
 

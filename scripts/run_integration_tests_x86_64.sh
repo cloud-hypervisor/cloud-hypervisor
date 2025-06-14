@@ -100,7 +100,7 @@ fi
 popd || exit
 
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
-VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
+VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux-x86_64"
 if [ ! -f "$VMLINUX_IMAGE" ]; then
     # Prepare linux image (build from source or download pre-built)
     prepare_linux
@@ -191,6 +191,14 @@ if [ $RES -eq 0 ]; then
     export RUST_BACKTRACE=1
     # integration tests now do not reply on build feature "dbus_api"
     time cargo test $test_features "dbus_api::$test_filter" -- ${test_binary_args[*]}
+    RES=$?
+fi
+
+# Run tests on fw_cfg
+if [ $RES -eq 0 ]; then
+    cargo build --features "mshv,fw_cfg" --all --release --target "$BUILD_TARGET"
+    export RUST_BACKTRACE=1
+    time cargo test "fw_cfg::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
     RES=$?
 fi
 

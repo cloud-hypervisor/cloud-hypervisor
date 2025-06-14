@@ -137,7 +137,7 @@ update_workloads() {
     mkdir -p "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"
     # Mount the 'raw' image, replace the compressed kernel file and umount the working folder
     guestmount -a "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME" -m /dev/sda1 "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR" || exit 1
-    cp "$WORKLOADS_DIR"/Image.gz "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"/boot/vmlinuz
+    cp "$WORKLOADS_DIR"/Image-arm64.gz "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"/boot/vmlinuz
     guestunmount "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"
 
     # Build virtiofsd
@@ -247,6 +247,14 @@ if [ $RES -eq 0 ]; then
     cargo build --features "dbus_api" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
     time cargo test "dbus_api::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
+    RES=$?
+fi
+
+# Run tests on fw_cfg
+if [ $RES -eq 0 ]; then
+    cargo build --features "fw_cfg" --all --release --target "$BUILD_TARGET"
+    export RUST_BACKTRACE=1
+    time cargo test "fw_cfg::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
     RES=$?
 fi
 

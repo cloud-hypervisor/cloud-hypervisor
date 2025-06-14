@@ -54,7 +54,7 @@ chmod +x $CH_RELEASE_NAME
 popd || exit
 
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
-VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux"
+VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux-x86_64"
 if [ ! -f "$VMLINUX_IMAGE" ]; then
     # Prepare linux image (build from source or download pre-built)
     prepare_linux

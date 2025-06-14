@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+set -x
+
 hypervisor="kvm"
 test_filter=""
 build_kernel=false
@@ -56,11 +58,11 @@ build_custom_linux() {
     make ch_defconfig
     make -j "$(nproc)"
     if [ "${ARCH}" == "x86_64" ]; then
-        cp vmlinux "$WORKLOADS_DIR/" || exit 1
-        cp arch/x86/boot/bzImage "$WORKLOADS_DIR/" || exit 1
+        cp vmlinux "$WORKLOADS_DIR/vmlinux-x86_64" || exit 1
+        cp arch/x86/boot/bzImage "$WORKLOADS_DIR/bzImage-x86_64" || exit 1
     elif [ "${ARCH}" == "aarch64" ]; then
-        cp arch/arm64/boot/Image "$WORKLOADS_DIR/" || exit 1
-        cp arch/arm64/boot/Image.gz "$WORKLOADS_DIR/" || exit 1
+        cp arch/arm64/boot/Image "$WORKLOADS_DIR/Image-arm64" || exit 1
+        cp arch/arm64/boot/Image.gz "$WORKLOADS_DIR/Image-arm64.gz" || exit 1
     fi
     popd || exit
 }
@@ -138,7 +140,7 @@ download_hypervisor_fw() {
 }
 
 download_linux() {
-    KERNEL_TAG="ch-release-v6.12.8-20250114"
+    KERNEL_TAG="ch-release-v6.12.8-20250613"
     if [ -n "$AUTH_DOWNLOAD_TOKEN" ]; then
         echo "Using authenticated download from GitHub"
         KERNEL_URLS=$(curl --silent https://api.github.com/repos/cloud-hypervisor/linux/releases/tags/${KERNEL_TAG} \
