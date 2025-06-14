@@ -1679,18 +1679,22 @@ impl VfioPciDevice {
 
                     region.user_memory_regions.push(user_memory_region);
 
-                    let mem_region = self.vm.make_user_memory_region(
-                        user_memory_region.slot,
-                        user_memory_region.start,
-                        user_memory_region.size,
-                        user_memory_region.host_addr,
-                        false,
-                        false,
-                    );
+                    let mem_region = unsafe {
+                        self.vm.make_user_memory_region(
+                            user_memory_region.slot,
+                            user_memory_region.start,
+                            user_memory_region.size,
+                            user_memory_region.host_addr,
+                            false,
+                            false,
+                        )
+                    };
 
-                    self.vm
-                        .create_user_memory_region(mem_region)
-                        .map_err(VfioPciError::CreateUserMemoryRegion)?;
+                    unsafe {
+                        self.vm
+                            .create_user_memory_region(mem_region)
+                            .map_err(VfioPciError::CreateUserMemoryRegion)
+                    }?;
 
                     if !self.iommu_attached {
                         self.container
@@ -1729,16 +1733,18 @@ impl VfioPciDevice {
                 }
 
                 // Remove region
-                let r = self.vm.make_user_memory_region(
-                    user_memory_region.slot,
-                    user_memory_region.start,
-                    user_memory_region.size,
-                    user_memory_region.host_addr,
-                    false,
-                    false,
-                );
+                let r = unsafe {
+                    self.vm.make_user_memory_region(
+                        user_memory_region.slot,
+                        user_memory_region.start,
+                        user_memory_region.size,
+                        user_memory_region.host_addr,
+                        false,
+                        false,
+                    )
+                };
 
-                if let Err(e) = self.vm.remove_user_memory_region(r) {
+                if let Err(e) = unsafe { self.vm.remove_user_memory_region(r) } {
                     error!("Could not remove the userspace memory region: {}", e);
                 }
 
@@ -1916,18 +1922,24 @@ impl PciDevice for VfioPciDevice {
                     }
 
                     // Remove old region
-                    let old_mem_region = self.vm.make_user_memory_region(
-                        user_memory_region.slot,
-                        user_memory_region.start,
-                        user_memory_region.size,
-                        user_memory_region.host_addr,
-                        false,
-                        false,
-                    );
+                    // SAFETY: user_memory_regions has valid entries
+                    let old_mem_region = unsafe {
+                        self.vm.make_user_memory_region(
+                            user_memory_region.slot,
+                            user_memory_region.start,
+                            user_memory_region.size,
+                            user_memory_region.host_addr,
+                            false,
+                            false,
+                        )
+                    };
 
-                    self.vm
-                        .remove_user_memory_region(old_mem_region)
-                        .map_err(io::Error::other)?;
+                    // SAFETY: valid just-created memory region
+                    unsafe {
+                        self.vm
+                            .remove_user_memory_region(old_mem_region)
+                            .map_err(io::Error::other)
+                    }?;
 
                     // Update the user memory region with the correct start address.
                     if new_base > old_base {
@@ -1937,18 +1949,24 @@ impl PciDevice for VfioPciDevice {
                     }
 
                     // Insert new region
-                    let new_mem_region = self.vm.make_user_memory_region(
-                        user_memory_region.slot,
-                        user_memory_region.start,
-                        user_memory_region.size,
-                        user_memory_region.host_addr,
-                        false,
-                        false,
-                    );
+                    // SAFETY: mmio_regions only has valid values
+                    let new_mem_region = unsafe {
+                        self.vm.make_user_memory_region(
+                            user_memory_region.slot,
+                            user_memory_region.start,
+                            user_memory_region.size,
+                            user_memory_region.host_addr,
+                            false,
+                            false,
+                        )
+                    };
 
-                    self.vm
-                        .create_user_memory_region(new_mem_region)
-                        .map_err(io::Error::other)?;
+                    // SAFETY: valid just-created memory region
+                    unsafe {
+                        self.vm
+                            .create_user_memory_region(new_mem_region)
+                            .map_err(io::Error::other)
+                    }?;
 
                     // Map the moved mmio region to vfio container
                     if !self.iommu_attached {

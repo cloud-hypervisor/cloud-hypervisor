@@ -3431,17 +3431,21 @@ pub fn test_vm() {
     let vm = hv.create_vm().expect("new VM creation failed");
 
     for (index, region) in mem.iter().enumerate() {
-        let mem_region = vm.make_user_memory_region(
-            index as u32,
-            region.start_addr().raw_value(),
-            region.len(),
-            region.as_ptr() as u64,
-            false,
-            false,
-        );
+        let mem_region = unsafe {
+            vm.make_user_memory_region(
+                index as u32,
+                region.start_addr().raw_value(),
+                region.len(),
+                region.as_ptr() as u64,
+                false,
+                false,
+            )
+        };
 
-        vm.create_user_memory_region(mem_region)
-            .expect("Cannot configure guest memory");
+        unsafe {
+            vm.create_user_memory_region(mem_region)
+                .expect("Cannot configure guest memory")
+        };
     }
     mem.write_slice(&code, load_addr)
         .expect("Writing code to memory failed");

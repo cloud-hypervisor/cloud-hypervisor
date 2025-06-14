@@ -4,14 +4,12 @@ Intel® Software Guard Extensions (Intel® SGX) is an Intel technology designed
 to increase the security of application code and data. Cloud Hypervisor supports
 SGX virtualization through KVM. Because SGX is built on hardware features that
 cannot be emulated in software, virtualizing SGX requires support in KVM and in
-the host kernel. The required Linux and KVM changes can be found in the
-[KVM SGX Tree](https://github.com/intel/kvm-sgx).
+the host kernel. The required Linux and KVM changes can be found in Linux 5.13+.
 
 Utilizing SGX in the guest requires a kernel/OS with SGX support, e.g. a kernel
 since release 5.11, see
-[here](https://www.intel.com/content/www/us/en/developer/tools/software-guard-extensions/linux-overview.html)
-or the [KVM SGX Tree](https://github.com/intel/kvm-sgx). Running KVM SGX as the
-guest kernel allows nested virtualization of SGX.
+[here](https://www.intel.com/content/www/us/en/developer/tools/software-guard-extensions/linux-overview.html).
+Running Linux 5.13+ as the guest kernel allows nested virtualization of SGX.
 
 For more information about SGX, please refer to the [SGX Homepage](https://www.intel.com/content/www/us/en/developer/tools/software-guard-extensions/linux-overview.html).
 
