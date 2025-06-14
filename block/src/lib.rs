@@ -57,7 +57,7 @@ use vm_memory::{
 };
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
-use vmm_sys_util::{aio, ioctl_io_nr, ioctl_ioc_nr};
+use vmm_sys_util::{aio, ioctl_io_nr};
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::vhdx::VhdxError;

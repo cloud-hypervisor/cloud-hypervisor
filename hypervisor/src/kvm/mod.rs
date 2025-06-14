@@ -44,7 +44,7 @@ pub use crate::riscv64::{
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset_of};
-use crate::{cpu, hypervisor, vec_with_array_field, HypervisorType};
+use crate::{cpu, hypervisor, HypervisorType};
 #[cfg(target_arch = "riscv64")]
 use crate::{offset_of, riscv64_reg_id};
 // x86_64 dependencies
@@ -106,7 +106,7 @@ pub use kvm_ioctls::{Cap, Kvm, VcpuExit};
 use thiserror::Error;
 use vfio_ioctls::VfioDeviceFd;
 #[cfg(feature = "tdx")]
-use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_ioc_nr, ioctl_iowr_nr};
+use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_iowr_nr};
 pub use {kvm_bindings, kvm_ioctls};
 
 #[cfg(target_arch = "aarch64")]
@@ -119,8 +119,6 @@ const KVM_CAP_SGX_ATTRIBUTE: u32 = 196;
 
 #[cfg(target_arch = "x86_64")]
 use vmm_sys_util::ioctl_io_nr;
-#[cfg(all(not(feature = "tdx"), target_arch = "x86_64"))]
-use vmm_sys_util::ioctl_ioc_nr;
 
 #[cfg(target_arch = "x86_64")]
 ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
@@ -693,10 +691,6 @@ impl vm::Vm for KvmVm {
     /// entries, as per the `KVM_SET_GSI_ROUTING` ioctl.
     ///
     fn set_gsi_routing(&self, entries: &[IrqRoutingEntry]) -> vm::Result<()> {
-        let mut irq_routing =
-            vec_with_array_field::<kvm_irq_routing, kvm_irq_routing_entry>(entries.len());
-        irq_routing[0].nr = entries.len() as u32;
-        irq_routing[0].flags = 0;
         let entries: Vec<kvm_irq_routing_entry> = entries
             .iter()
             .map(|entry| match entry {
@@ -706,17 +700,11 @@ impl vm::Vm for KvmVm {
             })
             .collect();
 
-        // SAFETY: irq_routing initialized with entries.len() and now it is being turned into
-        // entries_slice with entries.len() again. It is guaranteed to be large enough to hold
-        // everything from entries.
-        unsafe {
-            let entries_slice: &mut [kvm_irq_routing_entry] =
-                irq_routing[0].entries.as_mut_slice(entries.len());
-            entries_slice.copy_from_slice(&entries);
-        }
+        let irq_routing =
+            kvm_bindings::fam_wrappers::KvmIrqRouting::from_entries(&entries).unwrap();
 
         self.fd
-            .set_gsi_routing(&irq_routing[0])
+            .set_gsi_routing(&irq_routing)
             .map_err(|e| vm::HypervisorVmError::SetGsiRouting(e.into()))
     }
 
@@ -2956,11 +2944,15 @@ impl KvmVcpu {
     ///
     fn set_xsave(&self, xsave: &XsaveState) -> cpu::Result<()> {
         let xsave: kvm_bindings::kvm_xsave = (*xsave).clone().into();
-        self.fd
-            .lock()
-            .unwrap()
-            .set_xsave(&xsave)
-            .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
+        // SAFETY: Here we trust the kernel not to read past the end of the kvm_xsave struct
+        // when calling the kvm-ioctl library function.
+        unsafe {
+            self.fd
+                .lock()
+                .unwrap()
+                .set_xsave(&xsave)
+                .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
+        }
     }
 
     #[cfg(target_arch = "x86_64")]
