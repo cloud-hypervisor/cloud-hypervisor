@@ -1713,9 +1713,9 @@ impl MshvVcpu {
             set_gp_regs_field_ptr!(vp_reg_page, rax, ret_rax);
             // SAFETY: access raw pointer to reg page, access union fields
             unsafe {
+                (*vp_reg_page).dirty |= 1 << HV_X64_REGISTER_CLASS_GENERAL;
                 (*vp_reg_page).__bindgen_anon_1.__bindgen_anon_1.rip = info.header.rip + insn_len;
                 (*vp_reg_page).dirty |= 1 << HV_X64_REGISTER_CLASS_IP;
-                (*vp_reg_page).dirty |= 1 << HV_X64_REGISTER_CLASS_GENERAL;
             }
         } else {
             let arr_reg_name_value = [
