@@ -533,9 +533,9 @@ fn direct_kernel_boot_path() -> PathBuf {
 
     let mut kernel_path = workload_path;
     #[cfg(target_arch = "x86_64")]
-    kernel_path.push("vmlinux");
+    kernel_path.push("vmlinux-x86_64");
     #[cfg(target_arch = "aarch64")]
-    kernel_path.push("Image");
+    kernel_path.push("Image-arm64");
 
     kernel_path
 }
@@ -3180,7 +3180,7 @@ mod common_parallel {
         let mut kernel_path = direct_kernel_boot_path();
         // Replace the default kernel with the bzImage.
         kernel_path.pop();
-        kernel_path.push("bzImage");
+        kernel_path.push("bzImage-x86_64");
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=1"])
@@ -6045,7 +6045,7 @@ mod common_parallel {
         #[cfg(target_arch = "x86_64")]
         {
             let mut pvh_kernel_path = workload_path.clone();
-            pvh_kernel_path.push("vmlinux");
+            pvh_kernel_path.push("vmlinux-x86_64");
             kernels.push(pvh_kernel_path);
         }
 
