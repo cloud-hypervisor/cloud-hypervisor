@@ -969,16 +969,15 @@ impl MemoryManager {
         )
         .unwrap();
         unsafe {
-            let uefi_mem_region = self.vm.make_user_memory_region(
-                uefi_mem_slot,
-                uefi_region.start_addr().raw_value(),
-                uefi_region.len(),
-                uefi_region.as_ptr() as u64,
-                false,
-                false,
-            );
             self.vm
-                .create_user_memory_region(uefi_mem_region)
+                .create_user_memory_region(
+                    uefi_mem_slot,
+                    uefi_region.start_addr().raw_value(),
+                    uefi_region.len(),
+                    uefi_region.as_ptr() as u64,
+                    false,
+                    false,
+                )
                 .map_err(Error::CreateUefiFlash)?;
         }
         let uefi_flash =
@@ -1739,14 +1738,6 @@ impl MemoryManager {
         log_dirty: bool,
     ) -> Result<u32, Error> {
         let slot = self.allocate_memory_slot();
-        let mem_region = self.vm.make_user_memory_region(
-            slot,
-            guest_phys_addr,
-            memory_size,
-            userspace_addr,
-            readonly,
-            log_dirty,
-        );
 
         info!(
             "Creating userspace mapping: {:x} -> {:x} {:x}, slot {}",
@@ -1754,7 +1745,14 @@ impl MemoryManager {
         );
 
         self.vm
-            .create_user_memory_region(mem_region)
+            .create_user_memory_region(
+                slot,
+                guest_phys_addr,
+                memory_size,
+                userspace_addr,
+                readonly,
+                log_dirty,
+            )
             .map_err(Error::CreateUserMemoryRegion)?;
 
         // SAFETY: the address and size are valid since the
@@ -1821,17 +1819,15 @@ impl MemoryManager {
         mergeable: bool,
         slot: u32,
     ) -> Result<(), Error> {
-        let mem_region = self.vm.make_user_memory_region(
-            slot,
-            guest_phys_addr,
-            memory_size,
-            userspace_addr,
-            false, /* readonly -- don't care */
-            false, /* log dirty */
-        );
-
         self.vm
-            .remove_user_memory_region(mem_region)
+            .remove_user_memory_region(
+                slot,
+                guest_phys_addr,
+                memory_size,
+                userspace_addr,
+                false, /* readonly -- don't care */
+                false, /* log dirty */
+            )
             .map_err(Error::RemoveUserMemoryRegion)?;
 
         // Mark the pages as unmergeable if there were previously marked as
