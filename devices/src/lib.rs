@@ -24,6 +24,8 @@ pub mod gic;
 pub mod interrupt_controller;
 #[cfg(target_arch = "x86_64")]
 pub mod ioapic;
+#[cfg(feature = "ivshmem")]
+pub mod ivshmem;
 pub mod legacy;
 #[cfg(feature = "pvmemcontrol")]
 pub mod pvmemcontrol;
@@ -32,8 +34,21 @@ pub mod pvpanic;
 #[cfg(not(target_arch = "riscv64"))]
 pub mod tpm;
 
+use vm_memory::{GuestAddress, GuestUsize};
+
 pub use self::acpi::{AcpiGedDevice, AcpiPmTimerDevice, AcpiShutdownDevice};
+#[cfg(feature = "ivshmem")]
+pub use self::ivshmem::IvshmemDevice;
 pub use self::pvpanic::{PvPanicDevice, PVPANIC_DEVICE_MMIO_SIZE};
+
+#[derive(Clone)]
+pub struct UserspaceMapping {
+    pub host_addr: u64,
+    pub mem_slot: u32,
+    pub addr: GuestAddress,
+    pub len: GuestUsize,
+    pub mergeable: bool,
+}
 
 bitflags! {
     pub struct AcpiNotificationFlags: u8 {
