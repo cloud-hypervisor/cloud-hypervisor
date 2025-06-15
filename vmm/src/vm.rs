@@ -545,6 +545,18 @@ impl Vm {
             mmio_bus: mmio_bus.clone(),
         });
 
+        #[cfg(feature = "tdx")]
+        let mrconfigid =
+            config
+                .lock()
+                .unwrap()
+                .payload
+                .clone()
+                .map(|payload| match payload.mrconfigid {
+                    Some(id) => id.to_string(),
+                    None => "".to_string(),
+                });
+
         let cpus_config = { &config.lock().unwrap().cpus.clone() };
         let cpu_manager = cpu::CpuManager::new(
             cpus_config,
@@ -582,7 +594,7 @@ impl Vm {
         if tdx_enabled {
             let cpuid = cpu_manager.lock().unwrap().common_cpuid();
             let max_vcpus = cpu_manager.lock().unwrap().max_vcpus() as u32;
-            vm.tdx_init(&cpuid, max_vcpus)
+            vm.tdx_init(&cpuid, max_vcpus, &mrconfigid)
                 .map_err(Error::InitializeTdxVm)?;
         }
 
