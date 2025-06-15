@@ -820,25 +820,28 @@ impl DeviceRelocation for AddressManager {
                 {
                     // SAFETY: TODO what are the invariants here?
                     unsafe {
-                        let mem_region = self.vm.make_user_memory_region(
-                            shm_regions.mem_slot,
-                            old_base,
-                            shm_regions.len,
-                            shm_regions.host_addr,
-                            false,
-                            false,
-                        );
-
-                        self.vm.remove_user_memory_region(mem_region).map_err(|e| {
-                            io::Error::other(format!("failed to remove user memory region: {e:?}"))
-                        })?
+                        // Remove old mapping
+                        self.vm
+                            .remove_user_memory_region(
+                                shm_regions.mem_slot,
+                                old_base,
+                                shm_regions.len,
+                                shm_regions.host_addr,
+                                false,
+                                false,
+                            )
+                            .map_err(|e| {
+                                io::Error::other(format!(
+                                    "failed to remove user memory region: {e:?}"
+                                ))
+                            })?;
                     }
 
-                    // SAFETY: TODO
+                    // SAFETY: TODO what are the invariants here?
                     unsafe {
                         // Create new mapping by inserting new region to KVM.
-                        let mem_region = {
-                            self.vm.make_user_memory_region(
+                        self.vm
+                            .create_user_memory_region(
                                 shm_regions.mem_slot,
                                 new_base,
                                 shm_regions.len,
@@ -846,11 +849,11 @@ impl DeviceRelocation for AddressManager {
                                 false,
                                 false,
                             )
-                        };
-
-                        self.vm.create_user_memory_region(mem_region).map_err(|e| {
-                            io::Error::other(format!("failed to create user memory regions: {e:?}"))
-                        })?;
+                            .map_err(|e| {
+                                io::Error::other(format!(
+                                    "failed to create user memory regions: {e:?}"
+                                ))
+                            })?;
                     }
 
                     // Update shared memory regions to reflect the new mapping.

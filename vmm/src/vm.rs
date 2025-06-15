@@ -3536,16 +3536,15 @@ pub fn test_vm() {
         // SAFETY: region was allocated by GuestMemoryMmap which ensures the
         // needed invariants.
         unsafe {
-            let mem_region = vm.make_user_memory_region(
+            vm.create_user_memory_region(
                 index as u32,
                 region.start_addr().raw_value(),
                 region.len(),
                 region.as_ptr() as u64,
                 false,
                 false,
-            );
-            vm.create_user_memory_region(mem_region)
-                .expect("Cannot configure guest memory")
+            )
+            .expect("Cannot configure guest memory")
         }
     }
     mem.write_slice(&code, load_addr)
