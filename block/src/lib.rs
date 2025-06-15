@@ -744,7 +744,7 @@ where
         Ok(())
     }
 
-    fn file(&mut self) -> MutexGuard<F>;
+    fn file(&mut self) -> MutexGuard<'_, F>;
 }
 
 pub enum ImageType {
