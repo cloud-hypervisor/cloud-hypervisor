@@ -65,7 +65,7 @@ pub trait DiskFile: Send {
     ///
     /// The file descriptor is supposed to be used for `fcntl()` calls but no
     /// other operation.
-    fn fd(&mut self) -> BorrowedDiskFd;
+    fn fd(&mut self) -> BorrowedDiskFd<'_>;
 }
 
 #[derive(Error, Debug)]
