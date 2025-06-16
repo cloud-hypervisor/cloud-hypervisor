@@ -7,3 +7,4 @@
 /rpm/SOURCES
 /.vscode
 /vendor
+__pycache__
