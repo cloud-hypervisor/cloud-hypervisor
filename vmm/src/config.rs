@@ -1484,6 +1484,11 @@ impl NetConfig {
         if let Some(fds) = self.fds.as_ref() {
             for fd in fds {
                 if *fd <= 2 {
+                    // If we see this, most likely our live migration path for network FDs failed.
+                    log::debug!(
+                        "virtio-net devices {:?} unexpectedly reports invalid FD",
+                        self.id
+                    );
                     return Err(ValidationError::VnetReservedFd(*fd));
                 }
             }
@@ -2242,6 +2247,27 @@ pub struct RestoredNetConfig {
     // in the HTTP API handler.
     #[serde(default, deserialize_with = "deserialize_restorednetconfig_fds")]
     pub fds: Option<Vec<i32>>,
+}
+
+impl RestoredNetConfig {
+    // Ensure all net devices from 'VmConfig' backed by FDs have a
+    // corresponding 'RestoreNetConfig' with a matched 'id' and expected
+    // number of FDs.
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        let found = vm_config
+            .net
+            .iter()
+            .flatten()
+            .any(|net| net.id.as_ref() == Some(&self.id));
+
+        if !found {
+            Err(ValidationError::RestoreMissingRequiredNetId(
+                self.id.clone(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 fn deserialize_restorednetconfig_fds<'de, D>(

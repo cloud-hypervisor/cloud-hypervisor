@@ -45,7 +45,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(feature = "dbus_api")]
 pub use self::dbus::start_dbus_thread;
 pub use self::http::{start_http_fd_thread, start_http_path_thread};
-use crate::config::RestoreConfig;
+use crate::config::{RestoreConfig, RestoredNetConfig};
 use crate::device_tree::DeviceTree;
 use crate::vm::{Error as VmError, VmState};
 use crate::vm_config::{
@@ -249,6 +249,8 @@ pub struct VmCoredumpData {
 pub struct VmReceiveMigrationData {
     /// URL for the reception of migration state
     pub receiver_url: String,
+    /// Map with new network FDs on the new host.
+    pub net_fds: Option<Vec<RestoredNetConfig>>,
 }
 
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
