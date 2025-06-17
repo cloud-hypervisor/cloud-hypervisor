@@ -471,8 +471,8 @@ impl Tap {
         ifreq
     }
 
-    pub fn get_if_name(&self) -> Vec<u8> {
-        self.if_name.clone()
+    pub fn get_if_name(&self) -> &[u8] {
+        &self.if_name
     }
 
     #[cfg(fuzzing)]
