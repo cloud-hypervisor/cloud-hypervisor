@@ -18,6 +18,7 @@ use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_queue::{DescriptorChain, Queue, QueueT};
+use vm_device::UserspaceMapping;
 use vm_memory::{
     Address, ByteValued, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryLoadGuard,
@@ -28,8 +29,8 @@ use vmm_sys_util::eventfd::EventFd;
 
 use super::{
     ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
-    Error as DeviceError, UserspaceMapping, VirtioCommon, VirtioDevice, VirtioDeviceType,
-    EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+    Error as DeviceError, VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST,
+    VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
