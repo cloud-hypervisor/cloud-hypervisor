@@ -23,6 +23,8 @@ use std::result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
+#[cfg(feature = "tdx")]
+use hex::decode_to_slice;
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -937,19 +939,29 @@ impl vm::Vm for KvmVm {
     /// Initialize TDX for this VM
     ///
     #[cfg(feature = "tdx")]
-    fn tdx_init(&self, cpuid: &[CpuIdEntry], max_vcpus: u32) -> vm::Result<()> {
+    fn tdx_init(
+        &self,
+        cpuid: &[CpuIdEntry],
+        max_vcpus: u32,
+        mrconfigid_opt: &Option<String>,
+    ) -> vm::Result<()> {
         const TDX_ATTR_SEPT_VE_DISABLE: usize = 28;
 
         let mut cpuid: Vec<kvm_bindings::kvm_cpuid_entry2> =
             cpuid.iter().map(|e| (*e).into()).collect();
         cpuid.resize(256, kvm_bindings::kvm_cpuid_entry2::default());
 
+        let mut mrconfigid = [0u8; 48];
+        if let Some(mrconfigid_str) = mrconfigid_opt {
+            decode_to_slice(mrconfigid_str, &mut mrconfigid as &mut [u8]).unwrap();
+        }
+
         #[repr(C)]
         struct TdxInitVm {
             attributes: u64,
             max_vcpus: u32,
             padding: u32,
-            mrconfigid: [u64; 6],
+            mrconfigid: [u8; 48],
             mrowner: [u64; 6],
             mrownerconfig: [u64; 6],
             cpuid_nent: u32,
@@ -960,7 +972,7 @@ impl vm::Vm for KvmVm {
             attributes: 1 << TDX_ATTR_SEPT_VE_DISABLE,
             max_vcpus,
             padding: 0,
-            mrconfigid: [0; 6],
+            mrconfigid,
             mrowner: [0; 6],
             mrownerconfig: [0; 6],
             cpuid_nent: cpuid.len() as u32,
