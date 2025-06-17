@@ -129,6 +129,9 @@ fn ipv6_mask_to_prefix(mask: Ipv6Addr) -> Result<u8> {
 }
 
 impl Tap {
+    /// The default naming scheme for Tap devices that are created by Cloud Hypervisor.
+    pub const DEFAULT_NAME_SCHEME: &'static str = "vmtap%d";
+
     unsafe fn ioctl_with_mut_ref<F: AsRawFd, T>(fd: &F, req: c_ulong, arg: &mut T) -> Result<()> {
         let ret = ioctl_with_mut_ref(fd, req, arg);
         if ret < 0 {
@@ -224,7 +227,7 @@ impl Tap {
 
     /// Create a new tap interface.
     pub fn new(num_queue_pairs: usize) -> Result<Tap> {
-        Self::open_named("vmtap%d", num_queue_pairs, None)
+        Self::open_named(Self::DEFAULT_NAME_SCHEME, num_queue_pairs, None)
     }
 
     pub fn from_tap_fd(fd: RawFd, num_queue_pairs: usize) -> Result<Tap> {
