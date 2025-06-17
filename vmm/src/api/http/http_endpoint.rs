@@ -193,6 +193,30 @@ vm_action_put_handler_body!(VmSendMigration);
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 vm_action_put_handler_body!(VmCoredump);
 
+// Special Handling for virtio-net Devices Backed by Network FDs
+//
+// # Prerequisites
+// This mechanism requires that the control software connects to Cloud
+// Hypervisor uses a UNIX domain socket and that it passes file descriptors
+// (FDs) via ancillary messages—specifically using the SCM_RIGHTS mechanism
+// described in cmsg(3). These ancillary messages must accompany the primary
+// payload (HTTP JSON REST API in this case).
+//
+// # Motivation and Rationale
+// File descriptor numbers are specific to the process in which they are created
+// and therefore cannot be assumed to have any meaning in another process. When
+// configuring virtio-net devices via Cloud Hypervisor’s HTTP REST API, any FD
+// number provided by the client is almost certainly invalid within the
+// hypervisor process.
+//
+// To address this, file descriptors are transmitted over UNIX domain sockets
+// using the SCM_RIGHTS control message mechanism. The Linux kernel handles
+// these messages by duplicating the referenced FDs into the receiving process,
+// thereby ensuring they are valid and usable in the target context.
+//
+// Once these valid file descriptors are received here, we integrate the actual
+// FDs into the virtual machine configuration, allowing the virtio-net device to
+// function correctly with its backing network resources.
 impl PutHandler for VmAddNet {
     fn handle_request(
         &'static self,
@@ -253,6 +277,9 @@ impl PutHandler for VmResize {
 
 impl GetHandler for VmResize {}
 
+// Special Handling for virtio-net Devices Backed by Network FDs
+//
+// See above.
 impl PutHandler for VmRestore {
     fn handle_request(
         &'static self,
