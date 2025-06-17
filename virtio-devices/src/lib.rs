@@ -47,8 +47,8 @@ pub use self::balloon::Balloon;
 pub use self::block::{Block, BlockState};
 pub use self::console::{Console, ConsoleResizer, Endpoint};
 pub use self::device::{
-    DmaRemapping, UserspaceMapping, VirtioCommon, VirtioDevice, VirtioInterrupt,
-    VirtioInterruptType, VirtioSharedMemoryList,
+    DmaRemapping, VirtioCommon, VirtioDevice, VirtioInterrupt, VirtioInterruptType,
+    VirtioSharedMemoryList,
 };
 pub use self::epoll_helper::{
     EpollHelper, EpollHelperError, EpollHelperHandler, EPOLL_HELPER_EVENT_LAST,
