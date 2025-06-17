@@ -661,6 +661,24 @@ impl Net {
 
 impl Drop for Net {
     fn drop(&mut self) {
+        // Get a comma-separated list of the interface names of the tap devices
+        // associated with this network device.
+        let ifnames_str = self
+            .taps
+            .iter()
+            .map(|tap| std::str::from_utf8(tap.get_if_name()).expect("should be valid utf-8"))
+            .fold(String::new(), |mut acc, elem| {
+                if !acc.is_empty() {
+                    acc.push(',');
+                }
+                acc.push_str(elem);
+                acc
+            });
+        debug!(
+            "virtio-network device dropped: id={}, ifnames=[{ifnames_str}]",
+            self.id
+        );
+
         if let Some(kill_evt) = self.common.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);
