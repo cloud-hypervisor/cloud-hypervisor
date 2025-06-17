@@ -15,6 +15,7 @@ use std::thread;
 
 use libc::EFD_NONBLOCK;
 use virtio_queue::Queue;
+use vm_device::UserspaceMapping;
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestUsize};
 use vm_migration::{MigratableError, Pausable};
 use vm_virtio::{AccessPlatform, VirtioDeviceType};
@@ -35,15 +36,6 @@ pub trait VirtioInterrupt: Send + Sync {
     fn notifier(&self, _int_type: VirtioInterruptType) -> Option<EventFd> {
         None
     }
-}
-
-#[derive(Clone)]
-pub struct UserspaceMapping {
-    pub host_addr: u64,
-    pub mem_slot: u32,
-    pub addr: GuestAddress,
-    pub len: GuestUsize,
-    pub mergeable: bool,
 }
 
 #[derive(Clone)]

@@ -95,7 +95,7 @@ use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
-use vm_device::{Bus, BusDevice, BusDeviceSync, Resource};
+use vm_device::{Bus, BusDevice, BusDeviceSync, Resource, UserspaceMapping};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion};
 #[cfg(target_arch = "x86_64")]
@@ -3231,7 +3231,7 @@ impl DeviceManager {
             .create_userspace_mapping(region_base, region_size, host_addr, false, false, false)
             .map_err(DeviceManagerError::MemoryManager)?;
 
-        let mapping = virtio_devices::UserspaceMapping {
+        let mapping = UserspaceMapping {
             host_addr,
             mem_slot,
             addr: GuestAddress(region_base),
