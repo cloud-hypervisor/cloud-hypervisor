@@ -55,6 +55,9 @@ jobs:
       - name: Build (default features + fw_cfg)
         run: cargo rustc --locked --bin cloud-hypervisor --features "fw_cfg" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
+      - name: Build (default features + ivshmem)
+        run: cargo rustc --locked --bin cloud-hypervisor --features "ivshmem" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+
       - name: Build (mshv)
         run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "mshv"  -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
