@@ -4,6 +4,33 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+//! # HTTP Endpoints of the Cloud Hypervisor API
+//!
+//! ## Special Handling for Devices Backed by Network File Descriptors (FDs) (e.g., virtio-net)
+//!
+//! Some of the HTTP handlers here implement special logic for devices
+//! **backed by network FDs** to enable live-migration, state save/resume
+//! (restore), and similar VM lifecycle events.
+//!
+//! The utilized mechanism requires that the control software (e.g., libvirt)
+//! connects to Cloud Hypervisor by using a UNIX domain socket and that it
+//! passes file descriptors (FDs) via _ancillary_ messages - specifically using
+//! the `SCM_RIGHTS` mechanism described in [`cmsg(3)`]. These ancillary
+//! messages must accompany the primary payload (HTTP JSON REST API in this
+//! case). The Linux kernel handles these messages by `dup()`ing the referenced
+//! FDs from the sender process into the receiving process, thereby ensuring
+//! they are valid and usable in the target context.
+//!
+//! Once these valid file descriptors are received here, we integrate the actual
+//! FDs into the VM's configuration, allowing the device to function correctly
+//! with its backing network resources.
+//!
+//! We can receive these FDs as we use a [special HTTP library] that is aware
+//! of the described mechanism.
+//!
+//! [`cmsg(3)`]: https://man7.org/linux/man-pages/man3/cmsg.3.html
+//! [special HTTP library]: https://github.com/firecracker-microvm/micro-http
+
 use std::fs::File;
 use std::os::unix::io::IntoRawFd;
 use std::sync::mpsc::Sender;
@@ -193,6 +220,8 @@ vm_action_put_handler_body!(VmSendMigration);
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 vm_action_put_handler_body!(VmCoredump);
 
+// Special handling for virtio-net devices backed by network FDs.
+// See module description for more info.
 impl PutHandler for VmAddNet {
     fn handle_request(
         &'static self,
@@ -249,6 +278,8 @@ impl PutHandler for VmResize {
 
 impl GetHandler for VmResize {}
 
+// Special handling for virtio-net devices backed by network FDs.
+// See module description for more info.
 impl PutHandler for VmRestore {
     fn handle_request(
         &'static self,
