@@ -58,6 +58,8 @@ landlock = "0.4.2"
 libc = { workspace = true }
 linux-loader = { workspace = true, features = ["bzimage", "elf", "pe"] }
 log = { workspace = true }
+# Special fork of micro_http that combines HTTP traffic over a UNIX domain
+# socket with UNIX' SCM_RIGHTS mechanism for transferring file descriptors.
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 mshv-bindings = { workspace = true, features = [
   "fam-wrappers",
