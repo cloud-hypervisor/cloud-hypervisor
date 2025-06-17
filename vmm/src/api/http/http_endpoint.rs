@@ -209,6 +209,10 @@ impl PutHandler for VmAddNet {
             }
             if !files.is_empty() {
                 let fds = files.drain(..).map(|f| f.into_raw_fd()).collect();
+                debug!(
+                    "Setting network FDs received via UNIX domain socket in virtio-net device: id={:?}, fds={fds:?}",
+                    net_cfg.id
+                );
                 net_cfg.fds = Some(fds);
             }
             self.send(api_notifier, api_sender, net_cfg)
