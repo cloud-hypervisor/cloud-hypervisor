@@ -114,7 +114,7 @@ pub fn open_tap(
             tap.set_vnet_hdr_size(vnet_hdr_size)
                 .map_err(Error::TapSetVnetHdrSize)?;
 
-            ifname = String::from_utf8(tap.get_if_name()).unwrap();
+            ifname = String::from_utf8(tap.get_if_name().to_vec()).unwrap();
         } else {
             tap = Tap::open_named(ifname.as_str(), num_rx_q, flags).map_err(Error::TapOpen)?;
 
