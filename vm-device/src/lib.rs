@@ -4,6 +4,7 @@
 //
 
 use serde::{Deserialize, Serialize};
+use vm_memory::{GuestAddress, GuestUsize};
 
 mod bus;
 pub mod dma_mapping;
@@ -57,4 +58,13 @@ pub enum Resource {
     MacAddress(String),
     /// KVM memslot index.
     KvmMemSlot(u32),
+}
+
+#[derive(Clone)]
+pub struct UserspaceMapping {
+    pub host_addr: u64,
+    pub mem_slot: u32,
+    pub addr: GuestAddress,
+    pub len: GuestUsize,
+    pub mergeable: bool,
 }

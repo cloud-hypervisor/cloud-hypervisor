@@ -11,6 +11,7 @@ use serde_with::{serde_as, Bytes};
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
 use virtio_queue::Queue;
+use vm_device::UserspaceMapping;
 use vm_memory::{ByteValued, GuestMemoryAtomic};
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -22,9 +23,8 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::VhostUserCommon;
 use crate::{
-    ActivateResult, GuestMemoryMmap, GuestRegionMmap, MmapRegion, UserspaceMapping, VirtioCommon,
-    VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList,
-    VIRTIO_F_IOMMU_PLATFORM,
+    ActivateResult, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VirtioCommon, VirtioDevice,
+    VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_IOMMU_PLATFORM,
 };
 
 const NUM_QUEUE_OFFSET: usize = 1;

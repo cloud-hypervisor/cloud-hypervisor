@@ -2406,6 +2406,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.12",
  "vfio-ioctls",
+ "vm-memory",
  "vmm-sys-util",
 ]
 
