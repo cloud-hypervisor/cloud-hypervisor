@@ -1907,8 +1907,8 @@ impl vm::Vm for MshvVm {
         &self,
         _slot: u32,
         guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
+        memory_size: usize,
+        userspace_addr: *const libc::c_void,
         readonly: bool,
         _log_dirty_pages: bool,
     ) -> vm::Result<()> {
@@ -1920,8 +1920,8 @@ impl vm::Vm for MshvVm {
         let user_memory_region = mshv_user_mem_region {
             flags,
             guest_pfn: guest_phys_addr >> PAGE_SHIFT,
-            size: memory_size,
-            userspace_addr,
+            size: crate::usize_to_u64(memory_size),
+            userspace_addr: crate::usize_to_u64(userspace_addr as _),
             ..Default::default()
         };
         // No matter read only or not we keep track the slots.
@@ -1946,8 +1946,8 @@ impl vm::Vm for MshvVm {
         &self,
         _slot: u32,
         guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
+        memory_size: usize,
+        userspace_addr: *const libc::c_void,
         readonly: bool,
         _log_dirty_pages: bool,
     ) -> vm::Result<()> {
@@ -1959,8 +1959,8 @@ impl vm::Vm for MshvVm {
         let user_memory_region = mshv_user_mem_region {
             flags,
             guest_pfn: guest_phys_addr >> PAGE_SHIFT,
-            size: memory_size,
-            userspace_addr,
+            size: crate::usize_to_u64(memory_size),
+            userspace_addr: crate::usize_to_u64(userspace_addr as _),
             ..Default::default()
         };
         // Remove the corresponding entry from "self.dirty_log_slots" if needed

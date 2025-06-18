@@ -947,13 +947,12 @@ impl MemoryManager {
 
         for (zone_id, regions) in list {
             for (region, virtio_mem) in regions {
-                // SAFETY: regions only holds valid addresses.
-                // TODO: encapsulate this unsafety in a small part of the file.
+                // SAFETY: guaranteed by GuestRegionMmap invariants
                 let slot = unsafe {
                     self.create_userspace_mapping(
                         region.start_addr().raw_value(),
-                        region.len(),
-                        region.as_ptr() as u64,
+                        region.len().try_into().expect("u64 didn't fit in usize"),
+                        region.as_ptr() as *const _,
                         self.mergeable,
                         false,
                         self.log_dirty,
@@ -1009,6 +1008,8 @@ impl MemoryManager {
             arch::layout::UEFI_START,
         )
         .unwrap();
+
+        // SAFETY: guaranteed by GuestRegionMmap
         unsafe {
             self.vm
                 .create_user_memory_region(
@@ -1673,12 +1674,12 @@ impl MemoryManager {
         )?;
 
         // Map it into the guest
-        // SAFETY: create_ram_region only produces valid mappings.
+        // SAFETY: guaranteed by GuestMmapRegion invariants
         let slot = unsafe {
             self.create_userspace_mapping(
                 region.start_addr().0,
-                region.len(),
-                region.as_ptr() as u64,
+                region.len().try_into().expect("u64 didn't fit in usize"),
+                region.as_ptr() as *const _,
                 self.mergeable,
                 false,
                 self.log_dirty,
@@ -1783,8 +1784,8 @@ impl MemoryManager {
     pub unsafe fn create_userspace_mapping(
         &mut self,
         guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
+        memory_size: usize,
+        userspace_addr: *const libc::c_void,
         mergeable: bool,
         readonly: bool,
         log_dirty: bool,
@@ -1793,7 +1794,7 @@ impl MemoryManager {
 
         info!(
             "Creating userspace mapping: {:x} -> {:x} {:x}, slot {}",
-            guest_phys_addr, userspace_addr, memory_size, slot
+            guest_phys_addr, userspace_addr as usize, memory_size, slot
         );
 
         self.vm
@@ -1848,7 +1849,7 @@ impl MemoryManager {
 
         info!(
             "Created userspace mapping: {:x} -> {:x} {:x}",
-            guest_phys_addr, userspace_addr, memory_size
+            guest_phys_addr, userspace_addr as usize, memory_size
         );
 
         Ok(slot)
@@ -1866,8 +1867,8 @@ impl MemoryManager {
     pub unsafe fn remove_userspace_mapping(
         &mut self,
         guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
+        memory_size: usize,
+        userspace_addr: *const libc::c_void,
         mergeable: bool,
         slot: u32,
     ) -> Result<(), Error> {
@@ -1910,7 +1911,7 @@ impl MemoryManager {
 
         info!(
             "Removed userspace mapping: {:x} -> {:x} {:x}",
-            guest_phys_addr, userspace_addr, memory_size
+            guest_phys_addr, userspace_addr as usize, memory_size
         );
 
         Ok(())
@@ -2063,7 +2064,7 @@ impl MemoryManager {
                     file.as_raw_fd(),
                     0,
                 )
-            } as u64;
+            };
 
             info!(
                 "Adding SGX EPC section: 0x{:x} (0x{:x})",
@@ -2076,7 +2077,10 @@ impl MemoryManager {
             let _mem_slot = unsafe {
                 self.create_userspace_mapping(
                     epc_section_start,
-                    epc_section.size,
+                    epc_section
+                        .size
+                        .try_into()
+                        .expect("can't allocate more than usize::MAX"),
                     host_addr,
                     false,
                     false,
