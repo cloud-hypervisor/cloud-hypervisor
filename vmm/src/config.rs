@@ -5,8 +5,8 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
+use std::result;
 use std::str::FromStr;
-use std::{fmt, result};
 
 use clap::ArgMatches;
 use option_parser::{
@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_bindings::virtio_blk::VIRTIO_BLK_ID_BYTES;
 use virtio_devices::block::MINIMUM_BLOCK_QUEUE_SIZE;
+use virtio_devices::vhost_user::VIRTIO_FS_TAG_LEN;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
 
 use crate::landlock::LandlockAccess;
@@ -28,451 +29,298 @@ const MAX_IOMMU_ADDRESS_WIDTH_BITS: u8 = 64;
 #[derive(Debug, Error)]
 pub enum Error {
     /// Filesystem tag is missing
+    #[error("Error parsing --fs: tag missing")]
     ParseFsTagMissing,
     /// Filesystem tag is too long
+    #[error("Error parsing --fs: max tag length is {VIRTIO_FS_TAG_LEN}")]
     ParseFsTagTooLong,
     /// Filesystem socket is missing
+    #[error("Error parsing --fs: socket missing")]
     ParseFsSockMissing,
     /// Missing persistent memory file parameter.
+    #[error("Error parsing --pmem: file missing")]
     ParsePmemFileMissing,
     /// Missing vsock socket path parameter.
+    #[error("Error parsing --vsock: socket missing")]
     ParseVsockSockMissing,
     /// Missing vsock cid parameter.
+    #[error("Error parsing --vsock: cid missing")]
     ParseVsockCidMissing,
     /// Missing restore source_url parameter.
+    #[error("Error parsing --restore: source_url missing")]
     ParseRestoreSourceUrlMissing,
     /// Error parsing CPU options
+    #[error("Error parsing --cpus")]
     ParseCpus(#[source] OptionParserError),
     /// Invalid CPU features
+    #[error("Invalid feature in --cpus features list: {0}")]
     InvalidCpuFeatures(String),
     /// Error parsing memory options
+    #[error("Error parsing --memory")]
     ParseMemory(#[source] OptionParserError),
     /// Error parsing memory zone options
+    #[error("Error parsing --memory-zone")]
     ParseMemoryZone(#[source] OptionParserError),
     /// Missing 'id' from memory zone
+    #[error("Error parsing --memory-zone: id missing")]
     ParseMemoryZoneIdMissing,
     /// Error parsing rate-limiter group options
+    #[error("Error parsing --rate-limit-group")]
     ParseRateLimiterGroup(#[source] OptionParserError),
     /// Error parsing disk options
+    #[error("Error parsing --disk")]
     ParseDisk(#[source] OptionParserError),
     /// Error parsing network options
+    #[error("Error parsing --net")]
     ParseNetwork(#[source] OptionParserError),
     /// Error parsing RNG options
+    #[error("Error parsing --rng")]
     ParseRng(#[source] OptionParserError),
     /// Error parsing balloon options
+    #[error("Error parsing --balloon")]
     ParseBalloon(#[source] OptionParserError),
     /// Error parsing filesystem parameters
+    #[error("Error parsing --fs")]
     ParseFileSystem(#[source] OptionParserError),
     /// Error parsing persistent memory parameters
+    #[error("Error parsing --pmem")]
     ParsePersistentMemory(#[source] OptionParserError),
     /// Failed parsing console
+    #[error("Error parsing --console")]
     ParseConsole(#[source] OptionParserError),
     #[cfg(target_arch = "x86_64")]
     /// Failed parsing debug-console
+    #[error("Error parsing --debug-console")]
     ParseDebugConsole(#[source] OptionParserError),
     /// No mode given for console
+    #[error("Error parsing --console: invalid console mode given")]
     ParseConsoleInvalidModeGiven,
     /// Failed parsing device parameters
+    #[error("Error parsing --device")]
     ParseDevice(#[source] OptionParserError),
     /// Missing path from device,
+    #[error("Error parsing --device: path missing")]
     ParseDevicePathMissing,
     /// Failed parsing vsock parameters
+    #[error("Error parsing --vsock")]
     ParseVsock(#[source] OptionParserError),
     /// Failed parsing restore parameters
+    #[error("Error parsing --restore")]
     ParseRestore(#[source] OptionParserError),
     /// Failed parsing SGX EPC parameters
     #[cfg(target_arch = "x86_64")]
+    #[error("Error parsing --sgx-epc")]
     ParseSgxEpc(#[source] OptionParserError),
     /// Missing 'id' from SGX EPC section
     #[cfg(target_arch = "x86_64")]
+    #[error("Error parsing --sgx-epc: id missing")]
     ParseSgxEpcIdMissing,
     /// Failed parsing NUMA parameters
+    #[error("Error parsing --numa")]
     ParseNuma(#[source] OptionParserError),
     /// Failed validating configuration
+    #[error("Error validating configuration")]
     Validation(#[source] ValidationError),
     #[cfg(feature = "sev_snp")]
+    #[error("Error parsing --sev_snp")]
     /// Failed parsing SEV-SNP config
     ParseSevSnp(#[source] OptionParserError),
     #[cfg(feature = "tdx")]
+    #[error("Error parsing --tdx")]
     /// Failed parsing TDX config
     ParseTdx(#[source] OptionParserError),
     #[cfg(feature = "tdx")]
+    #[error("TDX firmware missing")]
     /// No TDX firmware
     FirmwarePathMissing,
     /// Failed parsing userspace device
+    #[error("Error parsing --user-device")]
     ParseUserDevice(#[source] OptionParserError),
     /// Missing socket for userspace device
+    #[error("Error parsing --user-device: socket missing")]
     ParseUserDeviceSocketMissing,
     /// Error parsing pci segment options
+    #[error("Error parsing --pci-segment")]
     ParsePciSegment(#[source] OptionParserError),
     /// Failed parsing platform parameters
+    #[error("Error parsing --platform")]
     ParsePlatform(#[source] OptionParserError),
     /// Failed parsing vDPA device
+    #[error("Error parsing --vdpa")]
     ParseVdpa(#[source] OptionParserError),
     /// Missing path for vDPA device
+    #[error("Error parsing --vdpa: path missing")]
     ParseVdpaPathMissing,
     /// Failed parsing TPM device
+    #[error("Error parsing --tpm")]
     ParseTpm(#[source] OptionParserError),
     /// Missing path for TPM device
+    #[error("Error parsing --tpm: path missing")]
     ParseTpmPathMissing,
     /// Error parsing Landlock rules
+    #[error("Error parsing --landlock-rules")]
     ParseLandlockRules(#[source] OptionParserError),
     /// Missing fields in Landlock rules
+    #[error("Error parsing --landlock-rules: path/access field missing")]
     ParseLandlockMissingFields,
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]
 pub enum ValidationError {
     /// No kernel specified
+    #[error("No kernel specified")]
     KernelMissing,
     /// Missing file value for console
+    #[error("Path missing when using file console mode")]
     ConsoleFileMissing,
     /// Missing socket path for console
+    #[error("Path missing when using socket console mode")]
     ConsoleSocketPathMissing,
     /// Max is less than boot
+    #[error("Max CPUs lower than boot CPUs")]
     CpusMaxLowerThanBoot,
     /// Missing file value for debug-console
     #[cfg(target_arch = "x86_64")]
+    #[error("Path missing when using file mode for debug console")]
     DebugconFileMissing,
     /// Both socket and path specified
+    #[error("Disk path and vhost socket both provided")]
     DiskSocketAndPath,
     /// Using vhost user requires shared memory
+    #[error("Using vhost-user requires using shared memory or huge pages")]
     VhostUserRequiresSharedMemory,
     /// No socket provided for vhost_use
+    #[error("No socket provided when using vhost-user")]
     VhostUserMissingSocket,
     /// Trying to use IOMMU without PCI
+    #[error("Using an IOMMU without PCI support is unsupported")]
     IommuUnsupported,
     /// Trying to use VFIO without PCI
+    #[error("Using VFIO without PCI support is unsupported")]
     VfioUnsupported,
     /// CPU topology count doesn't match max
+    #[error("Product of CPU topology parts does not match maximum vCPU")]
     CpuTopologyCount,
     /// One part of the CPU topology was zero
+    #[error("No part of the CPU topology can be zero")]
     CpuTopologyZeroPart,
     #[cfg(target_arch = "aarch64")]
     /// Dies per package must be 1
+    #[error("Dies per package must be 1")]
     CpuTopologyDiesPerPackage,
     /// Virtio needs a min of 2 queues
+    #[error("Number of queues to virtio_net less than 2")]
     VnetQueueLowerThan2,
     /// The input queue number for virtio_net must match the number of input fds
+    #[error("Number of queues to virtio_net does not match the number of input FDs")]
     VnetQueueFdMismatch,
     /// Using reserved fd
+    #[error("Reserved fd number (<= 2)")]
     VnetReservedFd,
     /// Hardware checksum offload is disabled.
+    #[error("\"offload_tso\" and \"offload_ufo\" depend on \"offload_csum\"")]
     NoHardwareChecksumOffload,
     /// Hugepages not turned on
+    #[error("Huge page size specified but huge pages not enabled")]
     HugePageSizeWithoutHugePages,
     /// Huge page size is not power of 2
+    #[error("Huge page size is not power of 2: {0}")]
     InvalidHugePageSize(u64),
     /// CPU Hotplug is not permitted with TDX
     #[cfg(feature = "tdx")]
+    #[error("CPU hotplug is not permitted with TDX")]
     TdxNoCpuHotplug,
     /// Missing firmware for TDX
     #[cfg(feature = "tdx")]
+    #[error("No TDX firmware specified")]
     TdxFirmwareMissing,
     /// Insufficient vCPUs for queues
+    #[error("Number of vCPUs is insufficient for number of queues")]
     TooManyQueues,
     /// Invalid queue size
+    #[error("Queue size is smaller than {MINIMUM_BLOCK_QUEUE_SIZE}: {0}")]
     InvalidQueueSize(u16),
     /// Need shared memory for vfio-user
+    #[error("Using user devices requires using shared memory or huge pages")]
     UserDevicesRequireSharedMemory,
     /// VSOCK Context Identifier has a special meaning, unsuitable for a VM.
+    #[error("{0} is a special VSOCK CID")]
     VsockSpecialCid(u32),
     /// Memory zone is reused across NUMA nodes
+    #[error("Memory zone: {0} belongs to multiple NUMA nodes: {1} and {2}")]
     MemoryZoneReused(String, u32, u32),
     /// Invalid number of PCI segments
+    #[error("Number of PCI segments ({0}) not in range of 1 to {MAX_NUM_PCI_SEGMENTS}")]
     InvalidNumPciSegments(u16),
     /// Invalid PCI segment id
+    #[error("Invalid PCI segment id: {0}")]
     InvalidPciSegment(u16),
     /// Invalid PCI segment aperture weight
+    #[error("Invalid PCI segment aperture weight: {0}")]
     InvalidPciSegmentApertureWeight(u32),
     /// Invalid IOMMU address width in bits
+    #[error("IOMMU address width in bits ({0}) should be less than or equal to {MAX_IOMMU_ADDRESS_WIDTH_BITS}")]
     InvalidIommuAddressWidthBits(u8),
     /// Balloon too big
+    #[error("Ballon size ({0}) greater than RAM ({1})")]
     BalloonLargerThanRam(u64, u64),
     /// On a IOMMU segment but not behind IOMMU
+    #[error("Device is on an IOMMU PCI segment ({0}) but not placed behind IOMMU")]
     OnIommuSegment(u16),
     // On a IOMMU segment but IOMMU not supported
+    #[error(
+        "Device is on an IOMMU PCI segment ({0}) but does not support being placed behind IOMMU"
+    )]
     IommuNotSupportedOnSegment(u16),
     // Identifier is not unique
+    #[error("Identifier {0} is not unique")]
     IdentifierNotUnique(String),
     /// Invalid identifier
+    #[error("Identifier {0} is not invalid")]
     InvalidIdentifier(String),
     /// Placing the device behind a virtual IOMMU is not supported
+    #[error("Device does not support being placed behind IOMMU")]
     IommuNotSupported,
     /// Duplicated device path (device added twice)
+    #[error("Duplicated device path: {0}")]
     DuplicateDevicePath(String),
     /// Provided MTU is lower than what the VIRTIO specification expects
+    #[error("Provided MTU {0} is lower than 1280 (expected by VIRTIO specification)")]
     InvalidMtu(u16),
     /// PCI segment is reused across NUMA nodes
+    #[error("PCI segment: {0} belongs to multiple NUMA nodes {1} and {2}")]
     PciSegmentReused(u16, u32, u32),
     /// Default PCI segment is assigned to NUMA node other than 0.
+    #[error("Default PCI segment assigned to non-zero NUMA node {0}")]
     DefaultPciSegmentInvalidNode(u32),
     /// Invalid rate-limiter group
+    #[error("Invalid rate-limiter group")]
     InvalidRateLimiterGroup,
     /// The specified I/O port was invalid. It should be provided in hex, such as `0xe9`.
     #[cfg(target_arch = "x86_64")]
+    #[error("The IO port was not properly provided in hex or a `0x` prefix is missing: {0}")]
     InvalidIoPortHex(String),
     #[cfg(feature = "sev_snp")]
+    #[error("Invalid host data format")]
     InvalidHostData,
     /// Restore expects all net ids that have fds
+    #[error("Net id {0} is associated with FDs and is required")]
     RestoreMissingRequiredNetId(String),
     /// Number of FDs passed during Restore are incorrect to the NetConfig
+    #[error("Number of Net FDs passed for '{0}' during Restore: {1}. Expected: {2}")]
     RestoreNetFdCountMismatch(String, usize, usize),
     /// Path provided in landlock-rules doesn't exist
+    #[error("Path {0:?} provided in landlock-rules does not exist")]
     LandlockPathDoesNotExist(PathBuf),
     /// Access provided in landlock-rules in invalid
+    #[error("access provided in landlock-rules in invalid")]
     InvalidLandlockAccess(String),
     /// Invalid block device serial length
+    #[error("Block device serial length ({0}) exceeds maximum allowed length ({1})")]
     InvalidSerialLength(usize, usize),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
-
-impl fmt::Display for ValidationError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::ValidationError::*;
-        match self {
-            KernelMissing => write!(f, "No kernel specified"),
-            ConsoleFileMissing => write!(f, "Path missing when using file console mode"),
-            ConsoleSocketPathMissing => write!(f, "Path missing when using socket console mode"),
-            CpusMaxLowerThanBoot => write!(f, "Max CPUs lower than boot CPUs"),
-            #[cfg(target_arch = "x86_64")]
-            DebugconFileMissing => write!(f, "Path missing when using file mode for debug console"),
-            DiskSocketAndPath => write!(f, "Disk path and vhost socket both provided"),
-            VhostUserRequiresSharedMemory => {
-                write!(
-                    f,
-                    "Using vhost-user requires using shared memory or huge pages"
-                )
-            }
-            VhostUserMissingSocket => write!(f, "No socket provided when using vhost-user"),
-            IommuUnsupported => write!(f, "Using an IOMMU without PCI support is unsupported"),
-            VfioUnsupported => write!(f, "Using VFIO without PCI support is unsupported"),
-            CpuTopologyZeroPart => write!(f, "No part of the CPU topology can be zero"),
-            CpuTopologyCount => write!(
-                f,
-                "Product of CPU topology parts does not match maximum vCPUs"
-            ),
-            #[cfg(target_arch = "aarch64")]
-            CpuTopologyDiesPerPackage => write!(f, "Dies per package must be 1"),
-            VnetQueueLowerThan2 => write!(f, "Number of queues to virtio_net less than 2"),
-            VnetQueueFdMismatch => write!(
-                f,
-                "Number of queues to virtio_net does not match the number of input FDs"
-            ),
-            VnetReservedFd => write!(f, "Reserved fd number (<= 2)"),
-            NoHardwareChecksumOffload => write!(
-                f,
-                "\"offload_tso\" and \"offload_ufo\" depend on \"offload_tso\""
-            ),
-            HugePageSizeWithoutHugePages => {
-                write!(f, "Huge page size specified but huge pages not enabled")
-            }
-            InvalidHugePageSize(s) => {
-                write!(f, "Huge page size is not power of 2: {s}")
-            }
-            #[cfg(feature = "tdx")]
-            TdxNoCpuHotplug => {
-                write!(f, "CPU hotplug is not permitted with TDX")
-            }
-            #[cfg(feature = "tdx")]
-            TdxFirmwareMissing => {
-                write!(f, "No TDX firmware specified")
-            }
-            TooManyQueues => {
-                write!(f, "Number of vCPUs is insufficient for number of queues")
-            }
-            InvalidQueueSize(s) => {
-                write!(
-                    f,
-                    "Queue size is smaller than {MINIMUM_BLOCK_QUEUE_SIZE}: {s}"
-                )
-            }
-            UserDevicesRequireSharedMemory => {
-                write!(
-                    f,
-                    "Using user devices requires using shared memory or huge pages"
-                )
-            }
-            VsockSpecialCid(cid) => {
-                write!(f, "{cid} is a special VSOCK CID")
-            }
-            MemoryZoneReused(s, u1, u2) => {
-                write!(
-                    f,
-                    "Memory zone: {s} belongs to multiple NUMA nodes {u1} and {u2}"
-                )
-            }
-            InvalidNumPciSegments(n) => {
-                write!(
-                    f,
-                    "Number of PCI segments ({n}) not in range of 1 to {MAX_NUM_PCI_SEGMENTS}"
-                )
-            }
-            InvalidPciSegment(pci_segment) => {
-                write!(f, "Invalid PCI segment id: {pci_segment}")
-            }
-            InvalidPciSegmentApertureWeight(aperture_weight) => {
-                write!(f, "Invalid PCI segment aperture weight: {aperture_weight}")
-            }
-            InvalidIommuAddressWidthBits(iommu_address_width_bits) => {
-                write!(f, "IOMMU address width in bits ({iommu_address_width_bits}) should be less than or equal to {MAX_IOMMU_ADDRESS_WIDTH_BITS}")
-            }
-            BalloonLargerThanRam(balloon_size, ram_size) => {
-                write!(
-                    f,
-                    "Ballon size ({balloon_size}) greater than RAM ({ram_size})"
-                )
-            }
-            OnIommuSegment(pci_segment) => {
-                write!(
-                    f,
-                    "Device is on an IOMMU PCI segment ({pci_segment}) but not placed behind IOMMU"
-                )
-            }
-            IommuNotSupportedOnSegment(pci_segment) => {
-                write!(
-                    f,
-                    "Device is on an IOMMU PCI segment ({pci_segment}) but does not support being placed behind IOMMU"
-                )
-            }
-            IdentifierNotUnique(s) => {
-                write!(f, "Identifier {s} is not unique")
-            }
-            InvalidIdentifier(s) => {
-                write!(f, "Identifier {s} is invalid")
-            }
-            IommuNotSupported => {
-                write!(f, "Device does not support being placed behind IOMMU")
-            }
-            DuplicateDevicePath(p) => write!(f, "Duplicated device path: {p}"),
-            &InvalidMtu(mtu) => {
-                write!(
-                    f,
-                    "Provided MTU {mtu} is lower than 1280 (expected by VIRTIO specification)"
-                )
-            }
-            PciSegmentReused(pci_segment, u1, u2) => {
-                write!(
-                    f,
-                    "PCI segment: {pci_segment} belongs to multiple NUMA nodes {u1} and {u2}"
-                )
-            }
-            DefaultPciSegmentInvalidNode(u1) => {
-                write!(f, "Default PCI segment assigned to non-zero NUMA node {u1}")
-            }
-            InvalidRateLimiterGroup => {
-                write!(f, "Invalid rate-limiter group")
-            }
-            #[cfg(target_arch = "x86_64")]
-            InvalidIoPortHex(s) => {
-                write!(
-                    f,
-                    "The IO port was not properly provided in hex or a `0x` prefix is missing: {s}"
-                )
-            }
-            #[cfg(feature = "sev_snp")]
-            InvalidHostData => {
-                write!(f, "Invalid host data format")
-            }
-            RestoreMissingRequiredNetId(s) => {
-                write!(f, "Net id {s} is associated with FDs and is required")
-            }
-            RestoreNetFdCountMismatch(s, u1, u2) => {
-                write!(
-                    f,
-                    "Number of Net FDs passed for '{s}' during Restore: {u1}. Expected: {u2}"
-                )
-            }
-            LandlockPathDoesNotExist(s) => {
-                write!(
-                    f,
-                    "Path {:?} provided in landlock-rules does not exist",
-                    s.as_path()
-                )
-            }
-            InvalidLandlockAccess(s) => {
-                write!(f, "{s}")
-            }
-            InvalidSerialLength(actual, max) => {
-                write!(
-                    f,
-                    "Block device serial length ({actual}) exceeds maximum allowed length ({max})"
-                )
-            }
-        }
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use self::Error::*;
-        match self {
-            ParseConsole(o) => write!(f, "Error parsing --console: {o}"),
-            #[cfg(target_arch = "x86_64")]
-            ParseDebugConsole(o) => write!(f, "Error parsing --debug-console: {o}"),
-            ParseConsoleInvalidModeGiven => {
-                write!(f, "Error parsing --console: invalid console mode given")
-            }
-            ParseCpus(o) => write!(f, "Error parsing --cpus: {o}"),
-            InvalidCpuFeatures(o) => write!(f, "Invalid feature in --cpus features list: {o}"),
-            ParseDevice(o) => write!(f, "Error parsing --device: {o}"),
-            ParseDevicePathMissing => write!(f, "Error parsing --device: path missing"),
-            ParseFileSystem(o) => write!(f, "Error parsing --fs: {o}"),
-            ParseFsSockMissing => write!(f, "Error parsing --fs: socket missing"),
-            ParseFsTagMissing => write!(f, "Error parsing --fs: tag missing"),
-            ParseFsTagTooLong => write!(
-                f,
-                "Error parsing --fs: max tag length is {}",
-                virtio_devices::vhost_user::VIRTIO_FS_TAG_LEN
-            ),
-            ParsePersistentMemory(o) => write!(f, "Error parsing --pmem: {o}"),
-            ParsePmemFileMissing => write!(f, "Error parsing --pmem: file missing"),
-            ParseVsock(o) => write!(f, "Error parsing --vsock: {o}"),
-            ParseVsockCidMissing => write!(f, "Error parsing --vsock: cid missing"),
-            ParseVsockSockMissing => write!(f, "Error parsing --vsock: socket missing"),
-            ParseMemory(o) => write!(f, "Error parsing --memory: {o}"),
-            ParseMemoryZone(o) => write!(f, "Error parsing --memory-zone: {o}"),
-            ParseMemoryZoneIdMissing => write!(f, "Error parsing --memory-zone: id missing"),
-            ParseNetwork(o) => write!(f, "Error parsing --net: {o}"),
-            ParseRateLimiterGroup(o) => write!(f, "Error parsing --rate-limit-group: {o}"),
-            ParseDisk(o) => write!(f, "Error parsing --disk: {o}"),
-            ParseRng(o) => write!(f, "Error parsing --rng: {o}"),
-            ParseBalloon(o) => write!(f, "Error parsing --balloon: {o}"),
-            ParseRestore(o) => write!(f, "Error parsing --restore: {o}"),
-            #[cfg(target_arch = "x86_64")]
-            ParseSgxEpc(o) => write!(f, "Error parsing --sgx-epc: {o}"),
-            #[cfg(target_arch = "x86_64")]
-            ParseSgxEpcIdMissing => write!(f, "Error parsing --sgx-epc: id missing"),
-            ParseNuma(o) => write!(f, "Error parsing --numa: {o}"),
-            ParseRestoreSourceUrlMissing => {
-                write!(f, "Error parsing --restore: source_url missing")
-            }
-            ParseUserDeviceSocketMissing => {
-                write!(f, "Error parsing --user-device: socket missing")
-            }
-            ParseUserDevice(o) => write!(f, "Error parsing --user-device: {o}"),
-            Validation(v) => write!(f, "Error validating configuration: {v}"),
-            #[cfg(feature = "sev_snp")]
-            ParseSevSnp(o) => write!(f, "Error parsing --sev_snp: {o}"),
-            #[cfg(feature = "tdx")]
-            ParseTdx(o) => write!(f, "Error parsing --tdx: {o}"),
-            #[cfg(feature = "tdx")]
-            FirmwarePathMissing => write!(f, "TDX firmware missing"),
-            ParsePciSegment(o) => write!(f, "Error parsing --pci-segment: {o}"),
-            ParsePlatform(o) => write!(f, "Error parsing --platform: {o}"),
-            ParseVdpa(o) => write!(f, "Error parsing --vdpa: {o}"),
-            ParseVdpaPathMissing => write!(f, "Error parsing --vdpa: path missing"),
-            ParseTpm(o) => write!(f, "Error parsing --tpm: {o}"),
-            ParseTpmPathMissing => write!(f, "Error parsing --tpm: path missing"),
-            ParseLandlockRules(o) => write!(f, "Error parsing --landlock-rules: {o}"),
-            ParseLandlockMissingFields => write!(
-                f,
-                "Error parsing --landlock-rules: path/access field missing"
-            ),
-        }
-    }
-}
 
 pub fn add_to_config<T>(items: &mut Option<Vec<T>>, item: T) {
     if let Some(items) = items {
