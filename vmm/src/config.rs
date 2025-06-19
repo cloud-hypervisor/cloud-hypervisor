@@ -2233,6 +2233,13 @@ pub struct RestoredNetConfig {
     pub id: String,
     #[serde(default)]
     pub num_fds: usize,
+    // Special (de)serialize handling:
+    // A serialize-deserialize cycle typically happens across processes.
+    // The old FD is almost certainly invalid in the new process.
+    // One way to get actual FDs here in a new process is the `receive-migration`
+    // path via a UNIX Domain socket: An SCM_RIGHTS UNIX Domain Socket message
+    // passes new FDs to the Cloud Hypervisor process, but these FDs are handled
+    // in the HTTP API handler.
     #[serde(
         default,
         serialize_with = "serialize_restorednetconfig_fds",
@@ -2249,7 +2256,10 @@ where
     S: serde::Serializer,
 {
     if let Some(x) = x {
-        warn!("'RestoredNetConfig' contains FDs that can't be serialized correctly. Serializing them as invalid FDs.");
+        // If the live-migration path is used properly, new FDs are passed as
+        // SCM_RIGHTS message. So, we don't get them from the serialized JSON
+        // anyway.
+        debug!("FDs in 'RestoredNetConfig' won't be serialized as they are most likely invalid after deserialization. Serializing them as -1.");
         let invalid_fds = vec![-1; x.len()];
         s.serialize_some(&invalid_fds)
     } else {
@@ -2265,7 +2275,10 @@ where
 {
     let invalid_fds: Option<Vec<i32>> = Option::deserialize(d)?;
     if let Some(invalid_fds) = invalid_fds {
-        warn!("'RestoredNetConfig' contains FDs that can't be deserialized correctly. Deserializing them as invalid FDs.");
+        // If the live-migration path is used properly, new FDs are passed as
+        // SCM_RIGHTS message. So, we don't get them from the serialized JSON
+        // anyway.
+        debug!("FDs in 'RestoredNetConfig' won't be deserialized as they are most likely invalid now. Deserializing them as -1.");
         Ok(Some(vec![-1; invalid_fds.len()]))
     } else {
         Ok(None)
