@@ -73,9 +73,12 @@ impl EndpointHandler for VmCreate {
                         };
 
                         if let Some(ref mut nets) = vm_config.net {
-                            if nets.iter().any(|net| net.fds.is_some()) {
-                                warn!("Ignoring FDs sent via the HTTP request body");
-                            }
+                            nets.iter().filter(|net| net.fds.is_some()).for_each(|net| {
+                                // Only FDs transmitted via an SCM_RIGHTS UNIX Domain Socket message
+                                // are valid. Transmitting specific FD nums via the HTTP API is
+                                // almost always invalid.
+                                warn!("FDs were present in HTTP request body for virtio-net device '{:?}' but will be ignored", net.id);
+                            });
                             for net in nets {
                                 net.fds = None;
                             }
@@ -232,7 +235,10 @@ impl PutHandler for VmAddNet {
         if let Some(body) = body {
             let mut net_cfg: NetConfig = serde_json::from_slice(body.raw())?;
             if net_cfg.fds.is_some() {
-                warn!("Ignoring FDs sent via the HTTP request body");
+                // Only FDs transmitted via an SCM_RIGHTS UNIX Domain Socket message
+                // are valid. Transmitting specific FD nums via the HTTP API is
+                // almost always invalid.
+                warn!("FDs were present in HTTP request body for virtio-net device '{:?}' but will be ignored", net_cfg.id);
                 net_cfg.fds = None;
             }
             if !files.is_empty() {
@@ -311,7 +317,12 @@ impl PutHandler for VmRestore {
                 return Err(HttpError::BadRequest);
             }
             if let Some(ref mut nets) = restore_cfg.net_fds {
-                warn!("Ignoring FDs sent via the HTTP request body");
+                nets.iter().filter(|net| net.fds.is_some()).for_each(|net| {
+                    // Only FDs transmitted via an SCM_RIGHTS UNIX Domain Socket message
+                    // are valid. Transmitting specific FD nums via the HTTP API is
+                    // almost always invalid.
+                    warn!("FDs were present in HTTP request body for virtio-net device '{:?}' but will be ignored", net.id);
+                });
                 let mut start_idx = 0;
                 for restored_net in nets.iter_mut() {
                     let end_idx = start_idx + restored_net.num_fds;
