@@ -215,8 +215,8 @@ pub enum ValidationError {
     #[error("Number of queues to virtio_net does not match the number of input FDs")]
     VnetQueueFdMismatch,
     /// Using reserved fd
-    #[error("Reserved fd number (<= 2)")]
-    VnetReservedFd,
+    #[error("Reserved fd number (fd={0} <= 2)")]
+    VnetReservedFd(i32),
     /// Hardware checksum offload is disabled.
     #[error("\"offload_tso\" and \"offload_ufo\" depend on \"offload_csum\"")]
     NoHardwareChecksumOffload,
@@ -1434,7 +1434,7 @@ impl NetConfig {
         if let Some(fds) = self.fds.as_ref() {
             for fd in fds {
                 if *fd <= 2 {
-                    return Err(ValidationError::VnetReservedFd);
+                    return Err(ValidationError::VnetReservedFd(*fd));
                 }
             }
         }
@@ -4101,7 +4101,7 @@ mod tests {
         }]);
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::VnetReservedFd)
+            Err(ValidationError::VnetReservedFd(0))
         );
 
         let mut invalid_config = valid_config.clone();
