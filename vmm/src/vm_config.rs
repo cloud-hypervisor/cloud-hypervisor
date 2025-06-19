@@ -326,17 +326,13 @@ pub struct NetConfig {
     pub vhost_mode: VhostMode,
     #[serde(default)]
     pub id: Option<String>,
-    // Special (de)serialize handling:
+    // Special deserialize handling:
     // Therefore, we don't serialize FDs, and whatever value is here after
     // deserialization is invalid.
     //
     // Valid FDs are transmitted via a different channel (SCM_RIGHTS message)
     // and will be populated into this struct on the destination VMM eventually.
-    #[serde(
-        default,
-        serialize_with = "serialize_netconfig_fds",
-        deserialize_with = "deserialize_netconfig_fds"
-    )]
+    #[serde(default, deserialize_with = "deserialize_netconfig_fds")]
     pub fds: Option<Vec<i32>>,
     #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
@@ -386,19 +382,6 @@ pub const DEFAULT_NET_QUEUE_SIZE: u16 = 256;
 
 pub fn default_netconfig_queue_size() -> u16 {
     DEFAULT_NET_QUEUE_SIZE
-}
-
-fn serialize_netconfig_fds<S>(x: &Option<Vec<i32>>, s: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    if let Some(x) = x {
-        debug!("FDs in 'NetConfig' won't be serialized as they are most likely invalid after deserialization; using -1.");
-        let invalid_fds = vec![-1; x.len()];
-        s.serialize_some(&invalid_fds)
-    } else {
-        s.serialize_none()
-    }
 }
 
 fn deserialize_netconfig_fds<'de, D>(d: D) -> Result<Option<Vec<i32>>, D::Error>
