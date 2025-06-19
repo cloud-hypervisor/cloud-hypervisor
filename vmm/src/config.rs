@@ -2205,38 +2205,15 @@ pub struct RestoredNetConfig {
     pub id: String,
     #[serde(default)]
     pub num_fds: usize,
-    // Special (de)serialize handling:
+    // Special deserialize handling:
     // A serialize-deserialize cycle typically happens across processes.
     // Therefore, we don't serialize FDs, and whatever value is here after
     // deserialization is invalid.
     //
     // Valid FDs are transmitted via a different channel (SCM_RIGHTS message)
     // and will be populated into this struct on the destination VMM eventually.
-    #[serde(
-        default,
-        serialize_with = "serialize_restorednetconfig_fds",
-        deserialize_with = "deserialize_restorednetconfig_fds"
-    )]
+    #[serde(default, deserialize_with = "deserialize_restorednetconfig_fds")]
     pub fds: Option<Vec<i32>>,
-}
-
-fn serialize_restorednetconfig_fds<S>(
-    x: &Option<Vec<i32>>,
-    s: S,
-) -> std::result::Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    if let Some(x) = x {
-        // If the live-migration path is used properly, new FDs are passed as
-        // SCM_RIGHTS message. So, we don't get them from the serialized JSON
-        // anyway.
-        debug!("FDs in 'RestoredNetConfig' won't be serialized as they are most likely invalid after deserialization. Serializing them as -1.");
-        let invalid_fds = vec![-1; x.len()];
-        s.serialize_some(&invalid_fds)
-    } else {
-        s.serialize_none()
-    }
 }
 
 fn deserialize_restorednetconfig_fds<'de, D>(
