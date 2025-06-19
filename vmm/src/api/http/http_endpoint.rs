@@ -28,15 +28,17 @@
 //! We can receive these FDs as we use a **special** HTTP library that is aware
 //! of the just described mechanism.
 //!
+//! Also have a look into the [`helper`] module.
+//!
 //! [`cmsg(3)`]: https://man7.org/linux/man-pages/man3/cmsg.3.html
 
 use std::fs::File;
-use std::os::unix::io::IntoRawFd;
 use std::sync::mpsc::Sender;
 
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::api::http::http_endpoint::helper::apply_new_fds_to_cfg;
 use crate::api::http::{error_response, EndpointHandler, HttpError};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::api::VmCoredump;
@@ -49,6 +51,162 @@ use crate::api::{
 use crate::config::RestoreConfig;
 use crate::cpu::Error as CpuError;
 use crate::vm::Error as VmError;
+
+mod helper {
+    use std::fs::File;
+    use std::os::fd::IntoRawFd;
+
+    use crate::api::http::HttpError;
+
+    /// Abstraction over configuration types received via the HTTP API that
+    /// logically hold FDs. Helper for [`apply_new_fds_to_cfg`].
+    ///
+    /// Example: virtio-net device with externally opened FDs for the Tap device
+    pub trait ConfigWithFDs {
+        /// Returns the ID of the device.
+        ///
+        /// Used for logging.
+        fn id(&self) -> Option<&str>;
+
+        /// Returns how many FDs this type wants to own.
+        ///
+        /// `None` instead `Some(0)` indicates that this type wants to take
+        /// ownership of all available FDs. This is the case for config options
+        /// that don't know (yet) how many FDs belong to them, such as on hot
+        /// device attach. In these cases, only one single config object is
+        /// handled by the API call.
+        fn expected_num_fds(&self) -> Option<usize>;
+
+        /// Returns any FDs provided in the HTTP body.
+        ///
+        /// They will always be invalid. Used for logging.
+        fn fds_from_http_body(&self) -> Option<&[i32]>;
+
+        /// Updates the internal fds field to a new value.
+        fn set_fds(&mut self, fds: Option<Vec<i32>>);
+    }
+
+    mod config_with_fds_impls {
+        use super::ConfigWithFDs;
+        use crate::config::RestoredNetConfig;
+        use crate::vm_config::NetConfig;
+
+        impl ConfigWithFDs for NetConfig {
+            fn id(&self) -> Option<&str> {
+                self.id.as_deref()
+            }
+
+            fn expected_num_fds(&self) -> Option<usize> {
+                None
+            }
+
+            fn fds_from_http_body(&self) -> Option<&[i32]> {
+                self.fds.as_deref()
+            }
+
+            fn set_fds(&mut self, fds: Option<Vec<i32>>) {
+                self.fds = fds;
+            }
+        }
+
+        impl ConfigWithFDs for RestoredNetConfig {
+            fn id(&self) -> Option<&str> {
+                Some(self.id.as_str())
+            }
+
+            fn expected_num_fds(&self) -> Option<usize> {
+                Some(self.num_fds)
+            }
+
+            fn fds_from_http_body(&self) -> Option<&[i32]> {
+                self.fds.as_deref()
+            }
+
+            fn set_fds(&mut self, fds: Option<Vec<i32>>) {
+                self.fds = fds;
+            }
+        }
+    }
+
+    /// Applies FDs to configs for their corresponding devices, as part of the special
+    /// handling for devices backed by externally provided FDs.
+    ///
+    /// The FDs (via `files`) **must** be provided in the exact order matching the
+    /// config struct they belong to.
+    ///
+    /// See [module description] for more info.
+    ///
+    /// [module description]: self
+    pub fn apply_new_fds_to_cfg<T: ConfigWithFDs>(
+        // List of new files (well, actually FDs) that back up the device(s) of the given config(s).
+        files: Vec<File>,
+        // List of network configurations where each network can have up to `n` FDs.
+        cfgs: &mut [&mut T],
+    ) -> Result<(), HttpError> {
+        // Check: Only one single cfg wants to take ownership of all `files`.
+        {
+            let wants_ownership_of_all_files =
+                cfgs.iter().any(|cfg| cfg.expected_num_fds().is_none());
+            if wants_ownership_of_all_files {
+                assert_eq!(
+                    cfgs.len(),
+                    1,
+                    "should have exactly one cfg when expected_num_fds() returns None"
+                );
+            }
+        }
+
+        let expected_fds_total: usize = cfgs
+            .iter()
+            // Note: if this is None, `cfgs` must have a length of `1`!
+            .map(|cfg| cfg.expected_num_fds().unwrap_or(files.len()))
+            .sum();
+
+        // We are only interested in the raw FDs.
+        let mut fds = files
+            .into_iter()
+            .map(|f| f.into_raw_fd())
+            .collect::<Vec<i32>>();
+
+        if fds.len() != expected_fds_total {
+            error!(
+                "Number of expected FDs: {}, received: {}",
+                expected_fds_total,
+                fds.len()
+            );
+            return Err(HttpError::BadRequest);
+        }
+
+        // For each config: We drain the FDs vector by the amount of FDs the config expects.
+        for cfg in cfgs {
+            if cfg.fds_from_http_body().is_some() {
+                // Only FDs transmitted via an SCM_RIGHTS UNIX Domain Socket message
+                // are valid. Any provided over the HTTP API are set to `-1` in our
+                // specialized serializer callbacks.
+                warn!(
+                "FD numbers were present in HTTP request body for device {:?} but will be ignored",
+                cfg.id()
+            );
+
+                // Reset old value in any case; if there are FDs, they are invalid.
+                cfg.set_fds(None);
+            }
+
+            let n = cfg.expected_num_fds().unwrap_or(fds.len());
+            if n > 0 {
+                let new_fds = fds.drain(..n).collect::<Vec<_>>();
+                log::debug!("Applying network FDs received via UNIX domain socket to device: id={:?}, fds={new_fds:?}", cfg.id());
+                cfg.set_fds(Some(new_fds));
+            }
+        }
+
+        // We checked that `fds.len() != expected_fds`; so if we panic here, we have a hard
+        // programming bug
+        assert!(fds.is_empty());
+
+        Ok(())
+    }
+}
 
 // /api/v1/vm.create handler
 pub struct VmCreate {}
@@ -73,11 +231,17 @@ impl EndpointHandler for VmCreate {
                         };
 
                         if let Some(ref mut nets) = vm_config.net {
-                            if nets.iter().any(|net| net.fds.is_some()) {
-                                warn!("Ignoring FDs sent via the HTTP request body");
-                            }
-                            for net in nets {
-                                net.fds = None;
+                            let mut cfgs = nets.iter_mut().collect::<Vec<&mut _>>();
+                            let cfgs = cfgs.as_mut_slice();
+
+                            // For the VmCreate call, we do not accept FDs from the socket currently.
+                            // This call sets all FDs to null while doing the same logging as
+                            // similar code paths.
+                            let res = apply_new_fds_to_cfg(vec![], cfgs)
+                                .map_err(|e| error_response(e, StatusCode::InternalServerError));
+
+                            if let Err(e) = res {
+                                return e;
                             }
                         }
 
@@ -227,18 +391,12 @@ impl PutHandler for VmAddNet {
         api_notifier: EventFd,
         api_sender: Sender<ApiRequest>,
         body: &Option<Body>,
-        mut files: Vec<File>,
+        files: Vec<File>,
     ) -> std::result::Result<Option<Body>, HttpError> {
         if let Some(body) = body {
             let mut net_cfg: NetConfig = serde_json::from_slice(body.raw())?;
-            if net_cfg.fds.is_some() {
-                warn!("Ignoring FDs sent via the HTTP request body");
-                net_cfg.fds = None;
-            }
-            if !files.is_empty() {
-                let fds = files.drain(..).map(|f| f.into_raw_fd()).collect();
-                net_cfg.fds = Some(fds);
-            }
+            apply_new_fds_to_cfg(files, &mut [&mut net_cfg])?;
+
             self.send(api_notifier, api_sender, net_cfg)
                 .map_err(HttpError::ApiError)
         } else {
@@ -285,35 +443,15 @@ impl PutHandler for VmRestore {
         api_notifier: EventFd,
         api_sender: Sender<ApiRequest>,
         body: &Option<Body>,
-        mut files: Vec<File>,
+        files: Vec<File>,
     ) -> std::result::Result<Option<Body>, HttpError> {
         if let Some(body) = body {
             let mut restore_cfg: RestoreConfig = serde_json::from_slice(body.raw())?;
 
-            let mut fds = Vec::new();
-            if !files.is_empty() {
-                fds = files.drain(..).map(|f| f.into_raw_fd()).collect();
-            }
-            let expected_fds = match restore_cfg.net_fds {
-                Some(ref net_fds) => net_fds.iter().map(|net| net.num_fds).sum(),
-                None => 0,
-            };
-            if fds.len() != expected_fds {
-                error!(
-                    "Number of FDs expected: {}, but received: {}",
-                    expected_fds,
-                    fds.len()
-                );
-                return Err(HttpError::BadRequest);
-            }
-            if let Some(ref mut nets) = restore_cfg.net_fds {
-                warn!("Ignoring FDs sent via the HTTP request body");
-                let mut start_idx = 0;
-                for restored_net in nets.iter_mut() {
-                    let end_idx = start_idx + restored_net.num_fds;
-                    restored_net.fds = Some(fds[start_idx..end_idx].to_vec());
-                    start_idx = end_idx;
-                }
+            if let Some(cfgs) = restore_cfg.net_fds.as_mut() {
+                let mut cfgs = cfgs.iter_mut().collect::<Vec<&mut _>>();
+                let cfgs = cfgs.as_mut_slice();
+                apply_new_fds_to_cfg(files, cfgs)?;
             }
 
             self.send(api_notifier, api_sender, restore_cfg)
@@ -439,5 +577,136 @@ impl EndpointHandler for VmmShutdown {
             }
             _ => error_response(HttpError::BadRequest, StatusCode::BadRequest),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::http::http_endpoint::helper::ConfigWithFDs;
+
+    struct DummyNewDeviceCfg {
+        http_fds: Option<Vec<i32>>,
+    }
+
+    impl ConfigWithFDs for DummyNewDeviceCfg {
+        fn id(&self) -> Option<&str> {
+            Some("dummy")
+        }
+
+        fn expected_num_fds(&self) -> Option<usize> {
+            None
+        }
+
+        fn fds_from_http_body(&self) -> Option<&[i32]> {
+            self.http_fds.as_deref()
+        }
+
+        fn set_fds(&mut self, fds: Option<Vec<i32>>) {
+            self.http_fds = fds;
+        }
+    }
+
+    struct DummyRestoreDeviceCfg {
+        http_fds: Option<Vec<i32>>,
+        num_fds: usize,
+    }
+
+    impl ConfigWithFDs for DummyRestoreDeviceCfg {
+        fn id(&self) -> Option<&str> {
+            Some("dummy")
+        }
+
+        fn expected_num_fds(&self) -> Option<usize> {
+            Some(self.num_fds)
+        }
+
+        fn fds_from_http_body(&self) -> Option<&[i32]> {
+            self.http_fds.as_deref()
+        }
+
+        fn set_fds(&mut self, fds: Option<Vec<i32>>) {
+            self.http_fds = fds;
+        }
+    }
+
+    #[test]
+    fn test_apply_fds_to_cfg() {
+        let path = "/dev/null";
+
+        // test that FDs provided via the HTTP api are reset
+        {
+            let mut config = DummyNewDeviceCfg {
+                http_fds: Some(vec![1, 2, 3]),
+            };
+
+            apply_new_fds_to_cfg(vec![], &mut [&mut config]).unwrap();
+            assert_eq!(config.http_fds, None);
+        }
+
+        // test cfg for new device
+        {
+            let new_fds = vec![
+                File::open(path).unwrap(),
+                File::open(path).unwrap(),
+                File::open(path).unwrap(),
+            ];
+            let mut config = DummyNewDeviceCfg {
+                http_fds: Some(vec![1, 2, 3]),
+            };
+
+            apply_new_fds_to_cfg(new_fds, &mut [&mut config]).unwrap();
+            assert_eq!(config.http_fds.unwrap().len(), 3);
+        }
+
+        // test restore config
+        {
+            let new_fds = vec![
+                File::open(path).unwrap(),
+                File::open(path).unwrap(),
+                File::open(path).unwrap(),
+                File::open(path).unwrap(),
+                File::open(path).unwrap(),
+                File::open(path).unwrap(),
+            ];
+            let mut config1 = DummyRestoreDeviceCfg {
+                http_fds: None,
+                num_fds: 3,
+            };
+            let mut config2 = DummyRestoreDeviceCfg {
+                http_fds: None,
+                num_fds: 1,
+            };
+            let mut config3 = DummyRestoreDeviceCfg {
+                http_fds: None,
+                num_fds: 0,
+            };
+            let mut config4 = DummyRestoreDeviceCfg {
+                http_fds: None,
+                num_fds: 2,
+            };
+            let mut configs = [&mut config1, &mut config2, &mut config3, &mut config4];
+
+            apply_new_fds_to_cfg(new_fds, &mut configs).unwrap();
+            assert_eq!(config1.http_fds.unwrap().len(), 3);
+            assert_eq!(config2.http_fds.unwrap().len(), 1);
+            assert!(config3.http_fds.is_none());
+            assert_eq!(config4.http_fds.unwrap().len(), 2);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "should have exactly one cfg when expected_num_fds() returns None")]
+    fn test_panic_in_apply_fds_to_cfg() {
+        let path = "/dev/null";
+
+        // test restore config
+        let new_fds = vec![File::open(path).unwrap(), File::open(path).unwrap()];
+        let mut config1 = DummyNewDeviceCfg { http_fds: None };
+        let mut config2 = DummyNewDeviceCfg { http_fds: None };
+        let mut configs = [&mut config1, &mut config2];
+
+        // should panic here
+        apply_new_fds_to_cfg(new_fds, &mut configs).unwrap();
     }
 }
