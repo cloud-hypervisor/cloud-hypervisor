@@ -415,7 +415,6 @@ dependencies = [
  "libc",
  "log",
  "net_util",
- "once_cell",
  "option_parser",
  "seccompiler",
  "serde_json",
@@ -686,7 +685,6 @@ version = "0.1.0"
 dependencies = [
  "flume",
  "libc",
- "once_cell",
  "serde",
  "serde_json",
 ]
@@ -1256,7 +1254,6 @@ dependencies = [
  "libc",
  "log",
  "net_gen",
- "once_cell",
  "pnet",
  "pnet_datalink",
  "rate_limiter",
@@ -2028,7 +2025,6 @@ dependencies = [
  "dirs",
  "epoll",
  "libc",
- "once_cell",
  "serde",
  "serde_json",
  "ssh2",
@@ -2119,7 +2115,6 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "log",
- "once_cell",
  "serde",
  "serde_json",
 ]
@@ -2457,7 +2452,6 @@ dependencies = [
  "micro_http",
  "mshv-bindings",
  "net_util",
- "once_cell",
  "option_parser",
  "pci",
  "range_map_vec",

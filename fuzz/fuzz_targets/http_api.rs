@@ -6,11 +6,11 @@
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver};
+use std::sync::LazyLock;
 use std::thread;
 
 use libfuzzer_sys::{fuzz_target, Corpus};
 use micro_http::Request;
-use once_cell::sync::Lazy;
 use vm_migration::MigratableError;
 use vmm::api::http::*;
 use vmm::api::{
@@ -24,8 +24,8 @@ use vmm::{EpollContext, EpollDispatch};
 use vmm_sys_util::eventfd::EventFd;
 
 // Need to be ordered for test case reproducibility
-static ROUTES: Lazy<Vec<&Box<dyn EndpointHandler + Sync + Send>>> =
-    Lazy::new(|| HTTP_ROUTES.routes.values().collect());
+static ROUTES: LazyLock<Vec<&Box<dyn EndpointHandler + Sync + Send>>> =
+    LazyLock::new(|| HTTP_ROUTES.routes.values().collect());
 
 fuzz_target!(|bytes: &[u8]| -> Corpus {
     if bytes.len() < 2 {
