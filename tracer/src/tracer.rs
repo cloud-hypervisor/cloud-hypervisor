@@ -5,6 +5,7 @@
 
 #![allow(static_mut_refs)]
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
@@ -12,7 +13,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use once_cell::unsync::OnceCell;
 use serde::Serialize;
 
 #[derive(Debug)]

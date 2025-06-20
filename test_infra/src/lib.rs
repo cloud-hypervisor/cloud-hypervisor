@@ -14,11 +14,10 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 use std::{env, fmt, fs, io, thread};
 
-use once_cell::sync::Lazy;
 use serde_json::Value;
 use ssh2::Session;
 use thiserror::Error;
@@ -842,7 +841,7 @@ pub fn kill_child(child: &mut Child) {
 
 pub const PIPE_SIZE: i32 = 32 << 20;
 
-static NEXT_VM_ID: Lazy<Mutex<u8>> = Lazy::new(|| Mutex::new(1));
+static NEXT_VM_ID: LazyLock<Mutex<u8>> = LazyLock::new(|| Mutex::new(1));
 
 pub struct Guest {
     pub tmp_dir: TempDir,

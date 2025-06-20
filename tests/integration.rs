@@ -7981,11 +7981,11 @@ mod common_sequential {
 }
 
 mod windows {
-    use once_cell::sync::Lazy;
+    use std::sync::LazyLock;
 
     use crate::*;
 
-    static NEXT_DISK_ID: Lazy<Mutex<u8>> = Lazy::new(|| Mutex::new(1));
+    static NEXT_DISK_ID: LazyLock<Mutex<u8>> = LazyLock::new(|| Mutex::new(1));
 
     struct WindowsGuest {
         guest: Guest,

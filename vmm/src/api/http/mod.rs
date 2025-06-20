@@ -11,13 +11,13 @@ use std::os::unix::net::UnixListener;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
+use std::sync::LazyLock;
 use std::thread;
 
 use hypervisor::HypervisorType;
 use micro_http::{
     Body, HttpServer, MediaType, Method, Request, Response, ServerError, StatusCode, Version,
 };
-use once_cell::sync::Lazy;
 use seccompiler::{apply_filter, SeccompAction};
 use serde_json::Error as SerdeError;
 use thiserror::Error;
@@ -173,7 +173,7 @@ macro_rules! endpoint {
 }
 
 /// HTTP_ROUTES contain all the cloud-hypervisor HTTP routes.
-pub static HTTP_ROUTES: Lazy<HttpRoutes> = Lazy::new(|| {
+pub static HTTP_ROUTES: LazyLock<HttpRoutes> = LazyLock::new(|| {
     let mut r = HttpRoutes {
         routes: BTreeMap::new(),
     };
