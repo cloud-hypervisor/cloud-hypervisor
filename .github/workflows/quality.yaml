@@ -50,88 +50,97 @@ jobs:
           git checkout ${{ github.sha }}
 
       - name: Clippy (kvm)
-        uses: actions-rs/cargo@v1
+        uses: houseabsolute/actions-rust-cross@v1
         with:
-          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Clippy (mshv)
-        uses: actions-rs/cargo@v1
+        uses: houseabsolute/actions-rust-cross@v1
         with:
-          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "mshv" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Clippy (mshv + kvm)
-        uses: actions-rs/cargo@v1
+        uses: houseabsolute/actions-rust-cross@v1
         with:
-          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "mshv,kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv,kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Clippy (default features)
-        uses: actions-rs/cargo@v1
+        uses: houseabsolute/actions-rust-cross@v1
         with:
-          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --target=${{ matrix.target }} --locked --all --all-targets --tests --examples -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --tests --examples -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Clippy (default features + guest_debug)
-        uses: actions-rs/cargo@v1
+        uses: houseabsolute/actions-rust-cross@v1
         with:
-          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --target=${{ matrix.target }} --locked --all --all-targets --tests --examples --features "guest_debug" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --tests --examples --features "guest_debug" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Clippy (default features + pvmemcontrol)
-        uses: actions-rs/cargo@v1
+        uses: houseabsolute/actions-rust-cross@v1
         with:
-          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
           command: clippy
-          args: --target=${{ matrix.target }} --locked --all --all-targets --tests --examples --features "pvmemcontrol" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --tests --examples --features "pvmemcontrol" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Clippy (default features + tracing)
-        uses: actions-rs/cargo@v1
-        with:
-          use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
-          command: clippy
-          args: --target=${{ matrix.target }} --locked --all --all-targets --tests --examples --features "tracing" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
-
-      - name: Clippy (mshv)
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: actions-rs/cargo@v1
+        uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
-          args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "mshv" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
-
-      - name: Clippy (mshv + kvm)
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "mshv,kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --tests --examples --features "tracing" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Clippy (sev_snp)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: actions-rs/cargo@v1
+        uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
-          args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "sev_snp" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "sev_snp" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Clippy (igvm)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: actions-rs/cargo@v1
+        uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
-          args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "igvm" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "igvm" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Clippy (kvm + tdx)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: actions-rs/cargo@v1
+        uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
-          args: --target=${{ matrix.target }} --locked --all --all-targets --no-default-features --tests --examples --features "tdx,kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "tdx,kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
