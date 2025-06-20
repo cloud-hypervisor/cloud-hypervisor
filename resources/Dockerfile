@@ -58,6 +58,8 @@ RUN apt-get update \
         unzip \
         iproute2 \
         dbus \
+        libclang-dev \
+        clang \
     && apt-get install openvswitch-switch-dpdk -yq \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /var/log/*log  /var/log/apt/* /var/lib/dpkg/*-old /var/cache/debconf/*-old

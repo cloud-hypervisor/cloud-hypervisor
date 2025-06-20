@@ -104,22 +104,22 @@ members = [
 [workspace.dependencies]
 # rust-vmm crates
 acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main" }
-kvm-bindings = "0.10.0"
-kvm-ioctls = "0.19.1"
+kvm-bindings = "0.12.0"
+kvm-ioctls = "0.22.0"
 linux-loader = "0.13.0"
 mshv-bindings = "0.5.1"
 mshv-ioctls = "0.5.1"
 seccompiler = "0.5.0"
-vfio-bindings = { git = "https://github.com/rust-vmm/vfio", branch = "main" }
-vfio-ioctls = { git = "https://github.com/rust-vmm/vfio", branch = "main", default-features = false }
-vfio_user = { git = "https://github.com/rust-vmm/vfio-user", branch = "main" }
-vhost = { git = "https://github.com/rust-vmm/vhost", rev = "d983ae0" }
-vhost-user-backend = { git = "https://github.com/rust-vmm/vhost", rev = "d983ae0" }
-virtio-bindings = "0.2.4"
-virtio-queue = "0.14.0"
+vfio-bindings = { version = "0.5.0", default-features = false }
+vfio-ioctls = { version = "0.5.0", default-features = false }
+vfio_user = { version = "0.1.0", default-features = false }
+vhost = { version = "0.14.0", default-features = false }
+vhost-user-backend = { version = "0.19.0", default-features = false }
+virtio-bindings = "0.2.5"
+virtio-queue = "0.15.0"
 vm-fdt = { git = "https://github.com/rust-vmm/vm-fdt", branch = "main" }
 vm-memory = "0.16.1"
-vmm-sys-util = "0.12.1"
+vmm-sys-util = "0.14.0"
 
 # igvm crates
 # TODO: bump to 0.3.5 release
