@@ -34,6 +34,16 @@ cargo clippy --locked --all --all-targets --tests -- -D warnings || exit 1
 You will need to `chmod +x .git/hooks/pre-commit` to have it run on every
 commit you make.
 
+If you don't use the pre-commit hook, before submitting your code, please
+make sure each commit builds. You can use the in-tree helper script to do that.
+
+```sh
+./scripts/run_on_commits.sh $BASE_COMMIT $TIP_COMMIT $BUILD_COMMAND
+```
+
+Please refer to `.github/workflows/build.yaml` for some ideas on what build commands
+to run.
+
 ## Certificate of Origin
 
 In order to get a clear contribution chain of trust we use the [signed-off-by language](https://web.archive.org/web/20230406041855/https://01.org/community/signed-process)
