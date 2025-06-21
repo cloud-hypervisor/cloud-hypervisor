@@ -2389,6 +2389,8 @@ mod unit_tests {
                 igvm: None,
                 #[cfg(feature = "sev_snp")]
                 host_data: None,
+                #[cfg(feature = "fw_cfg")]
+                fw_cfg_config: None,
             }),
             rate_limit_groups: None,
             disks: None,

@@ -163,6 +163,10 @@ pub enum Error {
     /// Missing fields in Landlock rules
     #[error("Error parsing --landlock-rules: path/access field missing")]
     ParseLandlockMissingFields,
+    #[cfg(feature = "fw_cfg")]
+    #[error("Error parsing --fw_cfg_items")]
+    /// Failed Parsing FwCfgItem config
+    ParseFwCfgItem(#[source] OptionParserError),
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]
@@ -373,6 +377,8 @@ pub struct VmParams<'a> {
     pub host_data: Option<&'a str>,
     pub landlock_enable: bool,
     pub landlock_rules: Option<Vec<&'a str>>,
+    #[cfg(feature = "fw_cfg")]
+    pub fw_cfg_config: Option<&'a str>,
 }
 
 impl<'a> VmParams<'a> {
@@ -444,7 +450,9 @@ impl<'a> VmParams<'a> {
         let landlock_rules: Option<Vec<&str>> = args
             .get_many::<String>("landlock-rules")
             .map(|x| x.map(|y| y as &str).collect());
-
+        #[cfg(feature = "fw_cfg")]
+        let fw_cfg_config: Option<&str> =
+            args.get_one::<String>("fw_cfg_config").map(|x| x as &str);
         VmParams {
             cpus,
             memory,
@@ -486,6 +494,8 @@ impl<'a> VmParams<'a> {
             host_data,
             landlock_enable,
             landlock_rules,
+            #[cfg(feature = "fw_cfg")]
+            fw_cfg_config,
         }
     }
 }
@@ -1603,6 +1613,95 @@ impl FsConfig {
     }
 }
 
+#[cfg(feature = "fw_cfg")]
+impl FwCfgConfig {
+    pub const SYNTAX: &'static str = "Boot params to pass to FW CFG device \
+    \"disable<optional; enabled if not set>,e820=on|off,kernel=on|off,cmdline=on|off, \
+    initramfs=on|off,acpi_table=on|off,items=[name0=<backing_file_path>,file0=<file_path>:name1=<backing_file_path>,file1=<file_path>]\"";
+    pub fn parse(fw_cfg_config: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser
+            .add_valueless("disable")
+            .add("e820")
+            .add("kernel")
+            .add("cmdline")
+            .add("initramfs")
+            .add("acpi_table")
+            .add("items");
+        parser.parse(fw_cfg_config).map_err(Error::ParseFwCfgItem)?;
+        if parser.is_set("disable") {
+            return Ok(FwCfgConfig {
+                enabled: false,
+                e820: false,
+                kernel: false,
+                cmdline: false,
+                initramfs: false,
+                acpi_tables: false,
+                items: None,
+            });
+        }
+        let enabled = true;
+        let e820 = parser
+            .convert::<Toggle>("e820")
+            .map_err(Error::ParseFwCfgItem)?
+            .unwrap_or(Toggle(true))
+            .0;
+        let kernel = parser
+            .convert::<Toggle>("kernel")
+            .map_err(Error::ParseFwCfgItem)?
+            .unwrap_or(Toggle(true))
+            .0;
+        let cmdline = parser
+            .convert::<Toggle>("cmdline")
+            .map_err(Error::ParseFwCfgItem)?
+            .unwrap_or(Toggle(true))
+            .0;
+        let initramfs = parser
+            .convert::<Toggle>("initramfs")
+            .map_err(Error::ParseFwCfgItem)?
+            .unwrap_or(Toggle(true))
+            .0;
+        let acpi_tables = parser
+            .convert::<Toggle>("acpi_table")
+            .map_err(Error::ParseFwCfgItem)?
+            .unwrap_or(Toggle(true))
+            .0;
+        let items = if parser.is_set("items") {
+            Some(
+                parser
+                    .convert::<FwCfgItemList>("items")
+                    .map_err(Error::ParseFwCfgItem)?
+                    .unwrap(),
+            )
+        } else {
+            None
+        };
+
+        Ok(FwCfgConfig {
+            enabled,
+            e820,
+            kernel,
+            cmdline,
+            initramfs,
+            acpi_tables,
+            items,
+        })
+    }
+}
+
+#[cfg(feature = "fw_cfg")]
+impl FwCfgItem {
+    pub fn parse(fw_cfg: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser.add("name").add("file");
+        parser.parse(fw_cfg).map_err(Error::ParseFwCfgItem)?;
+
+        let name = parser.get("name").map(String::from);
+        let file = parser.get("file").map(PathBuf::from);
+        Ok(FwCfgItem { name, file })
+    }
+}
+
 impl PmemConfig {
     pub const SYNTAX: &'static str = "Persistent memory parameters \
     \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
@@ -2660,6 +2759,12 @@ impl VmConfig {
             }
             disks = Some(disk_config_list);
         }
+        #[cfg(feature = "fw_cfg")]
+        let fw_cfg_config = if vm_params.fw_cfg_config.is_some() {
+            Some(FwCfgConfig::parse(vm_params.fw_cfg_config.unwrap())?)
+        } else {
+            None
+        };
 
         let mut net: Option<Vec<NetConfig>> = None;
         if let Some(net_list) = &vm_params.net {
@@ -2797,6 +2902,8 @@ impl VmConfig {
                 igvm: vm_params.igvm.map(PathBuf::from),
                 #[cfg(feature = "sev_snp")]
                 host_data: vm_params.host_data.map(|s| s.to_string()),
+                #[cfg(feature = "fw_cfg")]
+                fw_cfg_config,
             })
         } else {
             None
@@ -3939,6 +4046,8 @@ mod tests {
                 host_data: Some(
                     "243eb7dc1a21129caa91dcbb794922b933baecb5823a377eb431188673288c07".to_string(),
                 ),
+                #[cfg(feature = "fw_cfg")]
+                fw_cfg_config: None,
             }),
             rate_limit_groups: None,
             disks: None,
@@ -4556,6 +4665,8 @@ mod tests {
                 igvm: None,
                 #[cfg(feature = "sev_snp")]
                 host_data: Some("".to_string()),
+                #[cfg(feature = "fw_cfg")]
+                fw_cfg_config: None,
             });
             config_with_no_host_data.validate().unwrap_err();
 
@@ -4570,6 +4681,8 @@ mod tests {
                 igvm: None,
                 #[cfg(feature = "sev_snp")]
                 host_data: None,
+                #[cfg(feature = "fw_cfg")]
+                fw_cfg_config: None,
             });
             valid_config_with_no_host_data.validate().unwrap();
 
@@ -4586,6 +4699,8 @@ mod tests {
                 host_data: Some(
                     "243eb7dc1a21129caa91dcbb794922b933baecb5823a377eb43118867328".to_string(),
                 ),
+                #[cfg(feature = "fw_cfg")]
+                fw_cfg_config: None,
             });
             config_with_invalid_host_data.validate().unwrap_err();
         }
