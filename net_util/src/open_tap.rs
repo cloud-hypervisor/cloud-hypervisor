@@ -89,6 +89,15 @@ pub fn open_tap(
                 Some(name) => Tap::open_named(name, num_rx_q, flags).map_err(Error::TapOpen)?,
                 None => Tap::new(num_rx_q).map_err(Error::TapOpen)?,
             };
+
+            let device_has_been_created = if_name.is_none();
+            if device_has_been_created {
+                log::info!(
+                    "Created tap device: name={}, num_rx_q={num_rx_q}",
+                    std::str::from_utf8(tap.get_if_name()).expect("should be valid utf-8")
+                );
+            }
+
             // Don't overwrite ip configuration of existing interfaces:
             if !tap_existed {
                 if let Some(ip) = ip_addr {
@@ -114,7 +123,7 @@ pub fn open_tap(
             tap.set_vnet_hdr_size(vnet_hdr_size)
                 .map_err(Error::TapSetVnetHdrSize)?;
 
-            ifname = String::from_utf8(tap.get_if_name()).unwrap();
+            ifname = String::from_utf8(tap.get_if_name().to_vec()).unwrap();
         } else {
             tap = Tap::open_named(ifname.as_str(), num_rx_q, flags).map_err(Error::TapOpen)?;
 
