@@ -2046,7 +2046,15 @@ impl MemoryManager {
                     file.as_raw_fd(),
                     0,
                 )
-            } as u64;
+            };
+
+            if host_addr == libc::MAP_FAILED {
+                error!(
+                    "Could not add SGX EPC section (size 0x{:x})",
+                    epc_section.size
+                );
+                return Err(Error::SgxEpcRangeAllocation);
+            }
 
             info!(
                 "Adding SGX EPC section: 0x{:x} (0x{:x})",
@@ -2056,7 +2064,7 @@ impl MemoryManager {
             let _mem_slot = self.create_userspace_mapping(
                 epc_section_start,
                 epc_section.size,
-                host_addr,
+                host_addr as u64,
                 false,
                 false,
                 false,
