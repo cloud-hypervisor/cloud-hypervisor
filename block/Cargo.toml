@@ -18,7 +18,7 @@ remain = "0.2.14"
 serde = { version = "1.0.208", features = ["derive"] }
 smallvec = "1.13.2"
 thiserror = { workspace = true }
-uuid = { version = "1.17.0", features = ["v4"] }
+uuid = { workspace = true }
 virtio-bindings = { workspace = true, features = ["virtio-v5_0_0"] }
 virtio-queue = { workspace = true }
 vm-memory = { workspace = true, features = [
