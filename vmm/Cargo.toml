@@ -67,7 +67,7 @@ serial_buffer = { path = "../serial_buffer" }
 signal-hook = "0.3.18"
 thiserror = { workspace = true }
 tracer = { path = "../tracer" }
-uuid = "1.17.0"
+uuid = { workspace = true }
 vfio-ioctls = { workspace = true, default-features = false }
 vfio_user = { workspace = true }
 virtio-bindings = { workspace = true }
