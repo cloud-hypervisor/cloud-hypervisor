@@ -131,4 +131,4 @@ serde_json = "1.0.120"
 # other crates
 thiserror = "2.0.12"
 uuid = { version = "1.17.0" }
-zerocopy = { version = "0.8.24", default-features = false }
+zerocopy = { version = "0.8.26", default-features = false }
