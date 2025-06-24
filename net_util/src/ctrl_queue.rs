@@ -4,19 +4,17 @@
 
 use std::sync::Arc;
 
-use libc::c_uint;
 use thiserror::Error;
 use virtio_bindings::virtio_net::{
     VIRTIO_NET_CTRL_GUEST_OFFLOADS, VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET, VIRTIO_NET_CTRL_MQ,
     VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN,
-    VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET, VIRTIO_NET_ERR, VIRTIO_NET_F_GUEST_CSUM,
-    VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4, VIRTIO_NET_F_GUEST_TSO6,
-    VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_OK,
+    VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET, VIRTIO_NET_ERR, VIRTIO_NET_OK,
 };
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestMemoryError};
 use vm_virtio::{AccessPlatform, Translatable};
 
+use super::virtio_features_to_tap_offload;
 use crate::{GuestMemoryMmap, Tap};
 
 #[derive(Error, Debug)]
@@ -162,25 +160,4 @@ impl CtrlQueue {
 
         Ok(())
     }
-}
-
-pub fn virtio_features_to_tap_offload(features: u64) -> c_uint {
-    let mut tap_offloads: c_uint = 0;
-    if features & (1 << VIRTIO_NET_F_GUEST_CSUM) != 0 {
-        tap_offloads |= net_gen::TUN_F_CSUM;
-    }
-    if features & (1 << VIRTIO_NET_F_GUEST_TSO4) != 0 {
-        tap_offloads |= net_gen::TUN_F_TSO4;
-    }
-    if features & (1 << VIRTIO_NET_F_GUEST_TSO6) != 0 {
-        tap_offloads |= net_gen::TUN_F_TSO6;
-    }
-    if features & (1 << VIRTIO_NET_F_GUEST_ECN) != 0 {
-        tap_offloads |= net_gen::TUN_F_TSO_ECN;
-    }
-    if features & (1 << VIRTIO_NET_F_GUEST_UFO) != 0 {
-        tap_offloads |= net_gen::TUN_F_UFO;
-    }
-
-    tap_offloads
 }
