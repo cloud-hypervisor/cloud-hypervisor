@@ -20,6 +20,13 @@ use super::{
 };
 use crate::mac::MAC_ADDR_LEN;
 
+/// Maximum length of a network interface name in Linux, excluding any NUL byte.
+///
+/// This corresponds to `IFNAMSIZ` in Linux [[0]].
+///
+/// [0]: https://elixir.bootlin.com/linux/v6.12/source/include/uapi/linux/if.h#L33
+const MAX_INTERFACE_NAME_LEN: usize = 15;
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Couldn't open /dev/net/tun")]
@@ -34,8 +41,10 @@ pub enum Error {
     IoctlError(c_ulong, #[source] IoError),
     #[error("Failed to create a socket")]
     NetUtil(#[source] NetUtilError),
-    #[error("Invalid interface name")]
-    InvalidIfname,
+    #[error("Interface name too long (max length is {MAX_INTERFACE_NAME_LEN}): {0}")]
+    IfnameTooLong(String),
+    #[error("Invalid interface name (does it exist?): {0}")]
+    InvalidIfname(String),
     #[error("Error parsing MAC data")]
     MacParsing(#[source] IoError),
     #[error("Invalid netmask")]
@@ -76,16 +85,14 @@ impl std::clone::Clone for Tap {
 fn build_terminated_if_name(if_name: &str) -> Result<Vec<u8>> {
     // Convert the string slice to bytes, and shadow the variable,
     // since we no longer need the &str version.
-    let if_name = if_name.as_bytes();
+    let bytes = if_name.as_bytes();
 
-    // TODO: the 16usize limit of the if_name member from struct Tap is pretty arbitrary.
-    // We leave it as is for now, but this should be refactored at some point.
-    if if_name.len() > 15 {
-        return Err(Error::InvalidIfname);
+    if bytes.len() > MAX_INTERFACE_NAME_LEN {
+        return Err(Error::IfnameTooLong(if_name.to_string()));
     }
 
-    let mut terminated_if_name = vec![b'\0'; if_name.len() + 1];
-    terminated_if_name[..if_name.len()].copy_from_slice(if_name);
+    let mut terminated_if_name = vec![b'\0'; bytes.len() + 1];
+    terminated_if_name[..bytes.len()].copy_from_slice(bytes);
 
     Ok(terminated_if_name)
 }
@@ -313,7 +320,10 @@ impl Tap {
                     // SAFETY: ifru_ivalue contains the ifindex and is set by the previous ioctl
                     unsafe {
                         match ifreq.ifr_ifru.ifru_ivalue {
-                            0 => return Err(Error::InvalidIfname),
+                            0 => {
+                                let name = String::from_utf8_lossy(&self.if_name).to_string();
+                                return Err(Error::InvalidIfname(name));
+                            }
                             i => i,
                         }
                     }
