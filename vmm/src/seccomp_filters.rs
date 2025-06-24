@@ -103,6 +103,8 @@ mod kvm {
     pub const KVM_GET_REG_LIST: u64 = 0xc008_aeb0;
     pub const KVM_MEMORY_ENCRYPT_OP: u64 = 0xc008_aeba;
     pub const KVM_NMI: u64 = 0xae9a;
+    pub const KVM_GET_NESTED_STATE: u64 = 3229658814;
+    pub const KVM_SET_NESTED_STATE: u64 = 1082175167;
 }
 
 // MSHV IOCTL code. This is unstable until the kernel code has been declared stable.
@@ -232,6 +234,8 @@ fn create_vmm_ioctl_seccomp_rule_common_kvm() -> Result<Vec<SeccompRule>, Backen
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_USER_MEMORY_REGION,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_VCPU_EVENTS,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_NMI)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_NESTED_STATE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_NESTED_STATE)?],
     ])
 }
 
@@ -697,6 +701,8 @@ fn create_vcpu_ioctl_seccomp_rule_kvm() -> Result<Vec<SeccompRule>, BackendError
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_USER_MEMORY_REGION,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_RUN,)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_NMI)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_NESTED_STATE)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_NESTED_STATE)?],
     ])
 }
 
