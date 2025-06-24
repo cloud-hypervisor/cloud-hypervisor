@@ -916,8 +916,8 @@ dependencies = [
  "iced-x86",
  "igvm",
  "igvm_defs",
- "kvm-bindings",
- "kvm-ioctls",
+ "kvm-bindings 0.13.0",
+ "kvm-ioctls 0.23.0",
  "libc",
  "log",
  "mshv-bindings",
@@ -1066,6 +1066,15 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4b153a59bb3ca930ff8148655b2ef68c34259a623ae08cf2fb9b570b2e45363"
 dependencies = [
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "kvm-bindings"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf3432d9f609fbede9f624d1dbefcce77985a9322de1d0e6d460ec05502b7fd0"
+dependencies = [
  "serde",
  "vmm-sys-util",
  "zerocopy 0.8.26",
@@ -1078,7 +1087,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b702df98508cb63ad89dd9beb9f6409761b30edca10d48e57941d3f11513a006"
 dependencies = [
  "bitflags 2.9.0",
- "kvm-bindings",
+ "kvm-bindings 0.12.0",
+ "libc",
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "kvm-ioctls"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e00243d27a20feb05cf001ae52ddc79831ac70c020f215ba1153ff9270b650a"
+dependencies = [
+ "bitflags 2.9.0",
+ "kvm-bindings 0.13.0",
  "libc",
  "vmm-sys-util",
 ]
@@ -2244,8 +2265,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61316b5e308faa8ed4a87c4130256f765e46de3442eb2e2e619840ef73456738"
 dependencies = [
  "byteorder",
- "kvm-bindings",
- "kvm-ioctls",
+ "kvm-bindings 0.12.0",
+ "kvm-ioctls 0.22.0",
  "libc",
  "log",
  "mshv-bindings",
