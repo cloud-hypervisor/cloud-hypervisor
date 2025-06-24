@@ -334,6 +334,10 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to inject NMI")]
     Nmi(#[source] anyhow::Error),
+    #[error("Failed to get nested guest state")]
+    GetNestedState(#[source] anyhow::Error),
+    #[error("Failed to set nested guest state")]
+    SetNestedState(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]

@@ -86,6 +86,8 @@ use std::mem;
 ///
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 pub use kvm_bindings::kvm_vcpu_events as VcpuEvents;
+#[cfg(target_arch = "x86_64")]
+use kvm_bindings::nested::KvmNestedStateBuffer;
 pub use kvm_bindings::{
     KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI,
     KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID, kvm_clock_data,
@@ -2442,6 +2444,7 @@ impl cpu::Vcpu for KvmVcpu {
         let xcrs = self.get_xcrs()?;
         let lapic_state = self.get_lapic()?;
         let fpu = self.get_fpu()?;
+        let nested_state = self.nested_state()?;
 
         // Try to get all MSRs based on the list previously retrieved from KVM.
         // If the number of MSRs obtained from GET_MSRS is different from the
@@ -2516,6 +2519,7 @@ impl cpu::Vcpu for KvmVcpu {
             xcrs,
             mp_state,
             tsc_khz,
+            nested_state,
         }
         .into())
     }
@@ -2683,6 +2687,9 @@ impl cpu::Vcpu for KvmVcpu {
         self.set_xcrs(&state.xcrs)?;
         self.set_lapic(&state.lapic_state)?;
         self.set_fpu(&state.fpu)?;
+        if let Some(nested_state) = state.nested_state {
+            self.set_nested_state(&nested_state)?;
+        }
 
         if let Some(freq) = state.tsc_khz {
             self.set_tsc_khz(freq)?;
@@ -3035,6 +3042,36 @@ impl KvmVcpu {
             .unwrap()
             .set_vcpu_events(events)
             .map_err(|e| cpu::HypervisorCpuError::SetVcpuEvents(e.into()))
+    }
+
+    /// Get the state of the nested guest from the current vCPU,
+    /// if there is any.
+    #[cfg(target_arch = "x86_64")]
+    fn nested_state(&self) -> cpu::Result<Option<KvmNestedStateBuffer>> {
+        let mut buffer = KvmNestedStateBuffer::empty();
+
+        let maybe_size = self
+            .fd
+            .lock()
+            .unwrap()
+            .get_nested_state(&mut buffer)
+            .map_err(|e| cpu::HypervisorCpuError::GetNestedState(e.into()))?;
+
+        if let Some(_size) = maybe_size {
+            Ok(Some(buffer))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Sets the state of the nested guest for the current vCPU.
+    #[cfg(target_arch = "x86_64")]
+    fn set_nested_state(&self, state: &KvmNestedStateBuffer) -> cpu::Result<()> {
+        self.fd
+            .lock()
+            .unwrap()
+            .set_nested_state(state)
+            .map_err(|e| cpu::HypervisorCpuError::GetNestedState(e.into()))
     }
 }
 
