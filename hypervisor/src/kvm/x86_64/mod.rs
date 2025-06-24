@@ -9,6 +9,7 @@
 //
 
 use kvm_bindings::nested::KvmNestedStateBuffer;
+use kvm_bindings::Xsave;
 use serde::{Deserialize, Serialize};
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms

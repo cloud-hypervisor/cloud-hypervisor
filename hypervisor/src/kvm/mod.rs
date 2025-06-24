@@ -103,6 +103,7 @@ use kvm_bindings::{
 use kvm_bindings::{kvm_riscv_core, user_regs_struct, KVM_REG_RISCV_CORE};
 #[cfg(feature = "tdx")]
 use kvm_bindings::{kvm_run__bindgen_ty_1, KVMIO};
+use kvm_bindings::Xsave;
 pub use kvm_ioctls::{Cap, Kvm, VcpuExit};
 use thiserror::Error;
 use vfio_ioctls::VfioDeviceFd;
@@ -2981,11 +2982,14 @@ impl KvmVcpu {
     ///
     fn set_xsave(&self, xsave: &XsaveState) -> cpu::Result<()> {
         let xsave: kvm_bindings::kvm_xsave = (*xsave).clone().into();
-        self.fd
-            .lock()
-            .unwrap()
-            .set_xsave(&xsave)
-            .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
+        // SAFETY: TODO: Works for now but we should migrate to set_xsave2
+        unsafe {
+            self.fd
+                .lock()
+                .unwrap()
+                .set_xsave(&xsave)
+                .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
+        }
     }
 
     #[cfg(target_arch = "x86_64")]
