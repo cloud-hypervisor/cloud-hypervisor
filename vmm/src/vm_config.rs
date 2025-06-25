@@ -10,6 +10,7 @@ use std::{fs, result};
 
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use virtio_devices::RateLimiterConfig;
 
 use crate::landlock::LandlockError;
@@ -685,6 +686,27 @@ pub struct NumaConfig {
     pub pci_segments: Option<Vec<u16>>,
 }
 
+/// Errors describing a misconfigured payload, i.e., a configuration that
+/// can't be booted by Cloud Hypervisor.
+///
+/// This typically is the case for invalid combinations of cmdline, kernel,
+/// firmware, and initrd.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum PayloadConfigError {
+    /// When a firmware is specified, providing kernel, initrd, or cmdline is not supported.
+    #[error("When a firmware is specified, providing kernel, initrd, or cmdline is not supported")]
+    FirmwarePlusOtherPayloads,
+    /// Provided cmdline without kernel.
+    #[error("Provided cmdline without kernel")]
+    CmdlineWithoutKernel,
+    /// No bootitem provided: neither firmware nor kernel.
+    #[error("No bootitem provided: neither firmware nor kernel")]
+    MissingBootitem,
+    /// There is an invalid and unbootable configuration.
+    #[error("There is an invalid and unbootable configuration.")]
+    InvalidConfiguration,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PayloadConfig {
     #[serde(default)]
@@ -773,6 +795,25 @@ impl FromStr for FwCfgItemList {
         Ok(FwCfgItemList {
             item_list: fw_cfg_items,
         })
+    }
+}
+
+impl PayloadConfig {
+    /// Validates the payload config and succeeds if Cloud Hypervisor will be
+    /// able to boot the configuration.
+    pub fn validate(&self) -> Result<(), PayloadConfigError> {
+        match (&self.firmware, &self.kernel, &self.initramfs, &self.cmdline) {
+            (Some(_firmware), None, None, None) => Ok(()),
+            (None, Some(_kernel), _, _) => Ok(()),
+            (Some(_firmware), Some(_kernel), _, _) => {
+                Err(PayloadConfigError::FirmwarePlusOtherPayloads)
+            }
+            (Some(_firmware), _, Some(_initrd), _) => {
+                Err(PayloadConfigError::FirmwarePlusOtherPayloads)
+            }
+            (_, None, _, Some(_cmdline)) => Err(PayloadConfigError::CmdlineWithoutKernel),
+            (None, None, _, _) => Err(PayloadConfigError::MissingBootitem),
+        }
     }
 }
 
