@@ -84,6 +84,7 @@ use std::mem;
 ///
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 pub use kvm_bindings::kvm_vcpu_events as VcpuEvents;
+use kvm_bindings::nested::KvmNestedStateBuffer;
 pub use kvm_bindings::{
     kvm_clock_data, kvm_create_device, kvm_create_device as CreateDevice,
     kvm_device_attr as DeviceAttr, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug,
@@ -102,6 +103,7 @@ use kvm_bindings::{
 use kvm_bindings::{kvm_riscv_core, user_regs_struct, KVM_REG_RISCV_CORE};
 #[cfg(feature = "tdx")]
 use kvm_bindings::{kvm_run__bindgen_ty_1, KVMIO};
+use kvm_bindings::Xsave;
 pub use kvm_ioctls::{Cap, Kvm, VcpuExit};
 use thiserror::Error;
 use vfio_ioctls::VfioDeviceFd;
@@ -2423,6 +2425,7 @@ impl cpu::Vcpu for KvmVcpu {
         let xcrs = self.get_xcrs()?;
         let lapic_state = self.get_lapic()?;
         let fpu = self.get_fpu()?;
+        let nested_state = self.nested_state()?;
 
         // Try to get all MSRs based on the list previously retrieved from KVM.
         // If the number of MSRs obtained from GET_MSRS is different from the
@@ -2497,6 +2500,7 @@ impl cpu::Vcpu for KvmVcpu {
             xcrs,
             mp_state,
             tsc_khz,
+            nested_state,
         }
         .into())
     }
@@ -2663,6 +2667,9 @@ impl cpu::Vcpu for KvmVcpu {
         self.set_xcrs(&state.xcrs)?;
         self.set_lapic(&state.lapic_state)?;
         self.set_fpu(&state.fpu)?;
+        if let Some(nested_State) = state.nested_state {
+            self.set_nested_state(&nested_State)?;
+        }
 
         if let Some(freq) = state.tsc_khz {
             self.set_tsc_khz(freq)?;
@@ -2933,6 +2940,25 @@ impl cpu::Vcpu for KvmVcpu {
             Ok(_) => Ok(()),
         }
     }
+
+    fn nested_state(&self) -> cpu::Result<Option<KvmNestedStateBuffer>> {
+        let mut buffer = KvmNestedStateBuffer::empty();
+
+        self.fd
+            .lock()
+            .unwrap()
+            .nested_state(&mut buffer)
+            .map(|size| size.map(|_| buffer))
+            .map_err(|e| cpu::HypervisorCpuError::GetNestedState(e.into()))
+    }
+
+    fn set_nested_state(&self, state: &KvmNestedStateBuffer) -> cpu::Result<()> {
+        self.fd
+            .lock()
+            .unwrap()
+            .set_nested_state(state)
+            .map_err(|e| cpu::HypervisorCpuError::GetNestedState(e.into()))
+    }
 }
 
 impl KvmVcpu {
@@ -2956,11 +2982,14 @@ impl KvmVcpu {
     ///
     fn set_xsave(&self, xsave: &XsaveState) -> cpu::Result<()> {
         let xsave: kvm_bindings::kvm_xsave = (*xsave).clone().into();
-        self.fd
-            .lock()
-            .unwrap()
-            .set_xsave(&xsave)
-            .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
+        // SAFETY: TODO: Works for now but we should migrate to set_xsave2
+        unsafe {
+            self.fd
+                .lock()
+                .unwrap()
+                .set_xsave(&xsave)
+                .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
+        }
     }
 
     #[cfg(target_arch = "x86_64")]
