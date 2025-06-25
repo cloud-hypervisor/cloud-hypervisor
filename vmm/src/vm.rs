@@ -317,9 +317,6 @@ pub enum Error {
     #[error("Error joining kernel loading thread")]
     KernelLoadThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
-    #[error("Payload configuration is not bootable")]
-    InvalidPayload,
-
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     #[error("Error coredumping VM")]
     Coredump(#[source] GuestDebuggableError),
@@ -1217,7 +1214,7 @@ impl Vm {
                 Self::load_firmware(&firmware, memory_manager)?;
                 arch::layout::UEFI_START
             }
-            _ => return Err(Error::InvalidPayload),
+            _ => unreachable!("Unsupported boot configuration: programming error from 'PayloadConfigError::validate()'"),
         };
 
         Ok(EntryPoint { entry_addr })
@@ -1267,7 +1264,7 @@ impl Vm {
                 Self::load_firmware(&firmware, memory_manager)?;
                 arch::layout::UEFI_START
             }
-            _ => return Err(Error::InvalidPayload),
+            _ => unreachable!("Unsupported boot configuration: programming error from 'PayloadConfigError::validate()'"),
         };
 
         Ok(EntryPoint { entry_addr })
@@ -1385,19 +1382,17 @@ impl Vm {
         match (
             &payload.firmware,
             &payload.kernel,
-            &payload.initramfs,
-            &payload.cmdline,
         ) {
-            (Some(firmware), None, None, None) => {
+            (Some(firmware), None) => {
                 let firmware = File::open(firmware).map_err(Error::FirmwareFile)?;
                 Self::load_kernel(firmware, None, memory_manager)
             }
-            (None, Some(kernel), _, _) => {
+            (None, Some(kernel)) => {
                 let kernel = File::open(kernel).map_err(Error::KernelFile)?;
                 let cmdline = Self::generate_cmdline(payload)?;
                 Self::load_kernel(kernel, Some(cmdline), memory_manager)
             }
-            _ => Err(Error::InvalidPayload),
+            _ => unreachable!("Unsupported boot configuration: programming error from 'PayloadConfigError::validate()'"),
         }
     }
 
@@ -1415,7 +1410,7 @@ impl Vm {
                 let kernel = File::open(kernel).map_err(Error::KernelFile)?;
                 Self::load_kernel(None, Some(kernel), memory_manager)
             }
-            _ => Err(Error::InvalidPayload),
+            _ => unreachable!("Unsupported boot configuration: programming error from 'PayloadConfigError::validate()'"),
         }
     }
 
