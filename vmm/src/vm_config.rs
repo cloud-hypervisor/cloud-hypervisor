@@ -10,6 +10,7 @@ use std::{fs, result};
 
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use virtio_devices::RateLimiterConfig;
 
 use crate::landlock::LandlockError;
@@ -705,6 +706,21 @@ pub struct NumaConfig {
     pub pci_segments: Option<Vec<u16>>,
 }
 
+/// Errors describing a misconfigured payload, i.e., a configuration that
+/// can't be booted by Cloud Hypervisor.
+///
+/// This typically is the case for invalid combinations of cmdline, kernel,
+/// firmware, and initrd.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum PayloadConfigError {
+    /// Specifying a kernel is not supported when a firmware is provided.
+    #[error("Specifying a kernel is not supported when a firmware is provided")]
+    FirmwarePlusOtherPayloads,
+    /// No bootitem provided: neither firmware nor kernel.
+    #[error("No bootitem provided: neither firmware nor kernel")]
+    MissingBootitem,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PayloadConfig {
     #[serde(default)]
@@ -793,6 +809,35 @@ impl FromStr for FwCfgItemList {
         Ok(FwCfgItemList {
             item_list: fw_cfg_items,
         })
+    }
+}
+
+impl PayloadConfig {
+    /// Validates the payload config.
+    ///
+    /// Succeeds if Cloud Hypervisor will be able to boot the configuration.
+    /// Further, warns for some odd configurations.
+    pub fn validate(&mut self) -> Result<(), PayloadConfigError> {
+        match (&self.firmware, &self.kernel) {
+            (Some(_firmware), Some(_kernel)) => Err(PayloadConfigError::FirmwarePlusOtherPayloads),
+            (Some(_firmware), None) => {
+                if self.cmdline.is_some() {
+                    log::warn!("Ignoring cmdline parameter as firmware is provided as the payload");
+                    self.cmdline = None;
+                }
+                if self.initramfs.is_some() {
+                    log::warn!(
+                        "Ignoring initramfs parameter as firmware is provided as the payload"
+                    );
+                    self.initramfs = None;
+                }
+                Ok(())
+            }
+            (None, Some(_kernel)) => Ok(()),
+            (None, None) => Err(PayloadConfigError::MissingBootitem),
+        }?;
+
+        Ok(())
     }
 }
 
