@@ -549,6 +549,7 @@ fn pty_foreground_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_write, vec![]),
         #[cfg(debug_assertions)]
         (libc::SYS_fcntl, vec![]),
+        (libc::SYS_getcwd, vec![]),
     ])
 }
 
@@ -697,6 +698,7 @@ fn vmm_thread_rules(
         (libc::SYS_wait4, vec![]),
         (libc::SYS_write, vec![]),
         (libc::SYS_writev, vec![]),
+        (libc::SYS_getcwd, vec![]),
     ])
 }
 
@@ -835,6 +837,7 @@ fn vcpu_thread_rules(
         (libc::SYS_writev, vec![]),
         #[cfg(debug_assertions)]
         (libc::SYS_fcntl, vec![]),
+        (libc::SYS_getcwd, vec![]),
     ])
 }
 
@@ -870,6 +873,7 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_write, vec![]),
         (libc::SYS_rt_sigprocmask, vec![]),
+        (libc::SYS_getcwd, vec![]),
     ])
 }
 
@@ -907,6 +911,7 @@ fn dbus_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_set_robust_list, vec![]),
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_write, vec![]),
+        (libc::SYS_getcwd, vec![]),
     ])
 }
 
@@ -922,6 +927,7 @@ fn event_monitor_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendE
         (libc::SYS_prctl, vec![]),
         (libc::SYS_sched_yield, vec![]),
         (libc::SYS_write, vec![]),
+        (libc::SYS_getcwd, vec![]),
     ])
 }
 
