@@ -56,6 +56,7 @@ class TitleStartsWithComponent(LineRule):
             'README',
             'resources',
             'scripts',
+            'seccomp',
             'serial_buffer',
             'test_data',
             'test_infra',
