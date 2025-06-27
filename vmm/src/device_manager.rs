@@ -3754,13 +3754,19 @@ impl DeviceManager {
             // virtio-mem device itself.
             for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
                 for region in zone.regions() {
-                    vfio_container
-                        .vfio_dma_map(
+                    // vfio_dma_map is unsound and ought to be marked as unsafe
+                    #[allow(unused_unsafe)]
+                    // SAFETY: GuestMemoryMmap guarantees that region points
+                    // to len bytes of valid memory starting at as_ptr()
+                    // that will only be freed with munmap().
+                    unsafe {
+                        vfio_container.vfio_dma_map(
                             region.start_addr().raw_value(),
                             region.len(),
                             region.as_ptr() as u64,
                         )
-                        .map_err(DeviceManagerError::VfioDmaMap)?;
+                    }
+                    .map_err(DeviceManagerError::VfioDmaMap)?;
                 }
             }
 
@@ -4368,13 +4374,19 @@ impl DeviceManager {
 
         // Take care of updating the memory for VFIO PCI devices.
         if let Some(vfio_container) = &self.vfio_container {
-            vfio_container
-                .vfio_dma_map(
+            // vfio_dma_map is unsound and ought to be marked as unsafe
+            #[allow(unused_unsafe)]
+            // SAFETY: GuestMemoryMmap guarantees that region points
+            // to len bytes of valid memory starting at as_ptr()
+            // that will only be freed with munmap().
+            unsafe {
+                vfio_container.vfio_dma_map(
                     new_region.start_addr().raw_value(),
                     new_region.len(),
                     new_region.as_ptr() as u64,
                 )
-                .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
+            }
+            .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
         }
 
         // Take care of updating the memory for vfio-user devices.
