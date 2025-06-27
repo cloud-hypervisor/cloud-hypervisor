@@ -943,7 +943,7 @@ impl vm::Vm for KvmVm {
             &self.fd.as_raw_fd(),
             TdxCommand::InitVm,
             0,
-            &data as *const _ as u64,
+            &data as *const _ as *const _,
         )
         .map_err(vm::HypervisorVmError::InitializeTdx)
     }
@@ -953,8 +953,13 @@ impl vm::Vm for KvmVm {
     ///
     #[cfg(feature = "tdx")]
     fn tdx_finalize(&self) -> vm::Result<()> {
-        tdx_command(&self.fd.as_raw_fd(), TdxCommand::Finalize, 0, 0)
-            .map_err(vm::HypervisorVmError::FinalizeTdx)
+        tdx_command(
+            &self.fd.as_raw_fd(),
+            TdxCommand::Finalize,
+            0,
+            std::ptr::null(),
+        )
+        .map_err(vm::HypervisorVmError::FinalizeTdx)
     }
 
     ///
@@ -963,9 +968,9 @@ impl vm::Vm for KvmVm {
     #[cfg(feature = "tdx")]
     fn tdx_init_memory_region(
         &self,
-        host_address: u64,
+        host_address: *mut u8,
         guest_address: u64,
-        size: u64,
+        size: usize,
         measure: bool,
     ) -> vm::Result<()> {
         #[repr(C)]
@@ -975,16 +980,16 @@ impl vm::Vm for KvmVm {
             pages: u64,
         }
         let data = TdxInitMemRegion {
-            host_address,
+            host_address: host_address as _,
             guest_address,
-            pages: size / 4096,
+            pages: (size / 4096).try_into().unwrap(),
         };
 
         tdx_command(
             &self.fd.as_raw_fd(),
             TdxCommand::InitMemRegion,
             u32::from(measure),
-            &data as *const _ as u64,
+            &data as *const _ as *const _,
         )
         .map_err(vm::HypervisorVmError::InitMemRegionTdx)
     }
@@ -1000,7 +1005,7 @@ fn tdx_command(
     fd: &RawFd,
     command: TdxCommand,
     flags: u32,
-    data: u64,
+    data: *const libc::c_void,
 ) -> std::result::Result<(), std::io::Error> {
     #[repr(C)]
     struct TdxIoctlCmd {
@@ -1013,7 +1018,7 @@ fn tdx_command(
     let cmd = TdxIoctlCmd {
         command,
         flags,
-        data,
+        data: data as _,
         error: 0,
         unused: 0,
     };
@@ -1252,7 +1257,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             &self.kvm.as_raw_fd(),
             TdxCommand::Capabilities,
             0,
-            &data as *const _ as u64,
+            &data as *const _ as *const _,
         )
         .map_err(|e| hypervisor::HypervisorError::TdxCapabilities(e.into()))?;
 
@@ -2724,6 +2729,11 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     #[cfg(feature = "tdx")]
     fn tdx_init(&self, hob_address: u64) -> cpu::Result<()> {
+        // On 32-bit, the next cast would clobber the high 32 bits.
+        #[cfg(not(target_pointer_width = "64"))]
+        compile_error!("32-bit TDX not supported");
+        let hob_address = hob_address as *const _;
+
         tdx_command(
             &self.fd.lock().unwrap().as_raw_fd(),
             TdxCommand::InitVcpu,
