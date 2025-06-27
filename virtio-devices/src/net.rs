@@ -661,6 +661,23 @@ impl Net {
 
 impl Drop for Net {
     fn drop(&mut self) {
+        // Get a comma-separated list of the interface names of the tap devices
+        // associated with this network device.
+        let ifnames_str = self
+            .taps
+            .iter()
+            .map(|tap| {
+                let name_bytes = tap.get_if_name();
+                let nul_terminated = name_bytes.split(|&b| b == 0).next().unwrap_or(&[]);
+                String::from_utf8_lossy(nul_terminated)
+            })
+            .collect::<Vec<_>>();
+        let ifnames_str = ifnames_str.join(",");
+        debug!(
+            "virtio-net device closed: id={}, ifnames=[{ifnames_str}]",
+            self.id
+        );
+
         if let Some(kill_evt) = self.common.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
             let _ = kill_evt.write(1);

@@ -4,6 +4,7 @@
 //
 
 use std::collections::{BTreeSet, HashMap};
+use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::result;
 use std::str::FromStr;
@@ -215,8 +216,8 @@ pub enum ValidationError {
     #[error("Number of queues to virtio_net does not match the number of input FDs")]
     VnetQueueFdMismatch,
     /// Using reserved fd
-    #[error("Reserved fd number (<= 2)")]
-    VnetReservedFd,
+    #[error("Reserved fd number (fd={0} <= 2)")]
+    VnetReservedFd(RawFd),
     /// Hardware checksum offload is disabled.
     #[error("\"offload_tso\" and \"offload_ufo\" depend on \"offload_csum\"")]
     NoHardwareChecksumOffload,
@@ -1434,7 +1435,7 @@ impl NetConfig {
         if let Some(fds) = self.fds.as_ref() {
             for fd in fds {
                 if *fd <= 2 {
-                    return Err(ValidationError::VnetReservedFd);
+                    return Err(ValidationError::VnetReservedFd(*fd));
                 }
             }
         }
@@ -2087,28 +2088,15 @@ pub struct RestoredNetConfig {
     pub id: String,
     #[serde(default)]
     pub num_fds: usize,
-    #[serde(
-        default,
-        serialize_with = "serialize_restorednetconfig_fds",
-        deserialize_with = "deserialize_restorednetconfig_fds"
-    )]
+    // Special deserialize handling:
+    // A serialize-deserialize cycle typically happens across processes.
+    // The old FD is almost certainly invalid in the new process.
+    // One way to get actual FDs here in a new process is the `receive-migration`
+    // path via a UNIX Domain socket: An SCM_RIGHTS UNIX Domain Socket message
+    // passes new FDs to the Cloud Hypervisor process, but these FDs are handled
+    // in the HTTP API handler.
+    #[serde(default, deserialize_with = "deserialize_restorednetconfig_fds")]
     pub fds: Option<Vec<i32>>,
-}
-
-fn serialize_restorednetconfig_fds<S>(
-    x: &Option<Vec<i32>>,
-    s: S,
-) -> std::result::Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    if let Some(x) = x {
-        warn!("'RestoredNetConfig' contains FDs that can't be serialized correctly. Serializing them as invalid FDs.");
-        let invalid_fds = vec![-1; x.len()];
-        s.serialize_some(&invalid_fds)
-    } else {
-        s.serialize_none()
-    }
 }
 
 fn deserialize_restorednetconfig_fds<'de, D>(
@@ -2119,7 +2107,10 @@ where
 {
     let invalid_fds: Option<Vec<i32>> = Option::deserialize(d)?;
     if let Some(invalid_fds) = invalid_fds {
-        warn!("'RestoredNetConfig' contains FDs that can't be deserialized correctly. Deserializing them as invalid FDs.");
+        // If the live-migration path is used properly, new FDs are passed as
+        // SCM_RIGHTS message. So, we don't get them from the serialized JSON
+        // anyway.
+        debug!("FDs in 'RestoredNetConfig' won't be deserialized as they are most likely invalid now. Deserializing them as -1.");
         Ok(Some(vec![-1; invalid_fds.len()]))
     } else {
         Ok(None)
@@ -4101,7 +4092,7 @@ mod tests {
         }]);
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::VnetReservedFd)
+            Err(ValidationError::VnetReservedFd(0))
         );
 
         let mut invalid_config = valid_config.clone();
