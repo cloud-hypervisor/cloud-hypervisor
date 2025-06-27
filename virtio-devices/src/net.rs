@@ -674,10 +674,17 @@ impl Drop for Net {
             })
             .collect::<Vec<_>>();
         let ifnames_str = ifnames_str.join(",");
+
+        unsafe { std::env::set_var("RUST_BACKTRACE", "full"); }
+        let backtrace = std::backtrace::Backtrace::capture();
+
         debug!(
             "virtio-net device closed: id={}, ifnames=[{ifnames_str}]",
             self.id
         );
+        debug!("backtrace: {backtrace}");
+        debug!("backtrace (debug): {backtrace:?}");
+        debug!("backtrace (debug#): {backtrace:#?}");
 
         if let Some(kill_evt) = self.common.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
