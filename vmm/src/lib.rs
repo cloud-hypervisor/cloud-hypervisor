@@ -2178,7 +2178,9 @@ impl RequestHandler for Vmm {
 
                         let mut vm_config = self.vm_config.as_mut().unwrap().lock().unwrap();
                         {
+                            debug!("restored_net_configs={restored_net_configs:?}");
                             for net in restored_net_configs {
+                                debug!("vm_config.net={:?}", vm_config.net);
                                 for net_config in vm_config.net.iter_mut().flatten() {
                                     // update only if the net dev is backed by FDs
                                     if net_config.id == Some(net.id.clone())
