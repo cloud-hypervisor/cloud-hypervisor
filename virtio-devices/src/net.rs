@@ -669,9 +669,7 @@ impl Drop for Net {
             .taps
             .iter()
             .map(|tap| {
-                let name_bytes = tap.get_if_name();
-                let nul_terminated = name_bytes.split(|&b| b == 0).next().unwrap_or(&[]);
-                String::from_utf8_lossy(nul_terminated)
+                tap.if_name_as_str()
             })
             .collect::<Vec<_>>();
         let ifnames_str = ifnames_str.join(",");

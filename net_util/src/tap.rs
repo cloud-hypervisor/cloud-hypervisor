@@ -67,7 +67,7 @@ pub struct Tap {
 
 impl Drop for Tap {
     fn drop(&mut self) {
-        debug!("Dropping Tap FD: {}", self.tap_file.as_raw_fd());
+        debug!("Dropping Tap: if_name FD: {}", self.tap_file.as_raw_fd());
     }
 }
 
@@ -180,6 +180,7 @@ impl Tap {
         if fd < 0 {
             return Err(Error::OpenTun(IoError::last_os_error()));
         }
+        debug!("Opening Tap device with given name: ifname={if_name}, fd={fd}");
 
         // SAFETY: We just checked that the fd is valid.
         let tuntap = unsafe { File::from_raw_fd(fd) };
@@ -490,8 +491,20 @@ impl Tap {
         ifreq
     }
 
-    pub fn get_if_name(&self) -> &[u8] {
+    /// Returns the raw bytes of the interface name, which may or may not be
+    /// valid UTF-8.
+    pub fn if_name_as_bytes(&self) -> &[u8] {
         &self.if_name
+    }
+
+    /// Returns the interface name as a string, truncated at the first NUL byte
+    /// if present.
+    pub fn if_name_as_str(&self) -> &str {
+        // All bytes until first NUL.
+        let nul_terminated = self.if_name_as_bytes().split(|&b| b == 0).next().unwrap_or(&[]);
+        // 1: No sane user-space tool would generate Non-ASCII interface names.
+        // 2: We only allow the creation from UTF-8 strings (`&str`).
+        std::str::from_utf8(nul_terminated).expect("Tap interface name should be valid UTF-8")
     }
 
     #[cfg(fuzzing)]
