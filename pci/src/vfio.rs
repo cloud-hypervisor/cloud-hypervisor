@@ -1650,17 +1650,6 @@ impl VfioPciDevice {
                     self.common.interrupt.msix.as_ref(),
                 )?;
 
-                for area in &sparse_areas {
-                    if !is_page_size_aligned(area.size) || !is_page_size_aligned(area.offset) {
-                        error!(
-                            "Could not mmap sparse area that is not page size aligned \
-(offset = 0x{:x}, size = 0x{:x})",
-                            area.offset, area.size
-                        );
-                        return Err(VfioPciError::MmapArea);
-                    }
-                }
-
                 for area in sparse_areas.iter() {
                     let mapping = match MmapRegion::mmap(
                         area.size,
