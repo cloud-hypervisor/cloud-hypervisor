@@ -403,9 +403,9 @@ pub trait Vm: Send + Sync + Any {
     /// Initialize a TDX memory region for this VM
     fn tdx_init_memory_region(
         &self,
-        _host_address: u64,
+        _host_address: *mut u8,
         _guest_address: u64,
-        _size: u64,
+        _size: usize,
         _measure: bool,
     ) -> Result<()> {
         unimplemented!()
