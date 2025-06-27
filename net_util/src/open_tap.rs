@@ -135,7 +135,7 @@ pub fn open_tap(
             // same device.
             tap = open_tap_rx_q_0(if_name, ip_addr, netmask, host_mac, mtu, num_rx_q, flags)?;
             // Set the name of the tap device we open in subsequent iterations.
-            ifname = String::from_utf8(tap.get_if_name().to_vec()).unwrap();
+            ifname = tap.if_name_as_str().to_string();
         } else {
             tap = Tap::open_named(ifname.as_str(), num_rx_q, flags).map_err(Error::TapOpen)?;
 
