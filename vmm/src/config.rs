@@ -2948,7 +2948,7 @@ impl VmConfig {
     /// fds are all valid.
     pub unsafe fn add_preserved_fds(&mut self, mut fds: Vec<i32>) {
         debug!("adding preserved FDs to VM list: {fds:?}");
-        
+
         if fds.is_empty() {
             return;
         }
