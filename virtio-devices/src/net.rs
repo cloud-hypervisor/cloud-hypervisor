@@ -613,11 +613,12 @@ impl Net {
         for fd in fds.iter() {
             // Duplicate so that it can survive reboots
             // SAFETY: FFI call to dup. Trivially safe.
-            let fd = unsafe { libc::dup(*fd) };
-            if fd < 0 {
+            let fd_dupped = unsafe { libc::dup(*fd) };
+            unsafe { libc::close(*fd) };
+            if fd_dupped < 0 {
                 return Err(Error::DuplicateTapFd(std::io::Error::last_os_error()));
             }
-            let tap = Tap::from_tap_fd(fd, num_queue_pairs).map_err(Error::TapError)?;
+            let tap = Tap::from_tap_fd(fd_dupped, num_queue_pairs).map_err(Error::TapError)?;
             taps.push(tap);
         }
 
