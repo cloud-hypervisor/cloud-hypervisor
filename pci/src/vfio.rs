@@ -288,10 +288,10 @@ unsafe trait MmioRegionRange {
 unsafe impl MmioRegionRange for Vec<MmioRegion> {
     // Check if a guest address is within the range of mmio regions
     fn check_range(&self, guest_addr: u64, size: u64) -> bool {
+        let Some(guest_addr_end) = guest_addr.checked_add(size) else {
+            return false;
+        };
         for region in self.iter() {
-            let Some(guest_addr_end) = guest_addr.checked_add(size) else {
-                return false;
-            };
             let Some(region_end) = region.start.raw_value().checked_add(region.length) else {
                 return false;
             };
