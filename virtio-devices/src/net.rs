@@ -613,12 +613,13 @@ impl Net {
         for fd in fds.iter() {
             // Duplicate so that it can survive reboots
             // SAFETY: FFI call to dup. Trivially safe.
-            let fd_dupped = unsafe { libc::dup(*fd) };
+            let fd_duped = unsafe { libc::dup(*fd) };
             unsafe { libc::close(*fd) };
-            if fd_dupped < 0 {
+            if fd_duped < 0 {
                 return Err(Error::DuplicateTapFd(std::io::Error::last_os_error()));
             }
-            let tap = Tap::from_tap_fd(fd_dupped, num_queue_pairs).map_err(Error::TapError)?;
+            debug!("dup'ed fd {fd} => {fd_duped} for virtio-net device {id}");
+            let tap = Tap::from_tap_fd(fd_duped, num_queue_pairs).map_err(Error::TapError)?;
             taps.push(tap);
         }
 
@@ -683,8 +684,6 @@ impl Drop for Net {
             self.id
         );
         debug!("backtrace: {backtrace}");
-        debug!("backtrace (debug): {backtrace:?}");
-        debug!("backtrace (debug#): {backtrace:#?}");
 
         if let Some(kill_evt) = self.common.kill_evt.take() {
             // Ignore the result because there is nothing we can do about it.
