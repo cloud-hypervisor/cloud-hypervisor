@@ -2251,9 +2251,9 @@ impl Vm {
         for section in sections {
             self.vm
                 .tdx_init_memory_region(
-                    mem.get_host_address(GuestAddress(section.address)).unwrap() as u64,
+                    mem.get_host_address(GuestAddress(section.address)).unwrap(),
                     section.address,
-                    section.size,
+                    section.size.try_into().unwrap(),
                     /* TDVF_SECTION_ATTRIBUTES_EXTENDMR */
                     section.attributes == 1,
                 )
