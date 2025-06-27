@@ -4,6 +4,7 @@
 //
 
 use std::collections::{BTreeSet, HashMap};
+use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::result;
 use std::str::FromStr;
@@ -215,8 +216,8 @@ pub enum ValidationError {
     #[error("Number of queues to virtio_net does not match the number of input FDs")]
     VnetQueueFdMismatch,
     /// Using reserved fd
-    #[error("Reserved fd number (<= 2)")]
-    VnetReservedFd,
+    #[error("Reserved fd number (fd={0} <= 2)")]
+    VnetReservedFd(RawFd),
     /// Hardware checksum offload is disabled.
     #[error("\"offload_tso\" and \"offload_ufo\" depend on \"offload_csum\"")]
     NoHardwareChecksumOffload,
@@ -1434,7 +1435,12 @@ impl NetConfig {
         if let Some(fds) = self.fds.as_ref() {
             for fd in fds {
                 if *fd <= 2 {
-                    return Err(ValidationError::VnetReservedFd);
+                    // If we see this, most likely our live migration path for network FDs failed.
+                    log::debug!(
+                        "virtio-net devices {:?} unexpectedly reports invalid FD",
+                        self.id
+                    );
+                    return Err(ValidationError::VnetReservedFd(*fd));
                 }
             }
         }
@@ -2087,27 +2093,35 @@ pub struct RestoredNetConfig {
     pub id: String,
     #[serde(default)]
     pub num_fds: usize,
-    #[serde(
-        default,
-        serialize_with = "serialize_restorednetconfig_fds",
-        deserialize_with = "deserialize_restorednetconfig_fds"
-    )]
+    // Special deserialize handling:
+    // A serialize-deserialize cycle typically happens across processes.
+    // The old FD is almost certainly invalid in the new process.
+    // One way to get actual FDs here in a new process is the `receive-migration`
+    // path via a UNIX Domain socket: An SCM_RIGHTS UNIX Domain Socket message
+    // passes new FDs to the Cloud Hypervisor process, but these FDs are handled
+    // in the HTTP API handler.
+    #[serde(default, deserialize_with = "deserialize_restorednetconfig_fds")]
     pub fds: Option<Vec<i32>>,
 }
 
-fn serialize_restorednetconfig_fds<S>(
-    x: &Option<Vec<i32>>,
-    s: S,
-) -> std::result::Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    if let Some(x) = x {
-        warn!("'RestoredNetConfig' contains FDs that can't be serialized correctly. Serializing them as invalid FDs.");
-        let invalid_fds = vec![-1; x.len()];
-        s.serialize_some(&invalid_fds)
-    } else {
-        s.serialize_none()
+impl RestoredNetConfig {
+    // Ensure all net devices from 'VmConfig' backed by FDs have a
+    // corresponding 'RestoreNetConfig' with a matched 'id' and expected
+    // number of FDs.
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        let found = vm_config
+            .net
+            .iter()
+            .flatten()
+            .any(|net| net.id.as_ref() == Some(&self.id));
+
+        if !found {
+            Err(ValidationError::RestoreMissingRequiredNetId(
+                self.id.clone(),
+            ))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -2119,7 +2133,10 @@ where
 {
     let invalid_fds: Option<Vec<i32>> = Option::deserialize(d)?;
     if let Some(invalid_fds) = invalid_fds {
-        warn!("'RestoredNetConfig' contains FDs that can't be deserialized correctly. Deserializing them as invalid FDs.");
+        // If the live-migration path is used properly, new FDs are passed as
+        // SCM_RIGHTS message. So, we don't get them from the serialized JSON
+        // anyway.
+        debug!("FDs in 'RestoredNetConfig' won't be deserialized as they are most likely invalid now. Deserializing them as -1.");
         Ok(Some(vec![-1; invalid_fds.len()]))
     } else {
         Ok(None)
@@ -2930,6 +2947,8 @@ impl VmConfig {
     /// To use this safely, the caller must guarantee that the input
     /// fds are all valid.
     pub unsafe fn add_preserved_fds(&mut self, mut fds: Vec<i32>) {
+        debug!("adding preserved FDs to VM list: {fds:?}");
+
         if fds.is_empty() {
             return;
         }
@@ -2985,7 +3004,11 @@ impl Clone for VmConfig {
                 .preserved_fds
                 .as_ref()
                 // SAFETY: FFI call with valid FDs
-                .map(|fds| fds.iter().map(|fd| unsafe { libc::dup(*fd) }).collect()),
+                .map(|fds| fds.iter().map(|fd| {
+                    let fd_duped = unsafe { libc::dup(*fd) };
+                    warn!("Cloning VM config: duping preserved FD {fd} => {fd_duped}");
+                    fd_duped
+                }).collect()),
             landlock_rules: self.landlock_rules.clone(),
             ..*self
         }
@@ -2995,6 +3018,7 @@ impl Clone for VmConfig {
 impl Drop for VmConfig {
     fn drop(&mut self) {
         if let Some(mut fds) = self.preserved_fds.take() {
+            debug!("Closing preserved FDs from VM: fds={fds:?}");
             for fd in fds.drain(..) {
                 // SAFETY: FFI call with valid FDs
                 unsafe { libc::close(fd) };
@@ -4101,7 +4125,7 @@ mod tests {
         }]);
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::VnetReservedFd)
+            Err(ValidationError::VnetReservedFd(0))
         );
 
         let mut invalid_config = valid_config.clone();

@@ -2335,8 +2335,8 @@ impl RequestHandler for Vmm {
         receive_data_migration: VmReceiveMigrationData,
     ) -> result::Result<(), MigratableError> {
         info!(
-            "Receiving migration: receiver_url = {}",
-            receive_data_migration.receiver_url
+            "Receiving migration: receiver_url = {}, net_fds={:?}",
+            receive_data_migration.receiver_url, &receive_data_migration.net_fds
         );
 
         // Accept the connection and get the socket
@@ -2363,11 +2363,36 @@ impl RequestHandler for Vmm {
                         Response::error().write_to(&mut socket)?;
                         continue;
                     }
-                    memory_manager = Some(self.vm_receive_config(
-                        &req,
-                        &mut socket,
-                        existing_memory_files.take(),
-                    )?);
+
+                    let memory_manager_config =
+                        self.vm_receive_config(&req, &mut socket, existing_memory_files.take())?;
+                    memory_manager = Some(memory_manager_config);
+
+                    if let Some(ref restored_net_configs) = receive_data_migration.net_fds {
+                        // TODO do some validaiton
+                        //restored_net_config.validate();
+                        // Update VM's net configurations with new fds received for restore operation
+
+                        let mut vm_config = self.vm_config.as_mut().unwrap().lock().unwrap();
+                        {
+                            for net in restored_net_configs {
+                                for net_config in vm_config.net.iter_mut().flatten() {
+                                    // update only if the net dev is backed by FDs
+                                    if net_config.id == Some(net.id.clone())
+                                        && net_config.fds.is_some()
+                                    {
+                                        log::error!(
+                                            "overwriting net fds: id={}, old={:?}, new={:?}",
+                                            net.id,
+                                            &net_config.fds,
+                                            &net.fds
+                                        );
+                                        net_config.fds.clone_from(&net.fds);
+                                    }
+                                }
+                            }
+                        }
+                    };
                 }
                 Command::State => {
                     info!("State Command Received");

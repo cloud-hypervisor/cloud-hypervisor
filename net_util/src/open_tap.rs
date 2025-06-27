@@ -76,7 +76,14 @@ fn open_tap_rx_q_0(
     let tap = match if_name {
         Some(name) => Tap::open_named(name, num_rx_q, flags).map_err(Error::TapOpen)?,
         // Create a new Tap device in Linux, if none was specified.
-        None => Tap::new(num_rx_q).map_err(Error::TapOpen)?,
+        None => {
+            let tap = Tap::new(num_rx_q).map_err(Error::TapOpen)?;
+            log::info!(
+                "Created tap device: name={}, num_rx_q={num_rx_q}",
+                tap.if_name_as_str()
+            );
+            Tap::new(num_rx_q).map_err(Error::TapOpen)?
+        }
     };
     // Don't overwrite ip configuration of existing interfaces:
     if !tap_exists {
@@ -135,7 +142,7 @@ pub fn open_tap(
             // same device.
             tap = open_tap_rx_q_0(if_name, ip_addr, netmask, host_mac, mtu, num_rx_q, flags)?;
             // Set the name of the tap device we open in subsequent iterations.
-            ifname = String::from_utf8(tap.get_if_name()).unwrap();
+            ifname = tap.if_name_as_str().to_string();
         } else {
             tap = Tap::open_named(ifname.as_str(), num_rx_q, flags).map_err(Error::TapOpen)?;
 

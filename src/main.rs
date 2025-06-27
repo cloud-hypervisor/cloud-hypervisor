@@ -15,7 +15,7 @@ use std::{env, io};
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use event_monitor::event;
 use libc::EFD_NONBLOCK;
-use log::{warn, LevelFilter};
+use log::{info, warn, LevelFilter};
 use option_parser::OptionParser;
 use seccompiler::SeccompAction;
 use signal_hook::consts::SIGSYS;
@@ -881,6 +881,7 @@ fn main() {
     let exit_code = match start_vmm(cmd_arguments) {
         Ok(path) => {
             path.map(|s| std::fs::remove_file(s).ok());
+            info!("Cloud Hypervisor exited successfully");
             0
         }
         Err(top_error) => {

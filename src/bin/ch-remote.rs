@@ -896,6 +896,10 @@ fn coredump_config(destination_url: &str) -> String {
 fn receive_migration_data(url: &str) -> String {
     let receive_migration_data = vmm::api::VmReceiveMigrationData {
         receiver_url: url.to_owned(),
+        // Only FDs transmitted via an SCM_RIGHTS UNIX Domain Socket message
+        // are valid. Transmitting specific FD nums via the HTTP API is
+        // almost always invalid.
+        net_fds: None,
     };
 
     serde_json::to_string(&receive_migration_data).unwrap()
@@ -1018,6 +1022,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .arg(
                 Arg::new("receive_migration_config")
                     .index(1)
+                    // Live migration with net_fds not supported in ch-remote.
                     .help("<receiver_url>"),
             ),
         Command::new("remove-device")
