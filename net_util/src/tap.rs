@@ -65,6 +65,12 @@ pub struct Tap {
     if_name: Vec<u8>,
 }
 
+impl Drop for Tap {
+    fn drop(&mut self) {
+        debug!("Dropping Tap FD: {}", self.tap_file.as_raw_fd());
+    }
+}
+
 impl PartialEq for Tap {
     fn eq(&self, other: &Tap) -> bool {
         self.if_name == other.if_name
