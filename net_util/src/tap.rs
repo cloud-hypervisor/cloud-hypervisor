@@ -481,8 +481,31 @@ impl Tap {
         ifreq
     }
 
-    pub fn get_if_name(&self) -> &[u8] {
+    /// Returns the raw bytes of the interface name, which may or may not be
+    /// valid UTF-8.
+    pub fn if_name_as_bytes(&self) -> &[u8] {
         &self.if_name
+    }
+
+    /// Returns the interface name as a string, truncated at the first NUL byte
+    /// if present.
+    ///
+    /// # Panic
+    /// Panics if the interface name is not encoded as valid UTF-8. This can
+    /// only be caused by unrecoverable internal errors as users and management
+    /// software are only allowed to specify interfaces names as Rust strings,
+    /// thus valid UTF-8. Also, self-generated interface names form CHV are
+    /// also always created from Rust strings, thus valid UTF-8.
+    pub fn if_name_as_str(&self) -> &str {
+        // All bytes until first NUL.
+        let nul_terminated = self
+            .if_name_as_bytes()
+            .split(|&b| b == 0)
+            .next()
+            .unwrap_or(&[]);
+
+        // Panicking here is fine, see function documentation.
+        std::str::from_utf8(nul_terminated).expect("Tap interface name should be valid UTF-8")
     }
 
     #[cfg(fuzzing)]
