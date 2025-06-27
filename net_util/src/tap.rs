@@ -481,8 +481,24 @@ impl Tap {
         ifreq
     }
 
-    pub fn get_if_name(&self) -> &[u8] {
+    /// Returns the raw bytes of the interface name, which may or may not be
+    /// valid UTF-8.
+    pub fn if_name_as_bytes(&self) -> &[u8] {
         &self.if_name
+    }
+
+    /// Returns the interface name as a string, truncated at the first NUL byte
+    /// if present.
+    pub fn if_name_as_str(&self) -> &str {
+        // All bytes until first NUL.
+        let nul_terminated = self
+            .if_name_as_bytes()
+            .split(|&b| b == 0)
+            .next()
+            .unwrap_or(&[]);
+        // 1: No sane user-space tool would generate non-ASCII interface names.
+        // 2: We only allow the creation from UTF-8 strings (`&str`).
+        std::str::from_utf8(nul_terminated).expect("Tap interface name should be valid UTF-8")
     }
 
     #[cfg(fuzzing)]
