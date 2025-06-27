@@ -326,15 +326,26 @@ impl Vdpa {
             .map_err(Error::SetStatus)
     }
 
-    fn dma_map(
+    /// # SAFETY
+    ///
+    /// `host_vaddr` must point to `size` bytes of valid memory.
+    unsafe fn dma_map(
         &mut self,
         iova: u64,
         size: u64,
         host_vaddr: *const u8,
         readonly: bool,
     ) -> Result<()> {
-        let iova_last = iova + size - 1;
+        let Some(iova_last) = iova.checked_add(size) else {
+            return Err(Error::InvalidIovaRange(iova, u64::MAX));
+        };
+        let Some(iova_last) = iova_last.checked_sub(1) else {
+            return Err(Error::InvalidIovaRange(0, 0));
+        };
         if iova < self.iova_range.first || iova_last > self.iova_range.last {
+            return Err(Error::InvalidIovaRange(iova, iova_last));
+        }
+        if isize::try_from(size).is_err() {
             return Err(Error::InvalidIovaRange(iova, iova_last));
         }
 
@@ -552,16 +563,20 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M
             "DMA map iova 0x{:x}, gpa 0x{:x}, size 0x{:x}, host_addr 0x{:x}",
             iova, gpa, size, user_addr as u64
         );
-        self.device
-            .lock()
-            .unwrap()
-            .dma_map(iova, size, user_addr, false)
-            .map_err(|e| {
-                io::Error::other(format!(
-                    "failed to map memory for vDPA device, \
+        // SAFETY: check_range() and get_host_address() guarantee that
+        // user_addr points to `size` bytes of memory.
+        unsafe {
+            self.device
+                .lock()
+                .unwrap()
+                .dma_map(iova, size, user_addr, false)
+                .map_err(|e| {
+                    io::Error::other(format!(
+                        "failed to map memory for vDPA device, \
                          iova 0x{iova:x}, gpa 0x{gpa:x}, size 0x{size:x}: {e:?}"
-                ))
-            })
+                    ))
+                })
+        }
     }
 
     fn unmap(&self, iova: u64, size: u64) -> std::result::Result<(), std::io::Error> {
