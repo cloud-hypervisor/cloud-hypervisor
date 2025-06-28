@@ -958,11 +958,13 @@ impl vm::Vm for KvmVm {
         .map_err(vm::HypervisorVmError::FinalizeTdx)
     }
 
-    ///
     /// Initialize memory regions for the TDX VM
     ///
+    /// # Safety
+    ///
+    /// host_address must be valid for usize bytes
     #[cfg(feature = "tdx")]
-    fn tdx_init_memory_region(
+    unsafe fn tdx_init_memory_region(
         &self,
         host_address: *mut u8,
         guest_address: u64,
