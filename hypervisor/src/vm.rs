@@ -401,7 +401,11 @@ pub trait Vm: Send + Sync + Any {
     }
     #[cfg(feature = "tdx")]
     /// Initialize a TDX memory region for this VM
-    fn tdx_init_memory_region(
+    ///
+    /// # Safety
+    ///
+    /// `_host_address` must be valid for `_size` bytes
+    unsafe fn tdx_init_memory_region(
         &self,
         _host_address: *mut u8,
         _guest_address: u64,
