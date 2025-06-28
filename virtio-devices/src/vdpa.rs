@@ -19,7 +19,7 @@ use vhost::{VhostBackend, VringConfigData};
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
-use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
+use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
@@ -27,7 +27,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::{
     ActivateError, ActivateResult, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK,
     DEVICE_FEATURES_OK, GuestMemoryMmap, VIRTIO_F_IOMMU_PLATFORM, VirtioCommon, VirtioDevice,
-    VirtioInterrupt, VirtioInterruptType,
+    VirtioInterrupt, VirtioInterruptType, get_host_address_range,
 };
 
 #[derive(Error, Debug)]
@@ -548,11 +548,10 @@ impl<M: GuestAddressSpace> VdpaDmaMapping<M> {
 
 impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M> {
     fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
+        let usize_size = size.try_into().unwrap();
         let mem = self.memory.memory();
         let guest_addr = GuestAddress(gpa);
-        let user_addr = if mem.check_range(guest_addr, size as usize) {
-            mem.get_host_address(guest_addr).unwrap() as *const u8
-        } else {
+        let Some(user_addr) = get_host_address_range(&*mem, guest_addr, usize_size) else {
             return Err(io::Error::other(format!(
                 "failed to convert guest address 0x{gpa:x} into \
                      host user virtual address"
@@ -563,7 +562,7 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M
             "DMA map iova 0x{:x}, gpa 0x{:x}, size 0x{:x}, host_addr 0x{:x}",
             iova, gpa, size, user_addr as u64
         );
-        // SAFETY: check_range() and get_host_address() guarantee that
+        // SAFETY: get_host_address_range() guarantees that
         // user_addr points to `size` bytes of memory.
         unsafe {
             self.device

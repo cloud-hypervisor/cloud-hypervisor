@@ -174,12 +174,15 @@ impl BalloonEpollHandler {
         range_len: usize,
         advice: libc::c_int,
     ) -> result::Result<(), Error> {
-        let hva = memory
-            .get_host_address(range_base)
+        let slice = memory
+            .get_slice(range_base, range_len)
             .map_err(Error::GuestMemory)?;
+        assert!(slice.len() >= range_len);
         let res =
-            // SAFETY: Need unsafe to do syscall madvise
-            unsafe { libc::madvise(hva as *mut libc::c_void, range_len as libc::size_t, advice) };
+            // SAFETY: FFI call with valid arguments, guaranteed by VolatileSlice
+            unsafe {
+                libc::madvise(slice.ptr_guard_mut().as_ptr() as *mut libc::c_void,
+                range_len as libc::size_t, advice) };
         if res != 0 {
             return Err(Error::MadviseFail(io::Error::last_os_error()));
         }
