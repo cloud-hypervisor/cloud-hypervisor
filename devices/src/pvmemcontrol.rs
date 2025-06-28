@@ -429,22 +429,20 @@ impl PvmemcontrolBusDevice {
     /// [`range_base`, `range_base` + `range_len`) is present in the guest
     fn operate_on_memory_range<F>(&self, addr: u64, length: u64, f: F) -> result::Result<(), Error>
     where
-        F: FnOnce(*mut libc::c_void, libc::size_t) -> libc::c_int,
+        F: FnOnce(*mut libc::c_void, usize) -> libc::c_int,
     {
         let memory = self.mem.memory();
         let range_base = GuestAddress(addr);
         let range_len = usize::try_from(length).map_err(|_| Error::InvalidRequest)?;
 
         // assume guest memory is not interleaved with vmm memory on the host.
-        if !memory.check_range(range_base, range_len) {
+        let Ok(slice) = memory.get_slice(range_base, range_len) else {
             return Err(Error::GuestMemory(GuestMemoryError::InvalidGuestAddress(
                 range_base,
             )));
-        }
-        let hva = memory
-            .get_host_address(range_base)
-            .map_err(Error::GuestMemory)?;
-        let res = f(hva as *mut libc::c_void, range_len as libc::size_t);
+        };
+        assert!(slice.len() >= range_len);
+        let res = f(slice.ptr_guard_mut().as_ptr() as _, slice.len());
         if res != 0 {
             return Err(Error::LibcFail(io::Error::last_os_error()));
         }

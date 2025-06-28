@@ -440,8 +440,9 @@ impl Request {
 
             let origin_ptr = mem
                 .get_slice(data_addr, data_len)
-                .map_err(ExecuteError::GetHostAddress)?
-                .ptr_guard();
+                .map_err(ExecuteError::GetHostAddress)?;
+            assert!(origin_ptr.len() >= data_len);
+            let origin_ptr = origin_ptr.ptr_guard();
 
             // Verify the buffer alignment.
             // In case it's not properly aligned, an intermediate buffer is
