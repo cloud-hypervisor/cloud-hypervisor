@@ -2249,15 +2249,23 @@ impl Vm {
         let mem = guest_memory.memory();
 
         for section in sections {
-            self.vm
-                .tdx_init_memory_region(
-                    mem.get_host_address(GuestAddress(section.address)).unwrap(),
+            let size = section.size.try_into().unwrap();
+            // SAFETY: get_host_address_range does proper bounds checking
+            unsafe {
+                self.vm.tdx_init_memory_region(
+                    virtio_devices::get_host_address_range(
+                        &*mem,
+                        GuestAddress(section.address),
+                        size,
+                    )
+                    .unwrap(),
                     section.address,
-                    section.size.try_into().unwrap(),
+                    size,
                     /* TDVF_SECTION_ATTRIBUTES_EXTENDMR */
                     section.attributes == 1,
                 )
-                .map_err(Error::InitializeTdxMemoryRegion)?;
+            }
+            .map_err(Error::InitializeTdxMemoryRegion)?;
         }
 
         Ok(())
