@@ -66,10 +66,7 @@ use crate::arch::x86::{
 };
 #[cfg(target_arch = "x86_64")]
 use crate::ClockData;
-use crate::{
-    CpuState, IoEventAddress, IrqRoutingEntry, MpState, StandardRegisters, UserMemoryRegion,
-    USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
-};
+use crate::{CpuState, IoEventAddress, IrqRoutingEntry, MpState, StandardRegisters};
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
@@ -233,51 +230,6 @@ pub struct KvmTdxExitVmcall {
     pub out_r8: u64,
     pub out_r9: u64,
     pub out_rdx: u64,
-}
-
-impl From<kvm_userspace_memory_region> for UserMemoryRegion {
-    fn from(region: kvm_userspace_memory_region) -> Self {
-        let mut flags = USER_MEMORY_REGION_READ;
-        if region.flags & KVM_MEM_READONLY == 0 {
-            flags |= USER_MEMORY_REGION_WRITE;
-        }
-        if region.flags & KVM_MEM_LOG_DIRTY_PAGES != 0 {
-            flags |= USER_MEMORY_REGION_LOG_DIRTY;
-        }
-
-        UserMemoryRegion {
-            slot: region.slot,
-            guest_phys_addr: region.guest_phys_addr,
-            memory_size: region.memory_size,
-            userspace_addr: region.userspace_addr,
-            flags,
-        }
-    }
-}
-
-impl From<UserMemoryRegion> for kvm_userspace_memory_region {
-    fn from(region: UserMemoryRegion) -> Self {
-        assert!(
-            region.flags & USER_MEMORY_REGION_READ != 0,
-            "KVM mapped memory is always readable"
-        );
-
-        let mut flags = 0;
-        if region.flags & USER_MEMORY_REGION_WRITE == 0 {
-            flags |= KVM_MEM_READONLY;
-        }
-        if region.flags & USER_MEMORY_REGION_LOG_DIRTY != 0 {
-            flags |= KVM_MEM_LOG_DIRTY_PAGES;
-        }
-
-        kvm_userspace_memory_region {
-            slot: region.slot,
-            guest_phys_addr: region.guest_phys_addr,
-            memory_size: region.memory_size,
-            userspace_addr: region.userspace_addr,
-            flags,
-        }
-    }
 }
 
 impl From<kvm_mp_state> for MpState {
@@ -720,38 +672,32 @@ impl vm::Vm for KvmVm {
             .map_err(|e| vm::HypervisorVmError::SetGsiRouting(e.into()))
     }
 
-    ///
-    /// Creates a memory region structure that can be used with {create/remove}_user_memory_region
-    ///
-    fn make_user_memory_region(
+    unsafe fn create_user_memory_region(
         &self,
         slot: u32,
         guest_phys_addr: u64,
-        memory_size: u64,
-        userspace_addr: u64,
+        memory_size: usize,
+        userspace_addr: *mut u8,
         readonly: bool,
         log_dirty_pages: bool,
-    ) -> UserMemoryRegion {
-        kvm_userspace_memory_region {
+    ) -> vm::Result<()> {
+        let mut flags = 0;
+        if readonly {
+            flags |= KVM_MEM_READONLY;
+        }
+        if log_dirty_pages {
+            flags |= KVM_MEM_LOG_DIRTY_PAGES;
+        }
+
+        const _: () = assert!(core::mem::size_of::<usize>() <= core::mem::size_of::<u64>());
+
+        let mut region = kvm_userspace_memory_region {
             slot,
             guest_phys_addr,
-            memory_size,
-            userspace_addr,
-            flags: if readonly { KVM_MEM_READONLY } else { 0 }
-                | if log_dirty_pages {
-                    KVM_MEM_LOG_DIRTY_PAGES
-                } else {
-                    0
-                },
-        }
-        .into()
-    }
-
-    ///
-    /// Creates a guest physical memory region.
-    ///
-    fn create_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
-        let mut region: kvm_userspace_memory_region = user_memory_region.into();
+            memory_size: memory_size as u64,
+            userspace_addr: userspace_addr as usize as u64,
+            flags,
+        };
 
         if (region.flags & KVM_MEM_LOG_DIRTY_PAGES) != 0 {
             if (region.flags & KVM_MEM_READONLY) != 0 {
@@ -776,7 +722,7 @@ impl vm::Vm for KvmVm {
             region.flags = 0;
         }
 
-        // SAFETY: Safe because guest regions are guaranteed not to overlap.
+        // SAFETY: Safe because caller promised this is safe.
         unsafe {
             self.fd
                 .set_user_memory_region(region)
@@ -784,18 +730,39 @@ impl vm::Vm for KvmVm {
         }
     }
 
-    ///
-    /// Removes a guest physical memory region.
-    ///
-    fn remove_user_memory_region(&self, user_memory_region: UserMemoryRegion) -> vm::Result<()> {
-        let mut region: kvm_userspace_memory_region = user_memory_region.into();
+    unsafe fn remove_user_memory_region(
+        &self,
+        slot: u32,
+        guest_phys_addr: u64,
+        memory_size: usize,
+        userspace_addr: *mut u8,
+        readonly: bool,
+        log_dirty_pages: bool,
+    ) -> vm::Result<()> {
+        let mut flags = 0;
+        if readonly {
+            flags |= KVM_MEM_READONLY;
+        }
+        if log_dirty_pages {
+            flags |= KVM_MEM_LOG_DIRTY_PAGES;
+        }
+
+        const _: () = assert!(core::mem::size_of::<usize>() <= core::mem::size_of::<u64>());
+
+        let mut region = kvm_userspace_memory_region {
+            slot,
+            guest_phys_addr,
+            memory_size: memory_size as u64,
+            userspace_addr: userspace_addr as usize as u64,
+            flags,
+        };
 
         // Remove the corresponding entry from "self.dirty_log_slots" if needed
         self.dirty_log_slots.write().unwrap().remove(&region.slot);
 
         // Setting the size to 0 means "remove"
         region.memory_size = 0;
-        // SAFETY: Safe because guest regions are guaranteed not to overlap.
+        // SAFETY: Safe because caller promised this is safe.
         unsafe {
             self.fd
                 .set_user_memory_region(region)
@@ -972,7 +939,7 @@ impl vm::Vm for KvmVm {
             &self.fd.as_raw_fd(),
             TdxCommand::InitVm,
             0,
-            &data as *const _ as u64,
+            &data as *const _ as *const _,
         )
         .map_err(vm::HypervisorVmError::InitializeTdx)
     }
@@ -982,19 +949,26 @@ impl vm::Vm for KvmVm {
     ///
     #[cfg(feature = "tdx")]
     fn tdx_finalize(&self) -> vm::Result<()> {
-        tdx_command(&self.fd.as_raw_fd(), TdxCommand::Finalize, 0, 0)
-            .map_err(vm::HypervisorVmError::FinalizeTdx)
+        tdx_command(
+            &self.fd.as_raw_fd(),
+            TdxCommand::Finalize,
+            0,
+            std::ptr::null(),
+        )
+        .map_err(vm::HypervisorVmError::FinalizeTdx)
     }
 
-    ///
     /// Initialize memory regions for the TDX VM
     ///
+    /// # Safety
+    ///
+    /// host_address must be valid for usize bytes
     #[cfg(feature = "tdx")]
-    fn tdx_init_memory_region(
+    unsafe fn tdx_init_memory_region(
         &self,
-        host_address: u64,
+        host_address: *mut u8,
         guest_address: u64,
-        size: u64,
+        size: usize,
         measure: bool,
     ) -> vm::Result<()> {
         #[repr(C)]
@@ -1004,16 +978,16 @@ impl vm::Vm for KvmVm {
             pages: u64,
         }
         let data = TdxInitMemRegion {
-            host_address,
+            host_address: host_address as _,
             guest_address,
-            pages: size / 4096,
+            pages: crate::usize_to_u64(size / 4096),
         };
 
         tdx_command(
             &self.fd.as_raw_fd(),
             TdxCommand::InitMemRegion,
             u32::from(measure),
-            &data as *const _ as u64,
+            &data as *const _ as *const _,
         )
         .map_err(vm::HypervisorVmError::InitMemRegionTdx)
     }
@@ -1029,7 +1003,7 @@ fn tdx_command(
     fd: &RawFd,
     command: TdxCommand,
     flags: u32,
-    data: u64,
+    data: *const libc::c_void,
 ) -> std::result::Result<(), std::io::Error> {
     #[repr(C)]
     struct TdxIoctlCmd {
@@ -1042,7 +1016,7 @@ fn tdx_command(
     let cmd = TdxIoctlCmd {
         command,
         flags,
-        data,
+        data: data as _,
         error: 0,
         unused: 0,
     };
@@ -1281,7 +1255,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             &self.kvm.as_raw_fd(),
             TdxCommand::Capabilities,
             0,
-            &data as *const _ as u64,
+            &data as *const _ as *const _,
         )
         .map_err(|e| hypervisor::HypervisorError::TdxCapabilities(e.into()))?;
 
@@ -2748,6 +2722,10 @@ impl cpu::Vcpu for KvmVcpu {
         Ok(())
     }
 
+    // Presumably nobody uses TDX and a 32-bit Cloud Hypervisor
+    #[cfg(not(target_pointer_width = "64"))]
+    compile_error!("32-bit TDX not supported");
+
     ///
     /// Initialize TDX for this CPU
     ///
@@ -2757,7 +2735,7 @@ impl cpu::Vcpu for KvmVcpu {
             &self.fd.lock().unwrap().as_raw_fd(),
             TdxCommand::InitVcpu,
             0,
-            hob_address,
+            hob_address as *const _,
         )
         .map_err(cpu::HypervisorCpuError::InitializeTdx)
     }
