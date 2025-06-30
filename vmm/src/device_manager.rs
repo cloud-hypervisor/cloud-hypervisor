@@ -4408,6 +4408,10 @@ impl DeviceManager {
         Ok(())
     }
 
+    /// Notifies the VM for a hotplug.
+    ///
+    /// This call doesn't wait for the vCPU receiving the
+    /// interrupt to acknowledge.
     pub fn notify_hotplug(
         &self,
         _notification_type: AcpiNotificationFlags,
