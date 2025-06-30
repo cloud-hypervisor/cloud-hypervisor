@@ -234,7 +234,7 @@ impl VirtioPciCommonConfig {
     }
 
     fn read_common_config_word(&self, offset: u64, queues: &[Queue]) -> u16 {
-        debug!("read_common_config_word: offset 0x{:x}", offset);
+        trace!("read_common_config_word: offset 0x{:x}", offset);
         match offset {
             0x10 => self.msix_config.load(Ordering::Acquire),
             0x12 => queues.len() as u16, // num_queues

@@ -255,9 +255,9 @@ impl NetEpollHandler {
             || !self.driver_awake
         {
             self.signal_used_queue(self.queue_index_base)?;
-            debug!("Signalling RX queue");
+            trace!("Signalling RX queue");
         } else {
-            debug!("Not signalling RX queue");
+            trace!("Not signalling RX queue");
         }
         Ok(())
     }
