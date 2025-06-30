@@ -4513,9 +4513,33 @@ impl DeviceManager {
                     .unwrap()
                     .device_type(),
             );
+            // When the device is hot-detached, we close all file descriptors
+            // opened externally for this device. This allows management
+            // software (e.g., libvirt) to properly close tap devices after a
+            // hot-remove operation.
+            //
+            // TODO: once we allow externally opened FDs for other devices,
+            // we should create a descriptive function for this functionality.
             match device_type {
-                VirtioDeviceType::Net
-                | VirtioDeviceType::Block
+                VirtioDeviceType::Net => {
+                    let mut config = self.config.lock().unwrap();
+                    let nets = config.net.as_deref_mut().unwrap();
+                    let net_dev_cfg = nets
+                        .iter_mut()
+                        .find(|net| net.id.as_ref() == Some(&id))
+                        .unwrap();
+                    let fds = net_dev_cfg.fds.take().unwrap_or(Vec::new());
+
+                    debug!("Closing preserved FDs from virtio-net device: id={id}, fds={fds:?}");
+                    for fd in fds {
+                        config.preserved_fds.as_mut().unwrap().retain(|x| *x != fd);
+                        // SAFETY: Trivially safe
+                        unsafe {
+                            libc::close(fd);
+                        }
+                    }
+                }
+                VirtioDeviceType::Block
                 | VirtioDeviceType::Pmem
                 | VirtioDeviceType::Fs
                 | VirtioDeviceType::Vsock => {}
