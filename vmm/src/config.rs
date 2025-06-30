@@ -3161,6 +3161,8 @@ impl VmConfig {
     /// To use this safely, the caller must guarantee that the input
     /// fds are all valid.
     pub unsafe fn add_preserved_fds(&mut self, mut fds: Vec<i32>) {
+        debug!("adding preserved FDs to VM list: {fds:?}");
+
         if fds.is_empty() {
             return;
         }
@@ -3216,7 +3218,11 @@ impl Clone for VmConfig {
                 .preserved_fds
                 .as_ref()
                 // SAFETY: FFI call with valid FDs
-                .map(|fds| fds.iter().map(|fd| unsafe { libc::dup(*fd) }).collect()),
+                .map(|fds| fds.iter().map(|fd| {
+                    let fd_duped = unsafe { libc::dup(*fd) };
+                    warn!("Cloning VM config: duping preserved FD {fd} => {fd_duped}");
+                    fd_duped
+                }).collect()),
             landlock_rules: self.landlock_rules.clone(),
             #[cfg(feature = "ivshmem")]
             ivshmem: self.ivshmem.clone(),
@@ -3228,6 +3234,7 @@ impl Clone for VmConfig {
 impl Drop for VmConfig {
     fn drop(&mut self) {
         if let Some(mut fds) = self.preserved_fds.take() {
+            debug!("Closing preserved FDs from VM: fds={fds:?}");
             for fd in fds.drain(..) {
                 // SAFETY: FFI call with valid FDs
                 unsafe { libc::close(fd) };
