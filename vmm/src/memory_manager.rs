@@ -2819,11 +2819,11 @@ impl Migratable for MemoryManager {
             let sub_table = MemoryRangeTable::from_bitmap(dirty_bitmap, r.gpa, 4096);
 
             if sub_table.regions().is_empty() {
-                // debug!("Dirty Memory Range Table is empty");
+                info!("Dirty Memory Range Table is empty");
             } else {
-                // debug!("Dirty Memory Range Table:");
-                for _range in sub_table.regions() {
-                    // debug!("GPA: {:x} size: {} (KiB)", range.gpa, range.length / 1024);
+                info!("Dirty Memory Range Table:");
+                for range in sub_table.regions() {
+                    info!("GPA: {:x} size: {} (KiB)", range.gpa, range.length / 1024);
                 }
             }
 
