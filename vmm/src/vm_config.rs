@@ -943,6 +943,7 @@ pub struct VmConfig {
     // Preserved FDs will stay open as long as the holding VmConfig instance is
     // valid, and will be closed when the holding VmConfig instance is destroyed.
     #[serde(skip)]
+    // TODO Make hashset! To improve safety
     pub preserved_fds: Option<Vec<i32>>,
     #[serde(default)]
     pub landlock_enable: bool,
