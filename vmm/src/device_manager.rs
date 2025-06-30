@@ -4512,9 +4512,35 @@ impl DeviceManager {
                     .unwrap()
                     .device_type(),
             );
+            // When the device is added, we close all file descriptors
+            // opened externally for this device. This allows management
+            // software to properly clean up resources, e.g., libvirt can clean
+            // up tap devices.
+            //
+            // TODO: once we allow externally opened FDs for other devices as well,
+            // we should create a descriptive abstraction/function for this
+            // functionality.
             match device_type {
-                VirtioDeviceType::Net
-                | VirtioDeviceType::Block
+                VirtioDeviceType::Net => {
+                    let mut config = self.config.lock().unwrap();
+                    let nets = config.net.as_deref_mut().unwrap();
+                    let net_dev_cfg = nets
+                        .iter_mut()
+                        .find(|net| net.id.as_ref() == Some(&id))
+                        // unwrap: the device could not have been removed without an ID
+                        .unwrap();
+                    let fds = net_dev_cfg.fds.take().unwrap_or(Vec::new());
+
+                    debug!("Closing preserved FDs from virtio-net device: id={id}, fds={fds:?}");
+                    for fd in fds {
+                        config.preserved_fds.as_mut().unwrap().retain(|x| *x != fd);
+                        // SAFETY: We are closing the only remaining instance of this FD.
+                        unsafe {
+                            libc::close(fd);
+                        }
+                    }
+                }
+                VirtioDeviceType::Block
                 | VirtioDeviceType::Pmem
                 | VirtioDeviceType::Fs
                 | VirtioDeviceType::Vsock => {}
