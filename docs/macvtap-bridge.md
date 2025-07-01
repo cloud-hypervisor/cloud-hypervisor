@@ -18,7 +18,7 @@ tapindex=$(< /sys/class/net/macvtap0/ifindex)
 tapdevice="/dev/tap$tapindex"
 
 # Ensure that we can access this device
-sudo chown "$UID.$UID" "$tapdevice"
+sudo chown "$UID:$UID" "$tapdevice"
 
 # Use --net fd=3 to point to fd 3 which the shell has opened to point to the /dev/tapN device
 target/debug/cloud-hypervisor \
