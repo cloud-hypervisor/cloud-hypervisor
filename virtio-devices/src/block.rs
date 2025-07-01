@@ -75,6 +75,8 @@ pub enum Error {
     Fsync(#[source] AsyncIoError),
     #[error("Failed adding used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
+    #[error("Failed submit batch requests: {0}")]
+    SubmitBatchRequestsError(#[source] AsyncIoError),
     #[error("Failed creating an iterator over the queue")]
     QueueIterator(#[source] virtio_queue::Error),
     #[error("Failed to update request status")]
@@ -151,6 +153,7 @@ struct BlockEpollHandler {
 impl BlockEpollHandler {
     fn process_queue_submit(&mut self) -> Result<()> {
         let queue = &mut self.queue;
+        let mut total_req = 0;
 
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref())
@@ -221,6 +224,7 @@ impl BlockEpollHandler {
             );
 
             if let Ok(true) = result {
+                total_req += 1;
                 self.inflight_requests
                     .push_back((desc_chain.head_index(), request));
             } else {
@@ -248,6 +252,11 @@ impl BlockEpollHandler {
             }
         }
 
+        if total_req > 0 {
+            self.disk_image
+                .submit_batch_requests()
+                .map_err(Error::SubmitBatchRequestsError)?;
+        }
         Ok(())
     }
 
