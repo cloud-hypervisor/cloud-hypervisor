@@ -170,7 +170,10 @@ pub fn get_host_address_range<M: GuestMemory + ?Sized>(
     size: usize,
 ) -> Option<*mut u8> {
     if mem.check_range(addr, size) {
-        Some(mem.get_host_address(addr).unwrap())
+        let slice = mem.get_slice(addr, size).unwrap();
+        assert!(slice.len() >= size);
+        #[allow(deprecated)]
+        Some(slice.as_ptr())
     } else {
         None
     }

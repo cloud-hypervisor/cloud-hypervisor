@@ -90,7 +90,7 @@ use vm_device::interrupt::{
 };
 use vm_device::{Bus, BusDevice, BusDeviceSync, Resource};
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::{Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion};
+use vm_memory::{Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion, VolatileMemory};
 #[cfg(target_arch = "x86_64")]
 use vm_memory::{GuestAddressSpace, GuestMemory};
 use vm_migration::protocol::MemoryRangeTable;
@@ -793,32 +793,40 @@ impl DeviceRelocation for AddressManager {
                 let mut virtio_dev = virtio_dev.lock().unwrap();
                 if let Some(mut shm_regions) = virtio_dev.get_shm_regions() {
                     if shm_regions.addr.raw_value() == old_base {
-                        let mem_region = self.vm.make_user_memory_region(
-                            shm_regions.mem_slot,
-                            old_base,
-                            shm_regions.len,
-                            shm_regions.host_addr,
-                            false,
-                            false,
-                        );
+                        // SAFETY: guaranteed by MmapRegion invariants
+                        unsafe {
+                            // Remove old mapping
+                            self.vm
+                                .remove_user_memory_region(
+                                    shm_regions.mem_slot,
+                                    old_base,
+                                    shm_regions.mapping.len(),
+                                    shm_regions.mapping.as_ptr(),
+                                    false,
+                                    false,
+                                )
+                                .map_err(|e| {
+                                    io::Error::other(format!(
+                                        "failed to remove user memory region: {e:?}"
+                                    ))
+                                })?;
 
-                        self.vm.remove_user_memory_region(mem_region).map_err(|e| {
-                            io::Error::other(format!("failed to remove user memory region: {e:?}"))
-                        })?;
-
-                        // Create new mapping by inserting new region to KVM.
-                        let mem_region = self.vm.make_user_memory_region(
-                            shm_regions.mem_slot,
-                            new_base,
-                            shm_regions.len,
-                            shm_regions.host_addr,
-                            false,
-                            false,
-                        );
-
-                        self.vm.create_user_memory_region(mem_region).map_err(|e| {
-                            io::Error::other(format!("failed to create user memory regions: {e:?}"))
-                        })?;
+                            // Create new mapping by inserting new region to KVM.
+                            self.vm
+                                .create_user_memory_region(
+                                    shm_regions.mem_slot,
+                                    new_base,
+                                    shm_regions.mapping.len(),
+                                    shm_regions.mapping.as_ptr(),
+                                    false,
+                                    false,
+                                )
+                                .map_err(|e| {
+                                    io::Error::other(format!(
+                                        "failed to create user memory regions: {e:?}"
+                                    ))
+                                })?;
+                        }
 
                         // Update shared memory regions to reflect the new mapping.
                         shm_regions.addr = GuestAddress(new_base);
@@ -3165,20 +3173,22 @@ impl DeviceManager {
                 },
         )
         .map_err(DeviceManagerError::NewMmapRegion)?;
-        let host_addr: u64 = mmap_region.as_ptr() as u64;
+        let host_addr = mmap_region.as_ptr();
 
-        let mem_slot = self
-            .memory_manager
-            .lock()
-            .unwrap()
-            .create_userspace_mapping(region_base, region_size, host_addr, false, false, false)
-            .map_err(DeviceManagerError::MemoryManager)?;
+        // SAFETY: host_addr points to region_size bytes of mmap-allocated memory.
+        let mem_slot = unsafe {
+            let region_size = region_size.try_into().unwrap();
+            self.memory_manager
+                .lock()
+                .unwrap()
+                .create_userspace_mapping(region_base, region_size, host_addr, false, false, false)
+                .map_err(DeviceManagerError::MemoryManager)
+        }?;
 
         let mapping = virtio_devices::UserspaceMapping {
-            host_addr,
             mem_slot,
             addr: GuestAddress(region_base),
-            len: region_size,
+            mapping: Arc::new(mmap_region),
             mergeable: false,
         };
 
@@ -3188,7 +3198,6 @@ impl DeviceManager {
                 file,
                 GuestAddress(region_base),
                 mapping,
-                mmap_region,
                 self.force_iommu | pmem_cfg.iommu,
                 self.seccomp_action.clone(),
                 self.exit_evt
@@ -3670,13 +3679,19 @@ impl DeviceManager {
             // virtio-mem device itself.
             for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
                 for region in zone.regions() {
-                    vfio_container
-                        .vfio_dma_map(
+                    // vfio_dma_map is unsound and ought to be marked as unsafe
+                    #[allow(unused_unsafe)]
+                    // SAFETY: GuestMemoryMmap guarantees that region points
+                    // to len bytes of valid memory starting at as_ptr()
+                    // that will only be freed with munmap().
+                    unsafe {
+                        vfio_container.vfio_dma_map(
                             region.start_addr().raw_value(),
                             region.len(),
                             region.as_ptr() as u64,
                         )
-                        .map_err(DeviceManagerError::VfioDmaMap)?;
+                    }
+                    .map_err(DeviceManagerError::VfioDmaMap)?;
                 }
             }
 
@@ -4228,13 +4243,19 @@ impl DeviceManager {
 
         // Take care of updating the memory for VFIO PCI devices.
         if let Some(vfio_container) = &self.vfio_container {
-            vfio_container
-                .vfio_dma_map(
+            // vfio_dma_map is unsound and ought to be marked as unsafe
+            #[allow(unused_unsafe)]
+            // SAFETY: GuestMemoryMmap guarantees that region points
+            // to len bytes of valid memory starting at as_ptr()
+            // that will only be freed with munmap().
+            unsafe {
+                vfio_container.vfio_dma_map(
                     new_region.start_addr().raw_value(),
                     new_region.len(),
                     new_region.as_ptr() as u64,
                 )
-                .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
+            }
+            .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
         }
 
         // Take care of updating the memory for vfio-user devices.
@@ -4570,17 +4591,22 @@ impl DeviceManager {
         // Shutdown and remove the underlying virtio-device if present
         if let Some(virtio_device) = virtio_device {
             for mapping in virtio_device.lock().unwrap().userspace_mappings() {
-                self.memory_manager
-                    .lock()
-                    .unwrap()
-                    .remove_userspace_mapping(
-                        mapping.addr.raw_value(),
-                        mapping.len,
-                        mapping.host_addr,
-                        mapping.mergeable,
-                        mapping.mem_slot,
-                    )
-                    .map_err(DeviceManagerError::MemoryManager)?;
+                // SAFETY: userspace_mappings only has valid mappings.
+                // TODO: do not rely on the correctness of all the code in this file
+                // for this to hold.
+                unsafe {
+                    self.memory_manager
+                        .lock()
+                        .unwrap()
+                        .remove_userspace_mapping(
+                            mapping.addr.raw_value(),
+                            mapping.mapping.size(),
+                            mapping.mapping.as_ptr() as _,
+                            mapping.mergeable,
+                            mapping.mem_slot,
+                        )
+                        .map_err(DeviceManagerError::MemoryManager)
+                }?;
             }
 
             virtio_device.lock().unwrap().shutdown();
