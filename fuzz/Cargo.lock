@@ -7,7 +7,7 @@ name = "acpi_tables"
 version = "0.1.0"
 source = "git+https://github.com/rust-vmm/acpi_tables?branch=main#e08a3f0b0a59b98859dbf59f5aa7fd4d2eb4018a"
 dependencies = [
- "zerocopy 0.8.24",
+ "zerocopy 0.8.26",
 ]
 
 [[package]]
@@ -480,7 +480,7 @@ dependencies = [
  "vfio-ioctls",
  "vm-memory",
  "vmm-sys-util",
- "zerocopy 0.8.24",
+ "zerocopy 0.8.26",
 ]
 
 [[package]]
@@ -531,29 +531,30 @@ dependencies = [
 
 [[package]]
 name = "js-sys"
-version = "0.3.69"
+version = "0.3.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29c15563dc2726973df627357ce0c9ddddbea194836909d655df6a75d2cf296d"
+checksum = "1cfaf33c695fc6e08064efbc1f72ec937429614f25eef83af942d0e227c3a28f"
 dependencies = [
+ "once_cell",
  "wasm-bindgen",
 ]
 
 [[package]]
 name = "kvm-bindings"
-version = "0.10.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa4933174d0cc4b77b958578cd45784071cc5ae212c2d78fbd755aaaa6dfa71a"
+checksum = "d4b153a59bb3ca930ff8148655b2ef68c34259a623ae08cf2fb9b570b2e45363"
 dependencies = [
  "serde",
  "vmm-sys-util",
- "zerocopy 0.7.35",
+ "zerocopy 0.8.26",
 ]
 
 [[package]]
 name = "kvm-ioctls"
-version = "0.19.1"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e013ae7fcd2c6a8f384104d16afe7ea02969301ea2bb2a56e44b011ebc907cab"
+checksum = "b702df98508cb63ad89dd9beb9f6409761b30edca10d48e57941d3f11513a006"
 dependencies = [
  "bitflags 2.9.0",
  "kvm-bindings",
@@ -635,7 +636,7 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 [[package]]
 name = "micro_http"
 version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#4f621532e81ee2ad096a9c9592fdacc40d19de48"
+source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#bf5098916006912f8dd35aaa6daa5579c6c297b2"
 dependencies = [
  "libc",
  "vmm-sys-util",
@@ -652,7 +653,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "vmm-sys-util",
- "zerocopy 0.8.24",
+ "zerocopy 0.8.26",
 ]
 
 [[package]]
@@ -830,7 +831,7 @@ checksum = "3779b94aeb87e8bd4e834cee3650289ee9e0d5677f976ecdb6d219e5f4f6cd94"
 dependencies = [
  "rand_chacha",
  "rand_core",
- "zerocopy 0.8.24",
+ "zerocopy 0.8.26",
 ]
 
 [[package]]
@@ -865,14 +866,20 @@ dependencies = [
 
 [[package]]
 name = "remain"
-version = "0.2.14"
+version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46aef80f842736de545ada6ec65b81ee91504efd6853f4b96de7414c42ae7443"
+checksum = "d7ef12e84481ab4006cb942f8682bba28ece7270743e649442027c5db87df126"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "rustversion"
+version = "1.0.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a0d197bd2c9dc6e53b84da9556a69ba4cdfab8619eb41a8bd1cc2027a0f6b1d"
 
 [[package]]
 name = "ryu"
@@ -1105,45 +1112,37 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.15.1"
+version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0f540e3240398cce6128b64ba83fdbdd86129c16a3aa1a3a252efd66eb3d587"
+checksum = "3cf4199d1e5d15ddd86a694e4d0dffa9c323ce759fea589f00fef9d81cc1931d"
 dependencies = [
  "getrandom 0.3.3",
+ "js-sys",
  "rand",
- "uuid-macro-internal",
-]
-
-[[package]]
-name = "uuid-macro-internal"
-version = "1.15.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9521621447c21497fac206ffe6e9f642f977c4f82eeba9201055f64884d9cb01"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
+ "wasm-bindgen",
 ]
 
 [[package]]
 name = "vfio-bindings"
-version = "0.4.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#b135b8305c2cc8ec333e0cf77a780445cc98dcee"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b565663f62e091ca47db9a674c8c95c9686a000e82970f391a3cacf6470ff060"
 dependencies = [
  "vmm-sys-util",
 ]
 
 [[package]]
 name = "vfio-ioctls"
-version = "0.2.0"
-source = "git+https://github.com/rust-vmm/vfio?branch=main#b135b8305c2cc8ec333e0cf77a780445cc98dcee"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61316b5e308faa8ed4a87c4130256f765e46de3442eb2e2e619840ef73456738"
 dependencies = [
  "byteorder",
  "kvm-bindings",
  "kvm-ioctls",
  "libc",
  "log",
- "thiserror 1.0.64",
+ "thiserror 2.0.12",
  "vfio-bindings",
  "vm-memory",
  "vmm-sys-util",
@@ -1152,15 +1151,16 @@ dependencies = [
 [[package]]
 name = "vfio_user"
 version = "0.1.0"
-source = "git+https://github.com/rust-vmm/vfio-user?branch=main#3febcdd3fa2531623865663ca1721e1962ed9979"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed81c5ed8224d468a322e923777ed0615cad433fe61177126098af995f89cecf"
 dependencies = [
- "bitflags 1.3.2",
+ "bitflags 2.9.0",
  "libc",
  "log",
  "serde",
  "serde_derive",
  "serde_json",
- "thiserror 1.0.64",
+ "thiserror 2.0.12",
  "vfio-bindings",
  "vm-memory",
  "vmm-sys-util",
@@ -1168,8 +1168,9 @@ dependencies = [
 
 [[package]]
 name = "vhost"
-version = "0.12.1"
-source = "git+https://github.com/rust-vmm/vhost?rev=d983ae0#d983ae07f78663b7d24059667376992460b571a2"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a4dcad85a129d97d5d4b2f3c47a4affdeedd76bdcd02094bcb5d9b76cac2d05"
 dependencies = [
  "bitflags 2.9.0",
  "libc",
@@ -1180,9 +1181,9 @@ dependencies = [
 
 [[package]]
 name = "virtio-bindings"
-version = "0.2.4"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1711e61c00f8cb450bd15368152a1e37a12ef195008ddc7d0f4812f9e2b30a68"
+checksum = "804f498a26d5a63be7bbb8bdcd3869c3f286c4c4a17108905276454da0caf8cb"
 
 [[package]]
 name = "virtio-devices"
@@ -1219,9 +1220,9 @@ dependencies = [
 
 [[package]]
 name = "virtio-queue"
-version = "0.14.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "872e2f3fbd70a7e6f01689720cce3d5c2c5efe52b484dd07b674246ada0e9a8d"
+checksum = "fb0479158f863e59323771a1f684d843962f76960b86fecfec2bfa9c8f0f9180"
 dependencies = [
  "log",
  "virtio-bindings",
@@ -1258,9 +1259,9 @@ source = "git+https://github.com/rust-vmm/vm-fdt?branch=main#ef5bd734f5f66fb0772
 
 [[package]]
 name = "vm-memory"
-version = "0.16.1"
+version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1720e7240cdc739f935456eb77f370d7e9b2a3909204da1e2b47bef1137a013"
+checksum = "1fd5e56d48353c5f54ef50bd158a0452fc82f5383da840f7b8efc31695dd3b9d"
 dependencies = [
  "arc-swap",
  "libc",
@@ -1335,14 +1336,14 @@ dependencies = [
  "vm-migration",
  "vm-virtio",
  "vmm-sys-util",
- "zerocopy 0.8.24",
+ "zerocopy 0.8.26",
 ]
 
 [[package]]
 name = "vmm-sys-util"
-version = "0.12.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d1435039746e20da4f8d507a72ee1b916f7b4b05af7a91c093d2c6561934ede"
+checksum = "d21f366bf22bfba3e868349978766a965cbe628c323d58e026be80b8357ab789"
 dependencies = [
  "bitflags 1.3.2",
  "libc",
@@ -1367,24 +1368,24 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen"
-version = "0.2.93"
+version = "0.2.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a82edfc16a6c469f5f44dc7b571814045d60404b55a0ee849f9bcfa2e63dd9b5"
+checksum = "1edc8929d7499fc4e8f0be2262a241556cfc54a0bea223790e71446f2aab1ef5"
 dependencies = [
  "cfg-if",
  "once_cell",
+ "rustversion",
  "wasm-bindgen-macro",
 ]
 
 [[package]]
 name = "wasm-bindgen-backend"
-version = "0.2.93"
+version = "0.2.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9de396da306523044d3302746f1208fa71d7532227f15e347e2d93e4145dd77b"
+checksum = "2f0a0651a5c2bc21487bde11ee802ccaf4c51935d0d3d42a6101f98161700bc6"
 dependencies = [
  "bumpalo",
  "log",
- "once_cell",
  "proc-macro2",
  "quote",
  "syn",
@@ -1393,9 +1394,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro"
-version = "0.2.93"
+version = "0.2.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "585c4c91a46b072c92e908d99cb1dcdf95c5218eeb6f3bf1efa991ee7a68cccf"
+checksum = "7fe63fc6d09ed3792bd0897b314f53de8e16568c2b3f7982f468c0bf9bd0b407"
 dependencies = [
  "quote",
  "wasm-bindgen-macro-support",
@@ -1403,9 +1404,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro-support"
-version = "0.2.93"
+version = "0.2.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afc340c74d9005395cf9dd098506f7f44e38f2b4a21c6aaacf9a105ea5e1e836"
+checksum = "8ae87ea40c9f689fc23f209965b6fb8a99ad69aeeb0231408be24920604395de"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1416,9 +1417,12 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-shared"
-version = "0.2.93"
+version = "0.2.100"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c62a0a307cb4a311d3a07867860911ca130c3494e8c2719593806c08bc5d0484"
+checksum = "1a05d73b933a847d6cccdda8f838a22ff101ad9bf93e33684f39c1f5f0eece3d"
+dependencies = [
+ "unicode-ident",
+]
 
 [[package]]
 name = "winapi"
@@ -1545,11 +1549,11 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.24"
+version = "0.8.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2586fea28e186957ef732a5f8b3be2da217d65c5969d4b1e17f973ebbe876879"
+checksum = "1039dd0d3c310cf05de012d8a39ff557cb0d23087fd44cad61df08fc31907a2f"
 dependencies = [
- "zerocopy-derive 0.8.24",
+ "zerocopy-derive 0.8.26",
 ]
 
 [[package]]
@@ -1565,9 +1569,9 @@ dependencies = [
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.24"
+version = "0.8.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a996a8f63c5c4448cd959ac1bab0aaa3306ccfd060472f85943ee0750f0169be"
+checksum = "9ecf5b4cc5364572d7f4c329661bcc82724222973f2cab6f050a4e5c22f75181"
 dependencies = [
  "proc-macro2",
  "quote",

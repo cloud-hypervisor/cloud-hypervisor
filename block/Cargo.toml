@@ -19,7 +19,7 @@ serde = { version = "1.0.208", features = ["derive"] }
 smallvec = "1.13.2"
 thiserror = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
-virtio-bindings = { workspace = true, features = ["virtio-v5_0_0"] }
+virtio-bindings = { workspace = true }
 virtio-queue = { workspace = true }
 vm-memory = { workspace = true, features = [
   "backend-atomic",
