@@ -100,6 +100,25 @@ use crate::{
     MEMORY_MANAGER_SNAPSHOT_ID,
 };
 
+/// Errors that can happen in context of the VM startup payload, i.e., the bootitem(s).
+///
+/// This especially models the (invalid) combinations of cmdline, kernel, firmware, and initrd.
+#[derive(Debug, Error)]
+pub enum PayloadError {
+    /// When a firmware is specified, providing kernel, initrd, or cmdline is not supported.
+    #[error("When a firmware is specified, providing kernel, initrd, or cmdline is not supported")]
+    FirmwarePlusOtherPayloads,
+    /// Provided cmdline without kernel.
+    #[error("Provided cmdline without kernel")]
+    CmdlineWithoutKernel,
+    /// No bootitem provided: neither firmware nor kernel.
+    #[error("No bootitem provided: neither firmware nor kernel")]
+    MissingBootitem,
+    /// There is an invalid and unbootable configuration.
+    #[error("There is an invalid and unbootable configuration.")]
+    InvalidConfiguration,
+}
+
 /// Errors associated with VM management
 #[derive(Debug, Error)]
 pub enum Error {
@@ -310,7 +329,7 @@ pub enum Error {
     KernelLoadThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
     #[error("Payload configuration is not bootable")]
-    InvalidPayload,
+    InvalidPayload(#[source] PayloadError),
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     #[error("Error coredumping VM")]
@@ -1051,6 +1070,11 @@ impl Vm {
         let guest_memory = memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
         let entry_addr = match (firmware, kernel) {
+            (Some(_firmware), Some(_kernel)) => {
+                return Err(Error::InvalidPayload(
+                    PayloadError::FirmwarePlusOtherPayloads,
+                ))
+            }
             (None, Some(mut kernel)) => {
                 match linux_loader::loader::pe::PE::load(
                     mem.deref(),
@@ -1075,7 +1099,7 @@ impl Vm {
                 Self::load_firmware(&firmware, memory_manager)?;
                 arch::layout::UEFI_START
             }
-            _ => return Err(Error::InvalidPayload),
+            _ => return Err(Error::InvalidPayload(PayloadError::MissingBootitem)),
         };
 
         Ok(EntryPoint { entry_addr })
@@ -1092,6 +1116,9 @@ impl Vm {
         let alignment = 0x20_0000;
         let aligned_kernel_addr = arch::layout::KERNEL_START.0 + (alignment - 1) & !(alignment - 1);
         let entry_addr = match (firmware, kernel) {
+            (Some(_firmware), Some(_kernel)) => Err(Error::InvalidPayload(
+                PayloadError::FirmwarePlusOtherPayloads,
+            )),
             (None, Some(mut kernel)) => {
                 match linux_loader::loader::pe::PE::load(
                     mem.deref(),
@@ -1116,7 +1143,7 @@ impl Vm {
                 // TODO: UEFI for riscv64 is scheduled to next stage.
                 unimplemented!()
             }
-            _ => return Err(Error::InvalidPayload),
+            _ => return Err(Error::InvalidPayload(PayloadError::MissingBootitem)),
         };
 
         Ok(EntryPoint { entry_addr })
@@ -1237,6 +1264,15 @@ impl Vm {
             &payload.initramfs,
             &payload.cmdline,
         ) {
+            (Some(_firmware), Some(_kernel), _, _) => Err(Error::InvalidPayload(
+                PayloadError::FirmwarePlusOtherPayloads,
+            )),
+            (Some(_firmware), _, Some(_initrd), _) => Err(Error::InvalidPayload(
+                PayloadError::FirmwarePlusOtherPayloads,
+            )),
+            (_, None, _, Some(_cmdline)) => {
+                Err(Error::InvalidPayload(PayloadError::CmdlineWithoutKernel))
+            }
             (Some(firmware), None, None, None) => {
                 let firmware = File::open(firmware).map_err(Error::FirmwareFile)?;
                 Self::load_kernel(firmware, None, memory_manager)
@@ -1246,7 +1282,7 @@ impl Vm {
                 let cmdline = Self::generate_cmdline(payload)?;
                 Self::load_kernel(kernel, Some(cmdline), memory_manager)
             }
-            _ => Err(Error::InvalidPayload),
+            _ => Err(Error::InvalidPayload(PayloadError::MissingBootitem)),
         }
     }
 
@@ -1264,7 +1300,7 @@ impl Vm {
                 let kernel = File::open(kernel).map_err(Error::KernelFile)?;
                 Self::load_kernel(None, Some(kernel), memory_manager)
             }
-            _ => Err(Error::InvalidPayload),
+            _ => Err(Error::InvalidPayload(PayloadError::MissingBootitem)),
         }
     }
 
