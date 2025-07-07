@@ -350,10 +350,12 @@ pub fn default_netconfig_tap() -> Option<String> {
 }
 
 pub fn default_netconfig_ip() -> IpAddr {
+    warn!("Deprecation warning: No IP address provided. A default IP address is assigned. This behavior will be deprecated soon.");
     IpAddr::V4(Ipv4Addr::new(192, 168, 249, 1))
 }
 
 pub fn default_netconfig_mask() -> IpAddr {
+    warn!("Deprecation warning: No network mask provided. A default network mask is assigned. This behavior will be deprecated soon.");
     IpAddr::V4(Ipv4Addr::new(255, 255, 255, 0))
 }
 
