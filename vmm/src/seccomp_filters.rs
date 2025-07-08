@@ -835,7 +835,6 @@ fn vcpu_thread_rules(
         (libc::SYS_unlinkat, vec![]),
         (libc::SYS_write, vec![]),
         (libc::SYS_writev, vec![]),
-        #[cfg(debug_assertions)]
         (libc::SYS_fcntl, vec![]),
         (libc::SYS_getcwd, vec![]),
     ])
