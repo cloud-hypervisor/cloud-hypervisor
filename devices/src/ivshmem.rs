@@ -4,7 +4,6 @@
 //
 
 use std::any::Any;
-use std::path::PathBuf;
 use std::result;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
@@ -19,11 +18,9 @@ use pci::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_allocator::{AddressAllocator, SystemAllocator};
-use vm_device::{BusDevice, Resource, UserspaceMapping};
-use vm_memory::bitmap::AtomicBitmap;
+use vm_device::{BusDevice, Resource};
 use vm_memory::{Address, GuestAddress};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
-use vmm_sys_util::eventfd::EventFd;
 
 const IVSHMEM_BAR0_IDX: usize = 0;
 const IVSHMEM_BAR1_IDX: usize = 1;
@@ -34,14 +31,20 @@ const IVSHMEM_DEVICE_ID: u16 = 0x1110;
 
 const IVSHMEM_REG_BAR_SIZE: u64 = 0x100;
 
-type GuestRegionMmap = vm_memory::GuestRegionMmap<AtomicBitmap>;
-
 #[derive(Debug, Error)]
 pub enum IvshmemError {
     #[error("Failed to retrieve PciConfigurationState: {0}")]
     RetrievePciConfigurationState(#[source] anyhow::Error),
     #[error("Failed to retrieve IvshmemDeviceState: {0}")]
     RetrieveIvshmemDeviceStateState(#[source] anyhow::Error),
+    #[error("Failed to remove user memory region")]
+    RemoveUserMemoryRegion,
+    #[error("Failed to create user memory region.")]
+    CreateUserMemoryRegion,
+    #[error("Failed to create userspace mapping.")]
+    CreateUserspaceMapping,
+    #[error("Failed to remove old userspace mapping.")]
+    RemoveUserspaceMapping,
 }
 
 #[derive(Copy, Clone)]
@@ -53,6 +56,12 @@ impl PciSubclass for IvshmemSubclass {
     fn get_register_value(&self) -> u8 {
         *self as u8
     }
+}
+
+pub trait IvshmemOps: Send + Sync {
+    fn map_ram_region(&mut self, start_addr: u64, size: usize) -> Result<(), IvshmemError>;
+
+    fn unmap_ram_region(&mut self) -> Result<(), IvshmemError>;
 }
 
 pub struct IvshmemDevice {
@@ -68,10 +77,8 @@ pub struct IvshmemDevice {
     configuration: PciConfiguration,
     bar_regions: Vec<PciBarConfiguration>,
 
-    region: Option<Arc<GuestRegionMmap>>,
     region_size: u64,
-    userspace_mapping: Option<UserspaceMapping>,
-    reprogram_evt: EventFd,
+    ivshmem_ops: Arc<Mutex<dyn IvshmemOps>>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -86,13 +93,13 @@ impl IvshmemDevice {
     pub fn new(
         id: String,
         region_size: u64,
+        ivshmem_ops: Arc<Mutex<dyn IvshmemOps>>,
         snapshot: Option<Snapshot>,
     ) -> Result<Self, IvshmemError> {
         let pci_configuration_state =
             vm_migration::state_from_id(snapshot.as_ref(), PCI_CONFIGURATION_ID).map_err(|e| {
                 IvshmemError::RetrievePciConfigurationState(anyhow!(
                     "Failed to get PciConfigurationState from Snapshot: {e}",
-                    e
                 ))
             })?;
 
@@ -130,8 +137,7 @@ impl IvshmemDevice {
                 iv_position: s.iv_position,
                 doorbell: s.doorbell,
                 region_size,
-                region: None,
-                userspace_mapping: None,
+                ivshmem_ops,
             }
         } else {
             IvshmemDevice {
@@ -143,8 +149,7 @@ impl IvshmemDevice {
                 iv_position: 0,
                 doorbell: 0,
                 region_size,
-                region: None,
-                userspace_mapping: None,
+                ivshmem_ops,
             }
         };
         Ok(device)
@@ -333,6 +338,13 @@ impl PciDevice for IvshmemDevice {
     }
 
     fn move_bar(&mut self, old_base: u64, new_base: u64) -> result::Result<(), std::io::Error> {
+        if new_base == self.data_bar_addr() {
+            self.ivshmem_ops
+                .lock()
+                .unwrap()
+                .map_ram_region(new_base, self.region_size as usize)
+                .map_err(std::io::Error::other)?;
+        }
         for bar in self.bar_regions.iter_mut() {
             if bar.addr() == old_base {
                 *bar = bar.set_address(new_base);
