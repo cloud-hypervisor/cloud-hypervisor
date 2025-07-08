@@ -1764,26 +1764,6 @@ impl VfioPciDevice {
         }
     }
 
-    pub fn dma_map(&self, iova: u64, size: u64, user_addr: u64) -> Result<(), VfioPciError> {
-        if !self.iommu_attached {
-            self.container
-                .vfio_dma_map(iova, size, user_addr)
-                .map_err(|e| VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf))?;
-        }
-
-        Ok(())
-    }
-
-    pub fn dma_unmap(&self, iova: u64, size: u64) -> Result<(), VfioPciError> {
-        if !self.iommu_attached {
-            self.container
-                .vfio_dma_unmap(iova, size)
-                .map_err(|e| VfioPciError::DmaUnmap(e, self.device_path.clone(), self.bdf))?;
-        }
-
-        Ok(())
-    }
-
     pub fn mmio_regions(&self) -> Vec<MmioRegion> {
         self.common.mmio_regions.clone()
     }
