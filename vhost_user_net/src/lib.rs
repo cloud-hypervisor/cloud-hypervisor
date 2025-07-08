@@ -348,7 +348,7 @@ pub fn start_net_backend(backend_command: &str) {
     let backend_config = match VhostUserNetBackendConfig::parse(backend_command) {
         Ok(config) => config,
         Err(e) => {
-            eprintln!("Failed parsing parameters {e:?}");
+            error!("Failed parsing parameters {e:?}");
             process::exit(1);
         }
     };
