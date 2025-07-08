@@ -23,7 +23,6 @@ use vm_device::{BusDevice, Resource, UserspaceMapping};
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{Address, GuestAddress};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
-use vmm_sys_util::eventfd::EventFd;
 
 const IVSHMEM_BAR0_IDX: usize = 0;
 const IVSHMEM_BAR1_IDX: usize = 1;
@@ -42,6 +41,14 @@ pub enum IvshmemError {
     RetrievePciConfigurationState(#[source] anyhow::Error),
     #[error("Failed to retrieve IvshmemDeviceState: {0}")]
     RetrieveIvshmemDeviceStateState(#[source] anyhow::Error),
+    #[error("Failed to remove user memory region")]
+    RemoveUserMemoryRegion,
+    #[error("Failed to create user memory region.")]
+    CreateUserMemoryRegion,
+    #[error("Failed to create userspace mapping.")]
+    CreateUserspaceMapping,
+    #[error("Failed to remove old userspace mapping.")]
+    RemoveUserspaceMapping,
 }
 
 #[derive(Copy, Clone)]
@@ -55,23 +62,41 @@ impl PciSubclass for IvshmemSubclass {
     }
 }
 
+pub trait IvshmemOps: Send + Sync {
+    fn map_ram_region(
+        &mut self,
+        start_addr: u64,
+        size: usize,
+        backing_file: Option<PathBuf>,
+    ) -> Result<(Arc<GuestRegionMmap>, UserspaceMapping), IvshmemError>;
+
+    fn unmap_ram_region(&mut self, mapping: UserspaceMapping) -> Result<(), IvshmemError>;
+}
+
+/// Inner-Vm Shared Memory Device (Ivshmem device)
+///
+/// This device can share memory between host and guest(ivshmem-plain)
+/// and share memory between guests(ivshmem-doorbell).
+/// But only ivshmem-plain support now, ivshmem-doorbell doesn't support yet.
 pub struct IvshmemDevice {
     id: String,
 
     // ivshmem device registers
-    interrupt_mask: u32,
-    interrupt_status: Arc<AtomicU32>,
-    iv_position: u32,
-    doorbell: u32,
+    // (only used for ivshmem-doorbell, ivshmem-doorbell don't support yet)
+    _interrupt_mask: u32,
+    _interrupt_status: Arc<AtomicU32>,
+    _iv_position: u32,
+    _doorbell: u32,
 
     // PCI configuration registers.
     configuration: PciConfiguration,
     bar_regions: Vec<PciBarConfiguration>,
 
-    region: Option<Arc<GuestRegionMmap>>,
     region_size: u64,
+    ivshmem_ops: Arc<Mutex<dyn IvshmemOps>>,
+    backend_file: Option<PathBuf>,
+    region: Option<Arc<GuestRegionMmap>>,
     userspace_mapping: Option<UserspaceMapping>,
-    reprogram_evt: EventFd,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -86,13 +111,14 @@ impl IvshmemDevice {
     pub fn new(
         id: String,
         region_size: u64,
+        backend_file: Option<PathBuf>,
+        ivshmem_ops: Arc<Mutex<dyn IvshmemOps>>,
         snapshot: Option<Snapshot>,
     ) -> Result<Self, IvshmemError> {
         let pci_configuration_state =
             vm_migration::state_from_id(snapshot.as_ref(), PCI_CONFIGURATION_ID).map_err(|e| {
                 IvshmemError::RetrievePciConfigurationState(anyhow!(
                     "Failed to get PciConfigurationState from Snapshot: {e}",
-                    e
                 ))
             })?;
 
@@ -125,29 +151,42 @@ impl IvshmemDevice {
                 id,
                 configuration,
                 bar_regions: vec![],
-                interrupt_mask: s.interrupt_mask,
-                interrupt_status: Arc::new(AtomicU32::new(s.interrupt_status)),
-                iv_position: s.iv_position,
-                doorbell: s.doorbell,
+                _interrupt_mask: s.interrupt_mask,
+                _interrupt_status: Arc::new(AtomicU32::new(s.interrupt_status)),
+                _iv_position: s.iv_position,
+                _doorbell: s.doorbell,
                 region_size,
+                ivshmem_ops,
                 region: None,
                 userspace_mapping: None,
+                backend_file,
             }
         } else {
             IvshmemDevice {
                 id,
                 configuration,
                 bar_regions: vec![],
-                interrupt_mask: 0,
-                interrupt_status: Arc::new(AtomicU32::new(0)),
-                iv_position: 0,
-                doorbell: 0,
+                _interrupt_mask: 0,
+                _interrupt_status: Arc::new(AtomicU32::new(0)),
+                _iv_position: 0,
+                _doorbell: 0,
                 region_size,
+                ivshmem_ops,
                 region: None,
                 userspace_mapping: None,
+                backend_file,
             }
         };
         Ok(device)
+    }
+
+    pub fn set_region(
+        &mut self,
+        region: Arc<GuestRegionMmap>,
+        userspace_mapping: UserspaceMapping,
+    ) {
+        self.region = Some(region);
+        self.userspace_mapping = Some(userspace_mapping);
     }
 
     pub fn config_bar_addr(&self) -> u64 {
@@ -160,10 +199,10 @@ impl IvshmemDevice {
 
     fn state(&self) -> IvshmemDeviceState {
         IvshmemDeviceState {
-            interrupt_mask: self.interrupt_mask,
-            interrupt_status: self.interrupt_status.load(Ordering::SeqCst),
-            iv_position: self.iv_position,
-            doorbell: self.doorbell,
+            interrupt_mask: self._interrupt_mask,
+            interrupt_status: self._interrupt_status.load(Ordering::SeqCst),
+            iv_position: self._iv_position,
+            doorbell: self._doorbell,
         }
     }
 }
@@ -319,6 +358,26 @@ impl PciDevice for IvshmemDevice {
     }
 
     fn move_bar(&mut self, old_base: u64, new_base: u64) -> result::Result<(), std::io::Error> {
+        if new_base == self.data_bar_addr() {
+            if let Some(old_mapping) = self.userspace_mapping.take() {
+                self.ivshmem_ops
+                    .lock()
+                    .unwrap()
+                    .unmap_ram_region(old_mapping)
+                    .map_err(std::io::Error::other)?;
+            }
+            let (region, new_mapping) = self
+                .ivshmem_ops
+                .lock()
+                .unwrap()
+                .map_ram_region(
+                    new_base,
+                    self.region_size as usize,
+                    self.backend_file.clone(),
+                )
+                .map_err(std::io::Error::other)?;
+            self.set_region(region, new_mapping);
+        }
         for bar in self.bar_regions.iter_mut() {
             if bar.addr() == old_base {
                 *bar = bar.set_address(new_base);
