@@ -4,6 +4,8 @@
 
 use std::error::Error;
 
+use log::error;
+
 /// Prints a chain of errors to the user in a consistent manner.
 /// The user will see a clear chain of errors, followed by debug output
 /// for opening issues.
@@ -19,10 +21,10 @@ pub fn cli_print_error_chain<'a>(
 ) {
     eprint!("Error: {component} exited with the following ");
     if top_error.source().is_none() {
-        eprintln!("error:");
-        eprintln!("  {top_error}");
+        error!("error:");
+        error!("  {top_error}");
     } else {
-        eprintln!("chain of errors:");
+        error!("chain of errors:");
         std::iter::successors(Some(top_error), |sub_error| {
             // Dereference necessary to mitigate rustc compiler bug.
             // See <https://github.com/rust-lang/rust/issues/141673>
@@ -32,13 +34,13 @@ pub fn cli_print_error_chain<'a>(
         .for_each(|(level, error)| {
             // Special case: handling of HTTP Server responses in ch-remote
             if let Some(message) = display_modifier(level, 2, error) {
-                eprintln!("{message}");
+                error!("{message}");
             } else {
-                eprintln!("  {level}: {error}");
+                error!("  {level}: {error}");
             }
         });
     }
 
-    eprintln!();
-    eprintln!("Debug Info: {top_error:?}");
+    error!("");
+    error!("Debug Info: {top_error:?}");
 }
