@@ -15,7 +15,7 @@ use std::{env, io};
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use event_monitor::event;
 use libc::EFD_NONBLOCK;
-use log::{warn, LevelFilter};
+use log::{error, warn, LevelFilter};
 use option_parser::OptionParser;
 use seccompiler::SeccompAction;
 use signal_hook::consts::SIGSYS;
@@ -561,7 +561,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
                 signal_hook::low_level::emulate_default_handler(SIGSYS).unwrap();
             })
         }
-        .map_err(|e| eprintln!("Error adding SIGSYS signal handler: {e}"))
+        .map_err(|e| error!("Error adding SIGSYS signal handler: {e}"))
         .ok();
     }
 
@@ -575,13 +575,13 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     // dedicated signal handling thread we'll start in a bit.
     for sig in &vmm::vm::Vm::HANDLED_SIGNALS {
         if let Err(e) = block_signal(*sig) {
-            eprintln!("Error blocking signals: {e}");
+            error!("Error blocking signals: {e}");
         }
     }
 
     for sig in &vmm::Vmm::HANDLED_SIGNALS {
         if let Err(e) = block_signal(*sig) {
-            eprintln!("Error blocking signals: {e}");
+            error!("Error blocking signals: {e}");
         }
     }
 
