@@ -17,6 +17,7 @@ use api_client::{
     Error as ApiClientError,
 };
 use clap::{Arg, ArgAction, ArgMatches, Command};
+use log::error;
 use option_parser::{ByteSized, ByteSizedParseError};
 use thiserror::Error;
 use vmm::config::RestoreConfig;
@@ -1071,6 +1072,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
 }
 
 fn main() {
+    env_logger::init();
     let app = Command::new("ch-remote")
         .author(env!("CARGO_PKG_AUTHORS"))
         .version(env!("BUILD_VERSION"))
@@ -1092,7 +1094,7 @@ fn main() {
         #[cfg(not(feature = "dbus_api"))]
         (Some(api_sock),) => TargetApi::HttpApi(
             UnixStream::connect(api_sock).unwrap_or_else(|e| {
-                eprintln!("Error opening HTTP socket: {e}");
+                error!("Error opening HTTP socket: {e}");
                 process::exit(1)
             }),
             PhantomData,
@@ -1100,7 +1102,7 @@ fn main() {
         #[cfg(feature = "dbus_api")]
         (Some(api_sock), None, None) => TargetApi::HttpApi(
             UnixStream::connect(api_sock).unwrap_or_else(|e| {
-                eprintln!("Error opening HTTP socket: {e}");
+                error!("Error opening HTTP socket: {e}");
                 process::exit(1)
             }),
             PhantomData,
@@ -1114,19 +1116,19 @@ fn main() {
             )
             .map_err(Error::DBusApiClient)
             .unwrap_or_else(|e| {
-                eprintln!("Error creating D-Bus proxy: {e}");
+                error!("Error creating D-Bus proxy: {e}");
                 process::exit(1)
             }),
         ),
         #[cfg(feature = "dbus_api")]
         (Some(_), Some(_) | None, Some(_) | None) => {
-            println!(
+            error!(
                 "`api-socket` and (dbus-service-name or dbus-object-path) are mutually exclusive"
             );
             process::exit(1);
         }
         _ => {
-            println!("Please either provide the api-socket option or dbus-service-name and dbus-object-path options");
+            error!("Please either provide the api-socket option or dbus-service-name and dbus-object-path options");
             process::exit(1);
         }
     };

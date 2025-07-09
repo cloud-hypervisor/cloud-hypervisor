@@ -409,6 +409,7 @@ dependencies = [
  "clap",
  "dhat",
  "dirs",
+ "env_logger",
  "epoll",
  "event_monitor",
  "hypervisor",
