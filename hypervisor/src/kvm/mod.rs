@@ -14,6 +14,8 @@ use std::any::Any;
 use std::collections::HashMap;
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
+#[cfg(target_arch = "riscv64")]
+use std::mem::offset_of;
 #[cfg(target_arch = "x86_64")]
 use std::os::unix::io::AsRawFd;
 #[cfg(feature = "tdx")]
@@ -41,12 +43,12 @@ pub use crate::riscv64::{
     aia::AiaImsicsState as AiaState, check_required_kvm_extensions, is_non_core_register,
     VcpuKvmState,
 };
+#[cfg(target_arch = "riscv64")]
+use crate::riscv64_reg_id;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
 #[cfg(target_arch = "aarch64")]
 use crate::{arm64_core_reg_id, offset_of};
 use crate::{cpu, hypervisor, HypervisorType};
-#[cfg(target_arch = "riscv64")]
-use crate::{offset_of, riscv64_reg_id};
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
@@ -99,7 +101,7 @@ use kvm_bindings::{
     KVM_REG_ARM_CORE, KVM_REG_SIZE_U128, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
 };
 #[cfg(target_arch = "riscv64")]
-use kvm_bindings::{kvm_riscv_core, user_regs_struct, KVM_REG_RISCV_CORE};
+use kvm_bindings::{kvm_riscv_core, KVM_REG_RISCV_CORE};
 #[cfg(feature = "tdx")]
 use kvm_bindings::{kvm_run__bindgen_ty_1, KVMIO};
 pub use kvm_ioctls::{Cap, Kvm, VcpuExit};
@@ -1495,7 +1497,7 @@ impl cpu::Vcpu for KvmVcpu {
                 state.mode = u64::from_le_bytes(bytes);
             };
             ($reg_name:ident) => {
-                let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, $reg_name);
+                let off = offset_of!(kvm_riscv_core, regs.$reg_name);
                 let mut bytes = [0_u8; 8];
                 self.fd
                     .lock()
@@ -1703,7 +1705,7 @@ impl cpu::Vcpu for KvmVcpu {
                     .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
             };
             ($reg_name:ident) => {
-                let off = offset_of!(kvm_riscv_core, regs, user_regs_struct, $reg_name);
+                let off = offset_of!(kvm_riscv_core, regs.$reg_name);
                 self.fd
                     .lock()
                     .unwrap()
@@ -2328,7 +2330,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
         // Setting the A0 () to the hartid of this CPU.
-        let a0 = offset_of!(kvm_riscv_core, regs, user_regs_struct, a0);
+        let a0 = offset_of!(kvm_riscv_core, regs.a0);
         self.fd
             .lock()
             .unwrap()
@@ -2339,7 +2341,7 @@ impl cpu::Vcpu for KvmVcpu {
             .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
 
         // Setting the PC (Processor Counter) to the current program address (kernel address).
-        let pc = offset_of!(kvm_riscv_core, regs, user_regs_struct, pc);
+        let pc = offset_of!(kvm_riscv_core, regs.pc);
         self.fd
             .lock()
             .unwrap()
@@ -2352,7 +2354,7 @@ impl cpu::Vcpu for KvmVcpu {
         // Last mandatory thing to set -> the address pointing to the FDT (also called DTB).
         // "The device tree blob (dtb) must be placed on an 8-byte boundary and must
         // not exceed 64 kilobytes in size." -> https://www.kernel.org/doc/Documentation/arch/riscv/boot.txt.
-        let a1 = offset_of!(kvm_riscv_core, regs, user_regs_struct, a1);
+        let a1 = offset_of!(kvm_riscv_core, regs.a1);
         self.fd
             .lock()
             .unwrap()
@@ -3019,7 +3021,7 @@ mod tests {
         let vcpu0 = vm.create_vcpu(0, None).unwrap();
 
         let core_regs = StandardRegisters::from(kvm_riscv_core {
-            regs: user_regs_struct {
+            regs: kvm_bindings::user_regs_struct {
                 pc: 0x00,
                 ra: 0x01,
                 sp: 0x02,
