@@ -129,6 +129,7 @@ igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main" }
 serde_json = "1.0.120"
 
 # other crates
+env_logger = "0.11.8"
 thiserror = "2.0.12"
 uuid = { version = "1.17.0" }
 zerocopy = { version = "0.8.26", default-features = false }
