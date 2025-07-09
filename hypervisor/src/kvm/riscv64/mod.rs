@@ -13,41 +13,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::kvm::{KvmError, KvmResult};
 
-// This macro gets the offset of a structure (i.e `str`) member (i.e `field`) without having
-// an instance of that structure.
-#[macro_export]
-macro_rules! _offset_of {
-    ($str:ty, $field:ident) => {{
-        let tmp: std::mem::MaybeUninit<$str> = std::mem::MaybeUninit::uninit();
-        let base = tmp.as_ptr();
-
-        // Avoid warnings when nesting `unsafe` blocks.
-        #[allow(unused_unsafe)]
-        // SAFETY: The pointer is valid and aligned, just not initialised. Using `addr_of` ensures
-        // that we don't actually read from `base` (which would be UB) nor create an intermediate
-        // reference.
-        let member = unsafe { core::ptr::addr_of!((*base).$field) } as *const u8;
-
-        // Avoid warnings when nesting `unsafe` blocks.
-        #[allow(unused_unsafe)]
-        // SAFETY: The two pointers are within the same allocated object `tmp`. All requirements
-        // from offset_from are upheld.
-        unsafe {
-            member.offset_from(base as *const u8) as usize
-        }
-    }};
-}
-
-#[macro_export]
-macro_rules! offset_of {
-    ($reg_struct:ty, $field:ident) => {
-        $crate::_offset_of!($reg_struct, $field)
-    };
-    ($outer_reg_struct:ty, $outer_field:ident, $($inner_reg_struct:ty, $inner_field:ident), +) => {
-        $crate::_offset_of!($outer_reg_struct, $outer_field) + offset_of!($($inner_reg_struct, $inner_field), +)
-    };
-}
-
 // Following are macros that help with getting the ID of a riscv64 register, including config registers, core registers and timer registers.
 // The register of core registers are wrapped in the `user_regs_struct` structure. See:
 // https://elixir.bootlin.com/linux/v6.10/source/arch/riscv/include/uapi/asm/kvm.h#L62
