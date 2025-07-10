@@ -20,7 +20,7 @@ use std::{io, result};
 use anyhow::anyhow;
 use block::async_io::{AsyncIo, AsyncIoError, DiskFile};
 use block::fcntl::{get_lock_state, LockError, LockType};
-use block::{build_serial, fcntl, Request, RequestType, VirtioBlockConfig};
+use block::{build_serial, fcntl, ExecuteAsync, Request, RequestType, VirtioBlockConfig};
 use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
 use rate_limiter::TokenType;
 use seccompiler::SeccompAction;
@@ -91,6 +91,8 @@ pub enum Error {
         /// The path of the disk image.
         path: PathBuf,
     },
+    #[error("Failed submit batch requests: {0}")]
+    SubmitBatchRequestsError(#[source] AsyncIoError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -151,6 +153,8 @@ struct BlockEpollHandler {
 impl BlockEpollHandler {
     fn process_queue_submit(&mut self) -> Result<()> {
         let queue = &mut self.queue;
+        let mut batch_requests = Vec::new();
+        let mut batch_inflight_requests = Vec::new();
 
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref())
@@ -220,9 +224,23 @@ impl BlockEpollHandler {
                 desc_chain.head_index() as u64,
             );
 
-            if let Ok(true) = result {
-                self.inflight_requests
-                    .push_back((desc_chain.head_index(), request));
+            if let Ok(ExecuteAsync {
+                async_complete: true,
+                batch_request,
+            }) = result
+            {
+                if let Some(batch_request) = batch_request {
+                    match batch_request.request_type {
+                        RequestType::In | RequestType::Out => batch_requests.push(batch_request),
+                        _ => {
+                            unreachable!(
+                                "Unexpected batch request type: {:?}",
+                                request.request_type
+                            )
+                        }
+                    }
+                }
+                batch_inflight_requests.push((desc_chain.head_index(), request));
             } else {
                 let status = match result {
                     Ok(_) => VIRTIO_BLK_S_OK,
@@ -245,6 +263,31 @@ impl BlockEpollHandler {
                 queue
                     .enable_notification(self.mem.memory().deref())
                     .map_err(Error::QueueEnableNotification)?;
+            }
+        }
+
+        match self.disk_image.submit_batch_requests(&batch_requests) {
+            Ok(()) => {
+                self.inflight_requests.extend(batch_inflight_requests);
+            }
+            Err(e) => {
+                // If batch submission fails, report VIRTIO_BLK_S_IOERR for all requests.
+                for (user_data, request) in batch_inflight_requests {
+                    warn!(
+                        "Request failed with batch submission: {:x?} {:?}",
+                        request, e
+                    );
+                    let desc_index = user_data;
+                    let mem = self.mem.memory();
+                    mem.write_obj(VIRTIO_BLK_S_IOERR as u8, request.status_addr)
+                        .map_err(Error::RequestStatus)?;
+                    queue
+                        .add_used(mem.deref(), desc_index, 0)
+                        .map_err(Error::QueueAddUsed)?;
+                    queue
+                        .enable_notification(mem.deref())
+                        .map_err(Error::QueueEnableNotification)?;
+                }
             }
         }
 
@@ -307,7 +350,7 @@ impl BlockEpollHandler {
         let mut write_ops = Wrapping(0);
 
         while let Some((user_data, result)) = self.disk_image.next_completed_request() {
-            let desc_index = user_data as u16;
+            let desc_index: u16 = user_data as u16;
 
             let mut request = self.find_inflight_request(desc_index)?;
 
