@@ -27,7 +27,7 @@ pub fn url_to_path(url: &str) -> std::result::Result<PathBuf, MigratableError> {
 
     if !path.is_dir() {
         return Err(MigratableError::MigrateSend(anyhow!(
-            "Destination is not a directory"
+            "Destination is not a directory: {path:?}"
         )));
     }
 
