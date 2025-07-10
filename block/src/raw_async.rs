@@ -12,7 +12,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
-use crate::DiskTopology;
+use crate::{DiskTopology, RequestType};
 
 pub struct RawFileDisk {
     file: File,
@@ -52,10 +52,23 @@ impl DiskFile for RawFileDisk {
     }
 }
 
+struct AioRequest {
+    offset: libc::off_t,
+    iovecs: Vec<libc::iovec>,
+    user_data: u64,
+    req_type: RequestType,
+}
+
+// SAFETY: data structure only contain a series of integers
+unsafe impl Send for RawFileAsync {}
+// SAFETY: data structure only contain a series of integers
+unsafe impl Sync for RawFileAsync {}
+
 pub struct RawFileAsync {
     fd: RawFd,
     io_uring: IoUring,
     eventfd: EventFd,
+    reqs_cache: Vec<AioRequest>,
 }
 
 impl RawFileAsync {
@@ -71,6 +84,7 @@ impl RawFileAsync {
             fd,
             io_uring,
             eventfd,
+            reqs_cache: Vec::new(),
         })
     }
 }
@@ -86,24 +100,14 @@ impl AsyncIo for RawFileAsync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        let (submitter, mut sq, _) = self.io_uring.split();
-
-        // SAFETY: we know the file descriptor is valid and we
-        // relied on vm-memory to provide the buffer address.
-        unsafe {
-            sq.push(
-                &opcode::Readv::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
-                    .offset(offset.try_into().unwrap())
-                    .build()
-                    .user_data(user_data),
-            )
-            .map_err(|_| AsyncIoError::ReadVectored(Error::other("Submission queue is full")))?
-        };
-
-        // Update the submission queue and submit new operations to the
-        // io_uring instance.
-        sq.sync();
-        submitter.submit().map_err(AsyncIoError::ReadVectored)?;
+        // Caching the request in a vector to batch multiple requests
+        // before submitting them to the io_uring instance.
+        self.reqs_cache.push(AioRequest {
+            offset,
+            iovecs: iovecs.to_vec(),
+            user_data,
+            req_type: RequestType::In,
+        });
 
         Ok(())
     }
@@ -114,24 +118,14 @@ impl AsyncIo for RawFileAsync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        let (submitter, mut sq, _) = self.io_uring.split();
-
-        // SAFETY: we know the file descriptor is valid and we
-        // relied on vm-memory to provide the buffer address.
-        unsafe {
-            sq.push(
-                &opcode::Writev::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
-                    .offset(offset.try_into().unwrap())
-                    .build()
-                    .user_data(user_data),
-            )
-            .map_err(|_| AsyncIoError::WriteVectored(Error::other("Submission queue is full")))?
-        };
-
-        // Update the submission queue and submit new operations to the
-        // io_uring instance.
-        sq.sync();
-        submitter.submit().map_err(AsyncIoError::WriteVectored)?;
+        // Caching the request in a vector to batch multiple requests
+        // before submitting them to the io_uring instance.
+        self.reqs_cache.push(AioRequest {
+            offset,
+            iovecs: iovecs.to_vec(),
+            user_data,
+            req_type: RequestType::Out,
+        });
 
         Ok(())
     }
