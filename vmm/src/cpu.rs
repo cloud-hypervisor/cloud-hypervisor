@@ -2963,10 +2963,12 @@ mod tests {
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "kvm")]
-    use std::mem;
+    use std::{mem, mem::offset_of};
 
     use arch::layout;
     use hypervisor::arch::aarch64::regs::MPIDR_EL1;
+    #[cfg(feature = "kvm")]
+    use hypervisor::arm64_core_reg_id;
     #[cfg(feature = "kvm")]
     use hypervisor::kvm::aarch64::is_system_register;
     #[cfg(feature = "kvm")]
@@ -2974,8 +2976,6 @@ mod tests {
         user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
     };
     use hypervisor::HypervisorCpuError;
-    #[cfg(feature = "kvm")]
-    use hypervisor::{arm64_core_reg_id, offset_of};
 
     #[test]
     fn test_setup_regs() {

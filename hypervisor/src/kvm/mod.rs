@@ -95,10 +95,10 @@ pub use kvm_bindings::{
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
-    kvm_regs, user_fpsimd_state, user_pt_regs, KVM_GUESTDBG_USE_HW, KVM_NR_SPSR, KVM_REG_ARM64,
-    KVM_REG_ARM64_SYSREG, KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRN_MASK,
-    KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK,
-    KVM_REG_ARM_CORE, KVM_REG_SIZE_U128, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
+    kvm_regs, user_pt_regs, KVM_GUESTDBG_USE_HW, KVM_NR_SPSR, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
+    KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRN_MASK, KVM_REG_ARM64_SYSREG_OP0_MASK,
+    KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_ARM_CORE,
+    KVM_REG_SIZE_U128, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
 };
 #[cfg(target_arch = "riscv64")]
 use kvm_bindings::{kvm_riscv_core, KVM_REG_RISCV_CORE};
@@ -1440,7 +1440,7 @@ impl cpu::Vcpu for KvmVcpu {
 
         // Now moving on to floating point registers which are stored in the user_fpsimd_state in the kernel:
         // https://elixir.free-electrons.com/linux/v4.9.62/source/arch/arm64/include/uapi/asm/kvm.h#L53
-        let mut off = offset_of!(kvm_regs, fp_regs) + offset_of!(user_fpsimd_state, vregs);
+        let mut off = offset_of!(kvm_regs, fp_regs.vregs);
         for i in 0..32 {
             let mut bytes = [0_u8; 16];
             self.fd
@@ -1453,7 +1453,7 @@ impl cpu::Vcpu for KvmVcpu {
         }
 
         // Floating-point Status Register
-        let off = offset_of!(kvm_regs, fp_regs) + offset_of!(user_fpsimd_state, fpsr);
+        let off = offset_of!(kvm_regs, fp_regs.fpsr);
         let mut bytes = [0_u8; 4];
         self.fd
             .lock()
@@ -1463,7 +1463,7 @@ impl cpu::Vcpu for KvmVcpu {
         state.fp_regs.fpsr = u32::from_le_bytes(bytes);
 
         // Floating-point Control Register
-        let off = offset_of!(kvm_regs, fp_regs) + offset_of!(user_fpsimd_state, fpcr);
+        let off = offset_of!(kvm_regs, fp_regs.fpcr);
         let mut bytes = [0_u8; 4];
         self.fd
             .lock()
@@ -1644,7 +1644,7 @@ impl cpu::Vcpu for KvmVcpu {
             off += std::mem::size_of::<u64>();
         }
 
-        let mut off = offset_of!(kvm_regs, fp_regs) + offset_of!(user_fpsimd_state, vregs);
+        let mut off = offset_of!(kvm_regs, fp_regs.vregs);
         for i in 0..32 {
             self.fd
                 .lock()
@@ -1657,7 +1657,7 @@ impl cpu::Vcpu for KvmVcpu {
             off += mem::size_of::<u128>();
         }
 
-        let off = offset_of!(kvm_regs, fp_regs) + offset_of!(user_fpsimd_state, fpsr);
+        let off = offset_of!(kvm_regs, fp_regs.fpsr);
         self.fd
             .lock()
             .unwrap()
@@ -1667,7 +1667,7 @@ impl cpu::Vcpu for KvmVcpu {
             )
             .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
 
-        let off = offset_of!(kvm_regs, fp_regs) + offset_of!(user_fpsimd_state, fpcr);
+        let off = offset_of!(kvm_regs, fp_regs.fpcr);
         self.fd
             .lock()
             .unwrap()
@@ -2281,10 +2281,8 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     #[cfg(target_arch = "aarch64")]
     fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
-        let kreg_off = offset_of!(kvm_regs, regs);
-
         // Get the register index of the PSTATE (Processor State) register.
-        let pstate = offset_of!(user_pt_regs, pstate) + kreg_off;
+        let pstate = offset_of!(kvm_regs, regs.pstate);
         self.fd
             .lock()
             .unwrap()
@@ -2297,7 +2295,7 @@ impl cpu::Vcpu for KvmVcpu {
         // Other vCPUs are powered off initially awaiting PSCI wakeup.
         if cpu_id == 0 {
             // Setting the PC (Processor Counter) to the current program address (kernel address).
-            let pc = offset_of!(user_pt_regs, pc) + kreg_off;
+            let pc = offset_of!(kvm_regs, regs.pc);
             self.fd
                 .lock()
                 .unwrap()
@@ -2311,7 +2309,7 @@ impl cpu::Vcpu for KvmVcpu {
             // "The device tree blob (dtb) must be placed on an 8-byte boundary and must
             // not exceed 2 megabytes in size." -> https://www.kernel.org/doc/Documentation/arm64/booting.txt.
             // We are choosing to place it the end of DRAM. See `get_fdt_addr`.
-            let regs0 = offset_of!(user_pt_regs, regs) + kreg_off;
+            let regs0 = offset_of!(kvm_regs, regs.regs);
             self.fd
                 .lock()
                 .unwrap()
