@@ -79,6 +79,9 @@ pub enum AsyncIoError {
     /// Failed synchronizing file.
     #[error("Failed synchronizing file")]
     Fsync(#[source] std::io::Error),
+    /// Failed submitting batch requests.
+    #[error("Failed submitting batch requests: {0}")]
+    SubmitBatchRequests(#[source] std::io::Error),
 }
 
 pub type AsyncIoResult<T> = std::result::Result<T, AsyncIoError>;
@@ -99,4 +102,7 @@ pub trait AsyncIo: Send {
     ) -> AsyncIoResult<()>;
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()>;
     fn next_completed_request(&mut self) -> Option<(u64, i32)>;
+    fn submit_batch_requests(&mut self) -> AsyncIoResult<()> {
+        Ok(())
+    }
 }

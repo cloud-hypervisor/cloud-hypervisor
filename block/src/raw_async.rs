@@ -162,4 +162,74 @@ impl AsyncIo for RawFileAsync {
             .next()
             .map(|entry| (entry.user_data(), entry.result()))
     }
+
+    /// Submits all cached requests to the io_uring instance.
+    /// This method is called when the application has finished
+    /// preparing a batch of requests and is ready to submit them
+    /// for processing.
+    fn submit_batch_requests(&mut self) -> AsyncIoResult<()> {
+        if self.reqs_cache.is_empty() {
+            return Ok(());
+        }
+        let (submitter, mut sq, _) = self.io_uring.split();
+        let mut submitted = false;
+
+        for req in &self.reqs_cache {
+            match req.req_type {
+                RequestType::In => {
+                    // SAFETY: we know the file descriptor is valid and we
+                    // relied on vm-memory to provide the buffer address.
+                    unsafe {
+                        sq.push(
+                            &opcode::Readv::new(
+                                types::Fd(self.fd),
+                                req.iovecs.as_ptr(),
+                                req.iovecs.len() as u32,
+                            )
+                            .offset(req.offset as u64)
+                            .build()
+                            .user_data(req.user_data),
+                        )
+                        .map_err(|_| {
+                            AsyncIoError::ReadVectored(Error::other("Submission queue is full"))
+                        })?
+                    };
+                    submitted = true;
+                }
+                RequestType::Out => {
+                    // SAFETY: we know the file descriptor is valid and we
+                    // relied on vm-memory to provide the buffer address.
+                    unsafe {
+                        sq.push(
+                            &opcode::Writev::new(
+                                types::Fd(self.fd),
+                                req.iovecs.as_ptr(),
+                                req.iovecs.len() as u32,
+                            )
+                            .offset(req.offset as u64)
+                            .build()
+                            .user_data(req.user_data),
+                        )
+                        .map_err(|_| {
+                            AsyncIoError::WriteVectored(Error::other("Submission queue is full"))
+                        })?
+                    };
+                    submitted = true;
+                }
+                _ => {}
+            }
+        }
+
+        // Only submit if we actually queued something
+        if submitted {
+            // Update the submission queue and submit new operations to the
+            // io_uring instance.
+            sq.sync();
+            submitter
+                .submit()
+                .map_err(AsyncIoError::SubmitBatchRequests)?;
+        }
+        self.reqs_cache.clear();
+        Ok(())
+    }
 }
