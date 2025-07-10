@@ -91,6 +91,8 @@ pub enum Error {
         /// The path of the disk image.
         path: PathBuf,
     },
+    #[error("Failed submit batch requests: {0}")]
+    SubmitBatchRequestsError(#[source] AsyncIoError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -151,6 +153,7 @@ struct BlockEpollHandler {
 impl BlockEpollHandler {
     fn process_queue_submit(&mut self) -> Result<()> {
         let queue = &mut self.queue;
+        let mut total_req = 0;
 
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref())
@@ -221,6 +224,7 @@ impl BlockEpollHandler {
             );
 
             if let Ok(true) = result {
+                total_req += 1;
                 self.inflight_requests
                     .push_back((desc_chain.head_index(), request));
             } else {
@@ -246,6 +250,11 @@ impl BlockEpollHandler {
                     .enable_notification(self.mem.memory().deref())
                     .map_err(Error::QueueEnableNotification)?;
             }
+        }
+        if total_req > 0 {
+            self.disk_image
+                .submit_batch_requests()
+                .map_err(Error::SubmitBatchRequestsError)?;
         }
 
         Ok(())
