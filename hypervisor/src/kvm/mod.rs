@@ -14,7 +14,7 @@ use std::any::Any;
 use std::collections::HashMap;
 #[cfg(target_arch = "x86_64")]
 use std::fs::File;
-#[cfg(target_arch = "riscv64")]
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use std::mem::offset_of;
 #[cfg(target_arch = "x86_64")]
 use std::os::unix::io::AsRawFd;
@@ -36,6 +36,8 @@ pub use crate::aarch64::{check_required_kvm_extensions, is_system_register, Vcpu
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 #[cfg(target_arch = "riscv64")]
 use crate::arch::riscv64::aia::{Vaia, VaiaConfig};
+#[cfg(target_arch = "aarch64")]
+use crate::arm64_core_reg_id;
 #[cfg(target_arch = "riscv64")]
 use crate::riscv64::aia::KvmAiaImsics;
 #[cfg(target_arch = "riscv64")]
@@ -46,8 +48,6 @@ pub use crate::riscv64::{
 #[cfg(target_arch = "riscv64")]
 use crate::riscv64_reg_id;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
-#[cfg(target_arch = "aarch64")]
-use crate::{arm64_core_reg_id, offset_of};
 use crate::{cpu, hypervisor, HypervisorType};
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
