@@ -19,31 +19,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::kvm::{KvmError, KvmResult};
 
-// This macro gets the offset of a structure (i.e `str`) member (i.e `field`) without having
-// an instance of that structure.
-#[macro_export]
-macro_rules! offset_of {
-    ($str:ty, $field:ident) => {{
-        let tmp: std::mem::MaybeUninit<$str> = std::mem::MaybeUninit::uninit();
-        let base = tmp.as_ptr();
-
-        // Avoid warnings when nesting `unsafe` blocks.
-        #[allow(unused_unsafe)]
-        // SAFETY: The pointer is valid and aligned, just not initialised. Using `addr_of` ensures
-        // that we don't actually read from `base` (which would be UB) nor create an intermediate
-        // reference.
-        let member = unsafe { core::ptr::addr_of!((*base).$field) } as *const u8;
-
-        // Avoid warnings when nesting `unsafe` blocks.
-        #[allow(unused_unsafe)]
-        // SAFETY: The two pointers are within the same allocated object `tmp`. All requirements
-        // from offset_from are upheld.
-        unsafe {
-            member.offset_from(base as *const u8) as usize
-        }
-    }};
-}
-
 // Following are macros that help with getting the ID of a aarch64 core register.
 // The core register are represented by the user_pt_regs structure. Look for it in
 // arch/arm64/include/uapi/asm/ptrace.h.
