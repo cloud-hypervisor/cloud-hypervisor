@@ -575,7 +575,7 @@ impl Request {
                         .get_mut(&domain_id)
                         .unwrap()
                         .mappings
-                        .retain(|&x, _| (x < req.virt_start || x > req.virt_end));
+                        .retain(|&x, _| x < req.virt_start || x > req.virt_end);
                 }
                 VIRTIO_IOMMU_T_PROBE => {
                     if desc_size_left != size_of::<VirtioIommuReqProbe>() {
