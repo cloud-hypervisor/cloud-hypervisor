@@ -12,8 +12,8 @@ use arch::layout;
 use hypervisor::arch::aarch64::gic::{GicState, Vgic, VgicConfig};
 use hypervisor::CpuState;
 use vm_device::interrupt::{
-    InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
-    LegacyIrqSourceConfig, MsiIrqGroupConfig,
+    get_irq_masked_state, InterruptIndex, InterruptManager, InterruptSourceConfig,
+    InterruptSourceGroup, LegacyIrqSourceConfig, MsiIrqGroupConfig,
 };
 use vm_memory::address::Address;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -96,7 +96,7 @@ impl Gic {
                 .update(
                     i as InterruptIndex,
                     InterruptSourceConfig::LegacyIrq(config),
-                    false,
+                    get_irq_masked_state(true, false),
                     false,
                 )
                 .map_err(Error::EnableInterrupt)?;
