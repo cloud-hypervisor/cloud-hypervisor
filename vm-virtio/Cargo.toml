@@ -8,7 +8,6 @@ version = "0.1.0"
 default = []
 
 [dependencies]
-log = "0.4.22"
 virtio-queue = { workspace = true }
 vm-memory = { workspace = true, features = [
   "backend-atomic",

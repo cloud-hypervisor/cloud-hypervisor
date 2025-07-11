@@ -34,7 +34,6 @@ tracing = ["tracer/tracing"]
 [dependencies]
 acpi_tables = { workspace = true }
 anyhow = "1.0.94"
-arc-swap = "1.7.1"
 arch = { path = "../arch" }
 bitflags = "2.9.0"
 block = { path = "../block" }
@@ -79,7 +78,6 @@ vfio-ioctls = { workspace = true, default-features = false }
 vfio_user = { workspace = true }
 virtio-bindings = { workspace = true }
 virtio-devices = { path = "../virtio-devices" }
-virtio-queue = { workspace = true }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = { workspace = true, features = [
