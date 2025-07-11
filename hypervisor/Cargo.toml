@@ -24,7 +24,7 @@ igvm_defs = { workspace = true, optional = true }
 kvm-bindings = { workspace = true, optional = true, features = ["serde"] }
 kvm-ioctls = { workspace = true, optional = true }
 libc = "0.2.167"
-log = "0.4.22"
+log = "0.4.27"
 mshv-bindings = { workspace = true, features = [
   "fam-wrappers",
   "with-serde",
