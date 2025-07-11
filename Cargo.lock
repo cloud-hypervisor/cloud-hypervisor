@@ -119,7 +119,6 @@ dependencies = [
  "uuid",
  "vm-fdt",
  "vm-memory",
- "vm-migration",
  "vmm-sys-util",
 ]
 
@@ -1507,7 +1506,6 @@ dependencies = [
  "serde_json",
  "test_infra",
  "thiserror 2.0.12",
- "wait-timeout",
 ]
 
 [[package]]
@@ -2065,7 +2063,6 @@ dependencies = [
  "dirs",
  "epoll",
  "libc",
- "serde",
  "serde_json",
  "ssh2",
  "thiserror 2.0.12",
@@ -2141,7 +2138,6 @@ name = "tpm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "byteorder",
  "libc",
  "log",
  "net_gen",
@@ -2312,7 +2308,6 @@ dependencies = [
  "block",
  "clap",
  "env_logger",
- "epoll",
  "libc",
  "log",
  "option_parser",
@@ -2355,7 +2350,6 @@ name = "virtio-devices"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arc-swap",
  "block",
  "byteorder",
  "epoll",
@@ -2363,13 +2357,11 @@ dependencies = [
  "libc",
  "log",
  "mshv-ioctls",
- "net_gen",
  "net_util",
  "pci",
  "rate_limiter",
  "seccompiler",
  "serde",
- "serde_json",
  "serde_with",
  "serial_buffer",
  "thiserror 2.0.12",
@@ -2409,12 +2401,10 @@ dependencies = [
 name = "vm-device"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "hypervisor",
  "serde",
  "thiserror 2.0.12",
  "vfio-ioctls",
- "vm-memory",
  "vmm-sys-util",
 ]
 
@@ -2450,7 +2440,6 @@ dependencies = [
 name = "vm-virtio"
 version = "0.1.0"
 dependencies = [
- "log",
  "virtio-queue",
  "vm-memory",
 ]
@@ -2461,7 +2450,6 @@ version = "0.1.0"
 dependencies = [
  "acpi_tables",
  "anyhow",
- "arc-swap",
  "arch",
  "bitflags 2.9.0",
  "block",
@@ -2503,7 +2491,6 @@ dependencies = [
  "vfio_user",
  "virtio-bindings",
  "virtio-devices",
- "virtio-queue",
  "vm-allocator",
  "vm-device",
  "vm-memory",
