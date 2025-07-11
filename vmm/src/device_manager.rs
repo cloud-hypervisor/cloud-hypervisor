@@ -53,10 +53,17 @@ use devices::gic;
 use devices::interrupt_controller::InterruptController;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
+#[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
+use devices::legacy::fw_cfg::FW_CFG_ACPI_ID;
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
 #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
 use devices::legacy::Serial;
+#[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
+use devices::legacy::{
+    fw_cfg::{PORT_FW_CFG_BASE, PORT_FW_CFG_WIDTH},
+    FwCfg,
+};
 #[cfg(feature = "pvmemcontrol")]
 use devices::pvmemcontrol::{PvmemcontrolBusDevice, PvmemcontrolPciDevice};
 use devices::{interrupt_controller, AcpiNotificationFlags};
@@ -126,6 +133,8 @@ const SERIAL_DEVICE_NAME: &str = "__serial";
 const DEBUGCON_DEVICE_NAME: &str = "__debug_console";
 #[cfg(target_arch = "aarch64")]
 const GPIO_DEVICE_NAME: &str = "__gpio";
+#[cfg(all(feature = "fw_cfg", target_arch = "aarch64"))]
+const FW_CFG_DEVICE_NAME: &str = "__fw-cfg";
 const RNG_DEVICE_NAME: &str = "__rng";
 const IOMMU_DEVICE_NAME: &str = "__iommu";
 #[cfg(feature = "pvmemcontrol")]
@@ -1070,6 +1079,9 @@ pub struct DeviceManager {
     rate_limit_groups: HashMap<String, Arc<RateLimiterGroup>>,
 
     mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
+
+    #[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
+    fw_cfg: Option<Arc<Mutex<FwCfg>>>,
 }
 
 fn create_mmio_allocators(
@@ -1334,6 +1346,8 @@ impl DeviceManager {
             snapshot,
             rate_limit_groups,
             mmio_regions: Arc::new(Mutex::new(Vec::new())),
+            #[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
+            fw_cfg: None,
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -1457,6 +1471,68 @@ impl DeviceManager {
             self.pvpanic_device = self.add_pvpanic_device()?;
         }
 
+        Ok(())
+    }
+
+    #[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
+    pub fn create_fw_cfg_device(&mut self) -> Result<(), DeviceManagerError> {
+        let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new(
+            self.memory_manager.lock().as_ref().unwrap().guest_memory(),
+        )));
+
+        self.bus_devices
+            .push(Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>);
+
+        self.fw_cfg = Some(fw_cfg.clone());
+
+        self.address_manager
+            .io_bus
+            .insert(fw_cfg, PORT_FW_CFG_BASE, PORT_FW_CFG_WIDTH)
+            .map_err(DeviceManagerError::BusError)?;
+        Ok(())
+    }
+
+    #[cfg(all(feature = "fw_cfg", target_arch = "aarch64"))]
+    pub fn create_fw_cfg_device(&mut self) -> Result<(), DeviceManagerError> {
+        let fw_cfg = Arc::new(Mutex::new(devices::legacy::FwCfg::new(
+            self.memory_manager.lock().as_ref().unwrap().guest_memory(),
+        )));
+
+        self.fw_cfg = Some(fw_cfg.clone());
+
+        // default address for fw_cfg on arm via mmio
+        // https://github.com/torvalds/linux/blob/master/drivers/firmware/qemu_fw_cfg.c#L27
+        self.address_manager
+            .mmio_bus
+            .insert(fw_cfg.clone(), PORT_FW_CFG_BASE, PORT_FW_CFG_WIDTH)
+            .map_err(DeviceManagerError::BusError)?;
+
+        self.bus_devices
+            .push(Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>);
+
+        let fw_cfg_irq = self
+            .address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_irq()
+            .unwrap();
+
+        self.id_to_dev_info.insert(
+            (DeviceType::FwCfg, "fw-cfg".to_string()),
+            MmioDeviceInfo {
+                addr: PORT_FW_CFG_BASE,
+                len: PORT_FW_CFG_WIDTH,
+                irq: fw_cfg_irq,
+            },
+        );
+
+        let id = String::from(FW_CFG_DEVICE_NAME);
+
+        self.device_tree
+            .lock()
+            .unwrap()
+            .insert(id.clone(), device_node!(id, fw_cfg));
         Ok(())
     }
 
@@ -4187,6 +4263,11 @@ impl DeviceManager {
         &self.address_manager.mmio_bus
     }
 
+    #[cfg(all(feature = "fw_cfg", not(target_arch = "riscv64")))]
+    pub fn fw_cfg(&self) -> Option<&Arc<Mutex<FwCfg>>> {
+        self.fw_cfg.as_ref()
+    }
+
     pub fn allocator(&self) -> &Arc<Mutex<SystemAllocator>> {
         &self.address_manager.allocator
     }
@@ -4960,6 +5041,27 @@ impl Aml for DeviceManager {
             ],
         )
         .to_aml_bytes(sink);
+
+        #[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
+        if self.fw_cfg.is_some() {
+            aml::Device::new(
+                "_SB_.FWCF".into(),
+                vec![
+                    &aml::Name::new("_HID".into(), &FW_CFG_ACPI_ID.to_string()),
+                    &aml::Name::new("_STA".into(), &0xB_usize),
+                    &aml::Name::new(
+                        "_CRS".into(),
+                        &aml::ResourceTemplate::new(vec![&aml::IO::new(
+                            PORT_FW_CFG_BASE as u16,
+                            PORT_FW_CFG_BASE as u16,
+                            0x01,
+                            PORT_FW_CFG_WIDTH as u8,
+                        )]),
+                    ),
+                ],
+            )
+            .to_aml_bytes(sink);
+        }
 
         // Serial device
         #[cfg(target_arch = "x86_64")]
