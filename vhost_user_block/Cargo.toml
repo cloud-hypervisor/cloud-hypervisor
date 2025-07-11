@@ -9,7 +9,6 @@ version = "0.1.0"
 block = { path = "../block" }
 clap = { version = "4.5.13", features = ["cargo", "wrap_help"] }
 env_logger = { workspace = true }
-epoll = "4.3.3"
 libc = "0.2.167"
 log = "0.4.22"
 option_parser = { path = "../option_parser" }
