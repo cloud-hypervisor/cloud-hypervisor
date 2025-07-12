@@ -335,6 +335,10 @@ pub enum Error {
 
     #[error("Error locking disk images: Another instance likely holds a lock")]
     LockingError(#[source] DeviceManagerError),
+
+    #[cfg(feature = "ivshmem")]
+    #[error("Error reprogramming: {0}")]
+    ReProgramPCIBar(#[source] DeviceManagerError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
