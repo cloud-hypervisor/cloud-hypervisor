@@ -13,7 +13,7 @@ byteorder = "1.5.0"
 crc-any = "2.5.0"
 io-uring = { version = "0.6.4", optional = true }
 libc = "0.2.167"
-log = "0.4.22"
+log = "0.4.27"
 remain = "0.2.15"
 serde = { version = "1.0.208", features = ["derive"] }
 smallvec = "1.13.2"
