@@ -10,7 +10,6 @@ sev_snp = ["mshv-ioctls"]
 
 [dependencies]
 anyhow = "1.0.94"
-arc-swap = "1.7.1"
 block = { path = "../block" }
 byteorder = "1.5.0"
 epoll = "4.3.3"
@@ -18,13 +17,11 @@ event_monitor = { path = "../event_monitor" }
 libc = "0.2.167"
 log = "0.4.22"
 mshv-ioctls = { workspace = true, optional = true }
-net_gen = { path = "../net_gen" }
 net_util = { path = "../net_util" }
 pci = { path = "../pci" }
 rate_limiter = { path = "../rate_limiter" }
 seccompiler = { workspace = true }
 serde = { version = "1.0.208", features = ["derive"] }
-serde_json = { workspace = true }
 serde_with = { version = "3.9.0", default-features = false, features = [
   "macros",
 ] }

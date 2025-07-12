@@ -12,4 +12,3 @@ serde = { version = "1.0.208", features = ["derive", "rc"] }
 serde_json = { workspace = true }
 test_infra = { path = "../test_infra" }
 thiserror = { workspace = true }
-wait-timeout = "0.2.0"
