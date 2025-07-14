@@ -371,7 +371,9 @@ impl Vcpu {
         apic_id: u32,
         vm: &Arc<dyn hypervisor::Vm>,
         vm_ops: Option<Arc<dyn VmOps>>,
-        #[cfg(target_arch = "x86_64")] cpu_vendor: CpuVendor,
+        #[cfg(target_arch = "x86_64")]
+        cpu_vendor: CpuVendor,
+        #[cfg(target_arch = "aarch64")]
         receiver: Receiver<PowerCtl>,
     ) -> Result<Self> {
         let vcpu = vm
@@ -502,6 +504,7 @@ impl Vcpu {
         Ok(())
     }
 
+    #[cfg(target_arch = "aarch64")]
     pub fn power_on_reset(&self, entry: u64, context_id: u64) -> Result<()> {
         let mut reset_accel_cpu_state = self.vcpu.state().unwrap().clone();
         let CpuState::Kvm(ref mut reset_kvm_state) = reset_accel_cpu_state;
@@ -553,6 +556,7 @@ pub struct CpuManager {
     vcpu_states: Vec<VcpuState>,
     selected_cpu: u8,
     vcpus: Vec<Arc<Mutex<Vcpu>>>,
+    #[cfg(target_arch = "aarch64")]
     parked_vcpus: Vec<Arc<Mutex<Vcpu>>>,
     seccomp_action: SeccompAction,
     vm_ops: Arc<dyn VmOps>,
@@ -661,6 +665,7 @@ struct VcpuState {
     kill: Arc<AtomicBool>,
     vcpu_run_interrupted: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
+    #[cfg(target_arch = "aarch64")]
     vcpu_power_ctl_signalled: Arc<AtomicBool>,
 }
 
@@ -699,6 +704,7 @@ impl VcpuState {
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
     fn signal_thread_powerctl(&self) {
         self.vcpu_power_ctl_signalled.store(true, Ordering::SeqCst);
         debug!("enter signal therad powerctl");
@@ -841,6 +847,7 @@ impl CpuManager {
             dynamic,
             hypervisor: hypervisor.clone(),
             vcpu_senders,
+            #[cfg(target_arch = "aarch64")]
             up_vcpus: Arc::new(AtomicU32::new(0)),
             #[cfg(feature = "sev_snp")]
             sev_snp_enabled,
@@ -890,6 +897,7 @@ impl CpuManager {
             Some(self.vm_ops.clone()),
             #[cfg(target_arch = "x86_64")]
             self.hypervisor.get_cpu_vendor(),
+            #[cfg(target_arch = "aarch64")]
             receiver,
         )?;
 
@@ -996,6 +1004,7 @@ impl CpuManager {
         snapshot: Option<Snapshot>,
     ) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
         let mut vcpus: Vec<Arc<Mutex<Vcpu>>> = vec![];
+        #[cfg(target_arch = "aarch64")]
         info!(
             "Request to create new vCPUs: desired = {}, max = {}, allocated = {}, parked allocated = {}, present = {}",
             desired_vcpus,
@@ -1061,6 +1070,7 @@ impl CpuManager {
         self.vcpus.clone()
     }
 
+    #[cfg(target_arch = "aarch64")]
     pub fn parked_vcpus(&self) -> Vec<Arc<Mutex<Vcpu>>> {
         self.parked_vcpus.clone()
     }
@@ -1093,6 +1103,7 @@ impl CpuManager {
         let vcpu_paused = self.vcpu_states[usize::try_from(vcpu_id).unwrap()]
             .paused
             .clone();
+        #[cfg(target_arch = "aarch64")]
         let vcpu_power_ctl_signalled = self.vcpu_states[usize::try_from(vcpu_id).unwrap()].vcpu_power_ctl_signalled.clone();
         let vcpu_senders = self.vcpu_senders.clone();
         let vm = self.vm.clone();
@@ -1123,6 +1134,7 @@ impl CpuManager {
 
         info!("Starting vCPU: cpu_id = {}", vcpu_id);
         let vcpu_states = self.vcpu_states.clone();
+        #[cfg(target_arch = "aarch64")]
         let up_vcpus = self.up_vcpus.clone();
 
         let handle = Some(
@@ -1228,6 +1240,7 @@ impl CpuManager {
                                 }
                             }
 
+                            #[cfg(target_arch = "aarch64")]
                             if vcpu_power_ctl_signalled.load(Ordering::SeqCst) {
                                 let vcpu = vcpu.lock().unwrap();
                                 if let Ok(power_ctl) = vcpu.receiver.recv() {
@@ -1423,6 +1436,7 @@ impl CpuManager {
             self.vcpus_pause_signalled.store(paused, Ordering::SeqCst);
         }
 
+        #[cfg(target_arch = "aarch64")]
         info!(
             "Starting vCPUs: desired = {}, vcpu allocated = {}, parked vcpu allocated = {}, present = {}, paused = {}",
             desired_vcpus,
