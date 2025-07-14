@@ -6,6 +6,8 @@ version = "0.1.0"
 
 [features]
 default = []
+kvm = ["pci/kvm"]
+mshv = ["pci/mshv"]
 sev_snp = ["mshv-ioctls"]
 
 [dependencies]
