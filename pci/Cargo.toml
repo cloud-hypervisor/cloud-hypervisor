@@ -6,8 +6,8 @@ version = "0.1.0"
 
 [features]
 default = []
-kvm = ["vfio-ioctls/kvm"]
-mshv = ["vfio-ioctls/mshv"]
+kvm = ["hypervisor/kvm", "vfio-ioctls/kvm"]
+mshv = ["hypervisor/mshv", "vfio-ioctls/mshv"]
 
 [dependencies]
 anyhow = "1.0.94"
