@@ -1931,13 +1931,7 @@ impl DeviceManager {
             .allocate_irq()
             .unwrap();
 
-        let interrupt_group = interrupt_manager
-            .create_group(LegacyIrqGroupConfig {
-                irq: rtc_irq as InterruptIndex,
-            })
-            .map_err(DeviceManagerError::CreateInterruptGroup)?;
-
-        let rtc_device = Arc::new(Mutex::new(devices::legacy::Rtc::new(interrupt_group)));
+        let rtc_device = Arc::new(Mutex::new(devices::legacy::Rtc::new()));
 
         self.bus_devices
             .push(Arc::clone(&rtc_device) as Arc<dyn BusDeviceSync>);
