@@ -11,20 +11,31 @@ mshv = ["pci/mshv"]
 sev_snp = ["mshv-ioctls"]
 
 [dependencies]
+<<<<<<< HEAD
 anyhow = "1.0.94"
+=======
+anyhow.workspace = true
+arc-swap.workspace = true
+>>>>>>> maximimize-workspace-inheritance
 block = { path = "../block" }
-byteorder = "1.5.0"
-epoll = "4.3.3"
+byteorder.workspace = true
+epoll.workspace = true
 event_monitor = { path = "../event_monitor" }
-libc = "0.2.167"
-log = "0.4.22"
+libc.workspace = true
+log.workspace = true
 mshv-ioctls = { workspace = true, optional = true }
 net_util = { path = "../net_util" }
 pci = { path = "../pci" }
 rate_limiter = { path = "../rate_limiter" }
 seccompiler = { workspace = true }
+<<<<<<< HEAD
 serde = { version = "1.0.208", features = ["derive"] }
 serde_with = { version = "3.9.0", default-features = false, features = [
+=======
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+serde_with = { workspace = true, default-features = false, features = [
+>>>>>>> maximimize-workspace-inheritance
   "macros",
 ] }
 serial_buffer = { path = "../serial_buffer" }
