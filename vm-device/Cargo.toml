@@ -10,10 +10,7 @@ kvm = ["vfio-ioctls/kvm"]
 mshv = ["vfio-ioctls/mshv"]
 
 [dependencies]
-<<<<<<< HEAD
-=======
 anyhow.workspace = true
->>>>>>> maximimize-workspace-inheritance
 hypervisor = { path = "../hypervisor" }
 serde = { workspace = true, features = ["derive", "rc"] }
 thiserror = { workspace = true }

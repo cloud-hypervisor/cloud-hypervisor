@@ -8,10 +8,7 @@ version = "0.1.0"
 default = []
 
 [dependencies]
-<<<<<<< HEAD
-=======
 log.workspace = true
->>>>>>> maximimize-workspace-inheritance
 virtio-queue = { workspace = true }
 vm-memory = { workspace = true, features = [
   "backend-atomic",
