@@ -5,7 +5,7 @@ name = "event_monitor"
 version = "0.1.0"
 
 [dependencies]
-flume = "0.11.1"
-libc = "0.2.167"
-serde = { version = "1.0.208", features = ["derive", "rc"] }
+flume.workspace = true
+libc.workspace = true
+serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }

@@ -5,12 +5,12 @@ name = "test_infra"
 version = "0.1.0"
 
 [dependencies]
-dirs = "6.0.0"
-epoll = "4.3.3"
-libc = "0.2.167"
-serde = { version = "1.0.208", features = ["derive", "rc"] }
+dirs.workspace = true
+epoll.workspace = true
+libc.workspace = true
+serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 ssh2 = { version = "0.9.4", features = ["vendored-openssl"] }
 thiserror = { workspace = true }
 vmm-sys-util = { workspace = true }
-wait-timeout = "0.2.0"
+wait-timeout.workspace = true

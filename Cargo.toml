@@ -29,20 +29,20 @@ inherits = "release"
 strip = false
 
 [dependencies]
-anyhow = "1.0.94"
+anyhow.workspace = true
 api_client = { path = "api_client" }
-clap = { version = "4.5.13", features = ["string"] }
-dhat = { version = "0.3.3", optional = true }
+clap = { workspace = true, features = ["string"] }
+dhat = { workspace = true, optional = true }
 env_logger = { workspace = true }
-epoll = "4.3.3"
+epoll.workspace = true
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
-libc = "0.2.167"
-log = { version = "0.4.22", features = ["std"] }
+libc.workspace = true
+log = { workspace = true, features = ["std"] }
 option_parser = { path = "option_parser" }
 seccompiler = { workspace = true }
 serde_json = { workspace = true }
-signal-hook = "0.3.18"
+signal-hook.workspace = true
 thiserror = { workspace = true }
 tpm = { path = "tpm" }
 tracer = { path = "tracer" }
@@ -52,11 +52,11 @@ vmm-sys-util = { workspace = true }
 zbus = { version = "5.7.1", optional = true }
 
 [dev-dependencies]
-dirs = "6.0.0"
+dirs.workspace = true
 net_util = { path = "net_util" }
 serde_json = { workspace = true }
 test_infra = { path = "test_infra" }
-wait-timeout = "0.2.0"
+wait-timeout.workspace = true
 
 # Please adjust `vmm::feature_list()` accordingly when changing the
 # feature list below
@@ -110,6 +110,7 @@ linux-loader = "0.13.0"
 mshv-bindings = "0.5.2"
 mshv-ioctls = "0.5.2"
 seccompiler = "0.5.0"
+signal-hook = "0.3"
 vfio-bindings = { version = "0.5.0", default-features = false }
 vfio-ioctls = { version = "0.5.0", default-features = false }
 vfio_user = { version = "0.1.0", default-features = false }
@@ -127,10 +128,25 @@ igvm = { git = "https://github.com/microsoft/igvm", branch = "main" }
 igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main" }
 
 # serde crates
+serde = "1"
 serde_json = "1.0.120"
+serde_with = { version = "3.9", default-features = false }
 
 # other crates
+anyhow = "1"
+arc-swap = "1.7"
+bitflags = "2.9"
+byteorder = "1.5.0"
+cfg-if = "1"
+clap = "4.5"
+dhat = "0.3"
+dirs = "6"
 env_logger = "0.11.8"
+epoll = "4.3"
+flume = "0.11"
+libc = "0.2"
+log = "0.4"
 thiserror = "2.0.12"
 uuid = { version = "1.17.0" }
+wait-timeout = "0.2"
 zerocopy = { version = "0.8.26", default-features = false }

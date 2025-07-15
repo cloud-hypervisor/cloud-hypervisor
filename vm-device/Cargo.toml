@@ -10,9 +10,9 @@ kvm = ["vfio-ioctls/kvm"]
 mshv = ["vfio-ioctls/mshv"]
 
 [dependencies]
-anyhow = "1.0.94"
+anyhow.workspace = true
 hypervisor = { path = "../hypervisor" }
-serde = { version = "1.0.208", features = ["derive", "rc"] }
+serde = { workspace = true, features = ["derive", "rc"] }
 thiserror = { workspace = true }
 vfio-ioctls = { workspace = true, default-features = false }
 vm-memory = { workspace = true, features = ["backend-mmap"] }

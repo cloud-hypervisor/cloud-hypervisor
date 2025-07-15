@@ -6,17 +6,17 @@ version = "0.1.0"
 
 [dependencies]
 acpi_tables = { workspace = true }
-anyhow = "1.0.94"
+anyhow.workspace = true
 arch = { path = "../arch" }
-bitflags = "2.9.0"
-byteorder = "1.5.0"
+bitflags.workspace = true
+byteorder.workspace = true
 event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
-libc = "0.2.167"
-log = "0.4.22"
+libc.workspace = true
+log.workspace = true
 num_enum = "0.7.2"
 pci = { path = "../pci" }
-serde = { version = "1.0.208", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tpm = { path = "../tpm" }
 vm-allocator = { path = "../vm-allocator" }

@@ -10,12 +10,12 @@ kvm = ["vfio-ioctls/kvm"]
 mshv = ["vfio-ioctls/mshv"]
 
 [dependencies]
-anyhow = "1.0.94"
-byteorder = "1.5.0"
+anyhow.workspace = true
+byteorder.workspace = true
 hypervisor = { path = "../hypervisor" }
-libc = "0.2.167"
-log = "0.4.22"
-serde = { version = "1.0.208", features = ["derive"] }
+libc.workspace = true
+log.workspace = true
+serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 vfio-bindings = { workspace = true, features = ["fam-wrappers"] }
 vfio-ioctls = { workspace = true, default-features = false }

@@ -6,10 +6,10 @@ name = "performance-metrics"
 version = "0.1.0"
 
 [dependencies]
-clap = { version = "4.5.13", features = ["wrap_help"] }
-dirs = "6.0.0"
-serde = { version = "1.0.208", features = ["derive", "rc"] }
+clap = { workspace = true, features = ["wrap_help"] }
+dirs.workspace = true
+serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 test_infra = { path = "../test_infra" }
 thiserror = { workspace = true }
-wait-timeout = "0.2.0"
+wait-timeout.workspace = true
