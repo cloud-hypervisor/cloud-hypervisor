@@ -6,6 +6,6 @@ version = "0.1.0"
 [dependencies]
 epoll = "4.3.3"
 libc = "0.2.167"
-log = "0.4.22"
+log = "0.4.27"
 thiserror = { workspace = true }
 vmm-sys-util = { workspace = true }

@@ -55,7 +55,7 @@ igvm_defs = { workspace = true, optional = true }
 landlock = "0.4.0"
 libc = "0.2.167"
 linux-loader = { workspace = true, features = ["bzimage", "elf", "pe"] }
-log = "0.4.22"
+log = "0.4.27"
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 mshv-bindings = { workspace = true, features = [
   "fam-wrappers",
