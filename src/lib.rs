@@ -19,12 +19,12 @@ pub fn cli_print_error_chain<'a>(
         &'a (dyn Error + 'static),
     ) -> Option<String>,
 ) {
-    eprint!("Error: {component} exited with the following ");
+    let msg = format!("Error: {component} exited with the following");
     if top_error.source().is_none() {
-        error!("error:");
+        error!("{msg} error:");
         error!("  {top_error}");
     } else {
-        error!("chain of errors:");
+        error!("{msg} chain of errors:");
         std::iter::successors(Some(top_error), |sub_error| {
             // Dereference necessary to mitigate rustc compiler bug.
             // See <https://github.com/rust-lang/rust/issues/141673>
