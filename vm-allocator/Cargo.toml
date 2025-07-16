@@ -9,7 +9,7 @@ default = []
 kvm = ["arch/kvm"]
 
 [dependencies]
-libc = "0.2.167"
+libc.workspace = true
 vm-memory = { workspace = true }
 
 [target.'cfg(any(target_arch = "aarch64", target_arch = "riscv64"))'.dependencies]
