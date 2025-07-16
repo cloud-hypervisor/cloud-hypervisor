@@ -97,7 +97,7 @@ fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
 
 pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
     let test_timeout = control.common.test_timeout;
-    let (rx, bandwidth) = control.net_control.unwrap();
+    let (rx, bandwidth) = control.test_control.as_ref().unwrap().net().unwrap();
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest = performance_test_new_guest(Box::new(focal));
@@ -351,7 +351,7 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
 pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     let test_timeout = control.common.test_timeout;
     let num_queues = control.common.num_queues.unwrap();
-    let (fio_ops, bandwidth) = control.blk_control.as_ref().unwrap();
+    let (fio_ops, bandwidth) = control.test_control.as_ref().unwrap().blk().unwrap();
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest = performance_test_new_guest(Box::new(focal));
@@ -404,10 +404,10 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
             .unwrap();
 
         // Parse fio output
-        if *bandwidth {
-            parse_fio_output(&output, fio_ops, num_queues).unwrap()
+        if bandwidth {
+            parse_fio_output(&output, &fio_ops, num_queues).unwrap()
         } else {
-            parse_fio_output_iops(&output, fio_ops, num_queues).unwrap()
+            parse_fio_output_iops(&output, &fio_ops, num_queues).unwrap()
         }
     });
 
