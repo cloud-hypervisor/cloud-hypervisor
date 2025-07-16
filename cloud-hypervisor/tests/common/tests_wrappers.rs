@@ -2615,6 +2615,118 @@ pub(crate) fn _test_dmi_oem_strings(guest: &Guest) {
 }
 
 #[cfg(target_arch = "x86_64")]
+fn check_dmi_oem_strings(guest: &Guest, strings: &[&str]) {
+    assert_eq!(
+        guest
+            .ssh_command("sudo dmidecode --oem-string count")
+            .unwrap()
+            .trim(),
+        strings.len().to_string()
+    );
+    // dmidecode sanitizes non-printable/non-ASCII bytes. Read the raw Type 11
+    // string-set (after its five-byte header) to check exact byte preservation.
+    let raw = guest
+        .ssh_command("sudo od -An -v -tx1 -j5 /sys/firmware/dmi/entries/11-0/raw")
+        .unwrap();
+    let expected = format!("{}\0\0", strings.join("\0"));
+    let expected_hex = expected
+        .as_bytes()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert_eq!(
+        raw.split_whitespace().collect::<Vec<_>>().join(" "),
+        expected_hex
+    );
+}
+
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn _test_dmi_oem_string_paths(guest: &Guest) {
+    let inline = "String from command line";
+    let first = "Secret from file 1";
+    let multiline =
+        "io.systemd.credential:bootstrapSecret=multi-line-secret\n\nand non-ascii chars © ™\n";
+    let first_path = guest.tmp_dir.as_path().join("oem1.txt");
+    let multiline_path = guest.tmp_dir.as_path().join("oem2.txt");
+    fs::write(&first_path, first).unwrap();
+    fs::write(&multiline_path, multiline).unwrap();
+    let platform = format!(
+        "oem_strings=[{inline}],oem_string_paths=[{},{}]",
+        first_path.display(),
+        multiline_path.display()
+    );
+    let mut child = GuestCommand::new(guest)
+        .args(["--landlock"])
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline_with_platform(Some(&platform))
+        .default_disks()
+        .default_net()
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+        check_dmi_oem_strings(guest, &[inline, first, multiline]);
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+    handle_child_output(r, &output);
+}
+
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn _test_dmi_oem_string_paths_api(guest: &Guest) {
+    let api_socket = temp_api_path(&guest.tmp_dir);
+    let path = guest.tmp_dir.as_path().join("oem");
+    let secret = "io.systemd.credential:apiSecret=first line\n\n© ™\n";
+    let mut config: serde_json::Value = serde_json::from_str(&guest.api_create_body()).unwrap();
+    config["platform"] = serde_json::json!({"oem_string_paths": [path]});
+    let config_path = guest.tmp_dir.as_path().join("config.json");
+    fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+
+    let mut child = GuestCommand::new(guest)
+        .args(["--api-socket", &api_socket])
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = panic::catch_unwind(|| {
+        assert!(wait_until(Duration::from_secs(5), || remote_command(
+            &api_socket,
+            "ping",
+            None
+        )));
+        // The file does not exist at vm.create: its contents are needed only at boot.
+        assert!(remote_command(
+            &api_socket,
+            "create",
+            Some(config_path.to_str().unwrap())
+        ));
+        fs::write(&path, secret).unwrap();
+        assert!(remote_command(&api_socket, "boot", None));
+        guest.wait_vm_boot().unwrap();
+        check_dmi_oem_strings(guest, &[secret]);
+
+        let (success, output, _) = remote_command_w_output(&api_socket, "info", None);
+        assert!(success);
+        let info: serde_json::Value = serde_json::from_slice(&output).unwrap();
+        assert_eq!(
+            info["config"]["platform"]["oem_string_paths"],
+            serde_json::json!([path])
+        );
+        assert!(info["config"]["platform"]["oem_strings"].is_null());
+        assert!(!String::from_utf8(output).unwrap().contains("apiSecret"));
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+    handle_child_output(r, &output);
+}
+
+#[cfg(target_arch = "x86_64")]
 pub(crate) fn _test_dmi_system_and_chassis(guest: &Guest) {
     let fields = [
         ("system_manufacturer", "system-manufacturer", "Manufacturer"),

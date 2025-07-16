@@ -14,6 +14,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 #[cfg(feature = "fw_cfg")]
 use std::ffi;
+#[cfg(target_arch = "x86_64")]
+use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
 use std::num::Wrapping;
@@ -112,6 +114,8 @@ use crate::migration::{SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE, get_vm_snapsho
 use crate::sev::MeasuredBootInfo;
 #[cfg(feature = "fw_cfg")]
 use crate::vm_config::FwCfgConfig;
+#[cfg(target_arch = "x86_64")]
+use crate::vm_config::PlatformConfig;
 use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, HotplugMethod, NetConfig,
     NumaConfig, PayloadConfig, PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
@@ -124,6 +128,14 @@ use crate::{
 /// Errors associated with VM management
 #[derive(Debug, Error)]
 pub enum Error {
+    #[cfg(target_arch = "x86_64")]
+    #[error("Cannot read OEM string file '{0}'")]
+    OemStringFileRead(String, #[source] io::Error),
+
+    #[cfg(target_arch = "x86_64")]
+    #[error("Too many OEM strings: {0} (maximum 255)")]
+    TooManyOemStrings(usize),
+
     #[error("Cannot open kernel file")]
     KernelFile(#[source] io::Error),
 
@@ -370,6 +382,34 @@ pub enum Error {
     ApplyMemoryZoneUpdate(#[source] MemoryZoneUpdateError),
 }
 pub type Result<T> = result::Result<T, Error>;
+
+#[cfg(target_arch = "x86_64")]
+fn load_smbios_config(platform: &PlatformConfig) -> Result<Option<arch::x86_64::SmbiosConfig>> {
+    let mut smbios = platform.smbios_config().unwrap_or_default();
+    let paths = platform.oem_string_paths.as_deref().unwrap_or_default();
+    let count = smbios.oem_strings.len() + paths.len();
+    if count > usize::from(u8::MAX) {
+        return Err(Error::TooManyOemStrings(count));
+    }
+    let mut oem_strings = smbios.oem_strings.into_vec();
+    for path in paths {
+        let content =
+            fs::read_to_string(path).map_err(|e| Error::OemStringFileRead(path.clone(), e))?;
+        // Empty strings and embedded NULs would corrupt the SMBIOS string-set.
+        if content.is_empty() || content.contains('\0') {
+            return Err(Error::OemStringFileRead(
+                path.clone(),
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "OEM string must be nonempty and contain no NUL bytes",
+                ),
+            ));
+        }
+        oem_strings.push(content);
+    }
+    smbios.oem_strings = oem_strings.into_boxed_slice();
+    Ok((!smbios.is_empty()).then_some(smbios))
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum VmState {
@@ -1841,7 +1881,9 @@ impl Vm {
             .unwrap()
             .platform
             .as_ref()
-            .and_then(|p| p.smbios_config());
+            .map(load_smbios_config)
+            .transpose()?
+            .flatten();
 
         let topology = self.cpu_manager.lock().unwrap().get_vcpu_topology();
 
@@ -3639,6 +3681,146 @@ impl GuestDebuggable for Vm {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(all(test, target_arch = "x86_64"))]
+mod smbios_tests {
+    use vmm_sys_util::tempdir::TempDir;
+
+    use super::*;
+
+    #[test]
+    fn oem_string_files_preserve_contents_and_order() {
+        let dir = TempDir::new().unwrap();
+        let first = dir.as_path().join("first");
+        let second = dir.as_path().join("second");
+        let multiline = "io.systemd.credential:bootstrapSecret=secret\n\n© ™\n";
+        fs::write(&first, multiline).unwrap();
+        fs::write(&second, "other secret").unwrap();
+        let config: PlatformConfig = serde_json::from_value(serde_json::json!({
+            "oem_strings": ["inline"],
+            "oem_string_paths": [first, second],
+            "system_manufacturer": "Manufacturer"
+        }))
+        .unwrap();
+        let smbios = load_smbios_config(&config).unwrap().unwrap();
+        assert_eq!(
+            smbios.oem_strings.as_ref(),
+            ["inline", multiline, "other secret"]
+        );
+        assert_eq!(
+            smbios.system.unwrap().manufacturer.as_deref(),
+            Some("Manufacturer")
+        );
+        // Loading must not put file contents into API responses or config logs.
+        assert_eq!(config.oem_strings.as_deref().unwrap(), ["inline"]);
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert!(!serialized.contains("bootstrapSecret"));
+        assert!(!serialized.contains("other secret"));
+    }
+
+    #[test]
+    fn oem_string_files_without_inline_strings() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.as_path().join("oem");
+        fs::write(&path, "file only").unwrap();
+        let config =
+            PlatformConfig::parse(&format!("oem_string_paths=[{}]", path.display())).unwrap();
+        assert_eq!(
+            load_smbios_config(&config)
+                .unwrap()
+                .unwrap()
+                .oem_strings
+                .as_ref(),
+            ["file only"]
+        );
+    }
+
+    #[test]
+    fn oem_string_files_missing_path() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.as_path().join("missing");
+        let config =
+            PlatformConfig::parse(&format!("oem_string_paths=[{}]", path.display())).unwrap();
+        let Error::OemStringFileRead(failed_path, source) =
+            load_smbios_config(&config).unwrap_err()
+        else {
+            panic!("expected OEM file read error");
+        };
+        assert_eq!(failed_path, path.to_str().unwrap());
+        assert_eq!(source.kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn oem_string_files_reject_invalid_contents_without_leaking_them() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.as_path().join("oem");
+        let config =
+            PlatformConfig::parse(&format!("oem_string_paths=[{}]", path.display())).unwrap();
+        for content in [b"".as_slice(), b"secret\0suffix", b"secret\xff"] {
+            fs::write(&path, content).unwrap();
+            let error = load_smbios_config(&config).unwrap_err();
+            assert!(!format!("{error:?}").contains("secret"));
+            let Error::OemStringFileRead(_, source) = error else {
+                panic!("expected OEM file read error");
+            };
+            assert_eq!(source.kind(), io::ErrorKind::InvalidData);
+        }
+    }
+
+    #[test]
+    fn oem_string_files_absent_preserves_existing_behavior() {
+        let config = PlatformConfig::parse("").unwrap();
+        assert_eq!(load_smbios_config(&config).unwrap(), config.smbios_config());
+        let config = PlatformConfig::parse("oem_strings=[inline]").unwrap();
+        assert_eq!(load_smbios_config(&config).unwrap(), config.smbios_config());
+    }
+
+    #[test]
+    fn oem_string_files_empty_list() {
+        let config = PlatformConfig::parse("oem_string_paths=[]").unwrap();
+        assert_eq!(load_smbios_config(&config).unwrap(), None);
+    }
+
+    #[test]
+    fn oem_string_files_directory_read_fails() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.as_path();
+        let config =
+            PlatformConfig::parse(&format!("oem_string_paths=[{}]", path.display())).unwrap();
+        let Error::OemStringFileRead(failed_path, source) =
+            load_smbios_config(&config).unwrap_err()
+        else {
+            panic!("expected OEM file read error");
+        };
+        assert_eq!(failed_path, path.to_str().unwrap());
+        assert_eq!(source.kind(), io::ErrorKind::IsADirectory);
+    }
+
+    #[test]
+    fn oem_string_files_count_limit() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.as_path().join("oem");
+        fs::write(&path, "file string").unwrap();
+        for inline_count in [0, 254, 255] {
+            let mut config = PlatformConfig::parse("").unwrap();
+            config.oem_strings = Some(vec!["inline".to_string(); inline_count].into_boxed_slice());
+            let mut paths = vec![path.to_str().unwrap().to_string(); 255 - inline_count];
+            config.oem_string_paths = Some(paths.clone().into_boxed_slice());
+            assert_eq!(
+                load_smbios_config(&config)
+                    .unwrap()
+                    .unwrap()
+                    .oem_strings
+                    .len(),
+                255
+            );
+            paths.push(path.to_str().unwrap().to_string());
+            config.oem_string_paths = Some(paths.into_boxed_slice());
+            let error = load_smbios_config(&config).unwrap_err();
+            assert_eq!(error.to_string(), "Too many OEM strings: 256 (maximum 255)");
+        }
     }
 }
 

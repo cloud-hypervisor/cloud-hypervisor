@@ -881,7 +881,7 @@ impl PlatformConfig {
             system_product_name=<dmi_system_product_name>,system_version=<dmi_system_version>,\
             system_serial_number=<dmi_system_serial_number>,system_uuid=<dmi_system_uuid>,\
             system_sku_number=<dmi_system_sku_number>,system_family=<dmi_system_family>,\
-            oem_strings=<list_of_strings>,chassis_asset_tag=<dmi_chassis_asset_tag>"
+            oem_strings=<list_of_strings>,oem_string_paths=<list_of_paths>,chassis_asset_tag=<dmi_chassis_asset_tag>"
                 .to_string();
 
             if cfg!(feature = "tdx") {
@@ -949,6 +949,7 @@ impl PlatformConfig {
             .add("serial_number")
             .add("uuid")
             .add("oem_strings")
+            .add("oem_string_paths")
             .add("iommufd")
             .add("iommufd_fd")
             .add("vfio_p2p_dma");
@@ -977,6 +978,17 @@ impl PlatformConfig {
             .convert::<StringList>("oem_strings")
             .map_err(Error::ParsePlatform)?
             .map(|v| v.0.into_boxed_slice());
+        let oem_string_paths = parser
+            .convert::<StringList>("oem_string_paths")
+            .map_err(Error::ParsePlatform)?
+            .map(|v| {
+                // StringList represents [] as one empty string, not an empty list.
+                if v.0 == [""] {
+                    Box::default()
+                } else {
+                    v.0.into_boxed_slice()
+                }
+            });
         let iommufd_fd = parser
             .convert::<i32>("iommufd_fd")
             .map_err(Error::ParsePlatform)?;
@@ -1010,6 +1022,7 @@ impl PlatformConfig {
             system_serial_number: None,
             system_uuid: None,
             oem_strings,
+            oem_string_paths,
             system_manufacturer: None,
             system_product_name: None,
             system_version: None,
@@ -5834,6 +5847,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             system_serial_number: None,
             system_uuid: None,
             oem_strings: None,
+            oem_string_paths: None,
             iommufd: false,
             iommufd_fd: None,
             vfio_p2p_dma: default_platformconfig_vfio_p2p_dma(),
@@ -7303,5 +7317,36 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert!(both.items.as_ref().unwrap().item_list[0].file.is_some());
         assert!(both.items.as_ref().unwrap().item_list[0].string.is_some());
         Ok(())
+    }
+
+    #[test]
+    fn test_platform_oem_string_paths_parsing() -> Result<()> {
+        let config = PlatformConfig::parse("oem_strings=[foo],oem_string_paths=[/path/1,/path/2]")?;
+        assert_eq!(
+            config.oem_strings.as_deref(),
+            Some(["foo".to_string()].as_slice())
+        );
+        assert_eq!(
+            config.oem_string_paths.as_deref(),
+            Some(["/path/1".to_string(), "/path/2".to_string()].as_slice())
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_platform_oem_string_paths_empty_list() {
+        let cli = PlatformConfig::parse("oem_string_paths=[]").unwrap();
+        let api: PlatformConfig = serde_json::from_str(r#"{"oem_string_paths":[]}"#).unwrap();
+        assert_eq!(cli.oem_string_paths, api.oem_string_paths);
+    }
+
+    #[test]
+    fn test_platform_oem_string_paths_option_order() {
+        let inline_first =
+            PlatformConfig::parse("oem_strings=[foo],oem_string_paths=[/path]").unwrap();
+        let paths_first =
+            PlatformConfig::parse("oem_string_paths=[/path],oem_strings=[foo]").unwrap();
+        assert_eq!(inline_first, paths_first);
     }
 }
