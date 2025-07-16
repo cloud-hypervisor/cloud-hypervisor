@@ -68,9 +68,9 @@ fn direct_kernel_boot_path() -> PathBuf {
 
     let mut kernel_path = workload_path;
     #[cfg(target_arch = "x86_64")]
-    kernel_path.push("vmlinux");
+    kernel_path.push("vmlinux-x86_64");
     #[cfg(target_arch = "aarch64")]
-    kernel_path.push("Image");
+    kernel_path.push("Image-arm64");
 
     kernel_path
 }
