@@ -351,7 +351,7 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
 pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     let test_timeout = control.common.test_timeout;
     let num_queues = control.common.num_queues.unwrap();
-    let (fio_ops, bandwidth) = control.fio_control.as_ref().unwrap();
+    let (fio_ops, bandwidth) = control.blk_control.as_ref().unwrap();
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest = performance_test_new_guest(Box::new(focal));
