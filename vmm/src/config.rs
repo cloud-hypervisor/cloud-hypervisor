@@ -683,7 +683,8 @@ impl PlatformConfig {
             .add("iommu_address_width")
             .add("serial_number")
             .add("uuid")
-            .add("oem_strings");
+            .add("oem_strings")
+            .add("oem_string_paths");
         #[cfg(feature = "tdx")]
         parser.add("tdx");
         #[cfg(feature = "sev_snp")]
@@ -710,6 +711,10 @@ impl PlatformConfig {
             .convert::<StringList>("oem_strings")
             .map_err(Error::ParsePlatform)?
             .map(|v| v.0);
+        let oem_string_paths = parser
+            .convert::<StringList>("oem_string_paths")
+            .map_err(Error::ParsePlatform)?
+            .map(|v| v.0);
         #[cfg(feature = "tdx")]
         let tdx = parser
             .convert::<Toggle>("tdx")
@@ -729,6 +734,7 @@ impl PlatformConfig {
             serial_number,
             uuid,
             oem_strings,
+            oem_string_paths,
             #[cfg(feature = "tdx")]
             tdx,
             #[cfg(feature = "sev_snp")]
@@ -3888,6 +3894,7 @@ mod tests {
             serial_number: None,
             uuid: None,
             oem_strings: None,
+            oem_string_paths: None,
             #[cfg(feature = "tdx")]
             tdx: false,
             #[cfg(feature = "sev_snp")]
@@ -4615,6 +4622,28 @@ mod tests {
                 access: "rw".to_string(),
             }
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_platform_config_parsing() -> Result<()> {
+        // Test oem_strings parsing
+        assert_eq!(
+            PlatformConfig::parse("oem_strings=[foo,bar]")?.oem_strings,
+            Some(vec!["foo".to_string(), "bar".to_string()])
+        );
+
+        // Test oem_string_paths parsing
+        assert_eq!(
+            PlatformConfig::parse("oem_string_paths=[/path/1,/path/2]")?.oem_string_paths,
+            Some(vec!["/path/1".to_string(), "/path/2".to_string()])
+        );
+
+        // Test both together
+        let config = PlatformConfig::parse("oem_strings=[foo],oem_string_paths=[/path]")?;
+        assert_eq!(config.oem_strings, Some(vec!["foo".to_string()]));
+        assert_eq!(config.oem_string_paths, Some(vec!["/path".to_string()]));
+
         Ok(())
     }
 }

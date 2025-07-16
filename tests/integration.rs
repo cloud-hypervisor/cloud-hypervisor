@@ -3769,6 +3769,77 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_dmi_oem_string_paths() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        // Create temporary files with OEM strings
+        let temp_dir = TempDir::new().unwrap();
+        let temp_file1_path = temp_dir.as_path().join("oem1.txt");
+        let temp_file2_path = temp_dir.as_path().join("oem2.txt");
+
+        let s1 = "Secret from file 1";
+        let s2 = "io.systemd.credential:bootstrapSecret=multi-line-secret
+
+        and non-ascii chars © ™";
+        let s3 = "String from command line";
+
+        std::fs::write(&temp_file1_path, s1.as_bytes()).unwrap();
+        std::fs::write(&temp_file2_path, s2.as_bytes()).unwrap();
+
+        let oem_string_paths = format!(
+            "oem_strings=[{}],oem_string_paths=[{},{}]",
+            s3,
+            temp_file1_path.display(),
+            temp_file2_path.display()
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--platform", &oem_string_paths])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // Should have 3 OEM strings total
+            assert_eq!(
+                guest
+                    .ssh_command("sudo dmidecode --oem-string count")
+                    .unwrap()
+                    .trim(),
+                "3"
+            );
+
+            // Check that all strings are present (order may vary)
+            let all_strings = [s1, s2, s3];
+            for i in 1..=3 {
+                let oem_string = guest
+                    .ssh_command(&format!("sudo dmidecode --oem-string {i}"))
+                    .unwrap();
+                let oem_string = oem_string.trim();
+                assert!(
+                    all_strings.contains(&oem_string),
+                    "OEM string {i} '{oem_string}' not found in expected strings"
+                );
+            }
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_virtio_fs() {
         _test_virtio_fs(&prepare_virtiofsd, false, None)
     }

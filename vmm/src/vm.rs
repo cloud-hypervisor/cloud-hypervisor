@@ -1345,17 +1345,57 @@ impl Vm {
             .as_ref()
             .and_then(|p| p.uuid.clone());
 
-        let oem_strings = self
+        let mut all_oem_strings = Vec::new();
+
+        if let Some(oem_strings) = self
             .config
             .lock()
             .unwrap()
             .platform
             .as_ref()
-            .and_then(|p| p.oem_strings.clone());
+            .and_then(|p| p.oem_strings.clone())
+        {
+            all_oem_strings.extend(oem_strings);
+        }
 
-        let oem_strings = oem_strings
-            .as_deref()
-            .map(|strings| strings.iter().map(|s| s.as_ref()).collect::<Vec<&str>>());
+        if let Some(oem_string_paths) = self
+            .config
+            .lock()
+            .unwrap()
+            .platform
+            .as_ref()
+            .and_then(|p| p.oem_string_paths.clone())
+        {
+            for path in oem_string_paths {
+                let content = std::fs::read(&path).map_err(|e| {
+                    Error::ConfigureSystem(arch::Error::PlatformSpecific(
+                        arch::x86_64::Error::OemStringFileRead(format!(
+                            "Failed to read OEM string file '{path}': {e}"
+                        )),
+                    ))
+                })?;
+                // Convert the raw bytes to a String (SMBIOS treats OEM strings as UTF-8)
+                let string_content = String::from_utf8(content).map_err(|e| {
+                    Error::ConfigureSystem(arch::Error::PlatformSpecific(
+                        arch::x86_64::Error::OemStringFileRead(format!(
+                            "Invalid UTF-8 in OEM string file '{path}': {e}"
+                        )),
+                    ))
+                })?;
+                all_oem_strings.push(string_content);
+            }
+        }
+
+        let oem_strings = if all_oem_strings.is_empty() {
+            None
+        } else {
+            Some(
+                all_oem_strings
+                    .iter()
+                    .map(|s| s.as_ref())
+                    .collect::<Vec<&str>>(),
+            )
+        };
 
         let topology = self.cpu_manager.lock().unwrap().get_vcpu_topology();
 
