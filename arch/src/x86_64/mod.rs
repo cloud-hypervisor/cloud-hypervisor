@@ -207,6 +207,10 @@ pub enum Error {
     /// Failed to configure E820 map for bzImage
     #[error("Failed to configure E820 map for bzImage")]
     E820Configuration,
+
+    /// Error reading OEM string file
+    #[error("Error reading OEM string file: {0}")]
+    OemStringFileRead(String),
 }
 
 pub fn get_x2apic_id(cpu_id: u32, topology: Option<(u8, u8, u8)>) -> u32 {
