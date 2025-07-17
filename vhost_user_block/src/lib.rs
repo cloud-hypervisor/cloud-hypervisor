@@ -334,8 +334,8 @@ impl VhostUserBackendMut for VhostUserBlkBackend {
     }
 
     fn set_event_idx(&mut self, enabled: bool) {
-        for thread in self.threads.iter() {
-            thread.lock().unwrap().event_idx = enabled;
+        for thread in self.threads.iter_mut() {
+            thread.get_mut().unwrap().event_idx = enabled;
         }
     }
 
@@ -352,7 +352,7 @@ impl VhostUserBackendMut for VhostUserBlkBackend {
 
         debug!("event received: {:?}", device_event);
 
-        let mut thread = self.threads[thread_id].lock().unwrap();
+        let thread = self.threads[thread_id].get_mut().unwrap();
         match device_event {
             0 => {
                 let mut vring = vrings[0].get_mut();
