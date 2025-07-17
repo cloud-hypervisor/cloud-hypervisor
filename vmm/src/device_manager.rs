@@ -53,6 +53,8 @@ use devices::gic;
 use devices::interrupt_controller::InterruptController;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
+#[cfg(feature = "ivshmem")]
+use devices::ivshmem::{IvshmemError, IvshmemOps};
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
 #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
@@ -88,7 +90,7 @@ use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
-use vm_device::{Bus, BusDevice, BusDeviceSync, Resource};
+use vm_device::{Bus, BusDevice, BusDeviceSync, Resource, UserspaceMapping};
 use vm_memory::guest_memory::FileOffset;
 use vm_memory::{Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion};
 #[cfg(target_arch = "x86_64")]
@@ -108,6 +110,8 @@ use crate::interrupt::{LegacyUserspaceInterruptManager, MsiInterruptManager};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager, MEMORY_MANAGER_ACPI_SIZE};
 use crate::pci_segment::PciSegment;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
+#[cfg(feature = "ivshmem")]
+use crate::vm_config::IvshmemConfig;
 use crate::vm_config::{
     ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
     VdpaConfig, VhostMode, VmConfig, VsockConfig, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS,
@@ -133,6 +137,8 @@ const PVMEMCONTROL_DEVICE_NAME: &str = "__pvmemcontrol";
 const BALLOON_DEVICE_NAME: &str = "__balloon";
 const CONSOLE_DEVICE_NAME: &str = "__console";
 const PVPANIC_DEVICE_NAME: &str = "__pvpanic";
+#[cfg(feature = "ivshmem")]
+const IVSHMEM_DEVICE_NAME: &str = "__ivshmem";
 
 // Devices that the user may name and for which we generate
 // identifiers if the user doesn't give one
@@ -625,6 +631,11 @@ pub enum DeviceManagerError {
     #[error("Cannot create a PvPanic device")]
     PvPanicCreate(#[source] devices::pvpanic::PvPanicError),
 
+    #[cfg(feature = "ivshmem")]
+    /// Cannot create a ivshmem device
+    #[error("Cannot create a ivshmem device: {0}")]
+    IvshmemCreate(IvshmemError),
+
     /// Cannot create a RateLimiterGroup
     #[error("Cannot create a RateLimiterGroup")]
     RateLimiterGroupCreate(#[source] rate_limiter::group::Error),
@@ -1070,6 +1081,10 @@ pub struct DeviceManager {
     rate_limit_groups: HashMap<String, Arc<RateLimiterGroup>>,
 
     mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
+
+    #[cfg(feature = "ivshmem")]
+    // ivshmem device
+    ivshmem_device: Option<Arc<Mutex<devices::IvshmemDevice>>>,
 }
 
 fn create_mmio_allocators(
@@ -1334,6 +1349,8 @@ impl DeviceManager {
             snapshot,
             rate_limit_groups,
             mmio_regions: Arc::new(Mutex::new(Vec::new())),
+            #[cfg(feature = "ivshmem")]
+            ivshmem_device: None,
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -1455,6 +1472,11 @@ impl DeviceManager {
 
         if self.config.clone().lock().unwrap().pvpanic {
             self.pvpanic_device = self.add_pvpanic_device()?;
+        }
+
+        #[cfg(feature = "ivshmem")]
+        if let Some(ivshmem) = self.config.clone().lock().unwrap().ivshmem.as_ref() {
+            self.ivshmem_device = self.add_ivshmem_device(ivshmem)?;
         }
 
         Ok(())
@@ -3168,7 +3190,7 @@ impl DeviceManager {
             .create_userspace_mapping(region_base, region_size, host_addr, false, false, false)
             .map_err(DeviceManagerError::MemoryManager)?;
 
-        let mapping = virtio_devices::UserspaceMapping {
+        let mapping = UserspaceMapping {
             host_addr,
             mem_slot,
             addr: GuestAddress(region_base),
@@ -4136,6 +4158,59 @@ impl DeviceManager {
         Ok(Some(pvpanic_device))
     }
 
+    #[cfg(feature = "ivshmem")]
+    fn add_ivshmem_device(
+        &mut self,
+        ivshmem_cfg: &IvshmemConfig,
+    ) -> DeviceManagerResult<Option<Arc<Mutex<devices::IvshmemDevice>>>> {
+        let id = String::from(IVSHMEM_DEVICE_NAME);
+        let pci_segment_id = 0x0_u16;
+        info!("Creating ivshmem device {}", id);
+
+        let (pci_segment_id, pci_device_bdf, resources) =
+            self.pci_resources(&id, pci_segment_id)?;
+        let snapshot = snapshot_from_id(self.snapshot.as_ref(), id.as_str());
+
+        let ivshmem_ops = Arc::new(Mutex::new(IvshmemHandler {
+            backing_file: Some(ivshmem_cfg.path.clone()),
+            memory_manager: self.memory_manager.clone(),
+            region: None,
+            userspace_mapping: None,
+        }));
+        let ivshmem_device = Arc::new(Mutex::new(
+            devices::IvshmemDevice::new(
+                id.clone(),
+                ivshmem_cfg.size as u64,
+                ivshmem_ops.clone(),
+                snapshot,
+            )
+            .map_err(DeviceManagerError::IvshmemCreate)?,
+        ));
+        let new_resources = self.add_pci_device(
+            ivshmem_device.clone(),
+            ivshmem_device.clone(),
+            pci_segment_id,
+            pci_device_bdf,
+            resources,
+        )?;
+
+        let start_addr = ivshmem_device.lock().unwrap().data_bar_addr();
+
+        ivshmem_ops
+            .lock()
+            .unwrap()
+            .map_ram_region(start_addr, ivshmem_cfg.size)
+            .map_err(DeviceManagerError::IvshmemCreate)?;
+
+        let mut node = device_node!(id, ivshmem_device);
+        node.resources = new_resources;
+        node.pci_bdf = Some(pci_device_bdf);
+        node.pci_device_handle = None;
+        self.device_tree.lock().unwrap().insert(id, node);
+
+        Ok(Some(ivshmem_device))
+    }
+
     fn pci_resources(
         &self,
         id: &str,
@@ -4801,6 +4876,78 @@ impl DeviceManager {
     #[cfg(not(target_arch = "riscv64"))]
     pub(crate) fn acpi_platform_addresses(&self) -> &AcpiPlatformAddresses {
         &self.acpi_platform_addresses
+    }
+}
+
+#[cfg(feature = "ivshmem")]
+struct IvshmemHandler {
+    backing_file: Option<PathBuf>,
+
+    memory_manager: Arc<Mutex<MemoryManager>>,
+    userspace_mapping: Option<UserspaceMapping>,
+    region: Option<Arc<GuestRegionMmap>>,
+}
+
+#[cfg(feature = "ivshmem")]
+impl IvshmemOps for IvshmemHandler {
+    fn map_ram_region(&mut self, start_addr: u64, size: usize) -> Result<(), IvshmemError> {
+        info!("Creating ivshmem mem region at 0x{:x}", start_addr);
+        self.unmap_ram_region()?;
+
+        let region = MemoryManager::create_ram_region(
+            &self.backing_file,
+            0,
+            GuestAddress(start_addr),
+            size,
+            false,
+            true,
+            false,
+            None,
+            None,
+            None,
+            false,
+        )
+        .map_err(|_| IvshmemError::CreateUserMemoryRegion)?;
+        let mem_slot = self
+            .memory_manager
+            .lock()
+            .unwrap()
+            .create_userspace_mapping(
+                region.start_addr().0,
+                region.len(),
+                region.as_ptr() as u64,
+                false,
+                false,
+                false,
+            )
+            .map_err(|_| IvshmemError::CreateUserspaceMapping)?;
+        self.userspace_mapping = Some(UserspaceMapping {
+            host_addr: region.as_ptr() as u64,
+            mem_slot,
+            addr: GuestAddress(region.start_addr().0),
+            len: region.len(),
+            mergeable: false,
+        });
+        self.region = Some(region);
+        Ok(())
+    }
+
+    fn unmap_ram_region(&mut self) -> Result<(), IvshmemError> {
+        if let Some(mapping) = self.userspace_mapping.as_ref() {
+            self.memory_manager
+                .lock()
+                .unwrap()
+                .remove_userspace_mapping(
+                    mapping.addr.raw_value(),
+                    mapping.len,
+                    mapping.host_addr,
+                    mapping.mergeable,
+                    mapping.mem_slot,
+                )
+                .map_err(|_| IvshmemError::RemoveUserspaceMapping)?;
+        }
+        self.region = None;
+        Ok(())
     }
 }
 
