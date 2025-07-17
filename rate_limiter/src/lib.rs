@@ -486,7 +486,7 @@ impl RateLimiter {
     /// Updates the parameters of the token buckets associated with this RateLimiter.
     // TODO: Please note that, right now, the buckets become full after being updated.
     pub fn update_buckets(&mut self, bytes: BucketUpdate, ops: BucketUpdate) {
-        let mut guard = self.inner.lock().unwrap();
+        let guard = self.inner.get_mut().unwrap();
         match bytes {
             BucketUpdate::Disabled => guard.bandwidth = None,
             BucketUpdate::Update(tb) => guard.bandwidth = Some(tb),
