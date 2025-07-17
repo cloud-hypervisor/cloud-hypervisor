@@ -111,6 +111,8 @@ pub enum ImageFormat {
     #[default]
     Raw,
     Qcow2,
+    Vhd,
+    Vhdx,
 }
 
 impl std::str::FromStr for ImageFormat {
@@ -120,6 +122,8 @@ impl std::str::FromStr for ImageFormat {
         match s {
             "raw" => Ok(ImageFormat::Raw),
             "qcow2" => Ok(ImageFormat::Qcow2),
+            "vhd" => Ok(ImageFormat::Vhd),
+            "vhdx" => Ok(ImageFormat::Vhdx),
             _ => Err(()),
         }
     }
@@ -130,6 +134,8 @@ impl fmt::Display for ImageFormat {
         match self {
             ImageFormat::Raw => write!(f, "raw"),
             ImageFormat::Qcow2 => write!(f, "qcow2"),
+            ImageFormat::Vhd => write!(f, "vhd"),
+            ImageFormat::Vhdx => write!(f, "vhdx"),
         }
     }
 }
@@ -837,7 +843,7 @@ fn main() {
             Arg::new("image-format")
                 .long("image-format")
                 .help(
-                    "Override the image format used for block tests, supported values: qcow2, raw. \
+                    "Override the image format used for block tests, supported values: qcow2, raw, vhd, vhdx. \
                      Default is 'raw'.",
                 )
                 .num_args(1),

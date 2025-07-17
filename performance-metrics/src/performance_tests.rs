@@ -38,8 +38,18 @@ pub fn init_tests(overrides: &PerformanceTestOverrides) {
     let mut cmd = format!("dd if=/dev/zero of={BLK_IO_TEST_IMG} bs=1M count=4096");
 
     if let Some(o) = overrides.test_image_format {
-        if matches!(o, ImageFormat::Qcow2) {
-            cmd = format!("qemu-img create -f qcow2 -o preallocation=full {BLK_IO_TEST_IMG} 4G");
+        match o {
+            ImageFormat::Raw => { /* Nothing to do */ }
+            ImageFormat::Qcow2 => {
+                cmd =
+                    format!("qemu-img create -f qcow2 -o preallocation=full {BLK_IO_TEST_IMG} 4G");
+            }
+            ImageFormat::Vhd => {
+                cmd = format!("qemu-img create -f vpc -o subformat=fixed {BLK_IO_TEST_IMG} 4G");
+            }
+            ImageFormat::Vhdx => {
+                cmd = format!("qemu-img create -f vhdx -o subformat=fixed {BLK_IO_TEST_IMG} 4G");
+            }
         }
     }
 
