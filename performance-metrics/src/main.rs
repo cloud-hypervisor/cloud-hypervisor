@@ -106,10 +106,39 @@ impl Default for MetricsReport {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+pub enum ImageFormat {
+    #[default]
+    Raw,
+    Qcow2,
+}
+
+impl std::str::FromStr for ImageFormat {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "raw" => Ok(ImageFormat::Raw),
+            "qcow2" => Ok(ImageFormat::Qcow2),
+            _ => Err(()),
+        }
+    }
+}
+
+impl fmt::Display for ImageFormat {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ImageFormat::Raw => write!(f, "raw"),
+            ImageFormat::Qcow2 => write!(f, "qcow2"),
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct PerformanceTestOverrides {
     test_iterations: Option<u32>,
     test_timeout: Option<u32>,
+    test_image_format: Option<ImageFormat>,
 }
 
 impl fmt::Display for PerformanceTestOverrides {
@@ -119,6 +148,10 @@ impl fmt::Display for PerformanceTestOverrides {
         }
         if let Some(test_timeout) = self.test_timeout {
             write!(f, "test_timeout = {test_timeout}")?;
+        }
+
+        if let Some(test_image_format) = self.test_image_format {
+            write!(f, "test_image_format = {test_image_format}")?;
         }
 
         Ok(())
@@ -800,6 +833,15 @@ fn main() {
                 .help("Override test timeout, Ex. --timeout 5")
                 .num_args(1),
         )
+        .arg(
+            Arg::new("image-format")
+                .long("image-format")
+                .help(
+                    "Override the image format used for block tests, supported values: qcow2, raw. \
+                     Default is 'raw'.",
+                )
+                .num_args(1),
+        )
         .get_matches();
 
     // It seems that the tool (ethr) used for testing the virtio-net latency
@@ -837,9 +879,14 @@ fn main() {
             .map(|s| s.parse())
             .transpose()
             .unwrap_or_default(),
+        test_image_format: cmd_arguments
+            .get_one::<String>("image-format")
+            .map(|s| s.parse())
+            .transpose()
+            .unwrap_or_default(),
     });
 
-    init_tests();
+    init_tests(&overrides);
 
     for test in test_list.iter() {
         if test_filter.is_empty() || test_filter.iter().any(|&s| test.name.contains(s)) {
