@@ -205,7 +205,7 @@ impl VhostUserBackendMut for VhostUserNetBackend {
         vrings: &[VringRwLock<GuestMemoryAtomic<GuestMemoryMmap>>],
         thread_id: usize,
     ) -> VhostUserBackendResult<()> {
-        let mut thread = self.threads[thread_id].lock().unwrap();
+        let thread = self.threads[thread_id].get_mut().unwrap();
         match device_event {
             0 => {
                 if !thread.net.rx_tap_listening {
