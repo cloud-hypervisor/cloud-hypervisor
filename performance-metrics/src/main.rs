@@ -712,8 +712,6 @@ fn main() {
     // Run performance tests sequentially and report results (in both readable/json format)
     let mut metrics_report: MetricsReport = Default::default();
 
-    init_tests();
-
     let overrides = Arc::new(PerformanceTestOverrides {
         test_iterations: cmd_arguments
             .get_one::<String>("iterations")
@@ -726,6 +724,8 @@ fn main() {
             .transpose()
             .unwrap_or_default(),
     });
+
+    init_tests();
 
     for test in test_list.iter() {
         if test_filter.is_empty() || test_filter.iter().any(|&s| test.name.contains(s)) {
