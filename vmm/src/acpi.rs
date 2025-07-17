@@ -16,6 +16,8 @@ use arch::aarch64::DeviceInfoForFdt;
 use arch::DeviceType;
 use arch::NumaNodes;
 use bitflags::bitflags;
+#[cfg(feature = "fw_cfg")]
+use devices::legacy::fw_cfg::AcpiTable;
 use pci::PciBdf;
 use tracer::trace_scoped;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryRegion};
@@ -192,6 +194,8 @@ pub fn create_dsdt_table(
     dsdt
 }
 
+pub const FACP_DSDT_OFFSET: usize = 140;
+
 fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Arc<Mutex<DeviceManager>>) -> Sdt {
     trace_scoped!("create_facp_table");
 
@@ -241,7 +245,7 @@ fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Arc<Mutex<Devic
     // FADT minor version
     facp.write(131, 3u8);
     // X_DSDT
-    facp.write(140, dsdt_offset.0);
+    facp.write(FACP_DSDT_OFFSET, dsdt_offset.0);
     // Hypervisor Vendor Identity
     facp.write_bytes(268, b"CLOUDHYP");
 
@@ -633,6 +637,7 @@ pub fn create_acpi_tables(
     memory_manager: &Arc<Mutex<MemoryManager>>,
     numa_nodes: &NumaNodes,
     tpm_enabled: bool,
+    #[cfg(feature = "fw_cfg")] add_to_fw_cfg: bool,
 ) -> GuestAddress {
     trace_scoped!("create_acpi_tables");
 
@@ -640,20 +645,47 @@ pub fn create_acpi_tables(
     let rsdp_offset = arch::layout::RSDP_POINTER;
     let mut tables: Vec<u64> = Vec::new();
 
+    // To create AcpiTable
+    #[cfg(feature = "fw_cfg")]
+    let mut table_bytes: Vec<u8> = vec![];
+    #[cfg(feature = "fw_cfg")]
+    let mut pointers: Vec<usize> = vec![];
+    #[cfg(feature = "fw_cfg")]
+    let mut checksums: Vec<(usize, usize)> = vec![];
+
     // DSDT
     let dsdt = create_dsdt_table(device_manager, cpu_manager, memory_manager);
     let dsdt_offset = rsdp_offset.checked_add(Rsdp::len() as u64).unwrap();
+    // table is not offset for fw_cfg since fw will place acpi tables in memory
+    #[cfg(feature = "fw_cfg")]
+    let fw_cfg_dsdt_offset = dsdt_offset;
     guest_mem
         .write_slice(dsdt.as_slice(), dsdt_offset)
         .expect("Error writing DSDT table");
+    #[cfg(feature = "fw_cfg")]
+    if add_to_fw_cfg {
+        table_bytes.extend_from_slice(dsdt.as_slice());
+    }
 
     // FACP aka FADT
-    let facp = create_facp_table(dsdt_offset, device_manager);
+    #[allow(unused_mut)]
+    let mut facp = create_facp_table(dsdt_offset, device_manager);
     let facp_offset = dsdt_offset.checked_add(dsdt.len() as u64).unwrap();
     guest_mem
         .write_slice(facp.as_slice(), facp_offset)
         .expect("Error writing FACP table");
     tables.push(facp_offset.0);
+    #[cfg(feature = "fw_cfg")]
+    if add_to_fw_cfg {
+        let fw_cfg_facp_offset = facp_offset.checked_sub(fw_cfg_dsdt_offset.0).unwrap();
+        // DSDT is first table in table_bytes
+        facp.write(FACP_DSDT_OFFSET, 0);
+        facp.update_checksum();
+        let pointer_facp_to_dsdt = fw_cfg_facp_offset.0 as usize + FACP_DSDT_OFFSET;
+        pointers.push(pointer_facp_to_dsdt);
+        table_bytes.extend_from_slice(facp.as_slice());
+        checksums.push((fw_cfg_facp_offset.0 as usize, facp.len()));
+    }
 
     // MADT
     let madt = cpu_manager.lock().unwrap().create_madt();
@@ -664,6 +696,10 @@ pub fn create_acpi_tables(
     tables.push(madt_offset.0);
     let mut prev_tbl_len = madt.len() as u64;
     let mut prev_tbl_off = madt_offset;
+    #[cfg(feature = "fw_cfg")]
+    if add_to_fw_cfg {
+        table_bytes.extend_from_slice(madt.as_slice());
+    }
 
     // PPTT
     #[cfg(target_arch = "aarch64")]
@@ -676,6 +712,10 @@ pub fn create_acpi_tables(
         tables.push(pptt_offset.0);
         prev_tbl_len = pptt.len() as u64;
         prev_tbl_off = pptt_offset;
+        #[cfg(feature = "fw_cfg")]
+        if add_to_fw_cfg {
+            table_bytes.extend_from_slice(pptt.as_slice());
+        }
     }
 
     // GTDT
@@ -689,6 +729,10 @@ pub fn create_acpi_tables(
         tables.push(gtdt_offset.0);
         prev_tbl_len = gtdt.len() as u64;
         prev_tbl_off = gtdt_offset;
+        #[cfg(feature = "fw_cfg")]
+        if add_to_fw_cfg {
+            table_bytes.extend_from_slice(gtdt.as_slice());
+        }
     }
 
     // MCFG
@@ -700,6 +744,10 @@ pub fn create_acpi_tables(
     tables.push(mcfg_offset.0);
     prev_tbl_len = mcfg.len() as u64;
     prev_tbl_off = mcfg_offset;
+    #[cfg(feature = "fw_cfg")]
+    if add_to_fw_cfg {
+        table_bytes.extend_from_slice(mcfg.as_slice());
+    }
 
     // SPCR and DBG2
     #[cfg(target_arch = "aarch64")]
@@ -734,6 +782,10 @@ pub fn create_acpi_tables(
         tables.push(spcr_offset.0);
         prev_tbl_len = spcr.len() as u64;
         prev_tbl_off = spcr_offset;
+        #[cfg(feature = "fw_cfg")]
+        if add_to_fw_cfg {
+            table_bytes.extend_from_slice(spcr.as_slice());
+        }
 
         // DBG2
         let dbg2 = create_dbg2_table(serial_device_addr);
@@ -744,6 +796,10 @@ pub fn create_acpi_tables(
         tables.push(dbg2_offset.0);
         prev_tbl_len = dbg2.len() as u64;
         prev_tbl_off = dbg2_offset;
+        #[cfg(feature = "fw_cfg")]
+        if add_to_fw_cfg {
+            table_bytes.extend_from_slice(dbg2.as_slice());
+        }
     }
 
     if tpm_enabled {
@@ -757,6 +813,10 @@ pub fn create_acpi_tables(
 
         prev_tbl_len = tpm2.len() as u64;
         prev_tbl_off = tpm2_offset;
+        #[cfg(feature = "fw_cfg")]
+        if add_to_fw_cfg {
+            table_bytes.extend_from_slice(tpm2.as_slice());
+        }
     }
     // SRAT and SLIT
     // Only created if the NUMA nodes list is not empty.
@@ -774,6 +834,10 @@ pub fn create_acpi_tables(
             .write_slice(srat.as_slice(), srat_offset)
             .expect("Error writing SRAT table");
         tables.push(srat_offset.0);
+        #[cfg(feature = "fw_cfg")]
+        if add_to_fw_cfg {
+            table_bytes.extend_from_slice(srat.as_slice());
+        }
 
         // SLIT
         let slit = create_slit_table(numa_nodes);
@@ -785,6 +849,10 @@ pub fn create_acpi_tables(
 
         prev_tbl_len = slit.len() as u64;
         prev_tbl_off = slit_offset;
+        #[cfg(feature = "fw_cfg")]
+        if add_to_fw_cfg {
+            table_bytes.extend_from_slice(slit.as_slice());
+        }
     };
 
     #[cfg(target_arch = "aarch64")]
@@ -797,6 +865,10 @@ pub fn create_acpi_tables(
         tables.push(iort_offset.0);
         prev_tbl_len = iort.len() as u64;
         prev_tbl_off = iort_offset;
+        #[cfg(feature = "fw_cfg")]
+        if add_to_fw_cfg {
+            table_bytes.extend_from_slice(iort.as_slice());
+        }
     }
 
     // VIOT
@@ -811,24 +883,62 @@ pub fn create_acpi_tables(
         tables.push(viot_offset.0);
         prev_tbl_len = viot.len() as u64;
         prev_tbl_off = viot_offset;
+        #[cfg(feature = "fw_cfg")]
+        if add_to_fw_cfg {
+            table_bytes.extend_from_slice(viot.as_slice());
+        }
     }
 
     // XSDT
     let mut xsdt = Sdt::new(*b"XSDT", 36, 1, *b"CLOUDH", *b"CHXSDT  ", 1);
-    for table in tables {
-        xsdt.append(table);
+    for table in &tables {
+        xsdt.append(*table);
     }
     xsdt.update_checksum();
     let xsdt_offset = prev_tbl_off.checked_add(prev_tbl_len).unwrap();
+    #[cfg(feature = "fw_cfg")]
+    let fw_cfg_xsdt_offset = xsdt_offset.checked_sub(fw_cfg_dsdt_offset.0).unwrap();
     guest_mem
         .write_slice(xsdt.as_slice(), xsdt_offset)
         .expect("Error writing XSDT table");
+    #[cfg(feature = "fw_cfg")]
+    if add_to_fw_cfg {
+        let mut fw_cfg_xsdt = Sdt::new(*b"XSDT", 36, 1, *b"CLOUDH", *b"CHXSDT  ", 1);
+        for table_pointer in tables {
+            let offset_pointer = table_pointer - fw_cfg_dsdt_offset.0;
+            pointers.push(fw_cfg_xsdt_offset.0 as usize + fw_cfg_xsdt.len());
+            fw_cfg_xsdt.append(offset_pointer);
+        }
+        checksums.push((fw_cfg_xsdt_offset.0 as usize, fw_cfg_xsdt.len()));
+        table_bytes.extend_from_slice(fw_cfg_xsdt.as_slice());
+    }
 
     // RSDP
     let rsdp = Rsdp::new(*b"CLOUDH", xsdt_offset.0);
     guest_mem
         .write_slice(rsdp.as_bytes(), rsdp_offset)
         .expect("Error writing RSDP");
+
+    #[cfg(feature = "fw_cfg")]
+    if add_to_fw_cfg {
+        // RSDP
+        let fw_cfg_rsdp = Rsdp::new(*b"CLOUDH", fw_cfg_xsdt_offset.0);
+
+        let acpi = AcpiTable {
+            rsdp: fw_cfg_rsdp,
+            tables: table_bytes,
+            table_checksums: checksums,
+            table_pointers: pointers,
+        };
+        let _ = device_manager
+            .lock()
+            .unwrap()
+            .fw_cfg()
+            .expect("fw_cfg must be present")
+            .lock()
+            .unwrap()
+            .add_acpi(acpi);
+    }
 
     info!(
         "Generated ACPI tables: took {}µs size = {}",
