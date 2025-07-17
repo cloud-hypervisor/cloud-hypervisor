@@ -12,7 +12,7 @@ use std::{fs, thread};
 use test_infra::{Error as InfraError, *};
 use thiserror::Error;
 
-use crate::{mean, PerformanceTestControl};
+use crate::{mean, ImageFormat, PerformanceTestControl, PerformanceTestOverrides};
 
 #[cfg(target_arch = "x86_64")]
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
@@ -30,16 +30,30 @@ enum Error {
     RestoreTimeParse,
 }
 
+// The test image cannot be created on tmpfs (e.g. /tmp) filesystem,
+// as tmpfs does not support O_DIRECT
 const BLK_IO_TEST_IMG: &str = "/var/tmp/ch-blk-io-test.img";
 
-pub fn init_tests() {
-    // The test image cannot be created on tmpfs (e.g. /tmp) filesystem,
-    // as tmpfs does not support O_DIRECT
-    assert!(exec_host_command_output(&format!(
-        "dd if=/dev/zero of={BLK_IO_TEST_IMG} bs=1M count=4096"
-    ))
-    .status
-    .success());
+pub fn init_tests(overrides: &PerformanceTestOverrides) {
+    let mut cmd = format!("dd if=/dev/zero of={BLK_IO_TEST_IMG} bs=1M count=4096");
+
+    if let Some(o) = overrides.test_image_format {
+        match o {
+            ImageFormat::Raw => { /* Nothing to do */ }
+            ImageFormat::Qcow2 => {
+                cmd =
+                    format!("qemu-img create -f qcow2 -o preallocation=full {BLK_IO_TEST_IMG} 4G");
+            }
+            ImageFormat::Vhd => {
+                cmd = format!("qemu-img create -f vpc -o subformat=fixed {BLK_IO_TEST_IMG} 4G");
+            }
+            ImageFormat::Vhdx => {
+                cmd = format!("qemu-img create -f vhdx -o subformat=fixed {BLK_IO_TEST_IMG} 4G");
+            }
+        }
+    }
+
+    assert!(exec_host_command_output(&cmd).status.success());
 }
 
 pub fn cleanup_tests() {
@@ -96,14 +110,14 @@ fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
 }
 
 pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
-    let test_timeout = control.test_timeout;
-    let (rx, bandwidth) = control.net_control.unwrap();
+    let test_timeout = control.common.test_timeout;
+    let (rx, bandwidth) = control.test_control.as_ref().unwrap().net().unwrap();
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest = performance_test_new_guest(Box::new(focal));
 
-    let num_queues = control.num_queues.unwrap();
-    let queue_size = control.queue_size.unwrap();
+    let num_queues = control.common.num_queues.unwrap();
+    let queue_size = control.common.queue_size.unwrap();
     let net_params = format!(
         "tap=,mac={},ip={},mask=255.255.255.0,num_queues={},queue_size={}",
         guest.network.guest_mac, guest.network.host_ip, num_queues, queue_size,
@@ -143,8 +157,8 @@ pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest = performance_test_new_guest(Box::new(focal));
 
-    let num_queues = control.num_queues.unwrap();
-    let queue_size = control.queue_size.unwrap();
+    let num_queues = control.common.num_queues.unwrap();
+    let queue_size = control.common.queue_size.unwrap();
     let net_params = format!(
         "tap=,mac={},ip={},mask=255.255.255.0,num_queues={},queue_size={}",
         guest.network.guest_mac, guest.network.host_ip, num_queues, queue_size,
@@ -167,7 +181,7 @@ pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
         guest.wait_vm_boot(None).unwrap();
 
         // 'ethr' tool will measure the latency multiple times with provided test time
-        let latency = measure_virtio_net_latency(&guest, control.test_timeout).unwrap();
+        let latency = measure_virtio_net_latency(&guest, control.common.test_timeout).unwrap();
         mean(&latency).unwrap()
     });
 
@@ -295,7 +309,7 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
         let c = cmd
             .args([
                 "--cpus",
-                &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
+                &format!("boot={}", control.common.num_boot_vcpus.unwrap_or(1)),
             ])
             .args(["--memory", "size=1G"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
@@ -303,7 +317,7 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
             .args(["--console", "off"])
             .default_disks();
 
-        measure_boot_time(c, control.test_timeout).unwrap()
+        measure_boot_time(c, control.common.test_timeout).unwrap()
     });
 
     match r {
@@ -322,7 +336,7 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
         let c = cmd
             .args([
                 "--cpus",
-                &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
+                &format!("boot={}", control.common.num_boot_vcpus.unwrap_or(1)),
             ])
             .args(["--memory", "size=1G,hugepages=on"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
@@ -337,7 +351,7 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
                 .as_str(),
             ]);
 
-        measure_boot_time(c, control.test_timeout).unwrap()
+        measure_boot_time(c, control.common.test_timeout).unwrap()
     });
 
     match r {
@@ -349,9 +363,9 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
 }
 
 pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
-    let test_timeout = control.test_timeout;
-    let num_queues = control.num_queues.unwrap();
-    let (fio_ops, bandwidth) = control.fio_control.as_ref().unwrap();
+    let test_timeout = control.common.test_timeout;
+    let num_queues = control.common.num_queues.unwrap();
+    let (fio_ops, bandwidth) = control.test_control.as_ref().unwrap().blk().unwrap();
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest = performance_test_new_guest(Box::new(focal));
@@ -404,10 +418,10 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
             .unwrap();
 
         // Parse fio output
-        if *bandwidth {
-            parse_fio_output(&output, fio_ops, num_queues).unwrap()
+        if bandwidth {
+            parse_fio_output(&output, &fio_ops, num_queues).unwrap()
         } else {
-            parse_fio_output_iops(&output, fio_ops, num_queues).unwrap()
+            parse_fio_output_iops(&output, &fio_ops, num_queues).unwrap()
         }
     });
 
@@ -494,7 +508,7 @@ pub fn performance_restore_latency(control: &PerformanceTestControl) -> f64 {
             .args(["--api-socket", &api_socket_source])
             .args([
                 "--cpus",
-                &format!("boot={}", control.num_boot_vcpus.unwrap_or(1)),
+                &format!("boot={}", control.common.num_boot_vcpus.unwrap_or(1)),
             ])
             .args(["--memory", "size=256M"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
@@ -505,7 +519,7 @@ pub fn performance_restore_latency(control: &PerformanceTestControl) -> f64 {
             .spawn()
             .unwrap();
 
-        thread::sleep(Duration::new((control.test_timeout / 2) as u64, 0));
+        thread::sleep(Duration::new((control.common.test_timeout / 2) as u64, 0));
         let snapshot_dir = String::from(guest.tmp_dir.as_path().join("snapshot").to_str().unwrap());
         std::fs::create_dir(&snapshot_dir).unwrap();
         assert!(remote_command(&api_socket_source, "pause", None));
@@ -527,7 +541,7 @@ pub fn performance_restore_latency(control: &PerformanceTestControl) -> f64 {
             ])
             .args(["--event-monitor", format!("path={event_path}").as_str()]);
 
-        measure_restore_time(c, event_path.as_str(), control.test_timeout).unwrap()
+        measure_restore_time(c, event_path.as_str(), control.common.test_timeout).unwrap()
     });
 
     match r {
