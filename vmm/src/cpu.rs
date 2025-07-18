@@ -17,8 +17,9 @@ use std::io::Write;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::mem::size_of;
 use std::os::unix::thread::JoinHandleExt;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Barrier, Mutex, mpsc};
+use std::sync::mpsc::{Sender, Receiver};
 use std::{cmp, io, result, thread};
 
 #[cfg(not(target_arch = "riscv64"))]
@@ -342,6 +343,8 @@ pub struct Vcpu {
     saved_state: Option<CpuState>,
     #[cfg(target_arch = "x86_64")]
     vendor: CpuVendor,
+    #[cfg(target_arch = "aarch64")]
+    receiver: Receiver<PowerCtl>,
 }
 
 impl Vcpu {
@@ -359,6 +362,7 @@ impl Vcpu {
         vm: &Arc<dyn hypervisor::Vm>,
         vm_ops: Option<Arc<dyn VmOps>>,
         #[cfg(target_arch = "x86_64")] cpu_vendor: CpuVendor,
+        receiver: Receiver<PowerCtl>,
     ) -> Result<Self> {
         let vcpu = vm
             .create_vcpu(apic_id, vm_ops)
@@ -372,6 +376,8 @@ impl Vcpu {
             saved_state: None,
             #[cfg(target_arch = "x86_64")]
             vendor: cpu_vendor,
+            #[cfg(target_arch = "aarch64")]
+            receiver,
         })
     }
 
@@ -535,6 +541,7 @@ pub struct CpuManager {
     affinity: BTreeMap<u32, Vec<usize>>,
     dynamic: bool,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
+    vcpu_senders: Vec<Sender<PowerCtl>>,
     #[cfg(feature = "sev_snp")]
     sev_snp_enabled: bool,
 }
@@ -709,6 +716,7 @@ impl CpuManager {
         let max_vcpus = usize::try_from(config.max_vcpus).unwrap();
         let mut vcpu_states = Vec::with_capacity(max_vcpus);
         vcpu_states.resize_with(max_vcpus, VcpuState::default);
+        let vcpu_senders = Vec::with_capacity(max_vcpus);
         let hypervisor_type = hypervisor.hypervisor_type();
         #[cfg(target_arch = "x86_64")]
         let cpu_vendor = hypervisor.get_cpu_vendor();
@@ -796,6 +804,7 @@ impl CpuManager {
             affinity,
             dynamic,
             hypervisor: hypervisor.clone(),
+            vcpu_senders,
             #[cfg(feature = "sev_snp")]
             sev_snp_enabled,
         })))
@@ -835,6 +844,8 @@ impl CpuManager {
         #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         let x2apic_id = cpu_id;
 
+        let (sender, receiver) = mpsc::channel::<PowerCtl>();
+        self.vcpu_senders.push(sender);
         let mut vcpu = Vcpu::new(
             cpu_id,
             x2apic_id,
@@ -842,6 +853,7 @@ impl CpuManager {
             Some(self.vm_ops.clone()),
             #[cfg(target_arch = "x86_64")]
             self.hypervisor.get_cpu_vendor(),
+            receiver,
         )?;
 
         if let Some(snapshot) = snapshot {
