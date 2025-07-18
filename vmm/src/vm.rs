@@ -1113,6 +1113,11 @@ impl Vm {
             }
         }
 
+        #[cfg(target_arch = "aarch64")]
+        {
+            vm.setup_psci_call_forward().unwrap();
+        }
+
         #[cfg(target_arch = "x86_64")]
         {
             vm.set_identity_map_address(KVM_IDENTITY_MAP_START.0)
