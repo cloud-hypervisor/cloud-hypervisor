@@ -257,6 +257,11 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to initialize VM")]
     InitializeVm(#[source] anyhow::Error),
+    #[cfg(target_arch = "aarch64")]
+    /// Failed to setup smccc filter
+    ///
+    #[error("Failed to set up smccc filter: {0}")]
+    SetupSmcccFilter(#[source] anyhow::Error),
 }
 ///
 /// Result type for returning from a function
@@ -321,6 +326,9 @@ pub trait Vm: Send + Sync + Any {
     fn create_vgic(&self, config: VgicConfig) -> Result<Arc<Mutex<dyn Vgic>>>;
     #[cfg(target_arch = "riscv64")]
     fn create_vaia(&self, config: VaiaConfig) -> Result<Arc<Mutex<dyn Vaia>>>;
+    /// setup smccc filter for psci
+    #[cfg(target_arch = "aarch64")]
+    fn setup_psci_call_forward(&self) -> Result<()>;
 
     /// Registers an event to be signaled whenever a certain address is written to.
     fn register_ioevent(

@@ -788,7 +788,7 @@ impl CpuManager {
             selected_cpu: 0,
             vcpus: Vec::with_capacity(max_vcpus),
             #[cfg(target_arch = "aarch64")]
-            parked_vcpus: Vec::with_capacity(usize::from(config.max_vcpus)),
+            parked_vcpus: Vec::with_capacity(usize::try_from(config.max_vcpus).unwrap()),
             seccomp_action,
             vm_ops,
             acpi_address: None,

@@ -344,6 +344,8 @@ pub enum VmExit {
     Reset,
     Shutdown,
     Hyperv,
+    #[cfg(target_arch = "aarch64")]
+    Hypercall,
     #[cfg(feature = "tdx")]
     Tdx,
     #[cfg(feature = "kvm")]

@@ -98,6 +98,7 @@ use kvm_bindings::{
     KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRN_MASK, KVM_REG_ARM64_SYSREG_OP0_MASK,
     KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_ARM_CORE,
     KVM_REG_SIZE_U128, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
+    PSCI_0_2_FN64_BASE, PSCI_0_2_FN_BASE,
 };
 #[cfg(target_arch = "riscv64")]
 use kvm_bindings::{kvm_riscv_core, KVM_REG_RISCV_CORE};
@@ -118,6 +119,17 @@ use crate::arch::aarch64::regs;
 use crate::RegList;
 #[cfg(target_arch = "x86_64")]
 ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
+
+#[cfg(target_arch = "aarch64")]
+pub const PSCI_0_2_FN64_CPU_ON: u32 = PSCI_0_2_FN64_BASE + 3;
+#[cfg(target_arch = "aarch64")]
+pub const PSCI_0_2_FN_CPU_OFF: u32 = PSCI_0_2_FN_BASE + 2;
+#[cfg(target_arch = "aarch64")]
+pub const KVM_SMCCC_FILTER_HANDLE: u8 = 0;
+#[cfg(target_arch = "aarch64")]
+pub const KVM_SMCCC_FILTER_DENY: u8 = 1;
+#[cfg(target_arch = "aarch64")]
+pub const KVM_SMCCC_FILTER_FWD_TO_USER: u8 = 2;
 
 #[cfg(feature = "tdx")]
 const KVM_EXIT_TDX: u32 = 50;
@@ -529,6 +541,28 @@ impl KvmVm {
     #[cfg(not(target_arch = "x86_64"))]
     fn translate_msi_ext_dest_id(address_lo: u32, address_hi: u32) -> (u32, u32) {
         (address_lo, address_hi)
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn setup_smccc_filter(&self, function: u32, faction: u8) -> vm::Result<()> {
+        let smccc_filter = kvm_bindings::kvm_smccc_filter {
+            base: function,
+            nr_functions: 1,
+            action: faction,
+            pad: [0u8; 15],
+        };
+        let smccc_filter_attr = kvm_bindings::kvm_device_attr {
+            group: 0, // KVM_ARM_VM_SMCCC_CTRL
+            attr: 0, // KVM_ARM_VM_SMCCC_FILTER
+            addr: &smccc_filter as *const _ as u64,
+            flags: 0,
+        };
+        self.fd
+            .set_device_attr(&smccc_filter_attr)
+            .map_err(|e| {
+                vm::HypervisorVmError::SetupSmcccFilter(e.into())
+            })?;
+        Ok(())
     }
 }
 
@@ -1062,6 +1096,13 @@ impl vm::Vm for KvmVm {
     /// Downcast to the underlying KvmVm type
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    fn setup_psci_call_forward(&self) -> vm::Result<()> {
+        self.setup_smccc_filter(PSCI_0_2_FN64_CPU_ON, KVM_SMCCC_FILTER_FWD_TO_USER).unwrap();
+        self.setup_smccc_filter(PSCI_0_2_FN_CPU_OFF, KVM_SMCCC_FILTER_FWD_TO_USER).unwrap();
+        Ok(())
     }
 }
 
@@ -2096,6 +2137,8 @@ impl cpu::Vcpu for KvmVcpu {
                     Ok(cpu::VmExit::Ignore)
                 }
                 VcpuExit::Hyperv => Ok(cpu::VmExit::Hyperv),
+                #[cfg(target_arch = "aarch64")]
+                VcpuExit::Hypercall(_) => Ok(cpu::VmExit::Hypercall),
                 #[cfg(feature = "tdx")]
                 VcpuExit::Unsupported(KVM_EXIT_TDX) => Ok(cpu::VmExit::Tdx),
                 VcpuExit::Debug(_) => Ok(cpu::VmExit::Debug),
