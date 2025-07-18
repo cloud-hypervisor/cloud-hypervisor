@@ -339,13 +339,17 @@ pub fn load_igvm(
 
                     let entries = cpu_manager.lock().unwrap().common_cpuid();
                     // TODO: Filter cpuid rather than truncate
-                    for i in 0..std::cmp::min(SNP_CPUID_LIMIT as usize, entries.len()) {
-                        new_cp.entries[i].eax_in = entries[i].function;
-                        new_cp.entries[i].ecx_in = entries[i].index;
-                        new_cp.entries[i].eax = entries[i].eax;
-                        new_cp.entries[i].ebx = entries[i].ebx;
-                        new_cp.entries[i].ecx = entries[i].ecx;
-                        new_cp.entries[i].edx = entries[i].edx;
+                    for (i, entry) in entries
+                        .iter()
+                        .enumerate()
+                        .take(std::cmp::min(SNP_CPUID_LIMIT as usize, entries.len()))
+                    {
+                        new_cp.entries[i].eax_in = entry.function;
+                        new_cp.entries[i].ecx_in = entry.index;
+                        new_cp.entries[i].eax = entry.eax;
+                        new_cp.entries[i].ebx = entry.ebx;
+                        new_cp.entries[i].ecx = entry.ecx;
+                        new_cp.entries[i].edx = entry.edx;
                         /*
                          * Guest kernels will calculate EBX themselves using the 0xD
                          * subfunctions corresponding to the individual XSAVE areas, so only
@@ -594,8 +598,7 @@ pub fn load_igvm(
                     let guest_region_mmap = guest_memory.to_region_addr(GuestAddress(gpa.gpa));
                     let uaddr_base = guest_region_mmap.unwrap().0.as_ptr() as u64;
                     let uaddr_offset: u64 = guest_region_mmap.unwrap().1 .0;
-                    let uaddr = uaddr_base + uaddr_offset;
-                    uaddr
+                    uaddr_base + uaddr_offset
                 })
                 .collect();
             #[cfg(feature = "kvm")]

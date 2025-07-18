@@ -137,7 +137,7 @@ pub const KVM_X86_SNP_VM: u32 = 4;
 use igvm_defs::PAGE_SIZE_4K;
 #[cfg(feature = "sev_snp")]
 use kvm_bindings::kvm_memory_attributes;
-#[cfg(all(feature = "sev_snp"))]
+#[cfg(feature = "sev_snp")]
 use kvm_bindings::{kvm_segment as Segment, KVM_MEMORY_ATTRIBUTE_PRIVATE};
 use vm_memory::GuestAddress;
 #[cfg(feature = "sev_snp")]
@@ -2354,7 +2354,7 @@ impl cpu::Vcpu for KvmVcpu {
                             let mem_attributes = kvm_bindings::kvm_memory_attributes {
                                 address,
                                 size,
-                                attributes: set_private_attr as u64,
+                                attributes: set_private_attr,
                                 ..Default::default()
                             };
                             self.vm_fd
@@ -3270,8 +3270,7 @@ impl cpu::Vcpu for KvmVcpu {
         sregs.gdt.base = vmsa.gdtr.base;
         sregs.gdt.limit = vmsa.gdtr.limit.try_into().unwrap();
         info!("gdt limit: {}", sregs.gdt.limit);
-        let _ = vcpu
-            .set_sregs(&sregs)
+        vcpu.set_sregs(&sregs)
             .map_err(|e| cpu::HypervisorCpuError::SetSpecialRegs(e.into()))?;
 
         let mut regs = vcpu
@@ -3282,8 +3281,7 @@ impl cpu::Vcpu for KvmVcpu {
         regs.rdx = vmsa.rdx;
         regs.rflags = vmsa.rflags;
 
-        let _ = vcpu
-            .set_regs(&regs)
+        vcpu.set_regs(&regs)
             .map_err(|e| cpu::HypervisorCpuError::SetRegister(e.into()))?;
 
         Ok(())

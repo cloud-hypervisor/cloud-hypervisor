@@ -1129,11 +1129,11 @@ impl Vm {
         // Region for loading Stage 0;
         memory_manager
             .add_ram_region(STAGE0_START_ADDRESS, STAGE0_SIZE)
-            .map_err(|e| Error::MemoryManager(e))?;
+            .map_err(Error::MemoryManager)?;
         // Region for loading the VMSA page
         memory_manager
             .add_ram_region(KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE)
-            .map_err(|e| Error::MemoryManager(e))?;
+            .map_err(Error::MemoryManager)?;
         Ok(())
     }
 
