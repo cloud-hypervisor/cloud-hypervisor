@@ -6,7 +6,7 @@ version = "0.1.0"
 
 [dependencies]
 libc = "0.2.167"
-log = "0.4.22"
+log = "0.4.27"
 serde = { version = "1.0.208", features = ["derive", "rc"] }
 serde_json = { workspace = true }
 
