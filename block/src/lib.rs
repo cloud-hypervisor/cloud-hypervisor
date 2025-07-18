@@ -39,7 +39,7 @@ use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
-use std::sync::{Arc, MutexGuard};
+use std::sync::Arc;
 use std::time::Instant;
 use std::{cmp, result};
 
@@ -646,10 +646,7 @@ pub fn block_io_uring_is_supported() -> bool {
     }
 }
 
-pub trait AsyncAdaptor<F>
-where
-    F: Read + Write + Seek,
-{
+pub trait AsyncAdaptor {
     fn read_vectored_sync(
         &mut self,
         offset: libc::off_t,
@@ -657,7 +654,10 @@ where
         user_data: u64,
         eventfd: &EventFd,
         completion_list: &mut VecDeque<(u64, i32)>,
-    ) -> AsyncIoResult<()> {
+    ) -> AsyncIoResult<()>
+    where
+        Self: Read + Seek,
+    {
         // Convert libc::iovec into IoSliceMut
         let mut slices: SmallVec<[IoSliceMut; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
             SmallVec::with_capacity(iovecs.len());
@@ -669,15 +669,13 @@ where
         }
 
         let result = {
-            let mut file = self.file();
-
             // Move the cursor to the right offset
-            file.seek(SeekFrom::Start(offset as u64))
+            self.seek(SeekFrom::Start(offset as u64))
                 .map_err(AsyncIoError::ReadVectored)?;
 
             let mut r = 0;
             for b in slices.iter_mut() {
-                r += file.read(b).map_err(AsyncIoError::ReadVectored)?;
+                r += self.read(b).map_err(AsyncIoError::ReadVectored)?;
             }
             r
         };
@@ -695,7 +693,10 @@ where
         user_data: u64,
         eventfd: &EventFd,
         completion_list: &mut VecDeque<(u64, i32)>,
-    ) -> AsyncIoResult<()> {
+    ) -> AsyncIoResult<()>
+    where
+        Self: Write + Seek,
+    {
         // Convert libc::iovec into IoSlice
         let mut slices: SmallVec<[IoSlice; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
             SmallVec::with_capacity(iovecs.len());
@@ -707,15 +708,13 @@ where
         }
 
         let result = {
-            let mut file = self.file();
-
             // Move the cursor to the right offset
-            file.seek(SeekFrom::Start(offset as u64))
+            self.seek(SeekFrom::Start(offset as u64))
                 .map_err(AsyncIoError::WriteVectored)?;
 
             let mut r = 0;
             for b in slices.iter() {
-                r += file.write(b).map_err(AsyncIoError::WriteVectored)?;
+                r += self.write(b).map_err(AsyncIoError::WriteVectored)?;
             }
             r
         };
@@ -731,12 +730,13 @@ where
         user_data: Option<u64>,
         eventfd: &EventFd,
         completion_list: &mut VecDeque<(u64, i32)>,
-    ) -> AsyncIoResult<()> {
+    ) -> AsyncIoResult<()>
+    where
+        Self: Write,
+    {
         let result: i32 = {
-            let mut file = self.file();
-
             // Flush
-            file.flush().map_err(AsyncIoError::Fsync)?;
+            self.flush().map_err(AsyncIoError::Fsync)?;
 
             0
         };
@@ -748,8 +748,6 @@ where
 
         Ok(())
     }
-
-    fn file(&mut self) -> MutexGuard<'_, F>;
 }
 
 pub enum ImageType {
