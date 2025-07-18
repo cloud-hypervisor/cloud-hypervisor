@@ -315,6 +315,7 @@ pub struct Vsock<B: VsockBackend> {
     path: PathBuf,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
+    is_restore: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -340,6 +341,8 @@ where
         exit_evt: EventFd,
         state: Option<VsockState>,
     ) -> io::Result<Vsock<B>> {
+        let is_restore = state.is_some();
+
         let (avail_features, acked_features, paused) = if let Some(state) = state {
             info!("Restoring virtio-vsock {}", id);
             (state.avail_features, state.acked_features, true)
@@ -369,6 +372,7 @@ where
             path,
             seccomp_action,
             exit_evt,
+            is_restore,
         })
     }
 
@@ -503,7 +507,17 @@ where
     }
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
-        self.common.resume()
+        self.common.resume()?;
+
+        // If it is restore, then reallocate the port.
+        if self.is_restore {
+            if let Err(e) = self.backend.write().unwrap().reset_vsock_port() {
+                error!("Failed to reset the vsock port during restore: {:?}", e);
+            }
+            self.is_restore = false;
+        }
+
+        Ok(())
     }
 }
 

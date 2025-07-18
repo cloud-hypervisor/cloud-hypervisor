@@ -340,7 +340,12 @@ impl VsockEpollListener for VsockMuxer {
     }
 }
 
-impl VsockBackend for VsockMuxer {}
+impl VsockBackend for VsockMuxer {
+    fn reset_vsock_port(&mut self) -> std::result::Result<(), VsockError> {
+        self.local_port_last = self.allocate_local_port();
+        Ok(())
+    }
+}
 
 impl VsockMuxer {
     /// Muxer constructor.
