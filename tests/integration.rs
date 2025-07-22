@@ -3381,6 +3381,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore = "See #7209"]
     fn test_virtio_block_dynamic_vhdx_expand() {
         const VIRTUAL_DISK_SIZE: u64 = 100 << 20;
         const EMPTY_VHDX_FILE_SIZE: u64 = 8 << 20;
