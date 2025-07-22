@@ -9,8 +9,21 @@ jobs:
     steps:
       - name: Code checkout
         uses: actions/checkout@v4
+        with:
+          # Fetch the entire history so git diff can compare against the base branch
+          fetch-depth: 0
 
-      - name: Link Availability Check
+      - name: Get changed files in PR
+        id: changed-files
+        uses: tj-actions/changed-files@v40 # Using a dedicated action for robustness
+        with:
+          # Compare the HEAD of the PR with the merge-base (where the PR branches off)
+          base_sha: ${{ github.event.pull_request.base.sha }}
+
+      - name: Link Availability Check (Diff Only)
+        # Only run lychee if there are any files identified as changed
+        if: steps.changed-files.outputs.any_changed == 'true'
         uses: lycheeverse/lychee-action@master
         with:
-          args: --verbose --config .lychee.toml .
+          # Pass the space-separated list of changed files to lychee
+          args: --verbose --config .lychee.toml ${{ steps.changed-files.outputs.all_changed_files }}
