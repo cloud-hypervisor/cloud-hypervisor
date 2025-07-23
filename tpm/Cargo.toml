@@ -7,7 +7,7 @@ version = "0.1.0"
 
 [dependencies]
 anyhow = "1.0.94"
-libc = "0.2.153"
+libc = "0.2.167"
 log = "0.4.21"
 net_gen = { path = "../net_gen" }
 thiserror = { workspace = true }
