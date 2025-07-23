@@ -3402,7 +3402,7 @@ mod common_parallel {
             .arg(vhdx_path)
             .arg(VIRTUAL_DISK_SIZE.to_string())
             .output()
-            .expect("Expect generating dynamic VHDx image from RAW image");
+            .expect("Expect generating dynamic VHDX image");
 
         // Check if the size matches with empty VHDx file size
         assert_eq!(vhdx_image_size(vhdx_path), EMPTY_VHDX_FILE_SIZE);
