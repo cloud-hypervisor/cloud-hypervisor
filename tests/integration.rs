@@ -3388,12 +3388,12 @@ mod common_parallel {
         const FULL_VHDX_FILE_SIZE: u64 = 112 << 20;
         const DYNAMIC_VHDX_NAME: &str = "dynamic.vhdx";
 
-        let mut workload_path = dirs::home_dir().unwrap();
-        workload_path.push("workloads");
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let kernel_path = direct_kernel_boot_path();
 
-        let mut vhdx_file_path = workload_path;
-        vhdx_file_path.push(DYNAMIC_VHDX_NAME);
-        let vhdx_path = vhdx_file_path.to_str().unwrap();
+        let vhdx_pathbuf = guest.tmp_dir.as_path().join(DYNAMIC_VHDX_NAME);
+        let vhdx_path = vhdx_pathbuf.to_str().unwrap();
 
         // Generate a 100 MiB dynamic VHDX file
         std::process::Command::new("qemu-img")
@@ -3406,10 +3406,6 @@ mod common_parallel {
 
         // Check if the size matches with empty VHDx file size
         assert_eq!(vhdx_image_size(vhdx_path), EMPTY_VHDX_FILE_SIZE);
-
-        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(focal));
-        let kernel_path = direct_kernel_boot_path();
 
         let mut cloud_child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=1"])
