@@ -158,7 +158,9 @@ pub trait VsockChannel {
 /// It that needs to be sendable through a mpsc channel (the latter due to how `vmm::EpollContext` works).
 /// Currently, the only implementation we have is `crate::virtio::unix::muxer::VsockMuxer`, which
 /// translates guest-side vsock connections to host-side Unix domain socket connections.
-pub trait VsockBackend: VsockChannel + VsockEpollListener + Send {}
+pub trait VsockBackend: VsockChannel + VsockEpollListener + Send {
+    fn reset_vsock_port(&mut self) -> Result<()>;
+}
 
 #[cfg(any(test, fuzzing))]
 pub mod tests {
@@ -256,7 +258,11 @@ pub mod tests {
             self.evset = Some(evset);
         }
     }
-    impl VsockBackend for TestBackend {}
+    impl VsockBackend for TestBackend {
+        fn reset_vsock_port(&mut self) -> Result<()> {
+            Ok(())
+        }
+    }
 
     pub struct TestContext {
         pub cid: u64,
