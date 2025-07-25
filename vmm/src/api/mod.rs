@@ -51,8 +51,8 @@ use crate::config::RestoreConfig;
 use crate::device_tree::DeviceTree;
 use crate::vm::{Error as VmError, VmState};
 use crate::vm_config::{
-    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
-    VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
+    UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 
 /// API errors are sent back from the VMM API server through the ApiResponse.
@@ -169,6 +169,10 @@ pub enum ApiError {
     /// The fs could not be added to the VM.
     #[error("The fs could not be added to the VM")]
     VmAddFs(#[source] VmError),
+
+    /// The generic vhost-user device could not be added to the VM.
+    #[error("The generic vhost-user device could not be added to the VM")]
+    VmAddGenericVhostUser(#[source] VmError),
 
     /// The pmem device could not be added to the VM.
     #[error("The pmem device could not be added to the VM")]
@@ -339,6 +343,11 @@ pub trait RequestHandler {
     fn vm_add_disk(&mut self, disk_cfg: DiskConfig) -> Result<Option<Vec<u8>>, VmError>;
 
     fn vm_add_fs(&mut self, fs_cfg: FsConfig) -> Result<Option<Vec<u8>>, VmError>;
+
+    fn vm_add_generic_vhost_user(
+        &mut self,
+        fs_cfg: GenericVhostUserConfig,
+    ) -> Result<Option<Vec<u8>>, VmError>;
 
     fn vm_add_pmem(&mut self, pmem_cfg: PmemConfig) -> Result<Option<Vec<u8>>, VmError>;
 
@@ -519,6 +528,43 @@ impl ApiAction for VmAddFs {
             let response = vmm
                 .vm_add_fs(config)
                 .map_err(ApiError::VmAddFs)
+                .map(ApiResponsePayload::VmAction);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
+}
+
+pub struct VmAddGenericVhostUser;
+
+impl ApiAction for VmAddGenericVhostUser {
+    type RequestBody = GenericVhostUserConfig;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        config: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmAddGenericVhostUser {config:?}");
+
+            let response = vmm
+                .vm_add_generic_vhost_user(config)
+                .map_err(ApiError::VmAddGenericVhostUser)
                 .map(ApiResponsePayload::VmAction);
 
             response_sender

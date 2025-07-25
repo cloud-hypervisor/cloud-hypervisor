@@ -69,6 +69,7 @@ interprocess memory sharing.
 
 Assuming you have `focal-server-cloudimg-amd64.raw` and `vmlinux` on your
 system, here is the Cloud Hypervisor command you need to run:
+
 ```bash
 ./cloud-hypervisor \
     --cpus boot=1 \
