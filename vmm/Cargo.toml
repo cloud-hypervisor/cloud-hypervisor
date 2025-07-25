@@ -33,18 +33,18 @@ tracing = ["tracer/tracing"]
 
 [dependencies]
 acpi_tables = { workspace = true }
-anyhow = "1.0.94"
+anyhow = { workspace = true }
 arch = { path = "../arch" }
-bitflags = "2.9.0"
+bitflags = { workspace = true }
 block = { path = "../block" }
 blocking = { version = "1.6.1", optional = true }
-cfg-if = "1.0.0"
-clap = "4.5.13"
+cfg-if = { workspace = true }
+clap = { workspace = true }
 devices = { path = "../devices" }
-dhat = { version = "0.3.3", optional = true }
-epoll = "4.3.3"
+dhat = { workspace = true, optional = true }
+epoll = { workspace = true }
 event_monitor = { path = "../event_monitor" }
-flume = "0.11.1"
+flume = { workspace = true }
 futures = { version = "0.3.31", optional = true }
 gdbstub = { version = "0.7.6", optional = true }
 gdbstub_arch = { version = "0.3.0", optional = true }
@@ -53,9 +53,9 @@ hypervisor = { path = "../hypervisor" }
 igvm = { workspace = true, optional = true }
 igvm_defs = { workspace = true, optional = true }
 landlock = "0.4.0"
-libc = "0.2.167"
+libc = { workspace = true }
 linux-loader = { workspace = true, features = ["bzimage", "elf", "pe"] }
-log = "0.4.22"
+log = { workspace = true }
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 mshv-bindings = { workspace = true, features = [
   "fam-wrappers",
@@ -67,10 +67,10 @@ pci = { path = "../pci" }
 range_map_vec = { version = "0.2.0", optional = true }
 rate_limiter = { path = "../rate_limiter" }
 seccompiler = { workspace = true }
-serde = { version = "1.0.208", features = ["derive", "rc"] }
+serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 serial_buffer = { path = "../serial_buffer" }
-signal-hook = "0.3.18"
+signal-hook = { workspace = true }
 thiserror = { workspace = true }
 tracer = { path = "../tracer" }
 uuid = { workspace = true }

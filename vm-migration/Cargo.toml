@@ -5,8 +5,8 @@ name = "vm-migration"
 version = "0.1.0"
 
 [dependencies]
-anyhow = "1.0.94"
-serde = { version = "1.0.208", features = ["derive", "rc"] }
+anyhow = { workspace = true }
+serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 vm-memory = { workspace = true, features = ["backend-atomic", "backend-mmap"] }
