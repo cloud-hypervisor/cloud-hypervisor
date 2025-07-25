@@ -32,11 +32,13 @@ use crate::{
 
 pub mod blk;
 pub mod fs;
+pub mod generic;
 pub mod net;
 pub mod vu_common_ctrl;
 
 pub use self::blk::Blk;
 pub use self::fs::*;
+pub use self::generic::Generic;
 pub use self::net::Net;
 pub use self::vu_common_ctrl::VhostUserConfig;
 

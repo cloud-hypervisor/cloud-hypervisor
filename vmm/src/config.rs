@@ -37,6 +37,24 @@ pub enum Error {
     /// Filesystem socket is missing
     #[error("Error parsing --fs: socket missing")]
     ParseFsSockMissing,
+    /// Generic socket is missing
+    #[error("Error parsing --generic: socket missing")]
+    ParseGenericSockMissing,
+    /// Generic number of queues is missing
+    #[error("Error parsing --generic: number of queues missing")]
+    ParseGenericNumQueuesMissing,
+    /// Generic virtio ID is missing
+    #[error("Error parsing --generic: virtio ID missing")]
+    ParseGenericVirtioIdMissing,
+    /// Generic min queues is missing
+    #[error("Error parsing --generic: min queues missing")]
+    ParseGenericMinQueuesMissing,
+    /// Generic ID is missing
+    #[error("Error parsing --generic: ID missing")]
+    ParseGenericIdMissing,
+    /// Generic queue size missing
+    #[error("Error parsing --generic: queue size missing")]
+    ParseGenericQueueSizeMissing,
     /// Missing persistent memory file parameter.
     #[error("Error parsing --pmem: file missing")]
     ParsePmemFileMissing,
@@ -85,6 +103,9 @@ pub enum Error {
     /// Error parsing persistent memory parameters
     #[error("Error parsing --pmem")]
     ParsePersistentMemory(#[source] OptionParserError),
+    /// Error parsing generic parameters
+    #[error("Error parsing --generic")]
+    ParseGeneric(#[source] OptionParserError),
     /// Failed parsing console
     #[error("Error parsing --console")]
     ParseConsole(#[source] OptionParserError),
@@ -346,6 +367,7 @@ pub struct VmParams<'a> {
     pub rng: &'a str,
     pub balloon: Option<&'a str>,
     pub fs: Option<Vec<&'a str>>,
+    pub generic: Option<Vec<&'a str>>,
     pub pmem: Option<Vec<&'a str>>,
     pub serial: &'a str,
     pub console: &'a str,
@@ -405,6 +427,9 @@ impl<'a> VmParams<'a> {
         let fs: Option<Vec<&str>> = args
             .get_many::<String>("fs")
             .map(|x| x.map(|y| y as &str).collect());
+        let generic: Option<Vec<&str>> = args
+            .get_many::<String>("vhost-user-generic")
+            .map(|x| x.map(|y| y as &str).collect());
         let pmem: Option<Vec<&str>> = args
             .get_many::<String>("pmem")
             .map(|x| x.map(|y| y as &str).collect());
@@ -459,6 +484,7 @@ impl<'a> VmParams<'a> {
             rng,
             balloon,
             fs,
+            generic,
             pmem,
             serial,
             console,
@@ -1532,6 +1558,84 @@ impl BalloonConfig {
     }
 }
 
+impl GenericConfig {
+    pub const SYNTAX: &'static str = "virtio-generic parameters \
+    \"virtio_id=<id>,socket=<socket_path>,num_queues=<number_of_queues>,\
+    queue_size=<size_of_each_queue>,id=<device_id>,pci_segment=<segment_id>,\
+    min_queues=<minimum_number_of_queues>\"";
+
+    pub fn parse(generic: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser
+            .add("virtio_id")
+            .add("queue_size")
+            .add("num_queues")
+            .add("min_queues")
+            .add("socket")
+            .add("id")
+            .add("pci_segment");
+        parser.parse(generic).map_err(Error::ParseGeneric)?;
+
+        let socket = PathBuf::from(parser.get("socket").ok_or(Error::ParseGenericSockMissing)?);
+
+        let queue_size = parser
+            .convert("queue_size")
+            .map_err(Error::ParseGeneric)?
+            .ok_or(Error::ParseGenericQueueSizeMissing)?;
+        let num_queues = parser
+            .convert("num_queues")
+            .map_err(Error::ParseGeneric)?
+            .ok_or(Error::ParseGenericNumQueuesMissing)?;
+        let device_type = parser
+            .convert("virtio_id")
+            .map_err(Error::ParseGeneric)?
+            .ok_or(Error::ParseGenericVirtioIdMissing)?;
+        let min_queues = parser
+            .convert("min_queues")
+            .map_err(Error::ParseGeneric)?
+            .ok_or(Error::ParseGenericMinQueuesMissing)?;
+
+        let id = parser.get("id").ok_or(Error::ParseGenericIdMissing)?;
+        let pci_segment = parser
+            .convert("pci_segment")
+            .map_err(Error::ParseGeneric)?
+            .unwrap_or_default();
+
+        Ok(GenericConfig {
+            socket,
+            num_queues,
+            queue_size,
+            min_queues,
+            device_type,
+            id,
+            pci_segment,
+        })
+    }
+
+    // TODO: avoid duplication with FsConfig
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if self.num_queues > vm_config.cpus.boot_vcpus as usize {
+            return Err(ValidationError::TooManyQueues);
+        }
+
+        if let Some(platform_config) = vm_config.platform.as_ref() {
+            if self.pci_segment >= platform_config.num_pci_segments {
+                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+            }
+
+            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref() {
+                if iommu_segments.contains(&self.pci_segment) {
+                    return Err(ValidationError::IommuNotSupportedOnSegment(
+                        self.pci_segment,
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl FsConfig {
     pub const SYNTAX: &'static str = "virtio-fs parameters \
     \"tag=<tag_name>,socket=<socket_path>,num_queues=<number_of_queues>,\
@@ -2285,13 +2389,22 @@ impl VmConfig {
         id: &Option<String>,
     ) -> ValidationResult<()> {
         if let Some(id) = id.as_ref() {
-            if id.starts_with("__") {
-                return Err(ValidationError::InvalidIdentifier(id.clone()));
-            }
+            Self::validate_always_identifier(id_list, id)?
+        }
 
-            if !id_list.insert(id.clone()) {
-                return Err(ValidationError::IdentifierNotUnique(id.clone()));
-            }
+        Ok(())
+    }
+
+    fn validate_always_identifier(
+        id_list: &mut BTreeSet<String>,
+        id: &str,
+    ) -> ValidationResult<()> {
+        if id.starts_with("__") {
+            return Err(ValidationError::InvalidIdentifier(id.to_owned()));
+        }
+
+        if !id_list.insert(id.to_owned()) {
+            return Err(ValidationError::IdentifierNotUnique(id.to_owned()));
         }
 
         Ok(())
@@ -2442,6 +2555,17 @@ impl VmConfig {
                 fs.validate(self)?;
 
                 Self::validate_identifier(&mut id_list, &fs.id)?;
+            }
+        }
+
+        if let Some(generics) = &self.generic {
+            if !generics.is_empty() && !self.backed_by_shared_memory() {
+                return Err(ValidationError::VhostUserRequiresSharedMemory);
+            }
+            for generic in generics {
+                generic.validate(self)?;
+
+                Self::validate_always_identifier(&mut id_list, &generic.id)?;
             }
         }
 
@@ -2692,6 +2816,15 @@ impl VmConfig {
             fs = Some(fs_config_list);
         }
 
+        let mut generic: Option<Vec<GenericConfig>> = None;
+        if let Some(generic_list) = &vm_params.generic {
+            let mut generic_config_list = Vec::new();
+            for item in generic_list.iter() {
+                generic_config_list.push(GenericConfig::parse(item)?);
+            }
+            generic = Some(generic_config_list);
+        }
+
         let mut pmem: Option<Vec<PmemConfig>> = None;
         if let Some(pmem_list) = &vm_params.pmem {
             let mut pmem_config_list = Vec::new();
@@ -2832,6 +2965,7 @@ impl VmConfig {
             net,
             rng,
             balloon,
+            generic,
             fs,
             pmem,
             serial,
@@ -2966,6 +3100,7 @@ impl Clone for VmConfig {
             #[cfg(feature = "pvmemcontrol")]
             pvmemcontrol: self.pvmemcontrol.clone(),
             fs: self.fs.clone(),
+            generic: self.generic.clone(),
             pmem: self.pmem.clone(),
             serial: self.serial.clone(),
             console: self.console.clone(),
@@ -3476,6 +3611,71 @@ mod tests {
         Ok(())
     }
 
+    fn generic_fixture() -> GenericConfig {
+        GenericConfig {
+            socket: PathBuf::from("/tmp/generic"),
+            num_queues: 20,
+            min_queues: 5,
+            id: "Something".to_owned(),
+            device_type: 100,
+            pci_segment: 0,
+            queue_size: 1024,
+        }
+    }
+
+    #[test]
+    fn test_parse_generic() -> Result<()> {
+        // all parameters must be supplied, except pci_segment
+        GenericConfig::parse("").unwrap_err();
+        GenericConfig::parse("virtio_id=1").unwrap_err();
+        GenericConfig::parse("queue_size=1").unwrap_err();
+        GenericConfig::parse("socket=/tmp/sock").unwrap_err();
+        GenericConfig::parse("min_queues=1").unwrap_err();
+        GenericConfig::parse("id=1").unwrap_err();
+        assert_eq!(
+            GenericConfig::parse(
+                "virtio_id=100,socket=/tmp/generic,\
+                num_queues=20,min_queues=5,id=Something,pci_segment=0,\
+                queue_size=1024"
+            )
+            .unwrap(),
+            generic_fixture()
+        );
+        assert_eq!(
+            GenericConfig::parse(
+                "virtio_id=100,socket=/tmp/generic,\
+                num_queues=20,min_queues=5,id=Something,\
+                queue_size=1024"
+            )?,
+            generic_fixture()
+        );
+        assert_eq!(
+            GenericConfig::parse(
+                "virtio_id=100,socket=/tmp/generic,\
+                num_queues=20,min_queues=6,id=Something,pci_segment=1,\
+                queue_size=1024"
+            )?,
+            GenericConfig {
+                pci_segment: 1,
+                min_queues: 6,
+                ..generic_fixture()
+            }
+        );
+        assert_eq!(
+            GenericConfig::parse(
+                "virtio_id=100,socket=/tmp/generic,\
+                num_queues=20,min_queues=6,id=\"Something\",pci_segment=1,\
+                queue_size=1024"
+            )?,
+            GenericConfig {
+                pci_segment: 1,
+                min_queues: 6,
+                ..generic_fixture()
+            }
+        );
+        Ok(())
+    }
+
     fn pmem_fixture() -> PmemConfig {
         PmemConfig {
             file: PathBuf::from("/tmp/pmem"),
@@ -3745,6 +3945,7 @@ mod tests {
             rate_limit_groups: None,
             disks: None,
             rng: RngConfig::default(),
+            generic: None,
             balloon: None,
             fs: None,
             pmem: None,
@@ -3949,6 +4150,7 @@ mod tests {
             },
             balloon: None,
             fs: None,
+            generic: None,
             pmem: None,
             serial: ConsoleConfig {
                 file: None,
