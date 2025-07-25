@@ -153,7 +153,7 @@ interface will be enabled as per `network-config` details.
 $ sudo setcap cap_net_admin+ep ./cloud-hypervisor
 $ ./create-cloud-init.sh
 $ ./cloud-hypervisor \
-	--kernel ./hypervisor-fw \
+	--firmware ./hypervisor-fw \
 	--disk path=focal-server-cloudimg-amd64.raw path=/tmp/ubuntu-cloudinit.img \
 	--cpus boot=4 \
 	--memory size=1024M \
@@ -174,6 +174,18 @@ $ ./cloud-hypervisor \
 	--serial tty \
 	--console off
 ```
+
+## Booting: `--firmware` vs `--kernel`
+
+The following scenarios are supported by Cloud Hypervisor to bootstrap a VM, i.e.,
+to load a payload/bootitem(s):
+
+- Provide firmware
+- Provide kernel \[+ cmdline\]\ [+ initrd\]
+
+Please note that our Cloud Hypervisor firmware (`hypervisor-fw`) has a Xen PVH
+boot entry, therefore it can also be booted via the `--kernel` parameter, as 
+seen in some examples.
 
 ### Custom Kernel and Disk Image
 
