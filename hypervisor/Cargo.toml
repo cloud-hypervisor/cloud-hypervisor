@@ -33,7 +33,7 @@ mshv-ioctls = { workspace = true, optional = true }
 open-enum = "0.5.2"
 serde = { version = "1.0.208", features = ["derive", "rc"] }
 serde_json = { workspace = true }
-serde_with = { version = "3.9.0", default-features = false, features = [
+serde_with = { version = "3.14.0", default-features = false, features = [
   "macros",
 ] }
 thiserror = { workspace = true }
