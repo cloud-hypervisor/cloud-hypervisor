@@ -175,6 +175,11 @@ pub enum Error {
     #[error("Error activating virtio devices")]
     ActivateVirtioDevices(#[source] VmError),
 
+    #[cfg(feature = "ivshmem")]
+    /// Error activating virtio devices
+    #[error("Error pci bar reprogramming: {0:?}")]
+    Reprogram(#[source] VmError),
+
     /// Error creating API server
     // TODO We should add #[source] here once the type implements Error.
     // Then we also can remove the `: {}` to align with the other errors.
@@ -2434,6 +2439,8 @@ mod unit_tests {
             preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
+            #[cfg(feature = "ivshmem")]
+            ivshmem: None,
         })
     }
 
