@@ -4,8 +4,8 @@ name = "rate_limiter"
 version = "0.1.0"
 
 [dependencies]
-epoll = "4.3.3"
-libc = "0.2.167"
-log = "0.4.22"
+epoll = { workspace = true }
+libc = { workspace = true }
+log = { workspace = true }
 thiserror = { workspace = true }
 vmm-sys-util = { workspace = true }
