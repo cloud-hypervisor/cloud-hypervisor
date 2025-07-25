@@ -156,13 +156,15 @@ if [ ! -f "$VIRTIOFSD" ]; then
     pushd "$WORKLOADS_DIR" || exit
     git clone "https://gitlab.com/virtio-fs/virtiofsd.git" $VIRTIOFSD_DIR
     pushd $VIRTIOFSD_DIR || exit
-    git checkout v1.8.0
+    git checkout bbf82173682a3e48083771a0a23331e5c23b4924 # version 1.13.3
     time cargo build --release
     cp target/release/virtiofsd "$VIRTIOFSD" || exit 1
     popd || exit
     rm -rf $VIRTIOFSD_DIR
     popd || exit
 fi
+# Log the version of virtiofsd so that problems can be debugged.
+"$VIRTIOFSD" --version || exit
 
 BLK_IMAGE="$WORKLOADS_DIR/blk.img"
 MNT_DIR="mount_image"

@@ -13,7 +13,7 @@ build_virtiofsd() {
     VIRTIOFSD_DIR="$WORKLOADS_DIR/virtiofsd_build"
     VIRTIOFSD_REPO="https://gitlab.com/virtio-fs/virtiofsd.git"
 
-    checkout_repo "$VIRTIOFSD_DIR" "$VIRTIOFSD_REPO" v1.8.0 "97ea7908fe7f9bc59916671a771bdcfaf4044b45"
+    checkout_repo "$VIRTIOFSD_DIR" "$VIRTIOFSD_REPO" v1.13.3 "bbf82173682a3e48083771a0a23331e5c23b4924"
 
     if [ ! -f "$VIRTIOFSD_DIR/.built" ]; then
         pushd "$VIRTIOFSD_DIR" || exit
@@ -24,6 +24,9 @@ build_virtiofsd() {
         popd || exit
     fi
 }
+
+# Log the virtiofsd version so that problems due to it being too old can be debugged.
+"$WORKLOADS_DIR/virtiofsd" --version || exit
 
 update_workloads() {
     cp scripts/sha1sums-aarch64 "$WORKLOADS_DIR"
