@@ -6,9 +6,9 @@ name = "tpm"
 version = "0.1.0"
 
 [dependencies]
-anyhow = "1.0.94"
-libc = "0.2.167"
-log = "0.4.22"
+anyhow = { workspace = true }
+libc = { workspace = true }
+log = { workspace = true }
 net_gen = { path = "../net_gen" }
 thiserror = { workspace = true }
 vmm-sys-util = { workspace = true }
