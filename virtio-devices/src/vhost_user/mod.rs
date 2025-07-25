@@ -34,11 +34,13 @@ use crate::{
 pub mod blk;
 pub mod fs;
 pub mod net;
+pub mod user_vhost;
 pub mod vu_common_ctrl;
 
 pub use self::blk::Blk;
 pub use self::fs::*;
 pub use self::net::Net;
+pub use self::user_vhost::UserVhost;
 pub use self::vu_common_ctrl::VhostUserConfig;
 
 #[derive(Error, Debug)]
