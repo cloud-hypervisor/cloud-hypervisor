@@ -11,7 +11,7 @@ mshv = ["vfio-ioctls/mshv"]
 
 [dependencies]
 hypervisor = { path = "../hypervisor" }
-serde = { version = "1.0.208", features = ["derive", "rc"] }
+serde = { workspace = true, features = ["derive", "rc"] }
 thiserror = { workspace = true }
 vfio-ioctls = { workspace = true, default-features = false }
 vmm-sys-util = { workspace = true }

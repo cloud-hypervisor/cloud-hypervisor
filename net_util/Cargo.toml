@@ -5,13 +5,13 @@ name = "net_util"
 version = "0.1.0"
 
 [dependencies]
-epoll = "4.3.3"
+epoll = { workspace = true }
 getrandom = "0.3.3"
-libc = "0.2.167"
-log = "0.4.22"
+libc = { workspace = true }
+log = { workspace = true }
 net_gen = { path = "../net_gen" }
 rate_limiter = { path = "../rate_limiter" }
-serde = { version = "1.0.208", features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 virtio-bindings = { workspace = true }
 virtio-queue = { workspace = true }
