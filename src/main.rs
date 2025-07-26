@@ -219,22 +219,16 @@ fn get_cli_options_sorted(
             )
             .default_value(default_vcpus)
             .group("vm-config"),
-        #[cfg(target_arch = "x86_64")]
-        Arg::new("debug-console")
-            .long("debug-console")
-            .help("Debug console: off|pty|tty|file=</path/to/a/file>,iobase=<port in hex>")
-            .default_value("off,iobase=0xe9")
-            .group("vm-config"),
-        #[cfg(feature = "dbus_api")]
-        Arg::new("dbus-service-name")
-            .long("dbus-service-name")
-            .help("Well known name of the device")
-            .num_args(1)
-            .group("vmm-config"),
         #[cfg(feature = "dbus_api")]
         Arg::new("dbus-object-path")
             .long("dbus-object-path")
             .help("Object path to serve the dbus interface")
+            .num_args(1)
+            .group("vmm-config"),
+        #[cfg(feature = "dbus_api")]
+        Arg::new("dbus-service-name")
+            .long("dbus-service-name")
+            .help("Well known name of the device")
             .num_args(1)
             .group("vmm-config"),
         #[cfg(feature = "dbus_api")]
@@ -244,6 +238,12 @@ fn get_cli_options_sorted(
             .help("Use the system bus instead of a session bus")
             .num_args(0)
             .group("vmm-config"),
+        #[cfg(target_arch = "x86_64")]
+        Arg::new("debug-console")
+            .long("debug-console")
+            .help("Debug console: off|pty|tty|file=</path/to/a/file>,iobase=<port in hex>")
+            .default_value("off,iobase=0xe9")
+            .group("vm-config"),
         Arg::new("device")
             .long("device")
             .help(DeviceConfig::SYNTAX)
@@ -275,18 +275,18 @@ fn get_cli_options_sorted(
             .help("GDB socket (UNIX domain socket): path=</path/to/a/file>")
             .num_args(1)
             .group("vmm-config"),
-        #[cfg(feature = "igvm")]
-        Arg::new("igvm")
-            .long("igvm")
-            .help("Path to IGVM file to load.")
-            .num_args(1)
-            .group("vm-payload"),
         #[cfg(feature = "sev_snp")]
         Arg::new("host-data")
             .long("host-data")
             .help("Host specific data to SEV SNP guest")
             .num_args(1)
             .group("vm-config"),
+        #[cfg(feature = "igvm")]
+        Arg::new("igvm")
+            .long("igvm")
+            .help("Path to IGVM file to load.")
+            .num_args(1)
+            .group("vm-payload"),
         Arg::new("initramfs")
             .long("initramfs")
             .help("Path to initramfs image")
