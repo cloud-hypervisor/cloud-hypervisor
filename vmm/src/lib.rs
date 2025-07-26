@@ -2399,6 +2399,7 @@ mod unit_tests {
             },
             balloon: None,
             fs: None,
+            generic: None,
             pmem: None,
             serial: ConsoleConfig {
                 file: None,
