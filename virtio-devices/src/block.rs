@@ -91,6 +91,8 @@ pub enum Error {
         /// The path of the disk image.
         path: PathBuf,
     },
+    #[error("Failed submit batch requests: {0}")]
+    SubmitBatchRequestsError(#[source] AsyncIoError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -247,6 +249,10 @@ impl BlockEpollHandler {
                     .map_err(Error::QueueEnableNotification)?;
             }
         }
+
+        self.disk_image
+            .submit_batch_requests()
+            .map_err(Error::SubmitBatchRequestsError)?;
 
         Ok(())
     }
