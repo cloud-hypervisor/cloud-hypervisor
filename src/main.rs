@@ -27,6 +27,8 @@ use vmm::api::ApiAction;
 use vmm::config::{RestoreConfig, VmParams};
 use vmm::landlock::{Landlock, LandlockError};
 use vmm::vm_config;
+#[cfg(feature = "fw_cfg")]
+use vmm::vm_config::FwCfgConfig;
 #[cfg(target_arch = "x86_64")]
 use vmm::vm_config::SgxEpcConfig;
 use vmm::vm_config::{
@@ -269,6 +271,12 @@ fn get_cli_options_sorted(
             .help(FsConfig::SYNTAX)
             .num_args(1..)
             .group("vm-config"),
+        #[cfg(feature = "fw_cfg")]
+        Arg::new("fw-cfg-config")
+            .long("fw-cfg-config")
+            .help(FwCfgConfig::SYNTAX)
+            .num_args(1)
+            .group("vm-payload"),
         #[cfg(feature = "guest_debug")]
         Arg::new("gdb")
             .long("gdb")
@@ -853,6 +861,8 @@ fn main() {
     compile_error!("Feature 'tdx' and 'sev_snp' are mutually exclusive.");
     #[cfg(all(feature = "sev_snp", not(target_arch = "x86_64")))]
     compile_error!("Feature 'sev_snp' needs target 'x86_64'");
+    #[cfg(all(feature = "fw_cfg", target_arch = "riscv64"))]
+    compile_error!("Feature 'fw_cfg' needs targets 'x86_64' or 'aarch64'");
 
     #[cfg(feature = "dhat-heap")]
     let _profiler = dhat::Profiler::new_heap();
@@ -977,6 +987,8 @@ mod unit_tests {
                 igvm: None,
                 #[cfg(feature = "sev_snp")]
                 host_data: None,
+                #[cfg(feature = "fw_cfg")]
+                fw_cfg_config: None,
             }),
             rate_limit_groups: None,
             disks: None,
