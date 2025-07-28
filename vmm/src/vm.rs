@@ -2332,15 +2332,16 @@ impl Vm {
         let rsdp_addr = self.create_acpi_tables();
 
         #[cfg(not(target_arch = "riscv64"))]
-        // Configure shared state based on loaded kernel
-        entry_point
-            .map(|entry_point| {
-                // Safe to unwrap rsdp_addr as we know it can't be None when
-                // the entry_point is Some.
-                self.configure_system(rsdp_addr.unwrap(), entry_point)
-            })
-            .transpose()?;
-
+        {
+            #[cfg(not(feature = "sev_snp"))]
+            assert!(rsdp_addr.is_some());
+            // Configure shared state based on loaded kernel
+            if let Some(rsdp_adr) = rsdp_addr {
+                entry_point
+                    .map(|entry_point| self.configure_system(rsdp_adr, entry_point))
+                    .transpose()?;
+            }
+        }
         #[cfg(target_arch = "riscv64")]
         self.configure_system().unwrap();
 
