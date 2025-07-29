@@ -585,7 +585,7 @@ impl Vm {
         #[cfg(feature = "tdx")]
         if tdx_enabled {
             let cpuid = cpu_manager.lock().unwrap().common_cpuid();
-            let max_vcpus = cpu_manager.lock().unwrap().max_vcpus() as u32;
+            let max_vcpus = cpu_manager.lock().unwrap().max_vcpus();
             vm.tdx_init(&cpuid, max_vcpus)
                 .map_err(Error::InitializeTdxVm)?;
         }
@@ -810,7 +810,7 @@ impl Vm {
                 }
 
                 if let Some(cpus) = &config.cpus {
-                    node.cpus.extend(cpus);
+                    node.cpus.extend(cpus.iter().map(|cpu| *cpu as u32));
                 }
 
                 if let Some(pci_segments) = &config.pci_segments {
@@ -1581,7 +1581,7 @@ impl Vm {
 
     pub fn resize(
         &mut self,
-        desired_vcpus: Option<u8>,
+        desired_vcpus: Option<u32>,
         desired_memory: Option<u64>,
         desired_balloon: Option<u64>,
     ) -> Result<()> {
@@ -1601,7 +1601,7 @@ impl Vm {
                     .notify_hotplug(AcpiNotificationFlags::CPU_DEVICES_CHANGED)
                     .map_err(Error::DeviceManager)?;
             }
-            self.config.lock().unwrap().cpus.boot_vcpus = desired_vcpus;
+            self.config.lock().unwrap().cpus.boot_vcpus = desired_vcpus.try_into().unwrap();
         }
 
         if let Some(desired_memory) = desired_memory {

@@ -217,7 +217,7 @@ pub struct VmmPingResponse {
 
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
 pub struct VmResizeData {
-    pub desired_vcpus: Option<u8>,
+    pub desired_vcpus: Option<u32>,
     pub desired_ram: Option<u64>,
     pub desired_balloon: Option<u64>,
 }
@@ -307,7 +307,7 @@ pub trait RequestHandler {
 
     fn vm_resize(
         &mut self,
-        desired_vcpus: Option<u8>,
+        desired_vcpus: Option<u32>,
         desired_ram: Option<u64>,
         desired_balloon: Option<u64>,
     ) -> Result<(), VmError>;

@@ -370,7 +370,7 @@ fn create_cpu_nodes(
         if numa_nodes.len() > 1 {
             for numa_node_idx in 0..numa_nodes.len() {
                 let numa_node = numa_nodes.get(&(numa_node_idx as u32));
-                if numa_node.unwrap().cpus.contains(&(cpu_id as u8)) {
+                if numa_node.unwrap().cpus.contains(&(cpu_id as u32)) {
                     fdt.property_u32("numa-node-id", numa_node_idx as u32)?;
                 }
             }

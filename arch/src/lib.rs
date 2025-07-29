@@ -123,7 +123,7 @@ fn pagesize() -> usize {
 pub struct NumaNode {
     pub memory_regions: Vec<Arc<GuestRegionMmap>>,
     pub hotplug_regions: Vec<Arc<GuestRegionMmap>>,
-    pub cpus: Vec<u8>,
+    pub cpus: Vec<u32>,
     pub pci_segments: Vec<u16>,
     pub distances: BTreeMap<u32, u8>,
     pub memory_zones: Vec<String>,

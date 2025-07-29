@@ -1262,7 +1262,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[cfg(target_arch = "aarch64")]
-    fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
+    fn setup_regs(&self, cpu_id: u32, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
         let arr_reg_name_value = [(
             hv_register_name_HV_ARM64_REGISTER_PSTATE,
             regs::PSTATE_FAULT_BITS_64,
@@ -1324,7 +1324,7 @@ impl cpu::Vcpu for MshvVcpu {
         &self,
         _vm: &Arc<dyn crate::Vm>,
         _kvi: &mut crate::VcpuInit,
-        _id: u8,
+        _id: u32,
     ) -> cpu::Result<()> {
         Ok(())
     }
@@ -1834,9 +1834,10 @@ impl vm::Vm for MshvVm {
     ///
     fn create_vcpu(
         &self,
-        id: u8,
+        id: u32,
         vm_ops: Option<Arc<dyn VmOps>>,
     ) -> vm::Result<Arc<dyn cpu::Vcpu>> {
+        let id: u8 = id.try_into().unwrap();
         let vcpu_fd = self
             .fd
             .create_vcpu(id)
