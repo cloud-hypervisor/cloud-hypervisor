@@ -820,14 +820,14 @@ pub fn generate_common_cpuid(
 
 pub fn configure_vcpu(
     vcpu: &Arc<dyn hypervisor::Vcpu>,
-    id: u8,
+    id: u32,
     boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
     cpuid: Vec<CpuIdEntry>,
     kvm_hyperv: bool,
     cpu_vendor: CpuVendor,
     topology: Option<(u8, u8, u8)>,
 ) -> super::Result<()> {
-    let x2apic_id = get_x2apic_id(id as u32, topology);
+    let x2apic_id = get_x2apic_id(id, topology);
 
     // Per vCPU CPUID changes; common are handled via generate_common_cpuid()
     let mut cpuid = cpuid;
@@ -946,7 +946,7 @@ pub fn configure_system(
     cmdline_addr: GuestAddress,
     cmdline_size: usize,
     initramfs: &Option<InitramfsConfig>,
-    _num_cpus: u8,
+    _num_cpus: u32,
     setup_header: Option<setup_header>,
     rsdp_addr: Option<GuestAddress>,
     sgx_epc_region: Option<SgxEpcRegion>,
@@ -1365,10 +1365,10 @@ fn update_cpuid_topology(
     cores_per_die: u8,
     dies_per_package: u8,
     cpu_vendor: CpuVendor,
-    id: u8,
+    id: u32,
 ) {
     let x2apic_id = get_x2apic_id(
-        id as u32,
+        id,
         Some((threads_per_core, cores_per_die, dies_per_package)),
     );
 
