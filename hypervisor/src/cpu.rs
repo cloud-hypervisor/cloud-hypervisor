@@ -471,7 +471,7 @@ pub trait Vcpu: Send + Sync {
         &self,
         vm: &Arc<dyn crate::Vm>,
         kvi: &mut VcpuInit,
-        id: u8,
+        id: u32,
     ) -> Result<()>;
     ///
     /// Returns VcpuInit with default value set
@@ -498,7 +498,7 @@ pub trait Vcpu: Send + Sync {
     /// Configure core registers for a given CPU.
     ///
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-    fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> Result<()>;
+    fn setup_regs(&self, cpu_id: u32, boot_ip: u64, fdt_start: u64) -> Result<()>;
     ///
     /// Check if the CPU supports PMU
     ///

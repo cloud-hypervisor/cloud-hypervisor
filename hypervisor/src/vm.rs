@@ -319,7 +319,7 @@ pub trait Vm: Send + Sync + Any {
     /// Unregister an event that will, when signaled, trigger the `gsi` IRQ.
     fn unregister_irqfd(&self, fd: &EventFd, gsi: u32) -> Result<()>;
     /// Creates a new KVM vCPU file descriptor and maps the memory corresponding
-    fn create_vcpu(&self, id: u8, vm_ops: Option<Arc<dyn VmOps>>) -> Result<Arc<dyn Vcpu>>;
+    fn create_vcpu(&self, id: u32, vm_ops: Option<Arc<dyn VmOps>>) -> Result<Arc<dyn Vcpu>>;
     #[cfg(target_arch = "aarch64")]
     fn create_vgic(&self, config: VgicConfig) -> Result<Arc<Mutex<dyn Vgic>>>;
     #[cfg(target_arch = "riscv64")]

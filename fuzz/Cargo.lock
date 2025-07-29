@@ -61,9 +61,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.95"
+version = "1.0.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34ac096ce696dc2fcabef30516bb13c0a68a11d30131d3df6f04711467681b04"
+checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
 
 [[package]]
 name = "arbitrary"
@@ -93,7 +93,6 @@ dependencies = [
  "uuid",
  "vm-fdt",
  "vm-memory",
- "vm-migration",
  "vmm-sys-util",
 ]
 
@@ -564,13 +563,13 @@ dependencies = [
 
 [[package]]
 name = "landlock"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18738c5d4c7fae6727a96adb94722ef7ce82f3eafea0a11777e258a93816537e"
+checksum = "b3d2ef408b88e913bfc6594f5e693d57676f6463ded7d8bf994175364320c706"
 dependencies = [
  "enumflags2",
  "libc",
- "thiserror 1.0.64",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -936,9 +935,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.9.0"
+version = "3.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69cecfa94848272156ea67b2b1a53f20fc7bc638c4a46d2f8abde08f05f4b857"
+checksum = "f2c45cd61fefa9db6f254525d46e392b852e0e61d9a1fd36e5bd183450a556d5"
 dependencies = [
  "serde",
  "serde_derive",
@@ -947,9 +946,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.9.0"
+version = "3.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8fee4991ef4f274617a51ad4af30519438dacb2f56ac773b08a1922ff743350"
+checksum = "de90945e6565ce0d9a25098082ed4ee4002e047cb59892c318d66821e14bb30f"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -1080,7 +1079,6 @@ name = "tpm"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "byteorder",
  "libc",
  "log",
  "net_gen",
@@ -1190,20 +1188,17 @@ name = "virtio-devices"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arc-swap",
  "block",
  "byteorder",
  "epoll",
  "event_monitor",
  "libc",
  "log",
- "net_gen",
  "net_util",
  "pci",
  "rate_limiter",
  "seccompiler",
  "serde",
- "serde_json",
  "serde_with",
  "serial_buffer",
  "thiserror 2.0.12",
@@ -1243,12 +1238,10 @@ dependencies = [
 name = "vm-device"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "hypervisor",
  "serde",
  "thiserror 2.0.12",
  "vfio-ioctls",
- "vm-memory",
  "vmm-sys-util",
 ]
 
@@ -1284,7 +1277,6 @@ dependencies = [
 name = "vm-virtio"
 version = "0.1.0"
 dependencies = [
- "log",
  "virtio-queue",
  "vm-memory",
 ]
@@ -1295,7 +1287,6 @@ version = "0.1.0"
 dependencies = [
  "acpi_tables",
  "anyhow",
- "arc-swap",
  "arch",
  "bitflags 2.9.0",
  "block",
@@ -1329,7 +1320,6 @@ dependencies = [
  "vfio_user",
  "virtio-bindings",
  "virtio-devices",
- "virtio-queue",
  "vm-allocator",
  "vm-device",
  "vm-memory",

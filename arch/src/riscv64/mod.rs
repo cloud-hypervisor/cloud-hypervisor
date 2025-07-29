@@ -57,7 +57,7 @@ pub struct EntryPoint {
 /// Configure the specified VCPU, and return its MPIDR.
 pub fn configure_vcpu(
     vcpu: &Arc<dyn hypervisor::Vcpu>,
-    id: u8,
+    id: u32,
     boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
 ) -> super::Result<()> {
     if let Some((kernel_entry_point, _guest_memory)) = boot_setup {
