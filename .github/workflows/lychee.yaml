@@ -1,7 +1,5 @@
 name: Link Check (lychee)
-on:
-  pull_request
-
+on: pull_request
 jobs:
   link_check:
     name: Link Check
@@ -9,8 +7,39 @@ jobs:
     steps:
       - name: Code checkout
         uses: actions/checkout@v4
+        with:
+          # Fetch the entire history so git diff can compare against the base branch
+          fetch-depth: 0
+      - name: Get changed files in PR
+        id: changed-files
+        uses: tj-actions/changed-files@v40 # Using a dedicated action for robustness
+        with:
+          # Compare the HEAD of the PR with the merge-base (where the PR branches off)
+          base_sha: ${{ github.event.pull_request.base.sha }}
 
-      - name: Link Availability Check
+      # NEW STEP: Print all changed-files outputs for verification
+      - name: Verify Changed Files
+        run: |
+          echo "--- tj-actions/changed-files Outputs ---"
+          echo "any_changed: ${{ steps.changed-files.outputs.any_changed }}"
+          echo "all_changed_files: ${{ steps.changed-files.outputs.all_changed_files }}"
+          echo "added_files: ${{ steps.changed-files.outputs.added_files }}"
+          echo "modified_files: ${{ steps.changed-files.outputs.modified_files }}"
+          echo "deleted_files: ${{ steps.changed-files.outputs.deleted_files }}"
+          echo "renamed_files: ${{ steps.changed-files.outputs.renamed_files }}"
+          echo "----------------------------------------"
+          # This will also show if the all_changed_files string is empty or not
+          if [ -n "${{ steps.changed-files.outputs.all_changed_files }}" ]; then
+            echo "Detected changes: all_changed_files output is NOT empty."
+          else
+            echo "No changes detected: all_changed_files output IS empty."
+          fi
+      - name: Link Availability Check (Diff Only)
+        # MODIFIED: Only run lychee if the 'all_changed_files' output is not an empty string
+        if: ${{ steps.changed-files.outputs.all_changed_files != '' }}
         uses: lycheeverse/lychee-action@master
         with:
-          args: --verbose --config .lychee.toml .
+          # Pass the space-separated list of changed files to lychee
+          args: --verbose --config .lychee.toml ${{ steps.changed-files.outputs.all_changed_files }}
+          failIfEmpty: false
+          fail: true
