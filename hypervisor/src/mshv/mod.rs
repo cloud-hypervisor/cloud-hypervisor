@@ -640,6 +640,21 @@ impl cpu::Vcpu for MshvVcpu {
                     debug!("HALT");
                     Ok(cpu::VmExit::Reset)
                 }
+                #[cfg(target_arch = "aarch64")]
+                hv_message_type_HVMSG_ARM64_RESET_INTERCEPT => {
+                    let reset_msg = x.to_reset_intercept_msg().unwrap();
+
+                    match reset_msg.reset_type {
+                        hv_arm64_reset_type_HV_ARM64_RESET_TYPE_REBOOT => Ok(cpu::VmExit::Reset),
+                        hv_arm64_reset_type_HV_ARM64_RESET_TYPE_POWER_OFF => {
+                            Ok(cpu::VmExit::Shutdown)
+                        }
+                        _ => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
+                            "Unhandled VCPU exit (RESET_INTERCEPT): reset type: {:?}",
+                            reset_msg.reset_type
+                        ))),
+                    }
+                }
                 hv_message_type_HVMSG_UNRECOVERABLE_EXCEPTION => {
                     warn!("TRIPLE FAULT");
                     Ok(cpu::VmExit::Shutdown)
