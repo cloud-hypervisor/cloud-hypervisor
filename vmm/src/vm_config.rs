@@ -8,6 +8,7 @@ use std::{fs, result};
 
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
+use virtio_devices::vhost_user::VhostUserConfig;
 use virtio_devices::RateLimiterConfig;
 
 use crate::landlock::LandlockError;
@@ -444,14 +445,13 @@ pub struct PvmemcontrolConfig {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct GenericConfig {
-    pub socket: PathBuf,
-    pub num_queues: usize,
-    pub queue_size: u16,
+    pub vu_cfg: VhostUserConfig,
     pub id: String,
     #[serde(default)]
     pub pci_segment: u16,
     pub device_type: u32,
     pub min_queues: u16,
+    pub avail_features: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]

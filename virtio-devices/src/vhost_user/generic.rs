@@ -16,10 +16,10 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vmm_sys_util::eventfd::EventFd;
 
 use super::vu_common_ctrl::VhostUserHandle;
-use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
+use super::{Error, Result};
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
-use crate::vhost_user::VhostUserCommon;
+use crate::vhost_user::{VhostUserCommon, VhostUserConfig};
 use crate::{
     ActivateResult, GuestMemoryMmap, GuestRegionMmap, MmapRegion, UserspaceMapping, VirtioCommon,
     VirtioDevice, VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_IOMMU_PLATFORM,
@@ -56,11 +56,14 @@ impl Generic {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
-        path: &str,
-        num_queues: usize,
-        queue_size: u16,
+        VhostUserConfig {
+            queue_size,
+            num_queues,
+            socket,
+        }: VhostUserConfig,
         device_type: u32,
         min_queues: u16,
+        avail_features: u64,
         cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
@@ -68,7 +71,7 @@ impl Generic {
         state: Option<State>,
     ) -> Result<Generic> {
         // Connect to the vhost-user socket.
-        let mut vu = VhostUserHandle::connect_vhost_user(false, path, num_queues as u64, false)?;
+        let mut vu = VhostUserHandle::connect_vhost_user(false, &socket, num_queues as u64, false)?;
 
         let (avail_features, acked_features, acked_protocol_features, vu_num_queues, paused) =
             if let Some(state) = state {
@@ -88,9 +91,12 @@ impl Generic {
                 )
             } else {
                 // Filling device and vring features VMM supports.
-                let avail_features = DEFAULT_VIRTIO_FEATURES;
 
-                let avail_protocol_features = VhostUserProtocolFeatures::all();
+                let avail_protocol_features = VhostUserProtocolFeatures::MQ
+                    | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
+                    | VhostUserProtocolFeatures::REPLY_ACK
+                    | VhostUserProtocolFeatures::INFLIGHT_SHMFD
+                    | VhostUserProtocolFeatures::LOG_SHMFD;
 
                 let (acked_features, acked_protocol_features) =
                     vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
@@ -147,7 +153,7 @@ impl Generic {
             vu_common: VhostUserCommon {
                 vu: Some(Arc::new(Mutex::new(vu))),
                 acked_protocol_features,
-                socket_path: path.to_string(),
+                socket_path: socket,
                 vu_num_queues,
                 migration_started: false,
                 server: false,

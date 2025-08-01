@@ -178,6 +178,10 @@ pub enum DeviceManagerError {
     #[error("Cannot create virtio-rng device")]
     CreateVirtioRng(#[source] io::Error),
 
+    /// Cannot create virtio-generic device
+    #[error("Cannot create virtio-generic device")]
+    CreateVirtioGeneric(#[source] virtio_devices::vhost_user::Error),
+
     /// Cannot create virtio-fs device
     #[error("Cannot create virtio-fs device")]
     CreateVirtioFs(#[source] virtio_devices::vhost_user::Error),
@@ -2985,43 +2989,37 @@ impl DeviceManager {
 
         let mut node = device_node!(id);
 
-        if let Some(generic_socket) = generic_cfg.socket.to_str() {
-            let virtio_generic_device = Arc::new(Mutex::new(
-                virtio_devices::vhost_user::Generic::new(
-                    id.clone(),
-                    generic_socket,
-                    generic_cfg.num_queues,
-                    generic_cfg.queue_size,
-                    generic_cfg.device_type,
-                    generic_cfg.min_queues,
-                    None,
-                    self.seccomp_action.clone(),
-                    self.exit_evt
-                        .try_clone()
-                        .map_err(DeviceManagerError::EventFd)?,
-                    self.force_iommu,
-                    state_from_id(self.snapshot.as_ref(), id.as_str())
-                        .map_err(DeviceManagerError::RestoreGetState)?,
-                )
-                .map_err(DeviceManagerError::CreateVirtioFs)?,
-            ));
+        let virtio_generic_device = Arc::new(Mutex::new(
+            virtio_devices::vhost_user::Generic::new(
+                id.clone(),
+                generic_cfg.vu_cfg.clone(),
+                generic_cfg.device_type,
+                generic_cfg.min_queues,
+                generic_cfg.avail_features,
+                None,
+                self.seccomp_action.clone(),
+                self.exit_evt
+                    .try_clone()
+                    .map_err(DeviceManagerError::EventFd)?,
+                self.force_iommu,
+                state_from_id(self.snapshot.as_ref(), id.as_str())
+                    .map_err(DeviceManagerError::RestoreGetState)?,
+            )
+            .map_err(DeviceManagerError::CreateVirtioGeneric)?,
+        ));
 
-            // Update the device tree with the migratable device.
-            node.migratable =
-                Some(Arc::clone(&virtio_generic_device) as Arc<Mutex<dyn Migratable>>);
-            self.device_tree.lock().unwrap().insert(id.clone(), node);
+        // Update the device tree with the migratable device.
+        node.migratable = Some(Arc::clone(&virtio_generic_device) as Arc<Mutex<dyn Migratable>>);
+        self.device_tree.lock().unwrap().insert(id.clone(), node);
 
-            Ok(MetaVirtioDevice {
-                virtio_device: Arc::clone(&virtio_generic_device)
-                    as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-                iommu: false,
-                id,
-                pci_segment: generic_cfg.pci_segment,
-                dma_handler: None,
-            })
-        } else {
-            Err(DeviceManagerError::NoVirtioFsSock)
-        }
+        Ok(MetaVirtioDevice {
+            virtio_device: Arc::clone(&virtio_generic_device)
+                as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
+            iommu: false,
+            id,
+            pci_segment: generic_cfg.pci_segment,
+            dma_handler: None,
+        })
     }
 
     fn make_virtio_generic_devices(&mut self) -> DeviceManagerResult<Vec<MetaVirtioDevice>> {

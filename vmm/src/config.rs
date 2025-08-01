@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_bindings::virtio_blk::VIRTIO_BLK_ID_BYTES;
 use virtio_devices::block::MINIMUM_BLOCK_QUEUE_SIZE;
-use virtio_devices::vhost_user::VIRTIO_FS_TAG_LEN;
+use virtio_devices::vhost_user::{VhostUserConfig, VIRTIO_FS_TAG_LEN};
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
 
 use crate::landlock::LandlockAccess;
@@ -46,6 +46,9 @@ pub enum Error {
     /// Generic virtio ID is missing
     #[error("Error parsing --generic: virtio ID missing")]
     ParseGenericVirtioIdMissing,
+    /// Generic available features is missing
+    #[error("Error parsing --generic: available features missing")]
+    ParseGenericAvailFeaturesMissing,
     /// Generic min queues is missing
     #[error("Error parsing --generic: min queues missing")]
     ParseGenericMinQueuesMissing,
@@ -1573,10 +1576,11 @@ impl GenericConfig {
             .add("min_queues")
             .add("socket")
             .add("id")
-            .add("pci_segment");
+            .add("pci_segment")
+            .add("avail_features");
         parser.parse(generic).map_err(Error::ParseGeneric)?;
 
-        let socket = PathBuf::from(parser.get("socket").ok_or(Error::ParseGenericSockMissing)?);
+        let socket = parser.get("socket").ok_or(Error::ParseGenericSockMissing)?;
 
         let queue_size = parser
             .convert("queue_size")
@@ -1600,24 +1604,27 @@ impl GenericConfig {
             .convert("pci_segment")
             .map_err(Error::ParseGeneric)?
             .unwrap_or_default();
+        let avail_features = parser
+            .convert("avail_features")
+            .map_err(Error::ParseGeneric)?
+            .ok_or(Error::ParseGenericAvailFeaturesMissing)?;
 
         Ok(GenericConfig {
-            socket,
-            num_queues,
-            queue_size,
+            vu_cfg: VhostUserConfig {
+                socket,
+                num_queues,
+                queue_size,
+            },
             min_queues,
             device_type,
             id,
             pci_segment,
+            avail_features,
         })
     }
 
     // TODO: avoid duplication with FsConfig
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if self.num_queues > vm_config.cpus.boot_vcpus as usize {
-            return Err(ValidationError::TooManyQueues);
-        }
-
         if let Some(platform_config) = vm_config.platform.as_ref() {
             if self.pci_segment >= platform_config.num_pci_segments {
                 return Err(ValidationError::InvalidPciSegment(self.pci_segment));
@@ -3145,6 +3152,7 @@ mod tests {
     use std::os::unix::io::AsRawFd;
 
     use net_util::MacAddr;
+    use virtio_devices::vhost_user::VhostUserConfig;
 
     use super::*;
 
@@ -3613,13 +3621,16 @@ mod tests {
 
     fn generic_fixture() -> GenericConfig {
         GenericConfig {
-            socket: PathBuf::from("/tmp/generic"),
-            num_queues: 20,
+            vu_cfg: VhostUserConfig {
+                socket: "/tmp/generic".to_owned(),
+                queue_size: 1024,
+                num_queues: 20,
+            },
             min_queues: 5,
             id: "Something".to_owned(),
             device_type: 100,
+            avail_features: u64::MAX,
             pci_segment: 0,
-            queue_size: 1024,
         }
     }
 
