@@ -8,6 +8,7 @@ use std::{fs, result};
 
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
+use virtio_devices::vhost_user::VhostUserConfig;
 use virtio_devices::RateLimiterConfig;
 
 use crate::landlock::LandlockError;
@@ -443,6 +444,17 @@ pub struct BalloonConfig {
 pub struct PvmemcontrolConfig {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct GenericConfig {
+    pub vu_cfg: VhostUserConfig,
+    pub id: String,
+    #[serde(default)]
+    pub pci_segment: u16,
+    pub device_type: u32,
+    pub min_queues: u16,
+    pub avail_features: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct FsConfig {
     pub tag: String,
     pub socket: PathBuf,
@@ -781,6 +793,7 @@ pub struct VmConfig {
     #[serde(default)]
     pub rng: RngConfig,
     pub balloon: Option<BalloonConfig>,
+    pub generic: Option<Vec<GenericConfig>>,
     pub fs: Option<Vec<FsConfig>>,
     pub pmem: Option<Vec<PmemConfig>>,
     #[serde(default = "default_serial")]

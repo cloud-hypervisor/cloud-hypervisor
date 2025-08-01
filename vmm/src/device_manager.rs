@@ -109,9 +109,9 @@ use crate::memory_manager::{Error as MemoryManagerError, MemoryManager, MEMORY_M
 use crate::pci_segment::PciSegment;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 use crate::vm_config::{
-    ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
-    VdpaConfig, VhostMode, VmConfig, VsockConfig, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS,
-    DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
+    ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, GenericConfig, NetConfig, PmemConfig,
+    UserDeviceConfig, VdpaConfig, VhostMode, VmConfig, VsockConfig,
+    DEFAULT_IOMMU_ADDRESS_WIDTH_BITS, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
 };
 use crate::{device_node, GuestRegionMmap, PciDeviceInfo, DEVICE_MANAGER_SNAPSHOT_ID};
 
@@ -177,6 +177,10 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-rng device
     #[error("Cannot create virtio-rng device")]
     CreateVirtioRng(#[source] io::Error),
+
+    /// Cannot create virtio-generic device
+    #[error("Cannot create virtio-generic device")]
+    CreateVirtioGeneric(#[source] virtio_devices::vhost_user::Error),
 
     /// Cannot create virtio-fs device
     #[error("Cannot create virtio-fs device")]
@@ -2454,6 +2458,8 @@ impl DeviceManager {
         devices.append(&mut self.make_virtio_net_devices()?);
         devices.append(&mut self.make_virtio_rng_devices()?);
 
+        devices.append(&mut self.make_virtio_generic_devices()?);
+
         // Add virtio-fs if required
         devices.append(&mut self.make_virtio_fs_devices()?);
 
@@ -2970,6 +2976,62 @@ impl DeviceManager {
                 .unwrap()
                 .insert(id.clone(), device_node!(id, virtio_rng_device));
         }
+
+        Ok(devices)
+    }
+    fn make_virtio_generic_device(
+        &mut self,
+        generic_cfg: &mut GenericConfig,
+    ) -> DeviceManagerResult<MetaVirtioDevice> {
+        let id = generic_cfg.id.clone();
+
+        info!("Creating virtio-generic device: {:?}", generic_cfg);
+
+        let mut node = device_node!(id);
+
+        let virtio_generic_device = Arc::new(Mutex::new(
+            virtio_devices::vhost_user::Generic::new(
+                id.clone(),
+                generic_cfg.vu_cfg.clone(),
+                generic_cfg.device_type,
+                generic_cfg.min_queues,
+                generic_cfg.avail_features,
+                None,
+                self.seccomp_action.clone(),
+                self.exit_evt
+                    .try_clone()
+                    .map_err(DeviceManagerError::EventFd)?,
+                self.force_iommu,
+                state_from_id(self.snapshot.as_ref(), id.as_str())
+                    .map_err(DeviceManagerError::RestoreGetState)?,
+            )
+            .map_err(DeviceManagerError::CreateVirtioGeneric)?,
+        ));
+
+        // Update the device tree with the migratable device.
+        node.migratable = Some(Arc::clone(&virtio_generic_device) as Arc<Mutex<dyn Migratable>>);
+        self.device_tree.lock().unwrap().insert(id.clone(), node);
+
+        Ok(MetaVirtioDevice {
+            virtio_device: Arc::clone(&virtio_generic_device)
+                as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
+            iommu: false,
+            id,
+            pci_segment: generic_cfg.pci_segment,
+            dma_handler: None,
+        })
+    }
+
+    fn make_virtio_generic_devices(&mut self) -> DeviceManagerResult<Vec<MetaVirtioDevice>> {
+        let mut devices = Vec::new();
+
+        let mut generic_devices = self.config.lock().unwrap().generic.clone();
+        if let Some(generic_list_cfg) = &mut generic_devices {
+            for generic_cfg in generic_list_cfg.iter_mut() {
+                devices.push(self.make_virtio_generic_device(generic_cfg)?);
+            }
+        }
+        self.config.lock().unwrap().generic = generic_devices;
 
         Ok(devices)
     }
