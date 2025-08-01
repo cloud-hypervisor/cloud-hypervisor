@@ -309,9 +309,6 @@ pub enum Error {
     #[error("Error joining kernel loading thread")]
     KernelLoadThreadJoin(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
-    #[error("Payload configuration is not bootable")]
-    InvalidPayload,
-
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     #[error("Error coredumping VM")]
     Coredump(#[source] GuestDebuggableError),
@@ -1075,7 +1072,8 @@ impl Vm {
                 Self::load_firmware(&firmware, memory_manager)?;
                 arch::layout::UEFI_START
             }
-            _ => return Err(Error::InvalidPayload),
+            // If we land here, we messed up in `PayloadConfigError::validate` earlier.
+            _ => panic!("Unsupported boot configuration"),
         };
 
         Ok(EntryPoint { entry_addr })
@@ -1116,7 +1114,8 @@ impl Vm {
                 // TODO: UEFI for riscv64 is scheduled to next stage.
                 unimplemented!()
             }
-            _ => return Err(Error::InvalidPayload),
+            // If we land here, we messed up in `PayloadConfigError::validate` earlier.
+            _ => panic!("Unsupported boot configuration"),
         };
 
         Ok(EntryPoint { entry_addr })
@@ -1246,7 +1245,8 @@ impl Vm {
                 let cmdline = Self::generate_cmdline(payload)?;
                 Self::load_kernel(kernel, Some(cmdline), memory_manager)
             }
-            _ => Err(Error::InvalidPayload),
+            // If we land here, we messed up in `PayloadConfigError::validate` earlier.
+            _ => panic!("Unsupported boot configuration"),
         }
     }
 
@@ -1264,7 +1264,8 @@ impl Vm {
                 let kernel = File::open(kernel).map_err(Error::KernelFile)?;
                 Self::load_kernel(None, Some(kernel), memory_manager)
             }
-            _ => Err(Error::InvalidPayload),
+            // If we land here, we messed up in `PayloadConfigError::validate` earlier.
+            _ => panic!("Unsupported boot configuration"),
         }
     }
 
