@@ -34,5 +34,6 @@ arch = { path = "../arch" }
 
 [features]
 default = []
+ivshmem = []
 kvm = ["arch/kvm"]
 pvmemcontrol = []

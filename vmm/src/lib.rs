@@ -2434,6 +2434,8 @@ mod unit_tests {
             preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
+            #[cfg(feature = "ivshmem")]
+            ivshmem: None,
         })
     }
 
