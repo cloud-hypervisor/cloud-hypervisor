@@ -34,6 +34,8 @@ use arch::PciSpaceInfo;
 use arch::{get_host_cpu_phys_bits, EntryPoint, NumaNode, NumaNodes};
 #[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller;
+#[cfg(feature = "fw_cfg")]
+use devices::legacy::fw_cfg::FwCfgItem;
 use devices::AcpiNotificationFlags;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
@@ -91,6 +93,8 @@ use crate::migration::get_vm_snapshot;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::migration::url_to_file;
 use crate::migration::{url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
+#[cfg(feature = "fw_cfg")]
+use crate::vm_config::FwCfgConfig;
 use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, HotplugMethod, NetConfig, NumaConfig, PayloadConfig,
     PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
@@ -335,6 +339,34 @@ pub enum Error {
 
     #[error("Error locking disk images: Another instance likely holds a lock")]
     LockingError(#[source] DeviceManagerError),
+
+    #[cfg(feature = "fw_cfg")]
+    #[error("Fw Cfg missing kernel")]
+    MissingFwCfgKernelFile(#[source] io::Error),
+
+    #[cfg(feature = "fw_cfg")]
+    #[error("Fw Cfg missing initramfs")]
+    MissingFwCfgInitramfs(#[source] io::Error),
+
+    #[cfg(feature = "fw_cfg")]
+    #[error("Fw Cfg missing kernel cmdline")]
+    MissingFwCfgCmdline,
+
+    #[cfg(feature = "fw_cfg")]
+    #[error("Error creating e820 map")]
+    CreatingE820Map(#[source] io::Error),
+
+    #[cfg(feature = "fw_cfg")]
+    #[error("Error adding fw_cfg item")]
+    AddingFwCfgItem(#[source] io::Error),
+
+    #[cfg(feature = "fw_cfg")]
+    #[error("Error populating fw_cfg")]
+    ErrorPopulatingFwCfg(#[source] io::Error),
+
+    #[cfg(feature = "fw_cfg")]
+    #[error("Error using fw_cfg while disabled")]
+    FwCfgDisabled,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -716,6 +748,24 @@ impl Vm {
             vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
         }
 
+        #[cfg(feature = "fw_cfg")]
+        {
+            let fw_cfg_config = config
+                .lock()
+                .unwrap()
+                .payload
+                .as_ref()
+                .map(|p| p.fw_cfg_config.is_some())
+                .unwrap_or(false);
+            if fw_cfg_config {
+                device_manager
+                    .lock()
+                    .unwrap()
+                    .create_fw_cfg_device()
+                    .map_err(Error::DeviceManager)?;
+            }
+        }
+
         #[cfg(feature = "tdx")]
         let kernel = config
             .lock()
@@ -771,6 +821,90 @@ impl Vm {
             stop_on_boot,
             load_payload_handle,
         })
+    }
+
+    #[cfg(feature = "fw_cfg")]
+    fn populate_fw_cfg(
+        fw_cfg_config: &FwCfgConfig,
+        device_manager: &Arc<Mutex<DeviceManager>>,
+        config: &Arc<Mutex<VmConfig>>,
+    ) -> Result<()> {
+        let mut e820_option: Option<usize> = None;
+        if fw_cfg_config.e820 {
+            e820_option = Some(config.lock().unwrap().memory.size as usize);
+        }
+        let mut kernel_option: Option<File> = None;
+        if fw_cfg_config.kernel {
+            let kernel = config
+                .lock()
+                .unwrap()
+                .payload
+                .as_ref()
+                .map(|p| p.kernel.as_ref().map(File::open))
+                .unwrap_or_default()
+                .transpose()
+                .map_err(Error::MissingFwCfgKernelFile)?;
+            kernel_option = kernel;
+        }
+        let mut cmdline_option: Option<std::ffi::CString> = None;
+        if fw_cfg_config.cmdline {
+            let cmdline = Vm::generate_cmdline(
+                config.lock().unwrap().payload.as_ref().unwrap(),
+                #[cfg(target_arch = "aarch64")]
+                device_manager,
+            )
+            .map_err(|_| Error::MissingFwCfgCmdline)?
+            .as_cstring()
+            .map_err(|_| Error::MissingFwCfgCmdline)?;
+            cmdline_option = Some(cmdline);
+        }
+        let mut initramfs_option: Option<File> = None;
+        if fw_cfg_config.initramfs {
+            let initramfs = config
+                .lock()
+                .unwrap()
+                .payload
+                .as_ref()
+                .map(|p| p.initramfs.as_ref().map(File::open))
+                .unwrap_or_default()
+                .transpose()
+                .map_err(Error::MissingFwCfgInitramfs)?;
+            // We measure the initramfs when running Oak Containers in SNP mode (initramfs = Stage1)
+            // o/w use Stage0 to launch cloud disk images
+            initramfs_option = initramfs;
+        }
+        let mut fw_cfg_item_list_option: Option<Vec<FwCfgItem>> = None;
+        if let Some(fw_cfg_files) = &fw_cfg_config.items {
+            let mut fw_cfg_item_list = vec![];
+            for fw_cfg_file in fw_cfg_files.item_list.clone() {
+                fw_cfg_item_list.push(FwCfgItem {
+                    name: fw_cfg_file.name,
+                    content: devices::legacy::fw_cfg::FwCfgContent::File(
+                        0,
+                        File::open(fw_cfg_file.file).map_err(Error::AddingFwCfgItem)?,
+                    ),
+                });
+            }
+            fw_cfg_item_list_option = Some(fw_cfg_item_list);
+        }
+
+        let device_manager_binding = device_manager.lock().unwrap();
+        let Some(fw_cfg) = device_manager_binding.fw_cfg() else {
+            return Err(Error::FwCfgDisabled);
+        };
+
+        fw_cfg
+            .lock()
+            .unwrap()
+            .populate_fw_cfg(
+                e820_option,
+                kernel_option,
+                initramfs_option,
+                cmdline_option,
+                fw_cfg_item_list_option,
+            )
+            .map_err(Error::ErrorPopulatingFwCfg)?;
+        Ok(())
     }
 
     fn create_numa_nodes(
@@ -2250,7 +2384,43 @@ impl Vm {
         } else {
             VmState::Running
         };
+
         current_state.valid_transition(new_state)?;
+
+        #[cfg(feature = "fw_cfg")]
+        {
+            let fw_cfg_enabled = self
+                .config
+                .lock()
+                .unwrap()
+                .payload
+                .as_ref()
+                .map(|p| p.fw_cfg_config.is_some())
+                .unwrap_or(false);
+            if fw_cfg_enabled {
+                let fw_cfg_config = self
+                    .config
+                    .lock()
+                    .unwrap()
+                    .payload
+                    .as_ref()
+                    .map(|p| p.fw_cfg_config.clone())
+                    .unwrap_or_default()
+                    .ok_or(Error::VmMissingConfig)?;
+                Self::populate_fw_cfg(&fw_cfg_config, &self.device_manager, &self.config)?;
+
+                if fw_cfg_config.acpi_tables {
+                    let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
+                    crate::acpi::create_acpi_tables_for_fw_cfg(
+                        &self.device_manager,
+                        &self.cpu_manager,
+                        &self.memory_manager,
+                        &self.numa_nodes,
+                        tpm_enabled,
+                    );
+                }
+            }
+        }
 
         // Do earlier to parallelise with loading kernel
         #[cfg(target_arch = "x86_64")]

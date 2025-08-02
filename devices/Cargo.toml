@@ -8,11 +8,17 @@ version = "0.1.0"
 acpi_tables = { workspace = true }
 anyhow = { workspace = true }
 arch = { path = "../arch" }
+bitfield-struct = { version = "0.10.1", optional = true }
 bitflags = { workspace = true }
 byteorder = { workspace = true }
 event_monitor = { path = "../event_monitor" }
 hypervisor = { path = "../hypervisor" }
 libc = { workspace = true }
+linux-loader = { workspace = true, features = [
+  "bzimage",
+  "elf",
+  "pe",
+], optional = true }
 log = { workspace = true }
 num_enum = "0.7.2"
 pci = { path = "../pci" }
@@ -28,11 +34,16 @@ vm-memory = { workspace = true, features = [
 ] }
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = { workspace = true }
+zerocopy = { version = "0.8.26", features = [
+  "alloc",
+  "derive",
+], optional = true }
 
 [target.'cfg(any(target_arch = "aarch64", target_arch = "riscv64"))'.dependencies]
 arch = { path = "../arch" }
 
 [features]
 default = []
+fw_cfg = ["arch/fw_cfg", "bitfield-struct", "linux-loader", "zerocopy"]
 kvm = ["arch/kvm"]
 pvmemcontrol = []
