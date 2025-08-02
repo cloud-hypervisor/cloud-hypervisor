@@ -725,7 +725,7 @@ fn resize_config(
     memory: Option<&str>,
     balloon: Option<&str>,
 ) -> Result<String, Error> {
-    let desired_vcpus: Option<u8> = if let Some(cpus) = cpus {
+    let desired_vcpus: Option<u32> = if let Some(cpus) = cpus {
         Some(cpus.parse().map_err(Error::InvalidCpuCount)?)
     } else {
         None

@@ -121,7 +121,7 @@ fn mpf_intel_compute_checksum(v: &mpspec::mpf_intel) -> u8 {
     (!checksum).wrapping_add(1)
 }
 
-fn compute_mp_size(num_cpus: u8) -> usize {
+fn compute_mp_size(num_cpus: u32) -> usize {
     mem::size_of::<MpfIntelWrapper>()
         + mem::size_of::<MpcTableWrapper>()
         + mem::size_of::<MpcCpuWrapper>() * (num_cpus as usize)
@@ -135,12 +135,12 @@ fn compute_mp_size(num_cpus: u8) -> usize {
 pub fn setup_mptable(
     offset: GuestAddress,
     mem: &GuestMemoryMmap,
-    num_cpus: u8,
+    num_cpus: u32,
     topology: Option<(u8, u8, u8)>,
 ) -> Result<()> {
     if num_cpus > 0 {
         let cpu_id_max = num_cpus - 1;
-        let x2apic_id_max = get_x2apic_id(cpu_id_max.into(), topology);
+        let x2apic_id_max = get_x2apic_id(cpu_id_max, topology);
         if x2apic_id_max >= MAX_SUPPORTED_CPUS {
             return Err(Error::TooManyCpus);
         }
@@ -195,7 +195,7 @@ pub fn setup_mptable(
         for cpu_id in 0..num_cpus {
             let mut mpc_cpu = MpcCpuWrapper(mpspec::mpc_cpu::default());
             mpc_cpu.0.type_ = mpspec::MP_PROCESSOR as u8;
-            mpc_cpu.0.apicid = get_x2apic_id(cpu_id as u32, topology) as u8;
+            mpc_cpu.0.apicid = get_x2apic_id(cpu_id, topology) as u8;
             mpc_cpu.0.apicver = APIC_VERSION;
             mpc_cpu.0.cpuflag = mpspec::CPU_ENABLED as u8
                 | if cpu_id == 0 {
@@ -392,13 +392,11 @@ mod tests {
 
     #[test]
     fn cpu_entry_count() {
-        let mem = GuestMemoryMmap::from_ranges(&[(
-            MPTABLE_START,
-            compute_mp_size(MAX_SUPPORTED_CPUS as u8),
-        )])
-        .unwrap();
+        let mem =
+            GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(MAX_SUPPORTED_CPUS))])
+                .unwrap();
 
-        for i in 0..MAX_SUPPORTED_CPUS as u8 {
+        for i in 0..MAX_SUPPORTED_CPUS {
             setup_mptable(MPTABLE_START, &mem, i, None).unwrap();
 
             let mpf_intel: MpfIntelWrapper = mem.read_obj(MPTABLE_START).unwrap();
@@ -429,10 +427,9 @@ mod tests {
     #[test]
     fn cpu_entry_count_max() {
         let cpus = MAX_SUPPORTED_CPUS + 1;
-        let mem =
-            GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(cpus as u8))]).unwrap();
+        let mem = GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(cpus))]).unwrap();
 
-        let result = setup_mptable(MPTABLE_START, &mem, cpus as u8, None);
+        let result = setup_mptable(MPTABLE_START, &mem, cpus, None);
         result.unwrap_err();
     }
 }

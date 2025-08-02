@@ -1806,7 +1806,7 @@ impl RequestHandler for Vmm {
 
     fn vm_resize(
         &mut self,
-        desired_vcpus: Option<u8>,
+        desired_vcpus: Option<u32>,
         desired_ram: Option<u64>,
         desired_balloon: Option<u64>,
     ) -> result::Result<(), VmError> {
@@ -1822,7 +1822,7 @@ impl RequestHandler for Vmm {
         } else {
             let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
             if let Some(desired_vcpus) = desired_vcpus {
-                config.cpus.boot_vcpus = desired_vcpus;
+                config.cpus.boot_vcpus = desired_vcpus as u8;
             }
             if let Some(desired_ram) = desired_ram {
                 config.memory.size = desired_ram;
