@@ -139,6 +139,7 @@ const PVPANIC_DEVICE_NAME: &str = "__pvpanic";
 const DISK_DEVICE_NAME_PREFIX: &str = "_disk";
 const FS_DEVICE_NAME_PREFIX: &str = "_fs";
 const NET_DEVICE_NAME_PREFIX: &str = "_net";
+const GENERIC_DEVICE_NAME_PREFIX: &str = "_generic";
 const PMEM_DEVICE_NAME_PREFIX: &str = "_pmem";
 const VDPA_DEVICE_NAME_PREFIX: &str = "_vdpa";
 const VSOCK_DEVICE_NAME_PREFIX: &str = "_vsock";
@@ -2979,47 +2980,63 @@ impl DeviceManager {
 
         Ok(devices)
     }
+
     fn make_virtio_generic_device(
         &mut self,
         generic_cfg: &mut GenericConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = generic_cfg.id.clone();
+        let id = if let Some(id) = &generic_cfg.id {
+            id.clone()
+        } else {
+            let id = self.next_device_name(GENERIC_DEVICE_NAME_PREFIX)?;
+            generic_cfg.id = Some(id.clone());
+            id
+        };
 
         info!("Creating virtio-generic device: {:?}", generic_cfg);
 
         let mut node = device_node!(id);
 
-        let virtio_generic_device = Arc::new(Mutex::new(
-            virtio_devices::vhost_user::Generic::new(
-                id.clone(),
-                generic_cfg.vu_cfg.clone(),
-                generic_cfg.device_type,
-                generic_cfg.min_queues,
-                generic_cfg.avail_features,
-                None,
-                self.seccomp_action.clone(),
-                self.exit_evt
-                    .try_clone()
-                    .map_err(DeviceManagerError::EventFd)?,
-                self.force_iommu,
-                state_from_id(self.snapshot.as_ref(), id.as_str())
-                    .map_err(DeviceManagerError::RestoreGetState)?,
-            )
-            .map_err(DeviceManagerError::CreateVirtioGeneric)?,
-        ));
+        if let Some(generic_socket) = generic_cfg.socket.to_str() {
+            let virtio_generic_device = Arc::new(Mutex::new(
+                virtio_devices::vhost_user::Generic::new(
+                    id.clone(),
+                    generic_socket,
+                    &generic_cfg.tag,
+                    generic_cfg.num_queues,
+                    generic_cfg.queue_size,
+                    generic_cfg.device_type,
+                    generic_cfg.min_queues,
+                    generic_cfg.avail_features,
+                    generic_cfg.avail_protocol_features.0,
+                    None,
+                    self.seccomp_action.clone(),
+                    self.exit_evt
+                        .try_clone()
+                        .map_err(DeviceManagerError::EventFd)?,
+                    self.force_iommu,
+                    state_from_id(self.snapshot.as_ref(), id.as_str())
+                        .map_err(DeviceManagerError::RestoreGetState)?,
+                )
+                .map_err(DeviceManagerError::CreateVirtioGeneric)?,
+            ));
 
-        // Update the device tree with the migratable device.
-        node.migratable = Some(Arc::clone(&virtio_generic_device) as Arc<Mutex<dyn Migratable>>);
-        self.device_tree.lock().unwrap().insert(id.clone(), node);
+            // Update the device tree with the migratable device.
+            node.migratable =
+                Some(Arc::clone(&virtio_generic_device) as Arc<Mutex<dyn Migratable>>);
+            self.device_tree.lock().unwrap().insert(id.clone(), node);
 
-        Ok(MetaVirtioDevice {
-            virtio_device: Arc::clone(&virtio_generic_device)
-                as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-            iommu: false,
-            id,
-            pci_segment: generic_cfg.pci_segment,
-            dma_handler: None,
-        })
+            Ok(MetaVirtioDevice {
+                virtio_device: Arc::clone(&virtio_generic_device)
+                    as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
+                iommu: false,
+                id,
+                pci_segment: generic_cfg.pci_segment,
+                dma_handler: None,
+            })
+        } else {
+            Err(DeviceManagerError::NoVirtioFsSock)
+        }
     }
 
     fn make_virtio_generic_devices(&mut self) -> DeviceManagerResult<Vec<MetaVirtioDevice>> {

@@ -14,9 +14,10 @@ use option_parser::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use vhost::vhost_user::VhostUserProtocolFeatures;
 use virtio_bindings::virtio_blk::VIRTIO_BLK_ID_BYTES;
 use virtio_devices::block::MINIMUM_BLOCK_QUEUE_SIZE;
-use virtio_devices::vhost_user::{VhostUserConfig, VIRTIO_FS_TAG_LEN};
+use virtio_devices::vhost_user::VIRTIO_FS_TAG_LEN;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
 
 use crate::landlock::LandlockAccess;
@@ -49,6 +50,16 @@ pub enum Error {
     /// Generic available features is missing
     #[error("Error parsing --generic: available features missing")]
     ParseGenericAvailFeaturesMissing,
+    /// Generic available protocol features is missing
+    #[error("Error parsing --generic: available protocol features missing")]
+    ParseGenericAvailProtocolFeaturesMissing,
+    /// Generic available protocol features not supported
+    #[error(
+        "Error parsing --generic: available protocol features not supported: \
+got 0b{:b} but only 0b{:b} supported",
+        provided, VhostUserProtocolFeatures::all().bits()
+    )]
+    ParseGenericAvailProtocolFeaturesUnsupported { provided: u64 },
     /// Generic min queues is missing
     #[error("Error parsing --generic: min queues missing")]
     ParseGenericMinQueuesMissing,
@@ -1565,7 +1576,8 @@ impl GenericConfig {
     pub const SYNTAX: &'static str = "virtio-generic parameters \
     \"virtio_id=<id>,socket=<socket_path>,num_queues=<number_of_queues>,\
     queue_size=<size_of_each_queue>,id=<device_id>,pci_segment=<segment_id>,\
-    min_queues=<minimum_number_of_queues>\"";
+    min_queues=<minimum_number_of_queues>,avail_features=<available features>,\
+    avail_protocol_features=<available vhost-user protocol features>\"";
 
     pub fn parse(generic: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1577,7 +1589,8 @@ impl GenericConfig {
             .add("socket")
             .add("id")
             .add("pci_segment")
-            .add("avail_features");
+            .add("avail_features")
+            .add("avail_protocol_features");
         parser.parse(generic).map_err(Error::ParseGeneric)?;
 
         let socket = parser.get("socket").ok_or(Error::ParseGenericSockMissing)?;
@@ -1604,22 +1617,33 @@ impl GenericConfig {
             .convert("pci_segment")
             .map_err(Error::ParseGeneric)?
             .unwrap_or_default();
-        let avail_features = parser
+        let avail_features: u64 = parser
             .convert("avail_features")
             .map_err(Error::ParseGeneric)?
             .ok_or(Error::ParseGenericAvailFeaturesMissing)?;
+        let avail_protocol_features: u64 = parser
+            .convert("avail_protocol_features")
+            .map_err(Error::ParseGeneric)?
+            .ok_or(Error::ParseGenericAvailProtocolFeaturesMissing)?;
+        let avail_protocol_features = AvailProtocolFeatures(
+            VhostUserProtocolFeatures::from_bits(avail_protocol_features).ok_or({
+                Error::ParseGenericAvailProtocolFeaturesUnsupported {
+                    provided: avail_protocol_features,
+                }
+            })?,
+        );
 
         Ok(GenericConfig {
-            vu_cfg: VhostUserConfig {
-                socket,
-                num_queues,
-                queue_size,
-            },
+            socket: socket.into(),
             min_queues,
             device_type,
-            id,
+            id: Some(id),
             pci_segment,
             avail_features,
+            avail_protocol_features,
+            tag: "".to_owned(),
+            num_queues,
+            queue_size,
         })
     }
 
@@ -2572,7 +2596,7 @@ impl VmConfig {
             for generic in generics {
                 generic.validate(self)?;
 
-                Self::validate_always_identifier(&mut id_list, &generic.id)?;
+                Self::validate_identifier(&mut id_list, &generic.id)?;
             }
         }
 
@@ -3152,7 +3176,6 @@ mod tests {
     use std::os::unix::io::AsRawFd;
 
     use net_util::MacAddr;
-    use virtio_devices::vhost_user::VhostUserConfig;
 
     use super::*;
 
@@ -3619,18 +3642,53 @@ mod tests {
         Ok(())
     }
 
-    fn generic_fixture() -> GenericConfig {
-        GenericConfig {
-            vu_cfg: VhostUserConfig {
-                socket: "/tmp/generic".to_owned(),
-                queue_size: 1024,
-                num_queues: 20,
-            },
-            min_queues: 5,
-            id: "Something".to_owned(),
-            device_type: 100,
-            avail_features: u64::MAX,
-            pci_segment: 0,
+    #[track_caller]
+    #[allow(clippy::too_many_arguments)]
+    fn make_generic_config(
+        socket: &str,
+        virtio_id: u64,
+        num_queues: u64,
+        min_queues: u64,
+        id: &str,
+        pci_segment: u64,
+        queue_size: u64,
+        avail_features: u64,
+        avail_protocol_features: u64,
+    ) {
+        assert!(!socket.contains(",[]\n\r\0\""));
+        assert!(!id.contains(",[]\n\r\0\""));
+        let config = GenericConfig::parse(&format!(
+            "virtio_id={virtio_id},socket=\"{socket}\",num_queues={num_queues},\
+min_queues={min_queues},id=\"{id}\",pci_segment={pci_segment},queue_size={queue_size},\
+avail_features={avail_features},avail_protocol_features={avail_protocol_features}"
+        ));
+        let avail_protocol_features = VhostUserProtocolFeatures::from_bits(avail_protocol_features);
+        if pci_segment > u16::MAX as _
+            || num_queues > usize::MAX as _
+            || virtio_id > u32::MAX as _
+            || min_queues > u16::MAX as _
+            || queue_size > u16::MAX as _
+            || avail_protocol_features.is_none()
+        {
+            config.unwrap_err();
+        } else {
+            assert_eq!(
+                config.unwrap(),
+                GenericConfig {
+                    socket: socket.into(),
+                    id: Some(id.to_owned()),
+                    device_type: u32::try_from(virtio_id).unwrap(),
+                    avail_features,
+                    avail_protocol_features: AvailProtocolFeatures(
+                        avail_protocol_features.unwrap()
+                    ),
+                    tag: "".to_owned(),
+                    pci_segment: u16::try_from(pci_segment).unwrap(),
+                    num_queues: usize::try_from(num_queues).unwrap(),
+                    min_queues: u16::try_from(min_queues).unwrap(),
+                    queue_size: u16::try_from(queue_size).unwrap()
+                }
+            )
         }
     }
 
@@ -3643,46 +3701,38 @@ mod tests {
         GenericConfig::parse("socket=/tmp/sock").unwrap_err();
         GenericConfig::parse("min_queues=1").unwrap_err();
         GenericConfig::parse("id=1").unwrap_err();
-        assert_eq!(
-            GenericConfig::parse(
-                "virtio_id=100,socket=/tmp/generic,\
-                num_queues=20,min_queues=5,id=Something,pci_segment=0,\
-                queue_size=1024"
-            )
-            .unwrap(),
-            generic_fixture()
+        make_generic_config(
+            "/dev/null/doesnotexist",
+            100,
+            20,
+            5,
+            "Something",
+            10,
+            u16::MAX.into(),
+            virtio_devices::vhost_user::DEFAULT_VIRTIO_FEATURES,
+            VhostUserProtocolFeatures::all().bits(),
         );
-        assert_eq!(
-            GenericConfig::parse(
-                "virtio_id=100,socket=/tmp/generic,\
-                num_queues=20,min_queues=5,id=Something,\
-                queue_size=1024"
-            )?,
-            generic_fixture()
+        make_generic_config(
+            "/dev/null/doesnotexist",
+            100,
+            20,
+            u64::MAX,
+            "Something",
+            10,
+            u16::MAX.into(),
+            virtio_devices::vhost_user::DEFAULT_VIRTIO_FEATURES,
+            VhostUserProtocolFeatures::all().bits(),
         );
-        assert_eq!(
-            GenericConfig::parse(
-                "virtio_id=100,socket=/tmp/generic,\
-                num_queues=20,min_queues=6,id=Something,pci_segment=1,\
-                queue_size=1024"
-            )?,
-            GenericConfig {
-                pci_segment: 1,
-                min_queues: 6,
-                ..generic_fixture()
-            }
-        );
-        assert_eq!(
-            GenericConfig::parse(
-                "virtio_id=100,socket=/tmp/generic,\
-                num_queues=20,min_queues=6,id=\"Something\",pci_segment=1,\
-                queue_size=1024"
-            )?,
-            GenericConfig {
-                pci_segment: 1,
-                min_queues: 6,
-                ..generic_fixture()
-            }
+        make_generic_config(
+            "/dev/null/doesnotexist",
+            u64::from(u32::MAX) + 1,
+            20,
+            u64::MAX,
+            "Something",
+            10,
+            u16::MAX.into(),
+            virtio_devices::vhost_user::DEFAULT_VIRTIO_FEATURES,
+            VhostUserProtocolFeatures::all().bits(),
         );
         Ok(())
     }

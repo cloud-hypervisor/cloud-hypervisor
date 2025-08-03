@@ -7,28 +7,34 @@ use std::{result, thread};
 
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, Bytes};
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
 use virtio_queue::Queue;
-use vm_memory::GuestMemoryAtomic;
+use vm_memory::{ByteValued, GuestMemoryAtomic};
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
 use super::vu_common_ctrl::VhostUserHandle;
-use super::{Error, Result};
+use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
-use crate::vhost_user::{VhostUserCommon, VhostUserConfig};
+use crate::vhost_user::VhostUserCommon;
 use crate::{
     ActivateResult, GuestMemoryMmap, GuestRegionMmap, MmapRegion, UserspaceMapping, VirtioCommon,
-    VirtioDevice, VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_IOMMU_PLATFORM,
+    VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList,
+    VIRTIO_F_IOMMU_PLATFORM,
 };
+
+const NUM_QUEUE_OFFSET: usize = 1;
+const DEFAULT_QUEUE_NUMBER: usize = 2;
 
 #[derive(Serialize, Deserialize)]
 pub struct State {
     pub avail_features: u64,
     pub acked_features: u64,
+    pub config: VirtioGenericConfig,
     pub acked_protocol_features: u64,
     pub vu_num_queues: usize,
     pub backend_req_support: bool,
@@ -37,10 +43,33 @@ pub struct State {
 struct BackendReqHandler {}
 impl VhostUserFrontendReqHandler for BackendReqHandler {}
 
+pub const VIRTIO_FS_TAG_LEN: usize = 36;
+#[serde_as]
+#[derive(Copy, Clone, Serialize, Deserialize)]
+#[repr(C, packed)]
+pub struct VirtioGenericConfig {
+    #[serde_as(as = "Bytes")]
+    pub tag: [u8; VIRTIO_FS_TAG_LEN],
+    pub num_request_queues: u32,
+}
+
+impl Default for VirtioGenericConfig {
+    fn default() -> Self {
+        VirtioGenericConfig {
+            tag: [0; VIRTIO_FS_TAG_LEN],
+            num_request_queues: 0,
+        }
+    }
+}
+
+// SAFETY: only a series of integers
+unsafe impl ByteValued for VirtioGenericConfig {}
+
 pub struct Generic {
     common: VirtioCommon,
     vu_common: VhostUserCommon,
     id: String,
+    config: VirtioGenericConfig,
     // Hold ownership of the memory that is allocated for the device
     // which will be automatically dropped when the device is dropped
     cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
@@ -56,84 +85,108 @@ impl Generic {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
-        VhostUserConfig {
-            queue_size,
-            num_queues,
-            socket,
-        }: VhostUserConfig,
+        path: &str,
+        tag: &str,
+        req_num_queues: usize,
+        queue_size: u16,
         device_type: u32,
         min_queues: u16,
         avail_features: u64,
+        avail_protocol_features: VhostUserProtocolFeatures,
         cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         iommu: bool,
         state: Option<State>,
     ) -> Result<Generic> {
+        // Calculate the actual number of queues needed.
+        let num_queues = NUM_QUEUE_OFFSET + req_num_queues;
+
         // Connect to the vhost-user socket.
-        let mut vu = VhostUserHandle::connect_vhost_user(false, &socket, num_queues as u64, false)?;
+        let mut vu = VhostUserHandle::connect_vhost_user(false, path, num_queues as u64, false)?;
 
-        let (avail_features, acked_features, acked_protocol_features, vu_num_queues, paused) =
-            if let Some(state) = state {
-                info!("Restoring vhost-user-generic (type {}) {}", device_type, id);
+        let (
+            avail_features,
+            acked_features,
+            acked_protocol_features,
+            vu_num_queues,
+            config,
+            paused,
+        ) = if let Some(state) = state {
+            info!("Restoring vhost-user-generic {}", id);
 
-                vu.set_protocol_features_vhost_user(
-                    state.acked_features,
-                    state.acked_protocol_features,
-                )?;
+            vu.set_protocol_features_vhost_user(
+                state.acked_features,
+                state.acked_protocol_features,
+            )?;
 
-                (
-                    state.avail_features,
-                    state.acked_features,
-                    state.acked_protocol_features,
-                    state.vu_num_queues,
-                    true,
-                )
-            } else {
-                // Filling device and vring features VMM supports.
-
-                let avail_protocol_features = VhostUserProtocolFeatures::MQ
+            (
+                state.avail_features,
+                state.acked_features,
+                state.acked_protocol_features,
+                state.vu_num_queues,
+                state.config,
+                true,
+            )
+        } else {
+            // Filling device and vring features VMM supports.
+            assert_eq!(avail_features, DEFAULT_VIRTIO_FEATURES);
+            assert_eq!(device_type, VirtioDeviceType::Fs as u32);
+            assert_eq!(min_queues, 1);
+            assert_eq!(
+                avail_protocol_features,
+                VhostUserProtocolFeatures::MQ
                     | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
                     | VhostUserProtocolFeatures::REPLY_ACK
                     | VhostUserProtocolFeatures::INFLIGHT_SHMFD
-                    | VhostUserProtocolFeatures::LOG_SHMFD;
+                    | VhostUserProtocolFeatures::LOG_SHMFD
+            );
 
-                let (acked_features, acked_protocol_features) =
-                    vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
+            let (acked_features, acked_protocol_features) =
+                vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
 
-                let backend_num_queues =
-                    if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
-                        vu.socket_handle()
-                            .get_queue_num()
-                            .map_err(Error::VhostUserGetQueueMaxNum)?
-                            .try_into()
-                            .unwrap()
-                    } else {
-                        2
-                    };
+            let backend_num_queues =
+                if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
+                    vu.socket_handle()
+                        .get_queue_num()
+                        .map_err(Error::VhostUserGetQueueMaxNum)? as usize
+                } else {
+                    DEFAULT_QUEUE_NUMBER
+                };
 
-                if num_queues > backend_num_queues {
-                    error!(
-                    "vhost-user-generic requested too many queues ({}) since the backend only supports {}\n",
-                       num_queues, backend_num_queues
+            if num_queues > backend_num_queues {
+                error!(
+                    "vhost-user-generic requested too many queues ({}) \
+since the backend only supports {}\n",
+                    num_queues, backend_num_queues
                 );
-                    return Err(Error::BadQueueNum);
-                }
+                return Err(Error::BadQueueNum);
+            }
 
-                // Create virtio-fs device configuration.
-
-                (
-                    acked_features,
-                    // If part of the available features that have been acked, the
-                    // PROTOCOL_FEATURES bit must be already set through the VIRTIO
-                    // acked features as we know the guest would never ack it, thus
-                    // the feature would be lost.
-                    acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
-                    acked_protocol_features,
-                    num_queues,
-                    false,
-                )
+            // Create virtio-generic device configuration.
+            let mut config = VirtioGenericConfig::default();
+            let tag_bytes_slice = tag.as_bytes();
+            let len = if tag_bytes_slice.len() < config.tag.len() {
+                tag_bytes_slice.len()
+            } else {
+                config.tag.len()
             };
+            config.tag[..len].copy_from_slice(tag_bytes_slice[..len].as_ref());
+            config.num_request_queues = req_num_queues as u32;
+
+            (
+                acked_features,
+                // If part of the available features that have been acked, the
+                // PROTOCOL_FEATURES bit must be already set through the VIRTIO
+                // acked features as we know the guest would never ack it, thus
+                // the feature would be lost.
+                acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
+                acked_protocol_features,
+                num_queues,
+                config,
+                false,
+            )
+        };
 
         Ok(Generic {
             common: VirtioCommon {
@@ -144,21 +197,17 @@ impl Generic {
                 paused_sync: Some(Arc::new(Barrier::new(2))),
                 min_queues,
                 paused: Arc::new(AtomicBool::new(paused)),
-                kill_evt: None,
-                interrupt_cb: None,
-                pause_evt: None,
-                access_platform: None,
-                epoll_threads: None,
+                ..Default::default()
             },
             vu_common: VhostUserCommon {
                 vu: Some(Arc::new(Mutex::new(vu))),
                 acked_protocol_features,
-                socket_path: socket,
+                socket_path: path.to_string(),
                 vu_num_queues,
-                migration_started: false,
-                server: false,
+                ..Default::default()
             },
             id,
+            config,
             cache,
             seccomp_action,
             guest_memory: None,
@@ -172,6 +221,7 @@ impl Generic {
         State {
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
+            config: self.config,
             acked_protocol_features: self.vu_common.acked_protocol_features,
             vu_num_queues: self.vu_common.vu_num_queues,
             backend_req_support: false,
@@ -215,6 +265,10 @@ impl VirtioDevice for Generic {
         self.common.ack_features(value)
     }
 
+    fn read_config(&self, offset: u64, data: &mut [u8]) {
+        self.read_config_from_slice(self.config.as_slice(), offset, data);
+    }
+
     fn activate(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
@@ -246,7 +300,7 @@ impl VirtioDevice for Generic {
         spawn_virtio_thread(
             &self.id,
             &self.seccomp_action,
-            Thread::VirtioVhostFs,
+            Thread::VirtioVhostGeneric,
             &mut epoll_threads,
             &self.exit_evt,
             move || handler.run(paused, paused_sync.unwrap()),
