@@ -89,9 +89,9 @@ impl RawFile {
 
         let align64: u64 = self.alignment.try_into().unwrap();
 
-        (self.position % align64 == 0)
-            && ((buf.as_ptr() as usize) % self.alignment == 0)
-            && (buf.len() % self.alignment == 0)
+        self.position.is_multiple_of(align64)
+            && (buf.as_ptr() as usize).is_multiple_of(self.alignment)
+            && buf.len().is_multiple_of(self.alignment)
     }
 
     pub fn set_len(&self, size: u64) -> std::io::Result<()> {

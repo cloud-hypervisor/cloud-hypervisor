@@ -264,7 +264,7 @@ impl MemoryRangeTable {
     }
 
     pub fn read_from(fd: &mut dyn Read, length: u64) -> Result<MemoryRangeTable, MigratableError> {
-        assert!(length as usize % std::mem::size_of::<MemoryRange>() == 0);
+        assert!((length as usize).is_multiple_of(size_of::<MemoryRange>()));
 
         let mut data: Vec<MemoryRange> = Vec::new();
         data.resize_with(

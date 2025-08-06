@@ -448,10 +448,7 @@ fn print_node(node: fdt_parser::node::FdtNode<'_, '_>, n_spaces: usize) {
         //   - At first, try to convert it to CStr and print,
         //   - If failed, print it as u32 array.
         let value_result = match CStr::from_bytes_with_nul(value) {
-            Ok(value_cstr) => match value_cstr.to_str() {
-                Ok(value_str) => Some(value_str),
-                Err(_e) => None,
-            },
+            Ok(value_cstr) => value_cstr.to_str().ok(),
             Err(_e) => None,
         };
 

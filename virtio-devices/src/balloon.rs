@@ -265,7 +265,7 @@ impl BalloonEpollHandler {
                 error!("The head contains the request type is not right");
                 return Err(Error::UnexpectedWriteOnlyDescriptor);
             }
-            if desc.len() as usize % data_chunk_size != 0 {
+            if !(desc.len() as usize).is_multiple_of(data_chunk_size) {
                 error!("the request size {} is not right", desc.len());
                 return Err(Error::InvalidRequest);
             }

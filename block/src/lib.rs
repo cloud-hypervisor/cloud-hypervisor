@@ -431,7 +431,7 @@ impl Request {
             // In case it's not properly aligned, an intermediate buffer is
             // created with the correct alignment, and a copy from/to the
             // origin buffer is performed, depending on the type of operation.
-            let iov_base = if (origin_ptr.as_ptr() as u64) % SECTOR_SIZE != 0 {
+            let iov_base = if !(origin_ptr.as_ptr() as u64).is_multiple_of(SECTOR_SIZE) {
                 let layout = Layout::from_size_align(data_len, SECTOR_SIZE as usize).unwrap();
                 // SAFETY: layout has non-zero size
                 let aligned_ptr = unsafe { alloc_zeroed(layout) };

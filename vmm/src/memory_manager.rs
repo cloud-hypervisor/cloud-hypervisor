@@ -1700,7 +1700,7 @@ impl MemoryManager {
         }
 
         // "Inserted" DIMM must have a size that is a multiple of 128MiB
-        if size % (128 << 20) != 0 {
+        if !size.is_multiple_of(128 << 20) {
             return Err(Error::InvalidSize);
         }
 
