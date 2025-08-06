@@ -1179,7 +1179,7 @@ impl Vmm {
             }
 
             // Enter the final stage of migration when the suspension conditions are met
-            if s.iteration > 1 && s.pending_size < s.threshold_size {
+            if s.iteration > 1 && s.pending_size <= s.threshold_size {
                 break;
             }
 
