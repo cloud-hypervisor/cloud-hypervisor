@@ -298,7 +298,7 @@ impl VirtioDevice for Net {
 
         let num_queues = queues.len();
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
-        if self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && num_queues % 2 != 0 {
+        if self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && !num_queues.is_multiple_of(2) {
             let ctrl_queue_index = num_queues - 1;
             let (_, mut ctrl_queue, ctrl_queue_evt) = queues.remove(ctrl_queue_index);
 

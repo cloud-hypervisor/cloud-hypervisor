@@ -156,7 +156,7 @@ fn compute_reg_len(gic: &DeviceFd, reg: &DistReg, base: u32) -> Result<u32> {
         // that the model has. It is also the type of register where
         // a register relates to multiple interrupts.
         end = base + (reg.bpi as u32 * (num_irq - LAYOUT_IRQ_BASE) / 8);
-        if reg.bpi as u32 * (num_irq - LAYOUT_IRQ_BASE) % 8 > 0 {
+        if !(reg.bpi as u32 * (num_irq - LAYOUT_IRQ_BASE)).is_multiple_of(8) {
             end += REG_SIZE as u32;
         }
     }

@@ -1705,12 +1705,12 @@ fn offset_is_cluster_boundary(offset: u64, cluster_bits: u32) -> Result<()> {
 
 // Ceiling of the division of `dividend`/`divisor`.
 fn div_round_up_u64(dividend: u64, divisor: u64) -> u64 {
-    dividend / divisor + u64::from(dividend % divisor != 0)
+    dividend / divisor + u64::from(!dividend.is_multiple_of(divisor))
 }
 
 // Ceiling of the division of `dividend`/`divisor`.
 fn div_round_up_u32(dividend: u32, divisor: u32) -> u32 {
-    dividend / divisor + u32::from(dividend % divisor != 0)
+    dividend / divisor + u32::from(!dividend.is_multiple_of(divisor))
 }
 
 fn convert_copy<R, W>(reader: &mut R, writer: &mut W, offset: u64, size: u64) -> Result<()>

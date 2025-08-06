@@ -193,35 +193,35 @@ unsafe impl ByteValued for VirtioMemConfig {}
 
 impl VirtioMemConfig {
     fn validate(&self) -> result::Result<(), Error> {
-        if self.addr % self.block_size != 0 {
+        if !self.addr.is_multiple_of(self.block_size) {
             return Err(Error::ValidateError(anyhow!(
                 "addr 0x{:x} is not aligned on block_size 0x{:x}",
                 self.addr,
                 self.block_size
             )));
         }
-        if self.region_size % self.block_size != 0 {
+        if !self.region_size.is_multiple_of(self.block_size) {
             return Err(Error::ValidateError(anyhow!(
                 "region_size 0x{:x} is not aligned on block_size 0x{:x}",
                 self.region_size,
                 self.block_size
             )));
         }
-        if self.usable_region_size % self.block_size != 0 {
+        if !self.usable_region_size.is_multiple_of(self.block_size) {
             return Err(Error::ValidateError(anyhow!(
                 "usable_region_size 0x{:x} is not aligned on block_size 0x{:x}",
                 self.usable_region_size,
                 self.block_size
             )));
         }
-        if self.plugged_size % self.block_size != 0 {
+        if !self.plugged_size.is_multiple_of(self.block_size) {
             return Err(Error::ValidateError(anyhow!(
                 "plugged_size 0x{:x} is not aligned on block_size 0x{:x}",
                 self.plugged_size,
                 self.block_size
             )));
         }
-        if self.requested_size % self.block_size != 0 {
+        if !self.requested_size.is_multiple_of(self.block_size) {
             return Err(Error::ValidateError(anyhow!(
                 "requested_size 0x{:x} is not aligned on block_size 0x{:x}",
                 self.requested_size,
@@ -244,7 +244,7 @@ impl VirtioMemConfig {
                 size,
                 self.region_size
             )));
-        } else if size % self.block_size != 0 {
+        } else if !size.is_multiple_of(self.block_size) {
             return Err(Error::ResizeError(anyhow!(
                 "new size 0x{:x} is not aligned on block_size 0x{:x}",
                 size,
@@ -267,7 +267,7 @@ impl VirtioMemConfig {
         // Start address must be aligned on block_size, the size must be
         // greater than 0, and all blocks covered by the request must be
         // in the usable region.
-        if addr % self.block_size != 0
+        if !addr.is_multiple_of(self.block_size)
             || size == 0
             || (addr < self.addr || addr + size > self.addr + self.usable_region_size)
         {

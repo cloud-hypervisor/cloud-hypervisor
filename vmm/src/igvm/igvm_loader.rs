@@ -66,8 +66,8 @@ enum ParameterAreaState {
 
 #[cfg(feature = "sev_snp")]
 fn igvm_memmap_from_ram_range(ram_range: (u64, u64)) -> IGVM_VHS_MEMORY_MAP_ENTRY {
-    assert!(ram_range.0 % HV_PAGE_SIZE == 0);
-    assert!((ram_range.1 - ram_range.0) % HV_PAGE_SIZE == 0);
+    assert!(ram_range.0.is_multiple_of(HV_PAGE_SIZE));
+    assert!((ram_range.1 - ram_range.0).is_multiple_of(HV_PAGE_SIZE));
 
     IGVM_VHS_MEMORY_MAP_ENTRY {
         starting_gpa_page_number: ram_range.0 / HV_PAGE_SIZE,
@@ -179,7 +179,7 @@ pub fn load_igvm(
                 data_type,
                 data,
             } => {
-                debug_assert!(data.len() as u64 % HV_PAGE_SIZE == 0);
+                debug_assert!((data.len() as u64).is_multiple_of(HV_PAGE_SIZE));
 
                 // TODO: only 4k or empty page data supported right now
                 assert!(data.len() as u64 == HV_PAGE_SIZE || data.is_empty());
