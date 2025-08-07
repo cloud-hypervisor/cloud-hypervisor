@@ -11,7 +11,7 @@ use crate::kvm::kvm_bindings::{
 
 /*
  Distributor registers as detailed at page 456 from
- https://static.docs.arm.com/ihi0069/c/IHI0069C_gic_architecture_specification.pdf.
+ https://developer.arm.com/documentation/ihi0069/c/?lang=en.
  Address offsets are relative to the Distributor base address defined
 by the system memory map. Unless otherwise stated in the register description,
 all GIC registers are 32-bits wide.
