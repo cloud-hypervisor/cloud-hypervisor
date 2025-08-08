@@ -735,6 +735,10 @@ components:
           type: array
           items:
             type: string
+        oem_string_paths:
+          type: array
+          items:
+            type: string
         tdx:
           type: boolean
           default: false
