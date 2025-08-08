@@ -553,10 +553,10 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         // handler safe functions (writing to stderr) and manipulating signals.
         unsafe {
             signal_hook::low_level::register(signal_hook::consts::SIGSYS, || {
-                eprint!(
+                eprintln!(
                     "\n==== Possible seccomp violation ====\n\
                 Try running with `strace -ff` to identify the cause and open an issue: \
-                https://github.com/cloud-hypervisor/cloud-hypervisor/issues/new\n"
+                https://github.com/cloud-hypervisor/cloud-hypervisor/issues/new"
                 );
                 signal_hook::low_level::emulate_default_handler(SIGSYS).unwrap();
             })
