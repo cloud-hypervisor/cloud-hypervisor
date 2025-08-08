@@ -1834,9 +1834,10 @@ impl vm::Vm for MshvVm {
     ///
     fn create_vcpu(
         &self,
-        id: u8,
+        id: u32,
         vm_ops: Option<Arc<dyn VmOps>>,
     ) -> vm::Result<Arc<dyn cpu::Vcpu>> {
+        let id: u8 = id.try_into().unwrap();
         let vcpu_fd = self
             .fd
             .create_vcpu(id)

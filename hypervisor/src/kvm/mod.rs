@@ -559,7 +559,7 @@ impl vm::Vm for KvmVm {
     ///
     fn create_vcpu(
         &self,
-        id: u8,
+        id: u32,
         vm_ops: Option<Arc<dyn VmOps>>,
     ) -> vm::Result<Arc<dyn cpu::Vcpu>> {
         let fd = self
@@ -2150,7 +2150,7 @@ impl cpu::Vcpu for KvmVcpu {
         &self,
         vm: &Arc<dyn crate::Vm>,
         kvi: &mut crate::VcpuInit,
-        id: u8,
+        id: u32,
     ) -> cpu::Result<()> {
         use std::arch::is_aarch64_feature_detected;
         #[allow(clippy::nonminimal_bool)]
@@ -2280,7 +2280,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// Configure core registers for a given CPU.
     ///
     #[cfg(target_arch = "aarch64")]
-    fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
+    fn setup_regs(&self, cpu_id: u32, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
         // Get the register index of the PSTATE (Processor State) register.
         let pstate = offset_of!(kvm_regs, regs.pstate);
         self.fd
@@ -2326,7 +2326,7 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// Configure registers for a given RISC-V CPU.
     ///
-    fn setup_regs(&self, cpu_id: u8, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
+    fn setup_regs(&self, cpu_id: u32, boot_ip: u64, fdt_start: u64) -> cpu::Result<()> {
         // Setting the A0 () to the hartid of this CPU.
         let a0 = offset_of!(kvm_riscv_core, regs.a0);
         self.fd

@@ -221,7 +221,7 @@ impl RequestHandler for StubApiRequestHandler {
         Ok(())
     }
 
-    fn vm_resize(&mut self, _: Option<u8>, _: Option<u64>, _: Option<u64>) -> Result<(), VmError> {
+    fn vm_resize(&mut self, _: Option<u32>, _: Option<u64>, _: Option<u64>) -> Result<(), VmError> {
         Ok(())
     }
 

@@ -39,7 +39,7 @@ pub struct Gic {
 
 impl Gic {
     pub fn new(
-        vcpu_count: u8,
+        vcpu_count: u32,
         interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         vm: Arc<dyn hypervisor::Vm>,
     ) -> Result<Gic> {

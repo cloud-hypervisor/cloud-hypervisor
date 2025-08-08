@@ -324,9 +324,9 @@ fn create_srat_table(
 
         for cpu in &node.cpus {
             #[cfg(target_arch = "x86_64")]
-            let x2apic_id = arch::x86_64::get_x2apic_id(*cpu as u32, topology);
+            let x2apic_id = arch::x86_64::get_x2apic_id(*cpu, topology);
             #[cfg(target_arch = "aarch64")]
-            let x2apic_id = *cpu as u32;
+            let x2apic_id = *cpu;
 
             // Flags
             // - Enabled = 1 (bit 0)
