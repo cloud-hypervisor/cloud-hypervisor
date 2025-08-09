@@ -8,7 +8,8 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
+    AsyncIo, AsyncIoError, AsyncIoResult, BatchRequest, BorrowedDiskFd, DiskFile, DiskFileError,
+    DiskFileResult,
 };
 use crate::fixed_vhd::FixedVhd;
 use crate::raw_async::RawFileAsync;
@@ -105,5 +106,13 @@ impl AsyncIo for FixedVhdAsync {
 
     fn next_completed_request(&mut self) -> Option<(u64, i32)> {
         self.raw_file_async.next_completed_request()
+    }
+
+    fn batch_requests_enabled(&self) -> bool {
+        true
+    }
+
+    fn submit_batch_requests(&mut self, batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
+        self.raw_file_async.submit_batch_requests(batch_request)
     }
 }
