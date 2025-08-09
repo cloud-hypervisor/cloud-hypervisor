@@ -14,7 +14,15 @@ exclude = [
 
     # OSDev has added bot protection and accesses my result in 403 Forbidden.
     '^https://wiki.osdev.org',
+    # Exclude all pages with $ in the URL since $XXX is a variable
+    "\\$.*",
+    # Exclude local files
+    "file://.*",
 ]
+
+# Exclude loopback addresses
+exclude_loopback = true
+
 
 max_retries = 3
 
