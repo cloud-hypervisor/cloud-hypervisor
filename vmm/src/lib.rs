@@ -405,6 +405,8 @@ pub fn feature_list() -> Vec<String> {
         "dbus_api".to_string(),
         #[cfg(feature = "dhat-heap")]
         "dhat-heap".to_string(),
+        #[cfg(feature = "fw_cfg")]
+        "fw_cfg".to_string(),
         #[cfg(feature = "guest_debug")]
         "guest_debug".to_string(),
         #[cfg(feature = "igvm")]
@@ -2389,6 +2391,8 @@ mod unit_tests {
                 igvm: None,
                 #[cfg(feature = "sev_snp")]
                 host_data: None,
+                #[cfg(feature = "fw_cfg")]
+                fw_cfg_config: None,
             }),
             rate_limit_groups: None,
             disks: None,

@@ -22,7 +22,12 @@ epoll = "4.3.3"
 hypervisor = { path = "../hypervisor", features = ["mshv_emulator"] }
 libc = "0.2.155"
 libfuzzer-sys = "0.4.7"
-linux-loader = { version = "0.13.0", features = ["bzimage", "elf", "pe"] }
+# TODO: update to 0.13.1+
+linux-loader = { git = "https://github.com/rust-vmm/linux-loader", branch = "main", features = [
+  "bzimage",
+  "elf",
+  "pe",
+] }
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
 mshv-bindings = "0.5.2"
 net_util = { path = "../net_util" }
