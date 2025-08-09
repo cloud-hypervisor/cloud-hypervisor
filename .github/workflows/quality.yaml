@@ -112,6 +112,15 @@ jobs:
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples --features "tracing" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
 
+      - name: Clippy (default features + ivshmem)
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --tests --examples --features "ivshmem" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+
       - name: Clippy (sev_snp)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: houseabsolute/actions-rust-cross@v1

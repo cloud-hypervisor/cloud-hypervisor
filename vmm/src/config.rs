@@ -4,6 +4,8 @@
 //
 
 use std::collections::{BTreeSet, HashMap};
+#[cfg(feature = "ivshmem")]
+use std::fs;
 use std::path::PathBuf;
 use std::result;
 use std::str::FromStr;
@@ -154,9 +156,17 @@ pub enum Error {
     /// Failed parsing TPM device
     #[error("Error parsing --tpm")]
     ParseTpm(#[source] OptionParserError),
+    #[cfg(feature = "ivshmem")]
+    /// Failed parsing ivsmem device
+    #[error("Error parsing --ivshmem")]
+    ParseIvshmem(#[source] OptionParserError),
     /// Missing path for TPM device
     #[error("Error parsing --tpm: path missing")]
     ParseTpmPathMissing,
+    #[cfg(feature = "ivshmem")]
+    /// Missing path for ivsmem device
+    #[error("Error parsing --ivshmem: path missing")]
+    ParseIvshmemPathMissing,
     /// Error parsing Landlock rules
     #[error("Error parsing --landlock-rules")]
     ParseLandlockRules(#[source] OptionParserError),
@@ -318,6 +328,18 @@ pub enum ValidationError {
     /// Invalid block device serial length
     #[error("Block device serial length ({0}) exceeds maximum allowed length ({1})")]
     InvalidSerialLength(usize, usize),
+    #[cfg(feature = "ivshmem")]
+    /// Invalid Ivshmem input size
+    #[error("Invalid ivshmem input size")]
+    InvalidIvshmemInputSize(u64),
+    #[cfg(feature = "ivshmem")]
+    /// Invalid Ivshmem backend file size
+    #[error("Invalid ivshmem backend file size")]
+    InvalidIvshmemSize(u64),
+    #[cfg(feature = "ivshmem")]
+    /// Invalid Ivshmem backend file path
+    #[error("Invalid ivshmem backend file path")]
+    InvalidIvshmemPath,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -373,6 +395,8 @@ pub struct VmParams<'a> {
     pub host_data: Option<&'a str>,
     pub landlock_enable: bool,
     pub landlock_rules: Option<Vec<&'a str>>,
+    #[cfg(feature = "ivshmem")]
+    pub ivshmem: Option<&'a str>,
 }
 
 impl<'a> VmParams<'a> {
@@ -444,7 +468,8 @@ impl<'a> VmParams<'a> {
         let landlock_rules: Option<Vec<&str>> = args
             .get_many::<String>("landlock-rules")
             .map(|x| x.map(|y| y as &str).collect());
-
+        #[cfg(feature = "ivshmem")]
+        let ivshmem: Option<&str> = args.get_one::<String>("ivshmem").map(|x| x as &str);
         VmParams {
             cpus,
             memory,
@@ -486,6 +511,8 @@ impl<'a> VmParams<'a> {
             host_data,
             landlock_enable,
             landlock_rules,
+            #[cfg(feature = "ivshmem")]
+            ivshmem,
         }
     }
 }
@@ -2279,6 +2306,47 @@ impl LandlockConfig {
     }
 }
 
+#[cfg(feature = "ivshmem")]
+impl IvshmemConfig {
+    pub const SYNTAX: &'static str = "Ivshmem device. Specify the backend file path and size \
+    for the shared memory: \"path=</path/to/a/file>, size=<file_size>\" \
+    \nThe <file_size> must be a power of 2 (e.g., 2M, 4M, etc.), as it represents the size \
+    of the memory region mapped to the guest. Default size is 128M.";
+    pub fn parse(ivshmem: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser.add("path").add("size");
+        parser.parse(ivshmem).map_err(Error::ParseIvshmem)?;
+        let path = parser
+            .get("path")
+            .map(PathBuf::from)
+            .ok_or(Error::ParseIvshmemPathMissing)?;
+        let size = parser
+            .convert::<ByteSized>("size")
+            .map_err(Error::ParseIvshmem)?
+            .unwrap_or(ByteSized((DEFAULT_IVSHMEM_SIZE << 20) as u64))
+            .0;
+        Ok(IvshmemConfig {
+            path,
+            size: size as usize,
+        })
+    }
+
+    pub fn validate(&self) -> ValidationResult<()> {
+        let size = self.size as u64;
+        let path = &self.path;
+        // size must = 2^n
+        if size == 0 || (size & (size - 1)) != 0 {
+            return Err(ValidationError::InvalidIvshmemInputSize(size));
+        }
+        let metadata = fs::metadata(path.to_str().unwrap())
+            .map_err(|_| ValidationError::InvalidIvshmemPath)?;
+        if metadata.len() < size {
+            return Err(ValidationError::InvalidIvshmemSize(metadata.len()));
+        }
+        Ok(())
+    }
+}
+
 impl VmConfig {
     fn validate_identifier(
         id_list: &mut BTreeSet<String>,
@@ -2636,6 +2704,10 @@ impl VmConfig {
                 landlock_rule.validate()?;
             }
         }
+        #[cfg(feature = "ivshmem")]
+        if let Some(ivshmem_config) = &self.ivshmem {
+            ivshmem_config.validate()?;
+        }
 
         Ok(id_list)
     }
@@ -2823,6 +2895,14 @@ impl VmConfig {
             );
         }
 
+        #[cfg(feature = "ivshmem")]
+        let mut ivshmem: Option<IvshmemConfig> = None;
+        #[cfg(feature = "ivshmem")]
+        if let Some(iv) = vm_params.ivshmem {
+            let ivshmem_conf = IvshmemConfig::parse(iv)?;
+            ivshmem = Some(ivshmem_conf);
+        }
+
         let mut config = VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory, vm_params.memory_zones)?,
@@ -2858,6 +2938,8 @@ impl VmConfig {
             preserved_fds: None,
             landlock_enable: vm_params.landlock_enable,
             landlock_rules,
+            #[cfg(feature = "ivshmem")]
+            ivshmem,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -2987,6 +3069,8 @@ impl Clone for VmConfig {
                 // SAFETY: FFI call with valid FDs
                 .map(|fds| fds.iter().map(|fd| unsafe { libc::dup(*fd) }).collect()),
             landlock_rules: self.landlock_rules.clone(),
+            #[cfg(feature = "ivshmem")]
+            ivshmem: self.ivshmem.clone(),
             ..*self
         }
     }
@@ -3791,6 +3875,8 @@ mod tests {
             ]),
             landlock_enable: false,
             landlock_rules: None,
+            #[cfg(feature = "ivshmem")]
+            ivshmem: None,
         };
 
         let valid_config = RestoreConfig {
@@ -3984,6 +4070,8 @@ mod tests {
             preserved_fds: None,
             landlock_enable: false,
             landlock_rules: None,
+            #[cfg(feature = "ivshmem")]
+            ivshmem: None,
         };
 
         valid_config.validate().unwrap();
