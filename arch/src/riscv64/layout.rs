@@ -44,16 +44,23 @@
 //           |                                                               |
 //           |                            APLICs                             |
 //           |                                                               |
+//    4 MB   +---------------------------------------------------------------+
+//           |                          UEFI flash                           |
 //    0 GB   +---------------------------------------------------------------+
 //
 //
 
 use vm_memory::GuestAddress;
 
+/// 0x0 ~ 0x40_0000 (4 MiB) is reserved to UEFI
+/// UEFI binary size is required less than 3 MiB, reserving 4 MiB is enough.
+pub const UEFI_START: GuestAddress = GuestAddress(0);
+pub const UEFI_SIZE: u64 = 0x040_0000;
+
 /// AIA related devices
 /// See https://elixir.bootlin.com/linux/v6.10/source/arch/riscv/include/uapi/asm/kvm.h
-/// 0x0 ~ 0x0400_0000 (64 MiB) resides APLICs
-pub const APLIC_START: GuestAddress = GuestAddress(0);
+/// 0x40_0000 ~ 0x0400_0000 (64 MiB) resides APLICs
+pub const APLIC_START: GuestAddress = GuestAddress(0x40_0000);
 pub const APLIC_SIZE: u64 = 0x4000;
 
 /// 0x0400_0000 ~ 0x0800_0000 (64 MiB) resides IMSICs
