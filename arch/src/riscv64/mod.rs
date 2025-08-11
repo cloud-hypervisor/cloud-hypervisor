@@ -7,6 +7,8 @@
 pub mod fdt;
 /// Layout for this riscv64 system.
 pub mod layout;
+/// Module for loading UEFI binary.
+pub mod uefi;
 
 use std::collections::HashMap;
 use std::fmt::Debug;
