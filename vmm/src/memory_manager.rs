@@ -199,7 +199,7 @@ pub struct MemoryManager {
     guest_ram_mappings: Vec<GuestRamMapping>,
 
     pub acpi_address: Option<GuestAddress>,
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     uefi_flash: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
 }
 
@@ -1274,7 +1274,7 @@ impl MemoryManager {
             arch_mem_regions,
             ram_allocator,
             dynamic,
-            #[cfg(target_arch = "aarch64")]
+            #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
             uefi_flash: None,
             thp: config.thp,
         };
@@ -2192,7 +2192,7 @@ impl MemoryManager {
         self.guest_ram_mappings.len() as u32
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     pub fn uefi_flash(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
         self.uefi_flash.as_ref().unwrap().clone()
     }
