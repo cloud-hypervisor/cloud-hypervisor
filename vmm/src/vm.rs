@@ -116,6 +116,10 @@ pub enum Error {
     #[error("Cannot load the UEFI binary in memory")]
     UefiLoad(#[source] arch::aarch64::uefi::Error),
 
+    #[cfg(target_arch = "riscv64")]
+    #[error("Cannot load the UEFI binary in memory")]
+    UefiLoad(#[source] arch::riscv64::uefi::Error),
+
     #[error("Cannot load the initramfs into memory")]
     InitramfsLoad,
 
