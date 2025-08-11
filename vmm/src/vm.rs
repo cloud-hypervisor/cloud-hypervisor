@@ -1086,6 +1086,15 @@ impl Vm {
     }
 
     #[cfg(target_arch = "riscv64")]
+    fn load_firmware(mut firmware: &File, memory_manager: Arc<Mutex<MemoryManager>>) -> Result<()> {
+        let uefi_flash = memory_manager.lock().as_ref().unwrap().uefi_flash();
+        let mem = uefi_flash.memory();
+        arch::riscv64::uefi::load_uefi(mem.deref(), arch::layout::UEFI_START, &mut firmware)
+            .map_err(Error::UefiLoad)?;
+        Ok(())
+    }
+
+    #[cfg(target_arch = "riscv64")]
     fn load_kernel(
         firmware: Option<File>,
         kernel: Option<File>,
@@ -1108,17 +1117,17 @@ impl Vm {
                     // If failed, retry to load it as UEFI binary.
                     // As the UEFI binary is formatless, it must be the last option to try.
                     Err(linux_loader::loader::Error::Pe(InvalidImageMagicNumber)) => {
-                        // TODO: UEFI for riscv64 is scheduled to next stage.
-                        unimplemented!()
+                        Self::load_firmware(&kernel, memory_manager)?;
+                        arch::layout::UEFI_START
                     }
                     Err(e) => {
                         return Err(Error::KernelLoad(e));
                     }
                 }
             }
-            (Some(_firmware), None) => {
-                // TODO: UEFI for riscv64 is scheduled to next stage.
-                unimplemented!()
+            (Some(firmware), None) => {
+                Self::load_firmware(&firmware, memory_manager)?;
+                arch::layout::UEFI_START
             }
             _ => return Err(Error::InvalidPayload),
         };
