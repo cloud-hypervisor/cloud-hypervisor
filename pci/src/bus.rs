@@ -13,11 +13,11 @@ use byteorder::{ByteOrder, LittleEndian};
 use thiserror::Error;
 use vm_device::{Bus, BusDevice, BusDeviceSync};
 
+use crate::PciBarConfiguration;
 use crate::configuration::{
     PciBarRegionType, PciBridgeSubclass, PciClassCode, PciConfiguration, PciHeaderType,
 };
 use crate::device::{BarReprogrammingParams, DeviceRelocation, Error as PciDeviceError, PciDevice};
-use crate::PciBarConfiguration;
 
 const VENDOR_ID_INTEL: u16 = 0x8086;
 const DEVICE_ID_INTEL_VIRT_PCIE_HOST: u16 = 0x0d57;

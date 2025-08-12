@@ -7,7 +7,7 @@ use std::{result, thread};
 
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, Bytes};
+use serde_with::{Bytes, serde_as};
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
 use virtio_queue::Queue;
@@ -18,13 +18,13 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vmm_sys_util::eventfd::EventFd;
 
 use super::vu_common_ctrl::VhostUserHandle;
-use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
+use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::VhostUserCommon;
 use crate::{
-    ActivateResult, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VirtioCommon, VirtioDevice,
-    VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList, VIRTIO_F_IOMMU_PLATFORM,
+    ActivateResult, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_IOMMU_PLATFORM,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList,
 };
 
 const NUM_QUEUE_OFFSET: usize = 1;
@@ -148,9 +148,9 @@ impl Fs {
 
             if num_queues > backend_num_queues {
                 error!(
-                "vhost-user-fs requested too many queues ({}) since the backend only supports {}\n",
-                num_queues, backend_num_queues
-            );
+                    "vhost-user-fs requested too many queues ({}) since the backend only supports {}\n",
+                    num_queues, backend_num_queues
+                );
                 return Err(Error::BadQueueNum);
             }
 

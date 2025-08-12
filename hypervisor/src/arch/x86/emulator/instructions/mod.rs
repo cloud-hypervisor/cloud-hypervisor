@@ -7,8 +7,8 @@
 use iced_x86::*;
 
 use crate::arch::emulator::{EmulationError, PlatformEmulator, PlatformError};
-use crate::arch::x86::emulator::CpuStateManager;
 use crate::arch::x86::Exception;
+use crate::arch::x86::emulator::CpuStateManager;
 
 pub mod cmp;
 pub mod mov;
