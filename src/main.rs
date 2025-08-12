@@ -8,22 +8,22 @@ mod test_util;
 
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::sync::mpsc::channel;
 use std::sync::Mutex;
+use std::sync::mpsc::channel;
 use std::{env, io};
 
 use clap::{Arg, ArgAction, ArgGroup, ArgMatches, Command};
 use event_monitor::event;
 use libc::EFD_NONBLOCK;
-use log::{error, warn, LevelFilter};
+use log::{LevelFilter, error, warn};
 use option_parser::OptionParser;
 use seccompiler::SeccompAction;
 use signal_hook::consts::SIGSYS;
 use thiserror::Error;
-#[cfg(feature = "dbus_api")]
-use vmm::api::dbus::{dbus_api_graceful_shutdown, DBusApiOptions};
-use vmm::api::http::http_api_graceful_shutdown;
 use vmm::api::ApiAction;
+#[cfg(feature = "dbus_api")]
+use vmm::api::dbus::{DBusApiOptions, dbus_api_graceful_shutdown};
+use vmm::api::http::http_api_graceful_shutdown;
 use vmm::config::{RestoreConfig, VmParams};
 use vmm::landlock::{Landlock, LandlockError};
 use vmm::vm_config;

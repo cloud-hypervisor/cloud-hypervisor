@@ -8,11 +8,11 @@ use std::os::fd::AsRawFd;
 
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::AsyncAdaptor;
 use crate::async_io::{
     AsyncIo, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::vhdx::{Result as VhdxResult, Vhdx};
-use crate::AsyncAdaptor;
 
 pub struct VhdxDiskSync {
     vhdx_file: Vhdx,

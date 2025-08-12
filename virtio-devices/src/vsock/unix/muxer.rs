@@ -52,7 +52,7 @@ use super::super::{
 };
 use super::muxer_killq::MuxerKillQ;
 use super::muxer_rxq::MuxerRxQ;
-use super::{defs, Error, MuxerConnection, Result};
+use super::{Error, MuxerConnection, Result, defs};
 
 /// A unique identifier of a `MuxerConnection` object. Connections are stored in a hash map,
 /// keyed by a `ConnMapKey` object.

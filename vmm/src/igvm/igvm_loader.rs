@@ -10,21 +10,21 @@ use std::sync::{Arc, Mutex};
 
 use igvm::snp_defs::SevVmsa;
 use igvm::{IgvmDirectiveHeader, IgvmFile, IgvmPlatformHeader, IsolationType};
-use igvm_defs::{
-    IgvmPageDataType, IgvmPlatformType, IGVM_VHS_PARAMETER, IGVM_VHS_PARAMETER_INSERT,
-};
 #[cfg(feature = "sev_snp")]
-use igvm_defs::{MemoryMapEntryType, IGVM_VHS_MEMORY_MAP_ENTRY};
+use igvm_defs::{IGVM_VHS_MEMORY_MAP_ENTRY, MemoryMapEntryType};
+use igvm_defs::{
+    IGVM_VHS_PARAMETER, IGVM_VHS_PARAMETER_INSERT, IgvmPageDataType, IgvmPlatformType,
+};
 use mshv_bindings::*;
 use thiserror::Error;
 use zerocopy::IntoBytes;
 
-use crate::cpu::CpuManager;
-use crate::igvm::loader::Loader;
-use crate::igvm::{BootPageAcceptance, IgvmLoadedInfo, StartupMemoryType, HV_PAGE_SIZE};
-use crate::memory_manager::MemoryManager;
 #[cfg(feature = "sev_snp")]
 use crate::GuestMemoryMmap;
+use crate::cpu::CpuManager;
+use crate::igvm::loader::Loader;
+use crate::igvm::{BootPageAcceptance, HV_PAGE_SIZE, IgvmLoadedInfo, StartupMemoryType};
+use crate::memory_manager::MemoryManager;
 
 #[derive(Debug, Error)]
 pub enum Error {

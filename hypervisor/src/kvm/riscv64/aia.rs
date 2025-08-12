@@ -7,10 +7,10 @@ use std::any::Any;
 use kvm_ioctls::DeviceFd;
 use serde::{Deserialize, Serialize};
 
+use crate::Vm;
 use crate::arch::riscv64::aia::{Error, Result, Vaia, VaiaConfig};
 use crate::device::HypervisorDeviceError;
 use crate::kvm::KvmVm;
-use crate::Vm;
 
 pub struct KvmAiaImsics {
     /// The KVM device for the Aia

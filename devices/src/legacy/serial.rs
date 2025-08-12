@@ -10,8 +10,8 @@ use std::sync::{Arc, Barrier};
 use std::{io, result};
 
 use serde::{Deserialize, Serialize};
-use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
+use vm_device::interrupt::InterruptSourceGroup;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::errno::Result;
 

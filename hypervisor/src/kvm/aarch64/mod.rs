@@ -11,8 +11,8 @@
 pub mod gic;
 
 use kvm_bindings::{
-    kvm_mp_state, kvm_one_reg, kvm_regs, KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE,
-    KVM_REG_SIZE_MASK, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
+    KVM_REG_ARM_COPROC_MASK, KVM_REG_ARM_CORE, KVM_REG_SIZE_MASK, KVM_REG_SIZE_U32,
+    KVM_REG_SIZE_U64, kvm_mp_state, kvm_one_reg, kvm_regs,
 };
 pub use kvm_ioctls::{Cap, Kvm};
 use serde::{Deserialize, Serialize};

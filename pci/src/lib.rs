@@ -24,16 +24,16 @@ use serde::de::Visitor;
 
 pub use self::bus::{PciBus, PciConfigIo, PciConfigMmio, PciRoot, PciRootError};
 pub use self::configuration::{
-    PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciCapability, PciCapabilityId,
-    PciClassCode, PciConfiguration, PciExpressCapabilityId, PciHeaderType, PciMassStorageSubclass,
-    PciNetworkControllerSubclass, PciProgrammingInterface, PciSerialBusSubClass, PciSubclass,
-    PCI_CONFIGURATION_ID,
+    PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciCapability,
+    PciCapabilityId, PciClassCode, PciConfiguration, PciExpressCapabilityId, PciHeaderType,
+    PciMassStorageSubclass, PciNetworkControllerSubclass, PciProgrammingInterface,
+    PciSerialBusSubClass, PciSubclass,
 };
 pub use self::device::{
     BarReprogrammingParams, DeviceRelocation, Error as PciDeviceError, PciDevice,
 };
-pub use self::msi::{msi_num_enabled_vectors, MsiCap, MsiConfig};
-pub use self::msix::{MsixCap, MsixConfig, MsixTableEntry, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE};
+pub use self::msi::{MsiCap, MsiConfig, msi_num_enabled_vectors};
+pub use self::msix::{MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, MsixCap, MsixConfig, MsixTableEntry};
 pub use self::vfio::{MmioRegion, VfioDmaMapping, VfioPciDevice, VfioPciError};
 pub use self::vfio_user::{VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError};
 

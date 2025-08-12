@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use hypervisor::arch::aarch64::gic::Vgic;
 use hypervisor::arch::aarch64::regs::MPIDR_EL1;
-use log::{log_enabled, Level};
+use log::{Level, log_enabled};
 use thiserror::Error;
 use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryAtomic};
 

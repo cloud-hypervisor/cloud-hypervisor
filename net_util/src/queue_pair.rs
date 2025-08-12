@@ -5,8 +5,8 @@
 use std::io;
 use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use rate_limiter::{RateLimiter, TokenType};
 use thiserror::Error;
@@ -15,7 +15,7 @@ use vm_memory::bitmap::Bitmap;
 use vm_memory::{Bytes, GuestMemory};
 use vm_virtio::{AccessPlatform, Translatable};
 
-use super::{register_listener, unregister_listener, vnet_hdr_len, Tap};
+use super::{Tap, register_listener, unregister_listener, vnet_hdr_len};
 
 #[derive(Clone)]
 pub struct TxVirtio {

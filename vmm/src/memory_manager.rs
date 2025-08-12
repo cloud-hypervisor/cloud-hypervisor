@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{ffi, result, thread};
 
-use acpi_tables::{aml, Aml};
+use acpi_tables::{Aml, aml};
 use anyhow::anyhow;
 use arch::RegionType;
 #[cfg(target_arch = "x86_64")]
@@ -278,7 +278,9 @@ pub enum Error {
 
     /// It's invalid to try applying a NUMA policy to a memory zone that is
     /// memory mapped with MAP_SHARED.
-    #[error("Invalid to try applying a NUMA policy to a memory zone that is memory mapped with MAP_SHARED")]
+    #[error(
+        "Invalid to try applying a NUMA policy to a memory zone that is memory mapped with MAP_SHARED"
+    )]
     InvalidSharedMemoryZoneWithHostNuma,
 
     /// Failed applying NUMA memory policy.
@@ -2611,7 +2613,7 @@ impl Migratable for MemoryManager {
                     return Err(MigratableError::MigrateSend(anyhow!(
                         "Error finding 'guest memory region' with address {:x}",
                         r.gpa
-                    )))
+                    )));
                 }
             };
 

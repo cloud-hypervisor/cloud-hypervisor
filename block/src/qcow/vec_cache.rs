@@ -4,8 +4,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::collections::hash_map::IterMut;
 use std::collections::HashMap;
+use std::collections::hash_map::IterMut;
 use std::io;
 use std::ops::{Index, IndexMut};
 use std::slice::SliceIndex;

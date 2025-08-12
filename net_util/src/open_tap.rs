@@ -8,7 +8,7 @@ use std::{fs, io};
 
 use thiserror::Error;
 
-use super::{vnet_hdr_len, MacAddr, Tap, TapError};
+use super::{MacAddr, Tap, TapError, vnet_hdr_len};
 
 #[derive(Error, Debug)]
 pub enum Error {

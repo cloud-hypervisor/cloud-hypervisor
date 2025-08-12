@@ -9,8 +9,8 @@ use std::path::Path;
 #[cfg(test)]
 use landlock::make_bitflags;
 use landlock::{
-    path_beneath_rules, Access, AccessFs, BitFlags, Compatible, Ruleset, RulesetAttr,
-    RulesetCreated, RulesetCreatedAttr, RulesetError, ABI,
+    ABI, Access, AccessFs, BitFlags, Compatible, Ruleset, RulesetAttr, RulesetCreated,
+    RulesetCreatedAttr, RulesetError, path_beneath_rules,
 };
 use thiserror::Error;
 
@@ -59,7 +59,7 @@ impl TryFrom<&str> for LandlockAccess {
                 _ => {
                     return Err(LandlockError::InvalidLandlockAccess(
                         format!("Invalid access: {c}").to_string(),
-                    ))
+                    ));
                 }
             };
         }

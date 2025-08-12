@@ -3,10 +3,10 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeSet;
-use std::fs::{read_dir, File};
+use std::fs::{File, read_dir};
 use std::io::{self, ErrorKind, Read, Write};
 use std::iter::once;
-use std::mem::{size_of, MaybeUninit};
+use std::mem::{MaybeUninit, size_of};
 use std::os::unix::prelude::*;
 use std::process::exit;
 use std::ptr::null_mut;
@@ -14,15 +14,16 @@ use std::ptr::null_mut;
 use arch::_NSIG;
 use hypervisor::HypervisorType;
 use libc::{
-    c_int, c_void, close, fork, getpgrp, ioctl, pipe2, poll, pollfd, setsid, sigemptyset,
-    siginfo_t, signal, sigprocmask, syscall, tcgetpgrp, tcsetpgrp, SYS_close_range, EINVAL, ENOSYS,
-    ENOTTY, O_CLOEXEC, POLLERR, SIGCHLD, SIGWINCH, SIG_DFL, SIG_SETMASK, STDERR_FILENO, TIOCSCTTY,
+    EINVAL, ENOSYS, ENOTTY, O_CLOEXEC, POLLERR, SIG_DFL, SIG_SETMASK, SIGCHLD, SIGWINCH,
+    STDERR_FILENO, SYS_close_range, TIOCSCTTY, c_int, c_void, close, fork, getpgrp, ioctl, pipe2,
+    poll, pollfd, setsid, sigemptyset, siginfo_t, signal, sigprocmask, syscall, tcgetpgrp,
+    tcsetpgrp,
 };
-use seccompiler::{apply_filter, BpfProgram, SeccompAction};
+use seccompiler::{BpfProgram, SeccompAction, apply_filter};
 use vmm_sys_util::signal::register_signal_handler;
 
-use crate::clone3::{clone3, clone_args, CLONE_CLEAR_SIGHAND};
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::clone3::{CLONE_CLEAR_SIGHAND, clone_args, clone3};
+use crate::seccomp_filters::{Thread, get_seccomp_filter};
 
 thread_local! {
     // The tty file descriptor is stored in a global variable so it

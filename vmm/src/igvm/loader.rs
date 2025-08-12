@@ -10,7 +10,7 @@ use vm_memory::{
     GuestMemoryRegion,
 };
 
-use crate::igvm::{BootPageAcceptance, StartupMemoryType, HV_PAGE_SIZE};
+use crate::igvm::{BootPageAcceptance, HV_PAGE_SIZE, StartupMemoryType};
 
 /// Structure to hold the guest memory info/layout to check
 /// the if the memory is accepted within the layout.

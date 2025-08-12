@@ -31,7 +31,7 @@ pub mod vhd;
 pub mod vhdx;
 pub mod vhdx_sync;
 
-use std::alloc::{alloc_zeroed, dealloc, Layout};
+use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::fs::File;
@@ -44,8 +44,8 @@ use std::time::Instant;
 use std::{cmp, result};
 
 #[cfg(feature = "io_uring")]
-use io_uring::{opcode, IoUring, Probe};
-use libc::{ioctl, S_IFBLK, S_IFMT};
+use io_uring::{IoUring, Probe, opcode};
+use libc::{S_IFBLK, S_IFMT, ioctl};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use thiserror::Error;

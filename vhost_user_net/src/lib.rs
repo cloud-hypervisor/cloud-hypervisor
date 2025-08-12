@@ -15,12 +15,12 @@ use std::{io, process};
 use libc::EFD_NONBLOCK;
 use log::*;
 use net_util::{
-    open_tap, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio,
+    MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio, open_tap,
 };
 use option_parser::{OptionParser, OptionParserError, Toggle};
 use thiserror::Error;
-use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
+use vhost::vhost_user::message::*;
 use vhost_user_backend::bitmap::BitmapMmapRegion;
 use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringT};
 use virtio_bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_1};

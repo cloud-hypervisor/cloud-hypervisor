@@ -34,7 +34,7 @@ pub mod dbus;
 pub mod http;
 
 use std::io;
-use std::sync::mpsc::{channel, RecvError, SendError, Sender};
+use std::sync::mpsc::{RecvError, SendError, Sender, channel};
 
 use micro_http::Body;
 use serde::{Deserialize, Serialize};
@@ -45,6 +45,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(feature = "dbus_api")]
 pub use self::dbus::start_dbus_thread;
 pub use self::http::{start_http_fd_thread, start_http_path_thread};
+use crate::Error as VmmError;
 use crate::config::RestoreConfig;
 use crate::device_tree::DeviceTree;
 use crate::vm::{Error as VmError, VmState};
@@ -52,7 +53,6 @@ use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
     VmConfig, VsockConfig,
 };
-use crate::Error as VmmError;
 
 /// API errors are sent back from the VMM API server through the ApiResponse.
 #[derive(Error, Debug)]

@@ -24,11 +24,11 @@ use vmm_sys_util::file_traits::{FileSetLen, FileSync};
 use vmm_sys_util::seek_hole::SeekHole;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
+use crate::BlockBackend;
 use crate::qcow::qcow_raw_file::QcowRawFile;
 pub use crate::qcow::raw_file::RawFile;
 use crate::qcow::refcount::RefCount;
 use crate::qcow::vec_cache::{CacheMap, Cacheable, VecCache};
-use crate::BlockBackend;
 
 /// Nesting depth limit for disk formats that can open other disk files.
 const MAX_NESTING_DEPTH: u32 = 10;

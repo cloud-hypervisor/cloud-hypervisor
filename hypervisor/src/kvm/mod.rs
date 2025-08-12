@@ -29,7 +29,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "aarch64")]
 use crate::aarch64::gic::KvmGicV3Its;
 #[cfg(target_arch = "aarch64")]
-pub use crate::aarch64::{check_required_kvm_extensions, is_system_register, VcpuKvmState};
+pub use crate::aarch64::{VcpuKvmState, check_required_kvm_extensions, is_system_register};
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 #[cfg(target_arch = "riscv64")]
@@ -40,21 +40,21 @@ use crate::arm64_core_reg_id;
 use crate::riscv64::aia::KvmAiaImsics;
 #[cfg(target_arch = "riscv64")]
 pub use crate::riscv64::{
-    aia::AiaImsicsState as AiaState, check_required_kvm_extensions, is_non_core_register,
-    VcpuKvmState,
+    VcpuKvmState, aia::AiaImsicsState as AiaState, check_required_kvm_extensions,
+    is_non_core_register,
 };
 #[cfg(target_arch = "riscv64")]
 use crate::riscv64_reg_id;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
-use crate::{cpu, hypervisor, HypervisorType};
+use crate::{HypervisorType, cpu, hypervisor};
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
-    kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP,
-    KVM_CAP_X2APIC_API, KVM_GUESTDBG_USE_HW_BP, KVM_X2APIC_API_DISABLE_BROADCAST_QUIRK,
-    KVM_X2APIC_API_USE_32BIT_IDS,
+    KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP, KVM_CAP_X2APIC_API, KVM_GUESTDBG_USE_HW_BP,
+    KVM_X2APIC_API_DISABLE_BROADCAST_QUIRK, KVM_X2APIC_API_USE_32BIT_IDS, MsrList, kvm_enable_cap,
+    kvm_msr_entry,
 };
 #[cfg(target_arch = "x86_64")]
 use x86_64::check_required_kvm_extensions;
@@ -62,14 +62,15 @@ use x86_64::check_required_kvm_extensions;
 pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, VcpuKvmState};
 
 #[cfg(target_arch = "x86_64")]
-use crate::arch::x86::{
-    CpuIdEntry, FpuState, LapicState, MsrEntry, SpecialRegisters, XsaveState, NUM_IOAPIC_PINS,
-};
-#[cfg(target_arch = "x86_64")]
 use crate::ClockData;
+#[cfg(target_arch = "x86_64")]
+use crate::arch::x86::{
+    CpuIdEntry, FpuState, LapicState, MsrEntry, NUM_IOAPIC_PINS, SpecialRegisters, XsaveState,
+};
 use crate::{
-    CpuState, IoEventAddress, IrqRoutingEntry, MpState, StandardRegisters, UserMemoryRegion,
+    CpuState, IoEventAddress, IrqRoutingEntry, MpState, StandardRegisters,
     USER_MEMORY_REGION_LOG_DIRTY, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
+    UserMemoryRegion,
 };
 // aarch64 dependencies
 #[cfg(target_arch = "aarch64")]
@@ -86,23 +87,23 @@ use std::mem;
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 pub use kvm_bindings::kvm_vcpu_events as VcpuEvents;
 pub use kvm_bindings::{
-    kvm_clock_data, kvm_create_device, kvm_create_device as CreateDevice,
-    kvm_device_attr as DeviceAttr, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug,
-    kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state, kvm_run, kvm_userspace_memory_region,
     KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI,
-    KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
+    KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID, kvm_clock_data,
+    kvm_create_device, kvm_create_device as CreateDevice, kvm_device_attr as DeviceAttr,
+    kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug, kvm_irq_routing, kvm_irq_routing_entry,
+    kvm_mp_state, kvm_run, kvm_userspace_memory_region,
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
-    kvm_regs, user_pt_regs, KVM_GUESTDBG_USE_HW, KVM_NR_SPSR, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
+    KVM_GUESTDBG_USE_HW, KVM_NR_SPSR, KVM_REG_ARM_CORE, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
     KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRN_MASK, KVM_REG_ARM64_SYSREG_OP0_MASK,
-    KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_ARM_CORE,
-    KVM_REG_SIZE_U128, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64,
+    KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_SIZE_U32,
+    KVM_REG_SIZE_U64, KVM_REG_SIZE_U128, kvm_regs, user_pt_regs,
 };
 #[cfg(target_arch = "riscv64")]
-use kvm_bindings::{kvm_riscv_core, KVM_REG_RISCV_CORE};
+use kvm_bindings::{KVM_REG_RISCV_CORE, kvm_riscv_core};
 #[cfg(feature = "tdx")]
-use kvm_bindings::{kvm_run__bindgen_ty_1, KVMIO};
+use kvm_bindings::{KVMIO, kvm_run__bindgen_ty_1};
 pub use kvm_ioctls::{Cap, Kvm, VcpuExit};
 use thiserror::Error;
 use vfio_ioctls::VfioDeviceFd;
@@ -112,10 +113,10 @@ use vmm_sys_util::ioctl_io_nr;
 use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_iowr_nr};
 pub use {kvm_bindings, kvm_ioctls};
 
-#[cfg(target_arch = "aarch64")]
-use crate::arch::aarch64::regs;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use crate::RegList;
+#[cfg(target_arch = "aarch64")]
+use crate::arch::aarch64::regs;
 #[cfg(target_arch = "x86_64")]
 ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 
@@ -2866,7 +2867,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// Return the list of initial MSR entries for a VCPU
     ///
     fn boot_msr_entries(&self) -> Vec<MsrEntry> {
-        use crate::arch::x86::{msr_index, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
+        use crate::arch::x86::{MTRR_ENABLE, MTRR_MEM_TYPE_WB, msr_index};
 
         [
             msr!(msr_index::MSR_IA32_SYSENTER_CS),

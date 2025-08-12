@@ -9,11 +9,11 @@ use std::os::fd::AsRawFd;
 
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::AsyncAdaptor;
 use crate::async_io::{
     AsyncIo, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::qcow::{QcowFile, RawFile, Result as QcowResult};
-use crate::AsyncAdaptor;
 
 pub struct QcowDiskSync {
     qcow_file: QcowFile,

@@ -13,18 +13,17 @@ use serde::{Deserialize, Serialize};
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
 pub use {
-    kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable, kvm_bindings::kvm_fpu,
-    kvm_bindings::kvm_lapic_state, kvm_bindings::kvm_mp_state as MpState,
+    kvm_bindings::CpuId, kvm_bindings::KVM_CPUID_FLAG_SIGNIFCANT_INDEX, kvm_bindings::MsrList,
+    kvm_bindings::Msrs as MsrEntries, kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable,
+    kvm_bindings::kvm_fpu, kvm_bindings::kvm_lapic_state, kvm_bindings::kvm_mp_state as MpState,
     kvm_bindings::kvm_msr_entry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
     kvm_bindings::kvm_sregs, kvm_bindings::kvm_vcpu_events as VcpuEvents,
     kvm_bindings::kvm_xcrs as ExtendedControlRegisters, kvm_bindings::kvm_xsave,
-    kvm_bindings::CpuId, kvm_bindings::MsrList, kvm_bindings::Msrs as MsrEntries,
-    kvm_bindings::KVM_CPUID_FLAG_SIGNIFCANT_INDEX,
 };
 
 use crate::arch::x86::{
-    CpuIdEntry, DescriptorTable, FpuState, LapicState, MsrEntry, SegmentRegister, SpecialRegisters,
-    XsaveState, CPUID_FLAG_VALID_INDEX,
+    CPUID_FLAG_VALID_INDEX, CpuIdEntry, DescriptorTable, FpuState, LapicState, MsrEntry,
+    SegmentRegister, SpecialRegisters, XsaveState,
 };
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 

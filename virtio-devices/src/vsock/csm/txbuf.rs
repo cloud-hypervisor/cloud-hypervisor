@@ -5,7 +5,7 @@
 use std::io::Write;
 use std::num::Wrapping;
 
-use super::{defs, Error, Result};
+use super::{Error, Result, defs};
 
 /// A simple ring-buffer implementation, used by vsock connections to buffer TX (guest -> host)
 /// data.  Memory for this buffer is allocated lazily, since buffering will only be needed when

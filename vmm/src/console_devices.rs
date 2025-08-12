@@ -10,7 +10,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use std::fs::{read_link, File, OpenOptions};
+use std::fs::{File, OpenOptions, read_link};
 use std::mem::zeroed;
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::fs::OpenOptionsExt;
@@ -19,12 +19,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::{io, result};
 
-use libc::{cfmakeraw, isatty, tcgetattr, tcsetattr, termios, TCSANOW};
+use libc::{TCSANOW, cfmakeraw, isatty, tcgetattr, tcsetattr, termios};
 use thiserror::Error;
 
+use crate::Vmm;
 use crate::sigwinch_listener::listen_for_sigwinch_on_tty;
 use crate::vm_config::ConsoleOutputMode;
-use crate::Vmm;
 
 const TIOCSPTLCK: libc::c_int = 0x4004_5431;
 const TIOCGPTPEER: libc::c_int = 0x5441;
@@ -225,7 +225,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                 ConsoleOutput::Tty(Arc::new(stdout))
             }
             ConsoleOutputMode::Socket => {
-                return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice)
+                return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice);
             }
             ConsoleOutputMode::Null => ConsoleOutput::Null,
             ConsoleOutputMode::Off => ConsoleOutput::Off,
@@ -288,7 +288,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                 ConsoleOutput::Tty(Arc::new(out))
             }
             ConsoleOutputMode::Socket => {
-                return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice)
+                return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice);
             }
             ConsoleOutputMode::Null => ConsoleOutput::Null,
             ConsoleOutputMode::Off => ConsoleOutput::Off,
