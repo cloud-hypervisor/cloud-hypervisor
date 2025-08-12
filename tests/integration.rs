@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::string::String;
 use std::sync::mpsc::Receiver;
-use std::sync::{mpsc, Mutex};
+use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 use std::{fs, io, thread};
 
@@ -719,10 +719,12 @@ fn setup_ovs_dpdk() {
     assert!(exec_host_command_status("service openvswitch-switch restart").success());
 
     // Create OVS-DPDK bridge and ports
-    assert!(exec_host_command_status(
-        "ovs-vsctl add-br ovsbr0 -- set bridge ovsbr0 datapath_type=netdev",
-    )
-    .success());
+    assert!(
+        exec_host_command_status(
+            "ovs-vsctl add-br ovsbr0 -- set bridge ovsbr0 datapath_type=netdev",
+        )
+        .success()
+    );
     assert!(exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user1 -- set Interface vhost-user1 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient1").success());
     assert!(exec_host_command_status("ovs-vsctl add-port ovsbr0 vhost-user2 -- set Interface vhost-user2 type=dpdkvhostuserclient options:vhost-server-path=/tmp/dpdkvhostclient2").success());
     assert!(exec_host_command_status("ip link set up dev ovsbr0").success());
@@ -1658,8 +1660,10 @@ fn _test_virtio_fs(
                     "{{\"id\":\"myfs0\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
                 )));
             } else {
-                assert!(String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}"));
+                assert!(
+                    String::from_utf8_lossy(&cmd_output)
+                        .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}")
+                );
             }
 
             thread::sleep(std::time::Duration::new(10, 0));
@@ -1739,8 +1743,10 @@ fn _test_virtio_fs(
                     "{{\"id\":\"myfs0\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
                 )));
             } else {
-                assert!(String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}"));
+                assert!(
+                    String::from_utf8_lossy(&cmd_output)
+                        .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}")
+                );
             }
 
             thread::sleep(std::time::Duration::new(10, 0));
@@ -1894,8 +1900,10 @@ fn _test_virtio_vsock(hotplug: bool) {
                 Some(format!("cid=3,socket={socket},id=test0").as_str()),
             );
             assert!(cmd_success);
-            assert!(String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}"));
+            assert!(
+                String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
+            );
             thread::sleep(std::time::Duration::new(10, 0));
             // Check adding a second one fails
             assert!(!remote_command(
@@ -2112,18 +2120,20 @@ fn get_counters(api_socket: &str) -> Counters {
 
 fn pty_read(mut pty: std::fs::File) -> Receiver<String> {
     let (tx, rx) = mpsc::channel::<String>();
-    thread::spawn(move || loop {
-        thread::sleep(std::time::Duration::new(1, 0));
-        let mut buf = [0; 512];
-        match pty.read(&mut buf) {
-            Ok(_bytes) => {
-                let output = std::str::from_utf8(&buf).unwrap().to_string();
-                match tx.send(output) {
-                    Ok(_) => (),
-                    Err(_) => break,
+    thread::spawn(move || {
+        loop {
+            thread::sleep(std::time::Duration::new(1, 0));
+            let mut buf = [0; 512];
+            match pty.read(&mut buf) {
+                Ok(_bytes) => {
+                    let output = std::str::from_utf8(&buf).unwrap().to_string();
+                    match tx.send(output) {
+                        Ok(_) => (),
+                        Err(_) => break,
+                    }
                 }
+                Err(_) => break,
             }
-            Err(_) => break,
         }
     });
     rx
@@ -2257,9 +2267,11 @@ fn _test_virtio_iommu(acpi: bool) {
         guest.wait_vm_boot(None).unwrap();
 
         // Verify the virtio-iommu device is present.
-        assert!(guest
-            .does_device_vendor_pair_match("0x1057", "0x1af4")
-            .unwrap_or_default());
+        assert!(
+            guest
+                .does_device_vendor_pair_match("0x1057", "0x1af4")
+                .unwrap_or_default()
+        );
 
         // On AArch64, if the guest system boots from FDT, the behavior of IOMMU is a bit
         // different with ACPI.
@@ -2319,9 +2331,11 @@ fn get_reboot_count(guest: &Guest) -> u32 {
 
 fn enable_guest_watchdog(guest: &Guest, watchdog_sec: u32) {
     // Check for PCI device
-    assert!(guest
-        .does_device_vendor_pair_match("0x1063", "0x1af4")
-        .unwrap_or_default());
+    assert!(
+        guest
+            .does_device_vendor_pair_match("0x1063", "0x1af4")
+            .unwrap_or_default()
+    );
 
     // Enable systemd watchdog
     guest
@@ -2335,9 +2349,11 @@ fn enable_guest_watchdog(guest: &Guest, watchdog_sec: u32) {
 
 fn make_guest_panic(guest: &Guest) {
     // Check for pvpanic device
-    assert!(guest
-        .does_device_vendor_pair_match("0x0011", "0x1b36")
-        .unwrap_or_default());
+    assert!(
+        guest
+            .does_device_vendor_pair_match("0x0011", "0x1b36")
+            .unwrap_or_default()
+    );
 
     // Trigger guest a panic
     guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
@@ -2976,13 +2992,17 @@ mod common_parallel {
                 ),
             );
             assert!(cmd_success);
-            assert!(String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"test0\",\"bdf\":\"0001:00:01.0\"}"));
+            assert!(
+                String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"test0\",\"bdf\":\"0001:00:01.0\"}")
+            );
 
             // Check IOMMU setup
-            assert!(guest
-                .does_device_vendor_pair_match("0x1057", "0x1af4")
-                .unwrap_or_default());
+            assert!(
+                guest
+                    .does_device_vendor_pair_match("0x1057", "0x1af4")
+                    .unwrap_or_default()
+            );
             assert_eq!(
                 guest
                     .ssh_command("ls /sys/kernel/iommu_groups/0/devices")
@@ -4437,9 +4457,11 @@ mod common_parallel {
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
 
-            assert!(guest
-                .does_device_vendor_pair_match("0x1043", "0x1af4")
-                .unwrap_or_default());
+            assert!(
+                guest
+                    .does_device_vendor_pair_match("0x1043", "0x1af4")
+                    .unwrap_or_default()
+            );
 
             guest.ssh_command(&cmd).unwrap();
         });
@@ -5409,8 +5431,10 @@ mod common_parallel {
                 ),
             );
             assert!(cmd_success);
-            assert!(String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}"));
+            assert!(
+                String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
+            );
 
             thread::sleep(std::time::Duration::new(10, 0));
 
@@ -5456,8 +5480,10 @@ mod common_parallel {
                 ),
             );
             assert!(cmd_success);
-            assert!(String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}"));
+            assert!(
+                String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
+            );
 
             thread::sleep(std::time::Duration::new(10, 0));
 
@@ -5956,8 +5982,10 @@ mod common_parallel {
                     "{{\"id\":\"test0\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
                 )));
             } else {
-                assert!(String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}"));
+                assert!(
+                    String::from_utf8_lossy(&cmd_output)
+                        .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
+                );
             }
 
             // Check that /dev/pmem0 exists and the block size is 128M
@@ -6087,8 +6115,10 @@ mod common_parallel {
                     "{{\"id\":\"test0\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
                 )));
             } else {
-                assert!(String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:05.0\"}"));
+                assert!(
+                    String::from_utf8_lossy(&cmd_output)
+                        .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:05.0\"}")
+                );
             }
 
             thread::sleep(std::time::Duration::new(5, 0));
@@ -6131,8 +6161,10 @@ mod common_parallel {
                     "{{\"id\":\"test1\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
                 )));
             } else {
-                assert!(String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"test1\",\"bdf\":\"0000:00:05.0\"}"));
+                assert!(
+                    String::from_utf8_lossy(&cmd_output)
+                        .contains("{\"id\":\"test1\",\"bdf\":\"0000:00:05.0\"}")
+                );
             }
 
             thread::sleep(std::time::Duration::new(5, 0));
@@ -6569,15 +6601,19 @@ mod common_parallel {
         let phy_net = "eth0";
 
         // Create a macvtap interface for the guest VM to use
-        assert!(exec_host_command_status(&format!(
-            "sudo ip link add link {phy_net} name {guest_macvtap_name} type macvtap mod bridge"
-        ))
-        .success());
-        assert!(exec_host_command_status(&format!(
-            "sudo ip link set {} address {} up",
-            guest_macvtap_name, guest.network.guest_mac
-        ))
-        .success());
+        assert!(
+            exec_host_command_status(&format!(
+                "sudo ip link add link {phy_net} name {guest_macvtap_name} type macvtap mod bridge"
+            ))
+            .success()
+        );
+        assert!(
+            exec_host_command_status(&format!(
+                "sudo ip link set {} address {} up",
+                guest_macvtap_name, guest.network.guest_mac
+            ))
+            .success()
+        );
         assert!(
             exec_host_command_status(&format!("sudo ip link show {guest_macvtap_name}")).success()
         );
@@ -6596,16 +6632,20 @@ mod common_parallel {
 
         // Create a macvtap on the same physical net interface for
         // the host machine to use
-        assert!(exec_host_command_status(&format!(
-            "sudo ip link add link {phy_net} name {host_macvtap_name} type macvtap mod bridge"
-        ))
-        .success());
+        assert!(
+            exec_host_command_status(&format!(
+                "sudo ip link add link {phy_net} name {host_macvtap_name} type macvtap mod bridge"
+            ))
+            .success()
+        );
         // Use default mask "255.255.255.0"
-        assert!(exec_host_command_status(&format!(
-            "sudo ip address add {}/24 dev {}",
-            guest.network.host_ip, host_macvtap_name
-        ))
-        .success());
+        assert!(
+            exec_host_command_status(&format!(
+                "sudo ip address add {}/24 dev {}",
+                guest.network.host_ip, host_macvtap_name
+            ))
+            .success()
+        );
         assert!(
             exec_host_command_status(&format!("sudo ip link set dev {host_macvtap_name} up"))
                 .success()
@@ -6641,11 +6681,15 @@ mod common_parallel {
                 remote_command_w_output(&api_socket, "add-net", Some(&net_params));
             assert!(cmd_success);
             #[cfg(target_arch = "x86_64")]
-            assert!(String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"_net2\",\"bdf\":\"0000:00:05.0\"}"));
+            assert!(
+                String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"_net2\",\"bdf\":\"0000:00:05.0\"}")
+            );
             #[cfg(target_arch = "aarch64")]
-            assert!(String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"_net0\",\"bdf\":\"0000:00:05.0\"}"));
+            assert!(
+                String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"_net0\",\"bdf\":\"0000:00:05.0\"}")
+            );
         }
 
         // The functional connectivity provided by the virtio-net device
@@ -6821,21 +6865,27 @@ mod common_parallel {
     fn setup_spdk_nvme(nvme_dir: &std::path::Path) -> Child {
         cleanup_spdk_nvme();
 
-        assert!(exec_host_command_status(&format!(
-            "mkdir -p {}",
-            nvme_dir.join("nvme-vfio-user").to_str().unwrap()
-        ))
-        .success());
-        assert!(exec_host_command_status(&format!(
-            "truncate {} -s 128M",
-            nvme_dir.join("test-disk.raw").to_str().unwrap()
-        ))
-        .success());
-        assert!(exec_host_command_status(&format!(
-            "mkfs.ext4 {}",
-            nvme_dir.join("test-disk.raw").to_str().unwrap()
-        ))
-        .success());
+        assert!(
+            exec_host_command_status(&format!(
+                "mkdir -p {}",
+                nvme_dir.join("nvme-vfio-user").to_str().unwrap()
+            ))
+            .success()
+        );
+        assert!(
+            exec_host_command_status(&format!(
+                "truncate {} -s 128M",
+                nvme_dir.join("test-disk.raw").to_str().unwrap()
+            ))
+            .success()
+        );
+        assert!(
+            exec_host_command_status(&format!(
+                "mkfs.ext4 {}",
+                nvme_dir.join("test-disk.raw").to_str().unwrap()
+            ))
+            .success()
+        );
 
         // Start the SPDK nvmf_tgt daemon to present NVMe device as a VFIO user device
         let child = Command::new("/usr/local/bin/spdk-nvme/nvmf_tgt")
@@ -6849,11 +6899,13 @@ mod common_parallel {
             3,
             std::time::Duration::new(5, 0),
         ));
-        assert!(exec_host_command_status(&format!(
-            "/usr/local/bin/spdk-nvme/rpc.py bdev_aio_create {} test 512",
-            nvme_dir.join("test-disk.raw").to_str().unwrap()
-        ))
-        .success());
+        assert!(
+            exec_host_command_status(&format!(
+                "/usr/local/bin/spdk-nvme/rpc.py bdev_aio_create {} test 512",
+                nvme_dir.join("test-disk.raw").to_str().unwrap()
+            ))
+            .success()
+        );
         assert!(exec_host_command_status(
                 "/usr/local/bin/spdk-nvme/rpc.py nvmf_create_subsystem nqn.2019-07.io.spdk:cnode -a -s test"
             )
@@ -6914,8 +6966,10 @@ mod common_parallel {
                 )),
             );
             assert!(cmd_success);
-            assert!(String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"vfio_user0\",\"bdf\":\"0000:00:05.0\"}"));
+            assert!(
+                String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"vfio_user0\",\"bdf\":\"0000:00:05.0\"}")
+            );
 
             thread::sleep(std::time::Duration::new(10, 0));
 
@@ -7020,15 +7074,19 @@ mod common_parallel {
                 Some("id=myvdpa0,path=/dev/vhost-vdpa-1,num_queues=1,pci_segment=1,iommu=on"),
             );
             assert!(cmd_success);
-            assert!(String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"myvdpa0\",\"bdf\":\"0001:00:01.0\"}"));
+            assert!(
+                String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"myvdpa0\",\"bdf\":\"0001:00:01.0\"}")
+            );
 
             thread::sleep(std::time::Duration::new(10, 0));
 
             // Check IOMMU setup
-            assert!(guest
-                .does_device_vendor_pair_match("0x1057", "0x1af4")
-                .unwrap_or_default());
+            assert!(
+                guest
+                    .does_device_vendor_pair_match("0x1057", "0x1af4")
+                    .unwrap_or_default()
+            );
             assert_eq!(
                 guest
                     .ssh_command("ls /sys/kernel/iommu_groups/0/devices")
@@ -7422,7 +7480,7 @@ mod ivshmem {
     use std::fs::remove_dir_all;
     use std::process::Command;
 
-    use test_infra::{handle_child_output, kill_child, Guest, GuestCommand, UbuntuDiskConfig};
+    use test_infra::{Guest, GuestCommand, UbuntuDiskConfig, handle_child_output, kill_child};
 
     use crate::*;
 
@@ -9408,8 +9466,10 @@ mod windows {
                     Some(format!("path={disk},readonly=off").as_str()),
                 );
                 assert!(cmd_success);
-                assert!(String::from_utf8_lossy(&cmd_output)
-                    .contains(format!("\"id\":\"{disk_id}\"").as_str()));
+                assert!(
+                    String::from_utf8_lossy(&cmd_output)
+                        .contains(format!("\"id\":\"{disk_id}\"").as_str())
+                );
                 thread::sleep(std::time::Duration::new(5, 0));
                 // Online disk devices
                 windows_guest.disks_set_rw();
@@ -9663,8 +9723,10 @@ mod vfio {
                 Some(format!("id=vfio0,path={NVIDIA_VFIO_DEVICE}").as_str()),
             );
             assert!(cmd_success);
-            assert!(String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"vfio0\",\"bdf\":\"0000:00:06.0\"}"));
+            assert!(
+                String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"vfio0\",\"bdf\":\"0000:00:06.0\"}")
+            );
 
             thread::sleep(std::time::Duration::new(10, 0));
 
@@ -9742,10 +9804,12 @@ mod vfio {
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
 
-            assert!(guest
-                .ssh_command("sudo dmesg")
-                .unwrap()
-                .contains("input address: 42 bits"));
+            assert!(
+                guest
+                    .ssh_command("sudo dmesg")
+                    .unwrap()
+                    .contains("input address: 42 bits")
+            );
         });
 
         let _ = child.kill();
@@ -9866,13 +9930,13 @@ mod live_migration {
         let _ = dest_vm.kill();
         let dest_output = dest_vm.wait_with_output().unwrap();
         eprintln!(
-                "\n\n==== Start 'destination_vm' stdout ====\n\n{}\n\n==== End 'destination_vm' stdout ====",
-                String::from_utf8_lossy(&dest_output.stdout)
-            );
+            "\n\n==== Start 'destination_vm' stdout ====\n\n{}\n\n==== End 'destination_vm' stdout ====",
+            String::from_utf8_lossy(&dest_output.stdout)
+        );
         eprintln!(
-                "\n\n==== Start 'destination_vm' stderr ====\n\n{}\n\n==== End 'destination_vm' stderr ====",
-                String::from_utf8_lossy(&dest_output.stderr)
-            );
+            "\n\n==== Start 'destination_vm' stderr ====\n\n{}\n\n==== End 'destination_vm' stderr ====",
+            String::from_utf8_lossy(&dest_output.stderr)
+        );
 
         if let Some(ovs_vm) = ovs_vm {
             let mut ovs_vm = ovs_vm;
@@ -11434,11 +11498,13 @@ mod rate_limiter {
             String::from(test_img_dir.as_path().join("blk.img").to_str().unwrap());
 
         // Create the test block image
-        assert!(exec_host_command_output(&format!(
-            "dd if=/dev/zero of={blk_rate_limiter_test_img} bs=1M count=1024"
-        ))
-        .status
-        .success());
+        assert!(
+            exec_host_command_output(&format!(
+                "dd if=/dev/zero of={blk_rate_limiter_test_img} bs=1M count=1024"
+            ))
+            .status
+            .success()
+        );
 
         let test_blk_params = if bandwidth {
             format!(
@@ -11543,11 +11609,13 @@ mod rate_limiter {
                     .unwrap(),
             );
 
-            assert!(exec_host_command_output(&format!(
-                "dd if=/dev/zero of={test_img_path} bs=1M count=1024"
-            ))
-            .status
-            .success());
+            assert!(
+                exec_host_command_output(&format!(
+                    "dd if=/dev/zero of={test_img_path} bs=1M count=1024"
+                ))
+                .status
+                .success()
+            );
 
             disk_args.push(format!(
                 "path={test_img_path},num_queues={num_queues},rate_limit_group=group0"

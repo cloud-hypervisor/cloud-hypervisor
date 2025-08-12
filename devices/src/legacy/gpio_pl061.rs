@@ -12,8 +12,8 @@ use std::{io, result};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use vm_device::interrupt::InterruptSourceGroup;
 use vm_device::BusDevice;
+use vm_device::interrupt::InterruptSourceGroup;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 
 use crate::{read_le_u32, write_le_u32};
@@ -28,10 +28,10 @@ const GPIORIE: u64 = 0x414; // Raw Interrupt Status Register
 const GPIOMIS: u64 = 0x418; // Masked Interrupt Status Register
 const GPIOIC: u64 = 0x41c; // Interrupt Clear Register
 const GPIOAFSEL: u64 = 0x420; // Mode Control Select Register
-                              // From 0x424 to 0xFDC => reserved space.
-                              // From 0xFE0 to 0xFFC => Peripheral and PrimeCell Identification Registers which are Read Only registers.
-                              // These registers can conceptually be treated as a 32-bit register, and PartNumber[11:0] is used to identify the peripheral.
-                              // We are putting the expected values (look at 'Reset value' column from above mentioned document) in an array.
+// From 0x424 to 0xFDC => reserved space.
+// From 0xFE0 to 0xFFC => Peripheral and PrimeCell Identification Registers which are Read Only registers.
+// These registers can conceptually be treated as a 32-bit register, and PartNumber[11:0] is used to identify the peripheral.
+// We are putting the expected values (look at 'Reset value' column from above mentioned document) in an array.
 const GPIO_ID: [u8; 8] = [0x61, 0x10, 0x14, 0x00, 0x0d, 0xf0, 0x05, 0xb1];
 // ID Margins
 const GPIO_ID_LOW: u64 = 0xfe0;

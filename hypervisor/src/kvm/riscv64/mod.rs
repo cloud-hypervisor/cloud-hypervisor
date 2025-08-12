@@ -5,8 +5,8 @@
 pub mod aia;
 
 use kvm_bindings::{
-    kvm_mp_state, kvm_one_reg, kvm_riscv_core, KVM_REG_RISCV_CORE, KVM_REG_RISCV_TYPE_MASK,
-    KVM_REG_SIZE_MASK, KVM_REG_SIZE_U64,
+    KVM_REG_RISCV_CORE, KVM_REG_RISCV_TYPE_MASK, KVM_REG_SIZE_MASK, KVM_REG_SIZE_U64, kvm_mp_state,
+    kvm_one_reg, kvm_riscv_core,
 };
 pub use kvm_ioctls::{Cap, Kvm};
 use serde::{Deserialize, Serialize};

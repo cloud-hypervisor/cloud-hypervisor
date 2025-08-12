@@ -306,7 +306,7 @@ pub(crate) mod tests {
 
     use super::RateLimiterGroupHandle;
     use crate::group::RateLimiterGroup;
-    use crate::{TokenBucket, TokenType, REFILL_TIMER_INTERVAL_MS};
+    use crate::{REFILL_TIMER_INTERVAL_MS, TokenBucket, TokenType};
 
     impl RateLimiterGroupHandle {
         fn bandwidth(&self) -> Option<TokenBucket> {

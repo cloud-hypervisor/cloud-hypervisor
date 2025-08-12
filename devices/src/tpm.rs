@@ -12,8 +12,8 @@ use arch::aarch64::layout::{TPM_SIZE, TPM_START};
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::layout::{TPM_SIZE, TPM_START};
 use thiserror::Error;
-use tpm::emulator::{BackendCmd, Emulator};
 use tpm::TPM_CRB_BUFFER_MAX;
+use tpm::emulator::{BackendCmd, Emulator};
 use vm_device::BusDevice;
 
 #[derive(Error, Debug)]

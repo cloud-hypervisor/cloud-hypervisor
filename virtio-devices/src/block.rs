@@ -19,10 +19,10 @@ use std::{io, result};
 
 use anyhow::anyhow;
 use block::async_io::{AsyncIo, AsyncIoError, DiskFile};
-use block::fcntl::{get_lock_state, LockError, LockType};
-use block::{build_serial, fcntl, Request, RequestType, VirtioBlockConfig};
-use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
+use block::fcntl::{LockError, LockType, get_lock_state};
+use block::{Request, RequestType, VirtioBlockConfig, build_serial, fcntl};
 use rate_limiter::TokenType;
+use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -36,9 +36,9 @@ use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
 
 use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
-    Error as DeviceError, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
-    EPOLL_HELPER_EVENT_LAST,
+    ActivateError, ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError,
+    EpollHelperHandler, Error as DeviceError, VirtioCommon, VirtioDevice, VirtioDeviceType,
+    VirtioInterruptType,
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;

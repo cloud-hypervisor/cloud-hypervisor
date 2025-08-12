@@ -13,8 +13,8 @@ use std::os::unix::net::UnixStream;
 use std::process;
 
 use api_client::{
-    simple_api_command, simple_api_command_with_fds, simple_api_full_command,
-    Error as ApiClientError,
+    Error as ApiClientError, simple_api_command, simple_api_command_with_fds,
+    simple_api_full_command,
 };
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use log::error;
@@ -1128,7 +1128,9 @@ fn main() {
             process::exit(1);
         }
         _ => {
-            error!("Please either provide the api-socket option or dbus-service-name and dbus-object-path options");
+            error!(
+                "Please either provide the api-socket option or dbus-service-name and dbus-object-path options"
+            );
             process::exit(1);
         }
     };

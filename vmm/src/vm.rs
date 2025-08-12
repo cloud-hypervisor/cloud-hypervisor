@@ -25,18 +25,18 @@ use std::time::Instant;
 use std::{cmp, result, str, thread};
 
 use anyhow::anyhow;
+#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+use arch::PciSpaceInfo;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{KVM_IDENTITY_MAP_START, KVM_TSS_START};
 #[cfg(feature = "tdx")]
 use arch::x86_64::tdx::TdvfSection;
-#[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-use arch::PciSpaceInfo;
-use arch::{get_host_cpu_phys_bits, EntryPoint, NumaNode, NumaNodes};
+use arch::{EntryPoint, NumaNode, NumaNodes, get_host_cpu_phys_bits};
+use devices::AcpiNotificationFlags;
 #[cfg(target_arch = "aarch64")]
 use devices::interrupt_controller;
 #[cfg(feature = "fw_cfg")]
 use devices::legacy::fw_cfg::FwCfgItem;
-use devices::AcpiNotificationFlags;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -44,17 +44,17 @@ use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
 use hypervisor::{HypervisorVmError, VmOps};
-use libc::{termios, SIGWINCH};
+use libc::{SIGWINCH, termios};
 use linux_loader::cmdline::Cmdline;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf;
+use linux_loader::loader::KernelLoader;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::bzimage::BzImage;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
-use linux_loader::loader::KernelLoader;
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -67,12 +67,12 @@ use vm_memory::{
 };
 use vm_migration::protocol::{MemoryRangeTable, Request, Response};
 use vm_migration::{
-    snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable,
+    Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, snapshot_from_id,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
-use crate::config::{add_to_config, ValidationError};
+use crate::config::{ValidationError, add_to_config};
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
@@ -92,7 +92,7 @@ use crate::memory_manager::{
 use crate::migration::get_vm_snapshot;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::migration::url_to_file;
-use crate::migration::{url_to_path, SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE};
+use crate::migration::{SNAPSHOT_CONFIG_FILE, SNAPSHOT_STATE_FILE, url_to_path};
 #[cfg(feature = "fw_cfg")]
 use crate::vm_config::FwCfgConfig;
 use crate::vm_config::{
@@ -100,8 +100,8 @@ use crate::vm_config::{
     PmemConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 use crate::{
-    cpu, GuestMemoryMmap, PciDeviceInfo, CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID,
-    MEMORY_MANAGER_SNAPSHOT_ID,
+    CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, GuestMemoryMmap,
+    MEMORY_MANAGER_SNAPSHOT_ID, PciDeviceInfo, cpu,
 };
 
 /// Errors associated with VM management

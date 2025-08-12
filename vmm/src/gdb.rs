@@ -11,24 +11,24 @@ use std::sync::mpsc;
 use gdbstub::arch::Arch;
 use gdbstub::common::{Signal, Tid};
 use gdbstub::conn::{Connection, ConnectionExt};
-use gdbstub::stub::{run_blocking, DisconnectReason, MultiThreadStopReason};
+use gdbstub::stub::{DisconnectReason, MultiThreadStopReason, run_blocking};
+use gdbstub::target::ext::base::BaseOps;
 use gdbstub::target::ext::base::multithread::{
     MultiThreadBase, MultiThreadResume, MultiThreadResumeOps, MultiThreadSingleStep,
     MultiThreadSingleStepOps,
 };
-use gdbstub::target::ext::base::BaseOps;
 use gdbstub::target::ext::breakpoints::{
     Breakpoints, BreakpointsOps, HwBreakpoint, HwBreakpointOps,
 };
 use gdbstub::target::{Target, TargetError, TargetResult};
 #[cfg(target_arch = "aarch64")]
-use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
-#[cfg(target_arch = "aarch64")]
 use gdbstub_arch::aarch64::AArch64 as GdbArch;
-#[cfg(target_arch = "x86_64")]
-use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
+#[cfg(target_arch = "aarch64")]
+use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(target_arch = "x86_64")]
 use gdbstub_arch::x86::X86_64_SSE as GdbArch;
+#[cfg(target_arch = "x86_64")]
+use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 use thiserror::Error;
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryError};
 

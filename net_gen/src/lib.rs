@@ -33,10 +33,10 @@ pub mod ipv6;
 // --constified-enum '*' --with-derive-default
 pub mod sockios;
 pub use if_tun::{
-    sock_fprog, IFF_MULTI_QUEUE, IFF_NO_PI, IFF_TAP, IFF_VNET_HDR, TUN_F_CSUM, TUN_F_TSO4,
-    TUN_F_TSO6, TUN_F_TSO_ECN, TUN_F_UFO,
+    IFF_MULTI_QUEUE, IFF_NO_PI, IFF_TAP, IFF_VNET_HDR, TUN_F_CSUM, TUN_F_TSO_ECN, TUN_F_TSO4,
+    TUN_F_TSO6, TUN_F_UFO, sock_fprog,
 };
-pub use iff::{ifreq, net_device_flags_IFF_UP, setsockopt, sockaddr, AF_INET};
+pub use iff::{AF_INET, ifreq, net_device_flags_IFF_UP, setsockopt, sockaddr};
 pub use inn::sockaddr_in;
 pub use ipv6::{in6_ifreq, sockaddr_in6};
 

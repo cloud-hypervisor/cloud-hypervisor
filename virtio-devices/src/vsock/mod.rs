@@ -172,7 +172,7 @@ pub mod tests {
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
     use vmm_sys_util::eventfd::EventFd;
 
-    use super::device::{VsockEpollHandler, RX_QUEUE_EVENT, TX_QUEUE_EVENT};
+    use super::device::{RX_QUEUE_EVENT, TX_QUEUE_EVENT, VsockEpollHandler};
     use super::packet::VSOCK_PKT_HDR_SIZE;
     use super::*;
     use crate::device::{VirtioInterrupt, VirtioInterruptType};

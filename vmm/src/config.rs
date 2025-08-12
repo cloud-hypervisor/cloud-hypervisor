@@ -273,7 +273,9 @@ pub enum ValidationError {
     #[error("Invalid PCI segment aperture weight: {0}")]
     InvalidPciSegmentApertureWeight(u32),
     /// Invalid IOMMU address width in bits
-    #[error("IOMMU address width in bits ({0}) should be less than or equal to {MAX_IOMMU_ADDRESS_WIDTH_BITS}")]
+    #[error(
+        "IOMMU address width in bits ({0}) should be less than or equal to {MAX_IOMMU_ADDRESS_WIDTH_BITS}"
+    )]
     InvalidIommuAddressWidthBits(u8),
     /// Balloon too big
     #[error("Ballon size ({0}) greater than RAM ({1})")]
@@ -1545,8 +1547,7 @@ impl RngConfig {
 }
 
 impl BalloonConfig {
-    pub const SYNTAX: &'static str =
-        "Balloon parameters \"size=<balloon_size>,deflate_on_oom=on|off,\
+    pub const SYNTAX: &'static str = "Balloon parameters \"size=<balloon_size>,deflate_on_oom=on|off,\
         free_page_reporting=on|off\"";
 
     pub fn parse(balloon: &str) -> Result<Self> {
@@ -1920,8 +1921,7 @@ impl DebugConsoleConfig {
 }
 
 impl DeviceConfig {
-    pub const SYNTAX: &'static str =
-        "Direct device assignment parameters \"path=<device_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>\"";
+    pub const SYNTAX: &'static str = "Direct device assignment parameters \"path=<device_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>\"";
 
     pub fn parse(device: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2249,7 +2249,9 @@ where
     S: serde::Serializer,
 {
     if let Some(x) = x {
-        warn!("'RestoredNetConfig' contains FDs that can't be serialized correctly. Serializing them as invalid FDs.");
+        warn!(
+            "'RestoredNetConfig' contains FDs that can't be serialized correctly. Serializing them as invalid FDs."
+        );
         let invalid_fds = vec![-1; x.len()];
         s.serialize_some(&invalid_fds)
     } else {
@@ -2265,7 +2267,9 @@ where
 {
     let invalid_fds: Option<Vec<i32>> = Option::deserialize(d)?;
     if let Some(invalid_fds) = invalid_fds {
-        warn!("'RestoredNetConfig' contains FDs that can't be deserialized correctly. Deserializing them as invalid FDs.");
+        warn!(
+            "'RestoredNetConfig' contains FDs that can't be deserialized correctly. Deserializing them as invalid FDs."
+        );
         Ok(Some(vec![-1; invalid_fds.len()]))
     } else {
         Ok(None)
@@ -3610,7 +3614,9 @@ mod tests {
         );
 
         assert_eq!(
-            NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,num_queues=4,queue_size=1024,iommu=on")?,
+            NetConfig::parse(
+                "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,num_queues=4,queue_size=1024,iommu=on"
+            )?,
             NetConfig {
                 num_queues: 4,
                 queue_size: 1024,
@@ -4872,18 +4878,19 @@ mod tests {
             )?,
             FwCfgConfig {
                 items: Some(FwCfgItemList {
-                    item_list: vec![FwCfgItem {
-                        name: "opt/org.test/fw_cfg_test_item".to_string(),
-                        file: PathBuf::from("/tmp/fw_cfg_test_item"),
-                    },
-                    FwCfgItem {
-                        name: "opt/org.test/fw_cfg_test_item2".to_string(),
-                        file: PathBuf::from("/tmp/fw_cfg_test_item2"),
-                    }]
+                    item_list: vec![
+                        FwCfgItem {
+                            name: "opt/org.test/fw_cfg_test_item".to_string(),
+                            file: PathBuf::from("/tmp/fw_cfg_test_item"),
+                        },
+                        FwCfgItem {
+                            name: "opt/org.test/fw_cfg_test_item2".to_string(),
+                            file: PathBuf::from("/tmp/fw_cfg_test_item2"),
+                        }
+                    ]
                 }),
                 ..Default::default()
-        },
-
+            },
         );
         Ok(())
     }

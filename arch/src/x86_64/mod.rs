@@ -15,7 +15,7 @@ pub mod regs;
 use std::collections::BTreeMap;
 use std::mem;
 
-use hypervisor::arch::x86::{CpuIdEntry, CPUID_FLAG_VALID_INDEX};
+use hypervisor::arch::x86::{CPUID_FLAG_VALID_INDEX, CpuIdEntry};
 use hypervisor::{CpuVendor, HypervisorCpuError, HypervisorError};
 use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::elf::start_info::{
@@ -582,9 +582,13 @@ impl CpuidFeatureEntry {
                 error!(
                     "Detected incompatible CPUID entry: leaf={:#02x} (subleaf={:#02x}), register='{:?}', \
                     compatible_check='{:?}', source VM feature='{:#04x}', destination VM feature'{:#04x}'.",
-                    entry.function, entry.index, entry.feature_reg,
-                    entry.compatible_check, src_vm_feature, dest_vm_feature
-                    );
+                    entry.function,
+                    entry.index,
+                    entry.feature_reg,
+                    entry.compatible_check,
+                    src_vm_feature,
+                    dest_vm_feature
+                );
 
                 compatible = false;
             }
