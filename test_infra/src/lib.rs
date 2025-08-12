@@ -1118,10 +1118,12 @@ impl Guest {
         thread::sleep(std::time::Duration::new(10, 0));
 
         // Write something to vsock from the host
-        assert!(exec_host_command_status(&format!(
-            "echo -e \"CONNECT 16\\nHelloWorld!\" | socat - UNIX-CONNECT:{socket}"
-        ))
-        .success());
+        assert!(
+            exec_host_command_status(&format!(
+                "echo -e \"CONNECT 16\\nHelloWorld!\" | socat - UNIX-CONNECT:{socket}"
+            ))
+            .success()
+        );
 
         // Wait for the thread to terminate.
         listen_socat.join().unwrap();
@@ -1134,10 +1136,11 @@ impl Guest {
 
     #[cfg(target_arch = "x86_64")]
     pub fn check_nvidia_gpu(&self) {
-        assert!(self
-            .ssh_command("nvidia-smi")
-            .unwrap()
-            .contains("NVIDIA L40S"));
+        assert!(
+            self.ssh_command("nvidia-smi")
+                .unwrap()
+                .contains("NVIDIA L40S")
+        );
     }
 
     pub fn reboot_linux(&self, current_reboot_count: u32, custom_timeout: Option<i32>) {
@@ -1334,11 +1337,9 @@ impl<'a> GuestCommand<'a> {
             if pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE {
                 Ok(child)
             } else {
-                Err(std::io::Error::other(
-                    format!(
-                        "resizing pipe w/ 'fnctl' failed: stdout pipesize {pipesize}, stderr pipesize {pipesize1}"
-                    ),
-                ))
+                Err(std::io::Error::other(format!(
+                    "resizing pipe w/ 'fnctl' failed: stdout pipesize {pipesize}, stderr pipesize {pipesize1}"
+                )))
             }
         } else {
             // The caller should call .wait() on the returned child

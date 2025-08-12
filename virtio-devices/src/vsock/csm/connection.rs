@@ -89,7 +89,7 @@ use super::super::defs::uapi;
 use super::super::packet::VsockPacket;
 use super::super::{Result as VsockResult, VsockChannel, VsockEpollListener, VsockError};
 use super::txbuf::TxBuf;
-use super::{defs, ConnState, Error, PendingRx, PendingRxSet, Result};
+use super::{ConnState, Error, PendingRx, PendingRxSet, Result, defs};
 
 /// A self-managing connection object, that handles communication between a guest-side AF_VSOCK
 /// socket and a host-side `Read + Write + AsRawFd` stream.
@@ -1158,10 +1158,11 @@ mod tests {
 
             // When there's data in the TX buffer, the connection should ask to be notified when it
             // can write to its backing stream.
-            assert!(ctx
-                .conn
-                .get_polled_evset()
-                .contains(epoll::Events::EPOLLOUT));
+            assert!(
+                ctx.conn
+                    .get_polled_evset()
+                    .contains(epoll::Events::EPOLLOUT)
+            );
             assert_eq!(ctx.conn.tx_buf.len(), data.len());
 
             // Unlock the write stream and notify the connection it can now write its buffered
@@ -1212,10 +1213,11 @@ mod tests {
             stream.write_state = StreamState::Closed;
             ctx.set_stream(stream);
 
-            assert!(ctx
-                .conn
-                .get_polled_evset()
-                .contains(epoll::Events::EPOLLOUT));
+            assert!(
+                ctx.conn
+                    .get_polled_evset()
+                    .contains(epoll::Events::EPOLLOUT)
+            );
             ctx.notify_epollout();
             assert_eq!(ctx.conn.state, ConnState::Killed);
         }

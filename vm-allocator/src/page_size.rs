@@ -1,7 +1,7 @@
 // Copyright 2023 Arm Limited (or its affiliates). All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use libc::{sysconf, _SC_PAGESIZE};
+use libc::{_SC_PAGESIZE, sysconf};
 
 /// get host page size
 pub fn get_page_size() -> u64 {

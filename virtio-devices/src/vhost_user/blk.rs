@@ -9,8 +9,8 @@ use block::VirtioBlockConfig;
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use vhost::vhost_user::message::{
-    VhostUserConfigFlags, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
-    VHOST_USER_CONFIG_OFFSET,
+    VHOST_USER_CONFIG_OFFSET, VhostUserConfigFlags, VhostUserProtocolFeatures,
+    VhostUserVirtioFeatures,
 };
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
 use virtio_bindings::virtio_blk::{
@@ -26,11 +26,11 @@ use vmm_sys_util::eventfd::EventFd;
 
 use super::super::{ActivateResult, VirtioCommon, VirtioDevice, VirtioDeviceType};
 use super::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
-use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
+use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::VhostUserCommon;
-use crate::{GuestMemoryMmap, GuestRegionMmap, VirtioInterrupt, VIRTIO_F_IOMMU_PLATFORM};
+use crate::{GuestMemoryMmap, GuestRegionMmap, VIRTIO_F_IOMMU_PLATFORM, VirtioInterrupt};
 
 const DEFAULT_QUEUE_NUMBER: usize = 1;
 
@@ -134,8 +134,10 @@ impl Blk {
                 };
 
             if num_queues > backend_num_queues {
-                error!("vhost-user-blk requested too many queues ({}) since the backend only supports {}\n",
-                num_queues, backend_num_queues);
+                error!(
+                    "vhost-user-blk requested too many queues ({}) since the backend only supports {}\n",
+                    num_queues, backend_num_queues
+                );
                 return Err(Error::BadQueueNum);
             }
 

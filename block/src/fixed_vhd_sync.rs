@@ -7,12 +7,12 @@ use std::os::unix::io::{AsRawFd, RawFd};
 
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::BlockBackend;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::fixed_vhd::FixedVhd;
 use crate::raw_sync::RawFileSync;
-use crate::BlockBackend;
 
 pub struct FixedVhdDiskSync(FixedVhd);
 

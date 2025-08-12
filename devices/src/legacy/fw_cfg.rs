@@ -20,6 +20,7 @@ use std::{
 };
 
 use acpi_tables::rsdp::Rsdp;
+use arch::RegionType;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::layout::{
     MEM_32BIT_DEVICES_START, MEM_32BIT_RESERVED_START, RAM_64BIT_START, RAM_START as HIGH_RAM_START,
@@ -29,7 +30,6 @@ use arch::layout::{
     EBDA_START, HIGH_RAM_START, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START,
     MEM_32BIT_RESERVED_START, PCI_MMCONFIG_SIZE, PCI_MMCONFIG_START, RAM_64BIT_START,
 };
-use arch::RegionType;
 use bitfield_struct::bitfield;
 #[cfg(target_arch = "x86_64")]
 use linux_loader::bootparam::boot_params;
@@ -752,7 +752,9 @@ impl BusDevice for FwCfg {
                 data.copy_from_slice(&addr_lo.to_be_bytes());
             }
             _ => {
-                debug!("fw_cfg: read from unknown port {port:#x}: {size:#x} bytes and offset {offset:#x}.");
+                debug!(
+                    "fw_cfg: read from unknown port {port:#x}: {size:#x} bytes and offset {offset:#x}."
+                );
             }
         };
     }

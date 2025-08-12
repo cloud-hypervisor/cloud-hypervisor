@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use std::mem::size_of;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::atomic::AtomicBool;
-use std::sync::{mpsc, Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier, Mutex, mpsc};
 use std::{io, result};
 
 use anyhow::anyhow;
@@ -36,9 +36,9 @@ use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottabl
 use vmm_sys_util::eventfd::EventFd;
 
 use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
-    Error as DeviceError, VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST,
-    VIRTIO_F_VERSION_1,
+    ActivateError, ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError,
+    EpollHelperHandler, Error as DeviceError, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice,
+    VirtioDeviceType,
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;

@@ -12,8 +12,8 @@ use thiserror::Error;
 use uuid::Uuid;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress};
 
-use crate::layout::SMBIOS_START;
 use crate::GuestMemoryMmap;
+use crate::layout::SMBIOS_START;
 
 #[derive(Debug, Error)]
 pub enum Error {

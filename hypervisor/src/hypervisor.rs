@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
+use crate::HypervisorType;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::CpuIdEntry;
 #[cfg(target_arch = "x86_64")]
@@ -20,7 +21,6 @@ use crate::cpu::CpuVendor;
 #[cfg(feature = "tdx")]
 use crate::kvm::TdxCapabilities;
 use crate::vm::Vm;
-use crate::HypervisorType;
 
 #[derive(Error, Debug)]
 pub enum HypervisorError {

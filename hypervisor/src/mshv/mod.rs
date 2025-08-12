@@ -14,7 +14,7 @@ use arc_swap::ArcSwap;
 use mshv_bindings::*;
 #[cfg(target_arch = "x86_64")]
 use mshv_ioctls::InterruptRequest;
-use mshv_ioctls::{set_registers_64, Mshv, NoDatamatch, VcpuFd, VmFd, VmType};
+use mshv_ioctls::{Mshv, NoDatamatch, VcpuFd, VmFd, VmType, set_registers_64};
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
 #[cfg(feature = "sev_snp")]
@@ -32,7 +32,7 @@ use crate::arch::x86::emulator::Emulator;
 use crate::mshv::aarch64::emulator;
 use crate::mshv::emulator::MshvEmulatorContext;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
-use crate::{cpu, hypervisor, vec_with_array_field, HypervisorType};
+use crate::{HypervisorType, cpu, hypervisor, vec_with_array_field};
 #[cfg(feature = "sev_snp")]
 mod snp_constants;
 // x86_64 dependencies
@@ -46,9 +46,9 @@ use std::os::unix::io::AsRawFd;
 use std::sync::Mutex;
 
 #[cfg(target_arch = "aarch64")]
-use aarch64::gic::{MshvGicV2M, BASE_SPI_IRQ};
-#[cfg(target_arch = "aarch64")]
 pub use aarch64::VcpuMshvState;
+#[cfg(target_arch = "aarch64")]
+use aarch64::gic::{BASE_SPI_IRQ, MshvGicV2M};
 #[cfg(feature = "sev_snp")]
 use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
 #[cfg(feature = "sev_snp")]
@@ -57,7 +57,7 @@ use vmm_sys_util::eventfd::EventFd;
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::*;
 #[cfg(target_arch = "x86_64")]
-pub use x86_64::{emulator, VcpuMshvState};
+pub use x86_64::{VcpuMshvState, emulator};
 ///
 /// Export generically-named wrappers of mshv-bindings for Unix-based platforms
 ///
@@ -66,18 +66,18 @@ pub use {
     mshv_bindings::mshv_device_attr as DeviceAttr, mshv_ioctls, mshv_ioctls::DeviceFd,
 };
 
+#[cfg(target_arch = "x86_64")]
+use crate::ClockData;
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::regs;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{CpuIdEntry, FpuState, MsrEntry};
-#[cfg(target_arch = "x86_64")]
-use crate::ClockData;
 use crate::{
-    CpuState, IoEventAddress, IrqRoutingEntry, MpState, UserMemoryRegion,
-    USER_MEMORY_REGION_ADJUSTABLE, USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ,
-    USER_MEMORY_REGION_WRITE,
+    CpuState, IoEventAddress, IrqRoutingEntry, MpState, USER_MEMORY_REGION_ADJUSTABLE,
+    USER_MEMORY_REGION_EXECUTE, USER_MEMORY_REGION_READ, USER_MEMORY_REGION_WRITE,
+    UserMemoryRegion,
 };
 
 pub const PAGE_SHIFT: usize = 12;
@@ -1512,7 +1512,7 @@ impl cpu::Vcpu for MshvVcpu {
     /// Return the list of initial MSR entries for a VCPU
     ///
     fn boot_msr_entries(&self) -> Vec<MsrEntry> {
-        use crate::arch::x86::{msr_index, MTRR_ENABLE, MTRR_MEM_TYPE_WB};
+        use crate::arch::x86::{MTRR_ENABLE, MTRR_MEM_TYPE_WB, msr_index};
 
         [
             msr!(msr_index::MSR_IA32_SYSENTER_CS),

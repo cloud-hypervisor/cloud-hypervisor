@@ -14,7 +14,7 @@ use std::sync::{Arc, Barrier, Mutex};
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use hypervisor::HypervisorVmError;
-use libc::{sysconf, _SC_PAGESIZE};
+use libc::{_SC_PAGESIZE, sysconf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
@@ -34,13 +34,13 @@ use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestUsiz
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::msi::{MsiConfigState, MSI_CONFIG_ID};
+use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
 use crate::msix::MsixConfigState;
 use crate::{
-    msi_num_enabled_vectors, BarReprogrammingParams, MsiCap, MsiConfig, MsixCap, MsixConfig,
-    PciBarConfiguration, PciBarPrefetchable, PciBarRegionType, PciBdf, PciCapabilityId,
-    PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciExpressCapabilityId,
-    PciHeaderType, PciSubclass, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, PCI_CONFIGURATION_ID,
+    BarReprogrammingParams, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, MsiCap, MsiConfig, MsixCap,
+    MsixConfig, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
+    PciBdf, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
+    PciExpressCapabilityId, PciHeaderType, PciSubclass, msi_num_enabled_vectors,
 };
 
 pub(crate) const VFIO_COMMON_ID: &str = "vfio_common";
@@ -1664,9 +1664,8 @@ impl VfioPciDevice {
                     if !is_page_size_aligned(area.size) || !is_page_size_aligned(area.offset) {
                         warn!(
                             "Could not mmap sparse area that is not page size aligned (offset = 0x{:x}, size = 0x{:x})",
-                            area.offset,
-                            area.size,
-                            );
+                            area.offset, area.size,
+                        );
                         return Ok(());
                     }
 
@@ -2040,9 +2039,9 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
             match mem.get_host_address(guest_addr) {
                 Ok(t) => t as u64,
                 Err(e) => {
-                    return Err(io::Error::other(
-                        format!("unable to retrieve user address for gpa 0x{gpa:x} from guest memory region: {e}")
-                    ));
+                    return Err(io::Error::other(format!(
+                        "unable to retrieve user address for gpa 0x{gpa:x} from guest memory region: {e}"
+                    )));
                 }
             }
         } else if self.mmio_regions.lock().unwrap().check_range(gpa, size) {

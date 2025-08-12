@@ -6,8 +6,8 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
 
-use crate::vhd::VhdFooter;
 use crate::BlockBackend;
+use crate::vhd::VhdFooter;
 
 #[derive(Debug)]
 pub struct FixedVhd {

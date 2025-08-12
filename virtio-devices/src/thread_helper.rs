@@ -6,12 +6,12 @@
 use std::panic::AssertUnwindSafe;
 use std::thread::{self, JoinHandle};
 
-use seccompiler::{apply_filter, SeccompAction};
+use seccompiler::{SeccompAction, apply_filter};
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::epoll_helper::EpollHelperError;
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::ActivateError;
+use crate::epoll_helper::EpollHelperError;
+use crate::seccomp_filters::{Thread, get_seccomp_filter};
 
 pub(crate) fn spawn_virtio_thread<F>(
     name: &str,

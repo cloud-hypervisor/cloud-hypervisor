@@ -3,14 +3,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 use std::panic::AssertUnwindSafe;
-use std::sync::mpsc::Sender;
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 use std::thread;
 
 use futures::channel::oneshot;
-use futures::{executor, FutureExt};
+use futures::{FutureExt, executor};
 use hypervisor::HypervisorType;
-use seccompiler::{apply_filter, SeccompAction};
+use seccompiler::{SeccompAction, apply_filter};
 use vmm_sys_util::eventfd::EventFd;
 use zbus::connection::Builder;
 use zbus::fdo::{self, Result};
@@ -26,7 +26,7 @@ use crate::api::{
     VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume,
     VmSendMigration, VmShutdown, VmSnapshot, VmmPing, VmmShutdown,
 };
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::{Error as VmmError, NetConfig, Result as VmmResult, VmConfig};
 
 pub type DBusApiShutdownChannels = (oneshot::Sender<()>, oneshot::Receiver<()>);

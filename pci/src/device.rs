@@ -12,8 +12,8 @@ use thiserror::Error;
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::Resource;
 
-use crate::configuration::{self, PciBarRegionType};
 use crate::PciBarConfiguration;
+use crate::configuration::{self, PciBarRegionType};
 
 #[derive(Error, Debug)]
 pub enum Error {

@@ -24,7 +24,7 @@ use virtio_queue::DescriptorChain;
 use vm_memory::{Address, GuestMemory};
 use vm_virtio::{AccessPlatform, Translatable};
 
-use super::{defs, Result, VsockError};
+use super::{Result, VsockError, defs};
 use crate::get_host_address_range;
 
 // The vsock packet header is defined by the C struct:
@@ -427,8 +427,8 @@ mod tests {
 
     use super::super::tests::TestContext;
     use super::*;
-    use crate::vsock::defs::MAX_PKT_BUF_SIZE;
     use crate::GuestMemoryMmap;
+    use crate::vsock::defs::MAX_PKT_BUF_SIZE;
 
     macro_rules! create_context {
         ($test_ctx:ident, $handler_ctx:ident) => {

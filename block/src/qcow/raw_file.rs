@@ -8,7 +8,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::alloc::{alloc_zeroed, dealloc, Layout};
+use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
