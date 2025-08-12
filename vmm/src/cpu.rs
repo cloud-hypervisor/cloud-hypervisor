@@ -390,7 +390,7 @@ impl Vcpu {
         boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
-        #[cfg(target_arch = "x86_64")] topology: Option<(u8, u8, u8)>,
+        #[cfg(target_arch = "x86_64")] topology: Option<(u16, u16, u16, u16)>,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
@@ -884,8 +884,22 @@ impl CpuManager {
 
         #[cfg(target_arch = "x86_64")]
         let topology = self.config.topology.clone().map_or_else(
-            || Some((1, self.boot_vcpus().try_into().unwrap(), 1)),
-            |t| Some((t.threads_per_core, t.cores_per_die, t.dies_per_package)),
+            || {
+                Some((
+                    1_u16,
+                    u16::try_from(self.boot_vcpus()).unwrap(),
+                    1_u16,
+                    1_u16,
+                ))
+            },
+            |t| {
+                Some((
+                    t.threads_per_core.into(),
+                    t.cores_per_die.into(),
+                    t.dies_per_package.into(),
+                    t.packages.into(),
+                ))
+            },
         );
         #[cfg(target_arch = "x86_64")]
         vcpu.configure(
@@ -1427,11 +1441,15 @@ impl CpuManager {
             .collect()
     }
 
-    pub fn get_vcpu_topology(&self) -> Option<(u8, u8, u8)> {
-        self.config
-            .topology
-            .clone()
-            .map(|t| (t.threads_per_core, t.cores_per_die, t.packages))
+    pub fn get_vcpu_topology(&self) -> Option<(u16, u16, u16, u16)> {
+        self.config.topology.clone().map(|t| {
+            (
+                t.threads_per_core.into(),
+                t.cores_per_die.into(),
+                t.dies_per_package.into(),
+                t.packages.into(),
+            )
+        })
     }
 
     #[cfg(not(target_arch = "riscv64"))]
@@ -1574,9 +1592,10 @@ impl CpuManager {
         // If topology is not specified, the default setting is:
         // 1 package, multiple cores, 1 thread per core
         // This is also the behavior when PPTT is missing.
-        let (threads_per_core, cores_per_package, packages) =
-            self.get_vcpu_topology()
-                .unwrap_or((1, self.max_vcpus().try_into().unwrap(), 1));
+        let (threads_per_core, cores_per_die, dies_per_package, packages) = self
+            .get_vcpu_topology()
+            .unwrap_or((1, u16::try_from(self.max_vcpus()).unwrap(), 1, 1));
+        let cores_per_package = cores_per_die * dies_per_package;
 
         let mut pptt = Sdt::new(*b"PPTT", 36, 2, *b"CLOUDH", *b"CHPPTT  ", 1);
 
@@ -1931,7 +1950,7 @@ struct Cpu {
     proximity_domain: u32,
     dynamic: bool,
     #[cfg(target_arch = "x86_64")]
-    topology: Option<(u8, u8, u8)>,
+    topology: Option<(u16, u16, u16, u16)>,
 }
 
 #[cfg(target_arch = "x86_64")]

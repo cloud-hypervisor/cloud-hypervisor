@@ -218,7 +218,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     guest_mem: &GuestMemoryMmap,
     cmdline: &str,
     vcpu_mpidr: Vec<u64>,
-    vcpu_topology: Option<(u8, u8, u8)>,
+    vcpu_topology: Option<(u16, u16, u16, u16)>,
     device_info: &HashMap<(DeviceType, String), T, S>,
     gic_device: &Arc<Mutex<dyn Vgic>>,
     initrd: &Option<InitramfsConfig>,
@@ -280,7 +280,7 @@ pub fn write_fdt_to_memory(fdt_final: Vec<u8>, guest_mem: &GuestMemoryMmap) -> R
 fn create_cpu_nodes(
     fdt: &mut FdtWriter,
     vcpu_mpidr: &[u64],
-    vcpu_topology: Option<(u8, u8, u8)>,
+    vcpu_topology: Option<(u16, u16, u16, u16)>,
     numa_nodes: &NumaNodes,
 ) -> FdtWriterResult<()> {
     // See https://github.com/torvalds/linux/blob/master/Documentation/devicetree/bindings/arm/cpus.yaml.
@@ -289,8 +289,11 @@ fn create_cpu_nodes(
     fdt.property_u32("#size-cells", 0x0)?;
 
     let num_cpus = vcpu_mpidr.len();
-    let (threads_per_core, cores_per_package, packages) = vcpu_topology.unwrap_or((1, 1, 1));
-    let max_cpus: u32 = (threads_per_core * cores_per_package * packages).into();
+    let (threads_per_core, cores_per_die, dies_per_package, packages) =
+        vcpu_topology.unwrap_or((1, 1, 1, 1));
+    let cores_per_package = cores_per_die * dies_per_package;
+    let max_cpus: u32 =
+        threads_per_core as u32 * cores_per_die as u32 * dies_per_package as u32 * packages as u32;
 
     // Add cache info.
     // L1 Data Cache Info.
@@ -462,7 +465,8 @@ fn create_cpu_nodes(
     }
 
     if let Some(topology) = vcpu_topology {
-        let (threads_per_core, cores_per_package, packages) = topology;
+        let (threads_per_core, cores_per_die, dies_per_package, packages) = topology;
+        let cores_per_package = cores_per_die * dies_per_package;
         let cpu_map_node = fdt.begin_node("cpu-map")?;
 
         // Create device tree nodes with regard of above mapping.
