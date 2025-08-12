@@ -39,6 +39,8 @@ pub const ACPI_APIC_GENERIC_CPU_INTERFACE: u8 = 11;
 #[cfg(target_arch = "aarch64")]
 pub const ACPI_APIC_GENERIC_DISTRIBUTOR: u8 = 12;
 #[cfg(target_arch = "aarch64")]
+pub const ACPI_APIC_GIC_MSI_FRAME: u8 = 13;
+#[cfg(target_arch = "aarch64")]
 pub const ACPI_APIC_GENERIC_REDISTRIBUTOR: u8 = 14;
 #[cfg(target_arch = "aarch64")]
 pub const ACPI_APIC_GENERIC_TRANSLATOR: u8 = 15;
@@ -649,7 +651,20 @@ fn create_acpi_tables_internal(
     xsdt_table_pointers.push(facp_addr.0);
 
     // MADT
-    let madt = cpu_manager.lock().unwrap().create_madt();
+    #[cfg(target_arch = "aarch64")]
+    let vgic = device_manager
+        .lock()
+        .unwrap()
+        .get_interrupt_controller()
+        .unwrap()
+        .lock()
+        .unwrap()
+        .get_vgic()
+        .unwrap();
+    let madt = cpu_manager.lock().unwrap().create_madt(
+        #[cfg(target_arch = "aarch64")]
+        vgic,
+    );
     let madt_addr = facp_addr.checked_add(facp.len() as u64).unwrap();
     tables_bytes.extend_from_slice(madt.as_slice());
     xsdt_table_pointers.push(madt_addr.0);

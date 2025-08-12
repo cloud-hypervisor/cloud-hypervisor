@@ -41,6 +41,8 @@ use hypervisor::CpuVendor;
 use hypervisor::HypervisorType;
 #[cfg(feature = "guest_debug")]
 use hypervisor::StandardRegisters;
+#[cfg(target_arch = "aarch64")]
+use hypervisor::arch::aarch64::gic::Vgic;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use hypervisor::arch::aarch64::regs::{ID_AA64MMFR0_EL1, TCR_EL1, TTBR1_EL1};
 #[cfg(target_arch = "x86_64")]
@@ -272,6 +274,21 @@ struct GicD {
     pub global_irq_base: u32,
     pub version: u8,
     pub reserved1: [u8; 3],
+}
+
+#[cfg(target_arch = "aarch64")]
+#[allow(dead_code)]
+#[repr(C, packed)]
+#[derive(IntoBytes, Immutable, FromBytes)]
+struct GicMsiFrame {
+    pub r#type: u8,
+    pub length: u8,
+    pub reserved0: u16,
+    pub msi_frame_id: u32,
+    pub base_address: u64,
+    pub flags: u32,
+    pub spi_count: u16,
+    pub spi_base: u16,
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -1471,7 +1488,7 @@ impl CpuManager {
     }
 
     #[cfg(not(target_arch = "riscv64"))]
-    pub fn create_madt(&self) -> Sdt {
+    pub fn create_madt(&self, #[cfg(target_arch = "aarch64")] vgic: Arc<Mutex<dyn Vgic>>) -> Sdt {
         use crate::acpi;
         // This is also checked in the commandline parsing.
         assert!(self.config.boot_vcpus <= self.config.max_vcpus);
@@ -1520,6 +1537,8 @@ impl CpuManager {
 
         #[cfg(target_arch = "aarch64")]
         {
+            use arch::layout::{GIC_V2M_COMPATIBLE, SPI_BASE, SPI_NUM};
+
             /* Notes:
              * Ignore Local Interrupt Controller Address at byte offset 36 of MADT table.
              */
@@ -1585,16 +1604,31 @@ impl CpuManager {
             };
             madt.append(gicr);
 
-            // See 5.2.12.18 GIC Interrupt Translation Service (ITS) Structure in ACPI spec.
-            let gicits = GicIts {
-                r#type: acpi::ACPI_APIC_GENERIC_TRANSLATOR,
-                length: 20,
-                reserved0: 0,
-                translation_id: 0,
-                base_address: vgic_config.msi_addr,
-                reserved1: 0,
-            };
-            madt.append(gicits);
+            if vgic.lock().unwrap().msi_compatibility() == GIC_V2M_COMPATIBLE {
+                // See 5.2.12.16 GIC MSI Frame Structure in ACPI spec.
+                let gic_msi_frame = GicMsiFrame {
+                    r#type: acpi::ACPI_APIC_GIC_MSI_FRAME,
+                    length: 24,
+                    reserved0: 0,
+                    msi_frame_id: 0,
+                    base_address: vgic_config.msi_addr,
+                    flags: 1,
+                    spi_count: SPI_NUM as u16,
+                    spi_base: SPI_BASE as u16,
+                };
+                madt.append(gic_msi_frame);
+            } else {
+                // See 5.2.12.18 GIC Interrupt Translation Service (ITS) Structure in ACPI spec.
+                let gicits = GicIts {
+                    r#type: acpi::ACPI_APIC_GENERIC_TRANSLATOR,
+                    length: 20,
+                    reserved0: 0,
+                    translation_id: 0,
+                    base_address: vgic_config.msi_addr,
+                    reserved1: 0,
+                };
+                madt.append(gicits);
+            }
 
             madt.update_checksum();
         }
