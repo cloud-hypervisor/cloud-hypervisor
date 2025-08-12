@@ -23,18 +23,18 @@ use std::{io, mem, net};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_bindings::virtio_net::{
-    virtio_net_hdr_v1, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN,
-    VIRTIO_NET_F_GUEST_CSUM, VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4,
-    VIRTIO_NET_F_GUEST_TSO6, VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_F_MAC, VIRTIO_NET_F_MQ,
+    VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN, VIRTIO_NET_F_GUEST_CSUM,
+    VIRTIO_NET_F_GUEST_ECN, VIRTIO_NET_F_GUEST_TSO4, VIRTIO_NET_F_GUEST_TSO6,
+    VIRTIO_NET_F_GUEST_UFO, VIRTIO_NET_F_MAC, VIRTIO_NET_F_MQ, virtio_net_hdr_v1,
 };
-use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::ByteValued;
+use vm_memory::bitmap::AtomicBitmap;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<AtomicBitmap>;
 
 pub use ctrl_queue::{CtrlQueue, Error as CtrlQueueError};
-pub use mac::{MacAddr, MAC_ADDR_LEN};
-pub use open_tap::{open_tap, Error as OpenTapError};
+pub use mac::{MAC_ADDR_LEN, MacAddr};
+pub use open_tap::{Error as OpenTapError, open_tap};
 pub use queue_pair::{NetCounters, NetQueuePair, NetQueuePairError, RxVirtio, TxVirtio};
 pub use tap::{Error as TapError, Tap};
 

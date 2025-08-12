@@ -26,15 +26,11 @@ impl<T> __IncompleteArrayField<T> {
     }
     #[inline]
     pub unsafe fn as_slice(&self, len: usize) -> &[T] {
-        unsafe {
-            ::std::slice::from_raw_parts(self.as_ptr(), len)
-        }
+        unsafe { ::std::slice::from_raw_parts(self.as_ptr(), len) }
     }
     #[inline]
     pub unsafe fn as_mut_slice(&mut self, len: usize) -> &mut [T] {
-        unsafe {
-            ::std::slice::from_raw_parts_mut(self.as_mut_ptr(), len)
-        }
+        unsafe { ::std::slice::from_raw_parts_mut(self.as_mut_ptr(), len) }
     }
 }
 impl<T> ::std::fmt::Debug for __IncompleteArrayField<T> {

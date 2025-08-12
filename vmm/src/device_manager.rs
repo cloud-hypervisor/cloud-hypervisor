@@ -11,7 +11,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{File, OpenOptions};
-use std::io::{self, stdout, IsTerminal, Seek, SeekFrom};
+use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
@@ -23,14 +23,14 @@ use std::time::Instant;
 
 use acpi_tables::sdt::GenericAddress;
 #[cfg(not(target_arch = "riscv64"))]
-use acpi_tables::{aml, Aml};
+use acpi_tables::{Aml, aml};
 #[cfg(not(target_arch = "riscv64"))]
 use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
 use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
-use arch::{layout, NumaNodes};
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use arch::{DeviceType, MmioDeviceInfo};
+use arch::{NumaNodes, layout};
 use block::async_io::DiskFile;
 use block::fixed_vhd_sync::FixedVhdDiskSync;
 use block::qcow_sync::QcowDiskSync;
@@ -38,7 +38,7 @@ use block::raw_async_aio::RawFileDiskAio;
 use block::raw_sync::RawFileDiskSync;
 use block::vhdx_sync::VhdxDiskSync;
 use block::{
-    block_aio_is_supported, block_io_uring_is_supported, detect_image_type, qcow, vhdx, ImageType,
+    ImageType, block_aio_is_supported, block_io_uring_is_supported, detect_image_type, qcow, vhdx,
 };
 #[cfg(feature = "io_uring")]
 use block::{fixed_vhd_async::FixedVhdDiskAsync, raw_async::RawFileDisk};
@@ -55,26 +55,26 @@ use devices::interrupt_controller::InterruptController;
 use devices::ioapic;
 #[cfg(feature = "ivshmem")]
 use devices::ivshmem::{IvshmemError, IvshmemOps};
-#[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
-use devices::legacy::fw_cfg::FW_CFG_ACPI_ID;
 #[cfg(target_arch = "aarch64")]
 use devices::legacy::Pl011;
 #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))]
 use devices::legacy::Serial;
+#[cfg(all(feature = "fw_cfg", target_arch = "x86_64"))]
+use devices::legacy::fw_cfg::FW_CFG_ACPI_ID;
 #[cfg(feature = "fw_cfg")]
 use devices::legacy::{
-    fw_cfg::{PORT_FW_CFG_BASE, PORT_FW_CFG_WIDTH},
     FwCfg,
+    fw_cfg::{PORT_FW_CFG_BASE, PORT_FW_CFG_WIDTH},
 };
 #[cfg(feature = "pvmemcontrol")]
 use devices::pvmemcontrol::{PvmemcontrolBusDevice, PvmemcontrolPciDevice};
-use devices::{interrupt_controller, AcpiNotificationFlags};
+use devices::{AcpiNotificationFlags, interrupt_controller};
+use hypervisor::IoEventAddress;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
-use hypervisor::IoEventAddress;
 use libc::{
-    tcsetattr, termios, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE,
-    TCSANOW,
+    MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW, tcsetattr,
+    termios,
 };
 use pci::{
     DeviceRelocation, MmioRegion, PciBarRegionType, PciBdf, PciDevice, VfioDmaMapping,
@@ -104,27 +104,27 @@ use vm_memory::{Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion
 use vm_memory::{GuestAddressSpace, GuestMemory};
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{
-    snapshot_from_id, state_from_id, Migratable, MigratableError, Pausable, Snapshot, SnapshotData,
-    Snapshottable, Transportable,
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,
+    snapshot_from_id, state_from_id,
 };
 use vm_virtio::{AccessPlatform, VirtioDeviceType};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::console_devices::{ConsoleDeviceError, ConsoleInfo, ConsoleOutput};
-use crate::cpu::{CpuManager, CPU_MANAGER_ACPI_SIZE};
+use crate::cpu::{CPU_MANAGER_ACPI_SIZE, CpuManager};
 use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::interrupt::{LegacyUserspaceInterruptManager, MsiInterruptManager};
-use crate::memory_manager::{Error as MemoryManagerError, MemoryManager, MEMORY_MANAGER_ACPI_SIZE};
+use crate::memory_manager::{Error as MemoryManagerError, MEMORY_MANAGER_ACPI_SIZE, MemoryManager};
 use crate::pci_segment::PciSegment;
 use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 #[cfg(feature = "ivshmem")]
 use crate::vm_config::IvshmemConfig;
 use crate::vm_config::{
-    ConsoleOutputMode, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
-    VdpaConfig, VhostMode, VmConfig, VsockConfig, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS,
-    DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
+    ConsoleOutputMode, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
+    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
+    VhostMode, VmConfig, VsockConfig,
 };
-use crate::{device_node, GuestRegionMmap, PciDeviceInfo, DEVICE_MANAGER_SNAPSHOT_ID};
+use crate::{DEVICE_MANAGER_SNAPSHOT_ID, GuestRegionMmap, PciDeviceInfo, device_node};
 
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 const MMIO_LEN: u64 = 0x1000;

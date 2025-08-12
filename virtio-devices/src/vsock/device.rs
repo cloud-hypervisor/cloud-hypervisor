@@ -47,10 +47,10 @@ use super::{VsockBackend, VsockPacket};
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::{
-    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Error as DeviceError,
-    GuestMemoryMmap, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
-    VirtioInterruptType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM,
-    VIRTIO_F_VERSION_1,
+    ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
+    Error as DeviceError, GuestMemoryMmap, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM,
+    VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
+    VirtioInterruptType,
 };
 
 const QUEUE_SIZE: u16 = 256;

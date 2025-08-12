@@ -12,7 +12,7 @@ use std::{mem, thread};
 // https://github.com/rust-lang/libc/issues/1848
 #[cfg_attr(target_env = "musl", allow(deprecated))]
 use libc::time_t;
-use libc::{clock_gettime, gmtime_r, timespec, tm, CLOCK_REALTIME};
+use libc::{CLOCK_REALTIME, clock_gettime, gmtime_r, timespec, tm};
 use vm_device::BusDevice;
 use vmm_sys_util::eventfd::EventFd;
 

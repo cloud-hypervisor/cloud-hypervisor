@@ -8,9 +8,9 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
-use acpi_tables::{aml, Aml, AmlSink};
-use vm_device::interrupt::InterruptSourceGroup;
+use acpi_tables::{Aml, AmlSink, aml};
 use vm_device::BusDevice;
+use vm_device::interrupt::InterruptSourceGroup;
 use vm_memory::GuestAddress;
 use vmm_sys_util::eventfd::EventFd;
 

@@ -37,7 +37,7 @@ pub mod tpm;
 pub use self::acpi::{AcpiGedDevice, AcpiPmTimerDevice, AcpiShutdownDevice};
 #[cfg(feature = "ivshmem")]
 pub use self::ivshmem::IvshmemDevice;
-pub use self::pvpanic::{PvPanicDevice, PVPANIC_DEVICE_MMIO_SIZE};
+pub use self::pvpanic::{PVPANIC_DEVICE_MMIO_SIZE, PvPanicDevice};
 
 bitflags! {
     pub struct AcpiNotificationFlags: u8 {

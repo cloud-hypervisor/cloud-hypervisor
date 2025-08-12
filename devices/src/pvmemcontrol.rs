@@ -137,9 +137,7 @@ impl PvmemcontrolTransport {
     }
 
     unsafe fn as_register(self) -> PvmemcontrolTransportRegister {
-        unsafe {
-            self.payload.register
-        }
+        unsafe { self.payload.register }
     }
 }
 
@@ -521,7 +519,7 @@ impl PvmemcontrolBusDevice {
                     ret_value: get_page_size().into(),
                     arg0: MAJOR_VERSION.into(),
                     arg1: MINOR_VERSION.into(),
-                })
+                });
             }
             FunctionCode::Dontneed => self.madvise(addr, length, libc::MADV_DONTNEED),
             FunctionCode::Remove => self.madvise(addr, length, libc::MADV_REMOVE),

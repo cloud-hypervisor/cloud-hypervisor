@@ -12,7 +12,7 @@ use std::{fs, thread};
 use test_infra::{Error as InfraError, *};
 use thiserror::Error;
 
-use crate::{mean, ImageFormat, PerformanceTestControl, PerformanceTestOverrides};
+use crate::{ImageFormat, PerformanceTestControl, PerformanceTestOverrides, mean};
 
 #[cfg(target_arch = "x86_64")]
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
