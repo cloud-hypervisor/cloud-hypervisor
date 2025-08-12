@@ -6,7 +6,7 @@ jobs:
     runs-on: ubuntu-latest
     container: openapitools/openapi-generator-cli
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
     - name: Validate OpenAPI
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -16,7 +16,7 @@ jobs:
         run: sudo chown -R runner:runner ${GITHUB_WORKSPACE}
       - name: Code checkout
         if: ${{ github.event_name != 'pull_request' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Run VFIO integration tests
