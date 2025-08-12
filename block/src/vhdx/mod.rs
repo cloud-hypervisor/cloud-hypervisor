@@ -12,11 +12,11 @@ use remain::sorted;
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::BlockBackend;
 use crate::vhdx::vhdx_bat::{BatEntry, VhdxBatError};
 use crate::vhdx::vhdx_header::{RegionInfo, RegionTableEntry, VhdxHeader, VhdxHeaderError};
 use crate::vhdx::vhdx_io::VhdxIoError;
 use crate::vhdx::vhdx_metadata::{DiskSpec, VhdxMetadataError};
-use crate::BlockBackend;
 
 mod vhdx_bat;
 mod vhdx_header;

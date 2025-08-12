@@ -20,6 +20,8 @@ use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
+#[cfg(target_arch = "x86_64")]
+use crate::ClockData;
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::gic::{Vgic, VgicConfig};
 #[cfg(target_arch = "riscv64")]
@@ -27,8 +29,6 @@ use crate::arch::riscv64::aia::{Vaia, VaiaConfig};
 #[cfg(feature = "tdx")]
 use crate::arch::x86::CpuIdEntry;
 use crate::cpu::Vcpu;
-#[cfg(target_arch = "x86_64")]
-use crate::ClockData;
 use crate::{IoEventAddress, IrqRoutingEntry, UserMemoryRegion};
 
 ///

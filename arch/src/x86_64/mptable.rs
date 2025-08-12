@@ -12,9 +12,9 @@ use thiserror::Error;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
 
 use super::MAX_SUPPORTED_CPUS_LEGACY;
+use crate::GuestMemoryMmap;
 use crate::layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
 use crate::x86_64::{get_x2apic_id, mpspec};
-use crate::GuestMemoryMmap;
 
 // This is a workaround to the Rust enforcement specifying that any implementation of a foreign
 // trait (in this case `ByteValued`) where:

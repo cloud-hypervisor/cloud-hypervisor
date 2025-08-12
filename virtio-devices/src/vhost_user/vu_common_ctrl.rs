@@ -5,8 +5,8 @@ use std::ffi;
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::UnixListener;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -29,8 +29,8 @@ use vmm_sys_util::eventfd::EventFd;
 use super::{Error, Result};
 use crate::vhost_user::Inflight;
 use crate::{
-    get_host_address_range, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VirtioInterrupt,
-    VirtioInterruptType,
+    GuestMemoryMmap, GuestRegionMmap, MmapRegion, VirtioInterrupt, VirtioInterruptType,
+    get_host_address_range,
 };
 
 // Size of a dirty page for vhost-user.
@@ -399,7 +399,7 @@ impl VhostUserHandle {
                             acked_features: 0,
                             vrings_info: None,
                             queue_indexes: Vec::new(),
-                        })
+                        });
                     }
                     Err(e) => e,
                 };

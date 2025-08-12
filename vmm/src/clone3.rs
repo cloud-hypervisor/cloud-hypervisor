@@ -1,7 +1,7 @@
 // Copyright 2021 Alyssa Ross <hi@alyssa.is>
 // SPDX-License-Identifier: Apache-2.0
 
-use libc::{c_long, size_t, syscall, SYS_clone3};
+use libc::{SYS_clone3, c_long, size_t, syscall};
 
 pub const CLONE_CLEAR_SIGHAND: u64 = 0x100000000;
 

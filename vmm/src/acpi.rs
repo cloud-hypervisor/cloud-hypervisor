@@ -5,16 +5,16 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use acpi_tables::Aml;
 use acpi_tables::rsdp::Rsdp;
 #[cfg(target_arch = "aarch64")]
 use acpi_tables::sdt::GenericAddress;
 use acpi_tables::sdt::Sdt;
-use acpi_tables::Aml;
-#[cfg(target_arch = "aarch64")]
-use arch::aarch64::DeviceInfoForFdt;
 #[cfg(target_arch = "aarch64")]
 use arch::DeviceType;
 use arch::NumaNodes;
+#[cfg(target_arch = "aarch64")]
+use arch::aarch64::DeviceInfoForFdt;
 use bitflags::bitflags;
 use pci::PciBdf;
 use tracer::trace_scoped;

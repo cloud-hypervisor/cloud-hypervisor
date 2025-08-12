@@ -20,7 +20,7 @@ use std::collections::{HashMap, VecDeque};
 
 use super::super::VsockChannel;
 use super::muxer::{ConnMapKey, MuxerRx};
-use super::{defs, MuxerConnection};
+use super::{MuxerConnection, defs};
 
 /// The muxer RX queue.
 ///

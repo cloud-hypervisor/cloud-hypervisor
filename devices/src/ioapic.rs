@@ -14,11 +14,11 @@ use std::sync::{Arc, Barrier};
 
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
+use vm_device::BusDevice;
 use vm_device::interrupt::{
     InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
     MsiIrqGroupConfig, MsiIrqSourceConfig,
 };
-use vm_device::BusDevice;
 use vm_memory::GuestAddress;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;

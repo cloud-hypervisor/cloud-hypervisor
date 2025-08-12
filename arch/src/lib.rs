@@ -81,9 +81,9 @@ pub mod aarch64;
 
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::{
-    arch_memory_regions, configure_system, configure_vcpu, fdt::DeviceInfoForFdt,
-    get_host_cpu_phys_bits, initramfs_load_addr, layout, layout::CMDLINE_MAX_SIZE,
-    layout::IRQ_BASE, uefi, EntryPoint, _NSIG,
+    _NSIG, EntryPoint, arch_memory_regions, configure_system, configure_vcpu,
+    fdt::DeviceInfoForFdt, get_host_cpu_phys_bits, initramfs_load_addr, layout,
+    layout::CMDLINE_MAX_SIZE, layout::IRQ_BASE, uefi,
 };
 
 /// Module for riscv64 related functionality.
@@ -92,9 +92,9 @@ pub mod riscv64;
 
 #[cfg(target_arch = "riscv64")]
 pub use riscv64::{
-    arch_memory_regions, configure_system, configure_vcpu, fdt::DeviceInfoForFdt,
-    get_host_cpu_phys_bits, initramfs_load_addr, layout, layout::CMDLINE_MAX_SIZE,
-    layout::IRQ_BASE, uefi, EntryPoint, _NSIG,
+    _NSIG, EntryPoint, arch_memory_regions, configure_system, configure_vcpu,
+    fdt::DeviceInfoForFdt, get_host_cpu_phys_bits, initramfs_load_addr, layout,
+    layout::CMDLINE_MAX_SIZE, layout::IRQ_BASE, uefi,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -102,10 +102,9 @@ pub mod x86_64;
 
 #[cfg(target_arch = "x86_64")]
 pub use x86_64::{
-    arch_memory_regions, configure_system, configure_vcpu, generate_common_cpuid,
-    generate_ram_ranges, get_host_cpu_phys_bits, initramfs_load_addr, layout,
-    layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START, regs, CpuidConfig, CpuidFeatureEntry,
-    EntryPoint, _NSIG,
+    _NSIG, CpuidConfig, CpuidFeatureEntry, EntryPoint, arch_memory_regions, configure_system,
+    configure_vcpu, generate_common_cpuid, generate_ram_ranges, get_host_cpu_phys_bits,
+    initramfs_load_addr, layout, layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START, regs,
 };
 
 /// Safe wrapper for `sysconf(_SC_PAGESIZE)`.
