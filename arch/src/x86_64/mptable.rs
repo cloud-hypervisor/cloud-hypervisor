@@ -136,7 +136,7 @@ pub fn setup_mptable(
     offset: GuestAddress,
     mem: &GuestMemoryMmap,
     num_cpus: u32,
-    topology: Option<(u8, u8, u8)>,
+    topology: Option<(u16, u16, u16, u16)>,
 ) -> Result<()> {
     if num_cpus > 0 {
         let cpu_id_max = num_cpus - 1;

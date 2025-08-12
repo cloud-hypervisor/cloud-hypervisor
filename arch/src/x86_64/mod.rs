@@ -209,11 +209,11 @@ pub enum Error {
     E820Configuration,
 }
 
-pub fn get_x2apic_id(cpu_id: u32, topology: Option<(u8, u8, u8)>) -> u32 {
+pub fn get_x2apic_id(cpu_id: u32, topology: Option<(u16, u16, u16, u16)>) -> u32 {
     if let Some(t) = topology {
-        let thread_mask_width = u8::BITS - (t.0 - 1).leading_zeros();
-        let core_mask_width = u8::BITS - (t.1 - 1).leading_zeros();
-        let die_mask_width = u8::BITS - (t.2 - 1).leading_zeros();
+        let thread_mask_width = u16::BITS - (t.0 - 1).leading_zeros();
+        let core_mask_width = u16::BITS - (t.1 - 1).leading_zeros();
+        let die_mask_width = u16::BITS - (t.2 - 1).leading_zeros();
 
         let thread_id = cpu_id % (t.0 as u32);
         let core_id = cpu_id / (t.0 as u32) % (t.1 as u32);
@@ -227,6 +227,13 @@ pub fn get_x2apic_id(cpu_id: u32, topology: Option<(u8, u8, u8)>) -> u32 {
     }
 
     cpu_id
+}
+
+pub fn get_max_x2apic_id(topology: (u16, u16, u16, u16)) -> u32 {
+    get_x2apic_id(
+        (topology.0 as u32 * topology.1 as u32 * topology.2 as u32 * topology.3 as u32) - 1,
+        Some(topology),
+    )
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -825,7 +832,7 @@ pub fn configure_vcpu(
     cpuid: Vec<CpuIdEntry>,
     kvm_hyperv: bool,
     cpu_vendor: CpuVendor,
-    topology: Option<(u8, u8, u8)>,
+    topology: Option<(u16, u16, u16, u16)>,
 ) -> super::Result<()> {
     let x2apic_id = get_x2apic_id(id, topology);
 
@@ -850,7 +857,7 @@ pub fn configure_vcpu(
     assert!(apic_id_patched);
 
     if let Some(t) = topology {
-        update_cpuid_topology(&mut cpuid, t.0, t.1, t.2, cpu_vendor, id);
+        update_cpuid_topology(&mut cpuid, t.0, t.1, t.2, t.3, cpu_vendor, id);
     }
 
     // The TSC frequency CPUID leaf should not be included when running with HyperV emulation
@@ -953,7 +960,7 @@ pub fn configure_system(
     serial_number: Option<&str>,
     uuid: Option<&str>,
     oem_strings: Option<&[&str]>,
-    topology: Option<(u8, u8, u8)>,
+    topology: Option<(u16, u16, u16, u16)>,
 ) -> super::Result<()> {
     // Write EBDA address to location where ACPICA expects to find it
     guest_mem
@@ -1361,21 +1368,24 @@ pub fn get_host_cpu_phys_bits(hypervisor: &Arc<dyn hypervisor::Hypervisor>) -> u
 
 fn update_cpuid_topology(
     cpuid: &mut Vec<CpuIdEntry>,
-    threads_per_core: u8,
-    cores_per_die: u8,
-    dies_per_package: u8,
+    threads_per_core: u16,
+    cores_per_die: u16,
+    dies_per_package: u16,
+    packages: u16,
     cpu_vendor: CpuVendor,
     id: u32,
 ) {
     let x2apic_id = get_x2apic_id(
         id,
-        Some((threads_per_core, cores_per_die, dies_per_package)),
+        Some((threads_per_core, cores_per_die, dies_per_package, packages)),
     );
 
-    let thread_width = 8 - (threads_per_core - 1).leading_zeros();
-    let core_width = (8 - (cores_per_die - 1).leading_zeros()) + thread_width;
-    let die_width = (8 - (dies_per_package - 1).leading_zeros()) + core_width;
+    // Note: the topology defined here is per "package" (~NUMA node).
+    let thread_width = u16::BITS - (threads_per_core - 1).leading_zeros();
+    let core_width = u16::BITS - (cores_per_die - 1).leading_zeros() + thread_width;
+    let die_width = u16::BITS - (dies_per_package - 1).leading_zeros() + core_width;
 
+    // The very old way: a flat number of logical CPUs per package: CPUID.1H:EBX[23:16] bits.
     let mut cpu_ebx = CpuidPatch::get_cpuid_reg(cpuid, 0x1, None, CpuidReg::EBX).unwrap_or(0);
     cpu_ebx |= ((dies_per_package as u32) * (cores_per_die as u32) * (threads_per_core as u32))
         & (0xff << 16);
@@ -1385,6 +1395,7 @@ fn update_cpuid_topology(
     cpu_edx |= 1 << 28;
     CpuidPatch::set_cpuid_reg(cpuid, 0x1, None, CpuidReg::EDX, cpu_edx);
 
+    // The legacy way: threads+cores per package.
     // CPU Topology leaf 0xb
     CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(0), CpuidReg::EAX, thread_width);
     CpuidPatch::set_cpuid_reg(
@@ -1407,6 +1418,7 @@ fn update_cpuid_topology(
     CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(1), CpuidReg::ECX, 2 << 8);
     CpuidPatch::set_cpuid_reg(cpuid, 0xb, Some(1), CpuidReg::EDX, x2apic_id);
 
+    // The modern way: many-level hierarchy (but we here only support four levels).
     // CPU Topology leaf 0x1f
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(0), CpuidReg::EAX, thread_width);
     CpuidPatch::set_cpuid_reg(
@@ -1721,22 +1733,27 @@ mod tests {
 
     #[test]
     fn test_get_x2apic_id() {
-        let x2apic_id = get_x2apic_id(0, Some((2, 3, 1)));
+        let x2apic_id = get_x2apic_id(0, Some((2, 3, 1, 1)));
         assert_eq!(x2apic_id, 0);
 
-        let x2apic_id = get_x2apic_id(1, Some((2, 3, 1)));
+        let x2apic_id = get_x2apic_id(1, Some((2, 3, 1, 1)));
         assert_eq!(x2apic_id, 1);
 
-        let x2apic_id = get_x2apic_id(2, Some((2, 3, 1)));
+        let x2apic_id = get_x2apic_id(2, Some((2, 3, 1, 1)));
         assert_eq!(x2apic_id, 2);
 
-        let x2apic_id = get_x2apic_id(6, Some((2, 3, 1)));
+        let x2apic_id = get_x2apic_id(6, Some((2, 3, 1, 1)));
         assert_eq!(x2apic_id, 8);
 
-        let x2apic_id = get_x2apic_id(7, Some((2, 3, 1)));
+        let x2apic_id = get_x2apic_id(7, Some((2, 3, 1, 1)));
         assert_eq!(x2apic_id, 9);
 
-        let x2apic_id = get_x2apic_id(8, Some((2, 3, 1)));
+        let x2apic_id = get_x2apic_id(8, Some((2, 3, 1, 1)));
         assert_eq!(x2apic_id, 10);
+
+        let x2apic_id = get_x2apic_id(257, Some((1, 312, 1, 1)));
+        assert_eq!(x2apic_id, 257);
+
+        assert_eq!(255, get_max_x2apic_id((1, 256, 1, 1)));
     }
 }

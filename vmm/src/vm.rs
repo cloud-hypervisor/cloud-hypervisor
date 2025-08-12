@@ -3582,7 +3582,7 @@ mod tests {
             &mem,
             "console=tty0",
             vec![0],
-            Some((0, 0, 0)),
+            Some((0, 0, 0, 0)),
             &dev_info,
             &gic,
             &None,
