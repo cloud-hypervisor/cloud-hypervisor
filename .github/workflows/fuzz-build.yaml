@@ -18,7 +18,7 @@ jobs:
       RUSTFLAGS: -D warnings
     steps:
       - name: Code checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Install Rust toolchain (${{ matrix.rust }})
         uses: dtolnay/rust-toolchain@stable
         with:

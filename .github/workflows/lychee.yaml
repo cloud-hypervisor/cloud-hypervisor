@@ -6,7 +6,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Code checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # Fetch the entire history so git diff can compare against the base branch
           fetch-depth: 0

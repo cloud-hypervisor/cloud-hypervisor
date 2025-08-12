@@ -12,7 +12,7 @@ jobs:
       METRICS_PUBLISH_KEY: ${{ secrets.METRICS_PUBLISH_KEY }}
     steps:
       - name: Code checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Run metrics tests
