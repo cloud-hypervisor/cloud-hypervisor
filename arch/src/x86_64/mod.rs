@@ -57,6 +57,8 @@ const KVM_FEATURE_ASYNC_PF_VMEXIT_BIT: u8 = 10;
 #[cfg(feature = "tdx")]
 const KVM_FEATURE_STEAL_TIME_BIT: u8 = 5;
 
+const KVM_FEATURE_MSI_EXT_DEST_ID: u8 = 15;
+
 pub const _NSIG: i32 = 65;
 
 #[derive(Debug, Copy, Clone)]
@@ -745,6 +747,10 @@ pub fn generate_common_cpuid(
                 entry.eax = (entry.eax & 0xffff_ff00) | (config.phys_bits as u32 & 0xff);
             }
             0x4000_0001 => {
+                // Enable KVM_FEATURE_MSI_EXT_DEST_ID. This allows the guest to target
+                // device interrupts to cpus with APIC IDs > 254 without interrupt remapping.
+                entry.eax |= 1 << KVM_FEATURE_MSI_EXT_DEST_ID;
+
                 // These features are not supported by TDX
                 #[cfg(feature = "tdx")]
                 if config.tdx {
@@ -903,7 +909,15 @@ pub fn configure_vcpu(
     if let Some((kernel_entry_point, guest_memory)) = boot_setup {
         regs::setup_regs(vcpu, kernel_entry_point).map_err(Error::RegsConfiguration)?;
         regs::setup_fpu(vcpu).map_err(Error::FpuConfiguration)?;
-        regs::setup_sregs(&guest_memory.memory(), vcpu).map_err(Error::SregsConfiguration)?;
+
+        // CPUs are required (by Intel sdm spec) to boot in x2apic mode if any
+        // of the apic IDs is larger than 255. Experimentally, the Linux kernel
+        // does not recognize the last vCPU if x2apic is not enabled when
+        // there are 256 vCPUs in a flat hierarchy (i.e. max x2apic ID is 255),
+        // so we need to enable x2apic in this case as well.
+        let enable_x2_apic_mode = get_max_x2apic_id(topology) >= 255;
+        regs::setup_sregs(&guest_memory.memory(), vcpu, enable_x2_apic_mode)
+            .map_err(Error::SregsConfiguration)?;
     }
     interrupts::set_lint(vcpu).map_err(|e| Error::LocalIntConfiguration(e.into()))?;
     Ok(())

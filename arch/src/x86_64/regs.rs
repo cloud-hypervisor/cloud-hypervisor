@@ -119,9 +119,13 @@ pub fn setup_regs(vcpu: &Arc<dyn hypervisor::Vcpu>, entry_point: EntryPoint) -> 
 ///
 /// * `mem` - The memory that will be passed to the guest.
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
-pub fn setup_sregs(mem: &GuestMemoryMmap, vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
+pub fn setup_sregs(
+    mem: &GuestMemoryMmap,
+    vcpu: &Arc<dyn hypervisor::Vcpu>,
+    enable_x2_apic_mode: bool,
+) -> Result<()> {
     let mut sregs: SpecialRegisters = vcpu.get_sregs().map_err(Error::GetStatusRegisters)?;
-    configure_segments_and_sregs(mem, &mut sregs)?;
+    configure_segments_and_sregs(mem, &mut sregs, enable_x2_apic_mode)?;
     vcpu.set_sregs(&sregs).map_err(Error::SetStatusRegisters)
 }
 
@@ -148,6 +152,7 @@ fn write_idt_value(val: u64, guest_mem: &GuestMemoryMmap) -> Result<()> {
 pub fn configure_segments_and_sregs(
     mem: &GuestMemoryMmap,
     sregs: &mut SpecialRegisters,
+    enable_x2_apic_mode: bool,
 ) -> Result<()> {
     let gdt_table: [u64; BOOT_GDT_MAX] = {
         // Configure GDT entries as specified by PVH boot protocol
@@ -183,6 +188,11 @@ pub fn configure_segments_and_sregs(
     sregs.cr0 = CR0_PE;
     sregs.cr4 = 0;
 
+    if enable_x2_apic_mode {
+        const X2APIC_ENABLE_BIT: u64 = 1 << 10;
+        sregs.apic_base |= X2APIC_ENABLE_BIT;
+    }
+
     Ok(())
 }
 
@@ -204,7 +214,7 @@ mod tests {
     fn segments_and_sregs() {
         let mut sregs: SpecialRegisters = Default::default();
         let gm = create_guest_mem();
-        configure_segments_and_sregs(&gm, &mut sregs).unwrap();
+        configure_segments_and_sregs(&gm, &mut sregs, false).unwrap();
         assert_eq!(0x0, read_u64(&gm, BOOT_GDT_START));
         assert_eq!(
             0xcf9b000000ffff,
