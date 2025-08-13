@@ -832,9 +832,9 @@ pub fn configure_vcpu(
     cpuid: Vec<CpuIdEntry>,
     kvm_hyperv: bool,
     cpu_vendor: CpuVendor,
-    topology: Option<(u16, u16, u16, u16)>,
+    topology: (u16, u16, u16, u16),
 ) -> super::Result<()> {
-    let x2apic_id = get_x2apic_id(id, topology);
+    let x2apic_id = get_x2apic_id(id, Some(topology));
 
     // Per vCPU CPUID changes; common are handled via generate_common_cpuid()
     let mut cpuid = cpuid;
@@ -856,9 +856,9 @@ pub fn configure_vcpu(
     }
     assert!(apic_id_patched);
 
-    if let Some(t) = topology {
-        update_cpuid_topology(&mut cpuid, t.0, t.1, t.2, t.3, cpu_vendor, id);
-    }
+    update_cpuid_topology(
+        &mut cpuid, topology.0, topology.1, topology.2, topology.3, cpu_vendor, id,
+    );
 
     // The TSC frequency CPUID leaf should not be included when running with HyperV emulation
     if !kvm_hyperv {

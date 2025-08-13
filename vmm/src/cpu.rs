@@ -390,7 +390,7 @@ impl Vcpu {
         boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
-        #[cfg(target_arch = "x86_64")] topology: Option<(u16, u16, u16, u16)>,
+        #[cfg(target_arch = "x86_64")] topology: (u16, u16, u16, u16),
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
@@ -885,20 +885,20 @@ impl CpuManager {
         #[cfg(target_arch = "x86_64")]
         let topology = self.config.topology.clone().map_or_else(
             || {
-                Some((
+                (
                     1_u16,
                     u16::try_from(self.boot_vcpus()).unwrap(),
                     1_u16,
                     1_u16,
-                ))
+                )
             },
             |t| {
-                Some((
+                (
                     t.threads_per_core.into(),
                     t.cores_per_die.into(),
                     t.dies_per_package.into(),
                     t.packages.into(),
-                ))
+                )
             },
         );
         #[cfg(target_arch = "x86_64")]
