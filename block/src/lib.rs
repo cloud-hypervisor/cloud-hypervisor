@@ -232,6 +232,11 @@ pub struct AlignedOperation {
     layout: Layout,
 }
 
+pub struct ExecuteAsync {
+    // `true` if the execution will complete asynchronously
+    pub async_complete: bool,
+}
+
 #[derive(Debug)]
 pub struct Request {
     pub request_type: RequestType,
@@ -397,7 +402,7 @@ impl Request {
         disk_image: &mut dyn AsyncIo,
         serial: &[u8],
         user_data: u64,
-    ) -> result::Result<bool, ExecuteError> {
+    ) -> result::Result<ExecuteAsync, ExecuteError> {
         let sector = self.sector;
         let request_type = self.request_type;
         let offset = (sector << SECTOR_SHIFT) as libc::off_t;
@@ -473,6 +478,9 @@ impl Request {
             iovecs.push(iovec);
         }
 
+        let mut ret = ExecuteAsync {
+            async_complete: true,
+        };
         // Queue operations expected to be submitted.
         match request_type {
             RequestType::In => {
@@ -507,12 +515,13 @@ impl Request {
                 }
                 mem.write_slice(serial, data_addr)
                     .map_err(ExecuteError::Write)?;
-                return Ok(false);
+                ret.async_complete = false;
+                return Ok(ret);
             }
             RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
         }
 
-        Ok(true)
+        Ok(ret)
     }
 
     pub fn complete_async(&mut self) -> result::Result<(), Error> {
