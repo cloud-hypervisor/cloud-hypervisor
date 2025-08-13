@@ -20,7 +20,7 @@ use std::{io, result};
 use anyhow::anyhow;
 use block::async_io::{AsyncIo, AsyncIoError, DiskFile};
 use block::fcntl::{get_lock_state, LockError, LockType};
-use block::{build_serial, fcntl, Request, RequestType, VirtioBlockConfig};
+use block::{build_serial, fcntl, ExecuteAsync, Request, RequestType, VirtioBlockConfig};
 use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
 use rate_limiter::TokenType;
 use seccompiler::SeccompAction;
@@ -220,7 +220,11 @@ impl BlockEpollHandler {
                 desc_chain.head_index() as u64,
             );
 
-            if let Ok(true) = result {
+            if let Ok(ExecuteAsync {
+                async_complete: true,
+                ..
+            }) = result
+            {
                 self.inflight_requests
                     .push_back((desc_chain.head_index(), request));
             } else {
