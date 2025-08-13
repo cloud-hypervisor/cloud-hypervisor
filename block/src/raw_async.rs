@@ -12,7 +12,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
-use crate::DiskTopology;
+use crate::{BatchRequest, DiskTopology, RequestType};
 
 pub struct RawFileDisk {
     file: File,
@@ -167,5 +167,78 @@ impl AsyncIo for RawFileAsync {
             .completion()
             .next()
             .map(|entry| (entry.user_data(), entry.result()))
+    }
+
+    fn batch_requests_enabled(&self) -> bool {
+        true
+    }
+
+    fn submit_batch_requests(&mut self, batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
+        if !self.batch_requests_enabled() {
+            return Ok(());
+        }
+
+        let (submitter, mut sq, _) = self.io_uring.split();
+        let mut submitted = false;
+
+        for req in batch_request {
+            match req.request_type {
+                RequestType::In => {
+                    // SAFETY: we know the file descriptor is valid and we
+                    // relied on vm-memory to provide the buffer address.
+                    unsafe {
+                        sq.push(
+                            &opcode::Readv::new(
+                                types::Fd(self.fd),
+                                req.iovecs.as_ptr(),
+                                req.iovecs.len() as u32,
+                            )
+                            .offset(req.offset as u64)
+                            .build()
+                            .user_data(req.user_data),
+                        )
+                        .map_err(|_| {
+                            AsyncIoError::ReadVectored(Error::other("Submission queue is full"))
+                        })?
+                    };
+                    submitted = true;
+                }
+                RequestType::Out => {
+                    // SAFETY: we know the file descriptor is valid and we
+                    // relied on vm-memory to provide the buffer address.
+                    unsafe {
+                        sq.push(
+                            &opcode::Writev::new(
+                                types::Fd(self.fd),
+                                req.iovecs.as_ptr(),
+                                req.iovecs.len() as u32,
+                            )
+                            .offset(req.offset as u64)
+                            .build()
+                            .user_data(req.user_data),
+                        )
+                        .map_err(|_| {
+                            AsyncIoError::WriteVectored(Error::other("Submission queue is full"))
+                        })?
+                    };
+                    submitted = true;
+                }
+                _ => {
+                    unreachable!("Unexpected batch request type: {:?}", req.request_type)
+                }
+            }
+        }
+
+        // Only submit if we actually queued something
+        if submitted {
+            // Update the submission queue and submit new operations to the
+            // io_uring instance.
+            sq.sync();
+            submitter
+                .submit()
+                .map_err(AsyncIoError::SubmitBatchRequests)?;
+        }
+
+        Ok(())
     }
 }
