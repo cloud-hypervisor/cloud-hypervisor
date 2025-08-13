@@ -79,6 +79,9 @@ pub enum AsyncIoError {
     /// Failed synchronizing file.
     #[error("Failed synchronizing file")]
     Fsync(#[source] std::io::Error),
+    /// Failed submitting batch requests.
+    #[error("Failed submitting batch requests: {0}")]
+    SubmitBatchRequests(#[source] std::io::Error),
 }
 
 pub type AsyncIoResult<T> = std::result::Result<T, AsyncIoError>;
