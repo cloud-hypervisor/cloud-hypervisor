@@ -1578,7 +1578,7 @@ impl CpuManager {
 
         #[cfg(target_arch = "aarch64")]
         {
-            use arch::layout::{GIC_V2M_COMPATIBLE, SPI_BASE, SPI_NUM};
+            use arch::layout::{GIC_V2M_COMPATIBLE, GICV2M_SPI_BASE, GICV2M_SPI_NUM};
 
             /* Notes:
              * Ignore Local Interrupt Controller Address at byte offset 36 of MADT table.
@@ -1654,8 +1654,8 @@ impl CpuManager {
                     msi_frame_id: 0,
                     base_address: vgic_config.msi_addr,
                     flags: 1,
-                    spi_count: SPI_NUM as u16,
-                    spi_base: SPI_BASE as u16,
+                    spi_count: GICV2M_SPI_NUM as u16,
+                    spi_base: GICV2M_SPI_BASE as u16,
                 };
                 madt.append(gic_msi_frame);
             } else {

@@ -25,8 +25,9 @@ use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryRegion
 
 use super::super::{DeviceType, GuestMemoryMmap, InitramfsConfig};
 use super::layout::{
-    GIC_V2M_COMPATIBLE, IRQ_BASE, MEM_32BIT_DEVICES_SIZE, MEM_32BIT_DEVICES_START, MEM_PCI_IO_SIZE,
-    MEM_PCI_IO_START, PCI_HIGH_BASE, PCI_MMIO_CONFIG_SIZE_PER_SEGMENT, SPI_BASE, SPI_NUM,
+    GIC_V2M_COMPATIBLE, GICV2M_SPI_BASE, GICV2M_SPI_NUM, IRQ_BASE, MEM_32BIT_DEVICES_SIZE,
+    MEM_32BIT_DEVICES_START, MEM_PCI_IO_SIZE, MEM_PCI_IO_START, PCI_HIGH_BASE,
+    PCI_MMIO_CONFIG_SIZE_PER_SEGMENT,
 };
 use crate::{NumaNodes, PciSpaceInfo};
 
@@ -666,8 +667,8 @@ fn create_gic_node(fdt: &mut FdtWriter, gic_device: &Arc<Mutex<dyn Vgic>>) -> Fd
         fdt.property_array_u64("reg", &msi_reg_prop)?;
 
         if msi_compatibility == GIC_V2M_COMPATIBLE {
-            fdt.property_u32("arm,msi-base-spi", SPI_BASE)?;
-            fdt.property_u32("arm,msi-num-spis", SPI_NUM)?;
+            fdt.property_u32("arm,msi-base-spi", GICV2M_SPI_BASE)?;
+            fdt.property_u32("arm,msi-num-spis", GICV2M_SPI_NUM)?;
         }
 
         fdt.end_node(msic_node)?;
