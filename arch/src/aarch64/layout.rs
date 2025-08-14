@@ -139,11 +139,11 @@ pub const IRQ_BASE: u32 = 32;
 /// Number of supported interrupts
 pub const IRQ_NUM: u32 = 256;
 
-/// Base SPI interrupt number
-pub const SPI_BASE: u32 = 32;
+/// Base SPI interrupt number for the GICv2M MSI frame
+pub const GICV2M_SPI_BASE: u32 = 128;
 
-/// Total number of SPIs
-pub const SPI_NUM: u32 = 64;
+/// Total number of SPIs for the GICv2M MSI frame
+pub const GICV2M_SPI_NUM: u32 = 64;
 
 /// GICv2M compatible string
 pub const GIC_V2M_COMPATIBLE: &str = "arm,gic-v2m-frame";
