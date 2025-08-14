@@ -171,9 +171,6 @@ pub enum Error {
 
 #[derive(Debug, PartialEq, Eq, Error)]
 pub enum ValidationError {
-    /// No kernel specified
-    #[error("No kernel specified")]
-    KernelMissing,
     /// Missing file value for console
     #[error("Path missing when using file console mode")]
     ConsoleFileMissing,
@@ -334,6 +331,8 @@ pub enum ValidationError {
     /// FwCfg missing initramfs
     #[error("Error --fw-cfg-config: missing --initramfs")]
     FwCfgMissingInitramfs,
+    #[error("Payload configuration is not bootable")]
+    PayloadError(#[from] PayloadConfigError),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -2438,9 +2437,13 @@ impl VmConfig {
     pub fn validate(&mut self) -> ValidationResult<BTreeSet<String>> {
         let mut id_list = BTreeSet::new();
 
+        // Is the payload configuration bootable?
         self.payload
             .as_ref()
-            .ok_or(ValidationError::KernelMissing)?;
+            .ok_or(ValidationError::PayloadError(
+                PayloadConfigError::MissingBootitem,
+            ))?
+            .validate()?;
 
         #[cfg(feature = "tdx")]
         {
@@ -4127,7 +4130,9 @@ mod tests {
         invalid_config.payload = None;
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::KernelMissing)
+            Err(ValidationError::PayloadError(
+                PayloadConfigError::MissingBootitem
+            ))
         );
 
         let mut invalid_config = valid_config.clone();
