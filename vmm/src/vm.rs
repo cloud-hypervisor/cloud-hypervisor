@@ -43,7 +43,13 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
+#[cfg(all(feature = "igvm", feature = "kvm"))]
+use hypervisor::kvm::{
+    KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE, KVM_X86_SNP_VM, STAGE0_SIZE, STAGE0_START_ADDRESS,
+};
 use hypervisor::{HypervisorVmError, VmOps};
+#[cfg(feature = "sev_snp")]
+use igvm_defs::SnpPolicy;
 use libc::{termios, SIGWINCH};
 use linux_loader::cmdline::Cmdline;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -527,6 +533,16 @@ pub struct Vm {
 impl Vm {
     pub const HANDLED_SIGNALS: [i32; 1] = [SIGWINCH];
 
+    #[cfg(feature = "sev_snp")]
+    pub fn get_default_sev_snp_guest_policy() -> SnpPolicy {
+        SnpPolicy::new()
+            .with_abi_minor(0)
+            .with_abi_major(0)
+            .with_smt(1)
+            .with_reserved_must_be_one(1)
+            .with_migrate_ma(0)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
@@ -568,6 +584,15 @@ impl Vm {
         let force_iommu = sev_snp_enabled;
         #[cfg(not(any(feature = "tdx", feature = "sev_snp")))]
         let force_iommu = false;
+        #[cfg(feature = "igvm")]
+        let igvm_enabled = config
+            .lock()
+            .unwrap()
+            .payload
+            .clone()
+            .unwrap()
+            .igvm
+            .is_some();
 
         #[cfg(feature = "guest_debug")]
         let stop_on_boot = config.lock().unwrap().gdb;
@@ -601,6 +626,8 @@ impl Vm {
             &numa_nodes,
             #[cfg(feature = "sev_snp")]
             sev_snp_enabled,
+            #[cfg(feature = "igvm")]
+            igvm_enabled,
         )
         .map_err(Error::CpuManager)?;
 
@@ -702,6 +729,23 @@ impl Vm {
             .add_uefi_flash()
             .map_err(Error::MemoryManager)?;
 
+        cpu_manager
+            .lock()
+            .unwrap()
+            .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
+            .map_err(Error::CpuManager)?;
+
+        // This initial SEV-SNP configuration must be done immediately after
+        // vCPUs are created. As part of this initialization we are
+        // transitioning the guest into secure state.
+        // For KVM + SEV_SNP we must call sev_snp_init before we load the
+        // payload (i.e before calling launch update)
+        #[cfg(feature = "sev_snp")]
+        if sev_snp_enabled {
+            vm.sev_snp_init(Vm::get_default_sev_snp_guest_policy())
+                .map_err(Error::InitializeSevSnpVm)?;
+        }
+
         // Loading the igvm file is pushed down here because
         // igvm parser needs cpu_manager to retrieve cpuid leaf.
         // Currently, Microsoft Hypervisor does not provide any
@@ -719,12 +763,6 @@ impl Vm {
         } else {
             None
         };
-
-        cpu_manager
-            .lock()
-            .unwrap()
-            .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
-            .map_err(Error::CpuManager)?;
 
         // For KVM, we need to create interrupt controller after we create boot vcpus.
         // Because we restore GIC state from the snapshot as part of boot vcpu creation.
@@ -746,14 +784,6 @@ impl Vm {
                     .create_devices(console_info, console_resize_pipe, original_termios, ic)
                     .map_err(Error::DeviceManager)?;
             }
-        }
-
-        // This initial SEV-SNP configuration must be done immediately after
-        // vCPUs are created. As part of this initialization we are
-        // transitioning the guest into secure state.
-        #[cfg(feature = "sev_snp")]
-        if sev_snp_enabled {
-            vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
         }
 
         #[cfg(feature = "fw_cfg")]
@@ -1117,8 +1147,20 @@ impl Vm {
                 // Passing SEV_SNP_ENABLED: 1 if sev_snp_enabled is true
                 // Otherwise SEV_SNP_DISABLED: 0
                 // value of sev_snp_enabled is mapped to SEV_SNP_ENABLED for true or SEV_SNP_DISABLED for false
+                let vm_type = match hypervisor.hypervisor_type() {
+                    #[cfg(feature = "mshv")]
+                    hypervisor::HypervisorType::Mshv => u64::from(sev_snp_enabled),
+                    #[cfg(feature = "kvm")]
+                    hypervisor::HypervisorType::Kvm => {
+                        if sev_snp_enabled {
+                            KVM_X86_SNP_VM.into()
+                        } else {
+                            0
+                        }
+                    },
+                };
                 let vm = hypervisor
-                    .create_vm_with_type_and_memory(u64::from(sev_snp_enabled), mem_size)
+                    .create_vm_with_type_and_memory(vm_type, mem_size)
                     .unwrap();
             } else {
                 let vm = hypervisor.create_vm().unwrap();
@@ -1223,6 +1265,20 @@ impl Vm {
         Ok(EntryPoint { entry_addr })
     }
 
+    #[cfg(all(feature = "kvm", feature = "igvm"))]
+    fn reserve_region_for_stage0(memory_manager: &Arc<Mutex<MemoryManager>>) -> Result<()> {
+        let mut memory_manager = memory_manager.lock().unwrap();
+        // Region for loading Stage 0;
+        memory_manager
+            .add_ram_region(STAGE0_START_ADDRESS, STAGE0_SIZE)
+            .map_err(Error::MemoryManager)?;
+        // Region for loading the VMSA page
+        memory_manager
+            .add_ram_region(KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE)
+            .map_err(Error::MemoryManager)?;
+        Ok(())
+    }
+
     #[cfg(target_arch = "riscv64")]
     fn load_firmware(mut firmware: &File, memory_manager: Arc<Mutex<MemoryManager>>) -> Result<()> {
         let uefi_flash = memory_manager.lock().as_ref().unwrap().uefi_flash();
@@ -1280,6 +1336,9 @@ impl Vm {
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
     ) -> Result<EntryPoint> {
+        #[cfg(all(feature = "kvm", feature = "igvm"))]
+        Self::reserve_region_for_stage0(&memory_manager)?;
+
         let res = igvm_loader::load_igvm(
             &igvm,
             memory_manager,
@@ -1367,19 +1426,20 @@ impl Vm {
         payload: &PayloadConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
         #[cfg(feature = "igvm")] cpu_manager: Arc<Mutex<cpu::CpuManager>>,
-        #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
+        #[cfg(feature = "sev_snp")] _sev_snp_enabled: bool,
     ) -> Result<EntryPoint> {
         trace_scoped!("load_payload");
         #[cfg(feature = "igvm")]
         {
             if let Some(_igvm_file) = &payload.igvm {
                 let igvm = File::open(_igvm_file).map_err(Error::IgvmFile)?;
-                #[cfg(feature = "sev_snp")]
-                if sev_snp_enabled {
-                    return Self::load_igvm(igvm, memory_manager, cpu_manager, &payload.host_data);
-                }
-                #[cfg(not(feature = "sev_snp"))]
-                return Self::load_igvm(igvm, memory_manager, cpu_manager);
+                return Self::load_igvm(
+                    igvm,
+                    memory_manager,
+                    cpu_manager,
+                    #[cfg(feature = "sev_snp")]
+                    &payload.host_data,
+                );
             }
         }
         match (
@@ -1460,7 +1520,11 @@ impl Vm {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn configure_system(&mut self, rsdp_addr: GuestAddress, entry_addr: EntryPoint) -> Result<()> {
+    fn configure_system(
+        &mut self,
+        rsdp_addr: Option<GuestAddress>,
+        entry_addr: EntryPoint,
+    ) -> Result<()> {
         trace_scoped!("configure_system");
         info!("Configuring system");
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
@@ -1471,7 +1535,6 @@ impl Vm {
         };
 
         let boot_vcpus = self.cpu_manager.lock().unwrap().boot_vcpus();
-        let rsdp_addr = Some(rsdp_addr);
         let sgx_epc_region = self
             .memory_manager
             .lock()
@@ -1531,7 +1594,7 @@ impl Vm {
     #[cfg(target_arch = "aarch64")]
     fn configure_system(
         &mut self,
-        _rsdp_addr: GuestAddress,
+        _rsdp_addr: Option<GuestAddress>,
         _entry_addr: EntryPoint,
     ) -> Result<()> {
         let cmdline = Self::generate_cmdline(
@@ -2519,16 +2582,15 @@ impl Vm {
         let rsdp_addr = self.create_acpi_tables();
 
         #[cfg(not(target_arch = "riscv64"))]
-        {
-            #[cfg(not(feature = "sev_snp"))]
-            assert!(rsdp_addr.is_some());
-            // Configure shared state based on loaded kernel
-            if let Some(rsdp_adr) = rsdp_addr {
-                entry_point
-                    .map(|entry_point| self.configure_system(rsdp_adr, entry_point))
-                    .transpose()?;
-            }
-        }
+        // Configure shared state based on loaded kernel
+        entry_point
+            .map(|entry_point| {
+                // Safe to unwrap rsdp_addr as we know it can't be None when
+                // the entry_point is Some.
+                self.configure_system(rsdp_addr, entry_point)
+            })
+            .transpose()?;
+
         #[cfg(target_arch = "riscv64")]
         self.configure_system().unwrap();
 

@@ -28,7 +28,7 @@ mshv = [
   "vm-device/mshv",
 ]
 pvmemcontrol = ["devices/pvmemcontrol"]
-sev_snp = ["arch/sev_snp", "hypervisor/sev_snp", "virtio-devices/sev_snp"]
+sev_snp = ["arch/sev_snp", "hypervisor/sev_snp", "virtio-devices/sev_snp", "igvm_defs"]
 tdx = ["arch/tdx", "hypervisor/tdx"]
 tracing = ["tracer/tracing"]
 
