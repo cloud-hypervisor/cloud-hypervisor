@@ -8,7 +8,7 @@
 FROM ubuntu:24.04 AS dev
 
 ARG TARGETARCH
-ARG RUST_TOOLCHAIN="1.87.0"
+ARG RUST_TOOLCHAIN="1.88.0"
 ARG CLH_SRC_DIR="/cloud-hypervisor"
 ARG CLH_BUILD_DIR="$CLH_SRC_DIR/build"
 ARG CARGO_REGISTRY_DIR="$CLH_BUILD_DIR/cargo_registry"
@@ -123,7 +123,7 @@ RUN echo 'source $CARGO_HOME/env' >> "$HOME"/.bashrc \
     && mkdir "$HOME"/.cargo \
     && ln -s $CARGO_HOME/env "$HOME"/.cargo/env
 
-# Allow pip to install packages system wide 
+# Allow pip to install packages system wide
 # hadolint ignore=DL3003,SC2046
 RUN rm /usr/lib/python3.12/EXTERNALLY-MANAGED \
         && git clone https://github.com/spdk/spdk \
