@@ -671,16 +671,6 @@ impl Default for IvshmemConfig {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct SgxEpcConfig {
-    pub id: String,
-    #[serde(default)]
-    pub size: u64,
-    #[serde(default)]
-    pub prefault: bool,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct NumaDistance {
     #[serde(default)]
@@ -699,9 +689,6 @@ pub struct NumaConfig {
     pub distances: Option<Vec<NumaDistance>>,
     #[serde(default)]
     pub memory_zones: Option<Vec<String>>,
-    #[cfg(target_arch = "x86_64")]
-    #[serde(default)]
-    pub sgx_epc_sections: Option<Vec<String>>,
     #[serde(default)]
     pub pci_segments: Option<Vec<u16>>,
 }
@@ -941,8 +928,6 @@ pub struct VmConfig {
     pub pvpanic: bool,
     #[serde(default)]
     pub iommu: bool,
-    #[cfg(target_arch = "x86_64")]
-    pub sgx_epc: Option<Vec<SgxEpcConfig>>,
     pub numa: Option<Vec<NumaConfig>>,
     #[serde(default)]
     pub watchdog: bool,
