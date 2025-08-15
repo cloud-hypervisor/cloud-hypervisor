@@ -667,9 +667,7 @@ impl Drop for Net {
         let ifnames_str = self
             .taps
             .iter()
-            .map(|tap| {
-                tap.if_name_as_str()
-            })
+            .map(|tap| tap.if_name_as_str())
             .collect::<Vec<_>>();
         let ifnames_str = ifnames_str.join(",");
         debug!(

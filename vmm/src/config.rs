@@ -3004,11 +3004,15 @@ impl Clone for VmConfig {
                 .preserved_fds
                 .as_ref()
                 // SAFETY: FFI call with valid FDs
-                .map(|fds| fds.iter().map(|fd| {
-                    let fd_duped = unsafe { libc::dup(*fd) };
-                    warn!("Cloning VM config: duping preserved FD {fd} => {fd_duped}");
-                    fd_duped
-                }).collect()),
+                .map(|fds| {
+                    fds.iter()
+                        .map(|fd| {
+                            let fd_duped = unsafe { libc::dup(*fd) };
+                            warn!("Cloning VM config: duping preserved FD {fd} => {fd_duped}");
+                            fd_duped
+                        })
+                        .collect()
+                }),
             landlock_rules: self.landlock_rules.clone(),
             ..*self
         }
