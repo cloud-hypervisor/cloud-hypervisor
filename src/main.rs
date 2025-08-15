@@ -461,6 +461,11 @@ fn get_cli_options_sorted(
             .action(ArgAction::SetTrue)
             .help("Print version")
             .num_args(0),
+        Arg::new("vhost-user-generic")
+            .long("vhost-user-generic")
+            .help(FsConfig::SYNTAX)
+            .num_args(1..)
+            .group("vm-config"),
         Arg::new("vsock")
             .long("vsock")
             .help(VsockConfig::SYNTAX)
@@ -1007,6 +1012,7 @@ mod unit_tests {
             },
             balloon: None,
             fs: None,
+            generic: None,
             pmem: None,
             serial: ConsoleConfig {
                 file: None,
