@@ -82,8 +82,6 @@ use crate::coredump::{
 };
 #[cfg(feature = "guest_debug")]
 use crate::gdb::{get_raw_tid, Debuggable, DebuggableError};
-#[cfg(target_arch = "x86_64")]
-use crate::memory_manager::MemoryManager;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 #[cfg(target_arch = "x86_64")]
 use crate::vm::physical_bits;
@@ -799,23 +797,14 @@ impl CpuManager {
     #[cfg(target_arch = "x86_64")]
     pub fn populate_cpuid(
         &mut self,
-        memory_manager: &Arc<Mutex<MemoryManager>>,
         hypervisor: &Arc<dyn hypervisor::Hypervisor>,
         #[cfg(feature = "tdx")] tdx: bool,
     ) -> Result<()> {
-        let sgx_epc_sections = memory_manager
-            .lock()
-            .unwrap()
-            .sgx_epc_region()
-            .as_ref()
-            .map(|sgx_epc_region| sgx_epc_region.epc_sections().values().cloned().collect());
-
         self.cpuid = {
             let phys_bits = physical_bits(hypervisor, self.config.max_phys_bits);
             arch::generate_common_cpuid(
                 hypervisor,
                 &arch::CpuidConfig {
-                    sgx_epc_sections,
                     phys_bits,
                     kvm_hyperv: self.config.kvm_hyperv,
                     #[cfg(feature = "tdx")]

@@ -12,11 +12,9 @@
 
 use std::any::Any;
 use std::collections::HashMap;
-#[cfg(target_arch = "x86_64")]
-use std::fs::File;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use std::mem::offset_of;
-#[cfg(target_arch = "x86_64")]
+#[cfg(feature = "tdx")]
 use std::os::unix::io::AsRawFd;
 #[cfg(feature = "tdx")]
 use std::os::unix::io::RawFd;
@@ -108,6 +106,8 @@ use kvm_bindings::{kvm_run__bindgen_ty_1, KVMIO};
 pub use kvm_ioctls::{Cap, Kvm, VcpuExit};
 use thiserror::Error;
 use vfio_ioctls::VfioDeviceFd;
+#[cfg(target_arch = "x86_64")]
+use vmm_sys_util::ioctl_io_nr;
 #[cfg(feature = "tdx")]
 use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_iowr_nr};
 pub use {kvm_bindings, kvm_ioctls};
@@ -116,13 +116,6 @@ pub use {kvm_bindings, kvm_ioctls};
 use crate::arch::aarch64::regs;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use crate::RegList;
-
-#[cfg(target_arch = "x86_64")]
-const KVM_CAP_SGX_ATTRIBUTE: u32 = 196;
-
-#[cfg(target_arch = "x86_64")]
-use vmm_sys_util::ioctl_io_nr;
-
 #[cfg(target_arch = "x86_64")]
 ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 
@@ -890,19 +883,6 @@ impl vm::Vm for KvmVm {
         self.fd
             .enable_cap(&cap)
             .map_err(|e| vm::HypervisorVmError::EnableX2ApicApi(e.into()))?;
-        Ok(())
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    fn enable_sgx_attribute(&self, file: File) -> vm::Result<()> {
-        let mut cap = kvm_enable_cap {
-            cap: KVM_CAP_SGX_ATTRIBUTE,
-            ..Default::default()
-        };
-        cap.args[0] = file.as_raw_fd() as u64;
-        self.fd
-            .enable_cap(&cap)
-            .map_err(|e| vm::HypervisorVmError::EnableSgxAttribute(e.into()))?;
         Ok(())
     }
 

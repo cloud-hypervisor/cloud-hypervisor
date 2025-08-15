@@ -11,8 +11,6 @@
 //
 
 use std::any::Any;
-#[cfg(target_arch = "x86_64")]
-use std::fs::File;
 use std::sync::Arc;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use std::sync::Mutex;
@@ -130,12 +128,6 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to enable x2apic API")]
     EnableX2ApicApi(#[source] anyhow::Error),
-    ///
-    /// Enable SGX attribute error
-    ///
-    #[error("Failed to enable SGX attribute")]
-    EnableSgxAttribute(#[source] anyhow::Error),
-    ///
     /// Get clock error
     ///
     #[error("Failed to get clock")]
@@ -363,8 +355,6 @@ pub trait Vm: Send + Sync + Any {
     /// Enable split Irq capability
     #[cfg(target_arch = "x86_64")]
     fn enable_split_irq(&self) -> Result<()>;
-    #[cfg(target_arch = "x86_64")]
-    fn enable_sgx_attribute(&self, file: File) -> Result<()>;
     /// Retrieve guest clock.
     #[cfg(target_arch = "x86_64")]
     fn get_clock(&self) -> Result<ClockData>;
