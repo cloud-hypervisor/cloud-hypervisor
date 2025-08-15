@@ -119,7 +119,7 @@ fn create_cpu_nodes(fdt: &mut FdtWriter, num_cpus: u32) -> FdtWriterResult<()> {
     fdt.property_u32("timebase-frequency", timebase_frequency)?;
 
     for cpu_index in 0..num_cpus {
-        let cpu = fdt.begin_node(&format!("cpu@{:x}", cpu_index))?;
+        let cpu = fdt.begin_node(&format!("cpu@{cpu_index:x}"))?;
         fdt.property_string("device_type", "cpu")?;
         fdt.property_string("compatible", "riscv")?;
         fdt.property_string("mmu-type", "sv48")?;
@@ -184,7 +184,7 @@ fn create_memory_node(fdt: &mut FdtWriter, guest_mem: &GuestMemoryMmap) -> FdtWr
     }
 
     let ram_start = super::layout::RAM_START.raw_value();
-    let memory_node_name = format!("memory@{:x}", ram_start);
+    let memory_node_name = format!("memory@{ram_start:x}");
     let memory_node = fdt.begin_node(&memory_node_name)?;
     fdt.property_string("device_type", "memory")?;
     fdt.property_array_u64("reg", &mem_reg_property)?;
