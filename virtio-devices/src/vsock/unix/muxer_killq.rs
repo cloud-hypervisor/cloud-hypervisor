@@ -111,11 +111,12 @@ impl MuxerKillQ {
     /// the queue has expired. Otherwise, `None` is returned.
     ///
     pub fn pop(&mut self) -> Option<ConnMapKey> {
-        if let Some(item) = self.q.front() {
-            if Instant::now() > item.kill_time {
-                return Some(self.q.pop_front().unwrap().key);
-            }
+        if let Some(item) = self.q.front()
+            && Instant::now() > item.kill_time
+        {
+            return Some(self.q.pop_front().unwrap().key);
         }
+
         None
     }
 
