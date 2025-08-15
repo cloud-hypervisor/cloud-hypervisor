@@ -16,7 +16,7 @@ libc = { workspace = true }
 log = { workspace = true }
 remain = "0.2.15"
 serde = { workspace = true, features = ["derive"] }
-smallvec = "1.13.2"
+smallvec = "1.15.1"
 thiserror = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 virtio-bindings = { workspace = true }
