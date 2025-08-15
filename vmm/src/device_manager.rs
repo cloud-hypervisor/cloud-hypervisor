@@ -3373,7 +3373,7 @@ impl DeviceManager {
         let mut devices = Vec::new();
 
         let mut vsock = self.config.lock().unwrap().vsock.clone();
-        if let Some(ref mut vsock_cfg) = &mut vsock {
+        if let Some(vsock_cfg) = &mut vsock {
             devices.push(self.make_virtio_vsock_device(vsock_cfg)?);
         }
         self.config.lock().unwrap().vsock = vsock;

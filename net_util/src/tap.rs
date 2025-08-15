@@ -130,7 +130,7 @@ fn ipv6_mask_to_prefix(mask: Ipv6Addr) -> Result<u8> {
 
 impl Tap {
     unsafe fn ioctl_with_mut_ref<F: AsRawFd, T>(fd: &F, req: c_ulong, arg: &mut T) -> Result<()> {
-        let ret = ioctl_with_mut_ref(fd, req, arg);
+        let ret = unsafe { ioctl_with_mut_ref(fd, req, arg) };
         if ret < 0 {
             return Err(Error::IoctlError(req, IoError::last_os_error()));
         }
@@ -139,7 +139,7 @@ impl Tap {
     }
 
     unsafe fn ioctl_with_ref<F: AsRawFd, T>(fd: &F, req: c_ulong, arg: &T) -> Result<()> {
-        let ret = ioctl_with_ref(fd, req, arg);
+        let ret = unsafe { ioctl_with_ref(fd, req, arg) };
         if ret < 0 {
             return Err(Error::IoctlError(req, IoError::last_os_error()));
         }
@@ -148,7 +148,7 @@ impl Tap {
     }
 
     unsafe fn ioctl_with_val<F: AsRawFd>(fd: &F, req: c_ulong, arg: c_ulong) -> Result<()> {
-        let ret = ioctl_with_val(fd, req, arg);
+        let ret = unsafe { ioctl_with_val(fd, req, arg) };
         if ret < 0 {
             return Err(Error::IoctlError(req, IoError::last_os_error()));
         }
