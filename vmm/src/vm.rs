@@ -1241,7 +1241,9 @@ impl Vm {
         let guest_memory = memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
         let alignment = 0x20_0000;
-        let aligned_kernel_addr = arch::layout::KERNEL_START.0 + (alignment - 1) & !(alignment - 1);
+        // align up
+        let aligned_kernel_addr =
+            (arch::layout::KERNEL_START.0 + (alignment - 1)) & !(alignment - 1);
         let entry_addr = match (firmware, kernel) {
             (None, Some(mut kernel)) => {
                 match linux_loader::loader::pe::PE::load(

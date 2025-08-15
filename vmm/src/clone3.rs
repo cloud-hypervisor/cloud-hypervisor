@@ -23,5 +23,6 @@ pub struct clone_args {
 }
 
 pub unsafe fn clone3(args: &mut clone_args, size: size_t) -> c_long {
+    // SAFETY: We trust the kernel
     unsafe { syscall(SYS_clone3, args, size) }
 }

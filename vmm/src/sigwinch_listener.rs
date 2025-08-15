@@ -84,6 +84,7 @@ unsafe fn close_fds_fallback(keep_fds: &BTreeSet<RawFd>) {
         .collect();
 
     for fd in open_fds.difference(keep_fds) {
+        // SAFETY: We trust the kernel
         unsafe { close(*fd) };
     }
 }
@@ -109,11 +110,13 @@ unsafe fn close_unused_fds(keep_fds: &mut [RawFd]) {
             continue;
         }
 
+        // SAFETY: We trust the kernel
         if unsafe { syscall(SYS_close_range, first, last, 0) } == -1 {
             // The kernel might be too old to have close_range, in
             // which case we need to fall back to an uglier method.
             let e = io::Error::last_os_error();
             if e.raw_os_error() == Some(ENOSYS) {
+                // SAFETY: We trust the kernel
                 return unsafe { close_fds_fallback(&keep_fds.iter().copied().collect()) };
             }
 
@@ -213,6 +216,7 @@ unsafe fn clone_clear_sighand() -> io::Result<u64> {
         ..Default::default()
     };
     args.flags |= CLONE_CLEAR_SIGHAND;
+    // SAFETY: We trust the kernel
     let r = unsafe { clone3(&mut args, size_of::<clone_args>()) };
     if r != -1 {
         return Ok(r.try_into().unwrap());
@@ -224,12 +228,14 @@ unsafe fn clone_clear_sighand() -> io::Result<u64> {
 
     // If CLONE_CLEAR_SIGHAND isn't available, fall back to resetting
     // all the signal handlers one by one.
+    // SAFETY: We trust the kernel
     let r = unsafe { fork() };
     if r == -1 {
         return Err(io::Error::last_os_error());
     }
     if r == 0 {
         for signum in 1.._NSIG {
+            // SAFETY: We trust the kernel
             let _ = unsafe { signal(signum, SIG_DFL) };
         }
     }
