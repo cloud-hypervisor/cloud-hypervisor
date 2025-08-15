@@ -11,6 +11,7 @@ use libc::c_uchar;
 use thiserror::Error;
 use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError};
 
+use super::MAX_SUPPORTED_CPUS_LEGACY;
 use crate::layout::{APIC_START, HIGH_RAM_START, IOAPIC_START};
 use crate::x86_64::{get_x2apic_id, mpspec};
 use crate::GuestMemoryMmap;
@@ -61,9 +62,6 @@ pub enum Error {
     /// Failure while zeroing out the memory for the MP table.
     #[error("Failure while zeroing out the memory for the MP table")]
     Clear(#[source] GuestMemoryError),
-    /// Number of CPUs exceeds the maximum supported CPUs
-    #[error("Number of CPUs exceeds the maximum supported CPUs")]
-    TooManyCpus,
     /// Failure to write the MP floating pointer.
     #[error("Failure to write the MP floating pointer")]
     WriteMpfIntel(#[source] GuestMemoryError),
@@ -88,11 +86,6 @@ pub enum Error {
 }
 
 pub type Result<T> = result::Result<T, Error>;
-
-// With APIC/xAPIC, there are only 255 APIC IDs available. And IOAPIC occupies
-// one APIC ID, so only 254 CPUs at maximum may be supported. Actually it's
-// a large number for FC usecases.
-pub const MAX_SUPPORTED_CPUS: u32 = 254;
 
 // Most of these variables are sourced from the Intel MP Spec 1.4.
 const SMP_MAGIC_IDENT: &[c_uchar; 4] = b"_MP_";
@@ -141,8 +134,9 @@ pub fn setup_mptable(
     if num_cpus > 0 {
         let cpu_id_max = num_cpus - 1;
         let x2apic_id_max = get_x2apic_id(cpu_id_max, topology);
-        if x2apic_id_max >= MAX_SUPPORTED_CPUS {
-            return Err(Error::TooManyCpus);
+        if x2apic_id_max >= MAX_SUPPORTED_CPUS_LEGACY {
+            info!("Skipping mptable creation due to too many CPUs");
+            return Ok(());
         }
     }
 
@@ -157,7 +151,7 @@ pub fn setup_mptable(
     }
 
     let mut checksum: u8 = 0;
-    let ioapicid: u8 = MAX_SUPPORTED_CPUS as u8 + 1;
+    let ioapicid: u8 = MAX_SUPPORTED_CPUS_LEGACY as u8 + 1;
 
     // The checked_add here ensures the all of the following base_mp.unchecked_add's will be without
     // overflow.
@@ -392,11 +386,13 @@ mod tests {
 
     #[test]
     fn cpu_entry_count() {
-        let mem =
-            GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(MAX_SUPPORTED_CPUS))])
-                .unwrap();
+        let mem = GuestMemoryMmap::from_ranges(&[(
+            MPTABLE_START,
+            compute_mp_size(MAX_SUPPORTED_CPUS_LEGACY),
+        )])
+        .unwrap();
 
-        for i in 0..MAX_SUPPORTED_CPUS {
+        for i in 0..MAX_SUPPORTED_CPUS_LEGACY {
             setup_mptable(MPTABLE_START, &mem, i, None).unwrap();
 
             let mpf_intel: MpfIntelWrapper = mem.read_obj(MPTABLE_START).unwrap();
@@ -426,10 +422,9 @@ mod tests {
 
     #[test]
     fn cpu_entry_count_max() {
-        let cpus = MAX_SUPPORTED_CPUS + 1;
+        let cpus = MAX_SUPPORTED_CPUS_LEGACY + 1;
         let mem = GuestMemoryMmap::from_ranges(&[(MPTABLE_START, compute_mp_size(cpus))]).unwrap();
 
-        let result = setup_mptable(MPTABLE_START, &mem, cpus, None);
-        result.unwrap_err();
+        setup_mptable(MPTABLE_START, &mem, cpus, None).unwrap();
     }
 }
