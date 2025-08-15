@@ -1061,24 +1061,6 @@ impl Guest {
         }
     }
 
-    #[cfg(target_arch = "x86_64")]
-    pub fn check_sgx_support(&self) -> Result<(), Error> {
-        self.ssh_command(
-            "cpuid -l 0x7 -s 0 | tr -s [:space:] | grep -q 'SGX: \
-                    Software Guard Extensions supported = true'",
-        )?;
-        self.ssh_command(
-            "cpuid -l 0x7 -s 0 | tr -s [:space:] | grep -q 'SGX_LC: \
-                    SGX launch config supported = true'",
-        )?;
-        self.ssh_command(
-            "cpuid -l 0x12 -s 0 | tr -s [:space:] | grep -q 'SGX1 \
-                    supported = true'",
-        )?;
-
-        Ok(())
-    }
-
     pub fn get_pci_bridge_class(&self) -> Result<String, Error> {
         Ok(self
             .ssh_command("cat /sys/bus/pci/devices/0000:00:00.0/class")?

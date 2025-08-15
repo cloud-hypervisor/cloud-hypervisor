@@ -9531,50 +9531,6 @@ mod windows {
 }
 
 #[cfg(target_arch = "x86_64")]
-mod sgx {
-    use crate::*;
-
-    #[test]
-    fn test_sgx() {
-        let jammy_image = JAMMY_IMAGE_NAME.to_string();
-        let jammy = UbuntuDiskConfig::new(jammy_image);
-        let guest = Guest::new(Box::new(jammy));
-
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
-            .args(["--memory", "size=512M"])
-            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
-            .default_disks()
-            .default_net()
-            .args(["--sgx-epc", "id=epc0,size=64M"])
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
-
-            // Check if SGX is correctly detected in the guest.
-            guest.check_sgx_support().unwrap();
-
-            // Validate the SGX EPC section is 64MiB.
-            assert_eq!(
-                guest
-                    .ssh_command("cpuid -l 0x12 -s 2 | grep 'section size' | cut -d '=' -f 2")
-                    .unwrap()
-                    .trim(),
-                "0x0000000004000000"
-            );
-        });
-
-        let _ = child.kill();
-        let output = child.wait_with_output().unwrap();
-
-        handle_child_output(r, &output);
-    }
-}
-
-#[cfg(target_arch = "x86_64")]
 mod vfio {
     use crate::*;
     const NVIDIA_VFIO_DEVICE: &str = "/sys/bus/pci/devices/0002:00:01.0";

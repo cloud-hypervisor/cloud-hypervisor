@@ -19,16 +19,12 @@ use std::{ffi, result, thread};
 
 use acpi_tables::{aml, Aml};
 use anyhow::anyhow;
-#[cfg(target_arch = "x86_64")]
-use arch::x86_64::{SgxEpcRegion, SgxEpcSection};
 use arch::RegionType;
 #[cfg(target_arch = "x86_64")]
 use devices::ioapic;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::HypervisorVmError;
 use libc::_SC_NPROCESSORS_ONLN;
-#[cfg(target_arch = "x86_64")]
-use libc::{MAP_NORESERVE, MAP_POPULATE, MAP_SHARED, PROT_READ, PROT_WRITE};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracer::trace_scoped;
@@ -54,8 +50,6 @@ use crate::coredump::{
     CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
 };
 use crate::migration::url_to_path;
-#[cfg(target_arch = "x86_64")]
-use crate::vm_config::SgxEpcConfig;
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID};
 
@@ -67,9 +61,6 @@ const SNAPSHOT_FILENAME: &str = "memory-ranges";
 
 #[cfg(target_arch = "x86_64")]
 const X86_64_IRQ_BASE: u32 = 5;
-
-#[cfg(target_arch = "x86_64")]
-const SGX_PAGE_SIZE: u64 = 1 << 12;
 
 const HOTPLUG_COUNT: usize = 8;
 
@@ -183,8 +174,6 @@ pub struct MemoryManager {
     hugepage_size: Option<u64>,
     prefault: bool,
     thp: bool,
-    #[cfg(target_arch = "x86_64")]
-    sgx_epc_region: Option<SgxEpcRegion>,
     user_provided_zones: bool,
     snapshot_memory_ranges: MemoryRangeTable,
     memory_zones: MemoryZones,
@@ -268,36 +257,6 @@ pub enum Error {
     /// Cannot create the system allocator
     #[error("Cannot create the system allocator")]
     CreateSystemAllocator,
-
-    /// Invalid SGX EPC section size
-    #[cfg(target_arch = "x86_64")]
-    #[error("Invalid SGX EPC section size")]
-    EpcSectionSizeInvalid,
-
-    /// Failed allocating SGX EPC region
-    #[cfg(target_arch = "x86_64")]
-    #[error("Failed allocating SGX EPC region")]
-    SgxEpcRangeAllocation,
-
-    /// Failed opening SGX virtual EPC device
-    #[cfg(target_arch = "x86_64")]
-    #[error("Failed opening SGX virtual EPC device")]
-    SgxVirtEpcOpen(#[source] io::Error),
-
-    /// Failed setting the SGX virtual EPC section size
-    #[cfg(target_arch = "x86_64")]
-    #[error("Failed setting the SGX virtual EPC section size")]
-    SgxVirtEpcFileSetLen(#[source] io::Error),
-
-    /// Failed opening SGX provisioning device
-    #[cfg(target_arch = "x86_64")]
-    #[error("Failed opening SGX provisioning device")]
-    SgxProvisionOpen(#[source] io::Error),
-
-    /// Failed enabling SGX provisioning
-    #[cfg(target_arch = "x86_64")]
-    #[error("Failed enabling SGX provisioning")]
-    SgxEnableProvisioning(#[source] hypervisor::HypervisorVmError),
 
     /// Failed creating a new MmapRegion instance.
     #[cfg(target_arch = "x86_64")]
@@ -1034,7 +993,6 @@ impl MemoryManager {
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         restore_data: Option<&MemoryManagerSnapshotData>,
         existing_memory_files: Option<HashMap<u32, File>>,
-        #[cfg(target_arch = "x86_64")] sgx_epc_config: Option<Vec<SgxEpcConfig>>,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         trace_scoped!("MemoryManager::new");
 
@@ -1236,8 +1194,7 @@ impl MemoryManager {
             None
         };
 
-        // If running on SGX the start of device area and RAM area may diverge but
-        // at this point they are next to each other.
+        // The start of device area and RAM area are placed next to each other.
         let end_of_ram_area = start_of_device_area.unchecked_sub(1);
         let ram_allocator = AddressAllocator::new(GuestAddress(0), start_of_device_area.0).unwrap();
 
@@ -1263,8 +1220,6 @@ impl MemoryManager {
             hugepages: config.hugepages,
             hugepage_size: config.hugepage_size,
             prefault: config.prefault,
-            #[cfg(target_arch = "x86_64")]
-            sgx_epc_region: None,
             user_provided_zones,
             snapshot_memory_ranges: MemoryRangeTable::default(),
             memory_zones,
@@ -1278,11 +1233,6 @@ impl MemoryManager {
             uefi_flash: None,
             thp: config.thp,
         };
-
-        #[cfg(target_arch = "x86_64")]
-        if let Some(sgx_epc_config) = sgx_epc_config {
-            memory_manager.setup_sgx(sgx_epc_config)?;
-        }
 
         Ok(Arc::new(Mutex::new(memory_manager)))
     }
@@ -1310,8 +1260,6 @@ impl MemoryManager {
                 #[cfg(feature = "tdx")]
                 false,
                 Some(&mem_snapshot),
-                None,
-                #[cfg(target_arch = "x86_64")]
                 None,
             )?;
 
@@ -1976,121 +1924,6 @@ impl MemoryManager {
         self.virtio_mem_resize(id, virtio_mem_size)
     }
 
-    #[cfg(target_arch = "x86_64")]
-    pub fn setup_sgx(&mut self, sgx_epc_config: Vec<SgxEpcConfig>) -> Result<(), Error> {
-        let file = OpenOptions::new()
-            .read(true)
-            .open("/dev/sgx_provision")
-            .map_err(Error::SgxProvisionOpen)?;
-        self.vm
-            .enable_sgx_attribute(file)
-            .map_err(Error::SgxEnableProvisioning)?;
-
-        // Go over each EPC section and verify its size is a 4k multiple. At
-        // the same time, calculate the total size needed for the contiguous
-        // EPC region.
-        let mut epc_region_size = 0;
-        for epc_section in sgx_epc_config.iter() {
-            if epc_section.size == 0 {
-                return Err(Error::EpcSectionSizeInvalid);
-            }
-            if epc_section.size & (SGX_PAGE_SIZE - 1) != 0 {
-                return Err(Error::EpcSectionSizeInvalid);
-            }
-
-            epc_region_size += epc_section.size;
-        }
-
-        // Place the SGX EPC region on a 4k boundary between the RAM and the device area
-        let epc_region_start =
-            GuestAddress(self.start_of_device_area.0.div_ceil(SGX_PAGE_SIZE) * SGX_PAGE_SIZE);
-
-        self.start_of_device_area = epc_region_start
-            .checked_add(epc_region_size)
-            .ok_or(Error::GuestAddressOverFlow)?;
-
-        let mut sgx_epc_region = SgxEpcRegion::new(epc_region_start, epc_region_size as GuestUsize);
-        info!(
-            "SGX EPC region: 0x{:x} (0x{:x})",
-            epc_region_start.0, epc_region_size
-        );
-
-        // Each section can be memory mapped into the allocated region.
-        let mut epc_section_start = epc_region_start.raw_value();
-        for epc_section in sgx_epc_config.iter() {
-            let file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open("/dev/sgx_vepc")
-                .map_err(Error::SgxVirtEpcOpen)?;
-
-            let prot = PROT_READ | PROT_WRITE;
-            let mut flags = MAP_NORESERVE | MAP_SHARED;
-            if epc_section.prefault {
-                flags |= MAP_POPULATE;
-            }
-
-            // We can't use the vm-memory crate to perform the memory mapping
-            // here as it would try to ensure the size of the backing file is
-            // matching the size of the expected mapping. The /dev/sgx_vepc
-            // device does not work that way, it provides a file descriptor
-            // which is not matching the mapping size, as it's a just a way to
-            // let KVM know that an EPC section is being created for the guest.
-            // SAFETY: FFI call with correct arguments
-            let host_addr = unsafe {
-                libc::mmap(
-                    std::ptr::null_mut(),
-                    epc_section.size as usize,
-                    prot,
-                    flags,
-                    file.as_raw_fd(),
-                    0,
-                )
-            };
-
-            if host_addr == libc::MAP_FAILED {
-                error!(
-                    "Could not add SGX EPC section (size 0x{:x})",
-                    epc_section.size
-                );
-                return Err(Error::SgxEpcRangeAllocation);
-            }
-
-            info!(
-                "Adding SGX EPC section: 0x{:x} (0x{:x})",
-                epc_section_start, epc_section.size
-            );
-
-            let _mem_slot = self.create_userspace_mapping(
-                epc_section_start,
-                epc_section.size,
-                host_addr as u64,
-                false,
-                false,
-                false,
-            )?;
-
-            sgx_epc_region.insert(
-                epc_section.id.clone(),
-                SgxEpcSection::new(
-                    GuestAddress(epc_section_start),
-                    epc_section.size as GuestUsize,
-                ),
-            );
-
-            epc_section_start += epc_section.size;
-        }
-
-        self.sgx_epc_region = Some(sgx_epc_region);
-
-        Ok(())
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    pub fn sgx_epc_region(&self) -> &Option<SgxEpcRegion> {
-        &self.sgx_epc_region
-    }
-
     pub fn is_hardlink(f: &File) -> bool {
         let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
         // SAFETY: FFI call with correct arguments
@@ -2641,34 +2474,6 @@ impl Aml for MemoryManager {
                 ],
             )
             .to_aml_bytes(sink);
-        }
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            if let Some(sgx_epc_region) = &self.sgx_epc_region {
-                let min = sgx_epc_region.start().raw_value();
-                let max = min + sgx_epc_region.size() - 1;
-                // SGX EPC region
-                aml::Device::new(
-                    "_SB_.EPC_".into(),
-                    vec![
-                        &aml::Name::new("_HID".into(), &aml::EISAName::new("INT0E0C")),
-                        // QWORD describing the EPC region start and size
-                        &aml::Name::new(
-                            "_CRS".into(),
-                            &aml::ResourceTemplate::new(vec![&aml::AddressSpace::new_memory(
-                                aml::AddressSpaceCacheable::NotCacheable,
-                                true,
-                                min,
-                                max,
-                                None,
-                            )]),
-                        ),
-                        &aml::Method::new("_STA".into(), 0, false, vec![&aml::Return::new(&0xfu8)]),
-                    ],
-                )
-                .to_aml_bytes(sink);
-            }
         }
     }
 }

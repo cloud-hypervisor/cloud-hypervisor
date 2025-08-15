@@ -2,8 +2,6 @@ verbose = "info"
 
 exclude = [
     # Availability of links below should be manually verified.
-    # Page for intel SGX support, returns 403 while querying.
-    '^https://www.intel.com/content/www/us/en/developer/tools/software-guard-extensions/linux-overview.html',
     # Page for intel TDX support, returns 403 while querying.
     '^https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html',
     # Page for TPM, returns 403 while querying.
