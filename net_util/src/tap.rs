@@ -133,7 +133,7 @@ impl Tap {
     /// The caller should ensure to pass a valid file descriptor and valid
     /// arguments for the `ioctl()` syscall.
     unsafe fn ioctl_with_mut_ref<F: AsRawFd, T>(fd: &F, req: c_ulong, arg: &mut T) -> Result<()> {
-        let ret = ioctl_with_mut_ref(fd, req, arg);
+        let ret = unsafe { ioctl_with_mut_ref(fd, req, arg) };
         if ret < 0 {
             return Err(Error::IoctlError(req, IoError::last_os_error()));
         }
@@ -145,7 +145,7 @@ impl Tap {
     /// The caller should ensure to pass a valid file descriptor and valid
     /// arguments for the `ioctl()` syscall.
     unsafe fn ioctl_with_ref<F: AsRawFd, T>(fd: &F, req: c_ulong, arg: &T) -> Result<()> {
-        let ret = ioctl_with_ref(fd, req, arg);
+        let ret = unsafe { ioctl_with_ref(fd, req, arg) };
         if ret < 0 {
             return Err(Error::IoctlError(req, IoError::last_os_error()));
         }
@@ -157,7 +157,7 @@ impl Tap {
     /// The caller should ensure to pass a valid file descriptor and valid
     /// arguments for the `ioctl()` syscall.
     unsafe fn ioctl_with_val<F: AsRawFd>(fd: &F, req: c_ulong, arg: c_ulong) -> Result<()> {
-        let ret = ioctl_with_val(fd, req, arg);
+        let ret = unsafe { ioctl_with_val(fd, req, arg) };
         if ret < 0 {
             return Err(Error::IoctlError(req, IoError::last_os_error()));
         }
