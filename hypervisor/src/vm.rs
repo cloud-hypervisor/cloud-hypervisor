@@ -126,11 +126,6 @@ pub enum HypervisorVmError {
     #[error("Failed to enable split Irq")]
     EnableSplitIrq(#[source] anyhow::Error),
     ///
-    /// Enable SGX attribute error
-    ///
-    #[error("Failed to enable SGX attribute")]
-    EnableSgxAttribute(#[source] anyhow::Error),
-    ///
     /// Get clock error
     ///
     #[error("Failed to get clock")]
@@ -358,8 +353,6 @@ pub trait Vm: Send + Sync + Any {
     /// Enable split Irq capability
     #[cfg(target_arch = "x86_64")]
     fn enable_split_irq(&self) -> Result<()>;
-    #[cfg(target_arch = "x86_64")]
-    fn enable_sgx_attribute(&self, file: File) -> Result<()>;
     /// Retrieve guest clock.
     #[cfg(target_arch = "x86_64")]
     fn get_clock(&self) -> Result<ClockData>;

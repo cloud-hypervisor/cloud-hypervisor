@@ -971,24 +971,6 @@ impl Vm {
                     }
                 }
 
-                #[cfg(target_arch = "x86_64")]
-                if let Some(sgx_epc_sections) = &config.sgx_epc_sections {
-                    if let Some(sgx_epc_region) = mm.sgx_epc_region() {
-                        let mm_sections = sgx_epc_region.epc_sections();
-                        for sgx_epc_section in sgx_epc_sections.iter() {
-                            if let Some(mm_section) = mm_sections.get(sgx_epc_section) {
-                                node.sgx_epc_sections.push(mm_section.clone());
-                            } else {
-                                error!("Unknown SGX EPC section '{}'", sgx_epc_section);
-                                return Err(Error::InvalidNumaConfig);
-                            }
-                        }
-                    } else {
-                        error!("Missing SGX EPC region");
-                        return Err(Error::InvalidNumaConfig);
-                    }
-                }
-
                 numa_nodes.insert(config.guest_numa_id, node);
             }
         }
@@ -1056,8 +1038,6 @@ impl Vm {
             )
             .map_err(Error::MemoryManager)?
         } else {
-            #[cfg(target_arch = "x86_64")]
-            let sgx_epc_config = vm_config.lock().unwrap().sgx_epc.clone();
 
             MemoryManager::new(
                 vm.clone(),
@@ -1068,8 +1048,6 @@ impl Vm {
                 tdx_enabled,
                 None,
                 None,
-                #[cfg(target_arch = "x86_64")]
-                sgx_epc_config,
             )
             .map_err(Error::MemoryManager)?
         };
@@ -1467,13 +1445,6 @@ impl Vm {
 
         let boot_vcpus = self.cpu_manager.lock().unwrap().boot_vcpus();
         let rsdp_addr = Some(rsdp_addr);
-        let sgx_epc_region = self
-            .memory_manager
-            .lock()
-            .unwrap()
-            .sgx_epc_region()
-            .as_ref()
-            .cloned();
 
         let serial_number = self
             .config
@@ -1513,7 +1484,6 @@ impl Vm {
             boot_vcpus,
             entry_addr.setup_header,
             rsdp_addr,
-            sgx_epc_region,
             serial_number.as_deref(),
             uuid.as_deref(),
             oem_strings.as_deref(),
@@ -2964,7 +2934,6 @@ impl Snapshottable for Vm {
             arch::generate_common_cpuid(
                 &self.hypervisor,
                 &arch::CpuidConfig {
-                    sgx_epc_sections: None,
                     phys_bits,
                     kvm_hyperv: self.config.lock().unwrap().cpus.kvm_hyperv,
                     #[cfg(feature = "tdx")]

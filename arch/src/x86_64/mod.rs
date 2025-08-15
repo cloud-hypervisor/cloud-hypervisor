@@ -75,55 +75,7 @@ pub struct EntryPoint {
 const E820_RAM: u32 = 1;
 const E820_RESERVED: u32 = 2;
 
-#[derive(Clone)]
-pub struct SgxEpcSection {
-    start: GuestAddress,
-    size: GuestUsize,
-}
-
-impl SgxEpcSection {
-    pub fn new(start: GuestAddress, size: GuestUsize) -> Self {
-        SgxEpcSection { start, size }
-    }
-    pub fn start(&self) -> GuestAddress {
-        self.start
-    }
-    pub fn size(&self) -> GuestUsize {
-        self.size
-    }
-}
-
-#[derive(Clone)]
-pub struct SgxEpcRegion {
-    start: GuestAddress,
-    size: GuestUsize,
-    epc_sections: BTreeMap<String, SgxEpcSection>,
-}
-
-impl SgxEpcRegion {
-    pub fn new(start: GuestAddress, size: GuestUsize) -> Self {
-        SgxEpcRegion {
-            start,
-            size,
-            epc_sections: BTreeMap::new(),
-        }
-    }
-    pub fn start(&self) -> GuestAddress {
-        self.start
-    }
-    pub fn size(&self) -> GuestUsize {
-        self.size
-    }
-    pub fn epc_sections(&self) -> &BTreeMap<String, SgxEpcSection> {
-        &self.epc_sections
-    }
-    pub fn insert(&mut self, id: String, epc_section: SgxEpcSection) {
-        self.epc_sections.insert(id, epc_section);
-    }
-}
-
 pub struct CpuidConfig {
-    pub sgx_epc_sections: Option<Vec<SgxEpcSection>>,
     pub phys_bits: u8,
     pub kvm_hyperv: bool,
     #[cfg(feature = "tdx")]
@@ -164,18 +116,6 @@ pub enum Error {
     /// Error setting up SMBIOS table
     #[error("Error setting up SMBIOS table")]
     SmbiosSetup(#[source] smbios::Error),
-
-    /// Could not find any SGX EPC section
-    #[error("Could not find any SGX EPC section")]
-    NoSgxEpcSection,
-
-    /// Missing SGX CPU feature
-    #[error("Missing SGX CPU feature")]
-    MissingSgxFeature,
-
-    /// Missing SGX_LC CPU feature
-    #[error("Missing SGX_LC CPU feature")]
-    MissingSgxLaunchControlFeature,
 
     /// Error getting supported CPUID through the hypervisor (kvm/mshv) API
     #[error("Error getting supported CPUID through the hypervisor API")]
@@ -671,10 +611,6 @@ pub fn generate_common_cpuid(
 
     CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);
 
-    if let Some(sgx_epc_sections) = &config.sgx_epc_sections {
-        update_cpuid_sgx(&mut cpuid, sgx_epc_sections)?;
-    }
-
     #[cfg(feature = "tdx")]
     let tdx_capabilities = if config.tdx {
         let caps = hypervisor
@@ -970,7 +906,6 @@ pub fn configure_system(
     _num_cpus: u32,
     setup_header: Option<setup_header>,
     rsdp_addr: Option<GuestAddress>,
-    sgx_epc_region: Option<SgxEpcRegion>,
     serial_number: Option<&str>,
     uuid: Option<&str>,
     oem_strings: Option<&[&str]>,
@@ -1004,14 +939,12 @@ pub fn configure_system(
             initramfs,
             hdr,
             rsdp_addr,
-            sgx_epc_region,
         ),
         None => configure_pvh(
             guest_mem,
             cmdline_addr,
             initramfs,
             rsdp_addr,
-            sgx_epc_region,
         ),
     }
 }
@@ -1104,7 +1037,6 @@ fn configure_pvh(
     cmdline_addr: GuestAddress,
     initramfs: &Option<InitramfsConfig>,
     rsdp_addr: Option<GuestAddress>,
-    sgx_epc_region: Option<SgxEpcRegion>,
 ) -> super::Result<()> {
     const XEN_HVM_START_MAGIC_VALUE: u32 = 0x336ec578;
 
@@ -1170,15 +1102,6 @@ fn configure_pvh(
         E820_RESERVED,
     );
 
-    if let Some(sgx_epc_region) = sgx_epc_region {
-        add_memmap_entry(
-            &mut memmap,
-            sgx_epc_region.start().raw_value(),
-            sgx_epc_region.size(),
-            E820_RESERVED,
-        );
-    }
-
     start_info.memmap_entries = memmap.len() as u32;
 
     // Copy the vector with the memmap table to the MEMMAP_START address
@@ -1225,7 +1148,6 @@ fn configure_32bit_entry(
     initramfs: &Option<InitramfsConfig>,
     setup_hdr: setup_header,
     rsdp_addr: Option<GuestAddress>,
-    sgx_epc_region: Option<SgxEpcRegion>,
 ) -> super::Result<()> {
     const KERNEL_LOADER_OTHER: u8 = 0xff;
 
@@ -1280,15 +1202,6 @@ fn configure_32bit_entry(
         layout::PCI_MMCONFIG_SIZE,
         E820_RESERVED,
     )?;
-
-    if let Some(sgx_epc_region) = sgx_epc_region {
-        add_e820_entry(
-            &mut params,
-            sgx_epc_region.start().raw_value(),
-            sgx_epc_region.size(),
-            E820_RESERVED,
-        )?;
-    }
 
     if let Some(rsdp_addr) = rsdp_addr {
         params.acpi_rsdp_addr = rsdp_addr.0;
@@ -1523,57 +1436,6 @@ fn update_cpuid_topology(
         }
     }
 }
-
-// The goal is to update the CPUID sub-leaves to reflect the number of EPC
-// sections exposed to the guest.
-fn update_cpuid_sgx(
-    cpuid: &mut Vec<CpuIdEntry>,
-    epc_sections: &[SgxEpcSection],
-) -> Result<(), Error> {
-    // Something's wrong if there's no EPC section.
-    if epc_sections.is_empty() {
-        return Err(Error::NoSgxEpcSection);
-    }
-    // We can't go further if the hypervisor does not support SGX feature.
-    if !CpuidPatch::is_feature_enabled(cpuid, 0x7, 0, CpuidReg::EBX, 2) {
-        return Err(Error::MissingSgxFeature);
-    }
-    // We can't go further if the hypervisor does not support SGX_LC feature.
-    if !CpuidPatch::is_feature_enabled(cpuid, 0x7, 0, CpuidReg::ECX, 30) {
-        return Err(Error::MissingSgxLaunchControlFeature);
-    }
-
-    // Get host CPUID for leaf 0x12, subleaf 0x2. This is to retrieve EPC
-    // properties such as confidentiality and integrity.
-    // SAFETY: call cpuid with valid leaves
-    let leaf = unsafe { std::arch::x86_64::__cpuid_count(0x12, 0x2) };
-
-    for (i, epc_section) in epc_sections.iter().enumerate() {
-        let subleaf_idx = i + 2;
-        let start = epc_section.start().raw_value();
-        let size = epc_section.size();
-        let eax = (start & 0xffff_f000) as u32 | 0x1;
-        let ebx = (start >> 32) as u32;
-        let ecx = (size & 0xffff_f000) as u32 | (leaf.ecx & 0xf);
-        let edx = (size >> 32) as u32;
-        // CPU Topology leaf 0x12
-        CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EAX, eax);
-        CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EBX, ebx);
-        CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::ECX, ecx);
-        CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EDX, edx);
-    }
-
-    // Add one NULL entry to terminate the dynamic list
-    let subleaf_idx = epc_sections.len() + 2;
-    // CPU Topology leaf 0x12
-    CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EAX, 0);
-    CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EBX, 0);
-    CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::ECX, 0);
-    CpuidPatch::set_cpuid_reg(cpuid, 0x12, Some(subleaf_idx as u32), CpuidReg::EDX, 0);
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use linux_loader::loader::bootparam::boot_e820_entry;

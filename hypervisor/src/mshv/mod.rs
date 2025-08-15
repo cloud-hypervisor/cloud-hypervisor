@@ -1892,11 +1892,6 @@ impl vm::Vm for MshvVm {
         Ok(())
     }
 
-    #[cfg(target_arch = "x86_64")]
-    fn enable_sgx_attribute(&self, _file: File) -> vm::Result<()> {
-        Ok(())
-    }
-
     fn register_ioevent(
         &self,
         fd: &EventFd,
