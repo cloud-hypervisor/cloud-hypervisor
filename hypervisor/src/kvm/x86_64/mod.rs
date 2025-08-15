@@ -8,6 +8,7 @@
 //
 //
 
+use kvm_bindings::nested::KvmNestedStateBuffer;
 use serde::{Deserialize, Serialize};
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
@@ -76,6 +77,9 @@ pub struct VcpuKvmState {
     pub xcrs: ExtendedControlRegisters,
     pub mp_state: MpState,
     pub tsc_khz: Option<u32>,
+    // Option to prevent useless 8K (de)serialization when no nested
+    // state exists.
+    pub nested_state: Option<KvmNestedStateBuffer>,
 }
 
 impl From<SegmentRegister> for kvm_segment {

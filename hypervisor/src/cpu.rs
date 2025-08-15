@@ -13,6 +13,7 @@
 #[cfg(target_arch = "aarch64")]
 use std::sync::Arc;
 
+use kvm_bindings::nested::KvmNestedStateBuffer;
 use thiserror::Error;
 #[cfg(not(target_arch = "riscv64"))]
 use vm_memory::GuestAddress;
@@ -334,6 +335,10 @@ pub enum HypervisorCpuError {
     ///
     #[error("Failed to inject NMI")]
     Nmi(#[source] anyhow::Error),
+    #[error("Failed to get nested guest state")]
+    GetNestedState(#[source] anyhow::Error),
+    #[error("Failed to set nested guest state")]
+    SetNestedState(#[source] anyhow::Error),
 }
 
 #[derive(Debug)]
@@ -514,6 +519,15 @@ pub trait Vcpu: Send + Sync {
     /// This function is necessary to snapshot the VM
     ///
     fn state(&self) -> Result<CpuState>;
+
+    /// Get the state of the nested guest from the current vCPU,
+    /// if there is any.
+    #[cfg(target_arch = "x86_64")]
+    fn nested_state(&self) -> Result<Option<KvmNestedStateBuffer>>;
+
+    /// Sets the state of the nested guest for the current vCPU.
+    #[cfg(target_arch = "x86_64")]
+    fn set_nested_state(&self, state: &KvmNestedStateBuffer) -> Result<()>;
     ///
     /// Set the vCPU state.
     /// This function is required when restoring the VM
