@@ -1,6 +1,6 @@
 [package]
 authors = ["The Chromium OS Authors"]
-edition = "2021"
+edition.workspace = true
 name = "net_util"
 version = "0.1.0"
 

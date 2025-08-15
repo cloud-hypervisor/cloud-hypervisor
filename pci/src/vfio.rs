@@ -190,7 +190,7 @@ pub(crate) struct Interrupt {
 
 impl Interrupt {
     fn update_msi(&mut self, offset: u64, data: &[u8]) -> Option<InterruptUpdateAction> {
-        if let Some(ref mut msi) = &mut self.msi {
+        if let Some(msi) = &mut self.msi {
             let action = msi.update(offset, data);
             return action;
         }
@@ -199,7 +199,7 @@ impl Interrupt {
     }
 
     fn update_msix(&mut self, offset: u64, data: &[u8]) -> Option<InterruptUpdateAction> {
-        if let Some(ref mut msix) = &mut self.msix {
+        if let Some(msix) = &mut self.msix {
             let action = msix.update(offset, data);
             return action;
         }
@@ -237,7 +237,7 @@ impl Interrupt {
     }
 
     fn msix_write_table(&mut self, offset: u64, data: &[u8]) {
-        if let Some(ref mut msix) = &mut self.msix {
+        if let Some(msix) = &mut self.msix {
             let offset = offset - u64::from(msix.cap.table_offset());
             msix.bar.write_table(offset, data)
         }

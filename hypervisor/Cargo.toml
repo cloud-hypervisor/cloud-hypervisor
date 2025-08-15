@@ -1,6 +1,6 @@
 [package]
 authors = ["Microsoft Authors"]
-edition = "2021"
+edition.workspace = true
 license = "Apache-2.0 OR BSD-3-Clause"
 name = "hypervisor"
 version = "0.1.0"

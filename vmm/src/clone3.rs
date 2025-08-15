@@ -33,5 +33,6 @@ pub struct clone_args {
 /// - On error: `-1` and `errno` is set
 #[must_use]
 pub unsafe fn clone3(args: &mut clone_args, size: size_t) -> c_long {
-    syscall(SYS_clone3, args, size)
+    // SAFETY: parameters are assumed to be valid
+    unsafe { syscall(SYS_clone3, args, size) }
 }

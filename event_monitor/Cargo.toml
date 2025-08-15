@@ -1,6 +1,6 @@
 [package]
 authors = ["The Cloud Hypervisor Authors"]
-edition = "2021"
+edition.workspace = true
 name = "event_monitor"
 version = "0.1.0"
 
