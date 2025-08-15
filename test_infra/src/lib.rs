@@ -481,13 +481,14 @@ pub fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::
 
         match fs::copy(&from, &to) {
             Err(e) => {
-                if let Some(errno) = e.raw_os_error() {
-                    if errno == libc::ENOSPC {
-                        eprintln!("Copy returned ENOSPC. Attempt {i} of 10. Sleeping.");
-                        thread::sleep(std::time::Duration::new(60, 0));
-                        continue;
-                    }
+                if let Some(errno) = e.raw_os_error()
+                    && errno == libc::ENOSPC
+                {
+                    eprintln!("Copy returned ENOSPC. Attempt {i} of 10. Sleeping.");
+                    thread::sleep(std::time::Duration::new(60, 0));
+                    continue;
                 }
+
                 return Err(e);
             }
             Ok(i) => return Ok(i),
@@ -1094,12 +1095,11 @@ impl Guest {
         let vendors: Vec<&str> = vendors.split('\n').collect();
 
         for (index, d_id) in devices.iter().enumerate() {
-            if *d_id == device_id {
-                if let Some(v_id) = vendors.get(index) {
-                    if *v_id == vendor_id {
-                        return Ok(true);
-                    }
-                }
+            if *d_id == device_id
+                && let Some(v_id) = vendors.get(index)
+                && *v_id == vendor_id
+            {
+                return Ok(true);
             }
         }
 

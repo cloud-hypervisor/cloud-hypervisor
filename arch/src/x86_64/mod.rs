@@ -810,31 +810,22 @@ pub fn configure_vcpu(
     );
 
     // The TSC frequency CPUID leaf should not be included when running with HyperV emulation
-    if !kvm_hyperv {
-        if let Some(tsc_khz) = vcpu.tsc_khz().map_err(Error::GetTscFrequency)? {
-            // Need to check that the TSC doesn't vary with dynamic frequency
-            // SAFETY: cpuid called with valid leaves
-            if unsafe { std::arch::x86_64::__cpuid(0x8000_0007) }.edx
-                & (1u32 << INVARIANT_TSC_EDX_BIT)
-                > 0
-            {
-                CpuidPatch::set_cpuid_reg(
-                    &mut cpuid,
-                    0x4000_0000,
-                    None,
-                    CpuidReg::EAX,
-                    0x4000_0010,
-                );
-                cpuid.retain(|c| c.function != 0x4000_0010);
-                cpuid.push(CpuIdEntry {
-                    function: 0x4000_0010,
-                    eax: tsc_khz,
-                    ebx: 1000000, /* LAPIC resolution of 1ns (freq: 1GHz) is hardcoded in KVM's
-                                   * APIC_BUS_CYCLE_NS */
-                    ..Default::default()
-                });
-            };
-        }
+    if !kvm_hyperv && let Some(tsc_khz) = vcpu.tsc_khz().map_err(Error::GetTscFrequency)? {
+        // Need to check that the TSC doesn't vary with dynamic frequency
+        // SAFETY: cpuid called with valid leaves
+        if unsafe { std::arch::x86_64::__cpuid(0x8000_0007) }.edx & (1u32 << INVARIANT_TSC_EDX_BIT)
+            > 0
+        {
+            CpuidPatch::set_cpuid_reg(&mut cpuid, 0x4000_0000, None, CpuidReg::EAX, 0x4000_0010);
+            cpuid.retain(|c| c.function != 0x4000_0010);
+            cpuid.push(CpuIdEntry {
+                function: 0x4000_0010,
+                eax: tsc_khz,
+                ebx: 1000000, /* LAPIC resolution of 1ns (freq: 1GHz) is hardcoded in KVM's
+                               * APIC_BUS_CYCLE_NS */
+                ..Default::default()
+            });
+        };
     }
 
     for c in &cpuid {
@@ -932,10 +923,10 @@ pub fn configure_system(
     mptable::setup_mptable(offset, guest_mem, _num_cpus, topology).map_err(Error::MpTableSetup)?;
 
     // Check that the RAM is not smaller than the RSDP start address
-    if let Some(rsdp_addr) = rsdp_addr {
-        if rsdp_addr.0 > guest_mem.last_addr().0 {
-            return Err(super::Error::RsdpPastRamEnd);
-        }
+    if let Some(rsdp_addr) = rsdp_addr
+        && rsdp_addr.0 > guest_mem.last_addr().0
+    {
+        return Err(super::Error::RsdpPastRamEnd);
     }
 
     match setup_header {

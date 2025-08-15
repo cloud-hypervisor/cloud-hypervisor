@@ -317,17 +317,16 @@ impl VhostUserHandle {
             .get_features()
             .map_err(Error::VhostUserGetFeatures)?;
 
-        if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
-            if let Some(acked_protocol_features) =
+        if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0
+            && let Some(acked_protocol_features) =
                 VhostUserProtocolFeatures::from_bits(acked_protocol_features)
-            {
-                self.vu
-                    .set_protocol_features(acked_protocol_features)
-                    .map_err(Error::VhostUserSetProtocolFeatures)?;
+        {
+            self.vu
+                .set_protocol_features(acked_protocol_features)
+                .map_err(Error::VhostUserSetProtocolFeatures)?;
 
-                if acked_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK) {
-                    self.vu.set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
-                }
+            if acked_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK) {
+                self.vu.set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
             }
         }
 

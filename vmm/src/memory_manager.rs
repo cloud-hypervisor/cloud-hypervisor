@@ -1959,23 +1959,21 @@ impl MemoryManager {
             }
 
             for region in memory_zone.regions() {
-                if snapshot {
-                    if let Some(file_offset) = region.file_offset() {
-                        if (region.flags() & libc::MAP_SHARED == libc::MAP_SHARED)
-                            && Self::is_hardlink(file_offset.file())
-                        {
-                            // In this very specific case, we know the memory
-                            // region is backed by a file on the host filesystem
-                            // that can be accessed by the user, and additionally
-                            // the mapping is shared, which means that modifications
-                            // to the content are written to the actual file.
-                            // When meeting these conditions, we can skip the
-                            // copy of the memory content for this specific region,
-                            // as we can assume the user will have it saved through
-                            // the backing file already.
-                            continue;
-                        }
-                    }
+                if snapshot
+                    && let Some(file_offset) = region.file_offset()
+                    && (region.flags() & libc::MAP_SHARED == libc::MAP_SHARED)
+                    && Self::is_hardlink(file_offset.file())
+                {
+                    // In this very specific case, we know the memory
+                    // region is backed by a file on the host filesystem
+                    // that can be accessed by the user, and additionally
+                    // the mapping is shared, which means that modifications
+                    // to the content are written to the actual file.
+                    // When meeting these conditions, we can skip the
+                    // copy of the memory content for this specific region,
+                    // as we can assume the user will have it saved through
+                    // the backing file already.
+                    continue;
                 }
 
                 table.push(MemoryRange {

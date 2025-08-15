@@ -866,11 +866,11 @@ mod tests {
                 let p = ParsedPkt::new(buf);
                 p.print();
 
-                if let Some(ref udp) = p.udp {
-                    if payload == udp.payload() {
-                        channel_tx.send(true).unwrap();
-                        break;
-                    }
+                if let Some(ref udp) = p.udp
+                    && payload == udp.payload()
+                {
+                    channel_tx.send(true).unwrap();
+                    break;
                 }
             }
         });

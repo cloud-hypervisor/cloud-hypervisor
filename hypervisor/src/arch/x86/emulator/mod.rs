@@ -624,11 +624,11 @@ impl<T: CpuStateManager> Emulator<'_, T> {
             last_decoded_ip = decoder.ip();
             num_insn_emulated += 1;
 
-            if let Some(num_insn) = num_insn {
-                if num_insn_emulated >= num_insn {
-                    // Exit the decoding loop, do not decode the next instruction.
-                    stop_emulation = true;
-                }
+            if let Some(num_insn) = num_insn
+                && num_insn_emulated >= num_insn
+            {
+                // Exit the decoding loop, do not decode the next instruction.
+                stop_emulation = true;
             }
         }
 
