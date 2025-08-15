@@ -636,6 +636,7 @@ impl CpusConfig {
         // list as it will always be checked for.
         #[allow(unused_mut)]
         let mut features = CpuFeatures::default();
+        #[allow(clippy::never_loop)]
         for s in features_list.0 {
             match <std::string::String as AsRef<str>>::as_ref(&s) {
                 #[cfg(target_arch = "x86_64")]
