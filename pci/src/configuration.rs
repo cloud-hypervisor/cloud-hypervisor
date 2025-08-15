@@ -828,10 +828,10 @@ impl PciConfiguration {
 
         let mut addr = u64::from(self.bars[bar_num].addr & self.writable_bits[bar_idx]);
 
-        if let Some(bar_type) = self.bars[bar_num].r#type {
-            if bar_type == PciBarRegionType::Memory64BitRegion {
-                addr |= u64::from(self.bars[bar_num + 1].addr) << 32;
-            }
+        if let Some(bar_type) = self.bars[bar_num].r#type
+            && bar_type == PciBarRegionType::Memory64BitRegion
+        {
+            addr |= u64::from(self.bars[bar_num + 1].addr) << 32;
         }
 
         addr
@@ -907,19 +907,19 @@ impl PciConfiguration {
         }
 
         // Handle potential write to MSI-X message control register
-        if let Some(msix_cap_reg_idx) = self.msix_cap_reg_idx {
-            if let Some(msix_config) = &self.msix_config {
-                if msix_cap_reg_idx == reg_idx && offset == 2 && data.len() == 2 {
-                    msix_config
-                        .lock()
-                        .unwrap()
-                        .set_msg_ctl(LittleEndian::read_u16(data));
-                } else if msix_cap_reg_idx == reg_idx && offset == 0 && data.len() == 4 {
-                    msix_config
-                        .lock()
-                        .unwrap()
-                        .set_msg_ctl((LittleEndian::read_u32(data) >> 16) as u16);
-                }
+        if let Some(msix_cap_reg_idx) = self.msix_cap_reg_idx
+            && let Some(msix_config) = &self.msix_config
+        {
+            if msix_cap_reg_idx == reg_idx && offset == 2 && data.len() == 2 {
+                msix_config
+                    .lock()
+                    .unwrap()
+                    .set_msg_ctl(LittleEndian::read_u16(data));
+            } else if msix_cap_reg_idx == reg_idx && offset == 0 && data.len() == 4 {
+                msix_config
+                    .lock()
+                    .unwrap()
+                    .set_msg_ctl((LittleEndian::read_u32(data) >> 16) as u16);
             }
         }
 

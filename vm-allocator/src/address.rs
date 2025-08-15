@@ -196,10 +196,10 @@ impl AddressAllocator {
     /// Free an already allocated address range.
     /// We can only free a range if it matches exactly an already allocated range.
     pub fn free(&mut self, address: GuestAddress, size: GuestUsize) {
-        if let Some(&range_size) = self.ranges.get(&address) {
-            if size == range_size {
-                self.ranges.remove(&address);
-            }
+        if let Some(&range_size) = self.ranges.get(&address)
+            && size == range_size
+        {
+            self.ranges.remove(&address);
         }
     }
 
