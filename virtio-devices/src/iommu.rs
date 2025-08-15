@@ -489,7 +489,7 @@ impl Request {
                         .write()
                         .unwrap()
                         .iter()
-                        .filter(|(_, &d)| d == domain_id)
+                        .filter(|&(_, &d)| d == domain_id)
                         .map(|(&e, _)| e)
                         .collect();
 
@@ -553,7 +553,7 @@ impl Request {
                         .write()
                         .unwrap()
                         .iter()
-                        .filter(|(_, &d)| d == domain_id)
+                        .filter(|&(_, &d)| d == domain_id)
                         .map(|(&e, _)| e)
                         .collect();
 
@@ -669,7 +669,7 @@ fn detach_endpoint_from_domain(
         .write()
         .unwrap()
         .iter()
-        .filter(|(_, &d)| d == domain_id)
+        .filter(|&(_, &d)| d == domain_id)
         .count()
         == 0
     {
