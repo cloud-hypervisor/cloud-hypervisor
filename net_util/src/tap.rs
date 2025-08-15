@@ -65,6 +65,16 @@ pub struct Tap {
     if_name: Vec<u8>,
 }
 
+impl Drop for Tap {
+    fn drop(&mut self) {
+        debug!(
+            "Dropping Tap: if_name={}, FD={}",
+            self.if_name_as_str(),
+            self.tap_file.as_raw_fd()
+        );
+    }
+}
+
 impl PartialEq for Tap {
     fn eq(&self, other: &Tap) -> bool {
         self.if_name == other.if_name
@@ -129,6 +139,9 @@ fn ipv6_mask_to_prefix(mask: Ipv6Addr) -> Result<u8> {
 }
 
 impl Tap {
+    /// The default naming scheme for Tap devices that are created by Cloud Hypervisor.
+    pub const DEFAULT_NAME_SCHEME: &'static str = "vmtap%d";
+
     unsafe fn ioctl_with_mut_ref<F: AsRawFd, T>(fd: &F, req: c_ulong, arg: &mut T) -> Result<()> {
         let ret = ioctl_with_mut_ref(fd, req, arg);
         if ret < 0 {
@@ -171,6 +184,7 @@ impl Tap {
         if fd < 0 {
             return Err(Error::OpenTun(IoError::last_os_error()));
         }
+        debug!("Opening Tap device with given name: ifname={if_name}, fd={fd}");
 
         // SAFETY: We just checked that the fd is valid.
         let tuntap = unsafe { File::from_raw_fd(fd) };
@@ -224,7 +238,7 @@ impl Tap {
 
     /// Create a new tap interface.
     pub fn new(num_queue_pairs: usize) -> Result<Tap> {
-        Self::open_named("vmtap%d", num_queue_pairs, None)
+        Self::open_named(Self::DEFAULT_NAME_SCHEME, num_queue_pairs, None)
     }
 
     pub fn from_tap_fd(fd: RawFd, num_queue_pairs: usize) -> Result<Tap> {
@@ -481,8 +495,24 @@ impl Tap {
         ifreq
     }
 
-    pub fn get_if_name(&self) -> Vec<u8> {
-        self.if_name.clone()
+    /// Returns the raw bytes of the interface name, which may or may not be
+    /// valid UTF-8.
+    pub fn if_name_as_bytes(&self) -> &[u8] {
+        &self.if_name
+    }
+
+    /// Returns the interface name as a string, truncated at the first NUL byte
+    /// if present.
+    pub fn if_name_as_str(&self) -> &str {
+        // All bytes until first NUL.
+        let nul_terminated = self
+            .if_name_as_bytes()
+            .split(|&b| b == 0)
+            .next()
+            .unwrap_or(&[]);
+        // 1: No sane user-space tool would generate non-ASCII interface names.
+        // 2: We only allow the creation from UTF-8 strings (`&str`).
+        std::str::from_utf8(nul_terminated).expect("Tap interface name should be valid UTF-8")
     }
 
     #[cfg(fuzzing)]
