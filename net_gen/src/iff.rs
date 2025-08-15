@@ -26,11 +26,11 @@ impl<T> __IncompleteArrayField<T> {
     }
     #[inline]
     pub unsafe fn as_slice(&self, len: usize) -> &[T] {
-        ::std::slice::from_raw_parts(self.as_ptr(), len)
+        unsafe { ::std::slice::from_raw_parts(self.as_ptr(), len) }
     }
     #[inline]
     pub unsafe fn as_mut_slice(&mut self, len: usize) -> &mut [T] {
-        ::std::slice::from_raw_parts_mut(self.as_mut_ptr(), len)
+        unsafe { ::std::slice::from_raw_parts_mut(self.as_mut_ptr(), len) }
     }
 }
 impl<T> ::std::fmt::Debug for __IncompleteArrayField<T> {
@@ -630,7 +630,7 @@ pub struct fd_set {
     pub __fds_bits: [__fd_mask; 16usize],
 }
 pub type fd_mask = __fd_mask;
-extern "C" {
+unsafe extern "C" {
     pub fn select(
         __nfds: ::std::os::raw::c_int,
         __readfds: *mut fd_set,
@@ -639,7 +639,7 @@ extern "C" {
         __timeout: *mut timeval,
     ) -> ::std::os::raw::c_int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn pselect(
         __nfds: ::std::os::raw::c_int,
         __readfds: *mut fd_set,
@@ -863,7 +863,7 @@ pub struct cmsghdr {
     pub cmsg_type: ::std::os::raw::c_int,
     pub __cmsg_data: __IncompleteArrayField<::std::os::raw::c_uchar>,
 }
-extern "C" {
+unsafe extern "C" {
     pub fn __cmsg_nxthdr(__mhdr: *mut msghdr, __cmsg: *mut cmsghdr) -> *mut cmsghdr;
 }
 pub const SCM_RIGHTS: ::std::os::raw::c_uint = 1;
@@ -884,14 +884,14 @@ pub const SHUT_RD: ::std::os::raw::c_uint = 0;
 pub const SHUT_WR: ::std::os::raw::c_uint = 1;
 pub const SHUT_RDWR: ::std::os::raw::c_uint = 2;
 pub type _bindgen_ty_3 = ::std::os::raw::c_uint;
-extern "C" {
+unsafe extern "C" {
     pub fn socket(
         __domain: ::std::os::raw::c_int,
         __type: ::std::os::raw::c_int,
         __protocol: ::std::os::raw::c_int,
     ) -> ::std::os::raw::c_int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn socketpair(
         __domain: ::std::os::raw::c_int,
         __type: ::std::os::raw::c_int,
@@ -899,35 +899,35 @@ extern "C" {
         __fds: *mut ::std::os::raw::c_int,
     ) -> ::std::os::raw::c_int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn bind(
         __fd: ::std::os::raw::c_int,
         __addr: *const sockaddr,
         __len: socklen_t,
     ) -> ::std::os::raw::c_int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn getsockname(
         __fd: ::std::os::raw::c_int,
         __addr: *mut sockaddr,
         __len: *mut socklen_t,
     ) -> ::std::os::raw::c_int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn connect(
         __fd: ::std::os::raw::c_int,
         __addr: *const sockaddr,
         __len: socklen_t,
     ) -> ::std::os::raw::c_int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn getpeername(
         __fd: ::std::os::raw::c_int,
         __addr: *mut sockaddr,
         __len: *mut socklen_t,
     ) -> ::std::os::raw::c_int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn send(
         __fd: ::std::os::raw::c_int,
         __buf: *const ::std::os::raw::c_void,
@@ -935,7 +935,7 @@ extern "C" {
         __flags: ::std::os::raw::c_int,
     ) -> ssize_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn recv(
         __fd: ::std::os::raw::c_int,
         __buf: *mut ::std::os::raw::c_void,
@@ -943,7 +943,7 @@ extern "C" {
         __flags: ::std::os::raw::c_int,
     ) -> ssize_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn sendto(
         __fd: ::std::os::raw::c_int,
         __buf: *const ::std::os::raw::c_void,
@@ -953,7 +953,7 @@ extern "C" {
         __addr_len: socklen_t,
     ) -> ssize_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn recvfrom(
         __fd: ::std::os::raw::c_int,
         __buf: *mut ::std::os::raw::c_void,
@@ -963,21 +963,21 @@ extern "C" {
         __addr_len: *mut socklen_t,
     ) -> ssize_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn sendmsg(
         __fd: ::std::os::raw::c_int,
         __message: *const msghdr,
         __flags: ::std::os::raw::c_int,
     ) -> ssize_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn recvmsg(
         __fd: ::std::os::raw::c_int,
         __message: *mut msghdr,
         __flags: ::std::os::raw::c_int,
     ) -> ssize_t;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn getsockopt(
         __fd: ::std::os::raw::c_int,
         __level: ::std::os::raw::c_int,
@@ -986,7 +986,7 @@ extern "C" {
         __optlen: *mut socklen_t,
     ) -> ::std::os::raw::c_int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn setsockopt(
         __fd: ::std::os::raw::c_int,
         __level: ::std::os::raw::c_int,
@@ -995,27 +995,27 @@ extern "C" {
         __optlen: socklen_t,
     ) -> ::std::os::raw::c_int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn listen(__fd: ::std::os::raw::c_int, __n: ::std::os::raw::c_int)
         -> ::std::os::raw::c_int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn accept(
         __fd: ::std::os::raw::c_int,
         __addr: *mut sockaddr,
         __addr_len: *mut socklen_t,
     ) -> ::std::os::raw::c_int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn shutdown(
         __fd: ::std::os::raw::c_int,
         __how: ::std::os::raw::c_int,
     ) -> ::std::os::raw::c_int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn sockatmark(__fd: ::std::os::raw::c_int) -> ::std::os::raw::c_int;
 }
-extern "C" {
+unsafe extern "C" {
     pub fn isfdtype(
         __fd: ::std::os::raw::c_int,
         __fdtype: ::std::os::raw::c_int,
