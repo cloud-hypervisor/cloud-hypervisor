@@ -36,12 +36,12 @@ where
     thread::Builder::new()
         .name(name.to_string())
         .spawn(move || {
-            if !seccomp_filter.is_empty() {
-                if let Err(e) = apply_filter(&seccomp_filter) {
-                    error!("Error applying seccomp filter: {:?}", e);
-                    thread_exit_evt.write(1).ok();
-                    return;
-                }
+            if !seccomp_filter.is_empty()
+                && let Err(e) = apply_filter(&seccomp_filter)
+            {
+                error!("Error applying seccomp filter: {:?}", e);
+                thread_exit_evt.write(1).ok();
+                return;
             }
             match std::panic::catch_unwind(AssertUnwindSafe(f)) {
                 Err(_) => {

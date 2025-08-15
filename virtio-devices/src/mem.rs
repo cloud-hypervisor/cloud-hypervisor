@@ -475,11 +475,9 @@ impl MemEpollHandler {
             return VIRTIO_MEM_RESP_ERROR;
         }
 
-        if !plug {
-            if let Err(e) = self.discard_memory_range(offset, size) {
-                error!("failed discarding memory range: {:?}", e);
-                return VIRTIO_MEM_RESP_ERROR;
-            }
+        if !plug && let Err(e) = self.discard_memory_range(offset, size) {
+            error!("failed discarding memory range: {:?}", e);
+            return VIRTIO_MEM_RESP_ERROR;
         }
 
         self.blocks_state

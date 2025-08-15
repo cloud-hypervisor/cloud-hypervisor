@@ -458,10 +458,9 @@ impl BusDevice for Tpm {
                 CRB_CTRL_CANCEL => {
                     if v == CRB_CANCEL_INVOKE
                         && (self.regs[CRB_CTRL_START as usize] & CRB_START_INVOKE != 0)
+                        && let Err(e) = self.emulator.cancel_cmd()
                     {
-                        if let Err(e) = self.emulator.cancel_cmd() {
-                            error!("Failed to run cancel command. Error: {:?}", e);
-                        }
+                        error!("Failed to run cancel command. Error: {:?}", e);
                     }
                 }
                 CRB_CTRL_START => {

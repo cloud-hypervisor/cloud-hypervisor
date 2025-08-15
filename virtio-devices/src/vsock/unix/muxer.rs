@@ -437,10 +437,10 @@ impl VsockMuxer {
                 if let Some(EpollListener::LocalStream(stream)) = self.listener_map.get_mut(&fd) {
                     let port = Self::read_local_stream_port(&mut self.partial_command_map, stream);
 
-                    if let Err(Error::UnixRead(ref e)) = port {
-                        if e.kind() == ErrorKind::WouldBlock {
-                            return;
-                        }
+                    if let Err(Error::UnixRead(ref e)) = port
+                        && e.kind() == ErrorKind::WouldBlock
+                    {
+                        return;
                     }
 
                     let stream = match self.remove_listener(fd) {

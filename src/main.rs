@@ -754,10 +754,10 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         Ok(())
     })();
 
-    if r.is_err() {
-        if let Err(e) = exit_evt.write(1) {
-            warn!("writing to exit EventFd: {e}");
-        }
+    if r.is_err()
+        && let Err(e) = exit_evt.write(1)
+    {
+        warn!("writing to exit EventFd: {e}");
     }
 
     if landlock_enable {

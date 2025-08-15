@@ -227,10 +227,10 @@ impl Drop for Fs {
             let _ = kill_evt.write(1);
         }
         self.common.wait_for_epoll_threads();
-        if let Some(thread) = self.epoll_thread.take() {
-            if let Err(e) = thread.join() {
-                error!("Error joining thread: {:?}", e);
-            }
+        if let Some(thread) = self.epoll_thread.take()
+            && let Err(e) = thread.join()
+        {
+            error!("Error joining thread: {:?}", e);
         }
     }
 }
@@ -308,11 +308,11 @@ impl VirtioDevice for Fs {
             self.common.resume().ok()?;
         }
 
-        if let Some(vu) = &self.vu_common.vu {
-            if let Err(e) = vu.lock().unwrap().reset_vhost_user() {
-                error!("Failed to reset vhost-user daemon: {:?}", e);
-                return None;
-            }
+        if let Some(vu) = &self.vu_common.vu
+            && let Err(e) = vu.lock().unwrap().reset_vhost_user()
+        {
+            error!("Failed to reset vhost-user daemon: {:?}", e);
+            return None;
         }
 
         if let Some(kill_evt) = self.common.kill_evt.take() {
