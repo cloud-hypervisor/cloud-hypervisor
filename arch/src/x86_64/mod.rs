@@ -33,6 +33,10 @@ use std::arch::x86_64;
 #[cfg(feature = "tdx")]
 pub mod tdx;
 
+// While modern architectures support more than 255 CPUs via x2APIC,
+// legacy devices such as mptable support at most 254 CPUs.
+pub(crate) const MAX_SUPPORTED_CPUS_LEGACY: u32 = 254;
+
 // CPUID feature bits
 #[cfg(feature = "kvm")]
 const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
@@ -915,7 +919,7 @@ pub fn configure_vcpu(
         // does not recognize the last vCPU if x2apic is not enabled when
         // there are 256 vCPUs in a flat hierarchy (i.e. max x2apic ID is 255),
         // so we need to enable x2apic in this case as well.
-        let enable_x2_apic_mode = get_max_x2apic_id(topology) >= 255;
+        let enable_x2_apic_mode = get_max_x2apic_id(topology) > MAX_SUPPORTED_CPUS_LEGACY;
         regs::setup_sregs(&guest_memory.memory(), vcpu, enable_x2_apic_mode)
             .map_err(Error::SregsConfiguration)?;
     }
