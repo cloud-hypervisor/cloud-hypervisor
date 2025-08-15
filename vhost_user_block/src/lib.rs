@@ -19,13 +19,13 @@ use std::time::Instant;
 use std::{convert, io, process, result};
 
 use block::qcow::{self, ImageType, QcowFile};
-use block::{build_serial, Request, VirtioBlockConfig};
+use block::{Request, VirtioBlockConfig, build_serial};
 use libc::EFD_NONBLOCK;
 use log::*;
 use option_parser::{OptionParser, OptionParserError, Toggle};
 use thiserror::Error;
-use vhost::vhost_user::message::*;
 use vhost::vhost_user::Listener;
+use vhost::vhost_user::message::*;
 use vhost_user_backend::bitmap::BitmapMmapRegion;
 use vhost_user_backend::{VhostUserBackendMut, VhostUserDaemon, VringRwLock, VringState, VringT};
 use virtio_bindings::virtio_blk::*;

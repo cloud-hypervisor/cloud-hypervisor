@@ -9,10 +9,10 @@ use std::os::unix::io::{AsRawFd, RawFd};
 
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::DiskTopology;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
-use crate::DiskTopology;
 
 pub struct RawFileDiskSync {
     file: File,

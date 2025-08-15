@@ -18,8 +18,8 @@ use anyhow::anyhow;
 #[cfg(not(fuzzing))]
 use net_util::virtio_features_to_tap_offload;
 use net_util::{
-    build_net_config_space, build_net_config_space_with_mq, open_tap, CtrlQueue, MacAddr,
-    NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TapError, TxVirtio, VirtioNetConfig,
+    CtrlQueue, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TapError, TxVirtio,
+    VirtioNetConfig, build_net_config_space, build_net_config_space_with_mq, open_tap,
 };
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
@@ -34,9 +34,9 @@ use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
 
 use super::{
-    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
-    Error as DeviceError, RateLimiterConfig, VirtioCommon, VirtioDevice, VirtioDeviceType,
-    VirtioInterruptType, EPOLL_HELPER_EVENT_LAST,
+    ActivateError, ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError,
+    EpollHelperHandler, Error as DeviceError, RateLimiterConfig, VirtioCommon, VirtioDevice,
+    VirtioDeviceType, VirtioInterruptType,
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
@@ -667,10 +667,10 @@ impl Drop for Net {
         }
         // Needed to ensure all references to tap FDs are dropped (#4868)
         self.common.wait_for_epoll_threads();
-        if let Some(thread) = self.ctrl_queue_epoll_thread.take() {
-            if let Err(e) = thread.join() {
-                error!("Error joining thread: {:?}", e);
-            }
+        if let Some(thread) = self.ctrl_queue_epoll_thread.take()
+            && let Err(e) = thread.join()
+        {
+            error!("Error joining thread: {:?}", e);
         }
     }
 }

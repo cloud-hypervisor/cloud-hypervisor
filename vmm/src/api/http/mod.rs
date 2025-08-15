@@ -10,15 +10,15 @@ use std::os::unix::io::{IntoRawFd, RawFd};
 use std::os::unix::net::UnixListener;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
-use std::sync::mpsc::Sender;
 use std::sync::LazyLock;
+use std::sync::mpsc::Sender;
 use std::thread;
 
 use hypervisor::HypervisorType;
 use micro_http::{
     Body, HttpServer, MediaType, Method, Request, Response, ServerError, StatusCode, Version,
 };
-use seccompiler::{apply_filter, SeccompAction};
+use seccompiler::{SeccompAction, apply_filter};
 use serde_json::Error as SerdeError;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
@@ -33,7 +33,7 @@ use crate::api::{
     VmSendMigration, VmShutdown, VmSnapshot,
 };
 use crate::landlock::Landlock;
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::{Error as VmmError, Result};
 
 pub mod http_endpoint;

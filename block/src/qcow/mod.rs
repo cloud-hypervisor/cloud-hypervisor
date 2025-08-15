@@ -24,11 +24,11 @@ use vmm_sys_util::file_traits::{FileSetLen, FileSync};
 use vmm_sys_util::seek_hole::SeekHole;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
+use crate::BlockBackend;
 use crate::qcow::qcow_raw_file::QcowRawFile;
 pub use crate::qcow::raw_file::RawFile;
 use crate::qcow::refcount::RefCount;
 use crate::qcow::vec_cache::{CacheMap, Cacheable, VecCache};
-use crate::BlockBackend;
 
 /// Nesting depth limit for disk formats that can open other disk files.
 const MAX_NESTING_DEPTH: u32 = 10;
@@ -287,11 +287,12 @@ impl QcowHeader {
         let cluster_bits: u32 = DEFAULT_CLUSTER_BITS;
         let cluster_size: u32 = 0x01 << cluster_bits;
         let max_length: usize = (cluster_size - header_size) as usize;
-        if let Some(path) = backing_file {
-            if path.len() > max_length {
-                return Err(Error::BackingFileTooLong(path.len() - max_length));
-            }
+        if let Some(path) = backing_file
+            && path.len() > max_length
+        {
+            return Err(Error::BackingFileTooLong(path.len() - max_length));
         }
+
         // L2 blocks are always one cluster long. They contain cluster_size/sizeof(u64) addresses.
         let entries_per_cluster: u32 = cluster_size / size_of::<u64>() as u32;
         let num_clusters: u32 = div_round_up_u64(size, u64::from(cluster_size)) as u32;
@@ -589,14 +590,12 @@ impl QcowFile {
 
         // Check for compressed blocks
         for l2_addr_disk in l1_table.get_values() {
-            if *l2_addr_disk != 0 {
-                if let Err(e) = Self::read_l2_cluster(&mut raw_file, *l2_addr_disk) {
-                    if let Some(os_error) = e.raw_os_error() {
-                        if os_error == ENOTSUP {
-                            return Err(Error::CompressedBlocksNotSupported);
-                        }
-                    }
-                }
+            if *l2_addr_disk != 0
+                && let Err(e) = Self::read_l2_cluster(&mut raw_file, *l2_addr_disk)
+                && let Some(os_error) = e.raw_os_error()
+                && os_error == ENOTSUP
+            {
+                return Err(Error::CompressedBlocksNotSupported);
             }
         }
 
@@ -1584,11 +1583,11 @@ impl Seek for QcowFile {
             }
         };
 
-        if let Some(o) = new_offset {
-            if o <= self.virtual_size() {
-                self.current_offset = o;
-                return Ok(o);
-            }
+        if let Some(o) = new_offset
+            && o <= self.virtual_size()
+        {
+            self.current_offset = o;
+            return Ok(o);
         }
         Err(std::io::Error::from_raw_os_error(EINVAL))
     }

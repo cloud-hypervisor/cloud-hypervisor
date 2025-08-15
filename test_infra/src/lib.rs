@@ -481,13 +481,14 @@ pub fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::
 
         match fs::copy(&from, &to) {
             Err(e) => {
-                if let Some(errno) = e.raw_os_error() {
-                    if errno == libc::ENOSPC {
-                        eprintln!("Copy returned ENOSPC. Attempt {i} of 10. Sleeping.");
-                        thread::sleep(std::time::Duration::new(60, 0));
-                        continue;
-                    }
+                if let Some(errno) = e.raw_os_error()
+                    && errno == libc::ENOSPC
+                {
+                    eprintln!("Copy returned ENOSPC. Attempt {i} of 10. Sleeping.");
+                    thread::sleep(std::time::Duration::new(60, 0));
+                    continue;
                 }
+
                 return Err(e);
             }
             Ok(i) => return Ok(i),
@@ -1112,12 +1113,11 @@ impl Guest {
         let vendors: Vec<&str> = vendors.split('\n').collect();
 
         for (index, d_id) in devices.iter().enumerate() {
-            if *d_id == device_id {
-                if let Some(v_id) = vendors.get(index) {
-                    if *v_id == vendor_id {
-                        return Ok(true);
-                    }
-                }
+            if *d_id == device_id
+                && let Some(v_id) = vendors.get(index)
+                && *v_id == vendor_id
+            {
+                return Ok(true);
             }
         }
 
@@ -1136,10 +1136,12 @@ impl Guest {
         thread::sleep(std::time::Duration::new(10, 0));
 
         // Write something to vsock from the host
-        assert!(exec_host_command_status(&format!(
-            "echo -e \"CONNECT 16\\nHelloWorld!\" | socat - UNIX-CONNECT:{socket}"
-        ))
-        .success());
+        assert!(
+            exec_host_command_status(&format!(
+                "echo -e \"CONNECT 16\\nHelloWorld!\" | socat - UNIX-CONNECT:{socket}"
+            ))
+            .success()
+        );
 
         // Wait for the thread to terminate.
         listen_socat.join().unwrap();
@@ -1152,10 +1154,11 @@ impl Guest {
 
     #[cfg(target_arch = "x86_64")]
     pub fn check_nvidia_gpu(&self) {
-        assert!(self
-            .ssh_command("nvidia-smi")
-            .unwrap()
-            .contains("NVIDIA L40S"));
+        assert!(
+            self.ssh_command("nvidia-smi")
+                .unwrap()
+                .contains("NVIDIA L40S")
+        );
     }
 
     pub fn reboot_linux(&self, current_reboot_count: u32, custom_timeout: Option<i32>) {
@@ -1352,11 +1355,9 @@ impl<'a> GuestCommand<'a> {
             if pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE {
                 Ok(child)
             } else {
-                Err(std::io::Error::other(
-                    format!(
-                        "resizing pipe w/ 'fnctl' failed: stdout pipesize {pipesize}, stderr pipesize {pipesize1}"
-                    ),
-                ))
+                Err(std::io::Error::other(format!(
+                    "resizing pipe w/ 'fnctl' failed: stdout pipesize {pipesize}, stderr pipesize {pipesize1}"
+                )))
             }
         } else {
             // The caller should call .wait() on the returned child

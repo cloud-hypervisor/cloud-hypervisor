@@ -12,9 +12,9 @@ use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vhost::vdpa::{VhostVdpa, VhostVdpaIovaRange};
+use vhost::vhost_kern::VhostKernFeatures;
 use vhost::vhost_kern::vdpa::VhostKernVdpa;
 use vhost::vhost_kern::vhost_binding::VHOST_BACKEND_F_SUSPEND;
-use vhost::vhost_kern::VhostKernFeatures;
 use vhost::{VhostBackend, VringConfigData};
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
@@ -25,9 +25,9 @@ use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::{
-    ActivateError, ActivateResult, GuestMemoryMmap, VirtioCommon, VirtioDevice, VirtioInterrupt,
-    VirtioInterruptType, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FEATURES_OK,
-    VIRTIO_F_IOMMU_PLATFORM,
+    ActivateError, ActivateResult, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK,
+    DEVICE_FEATURES_OK, GuestMemoryMmap, VIRTIO_F_IOMMU_PLATFORM, VirtioCommon, VirtioDevice,
+    VirtioInterrupt, VirtioInterruptType,
 };
 
 #[derive(Error, Debug)]
