@@ -432,12 +432,12 @@ impl Drop for SerialManager {
         if let Some(handle) = self.handle.take() {
             handle.join().ok();
         }
-        if let ConsoleOutput::Socket(_) = self.in_file {
-            if let Some(socket_path) = self.socket_path.as_ref() {
-                std::fs::remove_file(socket_path.as_os_str())
-                    .map_err(Error::RemoveUnixSocket)
-                    .ok();
-            }
+        if let ConsoleOutput::Socket(_) = self.in_file
+            && let Some(socket_path) = self.socket_path.as_ref()
+        {
+            std::fs::remove_file(socket_path.as_os_str())
+                .map_err(Error::RemoveUnixSocket)
+                .ok();
         }
     }
 }

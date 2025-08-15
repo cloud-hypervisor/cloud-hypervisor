@@ -968,18 +968,17 @@ impl PciDevice for VirtioPciDevice {
                 if let Resource::PciBar {
                     index, base, type_, ..
                 } = resource
+                    && index == VIRTIO_COMMON_BAR_INDEX
                 {
-                    if index == VIRTIO_COMMON_BAR_INDEX {
-                        settings_bar_addr = Some(GuestAddress(base));
-                        use_64bit_bar = match type_ {
-                            PciBarType::Io => {
-                                return Err(PciDeviceError::InvalidResource(resource));
-                            }
-                            PciBarType::Mmio32 => false,
-                            PciBarType::Mmio64 => true,
-                        };
-                        break;
-                    }
+                    settings_bar_addr = Some(GuestAddress(base));
+                    use_64bit_bar = match type_ {
+                        PciBarType::Io => {
+                            return Err(PciDeviceError::InvalidResource(resource));
+                        }
+                        PciBarType::Mmio32 => false,
+                        PciBarType::Mmio64 => true,
+                    };
+                    break;
                 }
             }
             // Error out if no resource was matching the BAR id.

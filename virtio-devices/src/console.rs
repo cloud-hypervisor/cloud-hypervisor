@@ -454,12 +454,11 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                 }
                 if self.endpoint.is_pty() {
                     self.file_event_registered = false;
-                    if event.events & libc::EPOLLHUP as u32 != 0 {
-                        if let Some(pty_write_out) = &self.write_out {
-                            if pty_write_out.load(Ordering::Acquire) {
-                                pty_write_out.store(false, Ordering::Release);
-                            }
-                        }
+                    if event.events & libc::EPOLLHUP as u32 != 0
+                        && let Some(pty_write_out) = &self.write_out
+                        && pty_write_out.load(Ordering::Acquire)
+                    {
+                        pty_write_out.store(false, Ordering::Release);
                     } else {
                         // If the EPOLLHUP flag is not up on the associated event, we
                         // can assume the other end of the PTY is connected and therefore
@@ -731,10 +730,10 @@ impl VirtioDevice for Console {
             .acked_features
             .store(self.common.acked_features, Ordering::Relaxed);
 
-        if self.common.feature_acked(VIRTIO_CONSOLE_F_SIZE) {
-            if let Err(e) = interrupt_cb.trigger(VirtioInterruptType::Config) {
-                error!("Failed to signal console driver: {:?}", e);
-            }
+        if self.common.feature_acked(VIRTIO_CONSOLE_F_SIZE)
+            && let Err(e) = interrupt_cb.trigger(VirtioInterruptType::Config)
+        {
+            error!("Failed to signal console driver: {:?}", e);
         }
 
         let (kill_evt, pause_evt) = self.common.dup_eventfds();

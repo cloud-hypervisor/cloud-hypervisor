@@ -729,15 +729,14 @@ impl Vmm {
                     thread::Builder::new()
                         .name("vmm_signal_handler".to_string())
                         .spawn(move || {
-                            if !signal_handler_seccomp_filter.is_empty() {
-                                if let Err(e) = apply_filter(&signal_handler_seccomp_filter)
+                            if !signal_handler_seccomp_filter.is_empty() && let Err(e) = apply_filter(&signal_handler_seccomp_filter)
                                     .map_err(Error::ApplySeccompFilter)
                                 {
                                     error!("Error applying seccomp filter: {:?}", e);
                                     exit_evt.write(1).ok();
                                     return;
                                 }
-                            }
+
                             if landlock_enable{
                                 match Landlock::new() {
                                     Ok(landlock) => {
@@ -1834,10 +1833,10 @@ impl RequestHandler for Vmm {
             if let Some(desired_ram) = desired_ram {
                 config.memory.size = desired_ram;
             }
-            if let Some(desired_balloon) = desired_balloon {
-                if let Some(balloon_config) = &mut config.balloon {
-                    balloon_config.size = desired_balloon;
-                }
+            if let Some(desired_balloon) = desired_balloon
+                && let Some(balloon_config) = &mut config.balloon
+            {
+                balloon_config.size = desired_balloon;
             }
             Ok(())
         }
@@ -2306,16 +2305,16 @@ impl RequestHandler for Vmm {
                 error!("Migration failed: {:?}", migration_err);
 
                 // Stop logging dirty pages only for non-local migrations
-                if !send_data_migration.local {
-                    if let Err(e) = vm.stop_dirty_log() {
-                        return e;
-                    }
+                if !send_data_migration.local
+                    && let Err(e) = vm.stop_dirty_log()
+                {
+                    return e;
                 }
 
-                if vm.get_state().unwrap() == VmState::Paused {
-                    if let Err(e) = vm.resume() {
-                        return e;
-                    }
+                if vm.get_state().unwrap() == VmState::Paused
+                    && let Err(e) = vm.resume()
+                {
+                    return e;
                 }
 
                 migration_err

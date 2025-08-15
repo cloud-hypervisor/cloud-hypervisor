@@ -118,12 +118,11 @@ fn parse_http_response(socket: &mut dyn Read) -> Result<Option<String>, Error> {
             }
         }
 
-        if let Some(body_offset) = body_offset {
-            if let Some(content_length) = content_length {
-                if res.len() >= content_length + body_offset {
-                    break;
-                }
-            }
+        if let Some(body_offset) = body_offset
+            && let Some(content_length) = content_length
+            && res.len() >= content_length + body_offset
+        {
+            break;
         }
     }
     let body_string = content_length.and(body_offset.map(|o| String::from(&res[o..])));

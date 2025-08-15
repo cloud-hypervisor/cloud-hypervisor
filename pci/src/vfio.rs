@@ -208,21 +208,20 @@ impl Interrupt {
     }
 
     fn accessed(&self, offset: u64) -> Option<(PciCapabilityId, u64)> {
-        if let Some(msi) = &self.msi {
-            if offset >= u64::from(msi.cap_offset)
-                && offset < u64::from(msi.cap_offset) + msi.cfg.size()
-            {
-                return Some((
-                    PciCapabilityId::MessageSignalledInterrupts,
-                    u64::from(msi.cap_offset),
-                ));
-            }
+        if let Some(msi) = &self.msi
+            && offset >= u64::from(msi.cap_offset)
+            && offset < u64::from(msi.cap_offset) + msi.cfg.size()
+        {
+            return Some((
+                PciCapabilityId::MessageSignalledInterrupts,
+                u64::from(msi.cap_offset),
+            ));
         }
 
-        if let Some(msix) = &self.msix {
-            if offset == u64::from(msix.cap_offset) {
-                return Some((PciCapabilityId::MsiX, u64::from(msix.cap_offset)));
-            }
+        if let Some(msix) = &self.msix
+            && offset == u64::from(msix.cap_offset)
+        {
+            return Some((PciCapabilityId::MsiX, u64::from(msix.cap_offset)));
         }
 
         None
@@ -603,13 +602,12 @@ impl VfioCommon {
                         type_,
                         ..
                     } = resource
+                        && *index == bar_id as usize
                     {
-                        if *index == bar_id as usize {
-                            restored_bar_addr = Some(GuestAddress(*base));
-                            region_size = *size;
-                            region_type = PciBarRegionType::from(*type_);
-                            break;
-                        }
+                        restored_bar_addr = Some(GuestAddress(*base));
+                        region_size = *size;
+                        region_type = PciBarRegionType::from(*type_);
+                        break;
                     }
                 }
                 if restored_bar_addr.is_none() {
@@ -925,24 +923,23 @@ impl VfioCommon {
 
             match PciCapabilityId::from(cap_id) {
                 PciCapabilityId::MessageSignalledInterrupts => {
-                    if let Some(irq_info) = self.vfio_wrapper.get_irq_info(VFIO_PCI_MSI_IRQ_INDEX) {
-                        if irq_info.count > 0 {
-                            // Parse capability only if the VFIO device
-                            // supports MSI.
-                            let msg_ctl = self.parse_msi_capabilities(cap_iter);
-                            self.initialize_msi(msg_ctl, cap_iter as u32, None);
-                        }
+                    if let Some(irq_info) = self.vfio_wrapper.get_irq_info(VFIO_PCI_MSI_IRQ_INDEX)
+                        && irq_info.count > 0
+                    {
+                        // Parse capability only if the VFIO device
+                        // supports MSI.
+                        let msg_ctl = self.parse_msi_capabilities(cap_iter);
+                        self.initialize_msi(msg_ctl, cap_iter as u32, None);
                     }
                 }
                 PciCapabilityId::MsiX => {
                     if let Some(irq_info) = self.vfio_wrapper.get_irq_info(VFIO_PCI_MSIX_IRQ_INDEX)
+                        && irq_info.count > 0
                     {
-                        if irq_info.count > 0 {
-                            // Parse capability only if the VFIO device
-                            // supports MSI-X.
-                            let msix_cap = self.parse_msix_capabilities(cap_iter);
-                            self.initialize_msix(msix_cap, cap_iter as u32, bdf, None);
-                        }
+                        // Parse capability only if the VFIO device
+                        // supports MSI-X.
+                        let msix_cap = self.parse_msix_capabilities(cap_iter);
+                        self.initialize_msix(msix_cap, cap_iter as u32, bdf, None);
                     }
                 }
                 PciCapabilityId::PciExpress => pci_express_cap_found = true,
@@ -1038,17 +1035,17 @@ impl VfioCommon {
     }
 
     pub(crate) fn enable_intx(&mut self) -> Result<(), VfioPciError> {
-        if let Some(intx) = &mut self.interrupt.intx {
-            if !intx.enabled {
-                if let Some(eventfd) = intx.interrupt_source_group.notifier(0) {
-                    self.vfio_wrapper
-                        .enable_irq(VFIO_PCI_INTX_IRQ_INDEX, vec![&eventfd])
-                        .map_err(VfioPciError::EnableIntx)?;
+        if let Some(intx) = &mut self.interrupt.intx
+            && !intx.enabled
+        {
+            if let Some(eventfd) = intx.interrupt_source_group.notifier(0) {
+                self.vfio_wrapper
+                    .enable_irq(VFIO_PCI_INTX_IRQ_INDEX, vec![&eventfd])
+                    .map_err(VfioPciError::EnableIntx)?;
 
-                    intx.enabled = true;
-                } else {
-                    return Err(VfioPciError::MissingNotifier);
-                }
+                intx.enabled = true;
+            } else {
+                return Err(VfioPciError::MissingNotifier);
             }
         }
 
@@ -1056,13 +1053,13 @@ impl VfioCommon {
     }
 
     pub(crate) fn disable_intx(&mut self) {
-        if let Some(intx) = &mut self.interrupt.intx {
-            if intx.enabled {
-                if let Err(e) = self.vfio_wrapper.disable_irq(VFIO_PCI_INTX_IRQ_INDEX) {
-                    error!("Could not disable INTx: {}", e);
-                } else {
-                    intx.enabled = false;
-                }
+        if let Some(intx) = &mut self.interrupt.intx
+            && intx.enabled
+        {
+            if let Err(e) = self.vfio_wrapper.disable_irq(VFIO_PCI_INTX_IRQ_INDEX) {
+                error!("Could not disable INTx: {}", e);
+            } else {
+                intx.enabled = false;
             }
         }
     }
@@ -1118,12 +1115,12 @@ impl VfioCommon {
     }
 
     fn initialize_legacy_interrupt(&mut self) -> Result<(), VfioPciError> {
-        if let Some(irq_info) = self.vfio_wrapper.get_irq_info(VFIO_PCI_INTX_IRQ_INDEX) {
-            if irq_info.count == 0 {
-                // A count of 0 means the INTx IRQ is not supported, therefore
-                // it shouldn't be initialized.
-                return Ok(());
-            }
+        if let Some(irq_info) = self.vfio_wrapper.get_irq_info(VFIO_PCI_INTX_IRQ_INDEX)
+            && irq_info.count == 0
+        {
+            // A count of 0 means the INTx IRQ is not supported, therefore
+            // it shouldn't be initialized.
+            return Ok(());
         }
 
         if let Some(interrupt_source_group) = self.legacy_interrupt_group.clone() {
@@ -1200,10 +1197,10 @@ impl VfioCommon {
         // INTx EOI
         // The guest reading from the BAR potentially means the interrupt has
         // been received and can be acknowledged.
-        if self.interrupt.intx_in_use() {
-            if let Err(e) = self.vfio_wrapper.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX) {
-                error!("Failed unmasking INTx IRQ: {}", e);
-            }
+        if self.interrupt.intx_in_use()
+            && let Err(e) = self.vfio_wrapper.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX)
+        {
+            error!("Failed unmasking INTx IRQ: {}", e);
         }
     }
 
@@ -1228,10 +1225,10 @@ impl VfioCommon {
         // INTx EOI
         // The guest writing to the BAR potentially means the interrupt has
         // been received and can be acknowledged.
-        if self.interrupt.intx_in_use() {
-            if let Err(e) = self.vfio_wrapper.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX) {
-                error!("Failed unmasking INTx IRQ: {}", e);
-            }
+        if self.interrupt.intx_in_use()
+            && let Err(e) = self.vfio_wrapper.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX)
+        {
+            error!("Failed unmasking INTx IRQ: {}", e);
         }
 
         None
@@ -1619,12 +1616,11 @@ impl VfioPciDevice {
                 // Don't try to mmap the region if it contains MSI-X table or
                 // MSI-X PBA subregion, and if we couldn't find MSIX_MAPPABLE
                 // in the list of supported capabilities.
-                if let Some(msix) = self.common.interrupt.msix.as_ref() {
-                    if (region.index == msix.cap.table_bir() || region.index == msix.cap.pba_bir())
-                        && !caps.contains(&VfioRegionInfoCap::MsixMappable)
-                    {
-                        continue;
-                    }
+                if let Some(msix) = self.common.interrupt.msix.as_ref()
+                    && (region.index == msix.cap.table_bir() || region.index == msix.cap.pba_bir())
+                    && !caps.contains(&VfioRegionInfoCap::MsixMappable)
+                {
+                    continue;
                 }
 
                 let mmap_size = self.device.get_region_size(region.index);
@@ -1713,18 +1709,17 @@ impl VfioPciDevice {
         for region in self.common.mmio_regions.iter() {
             for user_memory_region in region.user_memory_regions.iter() {
                 // Unmap from vfio container
-                if !self.iommu_attached {
-                    if let Err(e) = self
+                if !self.iommu_attached
+                    && let Err(e) = self
                         .container
                         .vfio_dma_unmap(user_memory_region.start, user_memory_region.size)
                         .map_err(|e| VfioPciError::DmaUnmap(e, self.device_path.clone(), self.bdf))
-                    {
-                        error!(
-                            "Could not unmap mmio region from vfio container: \
+                {
+                    error!(
+                        "Could not unmap mmio region from vfio container: \
                             iova 0x{:x}, size 0x{:x}: {}, ",
-                            user_memory_region.start, user_memory_region.size, e
-                        );
-                    }
+                        user_memory_region.start, user_memory_region.size, e
+                    );
                 }
 
                 // Remove region
@@ -1791,16 +1786,16 @@ impl Drop for VfioPciDevice {
     fn drop(&mut self) {
         self.unmap_mmio_regions();
 
-        if let Some(msix) = &self.common.interrupt.msix {
-            if msix.bar.enabled() {
-                self.common.disable_msix();
-            }
+        if let Some(msix) = &self.common.interrupt.msix
+            && msix.bar.enabled()
+        {
+            self.common.disable_msix();
         }
 
-        if let Some(msi) = &self.common.interrupt.msi {
-            if msi.cfg.enabled() {
-                self.common.disable_msi()
-            }
+        if let Some(msi) = &self.common.interrupt.msi
+            && msi.cfg.enabled()
+        {
+            self.common.disable_msi()
         }
 
         if self.common.interrupt.intx_in_use() {
@@ -1898,20 +1893,19 @@ impl PciDevice for VfioPciDevice {
 
                 for user_memory_region in region.user_memory_regions.iter_mut() {
                     // Unmap the old MMIO region from vfio container
-                    if !self.iommu_attached {
-                        if let Err(e) = self
+                    if !self.iommu_attached
+                        && let Err(e) = self
                             .container
                             .vfio_dma_unmap(user_memory_region.start, user_memory_region.size)
                             .map_err(|e| {
                                 VfioPciError::DmaUnmap(e, self.device_path.clone(), self.bdf)
                             })
-                        {
-                            error!(
-                                "Could not unmap mmio region from vfio container: \
+                    {
+                        error!(
+                            "Could not unmap mmio region from vfio container: \
                                 iova 0x{:x}, size 0x{:x}: {}, ",
-                                user_memory_region.start, user_memory_region.size, e
-                            );
-                        }
+                            user_memory_region.start, user_memory_region.size, e
+                        );
                     }
 
                     // Remove old region

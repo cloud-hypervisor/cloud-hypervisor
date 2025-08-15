@@ -421,13 +421,12 @@ impl Request {
                     // If any other mappings exist in the domain for other containers,
                     // make sure to issue these mappings for the new endpoint/container
                     if let Some(domain_mappings) = &mapping.domains.read().unwrap().get(&domain_id)
+                        && let Some(ext_map) = ext_mapping.get(&endpoint)
                     {
-                        if let Some(ext_map) = ext_mapping.get(&endpoint) {
-                            for (virt_start, addr_map) in &domain_mappings.mappings {
-                                ext_map
-                                    .map(*virt_start, addr_map.gpa, addr_map.size)
-                                    .map_err(Error::ExternalUnmapping)?;
-                            }
+                        for (virt_start, addr_map) in &domain_mappings.mappings {
+                            ext_map
+                                .map(*virt_start, addr_map.gpa, addr_map.size)
+                                .map_err(Error::ExternalUnmapping)?;
                         }
                     }
 
@@ -654,13 +653,13 @@ fn detach_endpoint_from_domain(
     mapping.endpoints.write().unwrap().remove(&endpoint);
 
     // Trigger external unmapping for the endpoint if necessary.
-    if let Some(domain_mappings) = &mapping.domains.read().unwrap().get(&domain_id) {
-        if let Some(ext_map) = ext_mapping.get(&endpoint) {
-            for (virt_start, addr_map) in &domain_mappings.mappings {
-                ext_map
-                    .unmap(*virt_start, addr_map.size)
-                    .map_err(Error::ExternalUnmapping)?;
-            }
+    if let Some(domain_mappings) = &mapping.domains.read().unwrap().get(&domain_id)
+        && let Some(ext_map) = ext_mapping.get(&endpoint)
+    {
+        for (virt_start, addr_map) in &domain_mappings.mappings {
+            ext_map
+                .unmap(*virt_start, addr_map.size)
+                .map_err(Error::ExternalUnmapping)?;
         }
     }
 

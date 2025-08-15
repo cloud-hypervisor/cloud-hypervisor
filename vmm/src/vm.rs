@@ -3123,12 +3123,12 @@ impl GuestDebuggable for Vm {
 
         #[cfg(feature = "tdx")]
         {
-            if let Some(ref platform) = self.config.lock().unwrap().platform {
-                if platform.tdx {
-                    return Err(GuestDebuggableError::Coredump(anyhow!(
-                        "Coredump not possible with TDX VM"
-                    )));
-                }
+            if let Some(ref platform) = self.config.lock().unwrap().platform
+                && platform.tdx
+            {
+                return Err(GuestDebuggableError::Coredump(anyhow!(
+                    "Coredump not possible with TDX VM"
+                )));
             }
         }
 

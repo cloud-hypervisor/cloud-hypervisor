@@ -772,12 +772,13 @@ impl DeviceRelocation for AddressManager {
             if let Some(node) = self.device_tree.lock().unwrap().get_mut(&id) {
                 let mut resource_updated = false;
                 for resource in node.resources.iter_mut() {
-                    if let Resource::PciBar { base, type_, .. } = resource {
-                        if PciBarRegionType::from(*type_) == region_type && *base == old_base {
-                            *base = new_base;
-                            resource_updated = true;
-                            break;
-                        }
+                    if let Resource::PciBar { base, type_, .. } = resource
+                        && PciBarRegionType::from(*type_) == region_type
+                        && *base == old_base
+                    {
+                        *base = new_base;
+                        resource_updated = true;
+                        break;
                     }
                 }
 
@@ -814,43 +815,41 @@ impl DeviceRelocation for AddressManager {
             } else {
                 let virtio_dev = virtio_pci_dev.virtio_device();
                 let mut virtio_dev = virtio_dev.lock().unwrap();
-                if let Some(mut shm_regions) = virtio_dev.get_shm_regions() {
-                    if shm_regions.addr.raw_value() == old_base {
-                        let mem_region = self.vm.make_user_memory_region(
-                            shm_regions.mem_slot,
-                            old_base,
-                            shm_regions.len,
-                            shm_regions.host_addr,
-                            false,
-                            false,
-                        );
+                if let Some(mut shm_regions) = virtio_dev.get_shm_regions()
+                    && shm_regions.addr.raw_value() == old_base
+                {
+                    let mem_region = self.vm.make_user_memory_region(
+                        shm_regions.mem_slot,
+                        old_base,
+                        shm_regions.len,
+                        shm_regions.host_addr,
+                        false,
+                        false,
+                    );
 
-                        self.vm.remove_user_memory_region(mem_region).map_err(|e| {
-                            io::Error::other(format!("failed to remove user memory region: {e:?}"))
-                        })?;
+                    self.vm.remove_user_memory_region(mem_region).map_err(|e| {
+                        io::Error::other(format!("failed to remove user memory region: {e:?}"))
+                    })?;
 
-                        // Create new mapping by inserting new region to KVM.
-                        let mem_region = self.vm.make_user_memory_region(
-                            shm_regions.mem_slot,
-                            new_base,
-                            shm_regions.len,
-                            shm_regions.host_addr,
-                            false,
-                            false,
-                        );
+                    // Create new mapping by inserting new region to KVM.
+                    let mem_region = self.vm.make_user_memory_region(
+                        shm_regions.mem_slot,
+                        new_base,
+                        shm_regions.len,
+                        shm_regions.host_addr,
+                        false,
+                        false,
+                    );
 
-                        self.vm.create_user_memory_region(mem_region).map_err(|e| {
-                            io::Error::other(format!("failed to create user memory regions: {e:?}"))
-                        })?;
+                    self.vm.create_user_memory_region(mem_region).map_err(|e| {
+                        io::Error::other(format!("failed to create user memory regions: {e:?}"))
+                    })?;
 
-                        // Update shared memory regions to reflect the new mapping.
-                        shm_regions.addr = GuestAddress(new_base);
-                        virtio_dev.set_shm_regions(shm_regions).map_err(|e| {
-                            io::Error::other(format!(
-                                "failed to update shared memory regions: {e:?}"
-                            ))
-                        })?;
-                    }
+                    // Update shared memory regions to reflect the new mapping.
+                    shm_regions.addr = GuestAddress(new_base);
+                    virtio_dev.set_shm_regions(shm_regions).map_err(|e| {
+                        io::Error::other(format!("failed to update shared memory regions: {e:?}"))
+                    })?;
                 }
             }
         }
@@ -1655,14 +1654,14 @@ impl DeviceManager {
             iommu_attached_devices.append(&mut vfio_user_iommu_device_ids);
 
             // Add all devices from forced iommu segments
-            if let Some(platform_config) = self.config.lock().unwrap().platform.as_ref() {
-                if let Some(iommu_segments) = platform_config.iommu_segments.as_ref() {
-                    for segment in iommu_segments {
-                        for device in 0..32 {
-                            let bdf = PciBdf::new(*segment, 0, device, 0);
-                            if !iommu_attached_devices.contains(&bdf) {
-                                iommu_attached_devices.push(bdf);
-                            }
+            if let Some(platform_config) = self.config.lock().unwrap().platform.as_ref()
+                && let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
+            {
+                for segment in iommu_segments {
+                    for device in 0..32 {
+                        let bdf = PciBdf::new(*segment, 0, device, 0);
+                        if !iommu_attached_devices.contains(&bdf) {
+                            iommu_attached_devices.push(bdf);
                         }
                     }
                 }
@@ -4350,14 +4349,14 @@ impl DeviceManager {
                 .add_memory_region(new_region)
                 .map_err(DeviceManagerError::UpdateMemoryForVirtioDevice)?;
 
-            if let Some(dma_handler) = &handle.dma_handler {
-                if !handle.iommu {
-                    let gpa = new_region.start_addr().0;
-                    let size = new_region.len();
-                    dma_handler
-                        .map(gpa, gpa, size)
-                        .map_err(DeviceManagerError::VirtioDmaMap)?;
-                }
+            if let Some(dma_handler) = &handle.dma_handler
+                && !handle.iommu
+            {
+                let gpa = new_region.start_addr().0;
+                let size = new_region.len();
+                dma_handler
+                    .map(gpa, gpa, size)
+                    .map_err(DeviceManagerError::VirtioDmaMap)?;
             }
         }
 
@@ -4576,10 +4575,10 @@ impl DeviceManager {
         };
 
         let mut iommu_attached = false;
-        if let Some((_, iommu_attached_devices)) = &self.iommu_attached_devices {
-            if iommu_attached_devices.contains(&pci_device_bdf) {
-                iommu_attached = true;
-            }
+        if let Some((_, iommu_attached_devices)) = &self.iommu_attached_devices
+            && iommu_attached_devices.contains(&pci_device_bdf)
+        {
+            iommu_attached = true;
         }
 
         let (pci_device, bus_device, virtio_device, remove_dma_handler) = match pci_device_handle {
@@ -4610,16 +4609,16 @@ impl DeviceManager {
                         .map_err(|e| DeviceManagerError::UnRegisterIoevent(e.into()))?;
                 }
 
-                if let Some(dma_handler) = dev.dma_handler() {
-                    if !iommu_attached {
-                        for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
-                            for region in zone.regions() {
-                                let iova = region.start_addr().0;
-                                let size = region.len();
-                                dma_handler
-                                    .unmap(iova, size)
-                                    .map_err(DeviceManagerError::VirtioDmaUnmap)?;
-                            }
+                if let Some(dma_handler) = dev.dma_handler()
+                    && !iommu_attached
+                {
+                    for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+                        for region in zone.regions() {
+                            let iova = region.start_addr().0;
+                            let size = region.len();
+                            dma_handler
+                                .unmap(iova, size)
+                                .map_err(DeviceManagerError::VirtioDmaUnmap)?;
                         }
                     }
                 }

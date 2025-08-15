@@ -187,11 +187,11 @@ impl Seek for Vhdx {
             }
         };
 
-        if let Some(o) = new_offset {
-            if o <= self.virtual_disk_size() {
-                self.current_offset = o;
-                return Ok(o);
-            }
+        if let Some(o) = new_offset
+            && o <= self.virtual_disk_size()
+        {
+            self.current_offset = o;
+            return Ok(o);
         }
 
         Err(std::io::Error::new(

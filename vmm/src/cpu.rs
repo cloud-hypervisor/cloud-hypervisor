@@ -601,10 +601,10 @@ impl BusDevice for CpuManager {
                         state.removing = false;
                     }
                     // Trigger removal of vCPU
-                    if data[0] & (1 << CPU_EJECT_FLAG) == 1 << CPU_EJECT_FLAG {
-                        if let Err(e) = self.remove_vcpu(self.selected_cpu as u32) {
-                            error!("Error removing vCPU: {:?}", e);
-                        }
+                    if data[0] & (1 << CPU_EJECT_FLAG) == 1 << CPU_EJECT_FLAG
+                        && let Err(e) = self.remove_vcpu(self.selected_cpu as u32)
+                    {
+                        error!("Error removing vCPU: {:?}", e);
                     }
                 } else {
                     warn!("Out of range vCPU id: {}", self.selected_cpu);
@@ -1059,14 +1059,13 @@ impl CpuManager {
                     }
 
                     // Apply seccomp filter for vcpu thread.
-                    if !vcpu_seccomp_filter.is_empty() {
-                        if let Err(e) =
+                    if !vcpu_seccomp_filter.is_empty() &&  let Err(e) =
                             apply_filter(&vcpu_seccomp_filter).map_err(Error::ApplySeccompFilter)
                         {
                             error!("Error applying seccomp filter: {:?}", e);
                             return;
                         }
-                    }
+
                     extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {}
                     // This uses an async signal safe handler to kill the vcpu handles.
                     register_signal_handler(SIGRTMIN(), handle_signal)
