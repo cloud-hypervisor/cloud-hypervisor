@@ -261,36 +261,28 @@ impl VirtioPciCommonConfig {
                 let ready = value == 1;
                 q.set_ready(ready);
                 // Translate address of descriptor table and vrings.
-                if let Some(access_platform) = &self.access_platform {
-                    if ready {
-                        let desc_table = access_platform
-                            .translate_gva(
-                                q.desc_table(),
-                                get_vring_size(VringType::Desc, q.size()),
-                            )
-                            .unwrap();
-                        let avail_ring = access_platform
-                            .translate_gva(
-                                q.avail_ring(),
-                                get_vring_size(VringType::Avail, q.size()),
-                            )
-                            .unwrap();
-                        let used_ring = access_platform
-                            .translate_gva(q.used_ring(), get_vring_size(VringType::Used, q.size()))
-                            .unwrap();
-                        q.set_desc_table_address(
-                            Some((desc_table & 0xffff_ffff) as u32),
-                            Some((desc_table >> 32) as u32),
-                        );
-                        q.set_avail_ring_address(
-                            Some((avail_ring & 0xffff_ffff) as u32),
-                            Some((avail_ring >> 32) as u32),
-                        );
-                        q.set_used_ring_address(
-                            Some((used_ring & 0xffff_ffff) as u32),
-                            Some((used_ring >> 32) as u32),
-                        );
-                    }
+                if ready && let Some(access_platform) = &self.access_platform {
+                    let desc_table = access_platform
+                        .translate_gva(q.desc_table(), get_vring_size(VringType::Desc, q.size()))
+                        .unwrap();
+                    let avail_ring = access_platform
+                        .translate_gva(q.avail_ring(), get_vring_size(VringType::Avail, q.size()))
+                        .unwrap();
+                    let used_ring = access_platform
+                        .translate_gva(q.used_ring(), get_vring_size(VringType::Used, q.size()))
+                        .unwrap();
+                    q.set_desc_table_address(
+                        Some((desc_table & 0xffff_ffff) as u32),
+                        Some((desc_table >> 32) as u32),
+                    );
+                    q.set_avail_ring_address(
+                        Some((avail_ring & 0xffff_ffff) as u32),
+                        Some((avail_ring >> 32) as u32),
+                    );
+                    q.set_used_ring_address(
+                        Some((used_ring & 0xffff_ffff) as u32),
+                        Some((used_ring >> 32) as u32),
+                    );
                 }
             }),
             _ => {

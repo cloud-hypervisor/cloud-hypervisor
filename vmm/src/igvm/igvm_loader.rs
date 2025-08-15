@@ -428,11 +428,11 @@ pub fn load_igvm(
         let gpas_grouped = gpas
             .iter()
             .fold(Vec::<Vec<GpaPages>>::new(), |mut acc, gpa| {
-                if let Some(last_vec) = acc.last_mut() {
-                    if last_vec[0].page_type == gpa.page_type {
-                        last_vec.push(*gpa);
-                        return acc;
-                    }
+                if let Some(last_vec) = acc.last_mut()
+                    && last_vec[0].page_type == gpa.page_type
+                {
+                    last_vec.push(*gpa);
+                    return acc;
                 }
                 acc.push(vec![*gpa]);
                 acc

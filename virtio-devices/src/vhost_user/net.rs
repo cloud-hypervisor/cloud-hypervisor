@@ -243,23 +243,24 @@ impl Net {
 
 impl Drop for Net {
     fn drop(&mut self) {
-        if let Some(kill_evt) = self.common.kill_evt.take() {
-            if let Err(e) = kill_evt.write(1) {
-                error!("failed to kill vhost-user-net: {:?}", e);
-            }
+        if let Some(kill_evt) = self.common.kill_evt.take()
+            && let Err(e) = kill_evt.write(1)
+        {
+            error!("failed to kill vhost-user-net: {:?}", e);
         }
 
         self.common.wait_for_epoll_threads();
 
-        if let Some(thread) = self.epoll_thread.take() {
-            if let Err(e) = thread.join() {
-                error!("Error joining thread: {:?}", e);
-            }
+        if let Some(thread) = self.epoll_thread.take()
+            && let Err(e) = thread.join()
+        {
+            error!("Error joining thread: {:?}", e);
         }
-        if let Some(thread) = self.ctrl_queue_epoll_thread.take() {
-            if let Err(e) = thread.join() {
-                error!("Error joining thread: {:?}", e);
-            }
+
+        if let Some(thread) = self.ctrl_queue_epoll_thread.take()
+            && let Err(e) = thread.join()
+        {
+            error!("Error joining thread: {:?}", e);
         }
     }
 }
@@ -382,11 +383,11 @@ impl VirtioDevice for Net {
             self.common.resume().ok()?;
         }
 
-        if let Some(vu) = &self.vu_common.vu {
-            if let Err(e) = vu.lock().unwrap().reset_vhost_user() {
-                error!("Failed to reset vhost-user daemon: {:?}", e);
-                return None;
-            }
+        if let Some(vu) = &self.vu_common.vu
+            && let Err(e) = vu.lock().unwrap().reset_vhost_user()
+        {
+            error!("Failed to reset vhost-user daemon: {:?}", e);
+            return None;
         }
 
         if let Some(kill_evt) = self.common.kill_evt.take() {

@@ -505,16 +505,16 @@ impl Drop for VfioUserPciDevice {
     fn drop(&mut self) {
         self.unmap_mmio_regions();
 
-        if let Some(msix) = &self.common.interrupt.msix {
-            if msix.bar.enabled() {
-                self.common.disable_msix();
-            }
+        if let Some(msix) = &self.common.interrupt.msix
+            && msix.bar.enabled()
+        {
+            self.common.disable_msix();
         }
 
-        if let Some(msi) = &self.common.interrupt.msi {
-            if msi.cfg.enabled() {
-                self.common.disable_msi()
-            }
+        if let Some(msi) = &self.common.interrupt.msi
+            && msi.cfg.enabled()
+        {
+            self.common.disable_msi()
         }
 
         if self.common.interrupt.intx_in_use() {
