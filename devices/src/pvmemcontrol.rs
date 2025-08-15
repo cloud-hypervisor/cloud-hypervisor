@@ -137,6 +137,7 @@ impl PvmemcontrolTransport {
     }
 
     unsafe fn as_register(self) -> PvmemcontrolTransportRegister {
+        // SAFETY: We access initialized data.
         unsafe { self.payload.register }
     }
 }
