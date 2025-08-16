@@ -9763,6 +9763,8 @@ mod live_migration {
         src_api_socket: &str,
         dest_api_socket: &str,
         local: bool,
+        downtime: u64,
+        timeout: u64,
     ) -> bool {
         // Start to receive migration from the destination VM
         let mut receive_migration = Command::new(clh_command("ch-remote"))
@@ -9783,6 +9785,10 @@ mod live_migration {
             format!("--api-socket={}", &src_api_socket),
             "send-migration".to_string(),
             format! {"unix:{migration_socket}"},
+            "--downtime".to_string(),
+            format!("{downtime}"),
+            "--migration-timeout".to_string(),
+            format!("{timeout}"),
         ]
         .to_vec();
 
@@ -10007,8 +10013,18 @@ mod live_migration {
                     .unwrap(),
             );
 
+            let downtime = 100_000; // 100s
+            let migration_timeout = 1000; // 1000s
+
             assert!(
-                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, local),
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    local,
+                    downtime,
+                    migration_timeout
+                ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -10181,8 +10197,18 @@ mod live_migration {
                     .unwrap(),
             );
 
+            let downtime = 100000;
+            let migration_timeout = 1000;
+
             assert!(
-                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, local),
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    local,
+                    downtime,
+                    migration_timeout
+                ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -10399,8 +10425,18 @@ mod live_migration {
                     .unwrap(),
             );
 
+            let downtime = 100000;
+            let migration_timeout = 1000;
+
             assert!(
-                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, local),
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    local,
+                    downtime,
+                    migration_timeout
+                ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -10615,8 +10651,18 @@ mod live_migration {
                     .unwrap(),
             );
 
+            let downtime = 100000;
+            let migration_timeout = 1000;
+
             assert!(
-                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, local),
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    local,
+                    downtime,
+                    migration_timeout
+                ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -10725,8 +10771,18 @@ mod live_migration {
                     .unwrap(),
             );
 
+            let downtime = 100000;
+            let migration_timeout = 1000;
+
             assert!(
-                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, local),
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    local,
+                    downtime,
+                    migration_timeout
+                ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -10872,8 +10928,18 @@ mod live_migration {
                     .unwrap(),
             );
 
+            let downtime = 100000;
+            let migration_timeout = 1000;
+
             assert!(
-                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, true),
+                start_live_migration(
+                    &migration_socket,
+                    &src_api_socket,
+                    &dest_api_socket,
+                    true,
+                    downtime,
+                    migration_timeout
+                ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -10928,7 +10994,12 @@ mod live_migration {
             .port()
     }
 
-    fn start_live_migration_tcp(src_api_socket: &str, dest_api_socket: &str) -> bool {
+    fn start_live_migration_tcp(
+        src_api_socket: &str,
+        dest_api_socket: &str,
+        downtime: u64,
+        timeout: u64,
+    ) -> bool {
         // Get an available TCP port
         let migration_port = get_available_port();
         let host_ip = "127.0.0.1";
@@ -10955,6 +11026,10 @@ mod live_migration {
                 &format!("--api-socket={src_api_socket}"),
                 "send-migration",
                 &format!("tcp:{host_ip}:{migration_port}"),
+                "--downtime",
+                &format!("{downtime}"),
+                "--migration-timeout",
+                &format!("{timeout}"),
             ])
             .stdin(Stdio::null())
             .stderr(Stdio::piped())
@@ -11025,6 +11100,8 @@ mod live_migration {
             .output()
             .expect("Expect creating disk image to succeed");
         let pmem_path = String::from("/dev/pmem0");
+        let downtime = 100000;
+        let timeout = 1000;
 
         // Start the source VM
         let src_vm_path = clh_command("cloud-hypervisor");
@@ -11087,7 +11164,7 @@ mod live_migration {
             }
             // Start TCP live migration
             assert!(
-                start_live_migration_tcp(&src_api_socket, &dest_api_socket),
+                start_live_migration_tcp(&src_api_socket, &dest_api_socket, downtime, timeout),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
