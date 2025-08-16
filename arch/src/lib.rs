@@ -18,9 +18,6 @@ use std::{fmt, result};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[cfg(target_arch = "x86_64")]
-use crate::x86_64::SgxEpcSection;
-
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<vm_memory::bitmap::AtomicBitmap>;
 type GuestRegionMmap = vm_memory::GuestRegionMmap<vm_memory::bitmap::AtomicBitmap>;
 
@@ -127,8 +124,6 @@ pub struct NumaNode {
     pub pci_segments: Vec<u16>,
     pub distances: BTreeMap<u32, u8>,
     pub memory_zones: Vec<String>,
-    #[cfg(target_arch = "x86_64")]
-    pub sgx_epc_sections: Vec<SgxEpcSection>,
 }
 
 pub type NumaNodes = BTreeMap<u32, NumaNode>;

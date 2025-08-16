@@ -12,10 +12,9 @@
 
 use std::any::Any;
 use std::collections::HashMap;
-#[cfg(target_arch = "x86_64")]
-use std::fs::File;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use std::mem::offset_of;
+#[allow(unused_imports)]
 #[cfg(target_arch = "x86_64")]
 use std::os::unix::io::AsRawFd;
 #[cfg(feature = "tdx")]
@@ -107,6 +106,8 @@ use kvm_bindings::{kvm_run__bindgen_ty_1, KVMIO};
 pub use kvm_ioctls::{Cap, Kvm, VcpuExit};
 use thiserror::Error;
 use vfio_ioctls::VfioDeviceFd;
+#[cfg(target_arch = "x86_64")]
+use vmm_sys_util::ioctl_io_nr;
 #[cfg(feature = "tdx")]
 use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_iowr_nr};
 pub use {kvm_bindings, kvm_ioctls};
@@ -115,13 +116,6 @@ pub use {kvm_bindings, kvm_ioctls};
 use crate::arch::aarch64::regs;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use crate::RegList;
-
-#[cfg(target_arch = "x86_64")]
-const KVM_CAP_SGX_ATTRIBUTE: u32 = 196;
-
-#[cfg(target_arch = "x86_64")]
-use vmm_sys_util::ioctl_io_nr;
-
 #[cfg(target_arch = "x86_64")]
 ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 
@@ -822,19 +816,6 @@ impl vm::Vm for KvmVm {
         Ok(())
     }
 
-    #[cfg(target_arch = "x86_64")]
-    fn enable_sgx_attribute(&self, file: File) -> vm::Result<()> {
-        let mut cap = kvm_enable_cap {
-            cap: KVM_CAP_SGX_ATTRIBUTE,
-            ..Default::default()
-        };
-        cap.args[0] = file.as_raw_fd() as u64;
-        self.fd
-            .enable_cap(&cap)
-            .map_err(|e| vm::HypervisorVmError::EnableSgxAttribute(e.into()))?;
-        Ok(())
-    }
-
     /// Retrieve guest clock.
     #[cfg(target_arch = "x86_64")]
     fn get_clock(&self) -> vm::Result<ClockData> {
@@ -1359,7 +1340,7 @@ impl cpu::Vcpu for KvmVcpu {
         let mut state = kvm_regs::default();
         let mut off = offset_of!(user_pt_regs, regs);
         // There are 31 user_pt_regs:
-        // https://elixir.free-electrons.com/linux/v4.14.174/source/arch/arm64/include/uapi/asm/ptrace.h#L72
+        // https://elixir.bootlin.com/linux/v4.14.174/source/arch/arm64/include/uapi/asm/ptrace.h#L72
         // These actually are the general-purpose registers of the Armv8-a
         // architecture (i.e x0-x30 if used as a 64bit register or w0-30 when used as a 32bit register).
         for i in 0..31 {
@@ -1439,7 +1420,7 @@ impl cpu::Vcpu for KvmVcpu {
         }
 
         // Now moving on to floating point registers which are stored in the user_fpsimd_state in the kernel:
-        // https://elixir.free-electrons.com/linux/v4.9.62/source/arch/arm64/include/uapi/asm/kvm.h#L53
+        // https://elixir.bootlin.com/linux/v4.9.62/source/arch/arm64/include/uapi/asm/kvm.h#L53
         let mut off = offset_of!(kvm_regs, fp_regs.vregs);
         for i in 0..32 {
             let mut bytes = [0_u8; 16];
@@ -2351,7 +2332,7 @@ impl cpu::Vcpu for KvmVcpu {
 
         // Last mandatory thing to set -> the address pointing to the FDT (also called DTB).
         // "The device tree blob (dtb) must be placed on an 8-byte boundary and must
-        // not exceed 64 kilobytes in size." -> https://www.kernel.org/doc/Documentation/arch/riscv/boot.txt.
+        // not exceed 64 kilobytes in size." -> https://www.kernel.org/doc/Documentation/arch/riscv/boot.rst
         let a1 = offset_of!(kvm_riscv_core, regs.a1);
         self.fd
             .lock()
