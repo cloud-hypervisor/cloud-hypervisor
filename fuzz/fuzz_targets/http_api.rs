@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #![no_main]
+use std::collections::HashSet;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver};
@@ -192,7 +193,7 @@ impl RequestHandler for StubApiRequestHandler {
                 pci_segments: None,
                 platform: None,
                 tpm: None,
-                preserved_fds: None,
+                preserved_fds: HashSet::new(),
                 landlock_enable: false,
                 landlock_rules: None,
                 #[cfg(feature = "ivshmem")]

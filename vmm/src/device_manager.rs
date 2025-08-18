@@ -2941,7 +2941,10 @@ impl DeviceManager {
 
                 // SAFETY: 'fds' are valid because TAP devices are created successfully
                 unsafe {
-                    self.config.lock().unwrap().add_preserved_fds(fds.clone());
+                    self.config
+                        .lock()
+                        .unwrap()
+                        .add_preserved_fds(fds.iter().cloned());
                 }
 
                 Arc::new(Mutex::new(net))
@@ -4528,7 +4531,7 @@ impl DeviceManager {
 
                     debug!("Closing preserved FDs from virtio-net device: id={id}, fds={fds:?}");
                     for fd in fds {
-                        config.preserved_fds.as_mut().unwrap().retain(|x| *x != fd);
+                        config.preserved_fds.retain(|x| *x != fd);
                         // SAFETY: We are closing the only remaining instance of this FD.
                         unsafe {
                             libc::close(fd);

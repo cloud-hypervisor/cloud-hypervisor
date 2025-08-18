@@ -3,9 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 #[cfg(feature = "ivshmem")]
 use std::fs;
+use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::result;
 use std::str::FromStr;
@@ -3019,7 +3020,7 @@ impl VmConfig {
             pci_segments,
             platform,
             tpm,
-            preserved_fds: None,
+            preserved_fds: HashSet::new(),
             landlock_enable: vm_params.landlock_enable,
             landlock_rules,
             #[cfg(feature = "ivshmem")]
@@ -3092,19 +3093,21 @@ impl VmConfig {
         removed
     }
 
+    /// Adds the FDs to the preserved FDs.
+    ///
     /// # Safety
     /// To use this safely, the caller must guarantee that the input
-    /// fds are all valid.
-    pub unsafe fn add_preserved_fds(&mut self, mut fds: Vec<i32>) {
-        if fds.is_empty() {
-            return;
+    /// FDs are all valid.
+    pub unsafe fn add_preserved_fds(&mut self, fds: impl IntoIterator<Item = RawFd>) {
+        for fd in fds.into_iter() {
+            if self.preserved_fds.contains(&fd) {
+                log::warn!(
+                    "FD {fd} is already preserved. Using the same FD multiple times causes most likely unexpected behavior"
+                )
+            } else {
+                self.preserved_fds.insert(fd);
+            }
         }
-
-        if let Some(preserved_fds) = &self.preserved_fds {
-            fds.append(&mut preserved_fds.clone());
-        }
-
-        self.preserved_fds = Some(fds);
     }
 
     #[cfg(feature = "tdx")]
@@ -3147,9 +3150,10 @@ impl Clone for VmConfig {
             tpm: self.tpm.clone(),
             preserved_fds: self
                 .preserved_fds
-                .as_ref()
+                .iter()
                 // SAFETY: FFI call with valid FDs
-                .map(|fds| fds.iter().map(|fd| unsafe { libc::dup(*fd) }).collect()),
+                .map(|fd| unsafe { libc::dup(*fd) })
+                .collect(),
             landlock_rules: self.landlock_rules.clone(),
             #[cfg(feature = "ivshmem")]
             ivshmem: self.ivshmem.clone(),
@@ -3160,17 +3164,16 @@ impl Clone for VmConfig {
 
 impl Drop for VmConfig {
     fn drop(&mut self) {
-        if let Some(mut fds) = self.preserved_fds.take() {
-            for fd in fds.drain(..) {
-                // SAFETY: FFI call with valid FDs
-                unsafe { libc::close(fd) };
-            }
+        for fd in self.preserved_fds.drain() {
+            // SAFETY: FFI call with valid FDs
+            unsafe { libc::close(fd) };
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::fs::File;
     use std::os::unix::io::AsRawFd;
 
@@ -3943,7 +3946,7 @@ mod tests {
             pci_segments: None,
             platform: None,
             tpm: None,
-            preserved_fds: None,
+            preserved_fds: HashSet::new(),
             net: Some(vec![
                 NetConfig {
                     id: Some("net0".to_owned()),
@@ -4155,7 +4158,7 @@ mod tests {
             pci_segments: None,
             platform: None,
             tpm: None,
-            preserved_fds: None,
+            preserved_fds: HashSet::new(),
             landlock_enable: false,
             landlock_rules: None,
             #[cfg(feature = "ivshmem")]
@@ -4803,7 +4806,7 @@ mod tests {
         let fd2 = unsafe { libc::dup(File::open("/dev/null").unwrap().as_raw_fd()) };
         // SAFETY: safe as both FDs are valid
         unsafe {
-            still_valid_config.add_preserved_fds(vec![fd1, fd2]);
+            still_valid_config.add_preserved_fds([fd1, fd2]);
         }
         let _still_valid_config = still_valid_config.clone();
     }
