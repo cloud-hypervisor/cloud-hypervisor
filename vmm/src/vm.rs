@@ -1172,64 +1172,16 @@ impl Vm {
         Ok(cmdline)
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     fn load_firmware(mut firmware: &File, memory_manager: Arc<Mutex<MemoryManager>>) -> Result<()> {
         let uefi_flash = memory_manager.lock().as_ref().unwrap().uefi_flash();
         let mem = uefi_flash.memory();
-        arch::aarch64::uefi::load_uefi(mem.deref(), arch::layout::UEFI_START, &mut firmware)
+        arch::uefi::load_uefi(mem.deref(), arch::layout::UEFI_START, &mut firmware)
             .map_err(Error::UefiLoad)?;
         Ok(())
     }
 
-    #[cfg(target_arch = "aarch64")]
-    fn load_kernel(
-        firmware: Option<File>,
-        kernel: Option<File>,
-        memory_manager: Arc<Mutex<MemoryManager>>,
-    ) -> Result<EntryPoint> {
-        let guest_memory = memory_manager.lock().as_ref().unwrap().guest_memory();
-        let mem = guest_memory.memory();
-        let entry_addr = match (firmware, kernel) {
-            (None, Some(mut kernel)) => {
-                match linux_loader::loader::pe::PE::load(
-                    mem.deref(),
-                    Some(arch::layout::KERNEL_START),
-                    &mut kernel,
-                    None,
-                ) {
-                    Ok(entry_addr) => entry_addr.kernel_load,
-                    // Try to load the binary as kernel PE file at first.
-                    // If failed, retry to load it as UEFI binary.
-                    // As the UEFI binary is formatless, it must be the last option to try.
-                    Err(linux_loader::loader::Error::Pe(InvalidImageMagicNumber)) => {
-                        Self::load_firmware(&kernel, memory_manager)?;
-                        arch::layout::UEFI_START
-                    }
-                    Err(e) => {
-                        return Err(Error::KernelLoad(e));
-                    }
-                }
-            }
-            (Some(firmware), None) => {
-                Self::load_firmware(&firmware, memory_manager)?;
-                arch::layout::UEFI_START
-            }
-            _ => unreachable!("Unsupported boot configuration: programming error from 'PayloadConfigError::validate()'"),
-        };
-
-        Ok(EntryPoint { entry_addr })
-    }
-
-    #[cfg(target_arch = "riscv64")]
-    fn load_firmware(mut firmware: &File, memory_manager: Arc<Mutex<MemoryManager>>) -> Result<()> {
-        let uefi_flash = memory_manager.lock().as_ref().unwrap().uefi_flash();
-        let mem = uefi_flash.memory();
-        arch::riscv64::uefi::load_uefi(mem.deref(), arch::layout::UEFI_START, &mut firmware)
-            .map_err(Error::UefiLoad)?;
-        Ok(())
-    }
-
-    #[cfg(target_arch = "riscv64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     fn load_kernel(
         firmware: Option<File>,
         kernel: Option<File>,
@@ -1238,7 +1190,8 @@ impl Vm {
         let guest_memory = memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
         let alignment = 0x20_0000;
-        let aligned_kernel_addr = arch::layout::KERNEL_START.0 + (alignment - 1) & !(alignment - 1);
+        let aligned_kernel_addr =
+            (arch::layout::KERNEL_START.0 + (alignment - 1)) & !(alignment - 1);
         let entry_addr = match (firmware, kernel) {
             (None, Some(mut kernel)) => {
                 match linux_loader::loader::pe::PE::load(
