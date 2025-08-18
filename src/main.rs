@@ -904,6 +904,7 @@ fn main() {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::collections::HashSet;
     use std::path::PathBuf;
 
     use vmm::config::VmParams;
@@ -1026,7 +1027,7 @@ mod unit_tests {
             pci_segments: None,
             platform: None,
             tpm: None,
-            preserved_fds: None,
+            preserved_fds: HashSet::new(),
             landlock_enable: false,
             landlock_rules: None,
             #[cfg(feature = "ivshmem")]
