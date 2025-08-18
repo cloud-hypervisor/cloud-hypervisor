@@ -2,7 +2,9 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+use std::collections::HashSet;
 use std::net::IpAddr;
+use std::os::fd::RawFd;
 use std::path::{Path, PathBuf};
 #[cfg(feature = "fw_cfg")]
 use std::str::FromStr;
@@ -927,7 +929,7 @@ pub struct VmConfig {
     // Preserved FDs will stay open as long as the holding VmConfig instance is
     // valid, and will be closed when the holding VmConfig instance is destroyed.
     #[serde(skip)]
-    pub preserved_fds: Option<Vec<i32>>,
+    pub preserved_fds: HashSet<RawFd>,
     #[serde(default)]
     pub landlock_enable: bool,
     pub landlock_rules: Option<Vec<LandlockConfig>>,
