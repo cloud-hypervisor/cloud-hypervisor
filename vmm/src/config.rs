@@ -804,7 +804,7 @@ impl PlatformConfig {
             let mut syntax = "Platform configuration parameters \
             \"num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,\
             iommu_address_width=<bits>,serial_number=<dmi_device_serial_number>,\
-            uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>"
+            uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>,iommufd=on|off"
                 .to_string();
 
             if cfg!(feature = "tdx") {
@@ -831,7 +831,8 @@ impl PlatformConfig {
             .add("iommu_address_width")
             .add("serial_number")
             .add("uuid")
-            .add("oem_strings");
+            .add("oem_strings")
+            .add("iommufd");
         #[cfg(feature = "tdx")]
         parser.add("tdx");
         #[cfg(feature = "sev_snp")]
@@ -858,6 +859,11 @@ impl PlatformConfig {
             .convert::<StringList>("oem_strings")
             .map_err(Error::ParsePlatform)?
             .map(|v| v.0);
+        let iommufd = parser
+            .convert::<Toggle>("iommufd")
+            .map_err(Error::ParsePlatform)?
+            .unwrap_or(Toggle(false))
+            .0;
         #[cfg(feature = "tdx")]
         let tdx = parser
             .convert::<Toggle>("tdx")
@@ -877,6 +883,7 @@ impl PlatformConfig {
             serial_number,
             uuid,
             oem_strings,
+            iommufd,
             #[cfg(feature = "tdx")]
             tdx,
             #[cfg(feature = "sev_snp")]
@@ -4824,6 +4831,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             serial_number: None,
             uuid: None,
             oem_strings: None,
+            iommufd: false,
             #[cfg(feature = "tdx")]
             tdx: false,
             #[cfg(feature = "sev_snp")]
