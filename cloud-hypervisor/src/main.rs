@@ -33,8 +33,8 @@ use vmm::vm_config::FwCfgConfig;
 use vmm::vm_config::IvshmemConfig;
 use vmm::vm_config::{
     BalloonConfig, DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, LandlockConfig,
-    NetConfig, NumaConfig, PciSegmentConfig, PmemConfig, RateLimiterGroupConfig, TpmConfig,
-    UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
+    NetConfig, NumaConfig, PciSegmentConfig, PlatformConfig, PmemConfig, RateLimiterGroupConfig,
+    TpmConfig, UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
@@ -388,7 +388,7 @@ fn get_cli_options_sorted(
         Arg::new("platform")
             .long("platform")
             .help(
-                "num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,iommu_address_width=<bits>,serial_number=<dmi_device_serial_number>,uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>"
+                PlatformConfig::syntax()
             )
             .num_args(1)
             .group("vm-config"),
