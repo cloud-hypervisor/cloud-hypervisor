@@ -9,6 +9,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::result;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use block::ImageType;
 use clap::ArgMatches;
@@ -798,6 +799,30 @@ impl PciSegmentConfig {
 }
 
 impl PlatformConfig {
+    pub fn syntax() -> &'static str {
+        static SYNTAX: LazyLock<String> = LazyLock::new(|| {
+            let mut syntax = "Platform configuration parameters \
+            \"num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,\
+            iommu_address_width=<bits>,serial_number=<dmi_device_serial_number>,\
+            uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>"
+                .to_string();
+
+            if cfg!(feature = "tdx") {
+                syntax.push_str(",tdx=on|off");
+            }
+
+            if cfg!(feature = "sev_snp") {
+                syntax.push_str(",sev_snp=on|off");
+            }
+
+            syntax.push('"');
+
+            syntax
+        });
+
+        &SYNTAX
+    }
+
     pub fn parse(platform: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
