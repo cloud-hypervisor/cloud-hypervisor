@@ -639,13 +639,25 @@ impl VcpuState {
         self.handle.is_some()
     }
 
+    /// Sends a signal to the underlying thread.
+    ///
+    /// Please call [`Self::wait_until_signal_acknowledged`] afterward to block
+    /// until the vCPU thread has acknowledged the signal.
     fn signal_thread(&self) {
         if let Some(handle) = self.handle.as_ref() {
+            // SAFETY: FFI call with correct arguments
+            unsafe {
+                libc::pthread_kill(handle.as_pthread_t() as _, SIGRTMIN());
+            }
+        }
+    }
+
+    /// Blocks until the vCPU thread has acknowledged the signal.
+    ///
+    /// This is the counterpart of [`Self::signal_thread`].
+    fn wait_until_signal_acknowledged(&self) {
+        if let Some(_handle) = self.handle.as_ref() {
             loop {
-                // SAFETY: FFI call with correct arguments
-                unsafe {
-                    libc::pthread_kill(handle.as_pthread_t() as _, SIGRTMIN());
-                }
                 if self.vcpu_run_interrupted.load(Ordering::SeqCst) {
                     break;
                 } else {
@@ -1299,6 +1311,7 @@ impl CpuManager {
         let state = &mut self.vcpu_states[usize::try_from(cpu_id).unwrap()];
         state.kill.store(true, Ordering::SeqCst);
         state.signal_thread();
+        state.wait_until_signal_acknowledged();
         state.join_thread()?;
         state.handle = None;
 
@@ -1366,6 +1379,21 @@ impl CpuManager {
         }
     }
 
+    /// Signal to the spawned threads (vCPUs and console signal handler).
+    ///
+    /// For the vCPU threads this will interrupt the KVM_RUN ioctl() allowing
+    /// the loop to check the shared state booleans.
+    fn signal_vcpus(&self) {
+        // Splitting this into two loops reduced the time to pause many vCPUs
+        // massively. Example: 254 vCPUs. >254ms -> ~4ms.
+        for state in self.vcpu_states.iter() {
+            state.signal_thread();
+        }
+        for state in self.vcpu_states.iter() {
+            state.wait_until_signal_acknowledged();
+        }
+    }
+
     pub fn shutdown(&mut self) -> Result<()> {
         // Tell the vCPUs to stop themselves next time they go through the loop
         self.vcpus_kill_signalled.store(true, Ordering::SeqCst);
@@ -1378,12 +1406,7 @@ impl CpuManager {
             state.unpark_thread();
         }
 
-        // Signal to the spawned threads (vCPUs and console signal handler). For the vCPU threads
-        // this will interrupt the KVM_RUN ioctl() allowing the loop to check the boolean set
-        // above.
-        for state in self.vcpu_states.iter() {
-            state.signal_thread();
-        }
+        self.signal_vcpus();
 
         // Wait for all the threads to finish. This removes the state from the vector.
         for mut state in self.vcpu_states.drain(..) {
@@ -1934,11 +1957,7 @@ impl CpuManager {
 
     pub(crate) fn nmi(&self) -> Result<()> {
         self.vcpus_kick_signalled.store(true, Ordering::SeqCst);
-
-        for state in self.vcpu_states.iter() {
-            state.signal_thread();
-        }
-
+        self.signal_vcpus();
         self.vcpus_kick_signalled.store(false, Ordering::SeqCst);
 
         Ok(())
@@ -2300,12 +2319,7 @@ impl Pausable for CpuManager {
         // Tell the vCPUs to pause themselves next time they exit
         self.vcpus_pause_signalled.store(true, Ordering::SeqCst);
 
-        // Signal to the spawned threads (vCPUs and console signal handler). For the vCPU threads
-        // this will interrupt the KVM_RUN ioctl() allowing the loop to check the boolean set
-        // above.
-        for state in self.vcpu_states.iter() {
-            state.signal_thread();
-        }
+        self.signal_vcpus();
 
         for vcpu in self.vcpus.iter() {
             let mut vcpu = vcpu.lock().unwrap();
