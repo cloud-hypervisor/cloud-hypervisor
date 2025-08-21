@@ -956,6 +956,10 @@ pub struct VmConfig {
     // VmConfig instance, such as FDs for creating TAP devices.
     // Preserved FDs will stay open as long as the holding VmConfig instance is
     // valid, and will be closed when the holding VmConfig instance is destroyed.
+    //
+    // This is populated during hot device attach. Hot device detach causes the
+    // FDs to be closed early. This allows management software to gracefully
+    // clean up resources (e.g., libvirt destroys tap devices).
     #[serde(skip)]
     pub preserved_fds: Option<Vec<i32>>,
     #[serde(default)]

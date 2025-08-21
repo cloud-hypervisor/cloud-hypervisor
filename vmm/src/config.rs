@@ -3140,6 +3140,8 @@ impl VmConfig {
         removed
     }
 
+    /// Prepends the list of FDs to the preserved FDs.
+    ///
     /// # Safety
     /// To use this safely, the caller must guarantee that the input
     /// fds are all valid.
@@ -3149,7 +3151,12 @@ impl VmConfig {
         }
 
         if let Some(preserved_fds) = &self.preserved_fds {
-            fds.append(&mut preserved_fds.clone());
+            for fd in preserved_fds {
+                if fds.contains(fd) {
+                    log::warn!("fd {fd} is already preserved, skipping");
+                }
+                fds.push(*fd);
+            }
         }
 
         self.preserved_fds = Some(fds);
