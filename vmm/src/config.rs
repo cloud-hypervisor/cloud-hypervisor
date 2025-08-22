@@ -6,6 +6,7 @@
 use std::collections::{BTreeSet, HashMap};
 #[cfg(feature = "ivshmem")]
 use std::fs;
+use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::result;
 use std::str::FromStr;
@@ -226,8 +227,8 @@ pub enum ValidationError {
     #[error("Number of queues to virtio_net does not match the number of input FDs")]
     VnetQueueFdMismatch,
     /// Using reserved fd
-    #[error("Reserved fd number (<= 2)")]
-    VnetReservedFd,
+    #[error("Reserved fd number (fd={0} <= 2)")]
+    VnetReservedFd(RawFd),
     /// Hardware checksum offload is disabled.
     #[error("\"offload_tso\" and \"offload_ufo\" depend on \"offload_csum\"")]
     NoHardwareChecksumOffload,
@@ -1483,7 +1484,7 @@ impl NetConfig {
         if let Some(fds) = self.fds.as_ref() {
             for fd in fds {
                 if *fd <= 2 {
-                    return Err(ValidationError::VnetReservedFd);
+                    return Err(ValidationError::VnetReservedFd(*fd));
                 }
             }
         }
@@ -3144,6 +3145,8 @@ impl VmConfig {
     /// To use this safely, the caller must guarantee that the input
     /// fds are all valid.
     pub unsafe fn add_preserved_fds(&mut self, mut fds: Vec<i32>) {
+        debug!("adding preserved FDs to VM list: {fds:?}");
+
         if fds.is_empty() {
             return;
         }
@@ -3199,7 +3202,16 @@ impl Clone for VmConfig {
                 .preserved_fds
                 .as_ref()
                 // SAFETY: FFI call with valid FDs
-                .map(|fds| fds.iter().map(|fd| unsafe { libc::dup(*fd) }).collect()),
+                .map(|fds| {
+                    fds.iter()
+                        .map(|fd| {
+                            // SAFETY: FFI call to dup. Trivially safe.
+                            let fd_duped = unsafe { libc::dup(*fd) };
+                            warn!("Cloning VM config: duping preserved FD {fd} => {fd_duped}");
+                            fd_duped
+                        })
+                        .collect()
+                }),
             landlock_rules: self.landlock_rules.clone(),
             #[cfg(feature = "ivshmem")]
             ivshmem: self.ivshmem.clone(),
@@ -3211,6 +3223,7 @@ impl Clone for VmConfig {
 impl Drop for VmConfig {
     fn drop(&mut self) {
         if let Some(mut fds) = self.preserved_fds.take() {
+            debug!("Closing preserved FDs from VM: fds={fds:?}");
             for fd in fds.drain(..) {
                 // SAFETY: FFI call with valid FDs
                 unsafe { libc::close(fd) };
@@ -4325,7 +4338,7 @@ mod tests {
         }]);
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::VnetReservedFd)
+            Err(ValidationError::VnetReservedFd(0))
         );
 
         let mut invalid_config = valid_config.clone();
