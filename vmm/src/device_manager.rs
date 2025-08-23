@@ -120,8 +120,8 @@ use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 use crate::vm_config::IvshmemConfig;
 use crate::vm_config::{
     ConsoleOutputMode, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
-    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
-    VhostMode, VmConfig, VsockConfig,
+    DeviceConfig, DiscardWriteZeroesMode, DiskConfig, FsConfig, NetConfig, PmemConfig,
+    UserDeviceConfig, VdpaConfig, VhostMode, VmConfig, VsockConfig,
 };
 use crate::{DEVICE_MANAGER_SNAPSHOT_ID, GuestRegionMmap, PciDeviceInfo, device_node};
 
@@ -2773,6 +2773,9 @@ impl DeviceManager {
                     .clone(),
                 disk_cfg.readonly,
                 self.force_iommu | disk_cfg.iommu,
+                disk_cfg.discard != DiscardWriteZeroesMode::Off,
+                disk_cfg.detect_zeroes != DiscardWriteZeroesMode::Off,
+                disk_cfg.detect_zeroes == DiscardWriteZeroesMode::Unmap,
                 disk_cfg.num_queues,
                 disk_cfg.queue_size,
                 disk_cfg.serial.clone(),
