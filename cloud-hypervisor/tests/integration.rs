@@ -1216,6 +1216,21 @@ fn _test_power_button(acpi: bool) {
     handle_child_output(r, &output);
 }
 
+fn get_msi_interrupt_pattern() -> String {
+    #[cfg(target_arch = "x86_64")]
+    {
+        "PCI-MSI".to_string()
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        if cfg!(feature = "mshv") {
+            "GICv2m-PCI-MSIX".to_string()
+        } else {
+            "ITS-PCI-MSIX".to_string()
+        }
+    }
+}
+
 type PrepareNetDaemon = dyn Fn(
     &TempDir,
     &str,
@@ -1349,13 +1364,11 @@ fn test_vhost_user_net(
         // Since virtio-net has 2 queue pairs, its vectors is as follows:
         // 1 virtio-net     with 5 vectors: config, Rx (2), Tx (2)
         // Based on the above, the total vectors should 14.
-        #[cfg(target_arch = "x86_64")]
-        let grep_cmd = "grep -c PCI-MSI /proc/interrupts";
-        #[cfg(target_arch = "aarch64")]
-        let grep_cmd = "grep -c ITS-PCI-MSIX /proc/interrupts";
+        let grep_cmd = format!("grep -c {} /proc/interrupts", get_msi_interrupt_pattern());
+
         assert_eq!(
             guest
-                .ssh_command(grep_cmd)
+                .ssh_command(&grep_cmd)
                 .unwrap()
                 .trim()
                 .parse::<u32>()
@@ -3064,15 +3077,12 @@ mod common_parallel {
 
         guest.wait_vm_boot(None).unwrap();
 
-        #[cfg(target_arch = "x86_64")]
-        let grep_cmd = "grep -c PCI-MSI /proc/interrupts";
-        #[cfg(target_arch = "aarch64")]
-        let grep_cmd = "grep -c ITS-PCI-MSIX /proc/interrupts";
+        let grep_cmd = format!("grep -c {} /proc/interrupts", get_msi_interrupt_pattern());
 
         let r = std::panic::catch_unwind(|| {
             assert_eq!(
                 guest
-                    .ssh_command(grep_cmd)
+                    .ssh_command(&grep_cmd)
                     .unwrap()
                     .trim()
                     .parse::<u32>()
@@ -3341,14 +3351,10 @@ mod common_parallel {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
 
-            let grep_cmd = if cfg!(target_arch = "x86_64") {
-                "grep -c PCI-MSI /proc/interrupts"
-            } else {
-                "grep -c ITS-PCI-MSIX /proc/interrupts"
-            };
+            let grep_cmd = format!("grep -c {} /proc/interrupts", get_msi_interrupt_pattern());
             assert_eq!(
                 guest
-                    .ssh_command(grep_cmd)
+                    .ssh_command(&grep_cmd)
                     .unwrap()
                     .trim()
                     .parse::<u32>()
