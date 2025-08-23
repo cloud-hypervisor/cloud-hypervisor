@@ -37,7 +37,7 @@ use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::time::Instant;
-use std::{cmp, result};
+use std::{cmp, mem, result};
 
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
@@ -50,7 +50,7 @@ use virtio_bindings::virtio_blk::*;
 use virtio_queue::DescriptorChain;
 use vm_memory::bitmap::Bitmap;
 use vm_memory::{
-    ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryLoadGuard,
+    Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryLoadGuard,
 };
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
@@ -92,6 +92,12 @@ pub enum Error {
     TooManyDescriptors,
     #[error("Failure in vhdx")]
     VhdxError(#[source] VhdxError),
+    #[error("Invalid file access")]
+    InvalidAccess,
+    #[error("Failed to punch hole: {0}")]
+    PunchHole(AsyncIoError),
+    #[error("Failed to write zeroes: {0}")]
+    WriteZeroes(AsyncIoError),
 }
 
 fn build_device_id(disk_path: &Path) -> result::Result<String, Error> {
@@ -158,6 +164,8 @@ pub enum ExecuteError {
     AsyncFlush(#[source] AsyncIoError),
     #[error("Failed allocating a temporary buffer")]
     TemporaryBufferAllocation(#[source] io::Error),
+    #[error("Failed to handle discard or write zeroes: {0}")]
+    DiscardWriteZeroes(Error),
 }
 
 impl ExecuteError {
@@ -178,6 +186,7 @@ impl ExecuteError {
             ExecuteError::AsyncWrite(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::AsyncFlush(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::TemporaryBufferAllocation(_) => VIRTIO_BLK_S_IOERR,
+            ExecuteError::DiscardWriteZeroes(_) => VIRTIO_BLK_S_IOERR,
         };
         status as u8
     }
@@ -189,6 +198,8 @@ pub enum RequestType {
     Out,
     Flush,
     GetDeviceId,
+    Discard,
+    WriteZeroes,
     Unsupported(u32),
 }
 
@@ -202,6 +213,8 @@ pub fn request_type<B: Bitmap + 'static>(
         VIRTIO_BLK_T_OUT => Ok(RequestType::Out),
         VIRTIO_BLK_T_FLUSH => Ok(RequestType::Flush),
         VIRTIO_BLK_T_GET_ID => Ok(RequestType::GetDeviceId),
+        VIRTIO_BLK_T_DISCARD => Ok(RequestType::Discard),
+        VIRTIO_BLK_T_WRITE_ZEROES => Ok(RequestType::WriteZeroes),
         t => Ok(RequestType::Unsupported(t)),
     }
 }
@@ -228,6 +241,24 @@ pub struct AlignedOperation {
     size: usize,
     layout: Layout,
 }
+
+/// One or more `DiscardWriteZeroes` structs are used to describe the data for
+/// discard or write zeroes command.
+#[derive(Copy, Clone, Debug, Default)]
+#[repr(C)]
+struct DiscardWriteZeroes {
+    sector: u64,
+    num_sectors: u32,
+    flags: u32,
+}
+
+impl DiscardWriteZeroes {
+    // Size of DiscardWriteZeroes struct.
+    const LEN: u64 = mem::size_of::<DiscardWriteZeroes>() as u64;
+}
+
+// SAFETY: Safe because DiscardWriteZeroes contains only plain data.
+unsafe impl ByteValued for DiscardWriteZeroes {}
 
 pub struct BatchRequest {
     pub offset: libc::off_t,
@@ -395,6 +426,12 @@ impl Request {
                     mem.write_slice(serial, *data_addr)
                         .map_err(ExecuteError::Write)?;
                 }
+                RequestType::Discard => {
+                    return Err(ExecuteError::Unsupported(VIRTIO_BLK_T_DISCARD));
+                }
+                RequestType::WriteZeroes => {
+                    return Err(ExecuteError::Unsupported(VIRTIO_BLK_T_WRITE_ZEROES));
+                }
                 RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
             }
         }
@@ -408,6 +445,7 @@ impl Request {
         disk_image: &mut dyn AsyncIo,
         serial: &[u8],
         user_data: u64,
+        write_zeroes_unmap: bool,
     ) -> result::Result<ExecuteAsync, ExecuteError> {
         let sector = self.sector;
         let request_type = self.request_type;
@@ -544,10 +582,111 @@ impl Request {
                 ret.async_complete = false;
                 return Ok(ret);
             }
+            RequestType::Discard | RequestType::WriteZeroes => {
+                for (data_addr, data_len) in &self.data_descriptors {
+                    let data_len = *data_len as u64;
+                    // We support for now only data descriptors with the `len` field = multiple of
+                    // the size of `virtio_blk_discard_write_zeroes` segment. The specification,
+                    // however, requires that only `total_len` be such multiple (a segment can be
+                    // divided between several descriptors). Once we switch to a more general
+                    // approach regarding how we store and parse the device buffers, we'll fix this
+                    // too.
+                    if !data_len.is_multiple_of(DiscardWriteZeroes::LEN) {
+                        return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+                    }
+                    let mut available_bytes = data_len;
+                    let mut crt_addr = *data_addr;
+
+                    while available_bytes >= DiscardWriteZeroes::LEN {
+                        let segment: DiscardWriteZeroes = mem
+                            .read_obj(crt_addr)
+                            .map_err(|e| ExecuteError::BadRequest(Error::GuestMemory(e)))?;
+
+                        // For Discard, unmap bit (the least significant bit from segment flags)
+                        // MUST be 0, for Write Zeroes it can be either 0 or 1.
+                        // The other bits are reserved and MUST not be set (for both request types).
+                        // If any of these conditions are not met, status must be set to
+                        // VIRTIO_BLK_S_UNSUPP.
+                        // Verify two invalid request case:
+                        //1. Discard request: any unknown flag is set or unmap flag is set.
+                        //2. Write zeroes request: any unknown flag is set.
+                        if request_type == RequestType::Discard && segment.flags != 0 {
+                            return Err(ExecuteError::Unsupported(VIRTIO_BLK_T_DISCARD));
+                        } else if request_type == RequestType::WriteZeroes
+                            && segment.flags & !1 != 0
+                        {
+                            return Err(ExecuteError::Unsupported(VIRTIO_BLK_T_WRITE_ZEROES));
+                        }
+
+                        Self::handle_discard_write_zeroes_sync(
+                            &segment,
+                            request_type,
+                            disk_nsectors,
+                            write_zeroes_unmap,
+                            disk_image,
+                            user_data,
+                        )
+                        .map_err(ExecuteError::DiscardWriteZeroes)?;
+                        // Using `unchecked_add` here, since the overflow is not possible at this
+                        // point (it is checked when parsing the request) and `read_obj` fails if
+                        // the memory access is invalid.
+                        crt_addr = crt_addr.unchecked_add(DiscardWriteZeroes::LEN);
+                        available_bytes -= DiscardWriteZeroes::LEN;
+                    }
+                }
+            }
             RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
         }
 
         Ok(ret)
+    }
+
+    fn handle_discard_write_zeroes_sync(
+        segment: &DiscardWriteZeroes,
+        request_type: RequestType,
+        disk_nsectors: u64,
+        write_zeroes_unmap: bool,
+        disk_image: &mut dyn AsyncIo,
+        user_data: u64,
+    ) -> Result<(), Error> {
+        let sector = segment.sector;
+        let num_sectors = segment.num_sectors;
+        let _flags = segment.flags;
+
+        let offset = sector
+            .checked_shl(u32::from(SECTOR_SHIFT))
+            .ok_or(Error::InvalidAccess)?;
+        let length = u64::from(num_sectors)
+            .checked_shl(u32::from(SECTOR_SHIFT))
+            .ok_or(Error::InvalidAccess)?;
+
+        let mut sectors_count = num_sectors as u64;
+        sectors_count = sectors_count
+            .checked_add(sector)
+            .ok_or(Error::InvalidAccess)?;
+        if sectors_count > disk_nsectors {
+            return Err(Error::InvalidAccess);
+        }
+
+        // Unmap has two different cases:
+        // - request type is Discard
+        // - request type is Write Zeroes and unmap bit is set
+        if request_type == RequestType::Discard {
+            disk_image
+                .punch_hole(offset, length, user_data)
+                .map_err(Error::PunchHole)?;
+        } else {
+            // If unmap is set, try at first to punch a hole, if it fails, fall back to just
+            // writing zeroes.
+            // After a write zeroes command is completed, reads of the specified ranges of sectors
+            // MUST return zeroes, independent of unmap value.
+            if !write_zeroes_unmap || disk_image.punch_hole(offset, length, user_data).is_err() {
+                disk_image
+                    .write_all_zeroes_at(offset, length as usize, user_data)
+                    .map_err(Error::WriteZeroes)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn complete_async(&mut self) -> result::Result<(), Error> {
@@ -917,5 +1056,583 @@ impl DiskTopology {
             minimum_io_size: Self::query_block_size(f, BlockSize::MinimumIo)?,
             optimal_io_size: Self::query_block_size(f, BlockSize::OptimalIo)?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use virtio_bindings::bindings::virtio_ring::VRING_DESC_F_WRITE;
+    use virtio_queue::desc::RawDescriptor;
+    use virtio_queue::desc::split::Descriptor;
+    use virtio_queue::mock::MockSplitQueue;
+    use virtio_queue::{Queue, QueueT};
+    use vm_memory::bitmap::AtomicBitmap;
+    use vm_memory::{GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+    use crate::async_io::DiskFile;
+    use crate::raw_sync::RawFileDiskSync;
+
+    #[derive(Copy, Clone, Debug, Default)]
+    #[repr(C)]
+    struct RequestHeader {
+        request_type: u32,
+        _reserved: u32,
+        sector: u64,
+    }
+
+    // SAFETY: data structure only contain a series of integers
+    unsafe impl ByteValued for RequestHeader {}
+
+    fn read_data_vec(
+        disk_image_async: &mut dyn AsyncIo,
+        user_data: u64,
+        offset: u64,
+        len: usize,
+    ) -> Vec<u8> {
+        let mut data_vec = vec![0u8; len];
+        let iovec = vec![libc::iovec {
+            iov_base: data_vec.as_mut_ptr() as *mut libc::c_void,
+            iov_len: len as libc::size_t,
+        }];
+        disk_image_async
+            .read_vectored(offset as libc::off_t, &iovec, user_data)
+            .unwrap();
+        data_vec
+    }
+
+    #[test]
+    fn test_parse_request() {
+        let mem: GuestMemoryMmap<AtomicBitmap> =
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000_0000)]).unwrap();
+        let vq = MockSplitQueue::new(&mem, 128);
+
+        {
+            let v = [
+                // A device-writable request header descriptor.
+                RawDescriptor::from(Descriptor::new(
+                    0x10_0000,
+                    0x100,
+                    VRING_DESC_F_WRITE as u16,
+                    0,
+                )),
+                RawDescriptor::from(Descriptor::new(
+                    0x20_0000,
+                    0x100,
+                    VRING_DESC_F_WRITE as u16,
+                    0,
+                )),
+                RawDescriptor::from(Descriptor::new(
+                    0x30_0000,
+                    0x100,
+                    VRING_DESC_F_WRITE as u16,
+                    0,
+                )),
+            ];
+            vq.build_desc_chain(&v).unwrap();
+            let mut queue: Queue = vq.create_queue().unwrap();
+            let req_header = RequestHeader {
+                request_type: VIRTIO_BLK_T_IN,
+                _reserved: 0,
+                sector: 2,
+            };
+            mem.write_obj::<RequestHeader>(req_header, GuestAddress(0x10_0000))
+                .unwrap();
+            let mem_atomic: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>> =
+                GuestMemoryAtomic::from(Arc::new(mem.clone()));
+            let mut chain = queue.pop_descriptor_chain(mem_atomic.memory()).unwrap();
+            // Request header descriptor should be device-readable.
+            Request::parse(&mut chain, None).unwrap_err();
+        }
+
+        // Valid descriptor chain for FLUSH.
+        {
+            let v = [
+                RawDescriptor::from(Descriptor::new(0x10_0000, 0x100, 0, 0)),
+                RawDescriptor::from(Descriptor::new(
+                    0x40_0000,
+                    0x100,
+                    VRING_DESC_F_WRITE as u16,
+                    0,
+                )),
+            ];
+            vq.build_desc_chain(&v).unwrap();
+            let mut queue: Queue = vq.create_queue().unwrap();
+            let req_header = RequestHeader {
+                request_type: VIRTIO_BLK_T_FLUSH,
+                _reserved: 0,
+                sector: 0,
+            };
+            mem.write_obj::<RequestHeader>(req_header, GuestAddress(0x10_0000))
+                .unwrap();
+
+            let mem_atomic: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>> =
+                GuestMemoryAtomic::from(Arc::new(mem));
+            let mut chain = queue.pop_descriptor_chain(mem_atomic.memory()).unwrap();
+            Request::parse(&mut chain, None).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_discard_wr_zeroes_request() {
+        const NON_ZERO_VALUE: u8 = 0x55;
+
+        let f = TempFile::new().unwrap().into_file();
+        let disk_size = 0x1000u64;
+        let disk_nsectors = disk_size / SECTOR_SIZE; // 8
+        // 0x000-0x200: 0
+        // 0x200-0x400: 1
+        // 0x400-0x600: 2
+        // 0x600-0x800: 3
+        // 0x800-0xA00: 4
+        // 0xA00-0xC00: 5
+        // 0xC00-0xE00: 6
+        // 0xE00-0x1000: 7
+        f.set_len(disk_size).unwrap();
+        let mut disk_image = Box::new(RawFileDiskSync::new(f)) as Box<dyn DiskFile>;
+        let mut disk_image_async = disk_image.new_async_io(128).unwrap();
+        let disk_image_id_str = String::from("test image");
+        let disk_image_id = disk_image_id_str.as_bytes();
+
+        let mem: GuestMemoryMmap<AtomicBitmap> =
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000_0000)]).unwrap();
+        let vq = MockSplitQueue::new(&mem, 128);
+        let v = [
+            RawDescriptor::from(Descriptor::new(0x10_0000, 0x100, 0, 0)),
+            // 0x100:0 0x200: NON_ZERO_VALUE 0x100: 0
+            RawDescriptor::from(Descriptor::new(0x100, 0x400, 0, 0)),
+            // 0x80: NON_ZERO_VALUE 0x120: 0
+            RawDescriptor::from(Descriptor::new(0x800, 0x200, 0, 0)),
+            RawDescriptor::from(Descriptor::new(
+                0x40_0000,
+                0x100,
+                VRING_DESC_F_WRITE as u16,
+                0,
+            )),
+        ];
+        vq.build_desc_chain(&v).unwrap();
+        let mut queue: Queue = vq.create_queue().unwrap();
+
+        mem.write_slice(&[NON_ZERO_VALUE; 0x200], GuestAddress(0x200))
+            .unwrap();
+        mem.write_slice(&[NON_ZERO_VALUE; 0x100], GuestAddress(0x880))
+            .unwrap();
+        let req_header = RequestHeader {
+            request_type: VIRTIO_BLK_T_OUT,
+            _reserved: 0,
+            sector: 1,
+        };
+        mem.write_obj::<RequestHeader>(req_header, GuestAddress(0x10_0000))
+            .unwrap();
+
+        {
+            let mem_atomic: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>> =
+                GuestMemoryAtomic::from(Arc::new(mem.clone()));
+            let mut chain = queue.pop_descriptor_chain(mem_atomic.memory()).unwrap();
+            let mut request = Request::parse(&mut chain, None).unwrap();
+
+            // We will write in file at sector 1 (offset 0x200) 0x400 bytes from 0x100 guest memory
+            // address and 0x200 bytes from 0x800 address. 0 bytes should've been written in memory.
+            request
+                .execute_async(
+                    chain.memory(),
+                    disk_nsectors,
+                    disk_image_async.as_mut(),
+                    disk_image_id,
+                    chain.head_index() as u64,
+                    false,
+                )
+                .unwrap();
+            // file data now:
+            // 0x000-0x300: 0
+            // 0x300-0x500: NON_ZERO_VALUE
+            // 0x500-0x680: 0
+            // 0x680-0x780: NON_ZERO_VALUE
+            // 0x780-0x800: 0
+        }
+
+        // Let's write some more bytes to the file.
+        mem.write_slice(&[NON_ZERO_VALUE + 1; 0x600], GuestAddress(0x3100))
+            .unwrap();
+
+        // Write at offset 0x600 in file, 800 bytes: the first 100 bytes = 0, the next 600 bytes =
+        // = NON_ZERO_VALUE + 1 and the last 100 bytes = 0; and then at offset 0x600 + 0x800 =
+        // = 0xE00, which is the last sector, 200 bytes = NON_ZERO_VALUE.
+        let v = [
+            RawDescriptor::from(Descriptor::new(0x10_0000, 0x100, 0, 0)),
+            // 0x100:0 0x600: NON_ZERO_VALUE+1 0x100: 0
+            RawDescriptor::from(Descriptor::new(0x3000, 0x800, 0, 0)),
+            // 0x200: NON_ZERO_VALUE
+            RawDescriptor::from(Descriptor::new(0x200, 0x200, 0, 0)),
+            RawDescriptor::from(Descriptor::new(
+                0x40_0000,
+                0x100,
+                VRING_DESC_F_WRITE as u16,
+                0,
+            )),
+        ];
+        vq.build_desc_chain(&v).unwrap();
+        let mut queue: Queue = vq.create_queue().unwrap();
+
+        let req_header = RequestHeader {
+            request_type: VIRTIO_BLK_T_OUT,
+            _reserved: 0,
+            sector: 3,
+        };
+        mem.write_obj::<RequestHeader>(req_header, GuestAddress(0x10_0000))
+            .unwrap();
+
+        {
+            let mem_atomic: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>> =
+                GuestMemoryAtomic::from(Arc::new(mem.clone()));
+            let mut chain = queue.pop_descriptor_chain(mem_atomic.memory()).unwrap();
+            let mut request = Request::parse(&mut chain, None).unwrap();
+
+            // We will write in file at sector 1 (offset 0x200) 0x400 bytes from 0x100 guest memory
+            // address and 0x200 bytes from 0x800 address. 0 bytes should've been written in memory.
+            request
+                .execute_async(
+                    chain.memory(),
+                    disk_nsectors,
+                    disk_image_async.as_mut(),
+                    disk_image_id,
+                    chain.head_index() as u64,
+                    false,
+                )
+                .unwrap();
+            // file data now:
+            // 0x000-0x300: 0
+            // 0x300-0x500: NON_ZERO_VALUE
+            // 0x500-0x700: 0
+            // 0x700-0xD00: NON_ZERO_VALUE + 1
+            // 0xD00-0xE00: 0
+            // 0xE00-0x1000: NON_ZERO_VALUE
+        }
+
+        // Test write zeroes request.
+        // Write zeroes at offset 0x400 in file, 2 sectors = 0x400 bytes.
+        let wr_zeroes_1 = DiscardWriteZeroes {
+            sector: 2,
+            num_sectors: 2,
+            flags: 0,
+        };
+        mem.write_obj::<DiscardWriteZeroes>(wr_zeroes_1, GuestAddress(0x1000))
+            .unwrap();
+        // Write zeroes at offset 0xA00 in file, 1 sector = 0x200 bytes.
+        let wr_zeroes_2 = DiscardWriteZeroes {
+            sector: 5,
+            num_sectors: 1,
+            flags: 0,
+        };
+        mem.write_obj::<DiscardWriteZeroes>(wr_zeroes_2, GuestAddress(0x4000))
+            .unwrap();
+
+        let v = [
+            RawDescriptor::from(Descriptor::new(0x10_0000, 0x100, 0, 0)),
+            RawDescriptor::from(Descriptor::new(
+                0x1000,
+                DiscardWriteZeroes::LEN as u32,
+                0,
+                0,
+            )),
+            RawDescriptor::from(Descriptor::new(
+                0x4000,
+                DiscardWriteZeroes::LEN as u32,
+                0,
+                0,
+            )),
+            RawDescriptor::from(Descriptor::new(
+                0x40_0000,
+                0x100,
+                VRING_DESC_F_WRITE as u16,
+                0,
+            )),
+        ];
+        vq.build_desc_chain(&v).unwrap();
+        let mut queue: Queue = vq.create_queue().unwrap();
+
+        let req_header = RequestHeader {
+            request_type: VIRTIO_BLK_T_WRITE_ZEROES,
+            _reserved: 0,
+            sector: 2,
+        };
+        mem.write_obj::<RequestHeader>(req_header, GuestAddress(0x10_0000))
+            .unwrap();
+
+        {
+            let mem_atomic: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>> =
+                GuestMemoryAtomic::from(Arc::new(mem.clone()));
+            let mut chain = queue.pop_descriptor_chain(mem_atomic.memory()).unwrap();
+            let mut request = Request::parse(&mut chain, None).unwrap();
+
+            // 0 bytes should've been written in memory.
+            request
+                .execute_async(
+                    chain.memory(),
+                    disk_nsectors,
+                    disk_image_async.as_mut(),
+                    disk_image_id,
+                    chain.head_index() as u64,
+                    false,
+                )
+                .unwrap();
+
+            // expected file data:
+            // 0x000-0x300: 0
+            // 0x300-0x400: NON_ZERO_VALUE
+            // 0x400-0x800: 0
+            // 0x800-0xA00: NON_ZERO_VALUE + 1
+            // 0xA00-0xC00: 0
+            // 0xC00-0xD00: NON_ZERO_VALUE + 1
+            // 0xD00-0xE00: 0
+            // 0xE00-0x1000: NON_ZERO_VALUE
+            let data_vec = read_data_vec(
+                disk_image_async.as_mut(),
+                chain.head_index() as u64,
+                0x0,
+                0x300,
+            );
+            assert_eq!(data_vec, vec![0x0; 0x300]);
+
+            let data_vec = read_data_vec(
+                disk_image_async.as_mut(),
+                chain.head_index() as u64,
+                0x300,
+                0x100,
+            );
+            assert_eq!(data_vec, vec![NON_ZERO_VALUE; 0x100]);
+
+            let data_vec = read_data_vec(
+                disk_image_async.as_mut(),
+                chain.head_index() as u64,
+                0x400,
+                0x400,
+            );
+            assert_eq!(data_vec, vec![0x0; 0x400]);
+
+            let data_vec = read_data_vec(
+                disk_image_async.as_mut(),
+                chain.head_index() as u64,
+                0x800,
+                0x200,
+            );
+            assert_eq!(data_vec, vec![NON_ZERO_VALUE + 1; 0x200]);
+
+            let data_vec = read_data_vec(
+                disk_image_async.as_mut(),
+                chain.head_index() as u64,
+                0xA00,
+                0x200,
+            );
+            assert_eq!(data_vec, vec![0; 0x200]);
+
+            let data_vec = read_data_vec(
+                disk_image_async.as_mut(),
+                chain.head_index() as u64,
+                0xC00,
+                0x100,
+            );
+            assert_eq!(data_vec, vec![NON_ZERO_VALUE + 1; 0x100]);
+
+            let data_vec = read_data_vec(
+                disk_image_async.as_mut(),
+                chain.head_index() as u64,
+                0xD00,
+                0x100,
+            );
+            assert_eq!(data_vec, vec![0; 0x100]);
+
+            let data_vec = read_data_vec(
+                disk_image_async.as_mut(),
+                chain.head_index() as u64,
+                0xE00,
+                0x100,
+            );
+            assert_eq!(data_vec, vec![NON_ZERO_VALUE; 0x100]);
+        }
+
+        // Test discard request.
+        let discard_req = DiscardWriteZeroes {
+            sector: 7,
+            num_sectors: 1,
+            flags: 0,
+        };
+        mem.write_obj::<DiscardWriteZeroes>(discard_req, GuestAddress(0x1000))
+            .unwrap();
+
+        let v = [
+            RawDescriptor::from(Descriptor::new(0x10_0000, 0x100, 0, 0)),
+            RawDescriptor::from(Descriptor::new(
+                0x1000,
+                DiscardWriteZeroes::LEN as u32,
+                0,
+                0,
+            )),
+            RawDescriptor::from(Descriptor::new(
+                0x40_0000,
+                0x100,
+                VRING_DESC_F_WRITE as u16,
+                0,
+            )),
+        ];
+        vq.build_desc_chain(&v).unwrap();
+        let mut queue: Queue = vq.create_queue().unwrap();
+
+        let req_header = RequestHeader {
+            request_type: VIRTIO_BLK_T_DISCARD,
+            _reserved: 0,
+            sector: 7,
+        };
+        mem.write_obj::<RequestHeader>(req_header, GuestAddress(0x10_0000))
+            .unwrap();
+
+        {
+            let mem_atomic: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>> =
+                GuestMemoryAtomic::from(Arc::new(mem.clone()));
+            let mut chain = queue.pop_descriptor_chain(mem_atomic.memory()).unwrap();
+            let mut request = Request::parse(&mut chain, None).unwrap();
+
+            request
+                .execute_async(
+                    chain.memory(),
+                    disk_nsectors,
+                    disk_image_async.as_mut(),
+                    disk_image_id,
+                    chain.head_index() as u64,
+                    false,
+                )
+                .unwrap();
+
+            let data_vec = read_data_vec(
+                disk_image_async.as_mut(),
+                chain.head_index() as u64,
+                0xE00,
+                0x200,
+            );
+            assert_eq!(data_vec, vec![0x0; 0x200]);
+            // Even though we punched a hole at the end of the file, the file size should remain the
+            // same since FALLOC_FL_PUNCH_HOLE is used with FALLOC_FL_KEEP_SIZE.
+            assert_eq!(disk_image.size().unwrap(), 0x1000);
+        }
+
+        // Test that write zeroes request with unmap bit set is okay.
+        let wr_zeroes_req = DiscardWriteZeroes {
+            sector: 4,
+            num_sectors: 1,
+            flags: 0x0001,
+        };
+        mem.write_obj::<DiscardWriteZeroes>(wr_zeroes_req, GuestAddress(0x1000))
+            .unwrap();
+
+        let v = [
+            RawDescriptor::from(Descriptor::new(0x10_0000, 0x100, 0, 0)),
+            RawDescriptor::from(Descriptor::new(
+                0x1000,
+                DiscardWriteZeroes::LEN as u32,
+                0,
+                0,
+            )),
+            RawDescriptor::from(Descriptor::new(
+                0x40_0000,
+                0x100,
+                VRING_DESC_F_WRITE as u16,
+                0,
+            )),
+        ];
+        vq.build_desc_chain(&v).unwrap();
+        let mut queue: Queue = vq.create_queue().unwrap();
+
+        let req_header = RequestHeader {
+            request_type: VIRTIO_BLK_T_WRITE_ZEROES,
+            _reserved: 0,
+            sector: 7,
+        };
+        mem.write_obj::<RequestHeader>(req_header, GuestAddress(0x10_0000))
+            .unwrap();
+
+        {
+            let mem_atomic: GuestMemoryAtomic<GuestMemoryMmap<AtomicBitmap>> =
+                GuestMemoryAtomic::from(Arc::new(mem.clone()));
+            let mut chain = queue.pop_descriptor_chain(mem_atomic.memory()).unwrap();
+            let mut request = Request::parse(&mut chain, None).unwrap();
+
+            let data_vec = read_data_vec(
+                disk_image_async.as_mut(),
+                chain.head_index() as u64,
+                0x800,
+                0x200,
+            );
+            // Data is != 0 before the write zeroes request.
+            assert_eq!(data_vec, vec![NON_ZERO_VALUE + 1; 0x200]);
+
+            // Let's write some data in the file right before and after the fourth sector to confirm
+            // that those regions won't be zeroed out.
+            // After the fourth sector:
+            let mut v = vec![NON_ZERO_VALUE + 2; 0x200];
+            disk_image_async
+                .write_vectored(
+                    0xA00 as libc::off_t,
+                    &[libc::iovec {
+                        iov_base: v.as_mut_ptr() as *mut libc::c_void,
+                        iov_len: v.len() as libc::size_t,
+                    }],
+                    chain.head_index() as u64,
+                )
+                .unwrap();
+            // Before the fourth sector:
+            disk_image_async
+                .write_vectored(
+                    0x600 as libc::off_t,
+                    &[libc::iovec {
+                        iov_base: v.as_mut_ptr() as *mut libc::c_void,
+                        iov_len: v.len() as libc::size_t,
+                    }],
+                    chain.head_index() as u64,
+                )
+                .unwrap();
+
+            // 0 bytes should've been written in memory.
+            request
+                .execute_async(
+                    chain.memory(),
+                    disk_nsectors,
+                    disk_image_async.as_mut(),
+                    disk_image_id,
+                    chain.head_index() as u64,
+                    false,
+                )
+                .unwrap();
+
+            assert_eq!(
+                read_data_vec(
+                    disk_image_async.as_mut(),
+                    chain.head_index() as u64,
+                    0x600,
+                    0x200,
+                ),
+                vec![NON_ZERO_VALUE + 2; 0x200]
+            );
+            assert_eq!(
+                read_data_vec(
+                    disk_image_async.as_mut(),
+                    chain.head_index() as u64,
+                    0x800,
+                    0x200,
+                ),
+                vec![0; 0x200]
+            );
+            assert_eq!(
+                read_data_vec(
+                    disk_image_async.as_mut(),
+                    chain.head_index() as u64,
+                    0xA00,
+                    0x200,
+                ),
+                vec![NON_ZERO_VALUE + 2; 0x200]
+            );
+        }
     }
 }

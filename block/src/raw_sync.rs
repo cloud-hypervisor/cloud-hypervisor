@@ -4,7 +4,7 @@
 
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{Seek, SeekFrom};
+use std::io::{Error, ErrorKind, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 
 use log::warn;
@@ -14,6 +14,8 @@ use crate::DiskTopology;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
+
+const ZERO_BUFFER_SIZE: usize = 64 * 1024;
 
 pub struct RawFileDiskSync {
     file: File,
@@ -138,5 +140,123 @@ impl AsyncIo for RawFileSync {
 
     fn next_completed_request(&mut self) -> Option<(u64, i32)> {
         self.completion_list.pop_front()
+    }
+
+    fn punch_hole(&mut self, offset: u64, len: u64, user_data: u64) -> AsyncIoResult<()> {
+        // SAFETY: FFI call with valid arguments
+        let result = unsafe {
+            libc::fallocate(
+                self.fd,
+                libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
+                offset as libc::off_t,
+                len as libc::off_t,
+            )
+        };
+        if result < 0 {
+            return Err(AsyncIoError::PunchHole(std::io::Error::last_os_error()));
+        }
+        self.completion_list.push_back((user_data, result as i32));
+        self.eventfd.write(1).unwrap();
+        Ok(())
+    }
+
+    fn write_zeroes_at(
+        &mut self,
+        offset: u64,
+        len: usize,
+        user_data: Option<u64>,
+    ) -> std::io::Result<usize> {
+        // SAFETY: FFI call with valid arguments
+        if unsafe {
+            libc::fallocate(
+                self.fd,
+                libc::FALLOC_FL_ZERO_RANGE | libc::FALLOC_FL_KEEP_SIZE,
+                offset as libc::off_t,
+                len as libc::off_t,
+            )
+        } == 0
+        {
+            return Ok(len);
+        }
+
+        // fall back to writing a buffer of zeroes until we have written up to length.
+        let zero_buffer = [0u8; ZERO_BUFFER_SIZE];
+        let mut total_written = 0;
+        let mut current_offset = offset;
+
+        while total_written < len {
+            let bytes_to_write = std::cmp::min(len - total_written, ZERO_BUFFER_SIZE);
+            let iovs = [libc::iovec {
+                // SAFETY: a pointer to our stack buffer
+                iov_base: zero_buffer.as_ptr() as *mut libc::c_void,
+                iov_len: bytes_to_write,
+            }];
+
+            let bytes_written = loop {
+                // SAFETY: FFI call with valid arguments. We provide a valid file descriptor,
+                // a pointer to our iovs array, the count of iovs (1), and the offset.
+                let result = unsafe {
+                    libc::pwritev(
+                        self.fd,
+                        iovs.as_ptr(),
+                        iovs.len() as libc::c_int,
+                        current_offset as libc::off_t,
+                    )
+                };
+                if result < 0 {
+                    let err = std::io::Error::last_os_error();
+                    if err.kind() == ErrorKind::Interrupted {
+                        continue;
+                    }
+                    return Err(err);
+                }
+                break result as usize;
+            };
+            if bytes_written == 0 {
+                return Err(std::io::Error::new(
+                    ErrorKind::WriteZero,
+                    "failed to write whole buffer to file",
+                ));
+            }
+            total_written += bytes_written;
+            current_offset += bytes_written as u64;
+        }
+        if let Some(user_data) = user_data {
+            self.completion_list
+                .push_back((user_data, total_written as i32));
+            self.eventfd.write(1)?;
+        }
+        Ok(total_written)
+    }
+
+    fn write_all_zeroes_at(
+        &mut self,
+        mut offset: u64,
+        mut length: usize,
+        user_data: u64,
+    ) -> AsyncIoResult<()> {
+        let total = length;
+        while length > 0 {
+            match self.write_zeroes_at(offset, length, None) {
+                Ok(0) => return Err(AsyncIoError::WriteZeroes(Error::from(ErrorKind::WriteZero))),
+                Ok(bytes_written) => {
+                    length = length
+                        .checked_sub(bytes_written)
+                        .ok_or_else(|| AsyncIoError::WriteZeroes(Error::from(ErrorKind::Other)))?;
+                    offset = offset
+                        .checked_add(bytes_written as u64)
+                        .ok_or_else(|| AsyncIoError::WriteZeroes(Error::from(ErrorKind::Other)))?;
+                }
+                Err(e) => {
+                    // If the operation was interrupted, we should retry it.
+                    if e.kind() != ErrorKind::Interrupted {
+                        return Err(AsyncIoError::WriteZeroes(e));
+                    }
+                }
+            }
+        }
+        self.completion_list.push_back((user_data, total as i32));
+        self.eventfd.write(1).unwrap();
+        Ok(())
     }
 }

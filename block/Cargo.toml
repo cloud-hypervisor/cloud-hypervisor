@@ -31,5 +31,8 @@ vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { workspace = true }
 zstd = "0.13"
 
+[dev-dependencies]
+virtio-queue = { workspace = true, features = ["test-utils"] }
+
 [lints]
 workspace = true

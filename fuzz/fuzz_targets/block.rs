@@ -59,6 +59,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
         PathBuf::from(""),
         false,
         false,
+        false,
         2,
         256,
         None,

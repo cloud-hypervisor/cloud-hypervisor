@@ -2784,6 +2784,7 @@ impl DeviceManager {
                     .clone(),
                 disk_cfg.readonly,
                 self.force_iommu | disk_cfg.iommu,
+                disk_cfg.sparse,
                 disk_cfg.num_queues,
                 disk_cfg.queue_size,
                 disk_cfg.serial.clone(),
