@@ -242,6 +242,15 @@ pub struct VirtQueueAffinity {
     pub host_cpus: Vec<usize>,
 }
 
+// for discard DiscardWriteZeroesMode::On==DiscardWriteZeroesMode::Unmap
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub enum DiscardWriteZeroesMode {
+    #[default]
+    On,
+    Off,
+    Unmap, // Special case of write zeroes
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DiskConfig {
     pub path: Option<PathBuf>,
@@ -276,6 +285,10 @@ pub struct DiskConfig {
     pub serial: Option<String>,
     #[serde(default)]
     pub queue_affinity: Option<Vec<VirtQueueAffinity>>,
+    #[serde(default)]
+    pub discard: DiscardWriteZeroesMode,
+    #[serde(default)]
+    pub detect_zeroes: DiscardWriteZeroesMode,
 }
 
 impl ApplyLandlock for DiskConfig {
