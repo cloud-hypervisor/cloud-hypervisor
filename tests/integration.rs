@@ -3342,11 +3342,7 @@ mod common_parallel {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
 
-            let grep_cmd = if cfg!(target_arch = "x86_64") {
-                "grep -c PCI-MSI /proc/interrupts"
-            } else {
-                "grep -c ITS-PCI-MSIX /proc/interrupts"
-            };
+            let grep_cmd = "grep -c PCI-MSI /proc/interrupts";
             assert_eq!(
                 guest
                     .ssh_command(grep_cmd)
