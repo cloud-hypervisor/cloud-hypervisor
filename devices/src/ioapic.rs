@@ -171,7 +171,7 @@ impl BusDevice for Ioapic {
             return None;
         }
 
-        debug!("IOAPIC_W @ offset 0x{:x}", offset);
+        trace!("IOAPIC_W @ offset 0x{:x}", offset);
 
         let value = LittleEndian::read_u32(data);
 
@@ -249,7 +249,7 @@ impl Ioapic {
     }
 
     fn ioapic_write(&mut self, val: u32) {
-        debug!("IOAPIC_W reg 0x{:x}, val 0x{:x}", self.reg_sel, val);
+        trace!("IOAPIC_W reg 0x{:x}, val 0x{:x}", self.reg_sel, val);
 
         match self.reg_sel as u8 {
             IOAPIC_REG_VERSION => {

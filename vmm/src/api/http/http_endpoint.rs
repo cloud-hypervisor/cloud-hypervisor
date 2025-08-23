@@ -4,6 +4,32 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+//! # HTTP Endpoints of the Cloud Hypervisor API
+//!
+//! ## Special Handling for virtio-net Devices Backed by Network File Descriptors (FDs)
+//!
+//! Some of the HTTP handlers here implement special logic for virtio-net
+//! devices **backed by network FDs** to enable live-migration, state save/
+//! resume (restore), and similar VM lifecycle events.
+//!
+//! The utilized mechanism requires that the control software (e.g., libvirt)
+//! connects to Cloud Hypervisor by using a UNIX domain socket and that it
+//! passes file descriptors (FDs) via _ancillary_ messages - specifically using
+//! the `SCM_RIGHTS` mechanism described in [`cmsg(3)`]. These ancillary
+//! messages must accompany the primary payload (HTTP JSON REST API in this
+//! case). The Linux kernel handles these messages by `dup()`ing the referenced
+//! FDs from the sender process into the receiving process, thereby ensuring
+//! they are valid and usable in the target context.
+//!
+//! Once these valid file descriptors are received here, we integrate the actual
+//! FDs into the VM's configuration, allowing the virtio-net device to
+//! function correctly with its backing network resources.
+//!
+//! We can receive these FDs as we use a **special** HTTP library that is aware
+//! of the just described mechanism.
+//!
+//! [`cmsg(3)`]: https://man7.org/linux/man-pages/man3/cmsg.3.html
+
 use std::fs::File;
 use std::os::unix::io::IntoRawFd;
 use std::sync::mpsc::Sender;
@@ -17,10 +43,10 @@ use crate::api::VmCoredump;
 use crate::api::{
     AddDisk, ApiAction, ApiError, ApiRequest, NetConfig, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem,
     VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBoot, VmConfig, VmCounters, VmDelete, VmNmi, VmPause,
-    VmPowerButton, VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore,
-    VmResume, VmSendMigration, VmShutdown, VmSnapshot,
+    VmPowerButton, VmReboot, VmReceiveMigration, VmReceiveMigrationData, VmRemoveDevice, VmResize,
+    VmResizeZone, VmRestore, VmResume, VmSendMigration, VmShutdown, VmSnapshot,
 };
-use crate::config::RestoreConfig;
+use crate::config::{RestoreConfig, RestoredNetConfig};
 use crate::cpu::Error as CpuError;
 use crate::vm::Error as VmError;
 
@@ -47,11 +73,27 @@ impl EndpointHandler for VmCreate {
                         };
 
                         if let Some(ref mut nets) = vm_config.net {
-                            if nets.iter().any(|net| net.fds.is_some()) {
-                                warn!("Ignoring FDs sent via the HTTP request body");
-                            }
-                            for net in nets {
-                                net.fds = None;
+                            let mut cfgs = nets.iter_mut().collect::<Vec<&mut _>>();
+                            let cfgs = cfgs.as_mut_slice();
+
+                            // For the VmCreate call, we do not accept FDs from the socket currently.
+                            // This call sets all FDs to null while doing the same logging as
+                            // similar code paths.
+                            let res = apply_new_fds_to_cfg::<NetConfig>(
+                                vec![],
+                                cfgs,
+                                &|cfg| cfg.id.as_deref(),
+                                &|_| 0,
+                                &|cfg| cfg.fds.as_deref(),
+                                &|cfg, value| {
+                                    assert!(value.is_none());
+                                    cfg.fds = None
+                                },
+                            )
+                            .map_err(|e| error_response(e, StatusCode::InternalServerError));
+
+                            if let Err(e) = res {
+                                return e;
                             }
                         }
 
@@ -187,11 +229,81 @@ vm_action_put_handler_body!(VmAddUserDevice);
 vm_action_put_handler_body!(VmRemoveDevice);
 vm_action_put_handler_body!(VmResizeZone);
 vm_action_put_handler_body!(VmSnapshot);
-vm_action_put_handler_body!(VmReceiveMigration);
 vm_action_put_handler_body!(VmSendMigration);
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 vm_action_put_handler_body!(VmCoredump);
+
+/// Applies FDs to the network config of a given device, as part of the special
+/// handling for virtio-net devices backed by network FDs.
+///
+/// See [module description] for more info.
+///
+/// [module description]: self
+fn apply_new_fds_to_cfg<T>(
+    // List of new files (well, actually FDs) that back up a virtio-net device.
+    files: Vec<File>,
+    // List of network configurations where each network can have `n` FDs.
+    network_cfgs: &mut [&mut T],
+    // Callback to return the ID.
+    network_cfg_extract_id: &impl Fn(&T) -> Option<&str>,
+    // Callback to extract the amount of expected FDs.
+    network_cfg_extract_num_fds_fn: &impl Fn(&T) -> usize,
+    // Callback to extract the FDs that are part of the type (transmitted via
+    // the HTTP body)
+    network_cfg_extract_fds_fn: &impl Fn(&T) -> Option<&[i32]>,
+    // Callback to set any FDs in the type to the new value. The new value
+    // is either `Some` with a non-empty Vector or `None`.
+    network_cfg_replace_fds: &impl Fn(&mut T, Option<Vec<i32>>),
+) -> Result<(), HttpError> {
+    let expected_fds: usize = network_cfgs
+        .iter()
+        .map(|cfg| network_cfg_extract_num_fds_fn(cfg))
+        .sum();
+
+    let mut fds = files
+        .into_iter()
+        .map(|f| f.into_raw_fd())
+        .collect::<Vec<i32>>();
+
+    if fds.len() != expected_fds {
+        error!(
+            "Number of FDs expected: {}, but received: {}",
+            expected_fds,
+            fds.len()
+        );
+        return Err(HttpError::BadRequest);
+    }
+
+    for network_cfg in network_cfgs {
+        let has_fds_from_http_body = network_cfg_extract_fds_fn(network_cfg).is_some();
+        if has_fds_from_http_body {
+            // Only FDs transmitted via an SCM_RIGHTS UNIX Domain Socket message
+            // are valid. Any provided over the HTTP API are set to `-1` in our
+            // specialized serializer callbacks.
+            warn!(
+                "FD numbers were present in HTTP request body for virtio-net device {:?} but will be ignored",
+                network_cfg_extract_id(network_cfg)
+            );
+
+            // Reset old value in any case; if there are FDs, they are invalid.
+            network_cfg_replace_fds(*network_cfg, None);
+        }
+
+        let n = network_cfg_extract_num_fds_fn(network_cfg);
+        if n > 0 {
+            let new_fds = fds.drain(..n).collect::<Vec<_>>();
+            log::debug!("Applying network FDs received via UNIX domain socket to virtio-net device: id={:?}, fds={new_fds:?}", network_cfg_extract_id(network_cfg));
+            network_cfg_replace_fds(*network_cfg, Some(new_fds));
+        }
+    }
+
+    // We checked that `fds.len() != expected_fds`; so if we panic here, we have a hard
+    // programming bug
+    assert!(fds.is_empty());
+
+    Ok(())
+}
 
 impl PutHandler for VmAddNet {
     fn handle_request(
@@ -199,18 +311,25 @@ impl PutHandler for VmAddNet {
         api_notifier: EventFd,
         api_sender: Sender<ApiRequest>,
         body: &Option<Body>,
-        mut files: Vec<File>,
+        files: Vec<File>,
     ) -> std::result::Result<Option<Body>, HttpError> {
         if let Some(body) = body {
             let mut net_cfg: NetConfig = serde_json::from_slice(body.raw())?;
-            if net_cfg.fds.is_some() {
-                warn!("Ignoring FDs sent via the HTTP request body");
-                net_cfg.fds = None;
-            }
-            if !files.is_empty() {
-                let fds = files.drain(..).map(|f| f.into_raw_fd()).collect();
-                net_cfg.fds = Some(fds);
-            }
+
+            let mut net_cfgs = [&mut net_cfg];
+            let num_fds = files.len();
+            apply_new_fds_to_cfg::<NetConfig>(
+                files,
+                &mut net_cfgs,
+                &|cfg| cfg.id.as_deref(),
+                // We only have one single network here, so it wants all available FDs.
+                &|_| num_fds,
+                &|cfg| cfg.fds.as_deref(),
+                &|cfg, value| {
+                    cfg.fds = value;
+                },
+            )?;
+
             self.send(api_notifier, api_sender, net_cfg)
                 .map_err(HttpError::ApiError)
         } else {
@@ -220,6 +339,44 @@ impl PutHandler for VmAddNet {
 }
 
 impl GetHandler for VmAddNet {}
+
+// Special Handling for virtio-net Devices Backed by Network File Descriptors
+//
+// See above.
+impl PutHandler for VmReceiveMigration {
+    fn handle_request(
+        &'static self,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+        body: &Option<Body>,
+        files: Vec<File>,
+    ) -> std::result::Result<Option<Body>, HttpError> {
+        if let Some(body) = body {
+            let mut net_cfg: VmReceiveMigrationData = serde_json::from_slice(body.raw())?;
+            if let Some(cfgs) = &mut net_cfg.net_fds {
+                let mut cfgs = cfgs.iter_mut().collect::<Vec<&mut _>>();
+                let cfgs = cfgs.as_mut_slice();
+                apply_new_fds_to_cfg::<RestoredNetConfig>(
+                    files,
+                    cfgs,
+                    &|cfg| Some(&cfg.id),
+                    &|cfg| cfg.num_fds,
+                    &|cfg| cfg.fds.as_deref(),
+                    &|cfg, value| {
+                        cfg.fds = value;
+                    },
+                )?;
+            }
+
+            self.send(api_notifier, api_sender, net_cfg)
+                .map_err(HttpError::ApiError)
+        } else {
+            Err(HttpError::BadRequest)
+        }
+    }
+}
+
+impl GetHandler for VmReceiveMigration {}
 
 impl PutHandler for VmResize {
     fn handle_request(
@@ -249,41 +406,32 @@ impl PutHandler for VmResize {
 
 impl GetHandler for VmResize {}
 
+// Special handling for virtio-net devices backed by network FDs.
+// See module description for more info.
 impl PutHandler for VmRestore {
     fn handle_request(
         &'static self,
         api_notifier: EventFd,
         api_sender: Sender<ApiRequest>,
         body: &Option<Body>,
-        mut files: Vec<File>,
+        files: Vec<File>,
     ) -> std::result::Result<Option<Body>, HttpError> {
         if let Some(body) = body {
             let mut restore_cfg: RestoreConfig = serde_json::from_slice(body.raw())?;
 
-            let mut fds = Vec::new();
-            if !files.is_empty() {
-                fds = files.drain(..).map(|f| f.into_raw_fd()).collect();
-            }
-            let expected_fds = match restore_cfg.net_fds {
-                Some(ref net_fds) => net_fds.iter().map(|net| net.num_fds).sum(),
-                None => 0,
-            };
-            if fds.len() != expected_fds {
-                error!(
-                    "Number of FDs expected: {}, but received: {}",
-                    expected_fds,
-                    fds.len()
-                );
-                return Err(HttpError::BadRequest);
-            }
-            if let Some(ref mut nets) = restore_cfg.net_fds {
-                warn!("Ignoring FDs sent via the HTTP request body");
-                let mut start_idx = 0;
-                for restored_net in nets.iter_mut() {
-                    let end_idx = start_idx + restored_net.num_fds;
-                    restored_net.fds = Some(fds[start_idx..end_idx].to_vec());
-                    start_idx = end_idx;
-                }
+            if let Some(cfgs) = restore_cfg.net_fds.as_mut() {
+                let mut cfgs = cfgs.iter_mut().collect::<Vec<&mut _>>();
+                let cfgs = cfgs.as_mut_slice();
+                apply_new_fds_to_cfg::<RestoredNetConfig>(
+                    files,
+                    cfgs,
+                    &|cfg| Some(&cfg.id),
+                    &|cfg| cfg.num_fds,
+                    &|cfg| cfg.fds.as_deref(),
+                    &|cfg, value| {
+                        cfg.fds = value;
+                    },
+                )?;
             }
 
             self.send(api_notifier, api_sender, restore_cfg)
