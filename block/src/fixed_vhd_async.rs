@@ -12,7 +12,7 @@ use crate::async_io::{
 };
 use crate::fixed_vhd::FixedVhd;
 use crate::raw_async::RawFileAsync;
-use crate::BlockBackend;
+use crate::{BatchRequest, BlockBackend};
 
 pub struct FixedVhdDiskAsync(FixedVhd);
 
@@ -105,5 +105,13 @@ impl AsyncIo for FixedVhdAsync {
 
     fn next_completed_request(&mut self) -> Option<(u64, i32)> {
         self.raw_file_async.next_completed_request()
+    }
+
+    fn batch_requests_enabled(&self) -> bool {
+        true
+    }
+
+    fn submit_batch_requests(&mut self, batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
+        self.raw_file_async.submit_batch_requests(batch_request)
     }
 }
