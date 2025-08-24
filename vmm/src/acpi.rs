@@ -314,16 +314,6 @@ fn create_srat_table(
             ))
         }
 
-        #[cfg(target_arch = "x86_64")]
-        for section in &node.sgx_epc_sections {
-            srat.append(MemoryAffinity::from_range(
-                section.start().raw_value(),
-                section.size(),
-                proximity_domain,
-                MemAffinityFlags::ENABLE,
-            ))
-        }
-
         for cpu in &node.cpus {
             #[cfg(target_arch = "x86_64")]
             let x2apic_id = arch::x86_64::get_x2apic_id(*cpu, topology);
