@@ -20,7 +20,7 @@ use std::{io, result};
 use anyhow::anyhow;
 use block::async_io::{AsyncIo, AsyncIoError, DiskFile};
 use block::fcntl::{get_lock_state, LockError, LockType};
-use block::{build_serial, fcntl, Request, RequestType, VirtioBlockConfig};
+use block::{build_serial, fcntl, ExecuteError, Request, RequestType, VirtioBlockConfig};
 use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
 use rate_limiter::TokenType;
 use seccompiler::SeccompAction;
@@ -144,11 +144,25 @@ struct BlockEpollHandler {
     inflight_requests: VecDeque<(u16, Request)>,
     rate_limiter: Option<RateLimiterGroupHandle>,
     access_platform: Option<Arc<dyn AccessPlatform>>,
-    read_only: bool,
     host_cpus: Option<Vec<usize>>,
+    acked_features: u64,
+}
+
+fn has_feature(features: u64, feature_flag: u64) -> bool {
+    (features & (1u64 << feature_flag)) != 0
 }
 
 impl BlockEpollHandler {
+    fn check_request(features: u64, request_type: RequestType) -> result::Result<(), ExecuteError> {
+        if has_feature(features, VIRTIO_BLK_F_RO.into()) && request_type != RequestType::In {
+            // For virtio spec compliance
+            // "A device MUST set the status byte to VIRTIO_BLK_S_IOERR for a write request
+            // if the VIRTIO_BLK_F_RO feature if offered, and MUST NOT write any data."
+            return Err(ExecuteError::ReadOnly);
+        }
+        Ok(())
+    }
+
     fn process_queue_submit(&mut self) -> Result<()> {
         let queue = &mut self.queue;
 
@@ -159,10 +173,8 @@ impl BlockEpollHandler {
             // For virtio spec compliance
             // "A device MUST set the status byte to VIRTIO_BLK_S_IOERR for a write request
             // if the VIRTIO_BLK_F_RO feature if offered, and MUST NOT write any data."
-            if self.read_only
-                && (request.request_type == RequestType::Out
-                    || request.request_type == RequestType::Flush)
-            {
+            if let Err(e) = Self::check_request(self.acked_features, request.request_type) {
+                warn!("Request check failed: {:x?} {:?}", request, e);
                 desc_chain
                     .memory()
                     .write_obj(VIRTIO_BLK_S_IOERR, request.status_addr)
@@ -583,7 +595,6 @@ pub struct Block {
     seccomp_action: SeccompAction,
     rate_limiter: Option<Arc<RateLimiterGroup>>,
     exit_evt: EventFd,
-    read_only: bool,
     serial: Vec<u8>,
     queue_affinity: BTreeMap<u16, Vec<usize>>,
 }
@@ -715,15 +726,18 @@ impl Block {
             seccomp_action,
             rate_limiter,
             exit_evt,
-            read_only,
             serial,
             queue_affinity,
         })
     }
 
+    fn read_only(&self) -> bool {
+        has_feature(self.features(), VIRTIO_BLK_F_RO.into())
+    }
+
     /// Tries to set an advisory lock for the corresponding disk image.
     pub fn try_lock_image(&mut self) -> Result<()> {
-        let lock_type = match self.read_only {
+        let lock_type = match self.read_only() {
             true => LockType::Read,
             false => LockType::Write,
         };
@@ -904,8 +918,8 @@ impl VirtioDevice for Block {
                     .transpose()
                     .unwrap(),
                 access_platform: self.common.access_platform.clone(),
-                read_only: self.read_only,
                 host_cpus: self.queue_affinity.get(&queue_idx).cloned(),
+                acked_features: self.common.acked_features,
             };
 
             let paused = self.common.paused.clone();
