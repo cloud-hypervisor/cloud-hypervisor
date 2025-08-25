@@ -5,7 +5,7 @@
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
 
-use crate::{read_aligned_block_size, DiskTopology};
+use crate::{DiskTopology, read_aligned_block_size};
 
 #[derive(Clone, Copy)]
 pub struct VhdFooter {
@@ -123,7 +123,7 @@ mod tests {
 
     use vmm_sys_util::tempfile::TempFile;
 
-    use super::{is_fixed_vhd, VhdFooter};
+    use super::{VhdFooter, is_fixed_vhd};
 
     fn valid_fixed_vhd_footer() -> Vec<u8> {
         vec![

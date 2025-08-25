@@ -10,7 +10,7 @@ extern crate log;
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{stdout, Read, Write};
+use std::io::{Read, Write, stdout};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -27,12 +27,12 @@ use anyhow::anyhow;
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
 use api::http::HttpApiHandle;
-use console_devices::{pre_create_console_devices, ConsoleInfo};
+use console_devices::{ConsoleInfo, pre_create_console_devices};
 use landlock::LandlockError;
-use libc::{tcsetattr, termios, EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW};
+use libc::{EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW, tcsetattr, termios};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
-use seccompiler::{apply_filter, SeccompAction};
+use seccompiler::{SeccompAction, apply_filter};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
 use signal_hook::iterator::{Handle, Signals};
@@ -50,7 +50,7 @@ use crate::api::{
     ApiRequest, ApiResponse, RequestHandler, VmInfoResponse, VmReceiveMigrationData,
     VmSendMigrationData, VmmPingResponse,
 };
-use crate::config::{add_to_config, RestoreConfig};
+use crate::config::{RestoreConfig, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggable;
 use crate::landlock::Landlock;
@@ -58,7 +58,7 @@ use crate::memory_manager::MemoryManager;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
 use crate::migration::{recv_vm_config, recv_vm_state};
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
@@ -727,15 +727,14 @@ impl Vmm {
                     thread::Builder::new()
                         .name("vmm_signal_handler".to_string())
                         .spawn(move || {
-                            if !signal_handler_seccomp_filter.is_empty() {
-                                if let Err(e) = apply_filter(&signal_handler_seccomp_filter)
+                            if !signal_handler_seccomp_filter.is_empty() && let Err(e) = apply_filter(&signal_handler_seccomp_filter)
                                     .map_err(Error::ApplySeccompFilter)
                                 {
                                     error!("Error applying seccomp filter: {:?}", e);
                                     exit_evt.write(1).ok();
                                     return;
                                 }
-                            }
+
                             if landlock_enable{
                                 match Landlock::new() {
                                     Ok(landlock) => {
@@ -1831,10 +1830,10 @@ impl RequestHandler for Vmm {
             if let Some(desired_ram) = desired_ram {
                 config.memory.size = desired_ram;
             }
-            if let Some(desired_balloon) = desired_balloon {
-                if let Some(balloon_config) = &mut config.balloon {
-                    balloon_config.size = desired_balloon;
-                }
+            if let Some(desired_balloon) = desired_balloon
+                && let Some(balloon_config) = &mut config.balloon
+            {
+                balloon_config.size = desired_balloon;
             }
             Ok(())
         }
@@ -2303,16 +2302,16 @@ impl RequestHandler for Vmm {
                 error!("Migration failed: {:?}", migration_err);
 
                 // Stop logging dirty pages only for non-local migrations
-                if !send_data_migration.local {
-                    if let Err(e) = vm.stop_dirty_log() {
-                        return e;
-                    }
+                if !send_data_migration.local
+                    && let Err(e) = vm.stop_dirty_log()
+                {
+                    return e;
                 }
 
-                if vm.get_state().unwrap() == VmState::Paused {
-                    if let Err(e) = vm.resume() {
-                        return e;
-                    }
+                if vm.get_state().unwrap() == VmState::Paused
+                    && let Err(e) = vm.resume()
+                {
+                    return e;
                 }
 
                 migration_err
@@ -2468,14 +2467,15 @@ mod unit_tests {
         ));
 
         let _ = vmm.vm_create(create_dummy_vm_config());
-        assert!(vmm
-            .vm_config
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .devices
-            .is_none());
+        assert!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .devices
+                .is_none()
+        );
 
         assert!(vmm.vm_add_device(device_config.clone()).unwrap().is_none());
         assert_eq!(
@@ -2515,19 +2515,21 @@ mod unit_tests {
         ));
 
         let _ = vmm.vm_create(create_dummy_vm_config());
-        assert!(vmm
-            .vm_config
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .user_devices
-            .is_none());
+        assert!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .user_devices
+                .is_none()
+        );
 
-        assert!(vmm
-            .vm_add_user_device(user_device_config.clone())
-            .unwrap()
-            .is_none());
+        assert!(
+            vmm.vm_add_user_device(user_device_config.clone())
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(
             vmm.vm_config
                 .as_ref()
@@ -2564,14 +2566,15 @@ mod unit_tests {
         ));
 
         let _ = vmm.vm_create(create_dummy_vm_config());
-        assert!(vmm
-            .vm_config
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .disks
-            .is_none());
+        assert!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .disks
+                .is_none()
+        );
 
         assert!(vmm.vm_add_disk(disk_config.clone()).unwrap().is_none());
         assert_eq!(
@@ -2649,14 +2652,15 @@ mod unit_tests {
         ));
 
         let _ = vmm.vm_create(create_dummy_vm_config());
-        assert!(vmm
-            .vm_config
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .pmem
-            .is_none());
+        assert!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .pmem
+                .is_none()
+        );
 
         assert!(vmm.vm_add_pmem(pmem_config.clone()).unwrap().is_none());
         assert_eq!(
@@ -2698,14 +2702,15 @@ mod unit_tests {
         ));
 
         let _ = vmm.vm_create(create_dummy_vm_config());
-        assert!(vmm
-            .vm_config
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .net
-            .is_none());
+        assert!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .net
+                .is_none()
+        );
 
         assert!(vmm.vm_add_net(net_config.clone()).unwrap().is_none());
         assert_eq!(
@@ -2744,14 +2749,15 @@ mod unit_tests {
         ));
 
         let _ = vmm.vm_create(create_dummy_vm_config());
-        assert!(vmm
-            .vm_config
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .vdpa
-            .is_none());
+        assert!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .vdpa
+                .is_none()
+        );
 
         assert!(vmm.vm_add_vdpa(vdpa_config.clone()).unwrap().is_none());
         assert_eq!(
@@ -2790,14 +2796,15 @@ mod unit_tests {
         ));
 
         let _ = vmm.vm_create(create_dummy_vm_config());
-        assert!(vmm
-            .vm_config
-            .as_ref()
-            .unwrap()
-            .lock()
-            .unwrap()
-            .vsock
-            .is_none());
+        assert!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .vsock
+                .is_none()
+        );
 
         assert!(vmm.vm_add_vsock(vsock_config.clone()).unwrap().is_none());
         assert_eq!(

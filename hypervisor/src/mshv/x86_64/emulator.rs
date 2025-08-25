@@ -44,12 +44,12 @@ impl MshvEmulatorContext<'_> {
             gpa
         );
 
-        if let Some(vm_ops) = &self.vcpu.vm_ops {
-            if vm_ops.guest_mem_read(gpa, data).is_err() {
-                vm_ops
-                    .mmio_read(gpa, data)
-                    .map_err(|e| PlatformError::MemoryReadFailure(e.into()))?;
-            }
+        if let Some(vm_ops) = &self.vcpu.vm_ops
+            && vm_ops.guest_mem_read(gpa, data).is_err()
+        {
+            vm_ops
+                .mmio_read(gpa, data)
+                .map_err(|e| PlatformError::MemoryReadFailure(e.into()))?;
         }
 
         Ok(())
@@ -94,12 +94,12 @@ impl MshvEmulatorContext<'_> {
             gpa
         );
 
-        if let Some(vm_ops) = &self.vcpu.vm_ops {
-            if vm_ops.guest_mem_write(gpa, data).is_err() {
-                vm_ops
-                    .mmio_write(gpa, data)
-                    .map_err(|e| PlatformError::MemoryWriteFailure(e.into()))?;
-            }
+        if let Some(vm_ops) = &self.vcpu.vm_ops
+            && vm_ops.guest_mem_write(gpa, data).is_err()
+        {
+            vm_ops
+                .mmio_write(gpa, data)
+                .map_err(|e| PlatformError::MemoryWriteFailure(e.into()))?;
         }
 
         Ok(())

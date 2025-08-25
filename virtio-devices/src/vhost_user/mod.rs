@@ -10,11 +10,11 @@ use std::sync::{Arc, Barrier, Mutex};
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use vhost::Error as VhostError;
 use vhost::vhost_user::message::{
     VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontendReqHandler};
-use vhost::Error as VhostError;
 use virtio_queue::{Error as QueueError, Queue};
 use vm_memory::mmap::MmapRegionError;
 use vm_memory::{Address, Error as MmapError, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
@@ -24,10 +24,10 @@ use vmm_sys_util::eventfd::EventFd;
 use vu_common_ctrl::VhostUserHandle;
 
 use crate::{
-    ActivateError, EpollHelper, EpollHelperError, EpollHelperHandler, GuestMemoryMmap,
-    GuestRegionMmap, VirtioInterrupt, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_IN_ORDER,
-    VIRTIO_F_NOTIFICATION_DATA, VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX,
-    VIRTIO_F_RING_INDIRECT_DESC, VIRTIO_F_VERSION_1,
+    ActivateError, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
+    GuestMemoryMmap, GuestRegionMmap, VIRTIO_F_IN_ORDER, VIRTIO_F_NOTIFICATION_DATA,
+    VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_RING_INDIRECT_DESC,
+    VIRTIO_F_VERSION_1, VirtioInterrupt,
 };
 
 pub mod blk;

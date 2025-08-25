@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_devices::RateLimiterConfig;
 
-use crate::landlock::LandlockError;
 use crate::Landlock;
+use crate::landlock::LandlockError;
 
 pub type LandlockResult<T> = result::Result<T, LandlockError>;
 
@@ -353,12 +353,16 @@ pub fn default_netconfig_tap() -> Option<String> {
 }
 
 pub fn default_netconfig_ip() -> IpAddr {
-    warn!("Deprecation warning: No IP address provided. A default IP address is assigned. This behavior will be deprecated soon.");
+    warn!(
+        "Deprecation warning: No IP address provided. A default IP address is assigned. This behavior will be deprecated soon."
+    );
     IpAddr::V4(Ipv4Addr::new(192, 168, 249, 1))
 }
 
 pub fn default_netconfig_mask() -> IpAddr {
-    warn!("Deprecation warning: No network mask provided. A default network mask is assigned. This behavior will be deprecated soon.");
+    warn!(
+        "Deprecation warning: No network mask provided. A default network mask is assigned. This behavior will be deprecated soon."
+    );
     IpAddr::V4(Ipv4Addr::new(255, 255, 255, 0))
 }
 
@@ -383,7 +387,9 @@ where
     S: serde::Serializer,
 {
     if let Some(x) = x {
-        warn!("'NetConfig' contains FDs that can't be serialized correctly. Serializing them as invalid FDs.");
+        warn!(
+            "'NetConfig' contains FDs that can't be serialized correctly. Serializing them as invalid FDs."
+        );
         let invalid_fds = vec![-1; x.len()];
         s.serialize_some(&invalid_fds)
     } else {
@@ -397,7 +403,9 @@ where
 {
     let invalid_fds: Option<Vec<i32>> = Option::deserialize(d)?;
     if let Some(invalid_fds) = invalid_fds {
-        warn!("'NetConfig' contains FDs that can't be deserialized correctly. Deserializing them as invalid FDs.");
+        warn!(
+            "'NetConfig' contains FDs that can't be deserialized correctly. Deserializing them as invalid FDs."
+        );
         Ok(Some(vec![-1; invalid_fds.len()]))
     } else {
         Ok(None)

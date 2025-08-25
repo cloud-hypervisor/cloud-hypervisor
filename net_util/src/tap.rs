@@ -15,8 +15,8 @@ use thiserror::Error;
 use vmm_sys_util::ioctl::{ioctl_with_mut_ref, ioctl_with_ref, ioctl_with_val};
 
 use super::{
-    create_inet_socket, create_sockaddr, create_unix_socket, vnet_hdr_len, Error as NetUtilError,
-    MacAddr,
+    Error as NetUtilError, MacAddr, create_inet_socket, create_sockaddr, create_unix_socket,
+    vnet_hdr_len,
 };
 use crate::mac::MAC_ADDR_LEN;
 
@@ -130,7 +130,8 @@ fn ipv6_mask_to_prefix(mask: Ipv6Addr) -> Result<u8> {
 
 impl Tap {
     unsafe fn ioctl_with_mut_ref<F: AsRawFd, T>(fd: &F, req: c_ulong, arg: &mut T) -> Result<()> {
-        let ret = ioctl_with_mut_ref(fd, req, arg);
+        // SAFETY: We trust the kernel and the parameters.
+        let ret = unsafe { ioctl_with_mut_ref(fd, req, arg) };
         if ret < 0 {
             return Err(Error::IoctlError(req, IoError::last_os_error()));
         }
@@ -139,7 +140,8 @@ impl Tap {
     }
 
     unsafe fn ioctl_with_ref<F: AsRawFd, T>(fd: &F, req: c_ulong, arg: &T) -> Result<()> {
-        let ret = ioctl_with_ref(fd, req, arg);
+        // SAFETY: We trust the kernel and the parameters.
+        let ret = unsafe { ioctl_with_ref(fd, req, arg) };
         if ret < 0 {
             return Err(Error::IoctlError(req, IoError::last_os_error()));
         }
@@ -148,7 +150,8 @@ impl Tap {
     }
 
     unsafe fn ioctl_with_val<F: AsRawFd>(fd: &F, req: c_ulong, arg: c_ulong) -> Result<()> {
-        let ret = ioctl_with_val(fd, req, arg);
+        // SAFETY: We trust the kernel and the parameters.
+        let ret = unsafe { ioctl_with_val(fd, req, arg) };
         if ret < 0 {
             return Err(Error::IoctlError(req, IoError::last_os_error()));
         }
@@ -539,7 +542,7 @@ impl AsRawFd for Tap {
 #[cfg(test)]
 mod tests {
     use std::net::Ipv4Addr;
-    use std::sync::{mpsc, LazyLock, Mutex};
+    use std::sync::{LazyLock, Mutex, mpsc};
     use std::time::Duration;
     use std::{str, thread};
 
@@ -848,13 +851,15 @@ mod tests {
 
         // We use a separate thread to wait for the test packet because the API exposed by pnet is
         // blocking. This thread will be killed when the main thread exits.
-        let _handle = thread::spawn(move || loop {
-            let buf = rx.next().unwrap();
-            let p = ParsedPkt::new(buf);
-            p.print();
+        let _handle = thread::spawn(move || {
+            loop {
+                let buf = rx.next().unwrap();
+                let p = ParsedPkt::new(buf);
+                p.print();
 
-            if let Some(ref udp) = p.udp {
-                if payload == udp.payload() {
+                if let Some(ref udp) = p.udp
+                    && payload == udp.payload()
+                {
                     channel_tx.send(true).unwrap();
                     break;
                 }
