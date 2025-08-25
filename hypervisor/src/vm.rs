@@ -126,6 +126,11 @@ pub enum HypervisorVmError {
     #[error("Failed to enable split Irq")]
     EnableSplitIrq(#[source] anyhow::Error),
     ///
+    /// Enable x2apic API error
+    ///
+    #[error("Failed to enable x2apic API")]
+    EnableX2ApicApi(#[source] anyhow::Error),
+    ///
     /// Enable SGX attribute error
     ///
     #[error("Failed to enable SGX attribute")]
@@ -439,6 +444,11 @@ pub trait Vm: Send + Sync + Any {
     #[cfg(feature = "sev_snp")]
     fn gain_page_access(&self, _gpa: u64, _size: u32) -> Result<()> {
         Ok(())
+    }
+
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    fn enable_x2apic_api(&self) -> Result<()> {
+        unimplemented!("x2Apic is only supported on KVM/Linux hosts")
     }
 }
 
