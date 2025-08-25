@@ -126,6 +126,11 @@ pub enum HypervisorVmError {
     #[error("Failed to enable split Irq")]
     EnableSplitIrq(#[source] anyhow::Error),
     ///
+    /// Enable x2apic API error
+    ///
+    #[error("Failed to enable x2apic API")]
+    EnableX2ApicApi(#[source] anyhow::Error),
+    ///
     /// Enable SGX attribute error
     ///
     #[error("Failed to enable SGX attribute")]
@@ -358,6 +363,8 @@ pub trait Vm: Send + Sync + Any {
     /// Enable split Irq capability
     #[cfg(target_arch = "x86_64")]
     fn enable_split_irq(&self) -> Result<()>;
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    fn enable_x2apic_api(&self) -> Result<()>;
     #[cfg(target_arch = "x86_64")]
     fn enable_sgx_attribute(&self, file: File) -> Result<()>;
     /// Retrieve guest clock.

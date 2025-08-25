@@ -55,7 +55,8 @@ pub mod x86_64;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{
     kvm_enable_cap, kvm_msr_entry, MsrList, KVM_CAP_HYPERV_SYNIC, KVM_CAP_SPLIT_IRQCHIP,
-    KVM_GUESTDBG_USE_HW_BP,
+    KVM_CAP_X2APIC_API, KVM_GUESTDBG_USE_HW_BP, KVM_X2APIC_API_DISABLE_BROADCAST_QUIRK,
+    KVM_X2APIC_API_USE_32BIT_IDS,
 };
 #[cfg(target_arch = "x86_64")]
 use x86_64::check_required_kvm_extensions;
@@ -492,6 +493,50 @@ impl KvmVm {
     pub fn check_extension(&self, c: Cap) -> bool {
         self.fd.check_extension(c)
     }
+
+    #[cfg(target_arch = "x86_64")]
+    /// Translates the MSI extended destination ID bits according to the logic
+    /// found in the Linux kernel's KVM MSI handling in kvm_msi_to_lapic_irq()/x86_msi_msg_get_destid():
+    /// https://github.com/torvalds/linux/blob/3957a5720157264dcc41415fbec7c51c4000fc2d/arch/x86/kvm/irq.c#L266
+    /// https://github.com/torvalds/linux/blob/3957a5720157264dcc41415fbec7c51c4000fc2d/arch/x86/kernel/apic/apic.c#L2306
+    ///
+    /// This function moves bits [11, 5] from `address_lo` to bits [46, 40] in the combined 64-bit
+    /// address, but only if the Remappable Format (RF) bit (bit 4) in `address_lo` is
+    /// not set and `address_hi` is zero.
+    ///
+    /// The function is roughly equivalent to `uint64_t kvm_swizzle_msi_ext_dest_id(uint64_t address)` in
+    /// qemu/target/i386/kvm/kvm.c:
+    /// https://github.com/qemu/qemu/blob/88f72048d2f5835a1b9eaba690c7861393aef283/target/i386/kvm/kvm.c#L6258
+    fn translate_msi_ext_dest_id(mut address_lo: u32, mut address_hi: u32) -> (u32, u32) {
+        // Mask for extracting the RF (Remappable Format) bit from address_lo.
+        // In the MSI specification, this is bit 4. See
+        // VT-d spec section "Interrupt Requests in Remappable Format"
+        const REMAPPABLE_FORMAT_BIT_MASK: u32 = 0x10;
+        let remappable_format_bit_is_set = (address_lo & REMAPPABLE_FORMAT_BIT_MASK) != 0;
+
+        // Only perform the bit swizzling if the RF bit is unset and the upper
+        // 32 bits of the address are all zero. This identifies the legacy format.
+        if address_hi == 0 && !remappable_format_bit_is_set {
+            // "Move" the bits [11,5] to bits [46,40]. This is a shift of 35 bits, but
+            // since address is already split up into lo and hi, it's only a shift of
+            // 3 (35 - 32) within hi.
+            // "Move" via getting the bits via mask, zeroing out that range, and then
+            // ORing them back in at the correct location. The destination was already
+            // checked to be all zeroes.
+            const EXT_ID_MASK: u32 = 0xfe0;
+            const EXT_ID_SHIFT: u32 = 3;
+            let ext_id = address_lo & EXT_ID_MASK;
+            address_lo &= !EXT_ID_MASK;
+            address_hi |= ext_id << EXT_ID_SHIFT;
+        }
+
+        (address_lo, address_hi)
+    }
+
+    #[cfg(not(target_arch = "x86_64"))]
+    fn translate_msi_ext_dest_id(address_lo: u32, address_hi: u32) -> (u32, u32) {
+        (address_lo, address_hi)
+    }
 }
 
 /// Implementation of Vm trait for KVM
@@ -647,8 +692,12 @@ impl vm::Vm for KvmVm {
                     ..Default::default()
                 };
 
-                kvm_route.u.msi.address_lo = cfg.low_addr;
-                kvm_route.u.msi.address_hi = cfg.high_addr;
+                let (address_lo, address_hi) =
+                    Self::translate_msi_ext_dest_id(cfg.low_addr, cfg.high_addr);
+
+                kvm_route.u.msi.address_lo = address_lo;
+                kvm_route.u.msi.address_hi = address_hi;
+
                 kvm_route.u.msi.data = cfg.data;
 
                 if self.check_extension(crate::kvm::Cap::MsiDevid) {
@@ -819,6 +868,28 @@ impl vm::Vm for KvmVm {
         self.fd
             .enable_cap(&cap)
             .map_err(|e| vm::HypervisorVmError::EnableSplitIrq(e.into()))?;
+        Ok(())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn enable_x2apic_api(&self) -> vm::Result<()> {
+        // From https://docs.kernel.org/virt/kvm/api.html:
+        // On x86, kvm_msi::address_hi is ignored unless the KVM_X2APIC_API_USE_32BIT_IDS feature of
+        // KVM_CAP_X2APIC_API capability is enabled. If it is enabled, address_hi bits 31-8
+        // provide bits 31-8 of the destination id. Bits 7-0 of address_hi must be zero.
+
+        // Thus KVM_X2APIC_API_USE_32BIT_IDS in combination with KVM_FEATURE_MSI_EXT_DEST_ID allows
+        // the guest to target interrupts to cpus with APIC IDs > 254.
+
+        let mut cap = kvm_enable_cap {
+            cap: KVM_CAP_X2APIC_API,
+            ..Default::default()
+        };
+        cap.args[0] =
+            (KVM_X2APIC_API_USE_32BIT_IDS | KVM_X2APIC_API_DISABLE_BROADCAST_QUIRK) as u64;
+        self.fd
+            .enable_cap(&cap)
+            .map_err(|e| vm::HypervisorVmError::EnableX2ApicApi(e.into()))?;
         Ok(())
     }
 
@@ -1359,7 +1430,7 @@ impl cpu::Vcpu for KvmVcpu {
         let mut state = kvm_regs::default();
         let mut off = offset_of!(user_pt_regs, regs);
         // There are 31 user_pt_regs:
-        // https://elixir.free-electrons.com/linux/v4.14.174/source/arch/arm64/include/uapi/asm/ptrace.h#L72
+        // https://elixir.bootlin.com/linux/v4.14.174/source/arch/arm64/include/uapi/asm/ptrace.h#L72
         // These actually are the general-purpose registers of the Armv8-a
         // architecture (i.e x0-x30 if used as a 64bit register or w0-30 when used as a 32bit register).
         for i in 0..31 {
@@ -1439,7 +1510,7 @@ impl cpu::Vcpu for KvmVcpu {
         }
 
         // Now moving on to floating point registers which are stored in the user_fpsimd_state in the kernel:
-        // https://elixir.free-electrons.com/linux/v4.9.62/source/arch/arm64/include/uapi/asm/kvm.h#L53
+        // https://elixir.bootlin.com/linux/v4.9.62/source/arch/arm64/include/uapi/asm/kvm.h#L53
         let mut off = offset_of!(kvm_regs, fp_regs.vregs);
         for i in 0..32 {
             let mut bytes = [0_u8; 16];
@@ -2350,8 +2421,10 @@ impl cpu::Vcpu for KvmVcpu {
             .map_err(|e| cpu::HypervisorCpuError::SetRiscvCoreRegister(e.into()))?;
 
         // Last mandatory thing to set -> the address pointing to the FDT (also called DTB).
+        //
+        // In an earlier version of https://www.kernel.org/doc/Documentation/arch/riscv/boot.rst:
         // "The device tree blob (dtb) must be placed on an 8-byte boundary and must
-        // not exceed 64 kilobytes in size." -> https://www.kernel.org/doc/Documentation/arch/riscv/boot.txt.
+        // not exceed 64 kilobytes in size."
         let a1 = offset_of!(kvm_riscv_core, regs.a1);
         self.fd
             .lock()
