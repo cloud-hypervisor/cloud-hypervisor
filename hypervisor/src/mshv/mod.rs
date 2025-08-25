@@ -1892,6 +1892,13 @@ impl vm::Vm for MshvVm {
         Ok(())
     }
 
+    #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+    fn enable_x2apic_api(&self) -> vm::Result<()> {
+        Err(vm::HypervisorVmError::EnableX2ApicApi(anyhow!(
+            "x2Apic is only supported on KVM/Linux hosts"
+        )))
+    }
+
     #[cfg(target_arch = "x86_64")]
     fn enable_sgx_attribute(&self, _file: File) -> vm::Result<()> {
         Ok(())
