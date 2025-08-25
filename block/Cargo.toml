@@ -30,4 +30,5 @@ vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { workspace = true }
 
 [dev-dependencies]
+epoll = { workspace = true }
 virtio-queue = { workspace = true, features = ["test-utils"] }
