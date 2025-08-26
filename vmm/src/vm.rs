@@ -1177,8 +1177,8 @@ impl Vm {
         let guest_memory = memory_manager.lock().as_ref().unwrap().guest_memory();
         let mem = guest_memory.memory();
         let alignment = 0x20_0000;
-        let aligned_kernel_addr =
-            (arch::layout::KERNEL_START.0 + (alignment - 1)) & !(alignment - 1);
+        // round up
+        let aligned_kernel_addr = arch::layout::KERNEL_START.0.div_ceil(alignment) * alignment;
         let entry_addr = {
             match linux_loader::loader::pe::PE::load(
                 mem.deref(),
