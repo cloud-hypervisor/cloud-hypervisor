@@ -4,8 +4,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::collections::hash_map::IterMut;
 use std::collections::HashMap;
+use std::collections::hash_map::IterMut;
 use std::io;
 use std::ops::{Index, IndexMut};
 use std::slice::SliceIndex;
@@ -123,10 +123,10 @@ impl<T: Cacheable> CacheMap<T> {
         if self.map.len() == self.capacity {
             // TODO(dgreid) - smarter eviction strategy.
             let to_evict = *self.map.iter().next().unwrap().0;
-            if let Some(evicted) = self.map.remove(&to_evict) {
-                if evicted.dirty() {
-                    write_callback(to_evict, evicted)?;
-                }
+            if let Some(evicted) = self.map.remove(&to_evict)
+                && evicted.dirty()
+            {
+                write_callback(to_evict, evicted)?;
             }
         }
         self.map.insert(index, block);

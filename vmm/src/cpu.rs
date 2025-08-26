@@ -23,7 +23,7 @@ use std::{cmp, io, result, thread};
 
 #[cfg(not(target_arch = "riscv64"))]
 use acpi_tables::sdt::Sdt;
-use acpi_tables::{aml, Aml};
+use acpi_tables::{Aml, aml};
 use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
 use arch::x86_64::get_x2apic_id;
@@ -34,30 +34,30 @@ use devices::interrupt_controller::InterruptController;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use gdbstub_arch::x86::reg::{X86SegmentRegs, X86_64CoreRegs as CoreRegs};
-#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
-use hypervisor::arch::aarch64::regs::{ID_AA64MMFR0_EL1, TCR_EL1, TTBR1_EL1};
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use hypervisor::arch::x86::msr_index;
-#[cfg(target_arch = "x86_64")]
-use hypervisor::arch::x86::CpuIdEntry;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use hypervisor::arch::x86::MsrEntry;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use hypervisor::arch::x86::SpecialRegisters;
-#[cfg(feature = "tdx")]
-use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
+use gdbstub_arch::x86::reg::{X86_64CoreRegs as CoreRegs, X86SegmentRegs};
 #[cfg(target_arch = "x86_64")]
 use hypervisor::CpuVendor;
 #[cfg(feature = "kvm")]
 use hypervisor::HypervisorType;
 #[cfg(feature = "guest_debug")]
 use hypervisor::StandardRegisters;
+#[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
+use hypervisor::arch::aarch64::regs::{ID_AA64MMFR0_EL1, TCR_EL1, TTBR1_EL1};
+#[cfg(target_arch = "x86_64")]
+use hypervisor::arch::x86::CpuIdEntry;
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use hypervisor::arch::x86::MsrEntry;
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use hypervisor::arch::x86::SpecialRegisters;
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use hypervisor::arch::x86::msr_index;
+#[cfg(feature = "tdx")]
+use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
 use libc::{c_void, siginfo_t};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf::Elf64_Nhdr;
-use seccompiler::{apply_filter, SeccompAction};
+use seccompiler::{SeccompAction, apply_filter};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_device::BusDevice;
@@ -67,28 +67,28 @@ use vm_memory::ByteValued;
 use vm_memory::{Bytes, GuestAddressSpace};
 use vm_memory::{GuestAddress, GuestMemoryAtomic};
 use vm_migration::{
-    snapshot_from_id, Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable,
-    Transportable,
+    Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,
+    snapshot_from_id,
 };
 use vmm_sys_util::eventfd::EventFd;
-use vmm_sys_util::signal::{register_signal_handler, SIGRTMIN};
+use vmm_sys_util::signal::{SIGRTMIN, register_signal_handler};
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
-    CpuElf64Writable, CpuSegment, CpuState as DumpCpusState, DumpState, Elf64Writable,
-    GuestDebuggableError, NoteDescType, X86_64ElfPrStatus, X86_64UserRegs, COREDUMP_NAME_SIZE,
-    NT_PRSTATUS,
+    COREDUMP_NAME_SIZE, CpuElf64Writable, CpuSegment, CpuState as DumpCpusState, DumpState,
+    Elf64Writable, GuestDebuggableError, NT_PRSTATUS, NoteDescType, X86_64ElfPrStatus,
+    X86_64UserRegs,
 };
 #[cfg(feature = "guest_debug")]
-use crate::gdb::{get_raw_tid, Debuggable, DebuggableError};
+use crate::gdb::{Debuggable, DebuggableError, get_raw_tid};
 #[cfg(target_arch = "x86_64")]
 use crate::memory_manager::MemoryManager;
-use crate::seccomp_filters::{get_seccomp_filter, Thread};
+use crate::seccomp_filters::{Thread, get_seccomp_filter};
 #[cfg(target_arch = "x86_64")]
 use crate::vm::physical_bits;
 use crate::vm_config::CpusConfig;
-use crate::{GuestMemoryMmap, CPU_MANAGER_SNAPSHOT_ID};
+use crate::{CPU_MANAGER_SNAPSHOT_ID, GuestMemoryMmap};
 
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 /// Extract the specified bits of a 64-bit integer.
@@ -603,10 +603,10 @@ impl BusDevice for CpuManager {
                         state.removing = false;
                     }
                     // Trigger removal of vCPU
-                    if data[0] & (1 << CPU_EJECT_FLAG) == 1 << CPU_EJECT_FLAG {
-                        if let Err(e) = self.remove_vcpu(self.selected_cpu as u32) {
-                            error!("Error removing vCPU: {:?}", e);
-                        }
+                    if data[0] & (1 << CPU_EJECT_FLAG) == 1 << CPU_EJECT_FLAG
+                        && let Err(e) = self.remove_vcpu(self.selected_cpu as u32)
+                    {
+                        error!("Error removing vCPU: {:?}", e);
                     }
                 } else {
                     warn!("Out of range vCPU id: {}", self.selected_cpu);
@@ -1066,14 +1066,13 @@ impl CpuManager {
                     }
 
                     // Apply seccomp filter for vcpu thread.
-                    if !vcpu_seccomp_filter.is_empty() {
-                        if let Err(e) =
+                    if !vcpu_seccomp_filter.is_empty() &&  let Err(e) =
                             apply_filter(&vcpu_seccomp_filter).map_err(Error::ApplySeccompFilter)
                         {
                             error!("Error applying seccomp filter: {:?}", e);
                             return;
                         }
-                    }
+
                     extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {}
                     // This uses an async signal safe handler to kill the vcpu handles.
                     register_signal_handler(SIGRTMIN(), handle_signal)
@@ -1842,7 +1841,7 @@ impl CpuManager {
             _ => {
                 return Err(Error::TranslateVirtualAddress(anyhow!(format!(
                     "PA range not supported {pa_range}"
-                ))))
+                ))));
             }
         };
 
@@ -2865,8 +2864,8 @@ mod tests {
     use arch::layout::{BOOT_STACK_POINTER, ZERO_PAGE_START};
     use arch::x86_64::interrupts::*;
     use arch::x86_64::regs::*;
-    use hypervisor::arch::x86::{FpuState, LapicState};
     use hypervisor::StandardRegisters;
+    use hypervisor::arch::x86::{FpuState, LapicState};
     use linux_loader::loader::bootparam::setup_header;
 
     #[test]
@@ -2919,7 +2918,7 @@ mod tests {
 
     #[test]
     fn test_setup_msrs() {
-        use hypervisor::arch::x86::{msr_index, MsrEntry};
+        use hypervisor::arch::x86::{MsrEntry, msr_index};
 
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm().expect("new VM fd creation failed");
@@ -3004,6 +3003,7 @@ mod tests {
     use std::{mem, mem::offset_of};
 
     use arch::layout;
+    use hypervisor::HypervisorCpuError;
     use hypervisor::arch::aarch64::regs::MPIDR_EL1;
     #[cfg(feature = "kvm")]
     use hypervisor::arm64_core_reg_id;
@@ -3011,9 +3011,8 @@ mod tests {
     use hypervisor::kvm::aarch64::is_system_register;
     #[cfg(feature = "kvm")]
     use hypervisor::kvm::kvm_bindings::{
-        user_pt_regs, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_ARM_CORE, KVM_REG_SIZE_U64,
+        KVM_REG_ARM_CORE, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG, KVM_REG_SIZE_U64, user_pt_regs,
     };
-    use hypervisor::HypervisorCpuError;
 
     #[test]
     fn test_setup_regs() {

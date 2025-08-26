@@ -5,8 +5,8 @@ use std::ffi;
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::UnixListener;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -29,8 +29,8 @@ use vmm_sys_util::eventfd::EventFd;
 use super::{Error, Result};
 use crate::vhost_user::Inflight;
 use crate::{
-    get_host_address_range, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VirtioInterrupt,
-    VirtioInterruptType,
+    GuestMemoryMmap, GuestRegionMmap, MmapRegion, VirtioInterrupt, VirtioInterruptType,
+    get_host_address_range,
 };
 
 // Size of a dirty page for vhost-user.
@@ -317,17 +317,16 @@ impl VhostUserHandle {
             .get_features()
             .map_err(Error::VhostUserGetFeatures)?;
 
-        if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
-            if let Some(acked_protocol_features) =
+        if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0
+            && let Some(acked_protocol_features) =
                 VhostUserProtocolFeatures::from_bits(acked_protocol_features)
-            {
-                self.vu
-                    .set_protocol_features(acked_protocol_features)
-                    .map_err(Error::VhostUserSetProtocolFeatures)?;
+        {
+            self.vu
+                .set_protocol_features(acked_protocol_features)
+                .map_err(Error::VhostUserSetProtocolFeatures)?;
 
-                if acked_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK) {
-                    self.vu.set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
-                }
+            if acked_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK) {
+                self.vu.set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
             }
         }
 
@@ -399,7 +398,7 @@ impl VhostUserHandle {
                             acked_features: 0,
                             vrings_info: None,
                             queue_indexes: Vec::new(),
-                        })
+                        });
                     }
                     Err(e) => e,
                 };

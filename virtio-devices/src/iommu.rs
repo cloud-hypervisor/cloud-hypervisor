@@ -24,8 +24,8 @@ use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
 
 use super::{
-    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, Error as DeviceError,
-    VirtioCommon, VirtioDevice, VirtioDeviceType, EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
+    ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
+    Error as DeviceError, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice, VirtioDeviceType,
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
@@ -421,13 +421,12 @@ impl Request {
                     // If any other mappings exist in the domain for other containers,
                     // make sure to issue these mappings for the new endpoint/container
                     if let Some(domain_mappings) = &mapping.domains.read().unwrap().get(&domain_id)
+                        && let Some(ext_map) = ext_mapping.get(&endpoint)
                     {
-                        if let Some(ext_map) = ext_mapping.get(&endpoint) {
-                            for (virt_start, addr_map) in &domain_mappings.mappings {
-                                ext_map
-                                    .map(*virt_start, addr_map.gpa, addr_map.size)
-                                    .map_err(Error::ExternalUnmapping)?;
-                            }
+                        for (virt_start, addr_map) in &domain_mappings.mappings {
+                            ext_map
+                                .map(*virt_start, addr_map.gpa, addr_map.size)
+                                .map_err(Error::ExternalUnmapping)?;
                         }
                     }
 
@@ -489,7 +488,7 @@ impl Request {
                         .write()
                         .unwrap()
                         .iter()
-                        .filter(|(_, &d)| d == domain_id)
+                        .filter(|&(_, &d)| d == domain_id)
                         .map(|(&e, _)| e)
                         .collect();
 
@@ -553,7 +552,7 @@ impl Request {
                         .write()
                         .unwrap()
                         .iter()
-                        .filter(|(_, &d)| d == domain_id)
+                        .filter(|&(_, &d)| d == domain_id)
                         .map(|(&e, _)| e)
                         .collect();
 
@@ -654,13 +653,13 @@ fn detach_endpoint_from_domain(
     mapping.endpoints.write().unwrap().remove(&endpoint);
 
     // Trigger external unmapping for the endpoint if necessary.
-    if let Some(domain_mappings) = &mapping.domains.read().unwrap().get(&domain_id) {
-        if let Some(ext_map) = ext_mapping.get(&endpoint) {
-            for (virt_start, addr_map) in &domain_mappings.mappings {
-                ext_map
-                    .unmap(*virt_start, addr_map.size)
-                    .map_err(Error::ExternalUnmapping)?;
-            }
+    if let Some(domain_mappings) = &mapping.domains.read().unwrap().get(&domain_id)
+        && let Some(ext_map) = ext_mapping.get(&endpoint)
+    {
+        for (virt_start, addr_map) in &domain_mappings.mappings {
+            ext_map
+                .unmap(*virt_start, addr_map.size)
+                .map_err(Error::ExternalUnmapping)?;
         }
     }
 
@@ -669,7 +668,7 @@ fn detach_endpoint_from_domain(
         .write()
         .unwrap()
         .iter()
-        .filter(|(_, &d)| d == domain_id)
+        .filter(|&(_, &d)| d == domain_id)
         .count()
         == 0
     {

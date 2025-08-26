@@ -4,15 +4,15 @@
 
 use kvm_ioctls::DeviceFd;
 
+use crate::CpuState;
 use crate::arch::aarch64::gic::{Error, Result};
 use crate::device::HypervisorDeviceError;
-use crate::kvm::kvm_bindings::{
-    kvm_device_attr, kvm_one_reg, KVM_DEV_ARM_VGIC_GRP_REDIST_REGS, KVM_REG_ARM64,
-    KVM_REG_ARM64_SYSREG, KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP0_SHIFT,
-    KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_ARM64_SYSREG_OP2_SHIFT, KVM_REG_SIZE_U64,
-};
 use crate::kvm::VcpuKvmState;
-use crate::CpuState;
+use crate::kvm::kvm_bindings::{
+    KVM_DEV_ARM_VGIC_GRP_REDIST_REGS, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
+    KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP0_SHIFT, KVM_REG_ARM64_SYSREG_OP2_MASK,
+    KVM_REG_ARM64_SYSREG_OP2_SHIFT, KVM_REG_SIZE_U64, kvm_device_attr, kvm_one_reg,
+};
 
 // Relevant redistributor registers that we want to save/restore.
 const GICR_CTLR: u32 = 0x0000;

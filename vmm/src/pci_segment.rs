@@ -11,11 +11,11 @@
 
 use std::sync::{Arc, Mutex};
 
-use acpi_tables::{aml, Aml};
+use acpi_tables::{Aml, aml};
 use arch::layout;
 use pci::{DeviceRelocation, PciBdf, PciBus, PciConfigMmio, PciRoot};
 #[cfg(target_arch = "x86_64")]
-use pci::{PciConfigIo, PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE};
+use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE, PciConfigIo};
 use uuid::Uuid;
 use vm_allocator::AddressAllocator;
 use vm_device::BusDeviceSync;
@@ -105,7 +105,12 @@ impl PciSegment {
 
         info!(
             "Adding PCI segment: id={}, PCI MMIO config address: 0x{:x}, mem32 area [0x{:x}-0x{:x}, mem64 area [0x{:x}-0x{:x}",
-            segment.id, segment.mmio_config_address, segment.start_of_mem32_area, segment.end_of_mem32_area, segment.start_of_mem64_area, segment.end_of_mem64_area
+            segment.id,
+            segment.mmio_config_address,
+            segment.start_of_mem32_area,
+            segment.end_of_mem32_area,
+            segment.start_of_mem64_area,
+            segment.end_of_mem64_area
         );
         Ok(segment)
     }

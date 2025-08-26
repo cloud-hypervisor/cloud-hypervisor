@@ -48,8 +48,8 @@ extern crate log;
 
 use std::io;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use thiserror::Error;
@@ -470,7 +470,7 @@ impl RateLimiter {
                         std::io::ErrorKind::WouldBlock => {
                             return Err(Error::SpuriousRateLimiterEvent(
                                 "Rate limiter event handler called without a present timer",
-                            ))
+                            ));
                         }
                         _ => return Err(Error::TimerFdWaitError(err)),
                     }

@@ -59,13 +59,15 @@ const TUNSETOFFLOAD: u64 = 0x4004_54d0;
 
 #[cfg(feature = "sev_snp")]
 fn mshv_sev_snp_ioctl_seccomp_rule() -> SeccompRule {
-    and![Cond::new(
-        1,
-        ArgLen::Dword,
-        Eq,
-        mshv_ioctls::MSHV_MODIFY_GPA_HOST_ACCESS()
-    )
-    .unwrap()]
+    and![
+        Cond::new(
+            1,
+            ArgLen::Dword,
+            Eq,
+            mshv_ioctls::MSHV_MODIFY_GPA_HOST_ACCESS()
+        )
+        .unwrap()
+    ]
 }
 
 #[cfg(feature = "sev_snp")]

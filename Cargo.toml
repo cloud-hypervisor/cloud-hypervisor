@@ -3,7 +3,7 @@ authors = ["The Cloud Hypervisor Authors"]
 build = "build.rs"
 default-run = "cloud-hypervisor"
 description = "Open source Virtual Machine Monitor (VMM) that runs on top of KVM & MSHV"
-edition = "2021"
+edition = "2024"
 homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
 license = "Apache-2.0 AND BSD-3-Clause"
 name = "cloud-hypervisor"
@@ -102,6 +102,7 @@ members = [
   "vm-virtio",
   "vmm",
 ]
+package.edition = "2024"
 
 [workspace.dependencies]
 # rust-vmm crates

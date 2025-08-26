@@ -37,9 +37,9 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::{
-    ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler, GuestMemoryMmap,
-    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
-    EPOLL_HELPER_EVENT_LAST, VIRTIO_F_VERSION_1,
+    ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
+    GuestMemoryMmap, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice, VirtioDeviceType,
+    VirtioInterrupt, VirtioInterruptType,
 };
 
 const QUEUE_SIZE: u16 = 128;
@@ -575,12 +575,12 @@ impl VirtioDevice for Balloon {
         let data_len = data.len() as u64;
         if offset + data_len > config_len {
             error!(
-                    "Out-of-bound access to configuration: config_len = {} offset = {:x} length = {} for {}",
-                    config_len,
-                    offset,
-                    data_len,
-                    self.device_type()
-                );
+                "Out-of-bound access to configuration: config_len = {} offset = {:x} length = {} for {}",
+                config_len,
+                offset,
+                data_len,
+                self.device_type()
+            );
             return;
         }
 

@@ -12,9 +12,9 @@ use std::sync::{Arc, Barrier, Mutex};
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use pci::{
-    BarReprogrammingParams, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
-    PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType, PciSubclass,
-    PCI_CONFIGURATION_ID,
+    BarReprogrammingParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
+    PciBarRegionType, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,
+    PciSubclass,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

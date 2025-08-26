@@ -29,7 +29,7 @@ use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
 use super::muxer::ConnMapKey;
-use super::{defs, MuxerConnection};
+use super::{MuxerConnection, defs};
 
 /// A kill queue item, holding the connection key and the scheduled time for termination.
 ///
@@ -111,11 +111,12 @@ impl MuxerKillQ {
     /// the queue has expired. Otherwise, `None` is returned.
     ///
     pub fn pop(&mut self) -> Option<ConnMapKey> {
-        if let Some(item) = self.q.front() {
-            if Instant::now() > item.kill_time {
-                return Some(self.q.pop_front().unwrap().key);
-            }
+        if let Some(item) = self.q.front()
+            && Instant::now() > item.kill_time
+        {
+            return Some(self.q.pop_front().unwrap().key);
         }
+
         None
     }
 
