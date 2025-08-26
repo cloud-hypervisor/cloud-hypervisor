@@ -22,6 +22,16 @@ pub struct clone_args {
     pub cgroup: u64,
 }
 
+/// # Safety
+/// `size` must have the proper size to match `args`.
+/// Further, the caller needs to check the return value.
+///
+/// # Return
+/// - On success:
+///   - Parent: child PID (`c_long`)
+///   - Child: `0`
+/// - On error: `-1` and `errno` is set
+#[must_use]
 pub unsafe fn clone3(args: &mut clone_args, size: size_t) -> c_long {
     syscall(SYS_clone3, args, size)
 }
