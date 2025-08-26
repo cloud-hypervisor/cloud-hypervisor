@@ -135,30 +135,23 @@ impl log::Log for Logger {
         let duration = now.duration_since(self.start);
         let duration_s = duration.as_secs_f32();
 
-        if record.file().is_some() && record.line().is_some() {
-            write!(
-                *(*(self.output.lock().unwrap())),
-                // 10: 6 decimal places + sep => whole seconds in range `0..=999` properly aligned
-                "cloud-hypervisor: {:>10.6?}s: <{}> {}:{}:{} -- {}\r\n",
-                duration_s,
-                std::thread::current().name().unwrap_or("anonymous"),
-                record.level(),
-                record.file().unwrap(),
-                record.line().unwrap(),
-                record.args()
-            )
+        let location = if let (Some(file), Some(line)) = (record.file(), record.line()) {
+            format!("{}:{}", file, line)
         } else {
-            write!(
-                *(*(self.output.lock().unwrap())),
-                // 10: 6 decimal places + sep => whole seconds in range `0..=999` properly aligned
-                "cloud-hypervisor: {:>10.6?}s: <{}> {}:{} -- {}\r\n",
-                duration_s,
-                std::thread::current().name().unwrap_or("anonymous"),
-                record.level(),
-                record.target(),
-                record.args()
-            )
-        }
+            record.target().to_string()
+        };
+
+        let mut out = self.output.lock().unwrap();
+        write!(
+            &mut *out,
+            // 10: 6 decimal places + sep => whole seconds in range `0..=999` properly aligned
+            "cloud-hypervisor: {:>10.6?}s: <{}> {}:{} -- {}\r\n",
+            duration_s,
+            std::thread::current().name().unwrap_or("anonymous"),
+            record.level(),
+            location,
+            record.args(),
+        )
         .ok();
     }
     fn flush(&self) {}
