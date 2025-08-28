@@ -1,0 +1,122 @@
+name: MSHV Integration Tests
+on:
+  push:
+    branches:
+      - test_mshv_ci
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to run integration tests on'
+        required: true
+        default: 'main'
+
+jobs:
+  infra-setup:
+    name: MSHV Infra Setup (x86_64)
+    uses: ./.github/workflows/mshv-infra.yaml
+    with:
+      ARCH: x86_64
+      KEY: azure_key_${{ github.run_id }}
+      OS_DISK_SIZE: 512
+      RG: MSHV-INTEGRATION-${{ github.run_id }}
+      VM_SKU: Standard_D16s_v5
+    secrets:
+      MI_CLIENT_ID: ${{ secrets.MSHV_MI_CLIENT_ID }}
+      RUNNER_RG: ${{ secrets.MSHV_RUNNER_RG }}
+      STORAGE_ACCOUNT_PATHS: ${{ secrets.MSHV_STORAGE_ACCOUNT_PATHS }}
+      ARCH_SOURCE_PATH: ${{ secrets.MSHV_X86_SOURCE_PATH }}
+      USERNAME: ${{ secrets.MSHV_USERNAME }}
+
+  run-tests:
+    name: Integration Tests
+    needs: infra-setup
+    if: ${{ always() && needs.infra-setup.result == 'success' }}
+    runs-on:
+      - self-hosted
+      - Linux
+    steps:
+      - name: Determine branch to build
+        run: |
+          echo "Determining branch to build and test..."
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "BRANCH=${{ github.event.pull_request.head.ref }}" >> $GITHUB_ENV
+          else
+            echo "BRANCH=${{ inputs.branch }}" >> $GITHUB_ENV
+          fi
+
+      - name: Run integration tests
+        env:
+          BRANCH_NAME: ${{ env.BRANCH }}
+          KEY: azure_key_${{ github.run_id }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PRIVATE_IP: ${{ needs.infra-setup.outputs.PRIVATE_IP }}
+          RG: MSHV-${{ github.run_id }}
+          USERNAME: ${{ secrets.MSHV_USERNAME }}
+        run: |
+          set -e
+          echo "Connecting to the VM via SSH..."
+          ssh -i ~/.ssh/${KEY} -o StrictHostKeyChecking=no ${USERNAME}@${PRIVATE_IP} << EOF
+            set -e
+            echo "Logged in successfully."
+            export PATH="\$HOME/.cargo/bin:\$PATH"
+            echo "${BRANCH_NAME}"
+            git clone --depth 1 --single-branch --branch "$BRANCH_NAME" https://github.com/cloud-hypervisor/cloud-hypervisor.git
+            cd cloud-hypervisor
+
+             echo "Loading VDPA kernel modules..."
+            sudo modprobe vdpa
+            sudo modprobe vhost_vdpa
+            sudo modprobe vdpa_sim
+            sudo modprobe vdpa_sim_blk
+            sudo modprobe vdpa_sim_net
+
+            echo "Creating VDPA devices..."
+            sudo vdpa dev add name vdpa-blk0 mgmtdev vdpasim_blk
+            sudo vdpa dev add name vdpa-blk1 mgmtdev vdpasim_blk
+            sudo vdpa dev add name vdpa-blk2 mgmtdev vdpasim_net
+
+            echo "Setting permissions..."
+            for i in 0 1 2; do
+              dev="/dev/vhost-vdpa-$i"
+              if [ -e "$dev" ]; then
+                sudo chown $USER:$USER "$dev"
+                sudo chmod 660 "$dev"
+              else
+                echo "Warning: Device $dev not found"
+              fi
+            done
+
+            sudo ./scripts/dev_cli.sh tests --hypervisor mshv --integration -- -- --skip common_parallel::test_tpm --skip common_parallel::test_cpu_topology_421 --skip common_parallel::test_cpu_topology_142 --skip common_parallel::test_cpu_topology_262 --skip common_sequential::test_snapshot_restore_basic --skip common_sequential::test_snapshot_restore_with_fd --skip common_sequential::test_snapshot_restore_pvpanic --skip virtio_net_latency_us --skip common_parallel::test_cpu_hotplug
+          EOF
+
+  cleanup:
+    name: Cleanup
+    needs: run-tests
+    if: always()
+    runs-on:
+      - self-hosted
+      - Linux
+    steps:
+      - name: Delete RG
+        env:
+          RG: MSHV-INTEGRATION-${{ github.run_id }}
+        run: |
+          if az group exists --name ${RG}; then
+            az group delete --name ${RG} --yes --no-wait
+          else
+            echo "Resource Group ${RG} does not exist. Skipping deletion."
+          fi
+          echo "Cleanup process completed."
+
+      - name: Delete SSH Key
+        env:
+          KEY: azure_key_${{ github.run_id }}
+        run: |
+          if [ -f ~/.ssh/${KEY} ]; then
+            rm -f ~/.ssh/${KEY} ~/.ssh/${KEY}.pub
+            echo "SSH key deleted successfully."
+          else
+            echo "SSH key does not exist. Skipping deletion."
+          fi
+          echo "Cleanup process completed."
