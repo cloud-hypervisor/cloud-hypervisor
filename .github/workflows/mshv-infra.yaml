@@ -1,0 +1,238 @@
+name: MSHV Infra Setup
+on: 
+  workflow_call:
+    inputs:
+      ARCH:
+        description: 'Architecture for the VM'
+        required: true
+        type: string
+      KEY:
+        description: 'SSH Key Name'
+        required: true
+        type: string
+      OS_DISK_SIZE:
+        description: 'OS Disk Size in GB'
+        required: true
+        type: string
+      RG:
+        description: 'Resource Group Name'
+        required: true
+        type: string
+      VM_SKU:
+        description: 'VM SKU'
+        required: true
+        type: string
+    secrets:
+      MI_CLIENT_ID:
+        required: true
+      RUNNER_RG:
+        required: true
+      STORAGE_ACCOUNT_PATHS:
+        required: true
+      ARCH_SOURCE_PATH:
+        required: true
+      USERNAME:
+        required: true
+    outputs:
+      PRIVATE_IP:
+        description: 'Private IP of the VM'
+        value: ${{ jobs.infra-setup.outputs.PRIVATE_IP }}
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  infra-setup:
+    name: ${{ inputs.ARCH }} VM Provision
+    runs-on: 
+      - self-hosted
+      - Linux
+    outputs:
+      PRIVATE_IP: ${{ steps.get-vm-ip.outputs.PRIVATE_IP }}
+    steps:
+      - name: Install & login to AZ CLI
+        env:
+          MI_CLIENT_ID: ${{ secrets.MI_CLIENT_ID }}
+        run: |
+          set -e
+          echo "Installing Azure CLI if not already installed"
+          if ! command -v az &>/dev/null; then
+            curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+          else
+            echo "Azure CLI already installed"
+          fi
+          az --version
+          echo "Logging into Azure CLI using Managed Identity"
+          az login --identity --client-id ${MI_CLIENT_ID}
+
+      - name: Get Location
+        id: get-location
+        env:
+          SKU: ${{ inputs.VM_SKU }}
+          STORAGE_ACCOUNT_PATHS: ${{ secrets.STORAGE_ACCOUNT_PATHS }}
+        run: |
+          set -e
+          # Extract vCPU count from SKU (e.g., "Standard_D2s_v3" => 2)
+          vcpu=$(echo "$SKU" | sed -n 's/^Standard_[A-Za-z]\+\([0-9]\+\).*/\1/p')
+          if [[ -z "$vcpu" ]]; then
+            echo "Cannot extract vCPU count from SKU: $SKU"
+            exit 1
+          fi
+
+          SUPPORTED_LOCATIONS=$(echo "$STORAGE_ACCOUNT_PATHS" | jq -r 'to_entries[] | .key')
+
+          for location in $SUPPORTED_LOCATIONS; do
+            family=$(az vm list-skus --size "$SKU" --location "$location" --resource-type "virtualMachines" --query '[0].family' -o tsv)
+            if [[ -z "$family" ]]; then
+              echo "Cannot determine VM family for SKU: $SKU in $location"
+              continue
+            fi
+
+            usage=$(az vm list-usage --location "$location" --query "[?name.value=='$family'] | [0]" -o json)
+            current=$(echo "$usage" | jq -r '.currentValue')
+            limit=$(echo "$usage" | jq -r '.limit')
+
+            if [[ $((limit - current)) -ge $vcpu ]]; then
+              echo "Sufficient quota found in $location"
+              echo "location=$location" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+
+          echo "No location found with sufficient vCPU quota for SKU: $SKU"
+          exit 1
+
+      - name: Create Resource Group
+        id: rg-setup
+        env:
+          LOCATION: ${{ steps.get-location.outputs.location }}
+          RG: ${{ inputs.RG }}
+          STORAGE_ACCOUNT_PATHS: ${{ secrets.STORAGE_ACCOUNT_PATHS }}
+        run: |
+          set -e
+          echo "Creating Resource Group: $RG"
+          # Create the resource group
+          echo "Creating resource group in location: ${LOCATION}"
+          az group create --name ${RG} --location ${LOCATION}
+          echo "Resource group created successfully."
+
+      - name: Generate SSH Key
+        id: generate-ssh-key
+        env:
+          KEY: ${{ inputs.KEY }}
+        run: |
+          set -e
+          echo "Generating SSH key: $KEY"
+          mkdir -p ~/.ssh
+          ssh-keygen -t rsa -b 4096 -f ~/.ssh/${KEY} -N ""
+
+      - name: Create VM
+        id: vm-setup
+        env:
+          KEY: ${{ inputs.KEY }}
+          LOCATION: ${{ steps.get-location.outputs.location }}
+          OS_DISK_SIZE: ${{ inputs.OS_DISK_SIZE }}
+          RG: ${{ inputs.RG }}
+          RUNNER_RG: ${{ secrets.RUNNER_RG }}
+          USERNAME: ${{ secrets.USERNAME }}
+          VM_SKU: ${{ inputs.VM_SKU }}
+          VM_IMAGE_NAME: ${{ inputs.ARCH }}_${{ steps.get-location.outputs.location }}_image
+          VM_NAME: ${{ inputs.ARCH }}_${{ steps.get-location.outputs.location }}_${{ github.run_id }}
+        run: |
+          set -e
+          echo "Creating $VM_SKU VM: $VM_NAME"
+
+          # Extract subnet ID from the runner VM
+          echo "Retrieving subnet ID..."
+          SUBNET_ID=$(az network vnet list --resource-group ${RUNNER_RG} --query "[?contains(location, '${LOCATION}')].{SUBNETS:subnets}" | jq -r ".[0].SUBNETS[0].id")
+          if [[ -z "${SUBNET_ID}" ]]; then
+            echo "ERROR: Failed to retrieve Subnet ID."
+            exit 1
+          fi
+
+          # Extract image ID from the runner VM
+          echo "Retrieving image ID..."
+          IMAGE_ID=$(az image show --resource-group ${RUNNER_RG} --name ${VM_IMAGE_NAME} --query "id" -o tsv)
+          if [[ -z "${IMAGE_ID}" ]]; then
+            echo "ERROR: Failed to retrieve Image ID."
+            exit 1
+          fi
+
+          # Create VM
+          az vm create \
+            --resource-group ${RG} \
+            --name ${VM_NAME} \
+            --subnet ${SUBNET_ID} \
+            --size ${VM_SKU} \
+            --location ${LOCATION} \
+            --image ${IMAGE_ID} \
+            --os-disk-size-gb ${OS_DISK_SIZE} \
+            --public-ip-sku Standard \
+            --storage-sku Premium_LRS \
+            --public-ip-address "" \
+            --admin-username ${USERNAME} \
+            --ssh-key-value  ~/.ssh/${KEY}.pub \
+            --security-type Standard \
+            --output json
+
+          echo "VM creation process completed successfully."
+
+      - name: Get VM Private IP
+        id: get-vm-ip
+        env:
+          RG: ${{ inputs.RG }}
+          VM_NAME: ${{ inputs.ARCH }}_${{ steps.get-location.outputs.location }}_${{ github.run_id }}
+        run: |
+          set -e
+          echo "Retrieving VM Private IP address..."
+          # Retrieve VM Private IP address
+          PRIVATE_IP=$(az vm show -g ${RG} -n ${VM_NAME} -d --query privateIps -o tsv)
+          if [[ -z "$PRIVATE_IP" ]]; then
+            echo "ERROR: Failed to retrieve private IP address."
+            exit 1
+          fi
+          echo "PRIVATE_IP=$PRIVATE_IP" >> $GITHUB_OUTPUT
+
+      - name: Wait for SSH availability
+        env:
+          KEY: ${{ inputs.KEY }}
+          PRIVATE_IP: ${{ steps.get-vm-ip.outputs.PRIVATE_IP }}
+          USERNAME: ${{ secrets.USERNAME }}
+        run: |
+          echo "Waiting for SSH to be accessible..."
+          timeout 120 bash -c 'until ssh -o StrictHostKeyChecking=no -i ~/.ssh/${KEY} ${USERNAME}@${PRIVATE_IP} "exit" 2>/dev/null; do sleep 5; done'
+          echo "VM is accessible!"
+
+      - name: Remove Old Host Key
+        env:
+          PRIVATE_IP: ${{ steps.get-vm-ip.outputs.PRIVATE_IP }}
+        run: |
+          set -e
+          echo "Removing the old host key"
+          ssh-keygen -R $PRIVATE_IP
+
+      - name: SSH into VM and Install Dependencies
+        env:
+          KEY: ${{ inputs.KEY }}
+          PRIVATE_IP: ${{ steps.get-vm-ip.outputs.PRIVATE_IP }}
+          USERNAME: ${{ secrets.USERNAME }}
+        run: |
+          set -e
+          ssh -i ~/.ssh/${KEY} -o StrictHostKeyChecking=no ${USERNAME}@${PRIVATE_IP} << EOF
+            set -e
+            echo "Logged in successfully."
+            echo "Installing dependencies..."
+            sudo tdnf install -y git moby-engine moby-cli clang llvm pkg-config make gcc glibc-devel
+            echo "Installing Rust..."
+            curl -sSf https://sh.rustup.rs | sh -s -- --default-toolchain stable --profile default -y
+            export PATH="\$HOME/.cargo/bin:\$PATH"
+            cargo --version
+            sudo mkdir -p /etc/docker/
+            echo '{"default-ulimits":{"nofile":{"Hard":65535,"Name":"nofile","Soft":65535}}}' | sudo tee /etc/docker/daemon.json
+            sudo systemctl stop docker
+            sudo systemctl enable docker.service
+            sudo systemctl enable containerd.service
+            sudo systemctl start docker
+            sudo groupadd -f docker
+            sudo usermod -a -G docker ${USERNAME}
+            sudo systemctl restart docker
+          EOF
