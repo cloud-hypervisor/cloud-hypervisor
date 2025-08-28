@@ -945,7 +945,7 @@ impl Vm {
                 }
 
                 if let Some(cpus) = &config.cpus {
-                    node.cpus.extend(cpus.iter().map(|cpu| *cpu as u32));
+                    node.cpus.extend(cpus);
                 }
 
                 if let Some(pci_segments) = &config.pci_segments {
@@ -1040,6 +1040,11 @@ impl Vm {
             #[cfg(feature = "sev_snp")]
             vm_config.lock().unwrap().memory.total_size(),
         )?;
+
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        if vm_config.lock().unwrap().max_apic_id() > 254 {
+            vm.enable_x2apic_api().unwrap();
+        }
 
         let phys_bits = physical_bits(&hypervisor, vm_config.lock().unwrap().cpus.max_phys_bits);
 
@@ -1687,7 +1692,7 @@ impl Vm {
                     .notify_hotplug(AcpiNotificationFlags::CPU_DEVICES_CHANGED)
                     .map_err(Error::DeviceManager)?;
             }
-            self.config.lock().unwrap().cpus.boot_vcpus = desired_vcpus.try_into().unwrap();
+            self.config.lock().unwrap().cpus.boot_vcpus = desired_vcpus;
         }
 
         if let Some(desired_memory) = desired_memory {
@@ -2741,7 +2746,7 @@ impl Vm {
         &mut self,
         destination_url: &str,
     ) -> std::result::Result<DumpState, GuestDebuggableError> {
-        let nr_cpus = self.config.lock().unwrap().cpus.boot_vcpus as u32;
+        let nr_cpus = self.config.lock().unwrap().cpus.boot_vcpus;
         let elf_note_size = self.get_note_size(NoteDescType::ElfAndVmm, nr_cpus) as isize;
         let mut elf_phdr_num = 1;
         let elf_sh_info = 0;

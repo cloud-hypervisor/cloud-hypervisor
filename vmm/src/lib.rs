@@ -888,6 +888,11 @@ impl Vmm {
             ))
         })?;
 
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        if config.lock().unwrap().max_apic_id() > 254 {
+            vm.enable_x2apic_api().unwrap();
+        }
+
         let phys_bits =
             vm::physical_bits(&self.hypervisor, config.lock().unwrap().cpus.max_phys_bits);
 
@@ -1826,7 +1831,7 @@ impl RequestHandler for Vmm {
         } else {
             let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
             if let Some(desired_vcpus) = desired_vcpus {
-                config.cpus.boot_vcpus = desired_vcpus.try_into().unwrap();
+                config.cpus.boot_vcpus = desired_vcpus;
             }
             if let Some(desired_ram) = desired_ram {
                 config.memory.size = desired_ram;
