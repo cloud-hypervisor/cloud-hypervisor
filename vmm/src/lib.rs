@@ -900,8 +900,6 @@ impl Vmm {
             false,
             Some(&vm_migration_config.memory_manager_data),
             existing_memory_files,
-            #[cfg(target_arch = "x86_64")]
-            None,
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!(
@@ -1135,7 +1133,6 @@ impl Vmm {
             arch::generate_common_cpuid(
                 &hypervisor,
                 &arch::CpuidConfig {
-                    sgx_epc_sections: None,
                     phys_bits,
                     kvm_hyperv: vm_config.lock().unwrap().cpus.kvm_hyperv,
                     #[cfg(feature = "tdx")]
@@ -1266,7 +1263,7 @@ impl Vmm {
         };
 
         // We check the `CPUID` compatibility of between the source vm and destination, which is
-        // mostly about feature compatibility and "topology/sgx" leaves are not relevant.
+        // mostly about feature compatibility.
         let dest_cpuid = &{
             let vm_config = &src_vm_config.lock().unwrap();
 
@@ -1274,7 +1271,6 @@ impl Vmm {
             arch::generate_common_cpuid(
                 &self.hypervisor.clone(),
                 &arch::CpuidConfig {
-                    sgx_epc_sections: None,
                     phys_bits,
                     kvm_hyperv: vm_config.cpus.kvm_hyperv,
                     #[cfg(feature = "tdx")]
@@ -2428,8 +2424,6 @@ mod unit_tests {
             pvmemcontrol: None,
             pvpanic: false,
             iommu: false,
-            #[cfg(target_arch = "x86_64")]
-            sgx_epc: None,
             numa: None,
             watchdog: false,
             #[cfg(feature = "guest_debug")]

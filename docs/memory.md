@@ -437,12 +437,11 @@ struct NumaConfig {
     cpus: Option<Vec<u8>>,
     distances: Option<Vec<NumaDistance>>,
     memory_zones: Option<Vec<String>>,
-    sgx_epc_sections: Option<Vec<String>>,
 }
 ```
 
 ```
---numa <numa>	Settings related to a given NUMA node "guest_numa_id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>,memory_zones=<list_of_memory_zones>,sgx_epc_sections=<list_of_sgx_epc_sections>"
+--numa <numa>	Settings related to a given NUMA node "guest_numa_id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>,memory_zones=<list_of_memory_zones>
 ```
 
 ### `guest_numa_id`
@@ -548,26 +547,6 @@ _Example_
 --memory size=0
 --memory-zone id=mem0,size=1G id=mem1,size=1G id=mem2,size=1G
 --numa guest_numa_id=0,memory_zones=[mem0,mem2] guest_numa_id=1,memory_zones=mem1
-```
-
-### `sgx_epc_sections`
-
-List of SGX EPC sections attached to the guest NUMA node identified by the
-`guest_numa_id` option. This allows for describing a list of SGX EPC sections
-which must be seen by the guest as belonging to the NUMA node `guest_numa_id`.
-
-Multiple values can be provided to define the list. Each value is a string
-referring to an existing SGX EPC section identifier. Values are separated from
-each other with the `,` separator.
-
-As soon as one tries to describe a list of values, `[` and `]` must be used to
-demarcate the list.
-
-_Example_
-
-```
---sgx-epc id=epc0,size=32M id=epc1,size=64M id=epc2,size=32M
---numa guest_numa_id=0,sgx_epc_sections=epc1 guest_numa_id=1,sgx_epc_sections=[epc0,epc2]
 ```
 
 ### PCI bus
