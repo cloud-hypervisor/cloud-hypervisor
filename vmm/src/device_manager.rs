@@ -3323,6 +3323,7 @@ impl DeviceManager {
             vsock_cfg.id = Some(id.clone());
             id
         };
+        let backend_id = format!("{id}-backend");
 
         info!("Creating virtio-vsock device: {:?}", vsock_cfg);
 
@@ -3330,9 +3331,16 @@ impl DeviceManager {
             .socket
             .to_str()
             .ok_or(DeviceManagerError::CreateVsockConvertPath)?;
-        let backend =
-            virtio_devices::vsock::VsockUnixBackend::new(vsock_cfg.cid, socket_path.to_string())
-                .map_err(DeviceManagerError::CreateVsockBackend)?;
+
+        let vsock_snapshot = snapshot_from_id(self.snapshot.as_ref(), id.as_str());
+        let backend = virtio_devices::vsock::VsockUnixBackend::new(
+            backend_id.clone(),
+            vsock_cfg.cid,
+            socket_path.to_string(),
+            state_from_id(vsock_snapshot.as_ref(), backend_id.as_str())
+                .map_err(DeviceManagerError::RestoreGetState)?,
+        )
+        .map_err(DeviceManagerError::CreateVsockBackend)?;
 
         let vsock_device = Arc::new(Mutex::new(
             virtio_devices::Vsock::new(
