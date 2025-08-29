@@ -412,6 +412,7 @@ cmd_tests() {
         $DOCKER_RUNTIME run \
             --workdir "$CTR_CLH_ROOT_DIR" \
             --rm \
+            --security-opt seccomp=unconfined \
             --device $exported_device \
             --device /dev/net/tun \
             --cap-add net_admin \

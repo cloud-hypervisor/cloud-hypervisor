@@ -146,6 +146,7 @@ struct BlockEpollHandler {
     access_platform: Option<Arc<dyn AccessPlatform>>,
     host_cpus: Option<Vec<usize>>,
     acked_features: u64,
+    write_zeroes_unmap: bool,
 }
 
 fn has_feature(features: u64, feature_flag: u64) -> bool {
@@ -160,7 +161,21 @@ impl BlockEpollHandler {
             // if the VIRTIO_BLK_F_RO feature if offered, and MUST NOT write any data."
             return Err(ExecuteError::ReadOnly);
         }
-        Ok(())
+
+        match request_type {
+            RequestType::Flush if !has_feature(features, VIRTIO_BLK_F_FLUSH.into()) => {
+                Err(ExecuteError::Unsupported(VIRTIO_BLK_T_FLUSH))
+            }
+            RequestType::Discard if !has_feature(features, VIRTIO_BLK_F_DISCARD.into()) => {
+                Err(ExecuteError::Unsupported(VIRTIO_BLK_T_DISCARD))
+            }
+            RequestType::WriteZeroes
+                if !has_feature(features, VIRTIO_BLK_F_WRITE_ZEROES.into()) =>
+            {
+                Err(ExecuteError::Unsupported(VIRTIO_BLK_T_WRITE_ZEROES))
+            }
+            _ => Ok(()),
+        }
     }
 
     fn process_queue_submit(&mut self) -> Result<()> {
@@ -169,6 +184,7 @@ impl BlockEpollHandler {
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref())
                 .map_err(Error::RequestParsing)?;
+            debug!("virtio-blk request type: {:?}", request.request_type);
 
             // For virtio spec compliance
             // "A device MUST set the status byte to VIRTIO_BLK_S_IOERR for a write request
@@ -177,7 +193,7 @@ impl BlockEpollHandler {
                 warn!("Request check failed: {:x?} {:?}", request, e);
                 desc_chain
                     .memory()
-                    .write_obj(VIRTIO_BLK_S_IOERR, request.status_addr)
+                    .write_obj(e.status(), request.status_addr)
                     .map_err(Error::RequestStatus)?;
 
                 // If no asynchronous operation has been submitted, we can
@@ -230,6 +246,7 @@ impl BlockEpollHandler {
                 self.disk_image.as_mut(),
                 &self.serial,
                 desc_chain.head_index() as u64,
+                self.write_zeroes_unmap,
             );
 
             if let Ok(true) = result {
@@ -237,10 +254,10 @@ impl BlockEpollHandler {
                     .push_back((desc_chain.head_index(), request));
             } else {
                 let status = match result {
-                    Ok(_) => VIRTIO_BLK_S_OK,
+                    Ok(_) => VIRTIO_BLK_S_OK as u8,
                     Err(e) => {
                         warn!("Request failed: {:x?} {:?}", request, e);
-                        VIRTIO_BLK_S_IOERR
+                        e.status()
                     }
                 };
 
@@ -597,6 +614,7 @@ pub struct Block {
     exit_evt: EventFd,
     serial: Vec<u8>,
     queue_affinity: BTreeMap<u16, Vec<usize>>,
+    write_zeroes_unmap: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -617,6 +635,9 @@ impl Block {
         disk_path: PathBuf,
         read_only: bool,
         iommu: bool,
+        discard: bool,
+        write_zeroes: bool,
+        write_zeroes_unmap: bool,
         num_queues: usize,
         queue_size: u16,
         serial: Option<String>,
@@ -662,6 +683,13 @@ impl Block {
 
                 if read_only {
                     avail_features |= 1u64 << VIRTIO_BLK_F_RO;
+                }
+
+                if discard {
+                    avail_features |= 1u64 << VIRTIO_BLK_F_DISCARD;
+                }
+                if write_zeroes {
+                    avail_features |= 1u64 << VIRTIO_BLK_F_WRITE_ZEROES;
                 }
 
                 let topology = disk_image.topology();
@@ -728,6 +756,7 @@ impl Block {
             exit_evt,
             serial,
             queue_affinity,
+            write_zeroes_unmap,
         })
     }
 
@@ -920,6 +949,7 @@ impl VirtioDevice for Block {
                 access_platform: self.common.access_platform.clone(),
                 host_cpus: self.queue_affinity.get(&queue_idx).cloned(),
                 acked_features: self.common.acked_features,
+                write_zeroes_unmap: self.write_zeroes_unmap,
             };
 
             let paused = self.common.paused.clone();

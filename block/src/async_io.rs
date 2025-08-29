@@ -79,6 +79,12 @@ pub enum AsyncIoError {
     /// Failed synchronizing file.
     #[error("Failed synchronizing file")]
     Fsync(#[source] std::io::Error),
+    /// Failed to punch hole file.
+    #[error("Failed to punch hole file: {0}")]
+    PunchHole(#[source] std::io::Error),
+    /// Failed to write zeroes to file.
+    #[error("Failed to write zeroes to file: {0}")]
+    WriteZeroes(#[source] std::io::Error),
 }
 
 pub type AsyncIoResult<T> = std::result::Result<T, AsyncIoError>;
@@ -99,4 +105,46 @@ pub trait AsyncIo: Send {
     ) -> AsyncIoResult<()>;
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()>;
     fn next_completed_request(&mut self) -> Option<(u64, i32)>;
+    /// Replace a range of bytes with a hole.
+    ///
+    /// # Arguments
+    ///
+    /// * `offset`: offset of the file where to replace with a hole.
+    /// * `length`: the number of bytes of the hole to replace with.
+    fn punch_hole(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
+        unimplemented!("PunchHole doesn't support yet")
+    }
+    /// Write up to `length` bytes of zeroes starting at `offset`, returning how many bytes were
+    /// written.
+    ///
+    /// # Arguments
+    ///
+    /// * `offset`: offset of the file where to write zeroes.
+    /// * `length`: the number of bytes of zeroes to write to the stream.
+    fn write_zeroes_at(
+        &mut self,
+        _offset: u64,
+        _length: usize,
+        _user_data: Option<u64>,
+    ) -> std::io::Result<usize> {
+        unimplemented!("WriteZeroesAt doesn't support yet")
+    }
+
+    /// Write zeroes starting at `offset` until `length` bytes have been written.
+    ///
+    /// This method will continuously write zeroes until the requested `length` is satisfied or an
+    /// unrecoverable error is encountered.
+    ///
+    /// # Arguments
+    ///
+    /// * `offset`: offset of the file where to write zeroes.
+    /// * `length`: the exact number of bytes of zeroes to write to the stream.
+    fn write_all_zeroes_at(
+        &mut self,
+        _offset: u64,
+        _length: usize,
+        _user_data: u64,
+    ) -> AsyncIoResult<()> {
+        unimplemented!("WriteZeroesAt doesn't support yet")
+    }
 }
