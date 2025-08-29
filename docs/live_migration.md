@@ -28,7 +28,8 @@ Launch the destination VM from the same directory (on the host machine):
 $ target/release/cloud-hypervisor --api-socket=/tmp/api2
 ```
 
-Get ready for receiving migration for the destination VM (on the host machine):
+Get ready for receiving migration for the destination VM (on the host
+machine):
 
 ```console
 $ target/release/ch-remote --api-socket=/tmp/api2 receive-migration unix:/tmp/sock
@@ -171,7 +172,13 @@ After a few seconds the VM should be up and you can interact with it.
 Initiate the Migration over TCP:
 
 ```console
-src $ ch-remote --api-socket=/tmp/api send-migration  tcp:{dst}:{port}
+src $ ch-remote --api-socket=/tmp/api send-migration tcp:{dst}:{port}
+```
+
+With migration parameters:
+
+```console
+src $ ch-remote --api-socket=/tmp/api send-migration tcp:{dst}:{port} --migration-timeout 60 --downtime 5000
 ```
 
 > Replace {dst}:{port} with the actual IP address and port of your destination host.
@@ -180,3 +187,34 @@ After completing the above commands, the source VM will be migrated to
 the destination host and continue running there. The source VM instance
 will terminate normally. All ongoing processes and connections within
 the VM should remain intact after the migration.
+
+#### Migration Parameters
+
+Cloud Hypervisor supports additional parameters to control the
+migration process:
+
+- `migration-timeout <seconds>`
+  Sets the maximum time (in seconds) allowed for the migration process.
+  If the migration takes longer than this timeout, it will be aborted. A
+  value of 0 means no timeout limit.
+- `downtime <milliseconds>`
+  Specifies the targeted maximum downtime (in milliseconds) for live
+  migration in Cloud Hypervisor. This value defines
+  the trade-off between total migration duration and VM downtime. For
+  worst-case workloads, i.e., very
+  memory-write-intensive workloads, the actual downtime will always be
+  somewhat higher: The downtime goal is applied to
+  the transfer of the final memory delta: the migration runs in multiple
+  memory delta iterations until the final delta
+  is small enough that it can be transmitted within the targeted
+  duration, given the available throughput. Additional
+  time - typically a few dozen milliseconds - is required to stop the VM
+  and migrate the state of virtual hardware and
+  vCPUs, which is (yet) not accounted for in this parameter.
+
+> The downtime limit is related to the cost of serialization
+(deserialization) of vCPU and device state. Therefore, the expected
+downtime is always shorter than the actual downtime.
+
+These parameters can be used with the `send-migration` command to
+fine-tune the migration behavior according to your requirements.
