@@ -232,6 +232,20 @@ pub struct AlignedOperation {
     layout: Layout,
 }
 
+pub struct BatchRequest {
+    pub offset: libc::off_t,
+    pub iovecs: SmallVec<[libc::iovec; DEFAULT_DESCRIPTOR_VEC_SIZE]>,
+    pub user_data: u64,
+    pub request_type: RequestType,
+}
+
+pub struct ExecuteAsync {
+    // `true` if the execution will complete asynchronously
+    pub async_complete: bool,
+    // request need to be batched for submission if any
+    pub batch_request: Option<BatchRequest>,
+}
+
 #[derive(Debug)]
 pub struct Request {
     pub request_type: RequestType,
@@ -397,7 +411,7 @@ impl Request {
         disk_image: &mut dyn AsyncIo,
         serial: &[u8],
         user_data: u64,
-    ) -> result::Result<bool, ExecuteError> {
+    ) -> result::Result<ExecuteAsync, ExecuteError> {
         let sector = self.sector;
         let request_type = self.request_type;
         let offset = (sector << SECTOR_SHIFT) as libc::off_t;
@@ -473,6 +487,10 @@ impl Request {
             iovecs.push(iovec);
         }
 
+        let mut ret = ExecuteAsync {
+            async_complete: true,
+            batch_request: None,
+        };
         // Queue operations expected to be submitted.
         match request_type {
             RequestType::In => {
@@ -482,14 +500,32 @@ impl Request {
                         .bitmap()
                         .mark_dirty(0, *data_len as usize);
                 }
-                disk_image
-                    .read_vectored(offset, &iovecs, user_data)
-                    .map_err(ExecuteError::AsyncRead)?;
+                if disk_image.batch_requests_enabled() {
+                    ret.batch_request = Some(BatchRequest {
+                        offset,
+                        iovecs,
+                        user_data,
+                        request_type,
+                    });
+                } else {
+                    disk_image
+                        .read_vectored(offset, &iovecs, user_data)
+                        .map_err(ExecuteError::AsyncRead)?;
+                }
             }
             RequestType::Out => {
-                disk_image
-                    .write_vectored(offset, &iovecs, user_data)
-                    .map_err(ExecuteError::AsyncWrite)?;
+                if disk_image.batch_requests_enabled() {
+                    ret.batch_request = Some(BatchRequest {
+                        offset,
+                        iovecs,
+                        user_data,
+                        request_type,
+                    });
+                } else {
+                    disk_image
+                        .write_vectored(offset, &iovecs, user_data)
+                        .map_err(ExecuteError::AsyncWrite)?;
+                }
             }
             RequestType::Flush => {
                 disk_image
@@ -507,12 +543,13 @@ impl Request {
                 }
                 mem.write_slice(serial, data_addr)
                     .map_err(ExecuteError::Write)?;
-                return Ok(false);
+                ret.async_complete = false;
+                return Ok(ret);
             }
             RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
         }
 
-        Ok(true)
+        Ok(ret)
     }
 
     pub fn complete_async(&mut self) -> result::Result<(), Error> {
