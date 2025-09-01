@@ -43,9 +43,7 @@ concurrency:
 jobs:
   infra-setup:
     name: ${{ inputs.ARCH }} VM Provision
-    runs-on: 
-      - self-hosted
-      - Linux
+    runs-on: mshv
     outputs:
       PRIVATE_IP: ${{ steps.get-vm-ip.outputs.PRIVATE_IP }}
     steps:
