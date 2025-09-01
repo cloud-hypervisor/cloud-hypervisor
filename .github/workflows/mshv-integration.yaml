@@ -4,12 +4,6 @@ on:
     branches:
       - test_mshv_ci
   pull_request:
-  workflow_dispatch:
-    inputs:
-      branch:
-        description: 'Branch to run integration tests on'
-        required: true
-        default: 'main'
 
 jobs:
   infra-setup:
@@ -32,9 +26,7 @@ jobs:
     name: Integration Tests
     needs: infra-setup
     if: ${{ always() && needs.infra-setup.result == 'success' }}
-    runs-on:
-      - self-hosted
-      - Linux
+    runs-on: mshv
     steps:
       - name: Determine branch to build
         run: |
@@ -94,9 +86,7 @@ jobs:
     name: Cleanup
     needs: run-tests
     if: always()
-    runs-on:
-      - self-hosted
-      - Linux
+    runs-on: mshv
     steps:
       - name: Delete RG
         env:
