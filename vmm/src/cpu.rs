@@ -2438,10 +2438,9 @@ impl Pausable for CpuManager {
 
         self.signal_vcpus();
 
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         for vcpu in self.vcpus.iter() {
-            let mut vcpu = vcpu.lock().unwrap();
-            vcpu.pause()?;
-            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            let vcpu = vcpu.lock().unwrap();
             if !self.config.kvm_hyperv {
                 vcpu.vcpu.notify_guest_clock_paused().map_err(|e| {
                     MigratableError::Pause(anyhow!(
@@ -2466,10 +2465,6 @@ impl Pausable for CpuManager {
     }
 
     fn resume(&mut self) -> std::result::Result<(), MigratableError> {
-        for vcpu in self.vcpus.iter() {
-            vcpu.lock().unwrap().resume()?;
-        }
-
         // Toggle the vCPUs pause boolean
         self.vcpus_pause_signalled.store(false, Ordering::SeqCst);
 
