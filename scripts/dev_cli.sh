@@ -538,6 +538,7 @@ cmd_tests() {
             --env TARGET_CC="$target_cc" \
             --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
+            --env MIGRATABLE_VERSION="$MIGRATABLE_VERSION" \
             "$CTR_IMAGE" \
             ./scripts/run_integration_tests_live_migration.sh "$@" || fix_dir_perms $? || exit $?
     fi
