@@ -11,6 +11,7 @@ mkdir -p "$WORKLOADS_DIR"
 
 process_common_args "$@"
 
+migratable_version=v39.0
 # For now these values are default for kvm
 test_features=""
 
@@ -18,6 +19,15 @@ if [ "$hypervisor" = "mshv" ]; then
     test_features="--features mshv"
 fi
 
+# if migratable version is set to override the default
+if [ -n "${MIGRATABLE_VERSION}" ]; then
+    # validate the version if matched with vxx.0
+    if ! [[ "${MIGRATABLE_VERSION}" =~ ^v[0-9]{2,}\.[0-9]$ ]]; then
+        echo "MIGRATABLE_VERSION should be in format vxx.0, e.g. v47.0"
+        exit 1
+    fi
+    migratable_version=${MIGRATABLE_VERSION}
+fi
 cp scripts/sha1sums-x86_64 "$WORKLOADS_DIR"
 
 FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.qcow2"
@@ -45,8 +55,7 @@ fi
 popd || exit
 
 # Download Cloud Hypervisor binary from its last stable release
-LAST_RELEASE_VERSION="v39.0"
-CH_RELEASE_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/$LAST_RELEASE_VERSION/cloud-hypervisor-static"
+CH_RELEASE_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/${migratable_version}/cloud-hypervisor-static"
 CH_RELEASE_NAME="cloud-hypervisor-static"
 pushd "$WORKLOADS_DIR" || exit
 time wget --quiet $CH_RELEASE_URL -O "$CH_RELEASE_NAME" || exit 1
