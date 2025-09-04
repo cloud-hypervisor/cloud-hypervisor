@@ -98,7 +98,12 @@ pub const CMDLINE_MAX_SIZE: usize = 1024;
 pub const FDT_START: GuestAddress = RAM_START;
 pub const FDT_MAX_SIZE: u64 = 0x1_0000;
 
-/// Kernel start after FDT
+/// Put ACPI table above dtb
+pub const ACPI_START: GuestAddress = GuestAddress(RAM_START.0 + FDT_MAX_SIZE);
+pub const ACPI_MAX_SIZE: u64 = 0x20_0000;
+pub const RSDP_POINTER: GuestAddress = ACPI_START;
+
+/// Kernel start after FDT and ACPI
 pub const KERNEL_START: GuestAddress = GuestAddress(RAM_START.0 + FDT_MAX_SIZE);
 
 /// Pci high memory base
