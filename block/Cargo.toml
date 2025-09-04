@@ -11,7 +11,7 @@ io_uring = ["dep:io-uring"]
 [dependencies]
 byteorder = { workspace = true }
 crc-any = "2.5.0"
-io-uring = { version = "0.6.4", optional = true }
+io-uring = { version = "0.7.10", optional = true }
 libc = { workspace = true }
 log = { workspace = true }
 remain = "0.2.15"
