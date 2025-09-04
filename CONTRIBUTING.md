@@ -114,3 +114,13 @@ Signed-off-by: Sebastien Boeuf <sebastien.boeuf@intel.com>
 
 Then, after the corresponding PR is merged, GitHub will automatically close that issue when parsing the
 [commit message](https://help.github.com/articles/closing-issues-via-commit-messages/).
+
+## AI Generated Code
+
+Our policy is to decline any contributions known to contain contents
+generated or derived from using Large Language Models (LLMs). This
+includes ChatGPT, Gemini, Claude, Copilot and similar tools.
+
+The goal is to avoid ambiguity in license compliance and optimize the
+use of limited project resources, especially for code review and
+maintenance. This policy can be revisited as LLMs evolve and mature.
