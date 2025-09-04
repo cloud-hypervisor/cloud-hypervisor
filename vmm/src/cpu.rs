@@ -21,7 +21,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
 
-#[cfg(not(target_arch = "riscv64"))]
 use acpi_tables::sdt::Sdt;
 use acpi_tables::{Aml, aml};
 use anyhow::anyhow;
@@ -328,6 +327,47 @@ struct ProcessorHierarchyNode {
     pub parent: u32,
     pub acpi_processor_id: u32,
     pub num_private_resources: u32,
+}
+
+#[cfg(target_arch = "riscv64")]
+#[allow(dead_code)]
+#[repr(C, packed)]
+#[derive(IntoBytes, Immutable, FromBytes)]
+struct Imsic {
+    pub r#type: u8,
+    pub length: u8,
+    pub version: u8,
+    pub reserved: u8,
+    pub flags: u32,
+    /// Number of supervisor mode Interrupt Identities
+    pub n_supervisor_int_id: u16,
+    /// Number of guest mode Interrupt Identities
+    pub n_guest_int_id: u16,
+    pub geust_index_bits: u8,
+    pub hart_index_bits: u8,
+    pub group_index_bits: u8,
+    pub group_index_shift: u8,
+}
+
+#[cfg(target_arch = "riscv64")]
+#[allow(dead_code)]
+#[repr(C, packed)]
+#[derive(IntoBytes, Immutable, FromBytes)]
+struct Aplic {
+    pub r#type: u8,
+    pub length: u8,
+    pub version: u8,
+    pub aplic_id: u8,
+    pub flags: u32,
+    pub hardware_id: u64,
+    /// Number of Interrupt Delivery Control (IDC) structures
+    pub n_idc: u16,
+    /// Total External Interrupt Sources Supported
+    pub n_external_inc_sources: u16,
+    /// Global System Interrupt Base
+    pub gsi_inc_base: u32,
+    pub aplic_addr: u64,
+    pub aplic_size: u32,
 }
 
 #[allow(dead_code)]
@@ -1487,7 +1527,6 @@ impl CpuManager {
         })
     }
 
-    #[cfg(not(target_arch = "riscv64"))]
     pub fn create_madt(&self, #[cfg(target_arch = "aarch64")] vgic: Arc<Mutex<dyn Vgic>>) -> Sdt {
         use crate::acpi;
         // This is also checked in the commandline parsing.
@@ -1629,6 +1668,55 @@ impl CpuManager {
                 };
                 madt.append(gicits);
             }
+
+            madt.update_checksum();
+        }
+
+        #[cfg(target_arch = "riscv64")]
+        {
+            /* Notes:
+             * Ignore Local Interrupt Controller Address at byte offset 36 of MADT table.
+             */
+
+            let mut hart_index_bits = 0;
+            while (1 << hart_index_bits) < self.config.boot_vcpus {
+                hart_index_bits += 1;
+            }
+
+            // See section 5.2.12.28. RISC-V Incoming MSI Controller (IMSIC)
+            // Structure in ACPI spec.
+            let imsic = Imsic {
+                r#type: acpi::ACPI_RISC_V_IMSIC,
+                length: 16,
+                version: 1,
+                reserved: 0,
+                flags: 0,
+                n_supervisor_int_id: arch::riscv64::CLOUDHV_IRQCHIP_NUM_MSIS,
+                n_guest_int_id: arch::riscv64::CLOUDHV_IRQCHIP_NUM_MSIS,
+                geust_index_bits: 1,
+                hart_index_bits: hart_index_bits,
+                group_index_bits: 1,
+                // IMSIC_MMIO_GROUP_MIN_SHIFT
+                group_index_shift: 24,
+            };
+            madt.append(imsic);
+
+            // See section 5.2.12.29. RISC-V Advanced Platform Level Interrupt
+            // Controller (APLIC) Structure in ACPI spec.
+            let aplic = Aplic {
+                r#type: acpi::ACPI_RISC_V_APLIC,
+                length: 36,
+                version: 1,
+                aplic_id: 0,
+                flags: 0,
+                hardware_id: 0,
+                n_idc: 0,
+                n_external_inc_sources: arch::riscv64::CLOUDHV_IRQCHIP_NUM_SOURCES as u16,
+                gsi_inc_base: arch::layout::IRQ_BASE,
+                aplic_addr: arch::layout::APLIC_START.0,
+                aplic_size: arch::layout::APLIC_SIZE as u32,
+            };
+            madt.append(aplic);
 
             madt.update_checksum();
         }

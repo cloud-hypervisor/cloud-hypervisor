@@ -67,7 +67,6 @@ use crate::vm_config::{
     VmConfig, VsockConfig,
 };
 
-#[cfg(not(target_arch = "riscv64"))]
 mod acpi;
 pub mod api;
 mod clone3;

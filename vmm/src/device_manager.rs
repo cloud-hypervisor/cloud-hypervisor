@@ -22,7 +22,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use acpi_tables::sdt::GenericAddress;
-#[cfg(not(target_arch = "riscv64"))]
 use acpi_tables::{Aml, aml};
 #[cfg(not(target_arch = "riscv64"))]
 use anyhow::anyhow;
@@ -1043,7 +1042,6 @@ pub struct DeviceManager {
     // activation and thus start the threads from the VMM thread
     activate_evt: EventFd,
 
-    #[cfg(not(target_arch = "riscv64"))]
     acpi_address: GuestAddress,
 
     selected_segment: usize,
@@ -1083,7 +1081,6 @@ pub struct DeviceManager {
     // Pending activations
     pending_activations: Arc<Mutex<Vec<VirtioPciDeviceActivator>>>,
 
-    #[cfg(not(target_arch = "riscv64"))]
     // Addresses for ACPI platform devices e.g. ACPI PM timer, sleep/reset registers
     acpi_platform_addresses: AcpiPlatformAddresses,
 
@@ -1339,7 +1336,6 @@ impl DeviceManager {
             activate_evt: activate_evt
                 .try_clone()
                 .map_err(DeviceManagerError::EventFd)?,
-            #[cfg(not(target_arch = "riscv64"))]
             acpi_address,
             selected_segment: 0,
             serial_manager: None,
@@ -1358,7 +1354,6 @@ impl DeviceManager {
             #[cfg(not(target_arch = "riscv64"))]
             timestamp,
             pending_activations: Arc::new(Mutex::new(Vec::default())),
-            #[cfg(not(target_arch = "riscv64"))]
             acpi_platform_addresses: AcpiPlatformAddresses::default(),
             snapshot,
             rate_limit_groups,
@@ -4961,7 +4956,6 @@ impl DeviceManager {
         Ok(())
     }
 
-    #[cfg(not(target_arch = "riscv64"))]
     pub(crate) fn acpi_platform_addresses(&self) -> &AcpiPlatformAddresses {
         &self.acpi_platform_addresses
     }
@@ -5088,11 +5082,12 @@ impl Aml for TpmDevice {
     }
 }
 
-#[cfg(not(target_arch = "riscv64"))]
 impl Aml for DeviceManager {
     fn to_aml_bytes(&self, sink: &mut dyn acpi_tables::AmlSink) {
         #[cfg(target_arch = "aarch64")]
         use arch::aarch64::DeviceInfoForFdt;
+        #[cfg(target_arch = "riscv64")]
+        use arch::riscv64::DeviceInfoForFdt;
 
         let mut pci_scan_methods = Vec::new();
         for i in 0..self.pci_segments.len() {
@@ -5218,7 +5213,7 @@ impl Aml for DeviceManager {
         // Serial device
         #[cfg(target_arch = "x86_64")]
         let serial_irq = 4;
-        #[cfg(target_arch = "aarch64")]
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         let serial_irq =
             if self.config.lock().unwrap().serial.clone().mode != ConsoleOutputMode::Off {
                 self.get_device_info()
@@ -5240,6 +5235,8 @@ impl Aml for DeviceManager {
                         &aml::EISAName::new("PNP0501"),
                         #[cfg(target_arch = "aarch64")]
                         &"ARMH0011",
+                        #[cfg(target_arch = "riscv64")]
+                        &"RISCV011",
                     ),
                     &aml::Name::new("_UID".into(), &aml::ZERO),
                     &aml::Name::new("_DDN".into(), &"COM1"),
@@ -5273,6 +5270,7 @@ impl Aml for DeviceManager {
         )
         .to_aml_bytes(sink);
 
+        #[cfg(not(target_arch = "riscv64"))]
         if self.config.lock().unwrap().tpm.is_some() {
             // Add tpm device
             TpmDevice {}.to_aml_bytes(sink);
