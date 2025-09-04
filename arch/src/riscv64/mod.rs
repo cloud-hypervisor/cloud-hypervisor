@@ -22,6 +22,11 @@ use vm_memory::{Address, GuestAddress, GuestMemory, GuestMemoryAtomic};
 pub use self::fdt::DeviceInfoForFdt;
 use crate::{DeviceType, GuestMemoryMmap, PciSpaceInfo, RegionType};
 
+pub const CLOUDHV_IRQCHIP_NUM_MSIS: u16 = 255;
+pub const CLOUDHV_IRQCHIP_NUM_SOURCES: u8 = 96;
+pub const CLOUDHV_IRQCHIP_NUM_PRIO_BITS: u8 = 3;
+pub const CLOUDHV_IRQCHIP_MAX_GUESTS_BITS: u8 = 3;
+pub const CLOUDHV_IRQCHIP_MAX_GUESTS: u8 = (1 << CLOUDHV_IRQCHIP_MAX_GUESTS_BITS) - 1;
 pub const _NSIG: i32 = 65;
 
 /// Errors thrown while configuring riscv64 system.
