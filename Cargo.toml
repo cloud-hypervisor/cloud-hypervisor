@@ -149,6 +149,6 @@ libc = "0.2.167"
 log = "0.4.22"
 signal-hook = "0.3.18"
 thiserror = "2.0.12"
-uuid = { version = "1.17.0" }
+uuid = { version = "1.18.1" }
 wait-timeout = "0.2.1"
 zerocopy = { version = "0.8.26", default-features = false }
