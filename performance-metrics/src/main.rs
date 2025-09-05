@@ -4,8 +4,6 @@
 //
 
 // Custom harness to run performance tests
-extern crate test_infra;
-
 mod performance_tests;
 
 use std::process::Command;
