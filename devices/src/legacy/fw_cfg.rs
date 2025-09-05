@@ -35,6 +35,7 @@ use bitfield_struct::bitfield;
 use linux_loader::bootparam::boot_params;
 #[cfg(target_arch = "aarch64")]
 use linux_loader::loader::pe::arm64_image_header as boot_params;
+use log::{debug, error};
 use vm_device::BusDevice;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{

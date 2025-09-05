@@ -13,6 +13,7 @@ use std::result;
 use std::sync::{Arc, Barrier};
 
 use byteorder::{ByteOrder, LittleEndian};
+use log::{debug, error, trace, warn};
 use serde::{Deserialize, Serialize};
 use vm_device::BusDevice;
 use vm_device::interrupt::{

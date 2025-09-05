@@ -10,6 +10,7 @@
 use std::sync::{Arc, Barrier};
 use std::{io, result};
 
+use log::warn;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::BusDevice;

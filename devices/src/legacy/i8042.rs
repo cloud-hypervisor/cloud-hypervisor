@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 
+use log::{error, info};
 use vm_device::BusDevice;
 use vmm_sys_util::eventfd::EventFd;
 

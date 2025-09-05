@@ -7,13 +7,6 @@
 
 //! Emulates virtual and hardware devices.
 
-#[macro_use]
-extern crate bitflags;
-#[macro_use]
-extern crate event_monitor;
-#[macro_use]
-extern crate log;
-
 pub mod acpi;
 #[cfg(target_arch = "riscv64")]
 pub mod aia;
@@ -33,6 +26,8 @@ pub mod pvpanic;
 // TODO: TPM is not yet supported
 #[cfg(not(target_arch = "riscv64"))]
 pub mod tpm;
+
+use bitflags::bitflags;
 
 pub use self::acpi::{AcpiGedDevice, AcpiPmTimerDevice, AcpiShutdownDevice};
 #[cfg(feature = "ivshmem")]

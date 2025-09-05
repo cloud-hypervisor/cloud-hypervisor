@@ -8,6 +8,8 @@ use std::result;
 use std::sync::{Arc, Barrier, Mutex};
 
 use anyhow::anyhow;
+use event_monitor::event;
+use log::{debug, info};
 use pci::{
     BarReprogrammingParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
     PciBarRegionType, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,

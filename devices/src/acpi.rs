@@ -9,6 +9,7 @@ use std::thread;
 use std::time::Instant;
 
 use acpi_tables::{Aml, AmlSink, aml};
+use log::{error, info, warn};
 use vm_device::BusDevice;
 use vm_device::interrupt::InterruptSourceGroup;
 use vm_memory::GuestAddress;

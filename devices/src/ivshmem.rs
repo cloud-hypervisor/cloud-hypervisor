@@ -11,6 +11,7 @@ use std::sync::{Arc, Barrier, Mutex};
 
 use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
+use log::{debug, error, warn};
 use pci::{
     BarReprogrammingParams, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable,
     PciBarRegionType, PciClassCode, PciConfiguration, PciDevice, PciDeviceError, PciHeaderType,
