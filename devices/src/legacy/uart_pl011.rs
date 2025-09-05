@@ -11,6 +11,7 @@ use std::sync::{Arc, Barrier};
 use std::time::Instant;
 use std::{io, result};
 
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::BusDevice;

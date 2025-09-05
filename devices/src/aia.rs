@@ -3,8 +3,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use super::interrupt_controller::{Error, InterruptController};
-extern crate arch;
 use std::result;
 use std::sync::{Arc, Mutex};
 
@@ -18,6 +16,8 @@ use vm_device::interrupt::{
 use vm_memory::address::Address;
 use vm_migration::{Migratable, Pausable, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
+
+use super::interrupt_controller::{Error, InterruptController};
 
 type Result<T> = result::Result<T, Error>;
 

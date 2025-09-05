@@ -8,6 +8,7 @@ use std::ffi::CString;
 use std::sync::{Arc, Barrier, Mutex, RwLock};
 use std::{io, result};
 
+use log::{debug, warn};
 use num_enum::TryFromPrimitive;
 use pci::{
     BarReprogrammingParams, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,

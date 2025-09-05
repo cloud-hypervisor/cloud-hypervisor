@@ -13,6 +13,7 @@ use std::{mem, thread};
 #[cfg_attr(target_env = "musl", allow(deprecated))]
 use libc::time_t;
 use libc::{CLOCK_REALTIME, clock_gettime, gmtime_r, timespec, tm};
+use log::{info, warn};
 use vm_device::BusDevice;
 use vmm_sys_util::eventfd::EventFd;
 

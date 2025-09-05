@@ -15,6 +15,7 @@ use std::result;
 use std::sync::{Arc, Barrier};
 use std::time::Instant;
 
+use log::warn;
 use thiserror::Error;
 use vm_device::BusDevice;
 

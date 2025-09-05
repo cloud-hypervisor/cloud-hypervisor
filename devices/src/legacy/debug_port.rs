@@ -6,6 +6,7 @@
 use std::fmt;
 use std::time::Instant;
 
+use log::{error, warn};
 use vm_device::BusDevice;
 
 /// Debug I/O port, see:
