@@ -58,6 +58,12 @@ use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
 use libc::{c_void, siginfo_t};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf::Elf64_Nhdr;
+#[cfg(any(
+    target_arch = "aarch64",
+    all(target_arch = "x86_64", feature = "guest_debug")
+))]
+use log::debug;
+use log::{error, info, warn};
 use seccompiler::{SeccompAction, apply_filter};
 use thiserror::Error;
 use tracer::trace_scoped;

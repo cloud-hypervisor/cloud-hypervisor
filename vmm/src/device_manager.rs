@@ -68,6 +68,7 @@ use devices::legacy::{
 #[cfg(feature = "pvmemcontrol")]
 use devices::pvmemcontrol::{PvmemcontrolBusDevice, PvmemcontrolPciDevice};
 use devices::{AcpiNotificationFlags, interrupt_controller};
+use event_monitor::event;
 use hypervisor::IoEventAddress;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
@@ -75,6 +76,7 @@ use libc::{
     MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW, tcsetattr,
     termios,
 };
+use log::{debug, error, info, warn};
 use pci::{
     DeviceRelocation, MmioRegion, PciBarRegionType, PciBdf, PciDevice, VfioDmaMapping,
     VfioPciDevice, VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
@@ -2615,7 +2617,7 @@ impl DeviceManager {
 
         let (virtio_device, migratable_device) = if disk_cfg.vhost_user {
             if is_hotplug {
-                log::debug!("Acquiring image lock for vhost-user block device not supported");
+                debug!("Acquiring image lock for vhost-user block device not supported");
             }
             let socket = disk_cfg.vhost_socket.as_ref().unwrap().clone();
             let vu_cfg = VhostUserConfig {
@@ -2801,7 +2803,7 @@ impl DeviceManager {
             // state save/resume, and live-migration, locking is part of the outer control flow
             // to ensure proper order of (un)locking.
             if is_hotplug {
-                log::debug!("Acquiring lock for hotplugged image");
+                debug!("Acquiring lock for hotplugged image");
                 virtio_block
                     .try_lock_image()
                     .map_err(DeviceManagerError::DiskLockError)?;

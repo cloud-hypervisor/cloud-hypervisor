@@ -2,6 +2,7 @@
 //
 // Copyright © 2023, Microsoft Corporation
 //
+use log::debug;
 use range_map_vec::{Entry, RangeMap};
 use thiserror::Error;
 use vm_memory::bitmap::AtomicBitmap;

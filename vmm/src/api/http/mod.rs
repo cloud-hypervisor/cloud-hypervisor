@@ -15,6 +15,7 @@ use std::sync::mpsc::Sender;
 use std::thread;
 
 use hypervisor::HypervisorType;
+use log::error;
 use micro_http::{
     Body, HttpServer, MediaType, Method, Request, Response, ServerError, StatusCode, Version,
 };

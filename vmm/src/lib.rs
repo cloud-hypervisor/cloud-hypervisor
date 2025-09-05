@@ -3,11 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#[macro_use]
-extern crate event_monitor;
-#[macro_use]
-extern crate log;
-
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write, stdout};
@@ -30,8 +25,10 @@ use api::http::HttpApiHandle;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use arch::x86_64::MAX_SUPPORTED_CPUS_LEGACY;
 use console_devices::{ConsoleInfo, pre_create_console_devices};
+use event_monitor::event;
 use landlock::LandlockError;
 use libc::{EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW, tcsetattr, termios};
+use log::{error, info, warn};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
 use seccompiler::{SeccompAction, apply_filter};

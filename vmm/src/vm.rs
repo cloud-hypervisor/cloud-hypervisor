@@ -39,6 +39,7 @@ use devices::AcpiNotificationFlags;
 use devices::interrupt_controller;
 #[cfg(feature = "fw_cfg")]
 use devices::legacy::fw_cfg::FwCfgItem;
+use event_monitor::event;
 #[cfg(all(target_arch = "aarch64", feature = "guest_debug"))]
 use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -57,6 +58,7 @@ use linux_loader::loader::bzimage::BzImage;
 use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
+use log::{error, info};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

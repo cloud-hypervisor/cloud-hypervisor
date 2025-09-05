@@ -29,6 +29,7 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 use gdbstub_arch::x86::X86_64_SSE as GdbArch;
 #[cfg(target_arch = "x86_64")]
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
+use log::{error, info};
 use thiserror::Error;
 use vm_memory::{GuestAddress, GuestMemoryAtomic, GuestMemoryError};
 

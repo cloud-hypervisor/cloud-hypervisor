@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, result};
 
+use log::{debug, warn};
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -807,13 +808,11 @@ impl PayloadConfig {
             (Some(_firmware), Some(_kernel)) => Err(PayloadConfigError::FirmwarePlusOtherPayloads),
             (Some(_firmware), None) => {
                 if self.cmdline.is_some() {
-                    log::warn!("Ignoring cmdline parameter as firmware is provided as the payload");
+                    warn!("Ignoring cmdline parameter as firmware is provided as the payload");
                     self.cmdline = None;
                 }
                 if self.initramfs.is_some() {
-                    log::warn!(
-                        "Ignoring initramfs parameter as firmware is provided as the payload"
-                    );
+                    warn!("Ignoring initramfs parameter as firmware is provided as the payload");
                     self.initramfs = None;
                 }
                 Ok(())

@@ -73,6 +73,8 @@ mod fds_helper {
     use std::fs::File;
     use std::os::fd::{IntoRawFd, RawFd};
 
+    use log::{debug, error, warn};
+
     use crate::api::http::HttpError;
 
     /// Abstraction over configuration types received via the HTTP API that
@@ -172,7 +174,7 @@ mod fds_helper {
 
         if fds_amount > 0 {
             let new_fds = fds.drain(..fds_amount).collect::<Vec<_>>();
-            log::debug!(
+            debug!(
                 "Attaching network FDs received via UNIX domain socket to device: id={:?}, fds={new_fds:?}",
                 cfg.id()
             );
