@@ -3,6 +3,8 @@
 // Copyright © 2025, Microsoft Corporation
 //
 
+use anyhow::anyhow;
+
 use crate::arch::aarch64::regs::{EsrEl2, ExceptionClass, IssDataAbort};
 use crate::arch::emulator::PlatformError;
 use crate::cpu::Vcpu;

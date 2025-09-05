@@ -25,7 +25,10 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
+use anyhow::anyhow;
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
+#[cfg(target_arch = "x86_64")]
+use log::warn;
 use vmm_sys_util::eventfd::EventFd;
 
 #[cfg(target_arch = "aarch64")]

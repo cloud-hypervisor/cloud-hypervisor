@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, RwLock};
 
-#[cfg(feature = "sev_snp")]
-use arc_swap::ArcSwap;
+use anyhow::anyhow;
+use log::{debug, warn};
 use mshv_bindings::*;
 #[cfg(target_arch = "x86_64")]
 use mshv_ioctls::InterruptRequest;
@@ -19,6 +19,8 @@ use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
 #[cfg(feature = "sev_snp")]
 use vm_memory::bitmap::AtomicBitmap;
+#[cfg(feature = "sev_snp")]
+use {arc_swap::ArcSwap, log::info};
 
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::regs::{
@@ -271,7 +273,6 @@ impl hypervisor::Hypervisor for MshvHypervisor {
     /// # Examples
     ///
     /// ```
-    /// # extern crate hypervisor;
     /// use hypervisor::mshv::MshvHypervisor;
     /// use hypervisor::mshv::MshvVm;
     /// use hypervisor::HypervisorVmConfig;
@@ -1700,7 +1701,6 @@ impl MshvVm {
 /// # Examples
 ///
 /// ```
-/// extern crate hypervisor;
 /// use hypervisor::mshv::MshvHypervisor;
 /// use hypervisor::HypervisorVmConfig;
 /// use std::sync::Arc;

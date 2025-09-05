@@ -21,12 +21,6 @@
 //! - riscv64 (experimental)
 //!
 
-#[macro_use]
-extern crate anyhow;
-#[allow(unused_imports)]
-#[macro_use]
-extern crate log;
-
 /// Architecture specific definitions
 #[macro_use]
 pub mod arch;
@@ -53,6 +47,7 @@ mod device;
 
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use concat_idents::concat_idents;
 #[cfg(target_arch = "x86_64")]
 pub use cpu::CpuVendor;

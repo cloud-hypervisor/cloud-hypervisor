@@ -12,7 +12,7 @@
 
 use thiserror::Error;
 #[cfg(not(target_arch = "riscv64"))]
-use vm_memory::GuestAddress;
+use {anyhow::anyhow, vm_memory::GuestAddress};
 
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use crate::RegList;
