@@ -23,6 +23,8 @@ use block::fcntl::{LockError, LockGranularity, LockType, get_lock_state};
 use block::{
     ExecuteAsync, ExecuteError, Request, RequestType, VirtioBlockConfig, build_serial, fcntl,
 };
+use event_monitor::event;
+use log::{debug, error, info, warn};
 use rate_limiter::TokenType;
 use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
 use seccompiler::SeccompAction;
@@ -795,7 +797,7 @@ impl Block {
             false => LockType::Write,
         };
         let granularity = self.lock_granularity();
-        log::debug!(
+        debug!(
             "Attempting to acquire {lock_type:?} lock for disk image: id={},path={},granularity={granularity:?}",
             self.id,
             self.disk_path.display()
@@ -806,9 +808,9 @@ impl Block {
             // Don't propagate the error to the outside, as it is not useful at all. Instead,
             // we try to log additional help to the user.
             if let Ok(current_lock) = current_lock {
-                log::error!("Can't get {lock_type:?} lock for {} as there is already a {current_lock:?} lock", self.disk_path.display());
+                error!("Can't get {lock_type:?} lock for {} as there is already a {current_lock:?} lock", self.disk_path.display());
             } else {
-                log::error!("Can't get {lock_type:?} lock for {}, but also can't determine the current lock state", self.disk_path.display());
+                error!("Can't get {lock_type:?} lock for {}, but also can't determine the current lock state", self.disk_path.display());
             }
             Error::LockDiskImage {
                 path: self.disk_path.clone(),
@@ -816,7 +818,7 @@ impl Block {
                 lock_type,
             }
         })?;
-        log::info!(
+        info!(
             "Acquired {lock_type:?} lock for disk image id={},path={}",
             self.id,
             self.disk_path.display()

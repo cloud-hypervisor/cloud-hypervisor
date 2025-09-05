@@ -14,6 +14,8 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::time::Instant;
 
 use anyhow::anyhow;
+use event_monitor::event;
+use log::{error, info};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

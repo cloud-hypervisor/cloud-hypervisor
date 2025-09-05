@@ -6,6 +6,7 @@
 use std::panic::AssertUnwindSafe;
 use std::thread::{self, JoinHandle};
 
+use log::error;
 use seccompiler::{SeccompAction, apply_filter};
 use vmm_sys_util::eventfd::EventFd;
 

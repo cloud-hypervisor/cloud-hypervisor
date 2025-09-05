@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::{io, result};
 
 use anyhow::anyhow;
+use event_monitor::event;
+use log::{debug, error, info};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vhost::vdpa::{VhostVdpa, VhostVdpaIovaRange};

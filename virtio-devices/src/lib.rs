@@ -10,11 +10,6 @@
 
 //! Implements virtio devices, queues, and transport mechanisms.
 
-#[macro_use]
-extern crate event_monitor;
-#[macro_use]
-extern crate log;
-
 use std::io;
 
 use serde::{Deserialize, Serialize};

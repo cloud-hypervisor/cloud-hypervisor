@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 
+use log::info;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
