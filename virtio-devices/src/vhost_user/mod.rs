@@ -8,6 +8,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 
 use anyhow::anyhow;
+use log::error;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vhost::Error as VhostError;

@@ -14,6 +14,7 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 
 use libc::EFD_NONBLOCK;
+use log::{error, info, warn};
 use virtio_queue::Queue;
 use vm_device::UserspaceMapping;
 use vm_memory::{GuestAddress, GuestMemoryAtomic};

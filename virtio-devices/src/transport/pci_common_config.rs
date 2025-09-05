@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 
 use byteorder::{ByteOrder, LittleEndian};
+use log::{debug, error, warn};
 use serde::{Deserialize, Serialize};
 use virtio_queue::{Queue, QueueT};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};

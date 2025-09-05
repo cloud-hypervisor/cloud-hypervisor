@@ -22,6 +22,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier};
 
 use anyhow::anyhow;
+use event_monitor::event;
+use log::{error, info};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

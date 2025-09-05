@@ -6,6 +6,8 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::{mem, result, thread};
 
 use block::VirtioBlockConfig;
+use event_monitor::event;
+use log::{error, info};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use vhost::vhost_user::message::{

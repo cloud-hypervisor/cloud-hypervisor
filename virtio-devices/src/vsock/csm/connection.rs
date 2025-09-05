@@ -85,6 +85,8 @@ use std::num::Wrapping;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::{Duration, Instant};
 
+use log::{debug, error, info, warn};
+
 use super::super::defs::uapi;
 use super::super::packet::VsockPacket;
 use super::super::{Result as VsockResult, VsockChannel, VsockEpollListener, VsockError};

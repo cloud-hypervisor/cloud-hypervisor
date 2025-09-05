@@ -15,6 +15,8 @@ use std::sync::{Arc, Barrier};
 use std::{result, thread};
 
 use anyhow::anyhow;
+use event_monitor::event;
+use log::{debug, error, info};
 #[cfg(not(fuzzing))]
 use net_util::virtio_features_to_tap_offload;
 use net_util::{

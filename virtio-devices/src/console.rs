@@ -10,7 +10,9 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result};
 
 use anyhow::anyhow;
+use event_monitor::event;
 use libc::{EFD_NONBLOCK, TIOCGWINSZ};
+use log::{error, info};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use serial_buffer::SerialBuffer;

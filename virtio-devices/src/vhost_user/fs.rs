@@ -5,6 +5,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{result, thread};
 
+use event_monitor::event;
+use log::{error, info};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use serde_with::{Bytes, serde_as};

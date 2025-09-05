@@ -45,6 +45,8 @@ use std::io::{self, ErrorKind, Read};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 
+use log::{debug, error, info, warn};
+
 use super::super::csm::ConnState;
 use super::super::defs::uapi;
 use super::super::packet::VsockPacket;
