@@ -258,6 +258,17 @@ pub struct VmSendMigrationData {
     /// Send memory across socket without copying
     #[serde(default)]
     pub local: bool,
+    /// Microsecond level downtime
+    #[serde(default = "default_downtime")]
+    pub downtime: u64,
+    /// Second level migration timeout
+    #[serde(default)]
+    pub migration_timeout: u64,
+}
+
+// Default value for downtime the same as qemu.
+fn default_downtime() -> u64 {
+    300
 }
 
 pub enum ApiResponsePayload {
