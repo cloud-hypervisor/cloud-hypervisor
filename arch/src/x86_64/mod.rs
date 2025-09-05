@@ -6,11 +6,19 @@
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
+
 pub mod interrupts;
 pub mod layout;
+pub mod regs;
+
+#[cfg(feature = "tdx")]
+pub mod tdx;
+
 mod mpspec;
 mod mptable;
-pub mod regs;
+mod smbios;
+
+use std::arch::x86_64;
 use std::mem;
 
 use hypervisor::arch::x86::{CPUID_FLAG_VALID_INDEX, CpuIdEntry};
@@ -19,6 +27,7 @@ use linux_loader::loader::bootparam::{boot_params, setup_header};
 use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
 };
+use log::{debug, error, info};
 use thiserror::Error;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
@@ -26,10 +35,6 @@ use vm_memory::{
 };
 
 use crate::{GuestMemoryMmap, InitramfsConfig, RegionType};
-mod smbios;
-use std::arch::x86_64;
-#[cfg(feature = "tdx")]
-pub mod tdx;
 
 // While modern architectures support more than 255 CPUs via x2APIC,
 // legacy devices such as mptable support at most 254 CPUs.

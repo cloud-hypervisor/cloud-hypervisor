@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::str::FromStr;
 
+use log::{debug, info};
 use thiserror::Error;
 use uuid::Uuid;
 use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemoryError};
