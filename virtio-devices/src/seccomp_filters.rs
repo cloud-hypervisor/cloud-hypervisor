@@ -53,6 +53,10 @@ macro_rules! or {
 const VFIO_IOMMU_MAP_DMA: u64 = 0x3b71;
 const VFIO_IOMMU_UNMAP_DMA: u64 = 0x3b72;
 
+// See include/uapi/linux/iommufd.h in the kernel code.
+const IOMMU_IOAS_MAP: u64 = 0x3b85;
+const IOMMU_IOAS_UNMAP: u64 = 0x3b86;
+
 #[cfg(feature = "sev_snp")]
 fn mshv_sev_snp_ioctl_seccomp_rule() -> SeccompRule {
     and![
@@ -83,6 +87,8 @@ fn create_virtio_iommu_ioctl_seccomp_rule() -> Vec<SeccompRule> {
     or![
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_MAP_DMA).unwrap()],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_UNMAP_DMA).unwrap()],
+        and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_MAP).unwrap()],
+        and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_UNMAP).unwrap()],
     ]
 }
 
@@ -90,6 +96,8 @@ fn create_virtio_mem_ioctl_seccomp_rule() -> Vec<SeccompRule> {
     or![
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_MAP_DMA).unwrap()],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_UNMAP_DMA).unwrap()],
+        and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_MAP).unwrap()],
+        and![Cond::new(1, ArgLen::Dword, Eq, IOMMU_IOAS_UNMAP).unwrap()],
     ]
 }
 
