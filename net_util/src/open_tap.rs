@@ -6,6 +6,7 @@ use std::net::IpAddr;
 use std::path::Path;
 use std::{fs, io};
 
+use log::warn;
 use thiserror::Error;
 
 use super::{MacAddr, Tap, TapError, vnet_hdr_len};

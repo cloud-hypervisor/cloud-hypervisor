@@ -8,6 +8,7 @@
 use std::str::FromStr;
 use std::{fmt, io};
 
+use log::error;
 use serde::de::{Deserialize, Deserializer, Error};
 use serde::ser::{Serialize, Serializer};
 
