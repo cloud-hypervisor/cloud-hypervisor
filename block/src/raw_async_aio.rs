@@ -9,6 +9,7 @@ use std::fs::File;
 use std::io::{Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 
+use log::warn;
 use vmm_sys_util::aio;
 use vmm_sys_util::eventfd::EventFd;
 

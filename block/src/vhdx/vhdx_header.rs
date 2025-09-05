@@ -2,8 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-extern crate log;
-
 use std::collections::btree_map::BTreeMap;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
