@@ -3,10 +3,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-#[cfg(feature = "tracing")]
-#[macro_use]
-extern crate log;
-
 #[cfg(not(feature = "tracing"))]
 mod tracer_noop;
 #[cfg(not(feature = "tracing"))]
