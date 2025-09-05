@@ -21,7 +21,7 @@ use std::{convert, io, process, result};
 use block::qcow::{self, ImageType, QcowFile};
 use block::{Request, VirtioBlockConfig, build_serial};
 use libc::EFD_NONBLOCK;
-use log::*;
+use log::{debug, error, info};
 use option_parser::{OptionParser, OptionParserError, Toggle};
 use thiserror::Error;
 use vhost::vhost_user::Listener;
