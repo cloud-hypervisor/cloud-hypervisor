@@ -34,7 +34,7 @@ pub mod tdx;
 
 // While modern architectures support more than 255 CPUs via x2APIC,
 // legacy devices such as mptable support at most 254 CPUs.
-pub(crate) const MAX_SUPPORTED_CPUS_LEGACY: u32 = 254;
+pub const MAX_SUPPORTED_CPUS_LEGACY: u32 = 254;
 
 // CPUID feature bits
 #[cfg(feature = "kvm")]
