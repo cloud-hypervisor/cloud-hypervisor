@@ -7,6 +7,7 @@
 use std::sync::{Arc, Mutex};
 
 use byteorder::{ByteOrder, LittleEndian};
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::PciBarType;
