@@ -835,6 +835,7 @@ pub fn generate_common_cpuid(
     Ok(cpuid)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn configure_vcpu(
     vcpu: &Arc<dyn hypervisor::Vcpu>,
     id: u32,
@@ -843,6 +844,7 @@ pub fn configure_vcpu(
     kvm_hyperv: bool,
     cpu_vendor: CpuVendor,
     topology: (u16, u16, u16, u16),
+    setup_registers: bool,
 ) -> super::Result<()> {
     let x2apic_id = get_x2apic_id(id, Some(topology));
 
@@ -911,9 +913,6 @@ pub fn configure_vcpu(
 
     regs::setup_msrs(vcpu).map_err(Error::MsrsConfiguration)?;
     if let Some((kernel_entry_point, guest_memory)) = boot_setup {
-        regs::setup_regs(vcpu, kernel_entry_point).map_err(Error::RegsConfiguration)?;
-        regs::setup_fpu(vcpu).map_err(Error::FpuConfiguration)?;
-
         // CPUs are required (by Intel sdm spec) to boot in x2apic mode if any
         // of the apic IDs is larger than 255. Experimentally, the Linux kernel
         // does not recognize the last vCPU if x2apic is not enabled when
@@ -922,6 +921,12 @@ pub fn configure_vcpu(
         let enable_x2_apic_mode = get_max_x2apic_id(topology) > MAX_SUPPORTED_CPUS_LEGACY;
         regs::setup_sregs(&guest_memory.memory(), vcpu, enable_x2_apic_mode)
             .map_err(Error::SregsConfiguration)?;
+        if setup_registers {
+            regs::setup_regs(vcpu, kernel_entry_point).map_err(Error::RegsConfiguration)?;
+            regs::setup_sregs(&guest_memory.memory(), vcpu, enable_x2_apic_mode)
+                .map_err(Error::SregsConfiguration)?;
+        }
+        regs::setup_fpu(vcpu).map_err(Error::FpuConfiguration)?;
     }
     interrupts::set_lint(vcpu).map_err(|e| Error::LocalIntConfiguration(e.into()))?;
     Ok(())
