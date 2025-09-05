@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::{io, process};
 
 use libc::EFD_NONBLOCK;
-use log::*;
+use log::error;
 use net_util::{
     MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TxVirtio, open_tap,
 };
