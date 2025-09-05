@@ -8,6 +8,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use log::{error, info};
 use rate_limiter::{RateLimiter, TokenType};
 use thiserror::Error;
 use virtio_queue::{Queue, QueueOwnedT, QueueT};
