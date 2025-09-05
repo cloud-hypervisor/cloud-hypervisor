@@ -8,8 +8,6 @@
 //
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
-extern crate vhost_user_block;
-
 use clap::{Arg, Command};
 use vhost_user_block::start_block_backend;
 
