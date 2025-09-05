@@ -8,9 +8,6 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-#[macro_use]
-extern crate vmm_sys_util;
-
 // generated with bindgen /usr/include/linux/if.h --no-unstable-rust
 // --constified-enum '*' --with-derive-default -- -D __UAPI_DEF_IF_IFNAMSIZ -D
 // __UAPI_DEF_IF_NET_DEVICE_FLAGS -D __UAPI_DEF_IF_IFREQ -D __UAPI_DEF_IF_IFMAP
@@ -39,6 +36,7 @@ pub use if_tun::{
 pub use iff::{ifreq, net_device_flags_IFF_UP, setsockopt, sockaddr, AF_INET};
 pub use inn::sockaddr_in;
 pub use ipv6::{in6_ifreq, sockaddr_in6};
+use vmm_sys_util::{ioctl_ior_nr, ioctl_iow_nr};
 
 pub const TUNTAP: ::std::os::raw::c_uint = 84;
 
