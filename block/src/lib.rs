@@ -8,9 +8,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-#[macro_use]
-extern crate log;
-
 pub mod async_io;
 pub mod fcntl;
 pub mod fixed_vhd;
@@ -45,6 +42,7 @@ use std::{cmp, result};
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
 use libc::{S_IFBLK, S_IFMT, ioctl};
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use thiserror::Error;

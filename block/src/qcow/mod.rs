@@ -19,6 +19,7 @@ use std::str;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use libc::{EINVAL, EIO, ENOSPC};
+use log::error;
 use remain::sorted;
 use thiserror::Error;
 use vmm_sys_util::file_traits::{FileSetLen, FileSync};

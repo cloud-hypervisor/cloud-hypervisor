@@ -7,6 +7,7 @@ use std::io::{Error, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 
 use io_uring::{IoUring, opcode, types};
+use log::warn;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
