@@ -11,6 +11,7 @@ use std::result;
 use std::str::FromStr;
 
 use clap::ArgMatches;
+use log::{debug, warn};
 use option_parser::{
     ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple,
 };

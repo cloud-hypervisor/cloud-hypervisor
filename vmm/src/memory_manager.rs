@@ -25,6 +25,9 @@ use devices::ioapic;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::HypervisorVmError;
 use libc::_SC_NPROCESSORS_ONLN;
+#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
+use log::debug;
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracer::trace_scoped;

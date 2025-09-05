@@ -16,6 +16,7 @@ use arch::NumaNodes;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::DeviceInfoForFdt;
 use bitflags::bitflags;
+use log::info;
 use pci::PciBdf;
 use tracer::trace_scoped;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryRegion};

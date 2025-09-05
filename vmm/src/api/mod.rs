@@ -36,6 +36,7 @@ pub mod http;
 use std::io;
 use std::sync::mpsc::{RecvError, SendError, Sender, channel};
 
+use log::info;
 use micro_http::Body;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

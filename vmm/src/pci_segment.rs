@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use acpi_tables::{Aml, aml};
 use arch::layout;
+use log::info;
 use pci::{DeviceRelocation, PciBdf, PciBus, PciConfigMmio, PciRoot};
 #[cfg(target_arch = "x86_64")]
 use pci::{PCI_CONFIG_IO_PORT, PCI_CONFIG_IO_PORT_SIZE, PciConfigIo};

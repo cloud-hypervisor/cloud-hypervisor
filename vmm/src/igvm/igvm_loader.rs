@@ -15,6 +15,9 @@ use igvm_defs::{IGVM_VHS_MEMORY_MAP_ENTRY, MemoryMapEntryType};
 use igvm_defs::{
     IGVM_VHS_PARAMETER, IGVM_VHS_PARAMETER_INSERT, IgvmPageDataType, IgvmPlatformType,
 };
+use log::debug;
+#[cfg(feature = "sev_snp")]
+use log::info;
 use mshv_bindings::*;
 use thiserror::Error;
 use zerocopy::IntoBytes;
