@@ -196,8 +196,8 @@ pub enum Error {
     #[error("Error setting up AMX")]
     AmxEnable(#[source] anyhow::Error),
 
-    #[error("Maximum number of vCPUs exceeds host limit")]
-    MaximumVcpusExceeded,
+    #[error("Maximum number of vCPUs {0} exceeds host limit {1}")]
+    MaximumVcpusExceeded(u32, u32),
 
     #[cfg(feature = "sev_snp")]
     #[error("Failed to set sev control register")]
@@ -698,12 +698,16 @@ impl CpuManager {
         numa_nodes: &NumaNodes,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
     ) -> Result<Arc<Mutex<CpuManager>>> {
-        if u32::from(config.max_vcpus) > hypervisor.get_max_vcpus() {
-            return Err(Error::MaximumVcpusExceeded);
+        if config.max_vcpus > hypervisor.get_max_vcpus() {
+            return Err(Error::MaximumVcpusExceeded(
+                config.max_vcpus,
+                hypervisor.get_max_vcpus(),
+            ));
         }
 
-        let mut vcpu_states = Vec::with_capacity(usize::from(config.max_vcpus));
-        vcpu_states.resize_with(usize::from(config.max_vcpus), VcpuState::default);
+        let max_vcpus = usize::try_from(config.max_vcpus).unwrap();
+        let mut vcpu_states = Vec::with_capacity(max_vcpus);
+        vcpu_states.resize_with(max_vcpus, VcpuState::default);
         let hypervisor_type = hypervisor.hypervisor_type();
         #[cfg(target_arch = "x86_64")]
         let cpu_vendor = hypervisor.get_cpu_vendor();
@@ -755,7 +759,7 @@ impl CpuManager {
         let affinity = if let Some(cpu_affinity) = config.affinity.as_ref() {
             cpu_affinity
                 .iter()
-                .map(|a| (a.vcpu as u32, a.host_cpus.clone()))
+                .map(|a| (a.vcpu, a.host_cpus.clone()))
                 .collect()
         } else {
             BTreeMap::new()
@@ -781,7 +785,7 @@ impl CpuManager {
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
             selected_cpu: 0,
-            vcpus: Vec::with_capacity(usize::from(config.max_vcpus)),
+            vcpus: Vec::with_capacity(max_vcpus),
             seccomp_action,
             vm_ops,
             acpi_address: None,
@@ -895,10 +899,10 @@ impl CpuManager {
             },
             |t| {
                 (
-                    t.threads_per_core.into(),
-                    t.cores_per_die.into(),
-                    t.dies_per_package.into(),
-                    t.packages.into(),
+                    t.threads_per_core,
+                    t.cores_per_die,
+                    t.dies_per_package,
+                    t.packages,
                 )
             },
         );
@@ -934,7 +938,7 @@ impl CpuManager {
             self.present_vcpus()
         );
 
-        if desired_vcpus > self.config.max_vcpus as u32 {
+        if desired_vcpus > self.config.max_vcpus {
             return Err(Error::DesiredVCpuCountExceedsMax);
         }
 
@@ -1245,7 +1249,7 @@ impl CpuManager {
         inserting: bool,
         paused: Option<bool>,
     ) -> Result<()> {
-        if desired_vcpus > self.config.max_vcpus as u32 {
+        if desired_vcpus > self.config.max_vcpus {
             return Err(Error::DesiredVCpuCountExceedsMax);
         }
 
@@ -1418,11 +1422,11 @@ impl CpuManager {
     }
 
     pub fn boot_vcpus(&self) -> u32 {
-        self.config.boot_vcpus as u32
+        self.config.boot_vcpus
     }
 
     pub fn max_vcpus(&self) -> u32 {
-        self.config.max_vcpus as u32
+        self.config.max_vcpus
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -1456,10 +1460,10 @@ impl CpuManager {
     pub fn get_vcpu_topology(&self) -> Option<(u16, u16, u16, u16)> {
         self.config.topology.clone().map(|t| {
             (
-                t.threads_per_core.into(),
-                t.cores_per_die.into(),
-                t.dies_per_package.into(),
-                t.packages.into(),
+                t.threads_per_core,
+                t.cores_per_die,
+                t.dies_per_package,
+                t.packages,
             )
         })
     }
@@ -1475,7 +1479,7 @@ impl CpuManager {
         {
             madt.write(36, arch::layout::APIC_START.0);
 
-            for cpu in 0..self.config.max_vcpus as u32 {
+            for cpu in 0..self.config.max_vcpus {
                 let x2apic_id = get_x2apic_id(cpu, self.get_vcpu_topology());
 
                 let lapic = LocalX2Apic {
@@ -1483,7 +1487,7 @@ impl CpuManager {
                     length: 16,
                     processor_id: cpu,
                     apic_id: x2apic_id,
-                    flags: if cpu < self.config.boot_vcpus as u32 {
+                    flags: if cpu < self.config.boot_vcpus {
                         1 << MADT_CPU_ENABLE_FLAG
                     } else {
                         0
@@ -1535,8 +1539,8 @@ impl CpuManager {
                     r#type: acpi::ACPI_APIC_GENERIC_CPU_INTERFACE,
                     length: 80,
                     reserved0: 0,
-                    cpu_interface_number: cpu as u32,
-                    uid: cpu as u32,
+                    cpu_interface_number: cpu,
+                    uid: cpu,
                     flags: 1,
                     parking_version: 0,
                     performance_interrupt: 0,
@@ -2274,7 +2278,7 @@ impl Aml for CpuManager {
         let uid = aml::Name::new("_CID".into(), &aml::EISAName::new("PNP0A05"));
         // Bundle methods together under a common object
         let methods = CpuMethods {
-            max_vcpus: self.config.max_vcpus as u32,
+            max_vcpus: self.config.max_vcpus,
             dynamic: self.dynamic,
         };
         let mut cpu_data_inner: Vec<&dyn Aml> = vec![&hid, &uid, &methods];
@@ -2282,7 +2286,7 @@ impl Aml for CpuManager {
         #[cfg(target_arch = "x86_64")]
         let topology = self.get_vcpu_topology();
         let mut cpu_devices = Vec::new();
-        for cpu_id in 0..(self.config.max_vcpus as u32) {
+        for cpu_id in 0..self.config.max_vcpus {
             let proximity_domain = *self.proximity_domain_per_cpu.get(&cpu_id).unwrap_or(&0);
             let cpu_device = Cpu {
                 cpu_id,

@@ -1694,7 +1694,7 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
         let interrupt_controller: Arc<Mutex<gic::Gic>> = Arc::new(Mutex::new(
             gic::Gic::new(
-                self.config.lock().unwrap().cpus.boot_vcpus as u32,
+                self.config.lock().unwrap().cpus.boot_vcpus,
                 Arc::clone(&self.msi_interrupt_manager),
                 self.address_manager.vm.clone(),
             )
