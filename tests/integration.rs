@@ -9,8 +9,6 @@
 // related warnings for our quality workflow to pass.
 #![allow(dead_code)]
 
-extern crate test_infra;
-
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fs::OpenOptions;
