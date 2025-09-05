@@ -8,9 +8,6 @@
 //! Implements platform specific functionality.
 //! Supported platforms: x86_64, aarch64, riscv64.
 
-#[macro_use]
-extern crate log;
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::{fmt, result};

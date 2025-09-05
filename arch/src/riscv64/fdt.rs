@@ -15,6 +15,7 @@ use std::{cmp, result, str};
 
 use byteorder::{BigEndian, ByteOrder};
 use hypervisor::arch::riscv64::aia::Vaia;
+use log::debug;
 use thiserror::Error;
 use vm_fdt::{FdtWriter, FdtWriterResult};
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryRegion};

@@ -19,6 +19,7 @@ use hypervisor::arch::aarch64::regs::{
     AARCH64_ARCH_TIMER_HYP_IRQ, AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ,
     AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ, AARCH64_ARCH_TIMER_VIRT_IRQ, AARCH64_PMU_IRQ,
 };
+use log::{debug, warn};
 use thiserror::Error;
 use vm_fdt::{FdtWriter, FdtWriterResult};
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryRegion};
