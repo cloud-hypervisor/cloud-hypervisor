@@ -10,6 +10,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::sync::{Arc, Mutex};
 use std::{io, result, thread};
 
+use log::{error, info, warn};
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
