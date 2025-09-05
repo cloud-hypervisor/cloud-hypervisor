@@ -10,6 +10,8 @@
 // MOVS - Move Data from String to String
 //
 
+use anyhow::anyhow;
+
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::DF;
 

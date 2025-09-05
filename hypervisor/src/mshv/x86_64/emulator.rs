@@ -3,7 +3,9 @@
 // Copyright © 2024, Microsoft Corporation
 //
 
+use anyhow::anyhow;
 use iced_x86::Register;
+use log::debug;
 use mshv_bindings::*;
 
 use crate::arch::emulator::{PlatformEmulator, PlatformError};

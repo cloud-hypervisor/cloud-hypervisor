@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use anyhow::anyhow;
 use iced_x86::*;
 
 use crate::arch::emulator::{EmulationError, PlatformEmulator, PlatformError};

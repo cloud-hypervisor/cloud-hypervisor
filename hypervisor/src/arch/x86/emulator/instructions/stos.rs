@@ -10,6 +10,8 @@
 // STOS - Store String
 //
 
+use anyhow::anyhow;
+
 use crate::arch::x86::emulator::instructions::*;
 use crate::arch::x86::regs::DF;
 
