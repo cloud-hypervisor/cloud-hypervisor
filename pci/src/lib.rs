@@ -5,8 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 //! Implements pci devices and busses.
-#[macro_use]
-extern crate log;
 
 mod bus;
 mod configuration;

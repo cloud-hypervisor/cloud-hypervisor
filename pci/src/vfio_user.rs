@@ -9,6 +9,7 @@ use std::os::unix::prelude::AsRawFd;
 use std::sync::{Arc, Barrier, Mutex};
 
 use hypervisor::HypervisorVmError;
+use log::{error, info};
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::VfioIrq;

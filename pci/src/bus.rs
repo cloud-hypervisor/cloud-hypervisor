@@ -10,6 +10,7 @@ use std::ops::DerefMut;
 use std::sync::{Arc, Barrier, Mutex};
 
 use byteorder::{ByteOrder, LittleEndian};
+use log::error;
 use thiserror::Error;
 use vm_device::{Bus, BusDevice, BusDeviceSync};
 

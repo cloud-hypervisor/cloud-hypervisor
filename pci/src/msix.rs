@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::{io, result};
 
 use byteorder::{ByteOrder, LittleEndian};
+use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_device::interrupt::{
