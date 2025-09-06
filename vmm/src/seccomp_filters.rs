@@ -42,7 +42,9 @@ macro_rules! or {
 
 // See include/uapi/asm-generic/ioctls.h in the kernel code.
 const TCGETS: u64 = 0x5401;
+const TCGETS2: u64 = 0x802c_542a;
 const TCSETS: u64 = 0x5402;
+const TCSETS2: u64 = 0x402c_542b;
 const TIOCSCTTY: u64 = 0x540E;
 const TIOCGPGRP: u64 = 0x540F;
 const TIOCSPGRP: u64 = 0x5410;
@@ -311,7 +313,9 @@ fn create_vmm_ioctl_seccomp_rule_common(
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFMTU)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCSIFNETMASK)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TCSETS)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TCSETS2)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TCGETS)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TCGETS2)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TIOCGPGRP)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TIOCGPTPEER)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ)?],
@@ -487,7 +491,9 @@ fn create_api_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
 fn create_signal_handler_ioctl_seccomp_rule() -> Result<Vec<SeccompRule>, BackendError> {
     Ok(or![
         and![Cond::new(1, ArgLen::Dword, Eq, TCGETS)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TCGETS2)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TCSETS)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, TCSETS2)?],
         and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ)?],
     ])
 }
