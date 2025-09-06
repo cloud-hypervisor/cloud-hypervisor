@@ -6,7 +6,7 @@ use kvm_ioctls::DeviceFd;
 use crate::arch::aarch64::gic::{Error, Result};
 use crate::device::HypervisorDeviceError;
 use crate::kvm::kvm_bindings::{
-    kvm_device_attr, KVM_DEV_ARM_VGIC_GRP_DIST_REGS, KVM_DEV_ARM_VGIC_GRP_NR_IRQS,
+    KVM_DEV_ARM_VGIC_GRP_DIST_REGS, KVM_DEV_ARM_VGIC_GRP_NR_IRQS, kvm_device_attr,
 };
 
 /*

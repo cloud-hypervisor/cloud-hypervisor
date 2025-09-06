@@ -9,8 +9,8 @@ use block::VirtioBlockConfig;
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use vhost::vhost_user::message::{
-    VhostUserConfigFlags, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
-    VHOST_USER_CONFIG_OFFSET,
+    VHOST_USER_CONFIG_OFFSET, VhostUserConfigFlags, VhostUserProtocolFeatures,
+    VhostUserVirtioFeatures,
 };
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
 use virtio_bindings::virtio_blk::{
@@ -26,11 +26,11 @@ use vmm_sys_util::eventfd::EventFd;
 
 use super::super::{ActivateResult, VirtioCommon, VirtioDevice, VirtioDeviceType};
 use super::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
-use super::{Error, Result, DEFAULT_VIRTIO_FEATURES};
+use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::VhostUserCommon;
-use crate::{GuestMemoryMmap, GuestRegionMmap, VirtioInterrupt, VIRTIO_F_IOMMU_PLATFORM};
+use crate::{GuestMemoryMmap, GuestRegionMmap, VIRTIO_F_IOMMU_PLATFORM, VirtioInterrupt};
 
 const DEFAULT_QUEUE_NUMBER: usize = 1;
 
@@ -134,8 +134,10 @@ impl Blk {
                 };
 
             if num_queues > backend_num_queues {
-                error!("vhost-user-blk requested too many queues ({}) since the backend only supports {}\n",
-                num_queues, backend_num_queues);
+                error!(
+                    "vhost-user-blk requested too many queues ({}) since the backend only supports {}\n",
+                    num_queues, backend_num_queues
+                );
                 return Err(Error::BadQueueNum);
             }
 
@@ -211,16 +213,16 @@ impl Blk {
 
 impl Drop for Blk {
     fn drop(&mut self) {
-        if let Some(kill_evt) = self.common.kill_evt.take() {
-            if let Err(e) = kill_evt.write(1) {
-                error!("failed to kill vhost-user-blk: {:?}", e);
-            }
+        if let Some(kill_evt) = self.common.kill_evt.take()
+            && let Err(e) = kill_evt.write(1)
+        {
+            error!("failed to kill vhost-user-blk: {:?}", e);
         }
         self.common.wait_for_epoll_threads();
-        if let Some(thread) = self.epoll_thread.take() {
-            if let Err(e) = thread.join() {
-                error!("Error joining thread: {:?}", e);
-            }
+        if let Some(thread) = self.epoll_thread.take()
+            && let Err(e) = thread.join()
+        {
+            error!("Error joining thread: {:?}", e);
         }
     }
 }
@@ -265,16 +267,15 @@ impl VirtioDevice for Blk {
         }
 
         self.config.writeback = data[0];
-        if let Some(vu) = &self.vu_common.vu {
-            if let Err(e) = vu
+        if let Some(vu) = &self.vu_common.vu
+            && let Err(e) = vu
                 .lock()
                 .unwrap()
                 .socket_handle()
                 .set_config(offset as u32, VhostUserConfigFlags::WRITABLE, data)
                 .map_err(Error::VhostUserSetConfig)
-            {
-                error!("Failed setting vhost-user-blk configuration: {:?}", e);
-            }
+        {
+            error!("Failed setting vhost-user-blk configuration: {:?}", e);
         }
     }
 
@@ -327,11 +328,11 @@ impl VirtioDevice for Blk {
             self.common.resume().ok()?;
         }
 
-        if let Some(vu) = &self.vu_common.vu {
-            if let Err(e) = vu.lock().unwrap().reset_vhost_user() {
-                error!("Failed to reset vhost-user daemon: {:?}", e);
-                return None;
-            }
+        if let Some(vu) = &self.vu_common.vu
+            && let Err(e) = vu.lock().unwrap().reset_vhost_user()
+        {
+            error!("Failed to reset vhost-user daemon: {:?}", e);
+            return None;
         }
 
         if let Some(kill_evt) = self.common.kill_evt.take() {

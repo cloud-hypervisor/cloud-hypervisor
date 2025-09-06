@@ -1,4 +1,4 @@
-edition = "2021"
+edition = "2024"
 group_imports="StdExternalCrate"
 imports_granularity="Module"
 

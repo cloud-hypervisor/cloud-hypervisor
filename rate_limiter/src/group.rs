@@ -288,10 +288,10 @@ impl Drop for RateLimiterGroup {
     fn drop(&mut self) {
         self.kill_evt.write(1).unwrap();
 
-        if let Some(t) = self.epoll_thread.take() {
-            if let Err(e) = t.join() {
-                error!("Error joining thread: {:?}", e);
-            }
+        if let Some(t) = self.epoll_thread.take()
+            && let Err(e) = t.join()
+        {
+            error!("Error joining thread: {:?}", e);
         }
     }
 }
@@ -306,7 +306,7 @@ pub(crate) mod tests {
 
     use super::RateLimiterGroupHandle;
     use crate::group::RateLimiterGroup;
-    use crate::{TokenBucket, TokenType, REFILL_TIMER_INTERVAL_MS};
+    use crate::{REFILL_TIMER_INTERVAL_MS, TokenBucket, TokenType};
 
     impl RateLimiterGroupHandle {
         fn bandwidth(&self) -> Option<TokenBucket> {

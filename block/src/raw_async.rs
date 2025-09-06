@@ -6,7 +6,7 @@ use std::fs::File;
 use std::io::{Error, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 
-use io_uring::{opcode, types, IoUring};
+use io_uring::{IoUring, opcode, types};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
