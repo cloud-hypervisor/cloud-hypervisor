@@ -4,7 +4,7 @@
 
 use std::convert::TryFrom;
 use std::io::Error as IoError;
-use std::path::PathBuf;
+use std::path::Path;
 
 #[cfg(test)]
 use landlock::make_bitflags;
@@ -87,13 +87,13 @@ impl Landlock {
 
     pub(crate) fn add_rule(
         &mut self,
-        path: PathBuf,
+        path: &Path,
         access: BitFlags<AccessFs>,
     ) -> Result<(), LandlockError> {
         // path_beneath_rules in landlock crate handles file and directory access rules.
         // Incoming path/s are passed to path_beneath_rules, so that we don't
         // have to worry about the type of the path.
-        let paths = vec![path.clone()];
+        let paths = vec![&path];
         let path_beneath_rules = path_beneath_rules(paths, access);
         self.ruleset
             .as_mut()
@@ -104,7 +104,7 @@ impl Landlock {
 
     pub(crate) fn add_rule_with_access(
         &mut self,
-        path: PathBuf,
+        path: &Path,
         access: &str,
     ) -> Result<(), LandlockError> {
         self.add_rule(path, LandlockAccess::try_from(access)?.access)?;
