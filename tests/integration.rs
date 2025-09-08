@@ -2849,7 +2849,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_user_defined_memory_regions() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
@@ -2917,7 +2916,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_guest_numa_nodes() {
         _test_guest_numa_nodes(false);
     }
@@ -3914,13 +3912,11 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_multi_segment_hotplug() {
         _test_virtio_fs(&prepare_virtiofsd, true, Some(15))
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_virtio_fs_multi_segment() {
         _test_virtio_fs(&prepare_virtiofsd, false, Some(15))
     }
@@ -5107,7 +5103,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_virtio_mem() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
@@ -5181,7 +5176,6 @@ mod common_parallel {
 
     #[test]
     #[cfg(target_arch = "x86_64")]
-    #[cfg(not(feature = "mshv"))]
     // Test both vCPU and memory resizing together
     fn test_resize() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -5809,7 +5803,6 @@ mod common_parallel {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_virtio_balloon_free_page_reporting() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
@@ -7887,7 +7880,6 @@ mod common_sequential {
     // through each ssh command. There's no need to perform a dedicated test to
     // verify the migration went well for virtio-net.
     #[test]
-    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_hotplug_virtiomem() {
         _test_snapshot_restore(true);
     }
@@ -11164,25 +11156,21 @@ mod live_migration {
         }
 
         #[test]
-        #[cfg(not(feature = "mshv"))]
         fn test_live_migration_numa() {
             _test_live_migration_numa(false, false)
         }
 
         #[test]
-        #[cfg(not(feature = "mshv"))]
         fn test_live_migration_numa_local() {
             _test_live_migration_numa(false, true)
         }
 
         #[test]
-        #[cfg(not(feature = "mshv"))]
         fn test_live_upgrade_numa() {
             _test_live_migration_numa(true, false)
         }
 
         #[test]
-        #[cfg(not(feature = "mshv"))]
         fn test_live_upgrade_numa_local() {
             _test_live_migration_numa(true, true)
         }
