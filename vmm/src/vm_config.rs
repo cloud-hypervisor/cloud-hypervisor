@@ -955,6 +955,11 @@ impl VmConfig {
     pub(crate) fn apply_landlock(&self) -> LandlockResult<()> {
         let mut landlock = Landlock::new()?;
 
+        #[cfg(target_arch = "aarch64")]
+        {
+            landlock.add_rule_with_access(Path::new("/sys/devices/system/cpu/cpu0/cache"), "r")?;
+        }
+
         if let Some(mem_zones) = &self.memory.zones {
             for zone in mem_zones.iter() {
                 zone.apply_landlock(&mut landlock)?;
