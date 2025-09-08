@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 use std::net::{IpAddr, Ipv4Addr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(feature = "fw_cfg")]
 use std::str::FromStr;
 use std::{fs, result};
@@ -159,7 +159,7 @@ pub struct MemoryZoneConfig {
 impl ApplyLandlock for MemoryZoneConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(file) = &self.file {
-            landlock.add_rule_with_access(file.to_path_buf(), "rw")?;
+            landlock.add_rule_with_access(file, "rw")?;
         }
         Ok(())
     }
@@ -281,7 +281,7 @@ pub struct DiskConfig {
 impl ApplyLandlock for DiskConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(path) = &self.path {
-            landlock.add_rule_with_access(path.to_path_buf(), "rw")?;
+            landlock.add_rule_with_access(path, "rw")?;
         }
         Ok(())
     }
@@ -425,7 +425,7 @@ impl Default for RngConfig {
 impl ApplyLandlock for RngConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         // Rng Path only need read access
-        landlock.add_rule_with_access(self.src.to_path_buf(), "r")?;
+        landlock.add_rule_with_access(&self.src, "r")?;
         Ok(())
     }
 }
@@ -469,7 +469,7 @@ pub fn default_fsconfig_queue_size() -> u16 {
 
 impl ApplyLandlock for FsConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        landlock.add_rule_with_access(self.socket.to_path_buf(), "rw")?;
+        landlock.add_rule_with_access(&self.socket, "rw")?;
         Ok(())
     }
 }
@@ -492,7 +492,7 @@ pub struct PmemConfig {
 impl ApplyLandlock for PmemConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         let access = if self.discard_writes { "r" } else { "rw" };
-        landlock.add_rule_with_access(self.file.to_path_buf(), access)?;
+        landlock.add_rule_with_access(&self.file, access)?;
         Ok(())
     }
 }
@@ -524,10 +524,10 @@ pub fn default_consoleconfig_file() -> Option<PathBuf> {
 impl ApplyLandlock for ConsoleConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(file) = &self.file {
-            landlock.add_rule_with_access(file.to_path_buf(), "rw")?;
+            landlock.add_rule_with_access(file, "rw")?;
         }
         if let Some(socket) = &self.socket {
-            landlock.add_rule_with_access(socket.to_path_buf(), "rw")?;
+            landlock.add_rule_with_access(socket, "rw")?;
         }
         Ok(())
     }
@@ -557,7 +557,7 @@ impl Default for DebugConsoleConfig {
 impl ApplyLandlock for DebugConsoleConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         if let Some(file) = &self.file {
-            landlock.add_rule_with_access(file.to_path_buf(), "rw")?;
+            landlock.add_rule_with_access(file, "rw")?;
         }
         Ok(())
     }
@@ -585,8 +585,9 @@ impl ApplyLandlock for DeviceConfig {
             .to_str()
             .ok_or(LandlockError::InvalidPath)?;
 
-        let vfio_group_path = "/dev/vfio/".to_owned() + iommu_group_str;
-        landlock.add_rule_with_access(vfio_group_path.into(), "rw")?;
+        let mut vfio_group_path = PathBuf::from("/dev/vfio");
+        vfio_group_path.push(iommu_group_str);
+        landlock.add_rule_with_access(&vfio_group_path, "rw")?;
 
         Ok(())
     }
@@ -603,7 +604,7 @@ pub struct UserDeviceConfig {
 
 impl ApplyLandlock for UserDeviceConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        landlock.add_rule_with_access(self.socket.to_path_buf(), "rw")?;
+        landlock.add_rule_with_access(&self.socket, "rw")?;
         Ok(())
     }
 }
@@ -627,7 +628,7 @@ pub fn default_vdpaconfig_num_queues() -> usize {
 
 impl ApplyLandlock for VdpaConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        landlock.add_rule_with_access(self.path.to_path_buf(), "rw")?;
+        landlock.add_rule_with_access(&self.path, "rw")?;
         Ok(())
     }
 }
@@ -646,7 +647,7 @@ pub struct VsockConfig {
 
 impl ApplyLandlock for VsockConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        landlock.add_rule_with_access(self.socket.to_path_buf(), "rw")?;
+        landlock.add_rule_with_access(&self.socket, "rw")?;
         Ok(())
     }
 }
@@ -832,20 +833,20 @@ impl ApplyLandlock for PayloadConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         // Payload only needs read access
         if let Some(firmware) = &self.firmware {
-            landlock.add_rule_with_access(firmware.to_path_buf(), "r")?;
+            landlock.add_rule_with_access(firmware, "r")?;
         }
 
         if let Some(kernel) = &self.kernel {
-            landlock.add_rule_with_access(kernel.to_path_buf(), "r")?;
+            landlock.add_rule_with_access(kernel, "r")?;
         }
 
         if let Some(initramfs) = &self.initramfs {
-            landlock.add_rule_with_access(initramfs.to_path_buf(), "r")?;
+            landlock.add_rule_with_access(initramfs, "r")?;
         }
 
         #[cfg(feature = "igvm")]
         if let Some(igvm) = &self.igvm {
-            landlock.add_rule_with_access(igvm.to_path_buf(), "r")?;
+            landlock.add_rule_with_access(igvm, "r")?;
         }
 
         Ok(())
@@ -877,7 +878,7 @@ pub struct TpmConfig {
 
 impl ApplyLandlock for TpmConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        landlock.add_rule_with_access(self.socket.to_path_buf(), "rw")?;
+        landlock.add_rule_with_access(&self.socket, "rw")?;
         Ok(())
     }
 }
@@ -890,7 +891,7 @@ pub struct LandlockConfig {
 
 impl ApplyLandlock for LandlockConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        landlock.add_rule_with_access(self.path.to_path_buf(), self.access.clone().as_str())?;
+        landlock.add_rule_with_access(&self.path, self.access.clone().as_str())?;
         Ok(())
     }
 }
@@ -990,7 +991,7 @@ impl VmConfig {
         }
 
         if let Some(devices) = &self.devices {
-            landlock.add_rule_with_access("/dev/vfio/vfio".into(), "rw")?;
+            landlock.add_rule_with_access(Path::new("/dev/vfio/vfio"), "rw")?;
 
             for device in devices.iter() {
                 device.apply_landlock(&mut landlock)?;
@@ -1022,7 +1023,7 @@ impl VmConfig {
         }
 
         if self.net.is_some() {
-            landlock.add_rule_with_access("/dev/net/tun".into(), "rw")?;
+            landlock.add_rule_with_access(Path::new("/dev/net/tun"), "rw")?;
         }
 
         if let Some(landlock_rules) = &self.landlock_rules {
