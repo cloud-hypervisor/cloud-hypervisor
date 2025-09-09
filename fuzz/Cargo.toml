@@ -30,7 +30,7 @@ linux-loader = { git = "https://github.com/rust-vmm/linux-loader", branch = "mai
   "pe",
 ] }
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
-mshv-bindings = "0.5.2"
+mshv-bindings = "0.6.0"
 net_util = { path = "../net_util" }
 seccompiler = "0.5.0"
 virtio-devices = { path = "../virtio-devices" }
