@@ -4939,6 +4939,7 @@ mod common_parallel {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
         let api_socket = temp_api_path(&guest.tmp_dir);
+        let console_str = "console=ttyS0";
 
         let kernel_path = direct_kernel_boot_path();
 
@@ -4946,7 +4947,14 @@ mod common_parallel {
             .args(["--cpus", "boot=2,max=4"])
             .args(["--memory", "size=512M"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--cmdline",
+                DIRECT_KERNEL_BOOT_CMDLINE
+                    .replace("console=hvc0 ", console_str)
+                    .as_str(),
+            ])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
             .default_disks()
             .default_net()
             .args(["--api-socket", &api_socket])
