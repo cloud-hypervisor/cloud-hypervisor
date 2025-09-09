@@ -9,8 +9,8 @@ use std::path::Path;
 #[cfg(test)]
 use landlock::make_bitflags;
 use landlock::{
-    path_beneath_rules, Access, AccessFs, BitFlags, Ruleset, RulesetAttr, RulesetCreated,
-    RulesetCreatedAttr, RulesetError, ABI,
+    path_beneath_rules, Access, AccessFs, BitFlags, Compatible, Ruleset, RulesetAttr,
+    RulesetCreated, RulesetCreatedAttr, RulesetError, ABI,
 };
 use thiserror::Error;
 
@@ -75,8 +75,10 @@ impl Landlock {
         let file_access = AccessFs::from_all(ABI);
 
         let def_ruleset = Ruleset::default()
+            .set_compatibility(landlock::CompatLevel::HardRequirement)
             .handle_access(file_access)
-            .map_err(LandlockError::ManageRuleset)?;
+            .map_err(LandlockError::ManageRuleset)?
+            .set_compatibility(landlock::CompatLevel::HardRequirement);
 
         // By default, rulesets are created in `BestEffort` mode. This lets Landlock
         // to enable all the supported rules and silently ignore the unsupported ones.
