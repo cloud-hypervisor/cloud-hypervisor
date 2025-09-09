@@ -110,11 +110,8 @@ pub fn get_cache_size(cache_level: CacheLevel) -> u32 {
 
     let file_path = Path::new(&file_directory);
     if !file_path.exists() {
-        warn!("File: {} does not exist.", file_directory);
         0
     } else {
-        info!("File: {} exist.", file_directory);
-
         let src = fs::read_to_string(file_directory).expect("File not exists or file corrupted.");
         // The content of the file is as simple as a size, like: "32K"
         let src = src.trim();
@@ -144,11 +141,8 @@ pub fn get_cache_coherency_line_size(cache_level: CacheLevel) -> u32 {
 
     let file_path = Path::new(&file_directory);
     if !file_path.exists() {
-        warn!("File: {} does not exist.", file_directory);
         0
     } else {
-        info!("File: {} exist.", file_directory);
-
         let src = fs::read_to_string(file_directory).expect("File not exists or file corrupted.");
         src.trim().parse::<u32>().unwrap()
     }
@@ -167,11 +161,8 @@ pub fn get_cache_number_of_sets(cache_level: CacheLevel) -> u32 {
 
     let file_path = Path::new(&file_directory);
     if !file_path.exists() {
-        warn!("File: {} does not exist.", file_directory);
         0
     } else {
-        info!("File: {} exist.", file_directory);
-
         let src = fs::read_to_string(file_directory).expect("File not exists or file corrupted.");
         src.trim().parse::<u32>().unwrap()
     }
@@ -195,11 +186,8 @@ pub fn get_cache_shared(cache_level: CacheLevel) -> bool {
 
     let file_path = Path::new(&file_directory);
     if !file_path.exists() {
-        warn!("File: {} does not exist.", file_directory);
         result = false;
     } else {
-        info!("File: {} exist.", file_directory);
-
         let src = fs::read_to_string(file_directory).expect("File not exists or file corrupted.");
         let src = src.trim();
         if src.is_empty() {
@@ -325,7 +313,6 @@ fn create_cpu_nodes(
     if !cache_exist {
         warn!("cache sysfs system does not exist.");
     } else {
-        info!("cache sysfs system exists.");
         // L1 Data Cache Info.
         l1_d_cache_size = get_cache_size(CacheLevel::L1D);
         l1_d_cache_line_size = get_cache_coherency_line_size(CacheLevel::L1D);
@@ -425,9 +412,6 @@ fn create_cpu_nodes(
                 }
 
                 fdt.end_node(l2_cache_node)?;
-            }
-            if l2_cache_size != 0 && l2_cache_shared {
-                warn!("L2 cache shared with other cpus");
             }
         }
 
