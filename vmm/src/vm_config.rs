@@ -647,7 +647,12 @@ pub struct VsockConfig {
 
 impl ApplyLandlock for VsockConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        if let Some(parent) = self.socket.parent() {
+            landlock.add_rule_with_access(parent, "w")?;
+        }
+
         landlock.add_rule_with_access(&self.socket, "rw")?;
+
         Ok(())
     }
 }
