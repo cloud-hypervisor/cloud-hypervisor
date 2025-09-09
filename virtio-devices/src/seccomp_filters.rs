@@ -4,6 +4,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+use libc::{FIONBIO, TIOCGWINSZ, TUNSETOFFLOAD};
 use seccompiler::SeccompCmpOp::Eq;
 use seccompiler::{
     BpfProgram, Error, SeccompAction, SeccompCmpArgLen as ArgLen, SeccompCondition as Cond,
@@ -46,16 +47,9 @@ macro_rules! or {
     ($($x:expr),*) => (vec![$($x),*])
 }
 
-// See include/uapi/asm-generic/ioctls.h in the kernel code.
-const TIOCGWINSZ: u64 = 0x5413;
-const FIONBIO: u64 = 0x5421;
-
 // See include/uapi/linux/vfio.h in the kernel code.
 const VFIO_IOMMU_MAP_DMA: u64 = 0x3b71;
 const VFIO_IOMMU_UNMAP_DMA: u64 = 0x3b72;
-
-// See include/uapi/linux/if_tun.h in the kernel code.
-const TUNSETOFFLOAD: u64 = 0x4004_54d0;
 
 #[cfg(feature = "sev_snp")]
 fn mshv_sev_snp_ioctl_seccomp_rule() -> SeccompRule {
@@ -75,7 +69,7 @@ fn create_mshv_sev_snp_ioctl_seccomp_rule() -> Vec<SeccompRule> {
 
 fn create_virtio_console_ioctl_seccomp_rule() -> Vec<SeccompRule> {
     or![
-        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ).unwrap()],
+        and![Cond::new(1, ArgLen::Dword, Eq, TIOCGWINSZ as _).unwrap()],
         #[cfg(feature = "sev_snp")]
         mshv_sev_snp_ioctl_seccomp_rule(),
     ]
@@ -157,7 +151,7 @@ fn virtio_net_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 
 fn create_virtio_net_ctl_ioctl_seccomp_rule() -> Vec<SeccompRule> {
     or![
-        and![Cond::new(1, ArgLen::Dword, Eq, TUNSETOFFLOAD).unwrap()],
+        and![Cond::new(1, ArgLen::Dword, Eq, TUNSETOFFLOAD as _).unwrap()],
         #[cfg(feature = "sev_snp")]
         mshv_sev_snp_ioctl_seccomp_rule(),
     ]
@@ -231,7 +225,7 @@ fn virtio_vhost_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 
 fn create_vsock_ioctl_seccomp_rule() -> Vec<SeccompRule> {
     or![
-        and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO,).unwrap()],
+        and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO as _).unwrap()],
         #[cfg(feature = "sev_snp")]
         mshv_sev_snp_ioctl_seccomp_rule(),
     ]
