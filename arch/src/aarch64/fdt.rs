@@ -231,8 +231,8 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     let mut fdt = FdtWriter::new().unwrap();
 
     // For an explanation why these nodes were introduced in the blob take a look at
-    // https://github.com/torvalds/linux/blob/master/Documentation/devicetree/booting-without-of.txt#L845
-    // Look for "Required nodes and properties".
+    // the "Device Node Requirements" chapter of the Devicetree Specification.
+    // https://www.devicetree.org/specifications/
 
     // Header or the root node as per above mentioned documentation.
     let root_node = fdt.begin_node("")?;
