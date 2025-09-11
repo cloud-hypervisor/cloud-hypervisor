@@ -9,7 +9,7 @@ dirs = { workspace = true }
 epoll = { workspace = true }
 libc = { workspace = true }
 serde_json = { workspace = true }
-ssh2 = { version = "0.9.4", features = ["vendored-openssl"] }
+ssh2 = { version = "0.9.5", features = ["vendored-openssl"] }
 thiserror = { workspace = true }
 vmm-sys-util = { workspace = true }
 wait-timeout = { workspace = true }
