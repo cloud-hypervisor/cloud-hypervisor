@@ -524,7 +524,7 @@ pub struct CpuManager {
     #[cfg(feature = "guest_debug")]
     vm_debug_evt: EventFd,
     vcpu_states: Vec<VcpuState>,
-    selected_cpu: u8,
+    selected_cpu: u32,
     vcpus: Vec<Arc<Mutex<Vcpu>>>,
     seccomp_action: SeccompAction,
     vm_ops: Arc<dyn VmOps>,
@@ -553,11 +553,13 @@ impl BusDevice for CpuManager {
 
         match offset {
             CPU_SELECTION_OFFSET => {
-                data[0] = self.selected_cpu;
+                assert!(data.len() >= core::mem::size_of::<u32>());
+                data[0..core::mem::size_of::<u32>()]
+                    .copy_from_slice(&self.selected_cpu.to_le_bytes());
             }
             CPU_STATUS_OFFSET => {
-                if (self.selected_cpu as u32) < self.max_vcpus() {
-                    let state = &self.vcpu_states[usize::from(self.selected_cpu)];
+                if self.selected_cpu < self.max_vcpus() {
+                    let state = &self.vcpu_states[usize::try_from(self.selected_cpu).unwrap()];
                     if state.active() {
                         data[0] |= 1 << CPU_ENABLE_FLAG;
                     }
@@ -583,11 +585,13 @@ impl BusDevice for CpuManager {
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         match offset {
             CPU_SELECTION_OFFSET => {
-                self.selected_cpu = data[0];
+                assert!(data.len() >= core::mem::size_of::<u32>());
+                self.selected_cpu =
+                    u32::from_le_bytes(data[0..core::mem::size_of::<u32>()].try_into().unwrap());
             }
             CPU_STATUS_OFFSET => {
-                if (self.selected_cpu as u32) < self.max_vcpus() {
-                    let state = &mut self.vcpu_states[usize::from(self.selected_cpu)];
+                if self.selected_cpu < self.max_vcpus() {
+                    let state = &mut self.vcpu_states[usize::try_from(self.selected_cpu).unwrap()];
                     // The ACPI code writes back a 1 to acknowledge the insertion
                     if (data[0] & (1 << CPU_INSERTING_FLAG) == 1 << CPU_INSERTING_FLAG)
                         && state.inserting
@@ -602,7 +606,7 @@ impl BusDevice for CpuManager {
                     }
                     // Trigger removal of vCPU
                     if data[0] & (1 << CPU_EJECT_FLAG) == 1 << CPU_EJECT_FLAG
-                        && let Err(e) = self.remove_vcpu(self.selected_cpu as u32)
+                        && let Err(e) = self.remove_vcpu(self.selected_cpu)
                     {
                         error!("Error removing vCPU: {:?}", e);
                     }
