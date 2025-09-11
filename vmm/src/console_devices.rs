@@ -12,6 +12,7 @@
 
 use std::fs::{File, OpenOptions, read_link};
 use std::mem::zeroed;
+use std::net::TcpListener;
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixListener;
@@ -40,6 +41,10 @@ pub enum ConsoleDeviceError {
     #[error("No socket option support for console device")]
     NoSocketOptionSupportForConsoleDevice,
 
+    /// Error parsing the TCP address
+    #[error("Wrong TCP address format")]
+    WrongTcpAddressFormat(std::string::String),
+
     /// Error setting pty raw mode
     #[error("Error setting pty raw mode")]
     SetPtyRaw(#[source] vmm_sys_util::errno::Error),
@@ -62,6 +67,7 @@ pub enum ConsoleOutput {
     Tty(Arc<File>),
     Null,
     Socket(Arc<UnixListener>),
+    Tcp(Arc<TcpListener>),
     Off,
 }
 
@@ -265,7 +271,15 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                     .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
                 ConsoleOutput::Socket(Arc::new(listener))
             }
-            ConsoleOutputMode::Tcp => ConsoleOutput::Null,
+            ConsoleOutputMode::Tcp => {
+                let url = vmconfig.serial.url.as_ref().unwrap().to_str().unwrap();
+                let socket_addr: std::net::SocketAddr = url
+                    .parse()
+                    .map_err(|_| ConsoleDeviceError::WrongTcpAddressFormat(url.to_string()))?;
+                let listener = TcpListener::bind(socket_addr)
+                    .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
+                ConsoleOutput::Tcp(Arc::new(listener))
+            }
             ConsoleOutputMode::Null => ConsoleOutput::Null,
             ConsoleOutputMode::Off => ConsoleOutput::Off,
         },
