@@ -181,6 +181,9 @@ pub enum ValidationError {
     /// Missing file value for console
     #[error("Path missing when using file console mode")]
     ConsoleFileMissing,
+    /// Missing TCP address for console
+    #[error("Address missing when using TCP console mode")]
+    ConsoleTcpAddressMissing,
     /// Missing socket path for console
     #[error("Path missing when using socket console mode")]
     ConsoleSocketPathMissing,
@@ -1819,11 +1822,13 @@ impl ConsoleConfig {
             .add_valueless("null")
             .add("file")
             .add("iommu")
+            .add("tcp")
             .add("socket");
         parser.parse(console).map_err(Error::ParseConsole)?;
 
         let mut file: Option<PathBuf> = default_consoleconfig_file();
         let mut socket: Option<PathBuf> = None;
+        let mut url: Option<PathBuf> = None;
         let mut mode: ConsoleOutputMode = ConsoleOutputMode::Off;
 
         if parser.is_set("off") {
@@ -1839,6 +1844,11 @@ impl ConsoleConfig {
                 Some(PathBuf::from(parser.get("file").ok_or(
                     Error::Validation(ValidationError::ConsoleFileMissing),
                 )?));
+        } else if parser.is_set("tcp") {
+            mode = ConsoleOutputMode::Tcp;
+            url = Some(PathBuf::from(parser.get("tcp").ok_or(
+                Error::Validation(ValidationError::ConsoleTcpAddressMissing),
+            )?));
         } else if parser.is_set("socket") {
             mode = ConsoleOutputMode::Socket;
             socket = Some(PathBuf::from(parser.get("socket").ok_or(
@@ -1858,6 +1868,7 @@ impl ConsoleConfig {
             mode,
             iommu,
             socket,
+            url,
         })
     }
 }
@@ -3699,6 +3710,7 @@ mod tests {
                 iommu: false,
                 file: None,
                 socket: None,
+                url: None,
             }
         );
         assert_eq!(
@@ -3708,6 +3720,7 @@ mod tests {
                 iommu: false,
                 file: None,
                 socket: None,
+                url: None,
             }
         );
         assert_eq!(
@@ -3717,6 +3730,7 @@ mod tests {
                 iommu: false,
                 file: None,
                 socket: None,
+                url: None,
             }
         );
         assert_eq!(
@@ -3726,6 +3740,7 @@ mod tests {
                 iommu: false,
                 file: None,
                 socket: None,
+                url: None,
             }
         );
         assert_eq!(
@@ -3735,6 +3750,7 @@ mod tests {
                 iommu: false,
                 file: Some(PathBuf::from("/tmp/console")),
                 socket: None,
+                url: None,
             }
         );
         assert_eq!(
@@ -3744,6 +3760,7 @@ mod tests {
                 iommu: true,
                 file: None,
                 socket: None,
+                url: None,
             }
         );
         assert_eq!(
@@ -3753,6 +3770,7 @@ mod tests {
                 iommu: true,
                 file: Some(PathBuf::from("/tmp/console")),
                 socket: None,
+                url: None,
             }
         );
         assert_eq!(
@@ -3762,6 +3780,7 @@ mod tests {
                 iommu: true,
                 file: None,
                 socket: Some(PathBuf::from("/tmp/serial.sock")),
+                url: None,
             }
         );
         Ok(())
@@ -4128,12 +4147,14 @@ mod tests {
                 mode: ConsoleOutputMode::Null,
                 iommu: false,
                 socket: None,
+                url: None,
             },
             console: ConsoleConfig {
                 file: None,
                 mode: ConsoleOutputMode::Tty,
                 iommu: false,
                 socket: None,
+                url: None,
             },
             #[cfg(target_arch = "x86_64")]
             debug_console: DebugConsoleConfig::default(),
