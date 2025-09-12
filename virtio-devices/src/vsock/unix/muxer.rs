@@ -44,6 +44,9 @@ use std::io::{self, ErrorKind, Read};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 
+use serde::{Deserialize, Serialize};
+use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
+
 use super::super::csm::ConnState;
 use super::super::defs::uapi;
 use super::super::packet::VsockPacket;
@@ -102,6 +105,8 @@ struct PartiallyReadCommand {
 /// The vsock connection multiplexer.
 ///
 pub struct VsockMuxer {
+    /// The Vsock Muxer ID
+    id: String,
     /// Guest CID.
     cid: u64,
     /// A hash map used to store the active connections.
@@ -131,6 +136,11 @@ pub struct VsockMuxer {
     local_port_set: HashSet<u32>,
     /// The last used host-side port.
     local_port_last: u32,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct VsockMuxerState {
+    local_port_set: HashSet<u32>,
 }
 
 impl VsockChannel for VsockMuxer {
@@ -340,12 +350,35 @@ impl VsockEpollListener for VsockMuxer {
     }
 }
 
+impl Pausable for VsockMuxer {}
+
+impl Snapshottable for VsockMuxer {
+    fn id(&self) -> String {
+        self.id.clone()
+    }
+    fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+        Snapshot::new_from_state(&self.state())
+    }
+}
+
 impl VsockBackend for VsockMuxer {}
 
 impl VsockMuxer {
     /// Muxer constructor.
     ///
-    pub fn new(cid: u32, host_sock_path: String) -> Result<Self> {
+    pub fn new(
+        id: String,
+        cid: u32,
+        host_sock_path: String,
+        state: Option<VsockMuxerState>,
+    ) -> Result<Self> {
+        // Create the local port set.
+        let local_port_set = if let Some(state) = state {
+            state.local_port_set
+        } else {
+            HashSet::with_capacity(defs::MAX_CONNECTIONS)
+        };
+
         // Create the nested epoll FD. This FD will be added to the VMM `EpollContext`, at
         // device activation time.
         let epoll_fd = epoll::create(true).map_err(Error::EpollFdCreate)?;
@@ -360,6 +393,7 @@ impl VsockMuxer {
             .map_err(Error::UnixBind)?;
 
         let mut muxer = Self {
+            id,
             cid: cid.into(),
             host_sock,
             host_sock_path,
@@ -370,7 +404,7 @@ impl VsockMuxer {
             partial_command_map: Default::default(),
             killq: MuxerKillQ::new(),
             local_port_last: (1u32 << 30) - 1,
-            local_port_set: HashSet::with_capacity(defs::MAX_CONNECTIONS),
+            local_port_set,
         };
 
         muxer.add_listener(muxer.host_sock.as_raw_fd(), EpollListener::HostSock)?;
@@ -846,6 +880,12 @@ impl VsockMuxer {
             );
         }
     }
+
+    fn state(&self) -> VsockMuxerState {
+        VsockMuxerState {
+            local_port_set: self.local_port_set.clone(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -888,7 +928,8 @@ mod tests {
             )
             .unwrap();
             let uds_path = format!("test_vsock_{name}.sock");
-            let muxer = VsockMuxer::new(PEER_CID, uds_path).unwrap();
+            let id = format!("test_vsock_{name}");
+            let muxer = VsockMuxer::new(id, PEER_CID, uds_path, None).unwrap();
 
             Self {
                 _vsock_test_ctx: vsock_test_ctx,

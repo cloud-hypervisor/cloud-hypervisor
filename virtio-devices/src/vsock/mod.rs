@@ -16,6 +16,7 @@ mod unix;
 use std::os::unix::io::RawFd;
 
 use packet::VsockPacket;
+use vm_migration::Snapshottable;
 
 pub use self::device::Vsock;
 pub use self::unix::{VsockUnixBackend, VsockUnixError};
@@ -158,7 +159,7 @@ pub trait VsockChannel {
 /// It that needs to be sendable through a mpsc channel (the latter due to how `vmm::EpollContext` works).
 /// Currently, the only implementation we have is `crate::virtio::unix::muxer::VsockMuxer`, which
 /// translates guest-side vsock connections to host-side Unix domain socket connections.
-pub trait VsockBackend: VsockChannel + VsockEpollListener + Send {}
+pub trait VsockBackend: VsockChannel + VsockEpollListener + Send + Snapshottable {}
 
 #[cfg(any(test, fuzzing))]
 pub mod tests {
@@ -169,6 +170,7 @@ pub mod tests {
     use libc::EFD_NONBLOCK;
     use virtio_bindings::virtio_ring::{VRING_DESC_F_NEXT, VRING_DESC_F_WRITE};
     use vm_memory::{GuestAddress, GuestMemoryAtomic};
+    use vm_migration::Pausable;
     use vm_virtio::queue::testing::VirtQueue as GuestQ;
     use vmm_sys_util::eventfd::EventFd;
 
@@ -256,6 +258,9 @@ pub mod tests {
             self.evset = Some(evset);
         }
     }
+
+    impl Pausable for TestBackend {}
+    impl Snapshottable for TestBackend {}
     impl VsockBackend for TestBackend {}
 
     pub struct TestContext {
