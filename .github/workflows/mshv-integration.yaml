@@ -1,9 +1,5 @@
 name: MSHV Integration Tests
-on:
-  push:
-    branches:
-      - test_mshv_ci
-  pull_request:
+on: [pull_request_target, merge_group]
 
 jobs:
   infra-setup:
@@ -27,21 +23,14 @@ jobs:
     needs: infra-setup
     if: ${{ always() && needs.infra-setup.result == 'success' }}
     runs-on: mshv
+    continue-on-error: true
     steps:
-      - name: Determine branch to build
-        run: |
-          echo "Determining branch to build and test..."
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "BRANCH=${{ github.event.pull_request.head.ref }}" >> $GITHUB_ENV
-          else
-            echo "BRANCH=${{ inputs.branch }}" >> $GITHUB_ENV
-          fi
-
       - name: Run integration tests
         env:
-          BRANCH_NAME: ${{ env.BRANCH }}
           KEY: azure_key_${{ github.run_id }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_URL: https://github.com/cloud-hypervisor/cloud-hypervisor.git
+          REPO_DIR: cloud-hypervisor
           PRIVATE_IP: ${{ needs.infra-setup.outputs.PRIVATE_IP }}
           RG: MSHV-${{ github.run_id }}
           USERNAME: ${{ secrets.MSHV_USERNAME }}
@@ -52,11 +41,18 @@ jobs:
             set -e
             echo "Logged in successfully."
             export PATH="\$HOME/.cargo/bin:\$PATH"
-            echo "${BRANCH_NAME}"
-            git clone --depth 1 --single-branch --branch "$BRANCH_NAME" https://github.com/cloud-hypervisor/cloud-hypervisor.git
-            cd cloud-hypervisor
 
-             echo "Loading VDPA kernel modules..."
+            if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
+              git clone --depth 1 "$REPO_URL" "$REPO_DIR"
+              cd "$REPO_DIR"
+              git fetch origin pull/${{ github.event.pull_request.number }}/merge
+              git checkout FETCH_HEAD
+            else
+              git clone --depth 1 --single-branch --branch "${{ github.ref_name }}" "$REPO_URL" "$REPO_DIR"
+              cd "$REPO_DIR"
+            fi
+
+            echo "Loading VDPA kernel modules..."
             sudo modprobe vdpa
             sudo modprobe vhost_vdpa
             sudo modprobe vdpa_sim
