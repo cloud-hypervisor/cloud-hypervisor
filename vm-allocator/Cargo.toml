@@ -9,6 +9,7 @@ default = []
 kvm = ["arch/kvm"]
 
 [dependencies]
+bit-vec = "0.8.0"
 libc = { workspace = true }
 vm-memory = { workspace = true }
 
