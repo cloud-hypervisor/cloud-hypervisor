@@ -46,7 +46,7 @@ pub use crate::riscv64::{
 #[cfg(target_arch = "riscv64")]
 use crate::riscv64_reg_id;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
-use crate::{HypervisorType, cpu, hypervisor};
+use crate::{HypervisorType, HypervisorVmConfig, cpu, hypervisor};
 // x86_64 dependencies
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
@@ -539,10 +539,11 @@ impl KvmVm {
 ///
 /// ```
 /// # use hypervisor::kvm::KvmHypervisor;
+/// # use hypervisor::HypervisorVmConfig;
 /// # use std::sync::Arc;
 /// let kvm = KvmHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(kvm);
-/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
+/// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// ```
 impl vm::Vm for KvmVm {
     #[cfg(target_arch = "x86_64")]
@@ -1161,10 +1162,11 @@ impl KvmHypervisor {
 ///
 /// ```
 /// # use hypervisor::kvm::KvmHypervisor;
+/// # use hypervisor::HypervisorVmConfig;
 /// # use std::sync::Arc;
 /// let kvm = KvmHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(kvm);
-/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
+/// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// ```
 impl hypervisor::Hypervisor for KvmHypervisor {
     ///
@@ -1174,38 +1176,37 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         HypervisorType::Kvm
     }
 
-    ///
-    /// Create a Vm of a specific type using the underlying hypervisor, passing memory size
-    /// Return a hypervisor-agnostic Vm trait object
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use hypervisor::kvm::KvmHypervisor;
-    /// use hypervisor::kvm::KvmVm;
-    /// let hypervisor = KvmHypervisor::new().unwrap();
-    /// let vm = hypervisor.create_vm_with_type_and_memory(0).unwrap();
-    /// ```
-    fn create_vm_with_type_and_memory(
-        &self,
-        vm_type: u64,
-        #[cfg(feature = "sev_snp")] _mem_size: u64,
-    ) -> hypervisor::Result<Arc<dyn vm::Vm>> {
-        self.create_vm_with_type(vm_type)
-    }
-
     /// Create a KVM vm object of a specific VM type and return the object as Vm trait object
     ///
     /// # Examples
     ///
     /// ```
     /// # use hypervisor::kvm::KvmHypervisor;
-    /// use hypervisor::kvm::KvmVm;
+    /// # use hypervisor::kvm::KvmVm;
+    /// # use hypervisor::HypervisorVmConfig;
     /// let hypervisor = KvmHypervisor::new().unwrap();
-    /// let vm = hypervisor.create_vm_with_type(0).unwrap();
+    /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).unwrap();
     /// ```
-    fn create_vm_with_type(&self, vm_type: u64) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+    fn create_vm(&self, _config: HypervisorVmConfig) -> hypervisor::Result<Arc<dyn vm::Vm>> {
         let fd: VmFd;
+
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "tdx")] {
+                let vm_type: u64 = u64::from(_config.tdx_enabled);
+            }
+            else if #[cfg(target_arch = "aarch64")] {
+                // When KVM supports Cap::ArmVmIPASize, it is better to get the IPA
+                // size from the host and use that when creating the VM, which may
+                // avoid unnecessary VM creation failures.
+                let vm_type: u64 = if self.kvm.check_extension(Cap::ArmVmIPASize) {
+                    self.kvm.get_host_ipa_limit().try_into().unwrap()
+                } else {
+                    0
+                };
+            } else {
+                let vm_type: u64 = 0; // Create with default platform type
+            }
+        }
         loop {
             match self.kvm.create_vm_with_type(vm_type) {
                 Ok(res) => fd = res,
@@ -1254,31 +1255,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
             }))
         }
-    }
-
-    /// Create a KVM vm object and return the object as Vm trait object
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use hypervisor::kvm::KvmHypervisor;
-    /// use hypervisor::kvm::KvmVm;
-    /// let hypervisor = KvmHypervisor::new().unwrap();
-    /// let vm = hypervisor.create_vm().unwrap();
-    /// ```
-    fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
-        #[allow(unused_mut)]
-        let mut vm_type: u64 = 0; // Create with default platform type
-
-        // When KVM supports Cap::ArmVmIPASize, it is better to get the IPA
-        // size from the host and use that when creating the VM, which may
-        // avoid unnecessary VM creation failures.
-        #[cfg(target_arch = "aarch64")]
-        if self.kvm.check_extension(Cap::ArmVmIPASize) {
-            vm_type = self.kvm.get_host_ipa_limit().try_into().unwrap();
-        }
-
-        self.create_vm_with_type(vm_type)
     }
 
     fn check_required_extensions(&self) -> hypervisor::Result<()> {
@@ -1367,10 +1343,11 @@ pub struct KvmVcpu {
 ///
 /// ```
 /// # use hypervisor::kvm::KvmHypervisor;
+/// # use hypervisor::HypervisorVmConfig;
 /// # use std::sync::Arc;
 /// let kvm = KvmHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(kvm);
-/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
+/// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// let vcpu = vm.create_vcpu(0, None).unwrap();
 /// ```
 impl cpu::Vcpu for KvmVcpu {
@@ -2449,9 +2426,10 @@ impl cpu::Vcpu for KvmVcpu {
     /// ```rust
     /// # use hypervisor::kvm::KvmHypervisor;
     /// # use std::sync::Arc;
+    /// # use hypervisor::HypervisorVmConfig;
     /// let kvm = KvmHypervisor::new().unwrap();
     /// let hv = Arc::new(kvm);
-    /// let vm = hv.create_vm().expect("new VM fd creation failed");
+    /// let vm = hv.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
     /// vm.enable_split_irq().unwrap();
     /// let vcpu = vm.create_vcpu(0, None).unwrap();
     /// let state = vcpu.state().unwrap();
@@ -2686,10 +2664,11 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// ```rust
     /// # use hypervisor::kvm::KvmHypervisor;
+    /// # use hypervisor::HypervisorVmConfig;
     /// # use std::sync::Arc;
     /// let kvm = KvmHypervisor::new().unwrap();
     /// let hv = Arc::new(kvm);
-    /// let vm = hv.create_vm().expect("new VM fd creation failed");
+    /// let vm = hv.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
     /// vm.enable_split_irq().unwrap();
     /// let vcpu = vm.create_vcpu(0, None).unwrap();
     /// let state = vcpu.state().unwrap();
@@ -3069,7 +3048,9 @@ mod tests {
 
         let kvm = KvmHypervisor::new().unwrap();
         let hypervisor = Arc::new(kvm);
-        let vm = hypervisor.create_vm().expect("new VM fd creation failed");
+        let vm = hypervisor
+            .create_vm(HypervisorVmConfig::default())
+            .expect("new VM fd creation failed");
         let vcpu0 = vm.create_vcpu(0, None).unwrap();
 
         let core_regs = StandardRegisters::from(kvm_riscv_core {
