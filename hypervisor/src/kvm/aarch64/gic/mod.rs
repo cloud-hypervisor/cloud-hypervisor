@@ -216,9 +216,7 @@ impl KvmGicV3Its {
             0,
         )?;
 
-        /* Finalize the GIC.
-         * See https://code.woboq.org/linux/linux/virt/kvm/arm/vgic/vgic-kvm-device.c.html#211.
-         */
+        // Finalize the GIC.
         Self::set_device_attribute(
             &self.device,
             kvm_bindings::KVM_DEV_ARM_VGIC_GRP_CTRL,
