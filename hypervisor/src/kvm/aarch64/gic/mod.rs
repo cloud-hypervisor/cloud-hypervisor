@@ -482,6 +482,7 @@ impl Vgic for KvmGicV3Its {
 
 #[cfg(test)]
 mod tests {
+    use crate::HypervisorVmConfig;
     use crate::aarch64::gic::{
         get_dist_regs, get_icc_regs, get_redist_regs, set_dist_regs, set_icc_regs, set_redist_regs,
     };
@@ -506,7 +507,7 @@ mod tests {
     #[test]
     fn test_create_gic() {
         let hv = crate::new().unwrap();
-        let vm = hv.create_vm().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
 
         KvmGicV3Its::new(&*vm, create_test_vgic_config()).unwrap();
     }
@@ -514,7 +515,7 @@ mod tests {
     #[test]
     fn test_get_set_dist_regs() {
         let hv = crate::new().unwrap();
-        let vm = hv.create_vm().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
         let _ = vm.create_vcpu(0, None).unwrap();
         let gic = KvmGicV3Its::new(&*vm, create_test_vgic_config()).expect("Cannot create gic");
 
@@ -527,7 +528,7 @@ mod tests {
     #[test]
     fn test_get_set_redist_regs() {
         let hv = crate::new().unwrap();
-        let vm = hv.create_vm().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
         let _ = vm.create_vcpu(0, None).unwrap();
         let gic = KvmGicV3Its::new(&*vm, create_test_vgic_config()).expect("Cannot create gic");
 
@@ -542,7 +543,7 @@ mod tests {
     #[test]
     fn test_get_set_icc_regs() {
         let hv = crate::new().unwrap();
-        let vm = hv.create_vm().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
         let _ = vm.create_vcpu(0, None).unwrap();
         let gic = KvmGicV3Its::new(&*vm, create_test_vgic_config()).expect("Cannot create gic");
 
@@ -557,7 +558,7 @@ mod tests {
     #[test]
     fn test_save_data_tables() {
         let hv = crate::new().unwrap();
-        let vm = hv.create_vm().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
         let _ = vm.create_vcpu(0, None).unwrap();
         let gic = vm
             .create_vgic(create_test_vgic_config())
