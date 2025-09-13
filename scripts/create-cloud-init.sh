@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -x
+set -ex
 
 rm -f /tmp/ubuntu-cloudinit.img
 mkdosfs -n CIDATA -C /tmp/ubuntu-cloudinit.img 8192
