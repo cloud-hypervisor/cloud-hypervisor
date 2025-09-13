@@ -32,7 +32,7 @@ use crate::arch::x86::emulator::Emulator;
 use crate::mshv::aarch64::emulator;
 use crate::mshv::emulator::MshvEmulatorContext;
 use crate::vm::{self, InterruptSourceConfig, VmOps};
-use crate::{HypervisorType, cpu, hypervisor, vec_with_array_field};
+use crate::{HypervisorType, HypervisorVmConfig, cpu, hypervisor, vec_with_array_field};
 #[cfg(feature = "sev_snp")]
 mod snp_constants;
 // x86_64 dependencies
@@ -269,16 +269,74 @@ impl MshvHypervisor {
             .get_msr_index_list()
             .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))
     }
+}
 
-    fn create_vm_with_type_and_memory_int(
-        &self,
-        vm_type: u64,
-        #[cfg(feature = "sev_snp")] _mem_size: Option<u64>,
-    ) -> hypervisor::Result<Arc<dyn crate::Vm>> {
-        let mshv_vm_type: VmType = match VmType::try_from(vm_type) {
-            Ok(vm_type) => vm_type,
-            Err(_) => return Err(hypervisor::HypervisorError::UnsupportedVmType()),
-        };
+impl MshvHypervisor {
+    /// Create a hypervisor based on Mshv
+    #[allow(clippy::new_ret_no_self)]
+    pub fn new() -> hypervisor::Result<Arc<dyn hypervisor::Hypervisor>> {
+        let mshv_obj =
+            Mshv::new().map_err(|e| hypervisor::HypervisorError::HypervisorCreate(e.into()))?;
+        Ok(Arc::new(MshvHypervisor { mshv: mshv_obj }))
+    }
+    /// Check if the hypervisor is available
+    pub fn is_available() -> hypervisor::Result<bool> {
+        match std::fs::metadata("/dev/mshv") {
+            Ok(_) => Ok(true),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(err) => Err(hypervisor::HypervisorError::HypervisorAvailableCheck(
+                err.into(),
+            )),
+        }
+    }
+}
+
+/// Implementation of Hypervisor trait for Mshv
+///
+/// # Examples
+///
+/// ```
+/// use hypervisor::mshv::MshvHypervisor;
+/// # use hypervisor::HypervisorVmConfig;
+/// use std::sync::Arc;
+/// let mshv = MshvHypervisor::new().unwrap();
+/// let hypervisor = Arc::new(mshv);
+/// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
+/// ```
+impl hypervisor::Hypervisor for MshvHypervisor {
+    ///
+    /// Returns the type of the hypervisor
+    ///
+    fn hypervisor_type(&self) -> HypervisorType {
+        HypervisorType::Mshv
+    }
+
+    /// Create a mshv vm object and return the object as Vm trait object
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # extern crate hypervisor;
+    /// use hypervisor::mshv::MshvHypervisor;
+    /// use hypervisor::mshv::MshvVm;
+    /// use hypervisor::HypervisorVmConfig;
+    /// let config = HypervisorVmConfig::default();
+    /// let hypervisor = MshvHypervisor::new().unwrap();
+    /// let vm = hypervisor.create_vm(config).unwrap();
+    /// ```
+    fn create_vm(&self, _config: HypervisorVmConfig) -> hypervisor::Result<Arc<dyn vm::Vm>> {
+        #[allow(unused_mut)]
+        #[allow(unused_assignments)]
+        let mut mshv_vm_type = VmType::Normal; // Create with default platform type
+        #[cfg(feature = "sev_snp")]
+        {
+            mshv_vm_type = if _config.sev_snp_enabled {
+                VmType::Snp
+            } else {
+                VmType::Normal
+            };
+        }
+
         let fd: VmFd;
         loop {
             match self.mshv.create_vm_with_type(mshv_vm_type) {
@@ -321,7 +379,7 @@ impl MshvHypervisor {
                 #[cfg(feature = "sev_snp")]
                 host_access_pages: ArcSwap::new(
                     AtomicBitmap::new(
-                        _mem_size.unwrap_or_default() as usize,
+                        _config.mem_size as usize,
                         NonZeroUsize::new(HV_PAGE_SIZE).unwrap(),
                     )
                     .into(),
@@ -336,94 +394,6 @@ impl MshvHypervisor {
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
             }))
         }
-    }
-}
-
-impl MshvHypervisor {
-    /// Create a hypervisor based on Mshv
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> hypervisor::Result<Arc<dyn hypervisor::Hypervisor>> {
-        let mshv_obj =
-            Mshv::new().map_err(|e| hypervisor::HypervisorError::HypervisorCreate(e.into()))?;
-        Ok(Arc::new(MshvHypervisor { mshv: mshv_obj }))
-    }
-    /// Check if the hypervisor is available
-    pub fn is_available() -> hypervisor::Result<bool> {
-        match std::fs::metadata("/dev/mshv") {
-            Ok(_) => Ok(true),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(err) => Err(hypervisor::HypervisorError::HypervisorAvailableCheck(
-                err.into(),
-            )),
-        }
-    }
-}
-
-/// Implementation of Hypervisor trait for Mshv
-///
-/// # Examples
-///
-/// ```
-/// use hypervisor::mshv::MshvHypervisor;
-/// use std::sync::Arc;
-/// let mshv = MshvHypervisor::new().unwrap();
-/// let hypervisor = Arc::new(mshv);
-/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
-/// ```
-impl hypervisor::Hypervisor for MshvHypervisor {
-    ///
-    /// Returns the type of the hypervisor
-    ///
-    fn hypervisor_type(&self) -> HypervisorType {
-        HypervisorType::Mshv
-    }
-
-    ///
-    /// Create a Vm of a specific type using the underlying hypervisor, passing memory size
-    /// Return a hypervisor-agnostic Vm trait object
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use hypervisor::kvm::KvmHypervisor;
-    /// use hypervisor::kvm::KvmVm;
-    /// let hypervisor = KvmHypervisor::new().unwrap();
-    /// let vm = hypervisor.create_vm_with_type(0, 512*1024*1024).unwrap();
-    /// ```
-    fn create_vm_with_type_and_memory(
-        &self,
-        vm_type: u64,
-        #[cfg(feature = "sev_snp")] _mem_size: u64,
-    ) -> hypervisor::Result<Arc<dyn vm::Vm>> {
-        self.create_vm_with_type_and_memory_int(
-            vm_type,
-            #[cfg(feature = "sev_snp")]
-            Some(_mem_size),
-        )
-    }
-
-    fn create_vm_with_type(&self, vm_type: u64) -> hypervisor::Result<Arc<dyn crate::Vm>> {
-        self.create_vm_with_type_and_memory_int(
-            vm_type,
-            #[cfg(feature = "sev_snp")]
-            None,
-        )
-    }
-
-    /// Create a mshv vm object and return the object as Vm trait object
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # extern crate hypervisor;
-    /// use hypervisor::mshv::MshvHypervisor;
-    /// use hypervisor::mshv::MshvVm;
-    /// let hypervisor = MshvHypervisor::new().unwrap();
-    /// let vm = hypervisor.create_vm().unwrap();
-    /// ```
-    fn create_vm(&self) -> hypervisor::Result<Arc<dyn vm::Vm>> {
-        let vm_type = 0;
-        self.create_vm_with_type(vm_type)
     }
     #[cfg(target_arch = "x86_64")]
     ///
@@ -508,10 +478,11 @@ pub struct MshvVcpu {
 ///
 /// ```
 /// use hypervisor::mshv::MshvHypervisor;
+/// use hypervisor::HypervisorVmConfig;
 /// use std::sync::Arc;
 /// let mshv = MshvHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(mshv);
-/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
+/// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// let vcpu = vm.create_vcpu(0, None).unwrap();
 /// ```
 impl cpu::Vcpu for MshvVcpu {
@@ -1787,10 +1758,11 @@ impl MshvVm {
 /// ```
 /// extern crate hypervisor;
 /// use hypervisor::mshv::MshvHypervisor;
+/// use hypervisor::HypervisorVmConfig;
 /// use std::sync::Arc;
 /// let mshv = MshvHypervisor::new().unwrap();
 /// let hypervisor = Arc::new(mshv);
-/// let vm = hypervisor.create_vm().expect("new VM fd creation failed");
+/// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// ```
 impl vm::Vm for MshvVm {
     #[cfg(target_arch = "x86_64")]

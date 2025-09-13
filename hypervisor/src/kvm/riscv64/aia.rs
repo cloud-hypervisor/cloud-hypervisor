@@ -251,6 +251,7 @@ impl Vaia for KvmAiaImsics {
 
 #[cfg(test)]
 mod tests {
+    use crate::HypervisorVmConfig;
     use crate::arch::riscv64::aia::VaiaConfig;
     use crate::kvm::KvmAiaImsics;
 
@@ -266,7 +267,7 @@ mod tests {
     #[test]
     fn test_create_aia() {
         let hv = crate::new().unwrap();
-        let vm = hv.create_vm().unwrap();
+        let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
         let _vcpu = vm.create_vcpu(0, None).unwrap();
 
         assert!(KvmAiaImsics::new(&*vm, create_test_vaia_config()).is_ok());
