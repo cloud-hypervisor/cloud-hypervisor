@@ -13,7 +13,6 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use crate::HypervisorType;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::CpuIdEntry;
 #[cfg(target_arch = "x86_64")]
@@ -21,6 +20,7 @@ use crate::cpu::CpuVendor;
 #[cfg(feature = "tdx")]
 use crate::kvm::TdxCapabilities;
 use crate::vm::Vm;
+use crate::{HypervisorType, HypervisorVmConfig};
 
 #[derive(Error, Debug)]
 pub enum HypervisorError {
@@ -110,25 +110,7 @@ pub trait Hypervisor: Send + Sync {
     /// Create a Vm using the underlying hypervisor
     /// Return a hypervisor-agnostic Vm trait object
     ///
-    fn create_vm(&self) -> Result<Arc<dyn Vm>>;
-    ///
-    /// Create a Vm of a specific type using the underlying hypervisor
-    /// Return a hypervisor-agnostic Vm trait object
-    ///
-    fn create_vm_with_type(&self, _vm_type: u64) -> Result<Arc<dyn Vm>> {
-        unreachable!()
-    }
-    ///
-    /// Create a Vm of a specific type using the underlying hypervisor, passing memory size
-    /// Return a hypervisor-agnostic Vm trait object
-    ///
-    fn create_vm_with_type_and_memory(
-        &self,
-        _vm_type: u64,
-        #[cfg(feature = "sev_snp")] _mem_size: u64,
-    ) -> Result<Arc<dyn Vm>> {
-        unreachable!()
-    }
+    fn create_vm(&self, config: HypervisorVmConfig) -> Result<Arc<dyn Vm>>;
     #[cfg(target_arch = "x86_64")]
     ///
     /// Get the supported CpuID
