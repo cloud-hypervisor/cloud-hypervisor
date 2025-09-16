@@ -424,7 +424,7 @@ fn get_cli_options_sorted(
             .default_value("true"),
         Arg::new("serial")
             .long("serial")
-            .help("Control serial port: off|null|pty|tty|file=</path/to/a/file>|socket=</path/to/a/file>")
+            .help("Control serial port: off|null|pty|tty|file=</path/to/a/file>|socket=</path/to/a/file>|tcp=<host:port>")
             .default_value("null")
             .group("vm-config"),
         Arg::new("tpm")
