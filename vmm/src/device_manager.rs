@@ -4965,6 +4965,14 @@ impl DeviceManager {
     pub(crate) fn acpi_platform_addresses(&self) -> &AcpiPlatformAddresses {
         &self.acpi_platform_addresses
     }
+
+    fn cleanup_vfio_container(&mut self) {
+        // Drop the 'vfio container' instance when "Self" is the only reference
+        if let Some(1) = self.vfio_container.as_ref().map(Arc::strong_count) {
+            debug!("Drop 'vfio container' given no active 'vfio devices'.");
+            self.vfio_container = None;
+        }
+    }
 }
 
 #[cfg(feature = "ivshmem")]
@@ -5442,6 +5450,7 @@ impl BusDevice for DeviceManager {
                     if let Err(e) = self.eject_device(self.selected_segment as u16, slot_id as u8) {
                         error!("Failed ejecting device {slot_id}: {e:?}");
                     }
+                    self.cleanup_vfio_container();
                     slot_bitmap &= !(1 << slot_id);
                 }
             }
