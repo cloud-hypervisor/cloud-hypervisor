@@ -15,6 +15,7 @@ tdx = []
 [dependencies]
 anyhow = { workspace = true }
 arc-swap = "1.7.1"
+bitfield = "0.16.1"
 bitfield-struct = "0.10.1"
 byteorder = { workspace = true }
 cfg-if = { workspace = true }
