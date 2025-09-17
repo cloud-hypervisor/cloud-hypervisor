@@ -335,6 +335,10 @@ impl SerialManager {
                 std::panic::catch_unwind(AssertUnwindSafe(move || {
                     let write_distributor = FanoutWriter::new();
 
+                    if let ConsoleOutput::Tcp(_, Some(f)) = &in_file {
+                        write_distributor.add_writer("file".into(), f.clone());
+                    }
+
                     let mut events =
                         [epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
                     serial
