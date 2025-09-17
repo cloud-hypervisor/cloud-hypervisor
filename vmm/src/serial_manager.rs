@@ -220,7 +220,7 @@ impl SerialManager {
                 }
                 fd.as_raw_fd()
             }
-            ConsoleOutput::Tcp(ref fd) => fd.as_raw_fd(),
+            ConsoleOutput::Tcp(ref fd, _) => fd.as_raw_fd(),
             _ => return Ok(None),
         };
 
@@ -242,7 +242,7 @@ impl SerialManager {
             ConsoleOutput::Null => EpollDispatch::File,
             ConsoleOutput::Off => EpollDispatch::File,
             ConsoleOutput::Socket(_) => EpollDispatch::Socket,
-            ConsoleOutput::Tcp(_) => EpollDispatch::Tcp,
+            ConsoleOutput::Tcp(_, _) => EpollDispatch::Tcp,
         };
 
         epoll::ctl(
@@ -422,7 +422,7 @@ impl SerialManager {
                                         write_distributor.remove_writer("tcp");
                                     }
 
-                                    let ConsoleOutput::Tcp(ref listener) = in_file else {
+                                    let ConsoleOutput::Tcp(ref listener, _) = in_file else {
                                         unreachable!();
                                     };
 
@@ -473,7 +473,7 @@ impl SerialManager {
                                                     0
                                                 }
                                             }
-                                            ConsoleOutput::Tcp(_) => {
+                                            ConsoleOutput::Tcp(_, _) => {
                                                 if let Some(mut serial_reader) = reader_tcp.as_ref()
                                                 {
                                                     let count = serial_reader

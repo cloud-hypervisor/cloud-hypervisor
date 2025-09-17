@@ -67,7 +67,7 @@ pub enum ConsoleOutput {
     Tty(Arc<File>),
     Null,
     Socket(Arc<UnixListener>),
-    Tcp(Arc<TcpListener>),
+    Tcp(Arc<TcpListener>, Option<Arc<File>>),
     Off,
 }
 
@@ -278,7 +278,13 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                     .map_err(|_| ConsoleDeviceError::WrongTcpAddressFormat(url.to_string()))?;
                 let listener = TcpListener::bind(socket_addr)
                     .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
-                ConsoleOutput::Tcp(Arc::new(listener))
+
+                let mut f = None;
+                if let Some(p) = &vmconfig.serial.file {
+                    let file = File::create(p).map_err(ConsoleDeviceError::CreateConsoleDevice)?;
+                    f = Some(Arc::new(file));
+                }
+                ConsoleOutput::Tcp(Arc::new(listener), f)
             }
             ConsoleOutputMode::Null => ConsoleOutput::Null,
             ConsoleOutputMode::Off => ConsoleOutput::Off,
