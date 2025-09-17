@@ -50,8 +50,9 @@ use crate::MigratableError;
 // The source can at any time send an "abandon request" to cancel
 
 #[repr(u16)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub enum Command {
+    #[default]
     Invalid,
     Start,
     Config,
@@ -60,12 +61,6 @@ pub enum Command {
     Complete,
     Abandon,
     MemoryFd,
-}
-
-impl Default for Command {
-    fn default() -> Self {
-        Self::Invalid
-    }
 }
 
 #[repr(C)]
@@ -139,17 +134,12 @@ impl Request {
 }
 
 #[repr(u16)]
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Default)]
 pub enum Status {
+    #[default]
     Invalid,
     Ok,
     Error,
-}
-
-impl Default for Status {
-    fn default() -> Self {
-        Self::Invalid
-    }
 }
 
 #[repr(C)]

@@ -1229,16 +1229,12 @@ impl Guest {
     }
 }
 
+#[derive(Default)]
 pub enum VerbosityLevel {
+    #[default]
     Warn,
     Info,
     Debug,
-}
-
-impl Default for VerbosityLevel {
-    fn default() -> Self {
-        Self::Warn
-    }
 }
 
 impl Display for VerbosityLevel {
