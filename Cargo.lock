@@ -950,7 +950,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "igvm"
 version = "0.4.0"
-source = "git+https://github.com/microsoft/igvm?branch=main#dff4ebc9c5bd16707ff75de26ccabe2d4dfdbcd8"
+source = "git+https://github.com/microsoft/igvm?branch=main#9b67b6fa774f4a842718c5c70645973fe73ef616"
 dependencies = [
  "bitfield-struct",
  "crc32fast",
@@ -967,7 +967,7 @@ dependencies = [
 [[package]]
 name = "igvm_defs"
 version = "0.4.0"
-source = "git+https://github.com/microsoft/igvm?branch=main#dff4ebc9c5bd16707ff75de26ccabe2d4dfdbcd8"
+source = "git+https://github.com/microsoft/igvm?branch=main#9b67b6fa774f4a842718c5c70645973fe73ef616"
 dependencies = [
  "bitfield-struct",
  "open-enum",
