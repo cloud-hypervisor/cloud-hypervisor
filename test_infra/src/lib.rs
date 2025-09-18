@@ -5,6 +5,8 @@
 
 #![allow(clippy::undocumented_unsafe_blocks)]
 
+use std::any::Any;
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::fs::OpenOptions;
@@ -849,10 +851,20 @@ pub fn kill_child(child: &mut Child) {
 
 pub const PIPE_SIZE: i32 = 32 << 20;
 
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum GuestParamKey {
+    FwPath = 0,
+    KernelPath = 1,
+    KernelCmdline = 2,
+    BootTimeout = 3,
+}
 pub struct Guest {
     pub tmp_dir: TempDir,
     pub disk_config: Box<dyn DiskConfig>,
     pub network: GuestNetworkConfig,
+    pub vm_type: GuestVmType,
+    pub params: HashMap<GuestParamKey, Box<dyn Any>>,
 }
 
 // Return the next id that can be used for this guest. This is stored in a
@@ -917,6 +929,8 @@ impl Guest {
             tmp_dir,
             disk_config,
             network,
+            vm_type: GuestVmType::Regular,
+            params: HashMap::new(),
         }
     }
 
@@ -1427,6 +1441,22 @@ impl<'a> GuestCommand<'a> {
     pub fn default_net(&mut self) -> &mut Self {
         self.args(["--net", self.guest.default_net_string().as_str()])
     }
+
+    pub fn default_kernel_cmdline(&mut self) -> &mut Self {
+        if let Some(fw) = self.guest.params.get(&GuestParamKey::FwPath) {
+            let fw_str = fw.downcast_ref::<String>().unwrap();
+            self.command.args(["--kernel", fw_str.as_str()]);
+        } else if let Some(kernel) = self.guest.params.get(&GuestParamKey::KernelPath) {
+            let kernel_str = kernel.downcast_ref::<String>().unwrap();
+            self.command.args(["--kernel", kernel_str.as_str()]);
+            if let Some(cmdline_arg) = self.guest.params.get(&GuestParamKey::KernelCmdline) {
+                let cmdline_str = cmdline_arg.downcast_ref::<String>().unwrap();
+                self.command.args(["--cmdline", cmdline_str.as_str()]);
+            }
+        }
+
+        self
+    }
 }
 
 pub fn clh_command(cmd: &str) -> String {
@@ -1794,7 +1824,6 @@ pub fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Ve
 }
 
 // parse the bar address from the output of `lspci -vv`
-
 pub fn extract_bar_address(output: &str, device_desc: &str, bar_index: usize) -> Option<String> {
     let devices: Vec<&str> = output.split("\n\n").collect();
 
@@ -1815,4 +1844,10 @@ pub fn extract_bar_address(output: &str, device_desc: &str, bar_index: usize) ->
         }
     }
     None
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum GuestVmType {
+    Regular,
+    Cvm,
 }
