@@ -74,7 +74,7 @@ pub struct GuestNetworkConfig {
 
 pub const DEFAULT_TCP_LISTENER_MESSAGE: &str = "booted";
 pub const DEFAULT_TCP_LISTENER_PORT: u16 = 8000;
-pub const DEFAULT_TCP_LISTENER_TIMEOUT: i32 = 120;
+pub const DEFAULT_TCP_LISTENER_TIMEOUT: u32 = 120;
 
 #[derive(Error, Debug)]
 pub enum WaitForBootError {
@@ -91,7 +91,7 @@ pub enum WaitForBootError {
 }
 
 impl GuestNetworkConfig {
-    pub fn wait_vm_boot(&self, custom_timeout: Option<i32>) -> Result<(), WaitForBootError> {
+    pub fn wait_vm_boot(&self, custom_timeout: Option<u32>) -> Result<(), WaitForBootError> {
         let start = std::time::Instant::now();
         // The 'port' is unique per 'GUEST' and listening to wild-card ip avoids retrying on 'TcpListener::bind()'
         let listen_addr = format!("0.0.0.0:{}", self.tcp_listener_port);
@@ -122,14 +122,15 @@ impl GuestNetworkConfig {
             .expect("Cannot add 'tcp_listener' event to epoll");
             let mut events = [epoll::Event::new(epoll::Events::empty(), 0); 1];
             loop {
-                let num_events = match epoll::wait(epoll_fd, timeout * 1000_i32, &mut events[..]) {
-                    Ok(num_events) => Ok(num_events),
-                    Err(e) => match e.raw_os_error() {
-                        Some(libc::EAGAIN) | Some(libc::EINTR) => continue,
-                        _ => Err(e),
-                    },
-                }
-                .map_err(WaitForBootError::EpollWait)?;
+                let num_events =
+                    match epoll::wait(epoll_fd, (timeout * 1000) as i32, &mut events[..]) {
+                        Ok(num_events) => Ok(num_events),
+                        Err(e) => match e.raw_os_error() {
+                            Some(libc::EAGAIN) | Some(libc::EINTR) => continue,
+                            _ => Err(e),
+                        },
+                    }
+                    .map_err(WaitForBootError::EpollWait)?;
                 if num_events == 0 {
                     return Err(WaitForBootError::EpollWaitTimeout);
                 }
@@ -887,6 +888,10 @@ pub struct Guest {
     pub tmp_dir: TempDir,
     pub disk_config: Box<dyn DiskConfig>,
     pub network: GuestNetworkConfig,
+    pub vm_type: GuestVmType,
+    pub boot_timeout: u32,
+    pub kernel_path: Option<String>,
+    pub kernel_cmdline: Option<String>,
 }
 
 // Return the next id that can be used for this guest. This is stored in a
@@ -951,6 +956,10 @@ impl Guest {
             tmp_dir,
             disk_config,
             network,
+            vm_type: GuestVmType::Regular,
+            boot_timeout: DEFAULT_TCP_LISTENER_TIMEOUT,
+            kernel_path: None,
+            kernel_cmdline: None,
         }
     }
 
@@ -1076,7 +1085,7 @@ impl Guest {
         .map_err(Error::Parsing)
     }
 
-    pub fn wait_vm_boot(&self, custom_timeout: Option<i32>) -> Result<(), Error> {
+    pub fn wait_vm_boot(&self, custom_timeout: Option<u32>) -> Result<(), Error> {
         self.network
             .wait_vm_boot(custom_timeout)
             .map_err(Error::WaitForBoot)
@@ -1214,7 +1223,7 @@ impl Guest {
         );
     }
 
-    pub fn reboot_linux(&self, current_reboot_count: u32, custom_timeout: Option<i32>) {
+    pub fn reboot_linux(&self, current_reboot_count: u32, custom_timeout: Option<u32>) {
         let list_boots_cmd = "sudo last | grep -c reboot";
         let boot_count = self
             .ssh_command(list_boots_cmd)
@@ -1460,6 +1469,17 @@ impl<'a> GuestCommand<'a> {
 
     pub fn default_net(&mut self) -> &mut Self {
         self.args(["--net", self.guest.default_net_string().as_str()])
+    }
+
+    pub fn default_kernel_cmdline(&mut self) -> &mut Self {
+        if let Some(kernel) = &self.guest.kernel_path {
+            self.command.args(["--kernel", kernel]);
+            if let Some(cmdline) = &self.guest.kernel_cmdline {
+                self.command.args(["--cmdline", cmdline]);
+            }
+        }
+
+        self
     }
 }
 
@@ -1857,4 +1877,10 @@ pub fn extract_bar_address(output: &str, device_desc: &str, bar_index: usize) ->
         }
     }
     None
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum GuestVmType {
+    Regular,
+    Confidential,
 }
