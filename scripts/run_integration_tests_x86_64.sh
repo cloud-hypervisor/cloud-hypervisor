@@ -13,9 +13,13 @@ process_common_args "$@"
 
 # For now these values are default for kvm
 test_features=""
-
+build_features="mshv"
 if [ "$hypervisor" = "mshv" ]; then
     test_features="--features mshv"
+    if [ "$GUEST_VM_TYPE" = "CVM" ]; then
+        test_features="--features mshv,igvm,sev_snp"
+        build_features="mshv,igvm,sev_snp"
+    fi
 fi
 
 cp scripts/sha1sums-x86_64 "$WORKLOADS_DIR"
@@ -153,7 +157,7 @@ cp "$FOCAL_OS_RAW_IMAGE" "$VFIO_DIR"
 cp "$FW" "$VFIO_DIR"
 cp "$VMLINUX_IMAGE" "$VFIO_DIR" || exit 1
 
-cargo build --features mshv --all --release --target "$BUILD_TARGET"
+cargo build --features $build_features --all --release --target "$BUILD_TARGET"
 
 # We always copy a fresh version of our binary for our L2 guest.
 cp target/"$BUILD_TARGET"/release/cloud-hypervisor "$VFIO_DIR"
