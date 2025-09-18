@@ -1554,7 +1554,7 @@ impl DeviceManager {
     fn get_msi_iova_space(&mut self) -> (u64, u64) {
         #[cfg(target_arch = "aarch64")]
         {
-            let vcpus = self.config.lock().unwrap().cpus.boot_vcpus;
+            let vcpus = self.config.lock().unwrap().cpus.max_vcpus;
             let vgic_config = gic::Gic::create_default_config(vcpus.into());
             (
                 vgic_config.msi_addr,
@@ -1693,7 +1693,7 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
         let interrupt_controller: Arc<Mutex<gic::Gic>> = Arc::new(Mutex::new(
             gic::Gic::new(
-                self.config.lock().unwrap().cpus.boot_vcpus,
+                self.config.lock().unwrap().cpus.max_vcpus,
                 Arc::clone(&self.msi_interrupt_manager),
                 self.address_manager.vm.clone(),
             )
@@ -1719,7 +1719,13 @@ impl DeviceManager {
             let vgic_state = vgic_snapshot
                 .to_state()
                 .map_err(DeviceManagerError::RestoreGetState)?;
-            let saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
+            let mut saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
+            #[cfg(target_arch = "aarch64")]
+            {
+                let saved_parked_vcpu_states = self.cpu_manager.lock().unwrap().get_parked_saved_states();
+                saved_vcpu_states.extend(saved_parked_vcpu_states);
+            }
+
             interrupt_controller
                 .lock()
                 .unwrap()

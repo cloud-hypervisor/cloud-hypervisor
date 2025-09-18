@@ -342,12 +342,18 @@ fn create_cpu_nodes(
         }
     }
 
+    debug!(
+        "numa node len = {}", numa_nodes.len()
+    );
     for (cpu_id, mpidr) in vcpu_mpidr.iter().enumerate().take(num_cpus) {
         let cpu_name = format!("cpu@{cpu_id:x}");
         let cpu_node = fdt.begin_node(&cpu_name)?;
         fdt.property_string("device_type", "cpu")?;
         fdt.property_string("compatible", "arm,arm-v8")?;
         if num_cpus > 1 {
+            debug!(
+                "cpu name = {} ,enable method psci", cpu_name
+            );
             // This is required on armv8 64-bit. See aforementioned documentation.
             fdt.property_string("enable-method", "psci")?;
         }

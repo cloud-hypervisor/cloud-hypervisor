@@ -50,6 +50,10 @@ impl Gic {
             })
             .map_err(Error::CreateInterruptSourceGroup)?;
 
+        debug!(
+            "GIC new: vcpu count = {}",
+            vcpu_count
+        );
         let vgic = vm
             .create_vgic(Gic::create_default_config(vcpu_count as u64))
             .map_err(Error::CreateGic)?;
