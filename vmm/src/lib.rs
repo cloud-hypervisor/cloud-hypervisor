@@ -8,7 +8,7 @@ extern crate event_monitor;
 #[macro_use]
 extern crate log;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::{Read, Write, stdout};
 use std::net::{TcpListener, TcpStream};
@@ -1624,6 +1624,26 @@ impl RequestHandler for Vmm {
         restore_cfg
             .validate(&vm_config.lock().unwrap().clone())
             .map_err(VmError::ConfigValidation)?;
+
+        // Update VM's memory cfgs with new fds.
+        if let Some(mem_fds) = restore_cfg.mem_fds
+            && !mem_fds.is_empty()
+        {
+            let mut files = VecDeque::with_capacity(mem_fds.len());
+            for fd in mem_fds {
+                // Safety: we trust the API client to send us valid FDs.
+                files.push_back(unsafe { File::from_raw_fd(fd) });
+            }
+
+            vm_config
+                .lock()
+                .unwrap()
+                .memory
+                .consume_fds(files)
+                .map_err(|err| {
+                    VmError::ConfigValidation(crate::config::ValidationError::PayloadError(err))
+                })?;
+        }
 
         // Update VM's net configurations with new fds received for restore operation
         if let (Some(restored_nets), Some(vm_net_configs)) =
