@@ -887,6 +887,10 @@ pub struct Guest {
     pub tmp_dir: TempDir,
     pub disk_config: Box<dyn DiskConfig>,
     pub network: GuestNetworkConfig,
+    pub vm_type: GuestVmType,
+    pub boot_timeout: i32,
+    pub kernel_path: Option<String>,
+    pub kernel_cmdline: Option<String>,
 }
 
 // Return the next id that can be used for this guest. This is stored in a
@@ -951,6 +955,10 @@ impl Guest {
             tmp_dir,
             disk_config,
             network,
+            vm_type: GuestVmType::Regular,
+            boot_timeout: DEFAULT_TCP_LISTENER_TIMEOUT,
+            kernel_path: None,
+            kernel_cmdline: None,
         }
     }
 
@@ -1461,6 +1469,17 @@ impl<'a> GuestCommand<'a> {
     pub fn default_net(&mut self) -> &mut Self {
         self.args(["--net", self.guest.default_net_string().as_str()])
     }
+
+    pub fn default_kernel_cmdline(&mut self) -> &mut Self {
+        if let Some(kernel) = &self.guest.kernel_path {
+            self.command.args(["--kernel", kernel]);
+            if let Some(cmdline) = &self.guest.kernel_cmdline {
+                self.command.args(["--cmdline", cmdline]);
+            }
+        }
+
+        self
+    }
 }
 
 /// Returns the absolute path into the workspaces target directory to locate the desired
@@ -1857,4 +1876,10 @@ pub fn extract_bar_address(output: &str, device_desc: &str, bar_index: usize) ->
         }
     }
     None
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum GuestVmType {
+    Regular,
+    Confidential,
 }
