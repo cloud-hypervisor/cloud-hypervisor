@@ -1,21 +1,67 @@
 version: 2
 updates:
 - package-ecosystem: cargo
-  directory: "/"
+  directories:
+    - "/"
+    - "/fuzz"
   schedule:
-    interval: daily
-  open-pull-requests-limit: 1
+    interval: weekly
   allow:
-  - dependency-type: direct
-  - dependency-type: indirect
+    - dependency-name: "acpi_tables"
+    - dependency-name: "kvm-bindings"
+    - dependency-name: "kvm-ioctls"
+    - dependency-name: "linux-loader"
+    - dependency-name: "mshv-bindings"
+    - dependency-name: "mshv-ioctls"
+    - dependency-name: "seccompiler"
+    - dependency-name: "vfio-bindings"
+    - dependency-name: "vfio-ioctls"
+    - dependency-name: "vfio_user"
+    - dependency-name: "vhost"
+    - dependency-name: "vhost-user-backend"
+    - dependency-name: "virtio-bindings"
+    - dependency-name: "virtio-queue"
+    - dependency-name: "vm-fdt"
+    - dependency-name: "vm-memory"
+    - dependency-name: "vmm-sys-util"
+  groups:
+      rust-vmm:
+        patterns:
+          - "*"
+  target-branch: main
 - package-ecosystem: cargo
-  directory: "/fuzz"
+  directories:
+    - "/"
+    - "/fuzz"
   schedule:
-    interval: daily
-  open-pull-requests-limit: 1
+    interval: weekly
   allow:
-  - dependency-type: direct
-  - dependency-type: indirect
+    - dependency-type: all
+  ignore:
+    - dependency-name: "acpi_tables"
+    - dependency-name: "kvm-bindings"
+    - dependency-name: "kvm-ioctls"
+    - dependency-name: "linux-loader"
+    - dependency-name: "mshv-bindings"
+    - dependency-name: "mshv-ioctls"
+    - dependency-name: "seccompiler"
+    - dependency-name: "vfio-bindings"
+    - dependency-name: "vfio-ioctls"
+    - dependency-name: "vfio_user"
+    - dependency-name: "vhost"
+    - dependency-name: "vhost-user-backend"
+    - dependency-name: "virtio-bindings"
+    - dependency-name: "virtio-queue"
+    - dependency-name: "vm-fdt"
+    - dependency-name: "vm-memory"
+    - dependency-name: "vmm-sys-util"
+  groups:
+      non-rust-vmm:
+        patterns:
+          - "*"
+  # Makes it possible to have another config for the same directory.
+  # https://github.com/dependabot/dependabot-core/issues/1778#issuecomment-1988140219
+  target-branch: main
 - package-ecosystem: github-actions
   directory: "/"
   schedule:
