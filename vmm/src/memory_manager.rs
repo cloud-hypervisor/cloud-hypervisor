@@ -598,6 +598,9 @@ impl MemoryManager {
                     region_start.raw_value(),
                     region_size
                 );
+
+                let existing_memory_file = zone.fd.map(|fd| unsafe { File::from_raw_fd(fd) });
+
                 let region = MemoryManager::create_ram_region(
                     &zone.file,
                     file_offset,
@@ -608,7 +611,7 @@ impl MemoryManager {
                     zone.hugepages,
                     zone.hugepage_size,
                     zone.host_numa_node,
-                    None,
+                    existing_memory_file,
                     thp,
                 )?;
 
@@ -679,6 +682,10 @@ impl MemoryManager {
         for guest_ram_mapping in guest_ram_mappings {
             for zone_config in zones_config {
                 if guest_ram_mapping.zone_id == zone_config.id {
+                    let existing_memory_file = existing_memory_files
+                        .remove(&guest_ram_mapping.slot)
+                        .or(zone_config.fd.map(|fd| unsafe { File::from_raw_fd(fd) }));
+
                     let region = MemoryManager::create_ram_region(
                         if guest_ram_mapping.virtio_mem {
                             &None
@@ -693,7 +700,7 @@ impl MemoryManager {
                         zone_config.hugepages,
                         zone_config.hugepage_size,
                         zone_config.host_numa_node,
-                        existing_memory_files.remove(&guest_ram_mapping.slot),
+                        existing_memory_file,
                         thp,
                     )?;
                     memory_regions.push(Arc::clone(&region));
@@ -821,6 +828,7 @@ impl MemoryManager {
                 hotplug_size: config.hotplug_size,
                 hotplugged_size: config.hotplugged_size,
                 prefault: config.prefault,
+                fd: None,
             }];
 
             Ok((config.size, zones, allow_mem_hotplug))
@@ -1939,6 +1947,18 @@ impl MemoryManager {
         unsafe { (*stat.as_ptr()).st_nlink as usize > 0 }
     }
 
+    fn is_memfd(f: &File) -> bool {
+        let fd = f.as_raw_fd();
+        let procfs_fname = format!("/proc/self/fd/{fd}");
+
+        let Ok(fname) = std::fs::read_link(procfs_fname.as_str()) else {
+            error!("Couldn't read {procfs_fname}");
+            return false;
+        };
+
+        fname.starts_with("/memfd:")
+    }
+
     pub fn memory_zones(&self) -> &MemoryZones {
         &self.memory_zones
     }
@@ -1973,6 +1993,15 @@ impl MemoryManager {
                     // copy of the memory content for this specific region,
                     // as we can assume the user will have it saved through
                     // the backing file already.
+                    continue;
+                }
+
+                if snapshot
+                    && let Some(file_offset) = region.file_offset()
+                    && (region.flags() & libc::MAP_SHARED == libc::MAP_SHARED)
+                    && Self::is_memfd(file_offset.file())
+                {
+                    // A special case, like above.
                     continue;
                 }
 

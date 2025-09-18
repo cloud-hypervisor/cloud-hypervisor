@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::collections::VecDeque;
 use std::fs::File;
 use std::os::unix::io::IntoRawFd;
 use std::sync::mpsc::Sender;
@@ -34,6 +35,12 @@ impl EndpointHandler for VmCreate {
         api_notifier: EventFd,
         api_sender: Sender<ApiRequest>,
     ) -> Response {
+        // Cloning the files here is very important as it dup() the file
+        // descriptors, leaving open the one that was received. This way,
+        // rebooting the VM will work since the VM will be created from the
+        // original file descriptors.
+        let files: VecDeque<File> = req.files.iter().map(|f| f.try_clone().unwrap()).collect();
+
         match req.method() {
             Method::Put => {
                 match &req.body {
@@ -53,6 +60,15 @@ impl EndpointHandler for VmCreate {
                             for net in nets {
                                 net.fds = None;
                             }
+                        }
+
+                        if let Err(err) = vm_config.consume_fds(files) {
+                            return error_response(
+                                HttpError::ApiError(ApiError::VmCreate(VmError::ConfigValidation(
+                                    crate::config::ValidationError::PayloadError(err),
+                                ))),
+                                StatusCode::BadRequest,
+                            );
                         }
 
                         match crate::api::VmCreate
@@ -264,21 +280,35 @@ impl PutHandler for VmRestore {
             if !files.is_empty() {
                 fds = files.drain(..).map(|f| f.into_raw_fd()).collect();
             }
-            let expected_fds = match restore_cfg.net_fds {
+
+            let expected_mem_fds = restore_cfg.mem_fds.as_ref().map_or(0, |fds| fds.len());
+            let expected_net_fds = match restore_cfg.net_fds {
                 Some(ref net_fds) => net_fds.iter().map(|net| net.num_fds).sum(),
                 None => 0,
             };
-            if fds.len() != expected_fds {
+
+            if fds.len() != expected_mem_fds + expected_net_fds {
                 error!(
                     "Number of FDs expected: {}, but received: {}",
-                    expected_fds,
+                    expected_mem_fds + expected_net_fds,
                     fds.len()
                 );
                 return Err(HttpError::BadRequest);
             }
-            if let Some(ref mut nets) = restore_cfg.net_fds {
+
+            if !fds.is_empty() {
                 warn!("Ignoring FDs sent via the HTTP request body");
-                let mut start_idx = 0;
+            }
+
+            let mut start_idx = 0;
+            if let Some(ref mut mem_fds) = restore_cfg.mem_fds {
+                for mem_fd in mem_fds.iter_mut() {
+                    *mem_fd = fds[start_idx];
+                    start_idx += 1;
+                }
+            }
+
+            if let Some(ref mut nets) = restore_cfg.net_fds {
                 for restored_net in nets.iter_mut() {
                     let end_idx = start_idx + restored_net.num_fds;
                     restored_net.fds = Some(fds[start_idx..end_idx].to_vec());
