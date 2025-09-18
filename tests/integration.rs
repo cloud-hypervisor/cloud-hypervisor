@@ -2499,6 +2499,88 @@ EOF
     assert_eq!(test_message_write, file_message);
 }
 
+fn _test_simple_launch(guest: &Guest) {
+    let event_path = temp_event_monitor_path(&guest.tmp_dir);
+
+    let mut child = GuestCommand::new(guest)
+        .args(["--cpus", "boot=1"])
+        .args(["--memory", "size=512M"])
+        .default_kernel_cmdline()
+        .default_disks()
+        .default_net()
+        .args(["--serial", "tty", "--console", "off"])
+        .args(["--event-monitor", format!("path={event_path}").as_str()])
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot(Some(120)).unwrap();
+
+        assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
+        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
+
+        let expected_sequential_events = [
+            &MetaEvent {
+                event: "starting".to_string(),
+                device_id: None,
+            },
+            &MetaEvent {
+                event: "booting".to_string(),
+                device_id: None,
+            },
+            &MetaEvent {
+                event: "booted".to_string(),
+                device_id: None,
+            },
+            &MetaEvent {
+                event: "activated".to_string(),
+                device_id: Some("_disk0".to_string()),
+            },
+            &MetaEvent {
+                event: "reset".to_string(),
+                device_id: Some("_disk0".to_string()),
+            },
+        ];
+        assert!(check_sequential_events(
+            &expected_sequential_events,
+            &event_path
+        ));
+
+        // It's been observed on the Bionic image that udev and snapd
+        // services can cause some delay in the VM's shutdown. Disabling
+        // them improves the reliability of this test.
+        let _ = guest.ssh_command("sudo systemctl disable udev");
+        let _ = guest.ssh_command("sudo systemctl stop udev");
+        let _ = guest.ssh_command("sudo systemctl disable snapd");
+        let _ = guest.ssh_command("sudo systemctl stop snapd");
+
+        guest.ssh_command("sudo poweroff").unwrap();
+        thread::sleep(std::time::Duration::new(20, 0));
+        let latest_events = [
+            &MetaEvent {
+                event: "shutdown".to_string(),
+                device_id: None,
+            },
+            &MetaEvent {
+                event: "deleted".to_string(),
+                device_id: None,
+            },
+            &MetaEvent {
+                event: "shutdown".to_string(),
+                device_id: None,
+            },
+        ];
+        assert!(check_latest_events_exact(&latest_events, &event_path));
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
+
 mod common_parallel {
     use std::fs::OpenOptions;
     use std::io::SeekFrom;
@@ -2508,98 +2590,24 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_focal_hypervisor_fw() {
-        test_simple_launch(fw_path(FwType::RustHypervisorFirmware), FOCAL_IMAGE_NAME)
+        let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let mut guest = Guest::new(Box::new(disk_config));
+        guest.params.insert(
+            GuestParamKey::FwPath,
+            Box::new(fw_path(FwType::RustHypervisorFirmware)),
+        );
+        _test_simple_launch(&guest)
     }
 
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_focal_ovmf() {
-        test_simple_launch(fw_path(FwType::Ovmf), FOCAL_IMAGE_NAME)
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    fn test_simple_launch(fw_path: String, disk_path: &str) {
-        let disk_config = Box::new(UbuntuDiskConfig::new(disk_path.to_string()));
-        let guest = Guest::new(disk_config);
-        let event_path = temp_event_monitor_path(&guest.tmp_dir);
-
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=1"])
-            .args(["--memory", "size=512M"])
-            .args(["--kernel", fw_path.as_str()])
-            .default_disks()
-            .default_net()
-            .args(["--serial", "tty", "--console", "off"])
-            .args(["--event-monitor", format!("path={event_path}").as_str()])
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(Some(120)).unwrap();
-
-            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
-            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-            assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
-
-            let expected_sequential_events = [
-                &MetaEvent {
-                    event: "starting".to_string(),
-                    device_id: None,
-                },
-                &MetaEvent {
-                    event: "booting".to_string(),
-                    device_id: None,
-                },
-                &MetaEvent {
-                    event: "booted".to_string(),
-                    device_id: None,
-                },
-                &MetaEvent {
-                    event: "activated".to_string(),
-                    device_id: Some("_disk0".to_string()),
-                },
-                &MetaEvent {
-                    event: "reset".to_string(),
-                    device_id: Some("_disk0".to_string()),
-                },
-            ];
-            assert!(check_sequential_events(
-                &expected_sequential_events,
-                &event_path
-            ));
-
-            // It's been observed on the Bionic image that udev and snapd
-            // services can cause some delay in the VM's shutdown. Disabling
-            // them improves the reliability of this test.
-            let _ = guest.ssh_command("sudo systemctl disable udev");
-            let _ = guest.ssh_command("sudo systemctl stop udev");
-            let _ = guest.ssh_command("sudo systemctl disable snapd");
-            let _ = guest.ssh_command("sudo systemctl stop snapd");
-
-            guest.ssh_command("sudo poweroff").unwrap();
-            thread::sleep(std::time::Duration::new(20, 0));
-            let latest_events = [
-                &MetaEvent {
-                    event: "shutdown".to_string(),
-                    device_id: None,
-                },
-                &MetaEvent {
-                    event: "deleted".to_string(),
-                    device_id: None,
-                },
-                &MetaEvent {
-                    event: "shutdown".to_string(),
-                    device_id: None,
-                },
-            ];
-            assert!(check_latest_events_exact(&latest_events, &event_path));
-        });
-
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-
-        handle_child_output(r, &output);
+        let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let mut guest = Guest::new(Box::new(disk_config));
+        guest
+            .params
+            .insert(GuestParamKey::FwPath, Box::new(fw_path(FwType::Ovmf)));
+        _test_simple_launch(&guest)
     }
 
     #[test]
