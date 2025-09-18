@@ -16,8 +16,8 @@ use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
 use vm_device::BusDevice;
 use vm_device::interrupt::{
-    InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
-    MsiIrqGroupConfig, MsiIrqSourceConfig,
+    get_irq_masked_state, InterruptIndex, InterruptManager, InterruptSourceConfig,
+    InterruptSourceGroup, MsiIrqGroupConfig, MsiIrqSourceConfig,
 };
 use vm_memory::GuestAddress;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -388,7 +388,7 @@ impl Ioapic {
             .update(
                 irq as InterruptIndex,
                 InterruptSourceConfig::MsiIrq(config),
-                interrupt_mask(entry) == 1,
+                get_irq_masked_state(true, interrupt_mask(entry) == 1),
                 set_gsi,
             )
             .map_err(Error::UpdateInterrupt)?;
