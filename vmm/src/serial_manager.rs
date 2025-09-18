@@ -3,9 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::collections::HashMap;
 use std::fs::File;
-use std::io::Read;
-use std::net::Shutdown;
+use std::io::{Read, Write};
+use std::net::{Shutdown, TcpStream};
 use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd};
 use std::os::unix::net::UnixStream;
 use std::panic::AssertUnwindSafe;
@@ -67,9 +68,9 @@ pub enum Error {
     #[error("Error accepting connection")]
     AcceptConnection(#[source] io::Error),
 
-    /// Cannot clone the UnixStream
-    #[error("Error cloning UnixStream")]
-    CloneUnixStream(#[source] io::Error),
+    /// Cannot clone the Stream
+    #[error("Error cloning Stream")]
+    CloneStream(#[source] io::Error),
 
     /// Cannot shutdown the connection
     #[error("Error shutting down a connection")]
@@ -91,9 +92,10 @@ pub enum EpollDispatch {
     File = 0,
     Kill = 1,
     Socket = 2,
+    Tcp = 3,
     Unknown,
 }
-const EPOLL_EVENTS_LEN: usize = 4;
+const EPOLL_EVENTS_LEN: usize = 5;
 
 impl From<u64> for EpollDispatch {
     fn from(v: u64) -> Self {
@@ -102,8 +104,61 @@ impl From<u64> for EpollDispatch {
             0 => File,
             1 => Kill,
             2 => Socket,
+            3 => Tcp,
             _ => Unknown,
         }
+    }
+}
+
+/// A thread-safe writer that fans out to multiple keyed writers. Allows for
+/// bundling different kinds of writers for the serial device, e.g. writing to
+/// a TCP socket and a file.
+#[derive(Clone)]
+pub struct FanoutWriter {
+    writers: Arc<Mutex<HashMap<String, Box<dyn Write + Send>>>>,
+}
+
+impl FanoutWriter {
+    pub fn new() -> Self {
+        FanoutWriter {
+            writers: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub fn add_writer<W: Write + Send + 'static>(&self, key: String, writer: W) {
+        let mut writers = self.writers.lock().unwrap();
+        writers.insert(key, Box::new(writer));
+    }
+
+    pub fn remove_writer(&self, key: &str) -> Option<Box<dyn Write + Send>> {
+        let mut writers = self.writers.lock().unwrap();
+        writers.remove(key)
+    }
+}
+
+impl Write for FanoutWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let mut writers = self.writers.lock().unwrap();
+        let mut result: io::Result<usize> = Ok(buf.len());
+
+        for (i, w) in writers.values_mut().enumerate() {
+            let r = w.write(buf);
+            if i == 0 {
+                result = r;
+            } else if let Err(e) = r {
+                return Err(e);
+            }
+        }
+
+        result
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        let mut writers = self.writers.lock().unwrap();
+        for w in writers.values_mut() {
+            w.flush()?;
+        }
+        Ok(())
     }
 }
 
@@ -165,6 +220,7 @@ impl SerialManager {
                 }
                 fd.as_raw_fd()
             }
+            ConsoleOutput::Tcp(ref fd, _) => fd.as_raw_fd(),
             _ => return Ok(None),
         };
 
@@ -179,10 +235,14 @@ impl SerialManager {
         )
         .map_err(Error::Epoll)?;
 
-        let epoll_fd_data = if let ConsoleOutput::Socket(_) = output {
-            EpollDispatch::Socket
-        } else {
-            EpollDispatch::File
+        let epoll_fd_data = match output {
+            ConsoleOutput::File(_) => EpollDispatch::File,
+            ConsoleOutput::Pty(_) => EpollDispatch::File,
+            ConsoleOutput::Tty(_) => EpollDispatch::File,
+            ConsoleOutput::Null => EpollDispatch::File,
+            ConsoleOutput::Off => EpollDispatch::File,
+            ConsoleOutput::Socket(_) => EpollDispatch::Socket,
+            ConsoleOutput::Tcp(_, _) => EpollDispatch::Tcp,
         };
 
         epoll::ctl(
@@ -259,6 +319,7 @@ impl SerialManager {
         let serial = self.serial.clone();
         let pty_write_out = self.pty_write_out.clone();
         let mut reader: Option<UnixStream> = None;
+        let mut reader_tcp: Option<TcpStream> = None;
 
         // In case of PTY, we want to be able to detect a connection on the
         // other end of the PTY. This is done by detecting there's no event
@@ -272,8 +333,19 @@ impl SerialManager {
             .name("serial-manager".to_string())
             .spawn(move || {
                 std::panic::catch_unwind(AssertUnwindSafe(move || {
+                    let write_distributor = FanoutWriter::new();
+
+                    if let ConsoleOutput::Tcp(_, Some(f)) = &in_file {
+                        write_distributor.add_writer("file".into(), f.clone());
+                    }
+
                     let mut events =
                         [epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
+                    serial
+                        .as_ref()
+                        .lock()
+                        .unwrap()
+                        .set_out(Some(Box::new(write_distributor.clone())));
 
                     loop {
                         let num_events = match epoll::wait(epoll_fd, timeout, &mut events[..]) {
@@ -328,10 +400,9 @@ impl SerialManager {
                                     let (unix_stream, _) =
                                         listener.accept().map_err(Error::AcceptConnection)?;
                                     let writer =
-                                        unix_stream.try_clone().map_err(Error::CloneUnixStream)?;
-                                    reader = Some(
-                                        unix_stream.try_clone().map_err(Error::CloneUnixStream)?,
-                                    );
+                                        unix_stream.try_clone().map_err(Error::CloneStream)?;
+                                    reader =
+                                        Some(unix_stream.try_clone().map_err(Error::CloneStream)?);
 
                                     epoll::ctl(
                                         epoll_fd,
@@ -344,6 +415,41 @@ impl SerialManager {
                                     )
                                     .map_err(Error::Epoll)?;
                                     serial.lock().unwrap().set_out(Some(Box::new(writer)));
+                                }
+                                EpollDispatch::Tcp => {
+                                    // New connection request arrived.
+                                    // Shutdown the previous connection, if any
+                                    if let Some(ref previous_reader) = reader_tcp {
+                                        previous_reader
+                                            .shutdown(Shutdown::Both)
+                                            .map_err(Error::AcceptConnection)?;
+                                        write_distributor.remove_writer("tcp");
+                                    }
+
+                                    let ConsoleOutput::Tcp(ref listener, _) = in_file else {
+                                        unreachable!();
+                                    };
+
+                                    // Events on the listening socket will be connection requests.
+                                    // Accept them, create a reader and a writer.
+                                    let (tcp_stream, _) =
+                                        listener.accept().map_err(Error::AcceptConnection)?;
+                                    let writer =
+                                        tcp_stream.try_clone().map_err(Error::CloneStream)?;
+                                    reader_tcp =
+                                        Some(tcp_stream.try_clone().map_err(Error::CloneStream)?);
+
+                                    epoll::ctl(
+                                        epoll_fd,
+                                        epoll::ControlOptions::EPOLL_CTL_ADD,
+                                        tcp_stream.into_raw_fd(),
+                                        epoll::Event::new(
+                                            epoll::Events::EPOLLIN,
+                                            EpollDispatch::File as u64,
+                                        ),
+                                    )
+                                    .map_err(Error::Epoll)?;
+                                    write_distributor.add_writer("tcp".into(), writer);
                                 }
                                 EpollDispatch::File => {
                                     if event.events & libc::EPOLLIN as u32 != 0 {
@@ -365,6 +471,25 @@ impl SerialManager {
                                                             .lock()
                                                             .unwrap()
                                                             .set_out(None);
+                                                    }
+                                                    count
+                                                } else {
+                                                    0
+                                                }
+                                            }
+                                            ConsoleOutput::Tcp(_, _) => {
+                                                if let Some(mut serial_reader) = reader_tcp.as_ref()
+                                                {
+                                                    let count = serial_reader
+                                                        .read(&mut input)
+                                                        .map_err(Error::ReadInput)?;
+                                                    if count == 0 {
+                                                        info!("Remote end closed serial socket");
+                                                        serial_reader
+                                                            .shutdown(Shutdown::Both)
+                                                            .map_err(Error::ShutdownConnection)?;
+                                                        reader_tcp = None;
+                                                        write_distributor.remove_writer("tcp");
                                                     }
                                                     count
                                                 } else {
