@@ -33,6 +33,19 @@ use wait_timeout::ChildExt;
 // Constant taken from the VMM crate.
 const MAX_NUM_PCI_SEGMENTS: u16 = 96;
 
+const CVM_TIMEOUT: i32 = 140;
+
+#[macro_export]
+macro_rules! get_timeout {
+    ($custom_timeout:expr) => {
+        if is_guest_vm_type_cvm() {
+            Some(CVM_TIMEOUT)
+        } else {
+            Some($custom_timeout)
+        }
+    };
+}
+
 #[cfg(target_arch = "x86_64")]
 mod x86_64 {
     pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
@@ -2611,16 +2624,21 @@ mod common_parallel {
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=2,max=4"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .capture_output()
             .default_disks()
             .default_net();
 
+        let kernel = direct_kernel_boot_path();
+        cmd.kernel_cmdline(
+            kernel.to_str().unwrap(),
+            Some(DIRECT_KERNEL_BOOT_CMDLINE),
+            None,
+        );
+
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(Some(120)).unwrap();
+            guest.wait_vm_boot(get_timeout!(120)).unwrap();
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
 
