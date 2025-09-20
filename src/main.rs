@@ -1340,20 +1340,6 @@ mod unit_tests {
                 vec![
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--net",
-                    "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4",
-                ],
-                r#"{
-                    "payload": {"kernel": "/path/to/kernel"},
-                    "net": [
-                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4"}
-                    ]
-                }"#,
-                true,
-            ),
-            (
-                vec![
-                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
-                    "--net",
                     "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4,mask=5.6.7.8",
                 ],
                 r#"{
