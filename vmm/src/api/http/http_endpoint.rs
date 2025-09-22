@@ -35,6 +35,7 @@
 //! [special HTTP library]: https://github.com/firecracker-microvm/micro-http
 
 use std::fs::File;
+use std::os::fd::IntoRawFd;
 use std::sync::mpsc::Sender;
 
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
@@ -115,7 +116,7 @@ mod fds_helper {
 
         use super::{ConfigWithFDs, ConfigWithVariableFDs};
         use crate::config::RestoredNetConfig;
-        use crate::vm_config::NetConfig;
+        use crate::vm_config::{NetConfig, VmConfig};
 
         impl ConfigWithFDs for NetConfig {
             fn id(&self) -> Option<&str> {
@@ -148,6 +149,32 @@ mod fds_helper {
         impl ConfigWithVariableFDs for RestoredNetConfig {
             fn expected_num_fds(&self) -> usize {
                 self.num_fds
+            }
+        }
+
+        impl ConfigWithFDs for VmConfig {
+            fn id(&self) -> Option<&str> {
+                None
+            }
+
+            fn fds_from_http_body(&self) -> Option<&[RawFd]> {
+                None
+            }
+
+            fn set_fds(&mut self, fds: Option<Vec<RawFd>>) {
+                // We can assert below because the caller makes sure the numbers
+                //  of needed and provided FDs match.
+                assert_eq!(self.expect_fds(), fds.as_ref().map_or(0, |v| v.len()));
+                if let Some(v) = fds {
+                    // We can unwrap() below because of the assertion above.
+                    self.consume_fds(v).unwrap();
+                }
+            }
+        }
+
+        impl ConfigWithVariableFDs for VmConfig {
+            fn expected_num_fds(&self) -> usize {
+                self.expect_fds()
             }
         }
     }
@@ -264,6 +291,12 @@ impl EndpointHandler for VmCreate {
         api_notifier: EventFd,
         api_sender: Sender<ApiRequest>,
     ) -> Response {
+        // Cloning the files here is very important as it dup() the file
+        // descriptors, leaving open the one that was received. This way,
+        // rebooting the VM will work since the VM will be created from the
+        // original file descriptors.
+        let files: Vec<File> = req.files.iter().map(|f| f.try_clone().unwrap()).collect();
+
         match req.method() {
             Method::Put => {
                 match &req.body {
@@ -290,6 +323,10 @@ impl EndpointHandler for VmCreate {
                                     return e;
                                 }
                             }
+                        }
+
+                        if let Err(err) = attach_fds_to_cfg(files, vm_config.as_mut()) {
+                            return error_response(err, StatusCode::BadRequest);
                         }
 
                         match crate::api::VmCreate
@@ -490,11 +527,38 @@ impl PutHandler for VmRestore {
         api_notifier: EventFd,
         api_sender: Sender<ApiRequest>,
         body: &Option<Body>,
-        files: Vec<File>,
+        mut files: Vec<File>,
     ) -> std::result::Result<Option<Body>, HttpError> {
         if let Some(body) = body {
             let mut restore_cfg: RestoreConfig = serde_json::from_slice(body.raw())?;
 
+            // First, consume mem FDs, if any.
+            let expected_mem_fds = restore_cfg.mem_fds.as_ref().map_or(0, |fds| fds.len());
+
+            if files.len() < expected_mem_fds {
+                error!(
+                    "Number of mem FDs expected: {}, but received: {}",
+                    expected_mem_fds,
+                    files.len()
+                );
+                return Err(HttpError::BadRequest);
+            }
+
+            if let Some(mem_fds) = restore_cfg.mem_fds.as_mut()
+                && !mem_fds.is_empty()
+            {
+                let mut mem_files = files.split_off(mem_fds.len());
+                core::mem::swap(&mut mem_files, &mut files);
+
+                let mut idx = 0;
+                #[allow(clippy::explicit_counter_loop)]
+                for file in mem_files {
+                    mem_fds[idx] = file.into_raw_fd();
+                    idx += 1;
+                }
+            }
+
+            // Then consume net FDs, if any.
             if let Some(cfgs) = restore_cfg.net_fds.as_mut() {
                 let mut cfgs = cfgs.iter_mut().collect::<Vec<&mut _>>();
                 let cfgs = cfgs.as_mut_slice();

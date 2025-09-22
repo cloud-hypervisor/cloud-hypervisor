@@ -1617,6 +1617,20 @@ impl RequestHandler for Vmm {
             .validate(&vm_config.lock().unwrap().clone())
             .map_err(VmError::ConfigValidation)?;
 
+        // Update VM's memory cfgs with new fds.
+        if let Some(mem_fds) = restore_cfg.mem_fds
+            && !mem_fds.is_empty()
+        {
+            vm_config
+                .lock()
+                .unwrap()
+                .memory
+                .consume_fds(mem_fds)
+                .map_err(|err| {
+                    VmError::ConfigValidation(crate::config::ValidationError::PayloadError(err))
+                })?;
+        }
+
         // Update VM's net configurations with new fds received for restore operation
         if let (Some(restored_nets), Some(vm_net_configs)) =
             (restore_cfg.net_fds, &mut vm_config.lock().unwrap().net)
