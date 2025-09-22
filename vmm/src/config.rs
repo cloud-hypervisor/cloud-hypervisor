@@ -357,6 +357,10 @@ pub enum ValidationError {
     InvalidIvshmemPath,
     #[error("Payload configuration is not bootable")]
     PayloadError(#[from] PayloadConfigError),
+    #[error("Mask provided without an IP")]
+    MaskProvidedWithoutIp,
+    #[error("IP provided without a mask")]
+    IpProvidedWithoutMask,
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -1331,14 +1335,9 @@ impl NetConfig {
         parser.parse(net).map_err(Error::ParseNetwork)?;
 
         let tap = parser.get("tap");
-        let ip = parser
-            .convert("ip")
-            .map_err(Error::ParseNetwork)?
-            .unwrap_or_else(default_netconfig_ip);
-        let mask = parser
-            .convert("mask")
-            .map_err(Error::ParseNetwork)?
-            .unwrap_or_else(default_netconfig_mask);
+        let ip = parser.convert("ip").map_err(Error::ParseNetwork)?;
+        let mask = parser.convert("mask").map_err(Error::ParseNetwork)?;
+
         let mac = parser
             .convert("mac")
             .map_err(Error::ParseNetwork)?
@@ -1513,6 +1512,14 @@ impl NetConfig {
 
         if !self.offload_csum && (self.offload_tso || self.offload_ufo) {
             return Err(ValidationError::NoHardwareChecksumOffload);
+        }
+
+        if self.mask.is_some() && self.ip.is_none() {
+            return Err(ValidationError::MaskProvidedWithoutIp);
+        }
+
+        if self.ip.is_some() && self.mask.is_none() {
+            return Err(ValidationError::IpProvidedWithoutMask);
         }
 
         Ok(())
@@ -3177,7 +3184,6 @@ impl Drop for VmConfig {
 #[cfg(test)]
 mod tests {
     use std::fs::File;
-    use std::net::{IpAddr, Ipv4Addr};
     use std::os::unix::io::AsRawFd;
 
     use net_util::MacAddr;
@@ -3507,8 +3513,8 @@ mod tests {
     fn net_fixture() -> NetConfig {
         NetConfig {
             tap: None,
-            ip: IpAddr::V4(Ipv4Addr::new(192, 168, 249, 1)),
-            mask: IpAddr::V4(Ipv4Addr::new(255, 255, 255, 0)),
+            ip: None,
+            mask: None,
             mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
             host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
             mtu: None,
@@ -3550,8 +3556,8 @@ mod tests {
             )?,
             NetConfig {
                 tap: Some("tap0".to_owned()),
-                ip: "192.168.100.1".parse().unwrap(),
-                mask: "255.255.255.128".parse().unwrap(),
+                ip: Some("192.168.100.1".parse().unwrap()),
+                mask: Some("255.255.255.128".parse().unwrap()),
                 ..net_fixture()
             }
         );
@@ -3585,6 +3591,15 @@ mod tests {
                 host_mac: None,
                 fds: Some(vec![3, 7]),
                 num_queues: 4,
+                ..net_fixture()
+            }
+        );
+
+        assert_eq!(
+            NetConfig::parse("mac=de:ad:be:ef:12:34,mask=255.255.255.0")?,
+            NetConfig {
+                mask: Some("255.255.255.0".parse().unwrap()),
+                host_mac: None,
                 ..net_fixture()
             }
         );
@@ -4287,6 +4302,28 @@ mod tests {
         assert_eq!(
             invalid_config.validate(),
             Err(ValidationError::NoHardwareChecksumOffload)
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.net = Some(vec![NetConfig {
+            ip: None,
+            mask: Some("255.255.255.0".parse().unwrap()),
+            ..net_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::MaskProvidedWithoutIp)
+        );
+
+        let mut invalid_config = valid_config.clone();
+        invalid_config.net = Some(vec![NetConfig {
+            ip: Some("192.1.33.7".parse().unwrap()),
+            mask: None,
+            ..net_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::IpProvidedWithoutMask)
         );
 
         let mut invalid_config = valid_config.clone();
