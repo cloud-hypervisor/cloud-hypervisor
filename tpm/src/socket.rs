@@ -66,12 +66,12 @@ impl SocketDev {
         self.state = SocketDevState::Connecting;
 
         let s = UnixStream::connect(socket_path).map_err(|e| {
-            Error::ConnectToSocket(anyhow!("Failed to connect to tpm Socket. Error: {:?}", e))
+            Error::ConnectToSocket(anyhow!("Failed to connect to tpm Socket. Error: {e:?}"))
         })?;
         self.control_fd = s.as_raw_fd();
         self.stream = Some(s);
         self.state = SocketDevState::Connected;
-        debug!("Connected to tpm socket path : {:?}", socket_path);
+        debug!("Connected to tpm socket path : {socket_path:?}");
         Ok(())
     }
 
@@ -92,7 +92,7 @@ impl SocketDev {
             .unwrap()
             .send_with_fd(buf, write_fd)
             .map_err(|e| {
-                Error::WriteToSocket(anyhow!("Failed to write to Socket. Error: {:?}", e))
+                Error::WriteToSocket(anyhow!("Failed to write to Socket. Error: {e:?}"))
             })?;
 
         Ok(size)
@@ -129,7 +129,7 @@ impl SocketDev {
         }
         let mut socket = self.stream.as_ref().unwrap();
         let size: usize = socket.read(buf).map_err(|e| {
-            Error::ReadFromSocket(anyhow!("Failed to read from socket. Error Code {:?}", e))
+            Error::ReadFromSocket(anyhow!("Failed to read from socket. Error Code {e:?}"))
         })?;
         Ok(size)
     }

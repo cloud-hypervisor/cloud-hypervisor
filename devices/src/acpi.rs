@@ -51,7 +51,7 @@ impl BusDevice for AcpiShutdownDevice {
         if data[0] == 1 {
             info!("ACPI Reboot signalled");
             if let Err(e) = self.reset_evt.write(1) {
-                error!("Error triggering ACPI reset event: {}", e);
+                error!("Error triggering ACPI reset event: {e}");
             }
             // Spin until we are sure the reset_evt has been handled and that when
             // we return from the KVM_RUN we will exit rather than re-enter the guest.
@@ -68,7 +68,7 @@ impl BusDevice for AcpiShutdownDevice {
         if data[0] == (S5_SLEEP_VALUE << SLEEP_VALUE_BIT) | (1 << SLEEP_STATUS_EN_BIT) {
             info!("ACPI Shutdown signalled");
             if let Err(e) = self.exit_evt.write(1) {
-                error!("Error triggering ACPI shutdown event: {}", e);
+                error!("Error triggering ACPI shutdown event: {e}");
             }
             // Spin until we are sure the reset_evt has been handled and that when
             // we return from the KVM_RUN we will exit rather than re-enter the guest.

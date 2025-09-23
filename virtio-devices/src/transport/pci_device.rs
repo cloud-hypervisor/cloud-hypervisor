@@ -394,10 +394,7 @@ impl VirtioPciDevice {
         let mut queue_evts = Vec::new();
         for _ in locked_device.queue_max_sizes().iter() {
             queue_evts.push(EventFd::new(EFD_NONBLOCK).map_err(|e| {
-                VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
-                    "Failed creating eventfd: {}",
-                    e
-                ))
+                VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!("Failed creating eventfd: {e}"))
             })?)
         }
         let num_queues = locked_device.queue_max_sizes().len();
@@ -421,16 +418,14 @@ impl VirtioPciDevice {
             })
             .map_err(|e| {
                 VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
-                    "Failed creating MSI interrupt group: {}",
-                    e
+                    "Failed creating MSI interrupt group: {e}"
                 ))
             })?;
 
         let msix_state = vm_migration::state_from_id(snapshot.as_ref(), pci::MSIX_CONFIG_ID)
             .map_err(|e| {
                 VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
-                    "Failed to get MsixConfigState from Snapshot: {}",
-                    e
+                    "Failed to get MsixConfigState from Snapshot: {e}"
                 ))
             })?;
 
@@ -469,8 +464,7 @@ impl VirtioPciDevice {
             vm_migration::state_from_id(snapshot.as_ref(), pci::PCI_CONFIGURATION_ID).map_err(
                 |e| {
                     VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
-                        "Failed to get PciConfigurationState from Snapshot: {}",
-                        e
+                        "Failed to get PciConfigurationState from Snapshot: {e}"
                     ))
                 },
             )?;
@@ -493,8 +487,7 @@ impl VirtioPciDevice {
             vm_migration::state_from_id(snapshot.as_ref(), VIRTIO_PCI_COMMON_CONFIG_ID).map_err(
                 |e| {
                     VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
-                        "Failed to get VirtioPciCommonConfigState from Snapshot: {}",
-                        e
+                        "Failed to get VirtioPciCommonConfigState from Snapshot: {e}"
                     ))
                 },
             )?;
@@ -522,8 +515,7 @@ impl VirtioPciDevice {
             .transpose()
             .map_err(|e| {
                 VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
-                    "Failed to get VirtioPciDeviceState from Snapshot: {}",
-                    e
+                    "Failed to get VirtioPciDeviceState from Snapshot: {e}"
                 ))
             })?;
 
@@ -613,8 +605,7 @@ impl VirtioPciDevice {
         {
             virtio_pci_device.activate().map_err(|e| {
                 VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
-                    "Failed activating the device: {}",
-                    e
+                    "Failed activating the device: {e}"
                 ))
             })?;
         }
@@ -795,7 +786,7 @@ impl VirtioPciDevice {
             }
 
             if !queue.is_valid(self.memory.memory().deref()) {
-                error!("Queue {} is not valid", queue_index);
+                error!("Queue {queue_index} is not valid");
             }
 
             queues.push((
@@ -1182,7 +1173,7 @@ impl PciDevice for VirtioPciDevice {
                 }
                 // Handled with ioeventfds.
                 #[cfg(not(feature = "sev_snp"))]
-                error!("Unexpected write to notification BAR: offset = 0x{:x}", o);
+                error!("Unexpected write to notification BAR: offset = 0x{o:x}");
             }
             o if (MSIX_TABLE_BAR_OFFSET..MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE).contains(&o) => {
                 if let Some(msix_config) = &self.msix_config {

@@ -132,7 +132,7 @@ impl Vdpa {
             backend_features,
             paused,
         ) = if let Some(state) = state {
-            info!("Restoring vDPA {}", id);
+            info!("Restoring vDPA {id}");
 
             vhost.set_backend_features_acked(state.backend_features);
             vhost
@@ -404,14 +404,14 @@ impl VirtioDevice for Vdpa {
     fn read_config(&self, offset: u64, data: &mut [u8]) {
         assert!(self.vhost.is_some());
         if let Err(e) = self.vhost.as_ref().unwrap().get_config(offset as u32, data) {
-            error!("Failed reading virtio config: {}", e);
+            error!("Failed reading virtio config: {e}");
         }
     }
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
         assert!(self.vhost.is_some());
         if let Err(e) = self.vhost.as_ref().unwrap().set_config(offset as u32, data) {
-            error!("Failed writing virtio config: {}", e);
+            error!("Failed writing virtio config: {e}");
         }
     }
 
@@ -433,7 +433,7 @@ impl VirtioDevice for Vdpa {
 
     fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
         if let Err(e) = self.reset_vdpa() {
-            error!("Failed to reset vhost-vdpa: {:?}", e);
+            error!("Failed to reset vhost-vdpa: {e:?}");
             return None;
         }
 
@@ -487,7 +487,7 @@ impl Snapshottable for Vdpa {
         }
 
         let snapshot = Snapshot::new_from_state(&self.state().map_err(|e| {
-            MigratableError::Snapshot(anyhow!("Error snapshotting vDPA device: {:?}", e))
+            MigratableError::Snapshot(anyhow!("Error snapshotting vDPA device: {e:?}"))
         })?)?;
 
         // Force the vhost handler to be dropped in order to close the vDPA
@@ -509,7 +509,7 @@ impl Migratable for Vdpa {
         if self.backend_features & (1 << VHOST_BACKEND_F_SUSPEND) != 0 {
             assert!(self.vhost.is_some());
             self.vhost.as_ref().unwrap().suspend().map_err(|e| {
-                MigratableError::StartMigration(anyhow!("Error suspending vDPA device: {:?}", e))
+                MigratableError::StartMigration(anyhow!("Error suspending vDPA device: {e:?}"))
             })
         } else {
             Err(MigratableError::StartMigration(anyhow!(
@@ -565,7 +565,7 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M
     }
 
     fn unmap(&self, iova: u64, size: u64) -> std::result::Result<(), std::io::Error> {
-        debug!("DMA unmap iova 0x{:x} size 0x{:x}", iova, size);
+        debug!("DMA unmap iova 0x{iova:x} size 0x{size:x}");
         self.device
             .lock()
             .unwrap()

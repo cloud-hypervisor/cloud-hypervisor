@@ -265,8 +265,7 @@ impl<S: VhostUserFrontendReqHandler> EpollHelperHandler for VhostUserEpollHandle
             HUP_CONNECTION_EVENT => {
                 self.reconnect(helper).map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "failed to reconnect vhost-user backend: {:?}",
-                        e
+                        "failed to reconnect vhost-user backend: {e:?}"
                     ))
                 })?;
             }
@@ -274,8 +273,7 @@ impl<S: VhostUserFrontendReqHandler> EpollHelperHandler for VhostUserEpollHandle
                 if let Some(backend_req_handler) = self.backend_req_handler.as_mut() {
                     backend_req_handler.handle_request().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to handle request from vhost-user backend: {:?}",
-                            e
+                            "Failed to handle request from vhost-user backend: {e:?}"
                         ))
                     })?;
                 }
@@ -412,7 +410,7 @@ impl VhostUserCommon {
     pub fn pause(&mut self) -> std::result::Result<(), MigratableError> {
         if let Some(vu) = &self.vu {
             vu.lock().unwrap().pause_vhost_user().map_err(|e| {
-                MigratableError::Pause(anyhow!("Error pausing vhost-user backend: {:?}", e))
+                MigratableError::Pause(anyhow!("Error pausing vhost-user backend: {e:?}"))
             })
         } else {
             Ok(())
@@ -422,7 +420,7 @@ impl VhostUserCommon {
     pub fn resume(&mut self) -> std::result::Result<(), MigratableError> {
         if let Some(vu) = &self.vu {
             vu.lock().unwrap().resume_vhost_user().map_err(|e| {
-                MigratableError::Resume(anyhow!("Error resuming vhost-user backend: {:?}", e))
+                MigratableError::Resume(anyhow!("Error resuming vhost-user backend: {e:?}"))
             })
         } else {
             Ok(())
@@ -454,8 +452,7 @@ impl VhostUserCommon {
                     .start_dirty_log(last_ram_addr)
                     .map_err(|e| {
                         MigratableError::StartDirtyLog(anyhow!(
-                            "Error starting migration for vhost-user backend: {:?}",
-                            e
+                            "Error starting migration for vhost-user backend: {e:?}"
                         ))
                     })
             } else {
@@ -472,8 +469,7 @@ impl VhostUserCommon {
         if let Some(vu) = &self.vu {
             vu.lock().unwrap().stop_dirty_log().map_err(|e| {
                 MigratableError::StopDirtyLog(anyhow!(
-                    "Error stopping migration for vhost-user backend: {:?}",
-                    e
+                    "Error stopping migration for vhost-user backend: {e:?}"
                 ))
             })
         } else {
@@ -490,8 +486,7 @@ impl VhostUserCommon {
                 let last_ram_addr = guest_memory.memory().last_addr().raw_value();
                 vu.lock().unwrap().dirty_log(last_ram_addr).map_err(|e| {
                     MigratableError::DirtyLog(anyhow!(
-                        "Error retrieving dirty ranges from vhost-user backend: {:?}",
-                        e
+                        "Error retrieving dirty ranges from vhost-user backend: {e:?}"
                     ))
                 })
             } else {
@@ -518,8 +513,7 @@ impl VhostUserCommon {
         if let Some(kill_evt) = kill_evt {
             kill_evt.write(1).map_err(|e| {
                 MigratableError::CompleteMigration(anyhow!(
-                    "Error killing vhost-user thread: {:?}",
-                    e
+                    "Error killing vhost-user thread: {e:?}"
                 ))
             })?;
         }

@@ -66,7 +66,7 @@ impl NetCtrlEpollHandler {
         self.interrupt_cb
             .trigger(VirtioInterruptType::Queue(queue_index))
             .map_err(|e| {
-                error!("Failed to signal used queue: {:?}", e);
+                error!("Failed to signal used queue: {e:?}");
                 DeviceError::FailedSignalingUsedQueue(e)
             })
     }
@@ -96,32 +96,28 @@ impl EpollHelperHandler for NetCtrlEpollHandler {
                 let mem = self.mem.memory();
                 self.queue_evt.read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to get control queue event: {:?}",
-                        e
+                        "Failed to get control queue event: {e:?}"
                     ))
                 })?;
                 self.ctrl_q
                     .process(mem.deref(), &mut self.queue, self.access_platform.as_ref())
                     .map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to process control queue: {:?}",
-                            e
+                            "Failed to process control queue: {e:?}"
                         ))
                     })?;
                 match self.queue.needs_notification(mem.deref()) {
                     Ok(true) => {
                         self.signal_used_queue(self.queue_index).map_err(|e| {
                             EpollHelperError::HandleEvent(anyhow!(
-                                "Error signalling that control queue was used: {:?}",
-                                e
+                                "Error signalling that control queue was used: {e:?}"
                             ))
                         })?;
                     }
                     Ok(false) => {}
                     Err(e) => {
                         return Err(EpollHelperError::HandleEvent(anyhow!(
-                            "Error getting notification state of control queue: {}",
-                            e
+                            "Error getting notification state of control queue: {e}"
                         )));
                     }
                 };
@@ -184,7 +180,7 @@ impl NetEpollHandler {
         self.interrupt_cb
             .trigger(VirtioInterruptType::Queue(queue_index))
             .map_err(|e| {
-                error!("Failed to signal used queue: {:?}", e);
+                error!("Failed to signal used queue: {e:?}");
                 DeviceError::FailedSignalingUsedQueue(e)
             })
     }
@@ -192,7 +188,7 @@ impl NetEpollHandler {
     fn handle_rx_event(&mut self) -> result::Result<(), DeviceError> {
         let queue_evt = &self.queue_evt_pair.0;
         if let Err(e) = queue_evt.read() {
-            error!("Failed to get rx queue event: {:?}", e);
+            error!("Failed to get rx queue event: {e:?}");
         }
 
         self.net.rx_desc_avail = true;
@@ -316,30 +312,29 @@ impl EpollHelperHandler for NetEpollHandler {
             RX_QUEUE_EVENT => {
                 self.driver_awake = true;
                 self.handle_rx_event().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Error processing RX queue: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Error processing RX queue: {e:?}"))
                 })?;
             }
             TX_QUEUE_EVENT => {
                 let queue_evt = &self.queue_evt_pair.1;
                 if let Err(e) = queue_evt.read() {
-                    error!("Failed to get tx queue event: {:?}", e);
+                    error!("Failed to get tx queue event: {e:?}");
                 }
                 self.driver_awake = true;
                 self.handle_tx_event().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Error processing TX queue: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Error processing TX queue: {e:?}"))
                 })?;
             }
             TX_TAP_EVENT => {
                 self.handle_tx_event().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "Error processing TX queue (TAP event): {:?}",
-                        e
+                        "Error processing TX queue (TAP event): {e:?}"
                     ))
                 })?;
             }
             RX_TAP_EVENT => {
                 self.handle_rx_tap_event().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Error processing tap queue: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Error processing tap queue: {e:?}"))
                 })?;
             }
             RX_RATE_LIMITER_EVENT => {
@@ -348,8 +343,7 @@ impl EpollHelperHandler for NetEpollHandler {
                     // TAP fd for further processing if some RX buffers are available
                     rate_limiter.event_handler().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Error from 'rate_limiter.event_handler()': {:?}",
-                            e
+                            "Error from 'rate_limiter.event_handler()': {e:?}"
                         ))
                     })?;
 
@@ -362,8 +356,7 @@ impl EpollHelperHandler for NetEpollHandler {
                         )
                         .map_err(|e| {
                             EpollHelperError::HandleEvent(anyhow!(
-                                "Error register_listener with `RX_RATE_LIMITER_EVENT`: {:?}",
-                                e
+                                "Error register_listener with `RX_RATE_LIMITER_EVENT`: {e:?}"
                             ))
                         })?;
 
@@ -381,14 +374,13 @@ impl EpollHelperHandler for NetEpollHandler {
                     // and restart processing the queue.
                     rate_limiter.event_handler().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Error from 'rate_limiter.event_handler()': {:?}",
-                            e
+                            "Error from 'rate_limiter.event_handler()': {e:?}"
                         ))
                     })?;
 
                     self.driver_awake = true;
                     self.process_tx().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!("Error processing TX queue: {:?}", e))
+                        EpollHelperError::HandleEvent(anyhow!("Error processing TX queue: {e:?}"))
                     })?;
                 } else {
                     return Err(EpollHelperError::HandleEvent(anyhow!(
@@ -398,8 +390,7 @@ impl EpollHelperHandler for NetEpollHandler {
             }
             _ => {
                 return Err(EpollHelperError::HandleEvent(anyhow!(
-                    "Unexpected event: {}",
-                    ev_type
+                    "Unexpected event: {ev_type}"
                 )));
             }
         }
@@ -452,7 +443,7 @@ impl Net {
         let (avail_features, acked_features, config, queue_sizes, paused) = if let Some(state) =
             state
         {
-            info!("Restoring virtio-net {}", id);
+            info!("Restoring virtio-net {id}");
             (
                 state.avail_features,
                 state.acked_features,
@@ -670,7 +661,7 @@ impl Drop for Net {
         if let Some(thread) = self.ctrl_queue_epoll_thread.take()
             && let Err(e) = thread.join()
         {
-            error!("Error joining thread: {:?}", e);
+            error!("Error joining thread: {e:?}");
         }
     }
 }
@@ -777,7 +768,7 @@ impl VirtioDevice for Net {
             #[cfg(not(fuzzing))]
             tap.set_offload(virtio_features_to_tap_offload(self.common.acked_features))
                 .map_err(|e| {
-                    error!("Error programming tap offload: {:?}", e);
+                    error!("Error programming tap offload: {e:?}");
                     ActivateError::BadActivate
                 })?;
 

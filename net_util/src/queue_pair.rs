@@ -105,7 +105,7 @@ impl TxVirtio {
                         retry_write = true;
                         break;
                     }
-                    error!("net: tx: failed writing to tap: {}", e);
+                    error!("net: tx: failed writing to tap: {e}");
                     return Err(NetQueuePairError::WriteTap(e));
                 }
 
@@ -246,7 +246,7 @@ impl RxVirtio {
                         break;
                     }
 
-                    error!("net: rx: failed reading from tap: {}", e);
+                    error!("net: rx: failed reading from tap: {e}");
                     return Err(NetQueuePairError::ReadTap(e));
                 }
 

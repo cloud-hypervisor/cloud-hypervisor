@@ -83,10 +83,7 @@ impl MacAddr {
         // Generate a fully random MAC
         let mut random_bytes = [0u8; MAC_ADDR_LEN];
         if let Err(e) = getrandom::fill(&mut random_bytes) {
-            error!(
-                "Error populating MAC address with random data: {}",
-                e.to_string()
-            );
+            error!("Error populating MAC address with random data: {e}");
         }
 
         // Set the first byte to make the OUI a locally administered OUI

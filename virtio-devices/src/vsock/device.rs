@@ -108,7 +108,7 @@ where
         self.interrupt_cb
             .trigger(VirtioInterruptType::Queue(queue_index))
             .map_err(|e| {
-                error!("Failed to signal used queue: {:?}", e);
+                error!("Failed to signal used queue: {e:?}");
                 DeviceError::FailedSignalingUsedQueue(e)
             })
     }
@@ -137,7 +137,7 @@ where
                     }
                 }
                 Err(e) => {
-                    warn!("vsock: RX queue error: {:?}", e);
+                    warn!("vsock: RX queue error: {e:?}");
                     0
                 }
             };
@@ -170,7 +170,7 @@ where
             ) {
                 Ok(pkt) => pkt,
                 Err(e) => {
-                    error!("vsock: error reading TX packet: {:?}", e);
+                    error!("vsock: error reading TX packet: {e:?}");
                     self.queues[1]
                         .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
                         .map_err(DeviceError::QueueAddUsed)?;
@@ -226,7 +226,7 @@ where
             Some(evset) => evset,
             None => {
                 let evbits = event.events;
-                warn!("epoll: ignoring unknown event set: 0x{:x}", evbits);
+                warn!("epoll: ignoring unknown event set: 0x{evbits:x}");
                 return Ok(());
             }
         };
@@ -236,25 +236,22 @@ where
             RX_QUEUE_EVENT => {
                 debug!("vsock: RX queue event");
                 self.queue_evts[0].read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get RX queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get RX queue event: {e:?}"))
                 })?;
                 if self.backend.read().unwrap().has_pending_rx() {
                     self.process_rx().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to process RX queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to process RX queue: {e:?}"))
                     })?;
                 }
             }
             TX_QUEUE_EVENT => {
                 debug!("vsock: TX queue event");
                 self.queue_evts[1].read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get TX queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get TX queue event: {e:?}"))
                 })?;
 
                 self.process_tx().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to process TX queue: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process TX queue: {e:?}"))
                 })?;
 
                 // The backend may have queued up responses to the packets we sent during TX queue
@@ -262,17 +259,14 @@ where
                 // into RX buffers.
                 if self.backend.read().unwrap().has_pending_rx() {
                     self.process_rx().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to process RX queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to process RX queue: {e:?}"))
                     })?;
                 }
             }
             EVT_QUEUE_EVENT => {
                 debug!("vsock: EVT queue event");
                 self.queue_evts[2].read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get EVT queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get EVT queue event: {e:?}"))
                 })?;
             }
             BACKEND_EVENT => {
@@ -284,14 +278,11 @@ where
                 // returning an error) at some point in the past, now is the time to try walking the
                 // TX queue again.
                 self.process_tx().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to process TX queue: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process TX queue: {e:?}"))
                 })?;
                 if self.backend.read().unwrap().has_pending_rx() {
                     self.process_rx().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to process RX queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to process RX queue: {e:?}"))
                     })?;
                 }
             }
@@ -341,7 +332,7 @@ where
         state: Option<VsockState>,
     ) -> io::Result<Vsock<B>> {
         let (avail_features, acked_features, paused) = if let Some(state) = state {
-            info!("Restoring virtio-vsock {}", id);
+            info!("Restoring virtio-vsock {id}");
             (state.avail_features, state.acked_features, true)
         } else {
             let mut avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_IN_ORDER);

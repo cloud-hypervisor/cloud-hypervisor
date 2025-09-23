@@ -275,7 +275,7 @@ impl ConsoleEpollHandler {
         self.interrupt_cb
             .trigger(VirtioInterruptType::Queue(queue_index))
             .map_err(|e| {
-                error!("Failed to signal used queue: {:?}", e);
+                error!("Failed to signal used queue: {e:?}");
                 DeviceError::FailedSignalingUsedQueue(e)
             })
     }
@@ -328,7 +328,7 @@ impl ConsoleEpollHandler {
             }
             pty_write_out.store(true, Ordering::Release);
             out.flush()
-                .map_err(|e| anyhow!("Failed to flush PTY: {:?}", e))
+                .map_err(|e| anyhow!("Failed to flush PTY: {e:?}"))
         } else {
             Ok(())
         }
@@ -365,52 +365,39 @@ impl EpollHelperHandler for ConsoleEpollHandler {
         match ev_type {
             INPUT_QUEUE_EVENT => {
                 self.input_queue_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
                 let needs_notification = self.process_input_queue().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to process input queue : {:?}",
-                        e
-                    ))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process input queue : {e:?}"))
                 })?;
                 if needs_notification {
                     self.signal_used_queue(0).map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {e:?}"))
                     })?;
                 }
             }
             OUTPUT_QUEUE_EVENT => {
                 self.output_queue_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
                 let needs_notification = self.process_output_queue().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to process output queue : {:?}",
-                        e
-                    ))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process output queue : {e:?}"))
                 })?;
                 if needs_notification {
                     self.signal_used_queue(1).map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {e:?}"))
                     })?;
                 }
             }
             CONFIG_EVENT => {
                 self.config_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get config event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get config event: {e:?}"))
                 })?;
                 self.interrupt_cb
                     .trigger(VirtioInterruptType::Config)
                     .map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal console driver: {:?}",
-                            e
+                            "Failed to signal console driver: {e:?}"
                         ))
                     })?;
             }
@@ -420,10 +407,7 @@ impl EpollHelperHandler for ConsoleEpollHandler {
                     .unwrap()
                     .read_exact(&mut [0])
                     .map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to get resize event: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to get resize event: {e:?}"))
                     })?;
                 self.resizer.update_console_size();
             }
@@ -438,15 +422,13 @@ impl EpollHelperHandler for ConsoleEpollHandler {
 
                         let needs_notification = self.process_input_queue().map_err(|e| {
                             EpollHelperError::HandleEvent(anyhow!(
-                                "Failed to process input queue : {:?}",
-                                e
+                                "Failed to process input queue : {e:?}"
                             ))
                         })?;
                         if needs_notification {
                             self.signal_used_queue(0).map_err(|e| {
                                 EpollHelperError::HandleEvent(anyhow!(
-                                    "Failed to signal used queue: {:?}",
-                                    e
+                                    "Failed to signal used queue: {e:?}"
                                 ))
                             })?;
                         }
@@ -614,7 +596,7 @@ impl Console {
     ) -> io::Result<(Console, Arc<ConsoleResizer>)> {
         let (avail_features, acked_features, config, in_buffer, paused) = if let Some(state) = state
         {
-            info!("Restoring virtio-console {}", id);
+            info!("Restoring virtio-console {id}");
             (
                 state.avail_features,
                 state.acked_features,
@@ -733,7 +715,7 @@ impl VirtioDevice for Console {
         if self.common.feature_acked(VIRTIO_CONSOLE_F_SIZE)
             && let Err(e) = interrupt_cb.trigger(VirtioInterruptType::Config)
         {
-            error!("Failed to signal console driver: {:?}", e);
+            error!("Failed to signal console driver: {e:?}");
         }
 
         let (kill_evt, pause_evt) = self.common.dup_eventfds();

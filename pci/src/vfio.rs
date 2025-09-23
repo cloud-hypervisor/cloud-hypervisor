@@ -474,8 +474,7 @@ impl VfioCommon {
         let pci_configuration_state =
             vm_migration::state_from_id(snapshot.as_ref(), PCI_CONFIGURATION_ID).map_err(|e| {
                 VfioPciError::RetrievePciConfigurationState(anyhow!(
-                    "Failed to get PciConfigurationState from Snapshot: {}",
-                    e
+                    "Failed to get PciConfigurationState from Snapshot: {e}"
                 ))
             })?;
 
@@ -514,22 +513,19 @@ impl VfioCommon {
             .transpose()
             .map_err(|e| {
                 VfioPciError::RetrieveVfioCommonState(anyhow!(
-                    "Failed to get VfioCommonState from Snapshot: {}",
-                    e
+                    "Failed to get VfioCommonState from Snapshot: {e}"
                 ))
             })?;
         let msi_state =
             vm_migration::state_from_id(snapshot.as_ref(), MSI_CONFIG_ID).map_err(|e| {
                 VfioPciError::RetrieveMsiConfigState(anyhow!(
-                    "Failed to get MsiConfigState from Snapshot: {}",
-                    e
+                    "Failed to get MsiConfigState from Snapshot: {e}"
                 ))
             })?;
         let msix_state =
             vm_migration::state_from_id(snapshot.as_ref(), MSIX_CONFIG_ID).map_err(|e| {
                 VfioPciError::RetrieveMsixConfigState(anyhow!(
-                    "Failed to get MsixConfigState from Snapshot: {}",
-                    e
+                    "Failed to get MsixConfigState from Snapshot: {e}"
                 ))
             })?;
 
@@ -1057,7 +1053,7 @@ impl VfioCommon {
             && intx.enabled
         {
             if let Err(e) = self.vfio_wrapper.disable_irq(VFIO_PCI_INTX_IRQ_INDEX) {
-                error!("Could not disable INTx: {}", e);
+                error!("Could not disable INTx: {e}");
             } else {
                 intx.enabled = false;
             }
@@ -1085,7 +1081,7 @@ impl VfioCommon {
 
     pub(crate) fn disable_msi(&self) {
         if let Err(e) = self.vfio_wrapper.disable_msi() {
-            error!("Could not disable MSI: {}", e);
+            error!("Could not disable MSI: {e}");
         }
     }
 
@@ -1110,7 +1106,7 @@ impl VfioCommon {
 
     pub(crate) fn disable_msix(&self) {
         if let Err(e) = self.vfio_wrapper.disable_msix() {
-            error!("Could not disable MSI-X: {}", e);
+            error!("Could not disable MSI-X: {e}");
         }
     }
 
@@ -1200,7 +1196,7 @@ impl VfioCommon {
         if self.interrupt.intx_in_use()
             && let Err(e) = self.vfio_wrapper.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX)
         {
-            error!("Failed unmasking INTx IRQ: {}", e);
+            error!("Failed unmasking INTx IRQ: {e}");
         }
     }
 
@@ -1228,7 +1224,7 @@ impl VfioCommon {
         if self.interrupt.intx_in_use()
             && let Err(e) = self.vfio_wrapper.unmask_irq(VFIO_PCI_INTX_IRQ_INDEX)
         {
-            error!("Failed unmasking INTx IRQ: {}", e);
+            error!("Failed unmasking INTx IRQ: {e}");
         }
 
         None
@@ -1267,12 +1263,12 @@ impl VfioCommon {
             match cap_id {
                 PciCapabilityId::MessageSignalledInterrupts => {
                     if let Err(e) = self.update_msi_capabilities(cap_offset, data) {
-                        error!("Could not update MSI capabilities: {}", e);
+                        error!("Could not update MSI capabilities: {e}");
                     }
                 }
                 PciCapabilityId::MsiX => {
                     if let Err(e) = self.update_msix_capabilities(cap_offset, data) {
-                        error!("Could not update MSI-X capabilities: {}", e);
+                        error!("Could not update MSI-X capabilities: {e}");
                     }
                 }
                 _ => {}
@@ -1296,12 +1292,11 @@ impl VfioCommon {
                 & crate::configuration::COMMAND_REG_MEMORY_SPACE_MASK
                 == crate::configuration::COMMAND_REG_MEMORY_SPACE_MASK
             {
-                info!("BAR reprogramming parameter is returned: {:x?}", ret_param);
+                info!("BAR reprogramming parameter is returned: {ret_param:x?}");
                 self.configuration.clear_pending_bar_reprogram();
             } else {
                 info!(
-                    "MSE bit is disabled. No BAR reprogramming parameter is returned: {:x?}",
-                    ret_param
+                    "MSE bit is disabled. No BAR reprogramming parameter is returned: {ret_param:x?}"
                 );
 
                 ret_param = Vec::new();
@@ -1513,16 +1508,12 @@ impl VfioPciDevice {
                 VfioRegionInfoCap::MsixMappable => {
                     if !is_4k_aligned(region_start) {
                         error!(
-                            "Region start address 0x{:x} must be at least aligned on 4KiB",
-                            region_start
+                            "Region start address 0x{region_start:x} must be at least aligned on 4KiB"
                         );
                         return Err(VfioPciError::RegionAlignment);
                     }
                     if !is_4k_multiple(region_size) {
-                        error!(
-                            "Region size 0x{:x} must be at least a multiple of 4KiB",
-                            region_size
-                        );
+                        error!("Region size 0x{region_size:x} must be at least a multiple of 4KiB");
                         return Err(VfioPciError::RegionSize);
                     }
 
@@ -1733,7 +1724,7 @@ impl VfioPciDevice {
                 );
 
                 if let Err(e) = self.vm.remove_user_memory_region(r) {
-                    error!("Could not remove the userspace memory region: {}", e);
+                    error!("Could not remove the userspace memory region: {e}");
                 }
 
                 self.memory_slot_allocator

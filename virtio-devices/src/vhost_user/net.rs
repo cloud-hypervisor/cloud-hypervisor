@@ -90,7 +90,7 @@ impl Net {
             config,
             paused,
         ) = if let Some(state) = state {
-            info!("Restoring vhost-user-net {}", id);
+            info!("Restoring vhost-user-net {id}");
 
             // The backend acknowledged features must not contain
             // VIRTIO_NET_F_MAC since we don't expect the backend
@@ -169,8 +169,7 @@ impl Net {
 
             if num_queues > backend_num_queues {
                 error!(
-                    "vhost-user-net requested too many queues ({}) since the backend only supports {}\n",
-                    num_queues, backend_num_queues
+                    "vhost-user-net requested too many queues ({num_queues}) since the backend only supports {backend_num_queues}\n"
                 );
                 return Err(Error::BadQueueNum);
             }
@@ -246,7 +245,7 @@ impl Drop for Net {
         if let Some(kill_evt) = self.common.kill_evt.take()
             && let Err(e) = kill_evt.write(1)
         {
-            error!("failed to kill vhost-user-net: {:?}", e);
+            error!("failed to kill vhost-user-net: {e:?}");
         }
 
         self.common.wait_for_epoll_threads();
@@ -254,13 +253,13 @@ impl Drop for Net {
         if let Some(thread) = self.epoll_thread.take()
             && let Err(e) = thread.join()
         {
-            error!("Error joining thread: {:?}", e);
+            error!("Error joining thread: {e:?}");
         }
 
         if let Some(thread) = self.ctrl_queue_epoll_thread.take()
             && let Err(e) = thread.join()
         {
-            error!("Error joining thread: {:?}", e);
+            error!("Error joining thread: {e:?}");
         }
     }
 }
@@ -386,7 +385,7 @@ impl VirtioDevice for Net {
         if let Some(vu) = &self.vu_common.vu
             && let Err(e) = vu.lock().unwrap().reset_vhost_user()
         {
-            error!("Failed to reset vhost-user daemon: {:?}", e);
+            error!("Failed to reset vhost-user daemon: {e:?}");
             return None;
         }
 

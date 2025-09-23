@@ -93,8 +93,7 @@ impl WatchdogEpollHandler {
             // If this is the first "ping" then setup the timer
             if self.last_ping_time.lock().unwrap().is_none() {
                 info!(
-                    "First ping received. Starting timer (every {} seconds)",
-                    WATCHDOG_TIMER_INTERVAL
+                    "First ping received. Starting timer (every {WATCHDOG_TIMER_INTERVAL} seconds)"
                 );
                 timerfd_setup(&self.timer, WATCHDOG_TIMER_INTERVAL).map_err(Error::TimerfdSetup)?;
             }
@@ -113,7 +112,7 @@ impl WatchdogEpollHandler {
         self.interrupt_cb
             .trigger(VirtioInterruptType::Queue(0))
             .map_err(|e| {
-                error!("Failed to signal used queue: {:?}", e);
+                error!("Failed to signal used queue: {e:?}");
                 DeviceError::FailedSignalingUsedQueue(e)
             })
     }
@@ -142,18 +141,15 @@ impl EpollHelperHandler for WatchdogEpollHandler {
         match ev_type {
             QUEUE_AVAIL_EVENT => {
                 self.queue_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
 
                 let needs_notification = self.process_queue().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to process queue : {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process queue : {e:?}"))
                 })?;
                 if needs_notification {
                     self.signal_used_queue().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {e:?}"))
                     })?;
                 }
             }
@@ -162,22 +158,21 @@ impl EpollHelperHandler for WatchdogEpollHandler {
                 // the number of times this event has elapsed since the last read.
                 let mut buf = vec![0; 8];
                 self.timer.read_exact(&mut buf).map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Error reading from timer fd: {:}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Error reading from timer fd: {e:}"))
                 })?;
 
                 if let Some(last_ping_time) = self.last_ping_time.lock().unwrap().as_ref() {
                     let now = Instant::now();
                     let gap = now.duration_since(*last_ping_time).as_secs();
                     if gap > WATCHDOG_TIMEOUT {
-                        error!("Watchdog triggered: {} seconds since last ping", gap);
+                        error!("Watchdog triggered: {gap} seconds since last ping");
                         self.reset_evt.write(1).ok();
                     }
                 }
             }
             _ => {
                 return Err(EpollHelperError::HandleEvent(anyhow!(
-                    "Unexpected event: {}",
-                    ev_type
+                    "Unexpected event: {ev_type}"
                 )));
             }
         }
@@ -214,7 +209,7 @@ impl Watchdog {
     ) -> io::Result<Watchdog> {
         let mut last_ping_time = None;
         let (avail_features, acked_features, paused) = if let Some(state) = state {
-            info!("Restoring virtio-watchdog {}", id);
+            info!("Restoring virtio-watchdog {id}");
 
             // When restoring enable the watchdog if it was previously enabled.
             // We reset the timer to ensure that we don't unnecessarily reboot
@@ -229,7 +224,7 @@ impl Watchdog {
         };
 
         let timer_fd = timerfd_create().map_err(|e| {
-            error!("Failed to create timer fd {}", e);
+            error!("Failed to create timer fd {e}");
             e
         })?;
         // SAFETY: timer_fd is a valid fd
@@ -339,12 +334,12 @@ impl VirtioDevice for Watchdog {
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         let reset_evt = self.reset_evt.try_clone().map_err(|e| {
-            error!("Failed to clone reset_evt eventfd: {}", e);
+            error!("Failed to clone reset_evt eventfd: {e}");
             ActivateError::BadActivate
         })?;
 
         let timer = self.timer.try_clone().map_err(|e| {
-            error!("Failed to clone timer fd: {}", e);
+            error!("Failed to clone timer fd: {e}");
             ActivateError::BadActivate
         })?;
 
@@ -392,20 +387,17 @@ impl Pausable for Watchdog {
     fn pause(&mut self) -> result::Result<(), MigratableError> {
         info!("Watchdog paused - disabling timer");
         timerfd_setup(&self.timer, 0)
-            .map_err(|e| MigratableError::Pause(anyhow!("Error clearing timer: {:?}", e)))?;
+            .map_err(|e| MigratableError::Pause(anyhow!("Error clearing timer: {e:?}")))?;
         self.common.pause()
     }
 
     fn resume(&mut self) -> result::Result<(), MigratableError> {
         // Reset the timer on pause if it was previously used
         if self.last_ping_time.lock().unwrap().is_some() {
-            info!(
-                "Watchdog resumed - enabling timer (every {} seconds)",
-                WATCHDOG_TIMER_INTERVAL
-            );
+            info!("Watchdog resumed - enabling timer (every {WATCHDOG_TIMER_INTERVAL} seconds)");
             self.last_ping_time.lock().unwrap().replace(Instant::now());
             timerfd_setup(&self.timer, WATCHDOG_TIMER_INTERVAL)
-                .map_err(|e| MigratableError::Resume(anyhow!("Error setting timer: {:?}", e)))?;
+                .map_err(|e| MigratableError::Resume(anyhow!("Error setting timer: {e:?}")))?;
         }
         self.common.resume()
     }

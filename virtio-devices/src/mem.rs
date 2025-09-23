@@ -235,8 +235,7 @@ impl VirtioMemConfig {
     fn resize(&mut self, size: u64) -> result::Result<(), Error> {
         if self.requested_size == size {
             return Err(Error::ResizeError(anyhow!(
-                "new size 0x{:x} and requested_size are identical",
-                size
+                "new size 0x{size:x} and requested_size are identical"
             )));
         } else if size > self.region_size {
             return Err(Error::ResizeError(anyhow!(
@@ -426,7 +425,7 @@ impl MemEpollHandler {
             };
             if res != 0 {
                 let err = io::Error::last_os_error();
-                error!("Deallocating file space failed: {}", err);
+                error!("Deallocating file space failed: {err}");
                 return Err(Error::DiscardMemoryRange(err));
             }
         }
@@ -444,7 +443,7 @@ impl MemEpollHandler {
             };
             if res != 0 {
                 let err = io::Error::last_os_error();
-                error!("Advising kernel about pages range failed: {}", err);
+                error!("Advising kernel about pages range failed: {err}");
                 return Err(Error::DiscardMemoryRange(err));
             }
         }
@@ -476,7 +475,7 @@ impl MemEpollHandler {
         }
 
         if !plug && let Err(e) = self.discard_memory_range(offset, size) {
-            error!("failed discarding memory range: {:?}", e);
+            error!("failed discarding memory range: {e:?}");
             return VIRTIO_MEM_RESP_ERROR;
         }
 
@@ -506,10 +505,7 @@ impl MemEpollHandler {
         } else {
             for (_, handler) in handlers.iter() {
                 if let Err(e) = handler.unmap(addr, size) {
-                    error!(
-                        "failed DMA unmapping addr 0x{:x} size 0x{:x}: {}",
-                        addr, size, e
-                    );
+                    error!("failed DMA unmapping addr 0x{addr:x} size 0x{size:x}: {e}");
                     return VIRTIO_MEM_RESP_ERROR;
                 }
             }
@@ -523,7 +519,7 @@ impl MemEpollHandler {
     fn unplug_all(&mut self) -> u16 {
         let mut config = self.config.lock().unwrap();
         if let Err(e) = self.discard_memory_range(0, config.region_size) {
-            error!("failed discarding memory range: {:?}", e);
+            error!("failed discarding memory range: {e:?}");
             return VIRTIO_MEM_RESP_ERROR;
         }
 
@@ -592,7 +588,7 @@ impl MemEpollHandler {
 
     fn signal(&self, int_type: VirtioInterruptType) -> result::Result<(), DeviceError> {
         self.interrupt_cb.trigger(int_type).map_err(|e| {
-            error!("Failed to signal used queue: {:?}", e);
+            error!("Failed to signal used queue: {e:?}");
             DeviceError::FailedSignalingUsedQueue(e)
         })
     }
@@ -650,25 +646,21 @@ impl EpollHelperHandler for MemEpollHandler {
         match ev_type {
             QUEUE_AVAIL_EVENT => {
                 self.queue_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
 
                 let needs_notification = self.process_queue().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to process queue : {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process queue : {e:?}"))
                 })?;
                 if needs_notification {
                     self.signal(VirtioInterruptType::Queue(0)).map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {e:?}"))
                     })?;
                 }
             }
             _ => {
                 return Err(EpollHelperError::HandleEvent(anyhow!(
-                    "Unexpected event: {}",
-                    ev_type
+                    "Unexpected event: {ev_type}"
                 )));
             }
         }
@@ -727,7 +719,7 @@ impl Mem {
         }
 
         let (avail_features, acked_features, config, paused) = if let Some(state) = state {
-            info!("Restoring virtio-mem {}", id);
+            info!("Restoring virtio-mem {id}");
             *(blocks_state.lock().unwrap()) = state.blocks_state.clone();
             (
                 state.avail_features,
@@ -801,14 +793,14 @@ impl Mem {
     pub fn resize(&mut self, size: u64) -> result::Result<(), Error> {
         let mut config = self.config.lock().unwrap();
         config.resize(size).map_err(|e| {
-            Error::ResizeError(anyhow!("Failed to update virtio configuration: {:?}", e))
+            Error::ResizeError(anyhow!("Failed to update virtio configuration: {e:?}"))
         })?;
 
         if let Some(interrupt_cb) = self.interrupt_cb.as_ref() {
             interrupt_cb
                 .trigger(VirtioInterruptType::Config)
                 .map_err(|e| {
-                    Error::ResizeError(anyhow!("Failed to signal the guest about resize: {:?}", e))
+                    Error::ResizeError(anyhow!("Failed to signal the guest about resize: {e:?}"))
                 })
         } else {
             Ok(())

@@ -497,7 +497,7 @@ impl Snapshottable for Vcpu {
         let saved_state = self
             .vcpu
             .state()
-            .map_err(|e| MigratableError::Snapshot(anyhow!("Could not get vCPU state {:?}", e)))?;
+            .map_err(|e| MigratableError::Snapshot(anyhow!("Could not get vCPU state {e:?}")))?;
 
         self.saved_state = Some(saved_state.clone());
 
@@ -574,10 +574,7 @@ impl BusDevice for CpuManager {
                 }
             }
             _ => {
-                warn!(
-                    "Unexpected offset for accessing CPU manager device: {:#}",
-                    offset
-                );
+                warn!("Unexpected offset for accessing CPU manager device: {offset:#}");
             }
         }
     }
@@ -608,17 +605,14 @@ impl BusDevice for CpuManager {
                     if data[0] & (1 << CPU_EJECT_FLAG) == 1 << CPU_EJECT_FLAG
                         && let Err(e) = self.remove_vcpu(self.selected_cpu)
                     {
-                        error!("Error removing vCPU: {:?}", e);
+                        error!("Error removing vCPU: {e:?}");
                     }
                 } else {
                     warn!("Out of range vCPU id: {}", self.selected_cpu);
                 }
             }
             _ => {
-                warn!(
-                    "Unexpected offset for accessing CPU manager device: {:#}",
-                    offset
-                );
+                warn!("Unexpected offset for accessing CPU manager device: {offset:#}");
             }
         }
         None
@@ -827,7 +821,7 @@ impl CpuManager {
     }
 
     fn create_vcpu(&mut self, cpu_id: u32, snapshot: Option<Snapshot>) -> Result<Arc<Mutex<Vcpu>>> {
-        info!("Creating vCPU: cpu_id = {}", cpu_id);
+        info!("Creating vCPU: cpu_id = {cpu_id}");
 
         #[cfg(target_arch = "x86_64")]
         let topology = self.get_vcpu_topology();
@@ -851,11 +845,11 @@ impl CpuManager {
             vcpu.init(&self.vm)?;
 
             let state: CpuState = snapshot.to_state().map_err(|e| {
-                Error::VcpuCreate(anyhow!("Could not get vCPU state from snapshot {:?}", e))
+                Error::VcpuCreate(anyhow!("Could not get vCPU state from snapshot {e:?}"))
             })?;
             vcpu.vcpu
                 .set_state(&state)
-                .map_err(|e| Error::VcpuCreate(anyhow!("Could not set the vCPU state {:?}", e)))?;
+                .map_err(|e| Error::VcpuCreate(anyhow!("Could not set the vCPU state {e:?}")))?;
 
             vcpu.saved_state = Some(state);
         }
@@ -1035,7 +1029,7 @@ impl CpuManager {
         #[cfg(target_arch = "x86_64")]
         let interrupt_controller_clone = self.interrupt_controller.as_ref().cloned();
 
-        info!("Starting vCPU: cpu_id = {}", vcpu_id);
+        info!("Starting vCPU: cpu_id = {vcpu_id}");
 
         let handle = Some(
             thread::Builder::new()
@@ -1066,7 +1060,7 @@ impl CpuManager {
                     if !vcpu_seccomp_filter.is_empty() &&  let Err(e) =
                             apply_filter(&vcpu_seccomp_filter).map_err(Error::ApplySeccompFilter)
                         {
-                            error!("Error applying seccomp filter: {:?}", e);
+                            error!("Error applying seccomp filter: {e:?}");
                             return;
                         }
 
@@ -1132,7 +1126,7 @@ impl CpuManager {
                                 match vcpu.lock().as_ref().unwrap().vcpu.nmi() {
                                     Ok(()) => {},
                                     Err(e) => {
-                                        error!("Error when inject nmi {}", e);
+                                        error!("Error when inject nmi {e}");
                                         break;
                                     }
                                 }
@@ -1303,7 +1297,7 @@ impl CpuManager {
     }
 
     fn remove_vcpu(&mut self, cpu_id: u32) -> Result<()> {
-        info!("Removing vCPU: cpu_id = {}", cpu_id);
+        info!("Removing vCPU: cpu_id = {cpu_id}");
         let state = &mut self.vcpu_states[usize::try_from(cpu_id).unwrap()];
         state.kill.store(true, Ordering::SeqCst);
         state.signal_thread();
@@ -1335,7 +1329,7 @@ impl CpuManager {
     pub fn start_restored_vcpus(&mut self) -> Result<()> {
         self.activate_vcpus(self.vcpus.len() as u32, false, Some(true))
             .map_err(|e| {
-                Error::StartRestoreVcpu(anyhow!("Failed to start restored vCPUs: {:#?}", e))
+                Error::StartRestoreVcpu(anyhow!("Failed to start restored vCPUs: {e:#?}"))
             })?;
 
         Ok(())
@@ -2324,8 +2318,7 @@ impl Pausable for CpuManager {
             if !self.config.kvm_hyperv {
                 vcpu.vcpu.notify_guest_clock_paused().map_err(|e| {
                     MigratableError::Pause(anyhow!(
-                        "Could not notify guest it has been paused {:?}",
-                        e
+                        "Could not notify guest it has been paused {e:?}"
                     ))
                 })?;
             }

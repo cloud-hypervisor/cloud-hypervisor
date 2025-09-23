@@ -219,7 +219,7 @@ impl VfioUserPciDevice {
                 );
 
                 if let Err(e) = self.vm.remove_user_memory_region(r) {
-                    error!("Could not remove the userspace memory region: {}", e);
+                    error!("Could not remove the userspace memory region: {e}");
                 }
 
                 self.memory_slot_allocator
@@ -370,7 +370,7 @@ impl Vfio for VfioUserClientWrapper {
     }
 
     fn disable_irq(&self, irq_index: u32) -> Result<(), VfioError> {
-        info!("Disabling IRQ {:x}", irq_index);
+        info!("Disabling IRQ {irq_index:x}");
         self.client
             .lock()
             .unwrap()
@@ -385,7 +385,7 @@ impl Vfio for VfioUserClientWrapper {
     }
 
     fn unmask_irq(&self, irq_index: u32) -> Result<(), VfioError> {
-        info!("Unmasking IRQ {:x}", irq_index);
+        info!("Unmasking IRQ {irq_index:x}");
         self.client
             .lock()
             .unwrap()
@@ -448,7 +448,7 @@ impl PciDevice for VfioUserPciDevice {
     }
 
     fn move_bar(&mut self, old_base: u64, new_base: u64) -> Result<(), std::io::Error> {
-        info!("Moving BAR 0x{:x} -> 0x{:x}", old_base, new_base);
+        info!("Moving BAR 0x{old_base:x} -> 0x{new_base:x}");
         for mmio_region in self.common.mmio_regions.iter_mut() {
             if mmio_region.start.raw_value() == old_base {
                 mmio_region.start = GuestAddress(new_base);
@@ -489,7 +489,7 @@ impl PciDevice for VfioUserPciDevice {
                         .create_user_memory_region(new_region)
                         .map_err(std::io::Error::other)?;
                 }
-                info!("Moved bar 0x{:x} -> 0x{:x}", old_base, new_base);
+                info!("Moved bar 0x{old_base:x} -> 0x{new_base:x}");
             }
         }
 
@@ -522,7 +522,7 @@ impl Drop for VfioUserPciDevice {
         }
 
         if let Err(e) = self.client.lock().unwrap().shutdown() {
-            error!("Failed shutting down vfio-user client: {}", e);
+            error!("Failed shutting down vfio-user client: {e}");
         }
     }
 }

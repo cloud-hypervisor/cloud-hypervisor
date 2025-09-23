@@ -244,7 +244,7 @@ impl RateLimiterGroup {
                             match dispatch_event {
                                 EpollDispatch::Unknown => {
                                     let event = event.data;
-                                    warn!("Unknown rate-limiter loop event: {}", event);
+                                    warn!("Unknown rate-limiter loop event: {event}");
                                 }
                                 EpollDispatch::Unblocked => {
                                     inner.rate_limiter.event_handler().unwrap();
@@ -267,7 +267,7 @@ impl RateLimiterGroup {
                 match res {
                     Ok(res) => {
                         if let Err(e) = res {
-                            error!("Error running rate-limit-group worker: {:?}", e);
+                            error!("Error running rate-limit-group worker: {e:?}");
                             exit_evt.write(1).unwrap();
                         }
                     }
@@ -291,7 +291,7 @@ impl Drop for RateLimiterGroup {
         if let Some(t) = self.epoll_thread.take()
             && let Err(e) = t.join()
         {
-            error!("Error joining thread: {:?}", e);
+            error!("Error joining thread: {e:?}");
         }
     }
 }

@@ -84,7 +84,7 @@ impl SnapshotData {
         T: Deserialize<'a>,
     {
         serde_json::from_str(&self.state)
-            .map_err(|e| MigratableError::Restore(anyhow!("Error deserialising: {}", e)))
+            .map_err(|e| MigratableError::Restore(anyhow!("Error deserialising: {e}")))
     }
 
     /// Create from state that can be serialized
@@ -93,7 +93,7 @@ impl SnapshotData {
         T: Serialize,
     {
         let state = serde_json::to_string(state)
-            .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {}", e)))?;
+            .map_err(|e| MigratableError::Snapshot(anyhow!("Error serialising: {e}")))?;
 
         Ok(SnapshotData { state })
     }

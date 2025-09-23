@@ -338,7 +338,7 @@ fn start_http_thread(
                 apply_filter(&api_seccomp_filter)
                     .map_err(VmmError::ApplySeccompFilter)
                     .map_err(|e| {
-                        error!("Error applying seccomp filter: {:?}", e);
+                        error!("Error applying seccomp filter: {e:?}");
                         exit_evt.write(1).ok();
                         e
                     })?;
@@ -350,7 +350,7 @@ fn start_http_thread(
                     .restrict_self()
                     .map_err(VmmError::ApplyLandlock)
                     .map_err(|e| {
-                        error!("Error applying landlock to http-server thread: {:?}", e);
+                        error!("Error applying landlock to http-server thread: {e:?}");
                         exit_evt.write(1).ok();
                         e
                     })?;
@@ -365,7 +365,7 @@ fn start_http_thread(
                                 if let Err(e) = server.respond(server_request.process(|request| {
                                     handle_http_request(request, &api_notifier, &api_sender)
                                 })) {
-                                    error!("HTTP server error on response: {}", e);
+                                    error!("HTTP server error on response: {e}");
                                 }
                             }
                         }
@@ -374,10 +374,7 @@ fn start_http_thread(
                             return;
                         }
                         Err(e) => {
-                            error!(
-                                "HTTP server error on retrieving incoming request. Error: {}",
-                                e
-                            );
+                            error!("HTTP server error on retrieving incoming request. Error: {e}");
                         }
                     }
                 }

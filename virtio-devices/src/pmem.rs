@@ -170,7 +170,7 @@ impl PmemEpollHandler {
                     let status_code = match self.disk.sync_all() {
                         Ok(()) => VIRTIO_PMEM_RESP_TYPE_OK,
                         Err(e) => {
-                            error!("failed flushing disk image: {}", e);
+                            error!("failed flushing disk image: {e}");
                             VIRTIO_PMEM_RESP_TYPE_EIO
                         }
                     };
@@ -179,7 +179,7 @@ impl PmemEpollHandler {
                     match desc_chain.memory().write_obj(resp, req.status_addr) {
                         Ok(_) => size_of::<VirtioPmemResp>() as u32,
                         Err(e) => {
-                            error!("bad guest memory address: {}", e);
+                            error!("bad guest memory address: {e}");
                             0
                         }
                     }
@@ -190,7 +190,7 @@ impl PmemEpollHandler {
                     0
                 }
                 Err(e) => {
-                    error!("Failed to parse available descriptor chain: {:?}", e);
+                    error!("Failed to parse available descriptor chain: {e:?}");
                     0
                 }
             };
@@ -208,7 +208,7 @@ impl PmemEpollHandler {
         self.interrupt_cb
             .trigger(VirtioInterruptType::Queue(0))
             .map_err(|e| {
-                error!("Failed to signal used queue: {:?}", e);
+                error!("Failed to signal used queue: {e:?}");
                 DeviceError::FailedSignalingUsedQueue(e)
             })
     }
@@ -236,26 +236,22 @@ impl EpollHelperHandler for PmemEpollHandler {
         match ev_type {
             QUEUE_AVAIL_EVENT => {
                 self.queue_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
 
                 let needs_notification = self.process_queue().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to process queue : {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to process queue : {e:?}"))
                 })?;
 
                 if needs_notification {
                     self.signal_used_queue().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {e:?}"))
                     })?;
                 }
             }
             _ => {
                 return Err(EpollHelperError::HandleEvent(anyhow!(
-                    "Unexpected event: {}",
-                    ev_type
+                    "Unexpected event: {ev_type}"
                 )));
             }
         }
@@ -298,7 +294,7 @@ impl Pmem {
         state: Option<PmemState>,
     ) -> io::Result<Pmem> {
         let (avail_features, acked_features, config, paused) = if let Some(state) = state {
-            info!("Restoring virtio-pmem {}", id);
+            info!("Restoring virtio-pmem {id}");
             (
                 state.avail_features,
                 state.acked_features,
@@ -395,7 +391,7 @@ impl VirtioDevice for Pmem {
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
         if let Some(disk) = self.disk.as_ref() {
             let disk = disk.try_clone().map_err(|e| {
-                error!("failed cloning pmem disk: {}", e);
+                error!("failed cloning pmem disk: {e}");
                 ActivateError::BadActivate
             })?;
 

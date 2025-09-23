@@ -21,7 +21,7 @@ pub fn url_to_path(url: &str) -> std::result::Result<PathBuf, MigratableError> {
     let path: PathBuf = url
         .strip_prefix("file://")
         .ok_or_else(|| {
-            MigratableError::MigrateSend(anyhow!("Could not extract path from URL: {}", url))
+            MigratableError::MigrateSend(anyhow!("Could not extract path from URL: {url}"))
         })
         .map(|s| s.into())?;
 

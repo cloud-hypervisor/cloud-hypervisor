@@ -449,7 +449,7 @@ pub fn start_event_monitor_thread(
                 apply_filter(&seccomp_filter)
                     .map_err(Error::ApplySeccompFilter)
                     .map_err(|e| {
-                        error!("Error applying seccomp filter: {:?}", e);
+                        error!("Error applying seccomp filter: {e:?}");
                         exit_event.write(1).ok();
                         e
                     })?;
@@ -460,7 +460,7 @@ pub fn start_event_monitor_thread(
                     .restrict_self()
                     .map_err(Error::ApplyLandlock)
                     .map_err(|e| {
-                        error!("Error applying landlock to event monitor thread: {:?}", e);
+                        error!("Error applying landlock to event monitor thread: {e:?}");
                         exit_event.write(1).ok();
                         e
                     })?;
@@ -732,7 +732,7 @@ impl Vmm {
                             if !signal_handler_seccomp_filter.is_empty() && let Err(e) = apply_filter(&signal_handler_seccomp_filter)
                                     .map_err(Error::ApplySeccompFilter)
                                 {
-                                    error!("Error applying seccomp filter: {:?}", e);
+                                    error!("Error applying seccomp filter: {e:?}");
                                     exit_evt.write(1).ok();
                                     return;
                                 }
@@ -741,12 +741,12 @@ impl Vmm {
                                 match Landlock::new() {
                                     Ok(landlock) => {
                                         let _ = landlock.restrict_self().map_err(Error::ApplyLandlock).map_err(|e| {
-                                            error!("Error applying Landlock to signal handler thread: {:?}", e);
+                                            error!("Error applying Landlock to signal handler thread: {e:?}");
                                             exit_evt.write(1).ok();
                                         });
                                     }
                                     Err(e) => {
-                                        error!("Error creating Landlock object: {:?}", e);
+                                        error!("Error creating Landlock object: {e:?}");
                                         exit_evt.write(1).ok();
                                     }
                                 };
@@ -764,7 +764,7 @@ impl Vmm {
                         .map_err(Error::SignalHandlerSpawn)?,
                 );
             }
-            Err(e) => error!("Signal not found {}", e),
+            Err(e) => error!("Signal not found {e}"),
         }
         Ok(())
     }
@@ -845,7 +845,7 @@ impl Vmm {
 
         let vm_migration_config: VmMigrationConfig =
             serde_json::from_slice(&data).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error deserialising config: {}", e))
+                MigratableError::MigrateReceive(anyhow!("Error deserialising config: {e}"))
             })?;
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -857,7 +857,7 @@ impl Vmm {
         let config = vm_migration_config.vm_config.clone();
         self.vm_config = Some(vm_migration_config.vm_config);
         self.console_info = Some(pre_create_console_devices(self).map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error creating console devices: {:?}", e))
+            MigratableError::MigrateReceive(anyhow!("Error creating console devices: {e:?}"))
         })?);
 
         if self
@@ -869,7 +869,7 @@ impl Vmm {
             .landlock_enable
         {
             apply_landlock(self.vm_config.as_ref().unwrap().clone()).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error applying landlock: {:?}", e))
+                MigratableError::MigrateReceive(anyhow!("Error applying landlock: {e:?}"))
             })?;
         }
 
@@ -884,8 +884,7 @@ impl Vmm {
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!(
-                "Error creating hypervisor VM from snapshot: {:?}",
-                e
+                "Error creating hypervisor VM from snapshot: {e:?}"
             ))
         })?;
 
@@ -909,8 +908,7 @@ impl Vmm {
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!(
-                "Error creating MemoryManager from snapshot: {:?}",
-                e
+                "Error creating MemoryManager from snapshot: {e:?}"
             ))
         })?;
 
@@ -935,21 +933,21 @@ impl Vmm {
             .read_exact(&mut data)
             .map_err(MigratableError::MigrateSocket)?;
         let snapshot: Snapshot = serde_json::from_slice(&data).map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error deserialising snapshot: {}", e))
+            MigratableError::MigrateReceive(anyhow!("Error deserialising snapshot: {e}"))
         })?;
 
         let exit_evt = self.exit_evt.try_clone().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error cloning exit EventFd: {}", e))
+            MigratableError::MigrateReceive(anyhow!("Error cloning exit EventFd: {e}"))
         })?;
         let reset_evt = self.reset_evt.try_clone().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error cloning reset EventFd: {}", e))
+            MigratableError::MigrateReceive(anyhow!("Error cloning reset EventFd: {e}"))
         })?;
         #[cfg(feature = "guest_debug")]
         let debug_evt = self.vm_debug_evt.try_clone().map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error cloning debug EventFd: {}", e))
         })?;
         let activate_evt = self.activate_evt.try_clone().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error cloning activate EventFd: {}", e))
+            MigratableError::MigrateReceive(anyhow!("Error cloning activate EventFd: {e}"))
         })?;
 
         #[cfg(not(target_arch = "riscv64"))]
@@ -974,13 +972,13 @@ impl Vmm {
             Some(snapshot),
         )
         .map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {:?}", e))
+            MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {e:?}"))
         })?;
 
         // Create VM
         vm.restore().map_err(|e| {
             Response::error().write_to(socket).ok();
-            MigratableError::MigrateReceive(anyhow!("Failed restoring the Vm: {}", e))
+            MigratableError::MigrateReceive(anyhow!("Failed restoring the Vm: {e}"))
         })?;
         self.vm = Some(vm);
 
@@ -1014,7 +1012,7 @@ impl Vmm {
     fn socket_url_to_path(url: &str) -> result::Result<PathBuf, MigratableError> {
         url.strip_prefix("unix:")
             .ok_or_else(|| {
-                MigratableError::MigrateSend(anyhow!("Could not extract path from URL: {}", url))
+                MigratableError::MigrateSend(anyhow!("Could not extract path from URL: {url}"))
             })
             .map(|s| s.into())
     }
@@ -1023,19 +1021,19 @@ impl Vmm {
         destination_url: &str,
     ) -> std::result::Result<SocketStream, MigratableError> {
         if let Some(address) = destination_url.strip_prefix("tcp:") {
-            info!("Connecting to TCP socket at {}", address);
+            info!("Connecting to TCP socket at {address}");
 
             let socket = TcpStream::connect(address).map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("Error connecting to TCP socket: {}", e))
+                MigratableError::MigrateSend(anyhow!("Error connecting to TCP socket: {e}"))
             })?;
 
             Ok(SocketStream::Tcp(socket))
         } else {
             let path = Vmm::socket_url_to_path(destination_url)?;
-            info!("Connecting to UNIX socket at {:?}", path);
+            info!("Connecting to UNIX socket at {path:?}");
 
             let socket = UnixStream::connect(&path).map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("Error connecting to UNIX socket: {}", e))
+                MigratableError::MigrateSend(anyhow!("Error connecting to UNIX socket: {e}"))
             })?;
 
             Ok(SocketStream::Unix(socket))
@@ -1047,13 +1045,12 @@ impl Vmm {
     ) -> std::result::Result<SocketStream, MigratableError> {
         if let Some(address) = receiver_url.strip_prefix("tcp:") {
             let listener = TcpListener::bind(address).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error binding to TCP socket: {}", e))
+                MigratableError::MigrateReceive(anyhow!("Error binding to TCP socket: {e}"))
             })?;
 
             let (socket, _addr) = listener.accept().map_err(|e| {
                 MigratableError::MigrateReceive(anyhow!(
-                    "Error accepting connection on TCP socket: {}",
-                    e
+                    "Error accepting connection on TCP socket: {e}"
                 ))
             })?;
 
@@ -1061,19 +1058,18 @@ impl Vmm {
         } else {
             let path = Vmm::socket_url_to_path(receiver_url)?;
             let listener = UnixListener::bind(&path).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error binding to UNIX socket: {}", e))
+                MigratableError::MigrateReceive(anyhow!("Error binding to UNIX socket: {e}"))
             })?;
 
             let (socket, _addr) = listener.accept().map_err(|e| {
                 MigratableError::MigrateReceive(anyhow!(
-                    "Error accepting connection on UNIX socket: {}",
-                    e
+                    "Error accepting connection on UNIX socket: {e}"
                 ))
             })?;
 
             // Remove the UNIX socket file after accepting the connection
             std::fs::remove_file(&path).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error removing UNIX socket file: {}", e))
+                MigratableError::MigrateReceive(anyhow!("Error removing UNIX socket file: {e}"))
             })?;
 
             Ok(SocketStream::Unix(socket))
@@ -1147,7 +1143,7 @@ impl Vmm {
                 },
             )
             .map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("Error generating common cpuid': {:?}", e))
+                MigratableError::MigrateSend(anyhow!("Error generating common cpuid': {e:?}"))
             })?
         };
 
@@ -1207,7 +1203,7 @@ impl Vmm {
             // Try at most 5 passes of dirty memory sending
             const MAX_DIRTY_MIGRATIONS: usize = 5;
             for i in 0..MAX_DIRTY_MIGRATIONS {
-                info!("Dirty memory migration {} of {}", i, MAX_DIRTY_MIGRATIONS);
+                info!("Dirty memory migration {i} of {MAX_DIRTY_MIGRATIONS}");
                 if !Self::vm_maybe_send_dirty_pages(vm, &mut socket)? {
                     break;
                 }
@@ -1285,13 +1281,12 @@ impl Vmm {
                 },
             )
             .map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error generating common cpuid: {:?}", e))
+                MigratableError::MigrateReceive(anyhow!("Error generating common cpuid: {e:?}"))
             })?
         };
         arch::CpuidFeatureEntry::check_cpuid_compatibility(src_vm_cpuid, dest_cpuid).map_err(|e| {
             MigratableError::MigrateReceive(anyhow!(
-                "Error checking cpu feature compatibility': {:?}",
-                e
+                "Error checking cpu feature compatibility': {e:?}"
             ))
         })
     }
@@ -1399,7 +1394,7 @@ impl Vmm {
                 match dispatch_event {
                     EpollDispatch::Unknown => {
                         let event = event.data;
-                        warn!("Unknown VMM loop event: {}", event);
+                        warn!("Unknown VMM loop event: {event}");
                     }
                     EpollDispatch::Exit => {
                         info!("VM exit event");
@@ -1418,10 +1413,7 @@ impl Vmm {
                     EpollDispatch::ActivateVirtioDevices => {
                         if let Some(ref vm) = self.vm {
                             let count = self.activate_evt.read().map_err(Error::EventFdRead)?;
-                            info!(
-                                "Trying to activate pending virtio devices: count = {}",
-                                count
-                            );
+                            info!("Trying to activate pending virtio devices: count = {count}");
                             vm.activate_virtio_devices()
                                 .map_err(Error::ActivateVirtioDevices)?;
                         }
@@ -1641,7 +1633,7 @@ impl RequestHandler for Vmm {
 
         self.vm_restore(source_url, vm_config, restore_cfg.prefault)
             .map_err(|vm_restore_err| {
-                error!("VM Restore failed: {:?}", vm_restore_err);
+                error!("VM Restore failed: {vm_restore_err:?}");
 
                 // Cleanup the VM being created while vm restore
                 if let Err(e) = self.vm_delete() {
@@ -1820,7 +1812,7 @@ impl RequestHandler for Vmm {
 
         if let Some(ref mut vm) = self.vm {
             if let Err(e) = vm.resize(desired_vcpus, desired_ram, desired_balloon) {
-                error!("Error when resizing VM: {:?}", e);
+                error!("Error when resizing VM: {e:?}");
                 Err(e)
             } else {
                 Ok(())
@@ -1847,7 +1839,7 @@ impl RequestHandler for Vmm {
 
         if let Some(ref mut vm) = self.vm {
             if let Err(e) = vm.resize_zone(id, desired_ram) {
-                error!("Error when resizing VM: {:?}", e);
+                error!("Error when resizing VM: {e:?}");
                 Err(e)
             } else {
                 Ok(())
@@ -1865,7 +1857,7 @@ impl RequestHandler for Vmm {
                 }
             }
 
-            error!("Could not find the memory zone {} for the resize", id);
+            error!("Could not find the memory zone {id} for the resize");
             Err(VmError::ResizeZone)
         }
     }
@@ -1885,7 +1877,7 @@ impl RequestHandler for Vmm {
 
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_device(device_cfg).map_err(|e| {
-                error!("Error when adding new device to the VM: {:?}", e);
+                error!("Error when adding new device to the VM: {e:?}");
                 e
             })?;
             serde_json::to_vec(&info)
@@ -1914,7 +1906,7 @@ impl RequestHandler for Vmm {
 
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_user_device(device_cfg).map_err(|e| {
-                error!("Error when adding new user device to the VM: {:?}", e);
+                error!("Error when adding new user device to the VM: {e:?}");
                 e
             })?;
             serde_json::to_vec(&info)
@@ -1931,7 +1923,7 @@ impl RequestHandler for Vmm {
     fn vm_remove_device(&mut self, id: String) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
             if let Err(e) = vm.remove_device(id) {
-                error!("Error when removing device from the VM: {:?}", e);
+                error!("Error when removing device from the VM: {e:?}");
                 Err(e)
             } else {
                 Ok(())
@@ -1960,7 +1952,7 @@ impl RequestHandler for Vmm {
 
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_disk(disk_cfg).map_err(|e| {
-                error!("Error when adding new disk to the VM: {:?}", e);
+                error!("Error when adding new disk to the VM: {e:?}");
                 e
             })?;
             serde_json::to_vec(&info)
@@ -1986,7 +1978,7 @@ impl RequestHandler for Vmm {
 
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_fs(fs_cfg).map_err(|e| {
-                error!("Error when adding new fs to the VM: {:?}", e);
+                error!("Error when adding new fs to the VM: {e:?}");
                 e
             })?;
             serde_json::to_vec(&info)
@@ -2012,7 +2004,7 @@ impl RequestHandler for Vmm {
 
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_pmem(pmem_cfg).map_err(|e| {
-                error!("Error when adding new pmem device to the VM: {:?}", e);
+                error!("Error when adding new pmem device to the VM: {e:?}");
                 e
             })?;
             serde_json::to_vec(&info)
@@ -2038,7 +2030,7 @@ impl RequestHandler for Vmm {
 
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_net(net_cfg).map_err(|e| {
-                error!("Error when adding new network device to the VM: {:?}", e);
+                error!("Error when adding new network device to the VM: {e:?}");
                 e
             })?;
             serde_json::to_vec(&info)
@@ -2064,7 +2056,7 @@ impl RequestHandler for Vmm {
 
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_vdpa(vdpa_cfg).map_err(|e| {
-                error!("Error when adding new vDPA device to the VM: {:?}", e);
+                error!("Error when adding new vDPA device to the VM: {e:?}");
                 e
             })?;
             serde_json::to_vec(&info)
@@ -2095,7 +2087,7 @@ impl RequestHandler for Vmm {
 
         if let Some(ref mut vm) = self.vm {
             let info = vm.add_vsock(vsock_cfg).map_err(|e| {
-                error!("Error when adding new vsock device to the VM: {:?}", e);
+                error!("Error when adding new vsock device to the VM: {e:?}");
                 e
             })?;
             serde_json::to_vec(&info)
@@ -2112,7 +2104,7 @@ impl RequestHandler for Vmm {
     fn vm_counters(&mut self) -> result::Result<Option<Vec<u8>>, VmError> {
         if let Some(ref mut vm) = self.vm {
             let info = vm.counters().map_err(|e| {
-                error!("Error when getting counters from the VM: {:?}", e);
+                error!("Error when getting counters from the VM: {e:?}");
                 e
             })?;
             serde_json::to_vec(&info)
@@ -2222,8 +2214,7 @@ impl RequestHandler for Vmm {
                             let mut buf = [0u8; 4];
                             let (_, file) = unix_socket.recv_with_fd(&mut buf).map_err(|e| {
                                 MigratableError::MigrateReceive(anyhow!(
-                                    "Error receiving slot from socket: {}",
-                                    e
+                                    "Error receiving slot from socket: {e}"
                                 ))
                             })?;
 
@@ -2302,7 +2293,7 @@ impl RequestHandler for Vmm {
                 send_data_migration.clone(),
             )
             .map_err(|migration_err| {
-                error!("Migration failed: {:?}", migration_err);
+                error!("Migration failed: {migration_err:?}");
 
                 // Stop logging dirty pages only for non-local migrations
                 if !send_data_migration.local
@@ -2323,8 +2314,7 @@ impl RequestHandler for Vmm {
             // Shutdown the VM after the migration succeeded
             self.exit_evt.write(1).map_err(|e| {
                 MigratableError::MigrateSend(anyhow!(
-                    "Failed shutting down the VM after migration: {:?}",
-                    e
+                    "Failed shutting down the VM after migration: {e:?}"
                 ))
             })
         } else {

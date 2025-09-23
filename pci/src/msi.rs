@@ -267,15 +267,15 @@ impl MsiConfig {
                     self.cap.vector_masked(idx),
                     true,
                 ) {
-                    error!("Failed updating vector: {:?}", e);
+                    error!("Failed updating vector: {e:?}");
                 }
             }
 
             if !old_enabled && let Err(e) = self.interrupt_source_group.enable() {
-                error!("Failed enabling irq_fd: {:?}", e);
+                error!("Failed enabling irq_fd: {e:?}");
             }
         } else if old_enabled && let Err(e) = self.interrupt_source_group.disable() {
-            error!("Failed disabling irq_fd: {:?}", e);
+            error!("Failed disabling irq_fd: {e:?}");
         }
     }
 }

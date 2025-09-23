@@ -90,7 +90,7 @@ impl BusDevice for Cmos {
                     self.data[(self.index & INDEX_MASK) as usize] = data[0]
                 }
             }
-            o => warn!("bad write offset on CMOS device: {}", o),
+            o => warn!("bad write offset on CMOS device: {o}"),
         };
         None
     }
@@ -164,7 +164,7 @@ impl BusDevice for Cmos {
                 }
             }
             o => {
-                warn!("bad read offset on CMOS device: {}", o);
+                warn!("bad read offset on CMOS device: {o}");
                 0
             }
         }
