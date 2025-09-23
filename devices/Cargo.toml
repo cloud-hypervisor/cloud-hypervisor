@@ -8,7 +8,7 @@ version = "0.1.0"
 acpi_tables = { workspace = true }
 anyhow = { workspace = true }
 arch = { path = "../arch" }
-bitfield-struct = { version = "0.10.1", optional = true }
+bitfield-struct = { version = "0.11.0", optional = true }
 bitflags = { workspace = true }
 byteorder = { workspace = true }
 event_monitor = { path = "../event_monitor" }
@@ -20,7 +20,7 @@ linux-loader = { workspace = true, features = [
   "pe",
 ], optional = true }
 log = { workspace = true }
-num_enum = "0.7.2"
+num_enum = "0.7.4"
 pci = { path = "../pci" }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
@@ -34,7 +34,7 @@ vm-memory = { workspace = true, features = [
 ] }
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = { workspace = true }
-zerocopy = { version = "0.8.26", features = [
+zerocopy = { version = "0.8.27", features = [
   "alloc",
   "derive",
 ], optional = true }
