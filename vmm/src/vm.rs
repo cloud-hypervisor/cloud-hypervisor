@@ -448,7 +448,7 @@ impl VmOps for VmOpsHandler {
 
     fn mmio_read(&self, gpa: u64, data: &mut [u8]) -> result::Result<(), HypervisorVmError> {
         if let Err(vm_device::BusError::MissingAddressRange) = self.mmio_bus.read(gpa, data) {
-            info!("Guest MMIO read to unregistered address 0x{:x}", gpa);
+            info!("Guest MMIO read to unregistered address 0x{gpa:x}");
         }
         Ok(())
     }
@@ -456,7 +456,7 @@ impl VmOps for VmOpsHandler {
     fn mmio_write(&self, gpa: u64, data: &[u8]) -> result::Result<(), HypervisorVmError> {
         match self.mmio_bus.write(gpa, data) {
             Err(vm_device::BusError::MissingAddressRange) => {
-                info!("Guest MMIO write to unregistered address 0x{:x}", gpa);
+                info!("Guest MMIO write to unregistered address 0x{gpa:x}");
             }
             Ok(Some(barrier)) => {
                 info!("Waiting for barrier");
@@ -471,7 +471,7 @@ impl VmOps for VmOpsHandler {
     #[cfg(target_arch = "x86_64")]
     fn pio_read(&self, port: u64, data: &mut [u8]) -> result::Result<(), HypervisorVmError> {
         if let Err(vm_device::BusError::MissingAddressRange) = self.io_bus.read(port, data) {
-            info!("Guest PIO read to unregistered address 0x{:x}", port);
+            info!("Guest PIO read to unregistered address 0x{port:x}");
         }
         Ok(())
     }
@@ -480,7 +480,7 @@ impl VmOps for VmOpsHandler {
     fn pio_write(&self, port: u64, data: &[u8]) -> result::Result<(), HypervisorVmError> {
         match self.io_bus.write(port, data) {
             Err(vm_device::BusError::MissingAddressRange) => {
-                info!("Guest PIO write to unregistered address 0x{:x}", port);
+                info!("Guest PIO write to unregistered address 0x{port:x}");
             }
             Ok(Some(barrier)) => {
                 info!("Waiting for barrier");
@@ -939,7 +939,7 @@ impl Vm {
                             }
                             node.memory_zones.push(memory_zone.clone());
                         } else {
-                            error!("Unknown memory zone '{}'", memory_zone);
+                            error!("Unknown memory zone '{memory_zone}'");
                             return Err(Error::InvalidNumaConfig);
                         }
                     }
@@ -959,12 +959,12 @@ impl Vm {
                         let dist = distance.distance;
 
                         if !configs.iter().any(|cfg| cfg.guest_numa_id == dest) {
-                            error!("Unknown destination NUMA node {}", dest);
+                            error!("Unknown destination NUMA node {dest}");
                             return Err(Error::InvalidNumaConfig);
                         }
 
                         if node.distances.contains_key(&dest) {
-                            error!("Destination NUMA node {} has been already set", dest);
+                            error!("Destination NUMA node {dest} has been already set");
                             return Err(Error::InvalidNumaConfig);
                         }
 
@@ -1751,7 +1751,7 @@ impl Vm {
             }
         }
 
-        error!("Could not find the memory zone {} for the resize", id);
+        error!("Could not find the memory zone {id} for the resize");
         Err(Error::ResizeZone)
     }
 
@@ -2532,12 +2532,12 @@ impl Vm {
             Request::memory_fd(std::mem::size_of_val(&slot) as u64)
                 .write_to(socket)
                 .map_err(|e| {
-                    MigratableError::MigrateSend(anyhow!("Error sending memory fd request: {}", e))
+                    MigratableError::MigrateSend(anyhow!("Error sending memory fd request: {e}"))
                 })?;
             socket
                 .send_with_fd(&slot.to_le_bytes()[..], fd)
                 .map_err(|e| {
-                    MigratableError::MigrateSend(anyhow!("Error sending memory fd: {}", e))
+                    MigratableError::MigrateSend(anyhow!("Error sending memory fd: {e}"))
                 })?;
 
             Response::read_from(socket)?.ok_or_abandon(
@@ -2576,8 +2576,7 @@ impl Vm {
                     )
                     .map_err(|e| {
                         MigratableError::MigrateSend(anyhow!(
-                            "Error transferring memory to socket: {}",
-                            e
+                            "Error transferring memory to socket: {e}"
                         ))
                     })?;
                 offset += bytes_written as u64;
@@ -2766,19 +2765,19 @@ impl Pausable for Vm {
         let mut state = self
             .state
             .try_write()
-            .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM state: {}", e)))?;
+            .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM state: {e}")))?;
         let new_state = VmState::Paused;
 
         state
             .valid_transition(new_state)
-            .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {:?}", e)))?;
+            .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {e:?}")))?;
 
         #[cfg(target_arch = "x86_64")]
         {
             let mut clock = self
                 .vm
                 .get_clock()
-                .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM clock: {}", e)))?;
+                .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM clock: {e}")))?;
             clock.reset_flags();
             self.saved_clock = Some(clock);
         }
@@ -2786,7 +2785,7 @@ impl Pausable for Vm {
         // Before pausing the vCPUs activate any pending virtio devices that might
         // need activation between starting the pause (or e.g. a migration it's part of)
         self.activate_virtio_devices().map_err(|e| {
-            MigratableError::Pause(anyhow!("Error activating pending virtio devices: {:?}", e))
+            MigratableError::Pause(anyhow!("Error activating pending virtio devices: {e:?}"))
         })?;
 
         self.cpu_manager.lock().unwrap().pause()?;
@@ -2794,7 +2793,7 @@ impl Pausable for Vm {
 
         self.vm
             .pause()
-            .map_err(|e| MigratableError::Pause(anyhow!("Could not pause the VM: {}", e)))?;
+            .map_err(|e| MigratableError::Pause(anyhow!("Could not pause the VM: {e}")))?;
 
         *state = new_state;
 
@@ -2808,27 +2807,27 @@ impl Pausable for Vm {
         let mut state = self
             .state
             .try_write()
-            .map_err(|e| MigratableError::Resume(anyhow!("Could not get VM state: {}", e)))?;
+            .map_err(|e| MigratableError::Resume(anyhow!("Could not get VM state: {e}")))?;
         let new_state = VmState::Running;
 
         state
             .valid_transition(new_state)
-            .map_err(|e| MigratableError::Resume(anyhow!("Invalid transition: {:?}", e)))?;
+            .map_err(|e| MigratableError::Resume(anyhow!("Invalid transition: {e:?}")))?;
 
         self.cpu_manager.lock().unwrap().resume()?;
         #[cfg(target_arch = "x86_64")]
         {
             if let Some(clock) = &self.saved_clock {
-                self.vm.set_clock(clock).map_err(|e| {
-                    MigratableError::Resume(anyhow!("Could not set VM clock: {}", e))
-                })?;
+                self.vm
+                    .set_clock(clock)
+                    .map_err(|e| MigratableError::Resume(anyhow!("Could not set VM clock: {e}")))?;
             }
         }
 
         if current_state == VmState::Paused {
             self.vm
                 .resume()
-                .map_err(|e| MigratableError::Resume(anyhow!("Could not resume the VM: {}", e)))?;
+                .map_err(|e| MigratableError::Resume(anyhow!("Could not resume the VM: {e}")))?;
         }
 
         self.device_manager.lock().unwrap().resume()?;
@@ -2891,7 +2890,7 @@ impl Snapshottable for Vm {
                 },
             )
             .map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error generating common cpuid: {:?}", e))
+                MigratableError::MigrateReceive(anyhow!("Error generating common cpuid: {e:?}"))
             })?
         };
 

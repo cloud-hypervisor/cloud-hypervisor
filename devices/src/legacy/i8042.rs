@@ -45,7 +45,7 @@ impl BusDevice for I8042Device {
         if data.len() == 1 && data[0] == 0xfe && offset == 3 {
             info!("i8042 reset signalled");
             if let Err(e) = self.reset_evt.write(1) {
-                error!("Error triggering i8042 reset event: {}", e);
+                error!("Error triggering i8042 reset event: {e}");
             }
             // Spin until we are sure the reset_evt has been handled and that when
             // we return from the KVM_RUN we will exit rather than re-enter the guest.

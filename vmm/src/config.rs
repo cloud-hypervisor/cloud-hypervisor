@@ -2523,7 +2523,7 @@ impl VmConfig {
             tty_consoles.push("debug-console");
         };
         if tty_consoles.len() > 1 {
-            warn!("Using TTY output for multiple consoles: {:?}", tty_consoles);
+            warn!("Using TTY output for multiple consoles: {tty_consoles:?}");
         }
 
         if self.console.mode == ConsoleOutputMode::File && self.console.file.is_none() {

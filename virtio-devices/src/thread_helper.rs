@@ -39,18 +39,18 @@ where
             if !seccomp_filter.is_empty()
                 && let Err(e) = apply_filter(&seccomp_filter)
             {
-                error!("Error applying seccomp filter: {:?}", e);
+                error!("Error applying seccomp filter: {e:?}");
                 thread_exit_evt.write(1).ok();
                 return;
             }
             match std::panic::catch_unwind(AssertUnwindSafe(f)) {
                 Err(_) => {
-                    error!("{} thread panicked", thread_name);
+                    error!("{thread_name} thread panicked");
                     thread_exit_evt.write(1).ok();
                 }
                 Ok(r) => {
                     if let Err(e) = r {
-                        error!("Error running worker: {:?}", e);
+                        error!("Error running worker: {e:?}");
                         thread_exit_evt.write(1).ok();
                     }
                 }
@@ -58,7 +58,7 @@ where
         })
         .map(|thread| epoll_threads.push(thread))
         .map_err(|e| {
-            error!("Failed to spawn thread for {}: {}", name, e);
+            error!("Failed to spawn thread for {name}: {e}");
             ActivateError::ThreadSpawn(e)
         })
 }

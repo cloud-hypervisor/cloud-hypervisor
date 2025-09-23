@@ -136,7 +136,7 @@ impl log::Log for Logger {
         let duration_s = duration.as_secs_f32();
 
         let location = if let (Some(file), Some(line)) = (record.file(), record.line()) {
-            format!("{}:{}", file, line)
+            format!("{file}:{line}")
         } else {
             record.target().to_string()
         };

@@ -633,7 +633,7 @@ impl vm::Vm for KvmVm {
     ///
     fn create_vaia(&self, config: VaiaConfig) -> vm::Result<Arc<Mutex<dyn Vaia>>> {
         let aia_device = KvmAiaImsics::new(self, config)
-            .map_err(|e| vm::HypervisorVmError::CreateVaia(anyhow!("Vaia error {:?}", e)))?;
+            .map_err(|e| vm::HypervisorVmError::CreateVaia(anyhow!("Vaia error {e:?}")))?;
         Ok(Arc::new(Mutex::new(aia_device)))
     }
 
@@ -1997,8 +1997,7 @@ impl cpu::Vcpu for KvmVcpu {
         // tr.valid is set if the GVA is mapped to valid GPA.
         match tr.valid {
             0 => Err(cpu::HypervisorCpuError::TranslateVirtualAddress(anyhow!(
-                "Invalid GVA: {:#x}",
-                gva
+                "Invalid GVA: {gva:#x}"
             ))),
             _ => Ok((tr.physical_address, 0)),
         }
@@ -2081,16 +2080,14 @@ impl cpu::Vcpu for KvmVcpu {
                 VcpuExit::Debug(_) => Ok(cpu::VmExit::Debug),
 
                 r => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
-                    "Unexpected exit reason on vcpu run: {:?}",
-                    r
+                    "Unexpected exit reason on vcpu run: {r:?}"
                 ))),
             },
 
             Err(ref e) => match e.errno() {
                 libc::EAGAIN | libc::EINTR => Ok(cpu::VmExit::Ignore),
                 _ => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
-                    "VCPU error {:?}",
-                    e
+                    "VCPU error {e:?}"
                 ))),
             },
         }

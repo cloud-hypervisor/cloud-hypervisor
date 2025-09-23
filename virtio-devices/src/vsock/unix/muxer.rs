@@ -335,7 +335,7 @@ impl VsockEpollListener for VsockMuxer {
                         // appropriate to retry, by calling into epoll_wait().
                         continue;
                     }
-                    warn!("vsock: failed to consume muxer epoll event: {}", e);
+                    warn!("vsock: failed to consume muxer epoll event: {e}");
                 }
             }
             break 'epoll;
@@ -383,10 +383,7 @@ impl VsockMuxer {
     /// Handle/dispatch an epoll event to its listener.
     ///
     fn handle_event(&mut self, fd: RawFd, event_set: epoll::Events) {
-        debug!(
-            "vsock: muxer processing event: fd={}, event_set={:?}",
-            fd, event_set
-        );
+        debug!("vsock: muxer processing event: fd={fd}, event_set={event_set:?}");
 
         match self.listener_map.get_mut(&fd) {
             // This event needs to be forwarded to a `MuxerConnection` that is listening for
@@ -430,7 +427,7 @@ impl VsockMuxer {
                         self.add_listener(stream.as_raw_fd(), EpollListener::LocalStream(stream))
                     })
                     .unwrap_or_else(|err| {
-                        warn!("vsock: unable to accept local connection: {:?}", err);
+                        warn!("vsock: unable to accept local connection: {err:?}");
                     });
             }
 
@@ -478,16 +475,13 @@ impl VsockMuxer {
                         )
                     })
                     .unwrap_or_else(|err| {
-                        info!("vsock: error adding local-init connection: {:?}", err);
+                        info!("vsock: error adding local-init connection: {err:?}");
                     })
                 }
             }
 
             _ => {
-                info!(
-                    "vsock: unexpected event: fd={:?}, event_set={:?}",
-                    fd, event_set
-                );
+                info!("vsock: unexpected event: fd={fd:?}, event_set={event_set:?}");
             }
         }
     }
@@ -662,10 +656,7 @@ impl VsockMuxer {
                 epoll::Event::new(epoll::Events::empty(), 0),
             )
             .unwrap_or_else(|err| {
-                warn!(
-                    "vosck muxer: error removing epoll listener for fd {:?}: {:?}",
-                    fd, err
-                );
+                warn!("vosck muxer: error removing epoll listener for fd {fd:?}: {err:?}");
             });
         }
 
@@ -760,7 +751,7 @@ impl VsockMuxer {
                     }
                     Err(err) => {
                         conn.kill();
-                        warn!("vsock: unable to ack host connection: {:?}", err);
+                        warn!("vsock: unable to ack host connection: {err:?}");
                     }
                 };
             }
@@ -870,10 +861,7 @@ impl VsockMuxer {
             peer_port,
         });
         if !pushed {
-            warn!(
-                "vsock: muxer.rxq full; dropping RST packet for lp={}, pp={}",
-                local_port, peer_port
-            );
+            warn!("vsock: muxer.rxq full; dropping RST packet for lp={local_port}, pp={peer_port}");
         }
     }
 }

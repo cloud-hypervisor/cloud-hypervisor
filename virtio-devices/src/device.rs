@@ -233,13 +233,13 @@ impl VirtioCommon {
         }
 
         let kill_evt = EventFd::new(EFD_NONBLOCK).map_err(|e| {
-            error!("failed creating kill EventFd: {}", e);
+            error!("failed creating kill EventFd: {e}");
             ActivateError::BadActivate
         })?;
         self.kill_evt = Some(kill_evt);
 
         let pause_evt = EventFd::new(EFD_NONBLOCK).map_err(|e| {
-            error!("failed creating pause EventFd: {}", e);
+            error!("failed creating pause EventFd: {e}");
             ActivateError::BadActivate
         })?;
         self.pause_evt = Some(pause_evt);
@@ -265,7 +265,7 @@ impl VirtioCommon {
         if let Some(mut threads) = self.epoll_threads.take() {
             for t in threads.drain(..) {
                 if let Err(e) = t.join() {
-                    error!("Error joining thread: {:?}", e);
+                    error!("Error joining thread: {e:?}");
                 }
             }
         }
@@ -279,7 +279,7 @@ impl VirtioCommon {
         if let Some(mut threads) = self.epoll_threads.take() {
             for t in threads.drain(..) {
                 if let Err(e) = t.join() {
-                    error!("Error joining thread: {:?}", e);
+                    error!("Error joining thread: {e:?}");
                 }
             }
         }

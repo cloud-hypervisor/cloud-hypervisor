@@ -100,10 +100,10 @@ impl CtrlQueue {
                     } else if (queue_pairs < VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN as u16)
                         || (queue_pairs > VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX as u16)
                     {
-                        warn!("Number of MQ pairs out of range: {}", queue_pairs);
+                        warn!("Number of MQ pairs out of range: {queue_pairs}");
                         false
                     } else {
-                        info!("Number of MQ pairs requested: {}", queue_pairs);
+                        info!("Number of MQ pairs requested: {queue_pairs}");
                         true
                     }
                 }
@@ -118,10 +118,10 @@ impl CtrlQueue {
                     } else {
                         let mut ok = true;
                         for tap in self.taps.iter_mut() {
-                            info!("Reprogramming tap offload with features: {}", features);
+                            info!("Reprogramming tap offload with features: {features}");
                             tap.set_offload(virtio_features_to_tap_offload(features))
                                 .map_err(|e| {
-                                    error!("Error programming tap offload: {:?}", e);
+                                    error!("Error programming tap offload: {e:?}");
                                     ok = false
                                 })
                                 .ok();
@@ -130,7 +130,7 @@ impl CtrlQueue {
                     }
                 }
                 _ => {
-                    warn!("Unsupported command {:?}", ctrl_hdr);
+                    warn!("Unsupported command {ctrl_hdr:?}");
                     false
                 }
             };

@@ -308,7 +308,7 @@ impl SerialManager {
                             match dispatch_event {
                                 EpollDispatch::Unknown => {
                                     let event = event.data;
-                                    warn!("Unknown serial manager loop event: {}", event);
+                                    warn!("Unknown serial manager loop event: {event}");
                                 }
                                 EpollDispatch::Socket => {
                                     // New connection request arrived.

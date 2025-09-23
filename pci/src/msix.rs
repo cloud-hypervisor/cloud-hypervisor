@@ -186,13 +186,13 @@ impl MsixConfig {
                         table_entry.masked(),
                         true,
                     ) {
-                        error!("Failed updating vector: {:?}", e);
+                        error!("Failed updating vector: {e:?}");
                     }
                 }
             } else if old_enabled || !old_masked {
                 debug!("MSI-X disabled for device 0x{:x}", self.devid);
                 if let Err(e) = self.interrupt_source_group.disable() {
-                    error!("Failed disabling irq_fd: {:?}", e);
+                    error!("Failed disabling irq_fd: {e:?}");
                 }
             }
         }
@@ -235,7 +235,7 @@ impl MsixConfig {
                     }
                 };
 
-                debug!("MSI_R TABLE offset 0x{:x} data 0x{:x}", offset, value);
+                debug!("MSI_R TABLE offset 0x{offset:x} data 0x{value:x}");
                 LittleEndian::write_u32(data, value);
             }
             8 => {
@@ -254,7 +254,7 @@ impl MsixConfig {
                     }
                 };
 
-                debug!("MSI_R TABLE offset 0x{:x} data 0x{:x}", offset, value);
+                debug!("MSI_R TABLE offset 0x{offset:x} data 0x{value:x}");
                 LittleEndian::write_u64(data, value);
             }
             _ => {
@@ -290,7 +290,7 @@ impl MsixConfig {
                     _ => error!("invalid offset"),
                 };
 
-                debug!("MSI_W TABLE offset 0x{:x} data 0x{:x}", offset, value);
+                debug!("MSI_W TABLE offset 0x{offset:x} data 0x{value:x}");
             }
             8 => {
                 let value = LittleEndian::read_u64(data);
@@ -306,7 +306,7 @@ impl MsixConfig {
                     _ => error!("invalid offset"),
                 };
 
-                debug!("MSI_W TABLE offset 0x{:x} data 0x{:x}", offset, value);
+                debug!("MSI_W TABLE offset 0x{offset:x} data 0x{value:x}");
             }
             _ => error!("invalid data length"),
         };
@@ -336,7 +336,7 @@ impl MsixConfig {
                 table_entry.masked(),
                 true,
             ) {
-                error!("Failed updating vector: {:?}", e);
+                error!("Failed updating vector: {e:?}");
             }
         }
 
@@ -382,7 +382,7 @@ impl MsixConfig {
                     }
                 };
 
-                debug!("MSI_R PBA offset 0x{:x} data 0x{:x}", offset, value);
+                debug!("MSI_R PBA offset 0x{offset:x} data 0x{value:x}");
                 LittleEndian::write_u32(data, value);
             }
             8 => {
@@ -394,7 +394,7 @@ impl MsixConfig {
                     }
                 };
 
-                debug!("MSI_R PBA offset 0x{:x} data 0x{:x}", offset, value);
+                debug!("MSI_R PBA offset 0x{offset:x} data 0x{value:x}");
                 LittleEndian::write_u64(data, value);
             }
             _ => {
@@ -438,7 +438,7 @@ impl MsixConfig {
             .trigger(vector as InterruptIndex)
         {
             Ok(_) => debug!("MSI-X injected on vector control flip"),
-            Err(e) => error!("failed to inject MSI-X: {}", e),
+            Err(e) => error!("failed to inject MSI-X: {e}"),
         }
 
         // Clear the bit from PBA

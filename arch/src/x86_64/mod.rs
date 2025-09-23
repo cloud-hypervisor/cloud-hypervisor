@@ -829,7 +829,7 @@ pub fn configure_vcpu(
     }
 
     for c in &cpuid {
-        debug!("{}", c);
+        debug!("{c}");
     }
 
     vcpu.set_cpuid2(&cpuid)
@@ -995,17 +995,15 @@ pub fn generate_ram_ranges(guest_mem: &GuestMemoryMmap) -> super::Result<Vec<Ram
             && (first_region_end <= &mem_32bit_reserved_start))
         {
             error!(
-                "Unexpected first memory region layout: (start: 0x{:08x}, end: 0x{:08x}).
-                high_ram_start: 0x{:08x}, mem_32bit_reserved_start: 0x{:08x}",
-                first_region_start, first_region_end, high_ram_start, mem_32bit_reserved_start
+                "Unexpected first memory region layout: (start: 0x{first_region_start:08x}, end: 0x{first_region_end:08x}).
+                high_ram_start: 0x{high_ram_start:08x}, mem_32bit_reserved_start: 0x{mem_32bit_reserved_start:08x}"
             );
 
             return Err(super::Error::MemmapTableSetup);
         }
 
         info!(
-            "first usable physical memory range, start: 0x{:08x}, end: 0x{:08x}",
-            high_ram_start, first_region_end
+            "first usable physical memory range, start: 0x{high_ram_start:08x}, end: 0x{first_region_end:08x}"
         );
 
         (high_ram_start, *first_region_end)

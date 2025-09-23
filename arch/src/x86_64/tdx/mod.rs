@@ -108,7 +108,7 @@ fn tdvf_descriptor_offset(file: &mut File) -> Result<(SeekFrom, bool), TdvfError
                 u16::from_le_bytes(table[offset - 18..offset - 16].try_into().unwrap()) as usize;
             debug!(
                 "Entry GUID = {}, size = {}",
-                entry_uuid.hyphenated().to_string(),
+                entry_uuid.hyphenated(),
                 entry_size
             );
 

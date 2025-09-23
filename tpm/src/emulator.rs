@@ -88,13 +88,12 @@ impl Emulator {
     pub fn new(path: String) -> Result<Self> {
         if !Path::new(&path).exists() {
             return Err(Error::InitializeEmulator(anyhow!(
-                "The input TPM Socket path: {:?} does not exist",
-                path
+                "The input TPM Socket path: {path:?} does not exist"
             )));
         }
         let mut socket = SocketDev::new();
         socket.init(path).map_err(|e| {
-            Error::InitializeEmulator(anyhow!("Failed while initializing tpm emulator: {:?}", e))
+            Error::InitializeEmulator(anyhow!("Failed while initializing tpm emulator: {e:?}"))
         })?;
 
         let mut emulator = Self {
@@ -217,41 +216,36 @@ impl Emulator {
         msg_len_in: usize,
         msg_len_out: usize,
     ) -> Result<()> {
-        debug!("Control Cmd to send : {:02X?}", cmd);
+        debug!("Control Cmd to send : {cmd:02X?}");
 
         let cmd_no = (cmd as u32).to_be_bytes();
         let n = mem::size_of::<u32>() + msg_len_in;
 
         let converted_req = msg.ptm_to_request();
-        debug!("converted request: {:02X?}", converted_req);
+        debug!("converted request: {converted_req:02X?}");
 
         let mut buf = Vec::<u8>::with_capacity(n);
 
         buf.extend(cmd_no);
         buf.extend(converted_req);
-        debug!("full Control request {:02X?}", buf);
+        debug!("full Control request {buf:02X?}");
 
         let written = self.control_socket.write(&buf).map_err(|e| {
             Error::RunControlCmd(anyhow!(
-                "Failed while running {:02X?} Control Cmd. Error: {:?}",
-                cmd,
-                e
+                "Failed while running {cmd:02X?} Control Cmd. Error: {e:?}"
             ))
         })?;
 
         if written < buf.len() {
             return Err(Error::RunControlCmd(anyhow!(
-                "Truncated write while running {:02X?} Control Cmd",
-                cmd,
+                "Truncated write while running {cmd:02X?} Control Cmd",
             )));
         }
 
         // The largest response is 16 bytes so far.
         if msg_len_out > 16 {
             return Err(Error::RunControlCmd(anyhow!(
-                "Response size is too large for Cmd {:02X?}, max 16 wanted {}",
-                cmd,
-                msg_len_out
+                "Response size is too large for Cmd {cmd:02X?}, max 16 wanted {msg_len_out}"
             )));
         }
 
@@ -260,9 +254,7 @@ impl Emulator {
         // Every Control Cmd gets at least a result code in response. Read it
         let read_size = self.control_socket.read(&mut output).map_err(|e| {
             Error::RunControlCmd(anyhow!(
-                "Failed while reading response for Control Cmd: {:02X?}. Error: {:?}",
-                cmd,
-                e
+                "Failed while reading response for Control Cmd: {cmd:02X?}. Error: {e:?}"
             ))
         })?;
 
@@ -270,9 +262,7 @@ impl Emulator {
             msg.update_ptm_with_response(&output[0..read_size])
                 .map_err(|e| {
                     Error::RunControlCmd(anyhow!(
-                        "Failed while converting response of Control Cmd: {:02X?} to PTM. Error: {:?}",
-                        cmd,
-                        e
+                        "Failed while converting response of Control Cmd: {cmd:02X?} to PTM. Error: {e:?}"
                     ))
                 })?;
         } else {
@@ -303,10 +293,7 @@ impl Emulator {
             0,
             2 * mem::size_of::<u32>(),
         ) {
-            error!(
-                "Failed to run CmdGetTpmEstablished Control Cmd. Error: {:?}",
-                e
-            );
+            error!("Failed to run CmdGetTpmEstablished Control Cmd. Error: {e:?}");
             return false;
         }
 
@@ -379,8 +366,7 @@ impl Emulator {
 
         if isselftest && output_len < 10 {
             return Err(Error::SelfTest(anyhow!(
-                "Self test response should have 10 bytes. Only {:?} returned",
-                output_len
+                "Self test response should have 10 bytes. Only {output_len:?} returned"
             )));
         }
 
@@ -426,7 +412,7 @@ impl Emulator {
 
         if buffersize != 0 {
             let actual_size = self.set_buffer_size(buffersize)?;
-            debug!("set tpm buffersize to {:?} during Startup", actual_size);
+            debug!("set tpm buffersize to {actual_size:?} during Startup");
         }
 
         self.run_control_cmd(

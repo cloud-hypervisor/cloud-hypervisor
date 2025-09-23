@@ -81,7 +81,7 @@ impl Blk {
             config,
             paused,
         ) = if let Some(state) = state {
-            info!("Restoring vhost-user-block {}", id);
+            info!("Restoring vhost-user-block {id}");
 
             vu.set_protocol_features_vhost_user(
                 state.acked_features,
@@ -135,8 +135,7 @@ impl Blk {
 
             if num_queues > backend_num_queues {
                 error!(
-                    "vhost-user-blk requested too many queues ({}) since the backend only supports {}\n",
-                    num_queues, backend_num_queues
+                    "vhost-user-blk requested too many queues ({num_queues}) since the backend only supports {backend_num_queues}\n"
                 );
                 return Err(Error::BadQueueNum);
             }
@@ -216,13 +215,13 @@ impl Drop for Blk {
         if let Some(kill_evt) = self.common.kill_evt.take()
             && let Err(e) = kill_evt.write(1)
         {
-            error!("failed to kill vhost-user-blk: {:?}", e);
+            error!("failed to kill vhost-user-blk: {e:?}");
         }
         self.common.wait_for_epoll_threads();
         if let Some(thread) = self.epoll_thread.take()
             && let Err(e) = thread.join()
         {
-            error!("Error joining thread: {:?}", e);
+            error!("Error joining thread: {e:?}");
         }
     }
 }
@@ -275,7 +274,7 @@ impl VirtioDevice for Blk {
                 .set_config(offset as u32, VhostUserConfigFlags::WRITABLE, data)
                 .map_err(Error::VhostUserSetConfig)
         {
-            error!("Failed setting vhost-user-blk configuration: {:?}", e);
+            error!("Failed setting vhost-user-blk configuration: {e:?}");
         }
     }
 
@@ -331,7 +330,7 @@ impl VirtioDevice for Blk {
         if let Some(vu) = &self.vu_common.vu
             && let Err(e) = vu.lock().unwrap().reset_vhost_user()
         {
-            error!("Failed to reset vhost-user daemon: {:?}", e);
+            error!("Failed to reset vhost-user daemon: {e:?}");
             return None;
         }
 

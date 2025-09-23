@@ -68,8 +68,7 @@ impl PvPanicDevice {
         let pci_configuration_state =
             vm_migration::state_from_id(snapshot.as_ref(), PCI_CONFIGURATION_ID).map_err(|e| {
                 PvPanicError::RetrievePciConfigurationState(anyhow!(
-                    "Failed to get PciConfigurationState from Snapshot: {}",
-                    e
+                    "Failed to get PciConfigurationState from Snapshot: {e}"
                 ))
             })?;
 
@@ -100,8 +99,7 @@ impl PvPanicDevice {
             .transpose()
             .map_err(|e| {
                 PvPanicError::CreatePvPanicDevice(anyhow!(
-                    "Failed to get PvPanicDeviceState from Snapshot: {}",
-                    e
+                    "Failed to get PvPanicDeviceState from Snapshot: {e}"
                 ))
             })?;
         let events = if let Some(state) = state {
@@ -148,7 +146,7 @@ impl BusDevice for PvPanicDevice {
 
     fn write(&mut self, _base: u64, _offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         let event = self.event_to_string(data[0]);
-        info!("pvpanic got guest event {}", event);
+        info!("pvpanic got guest event {event}");
         event!("guest", "panic", "event", &event);
         None
     }

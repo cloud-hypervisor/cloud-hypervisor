@@ -2484,7 +2484,7 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Arc<Mutex<devices::tpm::Tpm>>> {
         // Create TPM Device
         let tpm = devices::tpm::Tpm::new(tpm_path.to_str().unwrap().to_string()).map_err(|e| {
-            DeviceManagerError::CreateTpmDevice(anyhow!("Failed to create TPM Device : {:?}", e))
+            DeviceManagerError::CreateTpmDevice(anyhow!("Failed to create TPM Device : {e:?}"))
         })?;
         let tpm = Arc::new(Mutex::new(tpm));
 
@@ -2606,7 +2606,7 @@ impl DeviceManager {
             id
         };
 
-        info!("Creating virtio-block device: {:?}", disk_cfg);
+        info!("Creating virtio-block device: {disk_cfg:?}");
 
         let (virtio_device, migratable_device) = if disk_cfg.vhost_user {
             if is_hotplug {
@@ -2854,7 +2854,7 @@ impl DeviceManager {
             net_cfg.id = Some(id.clone());
             id
         };
-        info!("Creating virtio-net device: {:?}", net_cfg);
+        info!("Creating virtio-net device: {net_cfg:?}");
 
         let (virtio_device, migratable_device) = if net_cfg.vhost_user {
             let socket = net_cfg.vhost_socket.as_ref().unwrap().clone();
@@ -3020,7 +3020,7 @@ impl DeviceManager {
         // Add virtio-rng if required
         let rng_config = self.config.lock().unwrap().rng.clone();
         if let Some(rng_path) = rng_config.src.to_str() {
-            info!("Creating virtio-rng device: {:?}", rng_config);
+            info!("Creating virtio-rng device: {rng_config:?}");
             let id = String::from(RNG_DEVICE_NAME);
 
             let virtio_rng_device = Arc::new(Mutex::new(
@@ -3070,7 +3070,7 @@ impl DeviceManager {
             id
         };
 
-        info!("Creating virtio-fs device: {:?}", fs_cfg);
+        info!("Creating virtio-fs device: {fs_cfg:?}");
 
         let mut node = device_node!(id);
 
@@ -3137,14 +3137,14 @@ impl DeviceManager {
             id
         };
 
-        info!("Creating virtio-pmem device: {:?}", pmem_cfg);
+        info!("Creating virtio-pmem device: {pmem_cfg:?}");
 
         let mut node = device_node!(id);
 
         // Look for the id in the device tree. If it can be found, that means
         // the device is being restored, otherwise it's created from scratch.
         let region_range = if let Some(node) = self.device_tree.lock().unwrap().get(&id) {
-            info!("Restoring virtio-pmem {} resources", id);
+            info!("Restoring virtio-pmem {id} resources");
 
             let mut region_range: Option<(u64, u64)> = None;
             for resource in node.resources.iter() {
@@ -3157,7 +3157,7 @@ impl DeviceManager {
                         region_range = Some((*base, *size));
                     }
                     _ => {
-                        error!("Unexpected resource {:?} for {}", resource, id);
+                        error!("Unexpected resource {resource:?} for {id}");
                     }
                 }
             }
@@ -3323,7 +3323,7 @@ impl DeviceManager {
             id
         };
 
-        info!("Creating virtio-vsock device: {:?}", vsock_cfg);
+        info!("Creating virtio-vsock device: {vsock_cfg:?}");
 
         let socket_path = vsock_cfg
             .socket
@@ -3387,7 +3387,7 @@ impl DeviceManager {
         let mut mm = mm.lock().unwrap();
         for (memory_zone_id, memory_zone) in mm.memory_zones_mut().iter_mut() {
             if let Some(virtio_mem_zone) = memory_zone.virtio_mem_zone_mut() {
-                info!("Creating virtio-mem device: id = {}", memory_zone_id);
+                info!("Creating virtio-mem device: id = {memory_zone_id}");
 
                 let node_id = numa_node_id_from_memory_zone_id(&self.numa_nodes, memory_zone_id)
                     .map(|i| i as u16);
@@ -3486,7 +3486,7 @@ impl DeviceManager {
 
         if let Some(balloon_config) = &self.config.lock().unwrap().balloon {
             let id = String::from(BALLOON_DEVICE_NAME);
-            info!("Creating virtio-balloon device: id = {}", id);
+            info!("Creating virtio-balloon device: id = {id}");
 
             let virtio_balloon_device = Arc::new(Mutex::new(
                 virtio_devices::Balloon::new(
@@ -3532,7 +3532,7 @@ impl DeviceManager {
         }
 
         let id = String::from(WATCHDOG_DEVICE_NAME);
-        info!("Creating virtio-watchdog device: id = {}", id);
+        info!("Creating virtio-watchdog device: id = {id}");
 
         let virtio_watchdog_device = Arc::new(Mutex::new(
             virtio_devices::Watchdog::new(
@@ -3576,7 +3576,7 @@ impl DeviceManager {
             id
         };
 
-        info!("Creating vDPA device: {:?}", vdpa_cfg);
+        info!("Creating vDPA device: {vdpa_cfg:?}");
 
         let device_path = vdpa_cfg
             .path
@@ -4189,7 +4189,7 @@ impl DeviceManager {
         let id = String::from(PVPANIC_DEVICE_NAME);
         let pci_segment_id = 0x0_u16;
 
-        info!("Creating pvpanic device {}", id);
+        info!("Creating pvpanic device {id}");
 
         let (pci_segment_id, pci_device_bdf, resources) =
             self.pci_resources(&id, pci_segment_id)?;
@@ -4280,7 +4280,7 @@ impl DeviceManager {
         // the device is being restored, otherwise it's created from scratch.
         let (pci_device_bdf, resources) =
             if let Some(node) = self.device_tree.lock().unwrap().get(id) {
-                info!("Restoring virtio-pci {} resources", id);
+                info!("Restoring virtio-pci {id} resources");
                 let pci_device_bdf: PciBdf = node
                     .pci_bdf
                     .ok_or(DeviceManagerError::MissingDeviceNodePciBdf)?;
@@ -4529,10 +4529,7 @@ impl DeviceManager {
     }
 
     pub fn eject_device(&mut self, pci_segment_id: u16, device_id: u8) -> DeviceManagerResult<()> {
-        info!(
-            "Ejecting device_id = {} on segment_id={}",
-            device_id, pci_segment_id
-        );
+        info!("Ejecting device_id = {device_id} on segment_id={pci_segment_id}");
 
         // Convert the device ID into the corresponding b/d/f.
         let pci_device_bdf = PciBdf::new(pci_segment_id, 0, device_id, 0);
@@ -5400,16 +5397,10 @@ impl BusDevice for DeviceManager {
                 assert_eq!(data.len(), PSEG_FIELD_SIZE);
                 data.copy_from_slice(&(self.selected_segment as u32).to_le_bytes());
             }
-            _ => error!(
-                "Accessing unknown location at base 0x{:x}, offset 0x{:x}",
-                base, offset
-            ),
+            _ => error!("Accessing unknown location at base 0x{base:x}, offset 0x{offset:x}"),
         }
 
-        debug!(
-            "PCI_HP_REG_R: base 0x{:x}, offset 0x{:x}, data {:?}",
-            base, offset, data
-        )
+        debug!("PCI_HP_REG_R: base 0x{base:x}, offset 0x{offset:x}, data {data:?}")
     }
 
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<std::sync::Barrier>> {
@@ -5423,7 +5414,7 @@ impl BusDevice for DeviceManager {
                 while slot_bitmap > 0 {
                     let slot_id = slot_bitmap.trailing_zeros();
                     if let Err(e) = self.eject_device(self.selected_segment as u16, slot_id as u8) {
-                        error!("Failed ejecting device {}: {:?}", slot_id, e);
+                        error!("Failed ejecting device {slot_id}: {e:?}");
                     }
                     slot_bitmap &= !(1 << slot_id);
                 }
@@ -5443,16 +5434,10 @@ impl BusDevice for DeviceManager {
                 }
                 self.selected_segment = selected_segment;
             }
-            _ => error!(
-                "Accessing unknown location at base 0x{:x}, offset 0x{:x}",
-                base, offset
-            ),
+            _ => error!("Accessing unknown location at base 0x{base:x}, offset 0x{offset:x}"),
         }
 
-        debug!(
-            "PCI_HP_REG_W: base 0x{:x}, offset 0x{:x}, data {:?}",
-            base, offset, data
-        );
+        debug!("PCI_HP_REG_W: base 0x{base:x}, offset 0x{offset:x}, data {data:?}");
 
         None
     }
@@ -5463,7 +5448,7 @@ impl Drop for DeviceManager {
         // Wake up the DeviceManager threads (mainly virtio device workers),
         // to avoid deadlock on waiting for paused/parked worker threads.
         if let Err(e) = self.resume() {
-            error!("Error resuming DeviceManager: {:?}", e);
+            error!("Error resuming DeviceManager: {e:?}");
         }
 
         for handle in self.virtio_devices.drain(..) {

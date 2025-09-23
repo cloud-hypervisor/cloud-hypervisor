@@ -394,7 +394,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Attach request 0x{:x?}", req);
+                    debug!("Attach request 0x{req:x?}");
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
@@ -448,7 +448,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Detach request 0x{:x?}", req);
+                    debug!("Detach request 0x{req:x?}");
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
@@ -467,7 +467,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Map request 0x{:x?}", req);
+                    debug!("Map request 0x{req:x?}");
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
@@ -530,7 +530,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Unmap request 0x{:x?}", req);
+                    debug!("Unmap request 0x{req:x?}");
 
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
@@ -586,7 +586,7 @@ impl Request {
                         .memory()
                         .read_obj(req_addr as GuestAddress)
                         .map_err(Error::GuestMemory)?;
-                    debug!("Probe request 0x{:x?}", req);
+                    debug!("Probe request 0x{req:x?}");
 
                     let probe_prop = VirtioIommuProbeProperty {
                         type_: VIRTIO_IOMMU_PROBE_T_RESV_MEM,
@@ -718,7 +718,7 @@ impl IommuEpollHandler {
         self.interrupt_cb
             .trigger(VirtioInterruptType::Queue(queue_index))
             .map_err(|e| {
-                error!("Failed to signal used queue: {:?}", e);
+                error!("Failed to signal used queue: {e:?}");
                 DeviceError::FailedSignalingUsedQueue(e)
             })
     }
@@ -746,28 +746,23 @@ impl EpollHelperHandler for IommuEpollHandler {
         match ev_type {
             REQUEST_Q_EVENT => {
                 self.request_queue_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
 
                 let needs_notification = self.request_queue().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to process request queue : {:?}",
-                        e
+                        "Failed to process request queue : {e:?}"
                     ))
                 })?;
                 if needs_notification {
                     self.signal_used_queue(0).map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used queue: {:?}",
-                            e
-                        ))
+                        EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {e:?}"))
                     })?;
                 }
             }
             _ => {
                 return Err(EpollHelperError::HandleEvent(anyhow!(
-                    "Unexpected event: {}",
-                    ev_type
+                    "Unexpected event: {ev_type}"
                 )));
             }
         }
@@ -800,7 +795,7 @@ pub struct IommuMapping {
 
 impl DmaRemapping for IommuMapping {
     fn translate_gva(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error> {
-        debug!("Translate GVA addr 0x{:x}", addr);
+        debug!("Translate GVA addr 0x{addr:x}");
         if let Some(domain_id) = self.endpoints.read().unwrap().get(&id) {
             if let Some(domain) = self.domains.read().unwrap().get(domain_id) {
                 // Directly return identity mapping in case the domain is in
@@ -812,7 +807,7 @@ impl DmaRemapping for IommuMapping {
                 for (&key, &value) in domain.mappings.iter() {
                     if addr >= key && addr < key + value.size {
                         let new_addr = addr - key + value.gpa;
-                        debug!("Into GPA addr 0x{:x}", new_addr);
+                        debug!("Into GPA addr 0x{new_addr:x}");
                         return Ok(new_addr);
                     }
                 }
@@ -827,7 +822,7 @@ impl DmaRemapping for IommuMapping {
     }
 
     fn translate_gpa(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error> {
-        debug!("Translate GPA addr 0x{:x}", addr);
+        debug!("Translate GPA addr 0x{addr:x}");
         if let Some(domain_id) = self.endpoints.read().unwrap().get(&id) {
             if let Some(domain) = self.domains.read().unwrap().get(domain_id) {
                 // Directly return identity mapping in case the domain is in
@@ -839,7 +834,7 @@ impl DmaRemapping for IommuMapping {
                 for (&key, &value) in domain.mappings.iter() {
                     if addr >= value.gpa && addr < value.gpa + value.size {
                         let new_addr = addr - value.gpa + key;
-                        debug!("Into GVA addr 0x{:x}", new_addr);
+                        debug!("Into GVA addr 0x{new_addr:x}");
                         return Ok(new_addr);
                     }
                 }
@@ -908,7 +903,7 @@ impl Iommu {
     ) -> io::Result<(Self, Arc<IommuMapping>)> {
         let (mut avail_features, acked_features, endpoints, domains, paused) =
             if let Some(state) = state {
-                info!("Restoring virtio-iommu {}", id);
+                info!("Restoring virtio-iommu {id}");
                 (
                     state.avail_features,
                     state.acked_features,
@@ -1015,7 +1010,7 @@ impl Iommu {
         }
 
         let bypass = self.config.bypass == 1;
-        info!("Updating bypass mode to {}", bypass);
+        info!("Updating bypass mode to {bypass}");
         self.mapping.bypass.store(bypass, Ordering::Release);
     }
 

@@ -472,10 +472,7 @@ impl BusDevice for MemoryManager {
                     }
                 }
                 _ => {
-                    warn!(
-                        "Unexpected offset for accessing memory manager device: {:#}",
-                        offset
-                    );
+                    warn!("Unexpected offset for accessing memory manager device: {offset:#}");
                 }
             }
         } else {
@@ -508,10 +505,7 @@ impl BusDevice for MemoryManager {
                 }
             }
             _ => {
-                warn!(
-                    "Unexpected offset for accessing memory manager device: {:#}",
-                    offset
-                );
+                warn!("Unexpected offset for accessing memory manager device: {offset:#}");
             }
         };
         None
@@ -786,9 +780,8 @@ impl MemoryManager {
                 if let Some(hotplug_size) = config.hotplug_size {
                     if hotplugged_size > hotplug_size {
                         error!(
-                            "'hotplugged_size' {} can't be bigger than \
-                            'hotplug_size' {}",
-                            hotplugged_size, hotplug_size,
+                            "'hotplugged_size' {hotplugged_size} can't be bigger than \
+                            'hotplug_size' {hotplug_size}",
                         );
                         return Err(Error::InvalidMemoryParameters);
                     }
@@ -861,9 +854,8 @@ impl MemoryManager {
                     if let Some(hotplug_size) = zone.hotplug_size {
                         if hotplugged_size > hotplug_size {
                             error!(
-                                "'hotplugged_size' {} can't be bigger than \
-                                'hotplug_size' {}",
-                                hotplugged_size, hotplug_size,
+                                "'hotplugged_size' {hotplugged_size} can't be bigger than \
+                                'hotplug_size' {hotplug_size}",
                             );
                             return Err(Error::InvalidMemoryParameters);
                         }
@@ -1452,10 +1444,7 @@ impl MemoryManager {
                 Self::get_prefault_align_size(backing_file, hugepages, hugepage_size)? as usize;
 
             if !is_aligned(size, page_size) {
-                warn!(
-                    "Prefaulting memory size {} misaligned with page size {}",
-                    size, page_size
-                );
+                warn!("Prefaulting memory size {size} misaligned with page size {page_size}");
             }
 
             let num_pages = size / page_size;
@@ -1484,7 +1473,7 @@ impl MemoryManager {
                         };
                         if ret != 0 {
                             let e = io::Error::last_os_error();
-                            warn!("Failed to prefault pages: {}", e);
+                            warn!("Failed to prefault pages: {e}");
                         }
                     });
                 }
@@ -1501,7 +1490,7 @@ impl MemoryManager {
             let ret = unsafe { libc::madvise(region.as_ptr() as _, size, libc::MADV_HUGEPAGE) };
             if ret != 0 {
                 let e = io::Error::last_os_error();
-                warn!("Failed to mark pages as THP eligible: {}", e);
+                warn!("Failed to mark pages as THP eligible: {e}");
             }
         }
 
@@ -1642,7 +1631,7 @@ impl MemoryManager {
     }
 
     fn hotplug_ram_region(&mut self, size: usize) -> Result<Arc<GuestRegionMmap>, Error> {
-        info!("Hotplugging new RAM: {}", size);
+        info!("Hotplugging new RAM: {size}");
 
         // Check that there is a free slot
         if self.next_hotplug_slot >= HOTPLUG_COUNT {
@@ -1739,8 +1728,7 @@ impl MemoryManager {
         );
 
         info!(
-            "Creating userspace mapping: {:x} -> {:x} {:x}, slot {}",
-            guest_phys_addr, userspace_addr, memory_size, slot
+            "Creating userspace mapping: {guest_phys_addr:x} -> {userspace_addr:x} {memory_size:x}, slot {slot}"
         );
 
         self.vm
@@ -1758,7 +1746,7 @@ impl MemoryManager {
         };
         if ret != 0 {
             let e = io::Error::last_os_error();
-            warn!("Failed to mark mapping as MADV_DONTDUMP: {}", e);
+            warn!("Failed to mark mapping as MADV_DONTDUMP: {e}");
         }
 
         // Mark the pages as mergeable if explicitly asked for.
@@ -1780,15 +1768,14 @@ impl MemoryManager {
                 if errno == libc::EINVAL {
                     warn!("kernel not configured with CONFIG_KSM");
                 } else {
-                    warn!("madvise error: {}", err);
+                    warn!("madvise error: {err}");
                 }
                 warn!("failed to mark pages as mergeable");
             }
         }
 
         info!(
-            "Created userspace mapping: {:x} -> {:x} {:x}",
-            guest_phys_addr, userspace_addr, memory_size
+            "Created userspace mapping: {guest_phys_addr:x} -> {userspace_addr:x} {memory_size:x}"
         );
 
         Ok(slot)
@@ -1835,15 +1822,14 @@ impl MemoryManager {
                 if errno == libc::EINVAL {
                     warn!("kernel not configured with CONFIG_KSM");
                 } else {
-                    warn!("madvise error: {}", err);
+                    warn!("madvise error: {err}");
                 }
                 warn!("failed to mark pages as unmergeable");
             }
         }
 
         info!(
-            "Removed userspace mapping: {:x} -> {:x} {:x}",
-            guest_phys_addr, userspace_addr, memory_size
+            "Removed userspace mapping: {guest_phys_addr:x} -> {userspace_addr:x} {memory_size:x}"
         );
 
         Ok(())
@@ -2119,8 +2105,7 @@ impl MemoryManager {
                     )
                     .map_err(|e| {
                         MigratableError::MigrateReceive(anyhow!(
-                            "Error receiving memory from socket: {}",
-                            e
+                            "Error receiving memory from socket: {e}"
                         ))
                     })?;
                 offset += bytes_read as u64;
@@ -2574,7 +2559,7 @@ impl Migratable for MemoryManager {
     // pages touched during our bulk copy are tracked.
     fn start_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
         self.vm.start_dirty_log().map_err(|e| {
-            MigratableError::MigrateSend(anyhow!("Error starting VM dirty log {}", e))
+            MigratableError::MigrateSend(anyhow!("Error starting VM dirty log {e}"))
         })?;
 
         for r in self.guest_memory.memory().iter() {
@@ -2586,7 +2571,7 @@ impl Migratable for MemoryManager {
 
     fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
         self.vm.stop_dirty_log().map_err(|e| {
-            MigratableError::MigrateSend(anyhow!("Error stopping VM dirty log {}", e))
+            MigratableError::MigrateSend(anyhow!("Error stopping VM dirty log {e}"))
         })?;
 
         Ok(())
@@ -2598,7 +2583,7 @@ impl Migratable for MemoryManager {
         let mut table = MemoryRangeTable::default();
         for r in &self.guest_ram_mappings {
             let vm_dirty_bitmap = self.vm.get_dirty_log(r.slot, r.gpa, r.size).map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {}", e))
+                MigratableError::MigrateSend(anyhow!("Error getting VM dirty log {e}"))
             })?;
             let vmm_dirty_bitmap = match self.guest_memory.memory().find_region(GuestAddress(r.gpa))
             {

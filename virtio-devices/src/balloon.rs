@@ -163,7 +163,7 @@ struct BalloonEpollHandler {
 impl BalloonEpollHandler {
     fn signal(&self, int_type: VirtioInterruptType) -> result::Result<(), Error> {
         self.interrupt_cb.trigger(int_type).map_err(|e| {
-            error!("Failed to signal used queue: {:?}", e);
+            error!("Failed to signal used queue: {e:?}");
             Error::FailedSignal(e)
         })
     }
@@ -363,28 +363,24 @@ impl EpollHelperHandler for BalloonEpollHandler {
             INFLATE_QUEUE_EVENT => {
                 self.inflate_queue_evt.read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to get inflate queue event: {:?}",
-                        e
+                        "Failed to get inflate queue event: {e:?}"
                     ))
                 })?;
                 self.process_queue(0).map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to signal used inflate queue: {:?}",
-                        e
+                        "Failed to signal used inflate queue: {e:?}"
                     ))
                 })?;
             }
             DEFLATE_QUEUE_EVENT => {
                 self.deflate_queue_evt.read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to get deflate queue event: {:?}",
-                        e
+                        "Failed to get deflate queue event: {e:?}"
                     ))
                 })?;
                 self.process_queue(1).map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to signal used deflate queue: {:?}",
-                        e
+                        "Failed to signal used deflate queue: {e:?}"
                     ))
                 })?;
             }
@@ -392,14 +388,12 @@ impl EpollHelperHandler for BalloonEpollHandler {
                 if let Some(reporting_queue_evt) = self.reporting_queue_evt.as_ref() {
                     reporting_queue_evt.read().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to get reporting queue event: {:?}",
-                            e
+                            "Failed to get reporting queue event: {e:?}"
                         ))
                     })?;
                     self.process_reporting_queue(2).map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to signal used inflate queue: {:?}",
-                            e
+                            "Failed to signal used inflate queue: {e:?}"
                         ))
                     })?;
                 } else {
@@ -450,7 +444,7 @@ impl Balloon {
         let mut queue_sizes = vec![QUEUE_SIZE; MIN_NUM_QUEUES];
 
         let (avail_features, acked_features, config, paused) = if let Some(state) = state {
-            info!("Restoring virtio-balloon {}", id);
+            info!("Restoring virtio-balloon {id}");
             (
                 state.avail_features,
                 state.acked_features,

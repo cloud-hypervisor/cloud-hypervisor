@@ -152,7 +152,7 @@ impl VhostUserBlkThread {
                         .unwrap();
                 }
                 Err(err) => {
-                    error!("failed to parse available descriptor chain: {:?}", err);
+                    error!("failed to parse available descriptor chain: {err:?}");
                     len = 0;
                 }
             }
@@ -350,7 +350,7 @@ impl VhostUserBackendMut for VhostUserBlkBackend {
             return Err(Error::HandleEventNotEpollIn.into());
         }
 
-        debug!("event received: {:?}", device_event);
+        debug!("event received: {device_event:?}");
 
         let thread = self.threads[thread_id].get_mut().unwrap();
         match device_event {
@@ -531,20 +531,17 @@ pub fn start_block_backend(backend_command: &str) {
     debug!("blk_daemon is created!\n");
 
     if let Err(e) = blk_daemon.start(listener) {
-        error!(
-            "Failed to start daemon for vhost-user-block with error: {:?}\n",
-            e
-        );
+        error!("Failed to start daemon for vhost-user-block with error: {e:?}\n");
         process::exit(1);
     }
 
     if let Err(e) = blk_daemon.wait() {
-        error!("Error from the main thread: {:?}", e);
+        error!("Error from the main thread: {e:?}");
     }
 
     for thread in blk_backend.read().unwrap().threads.iter() {
         if let Err(e) = thread.lock().unwrap().kill_evt.write(1) {
-            error!("Error shutting down worker thread: {:?}", e)
+            error!("Error shutting down worker thread: {e:?}")
         }
     }
 }

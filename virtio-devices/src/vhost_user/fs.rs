@@ -109,7 +109,7 @@ impl Fs {
             config,
             paused,
         ) = if let Some(state) = state {
-            info!("Restoring vhost-user-fs {}", id);
+            info!("Restoring vhost-user-fs {id}");
 
             vu.set_protocol_features_vhost_user(
                 state.acked_features,
@@ -148,8 +148,7 @@ impl Fs {
 
             if num_queues > backend_num_queues {
                 error!(
-                    "vhost-user-fs requested too many queues ({}) since the backend only supports {}\n",
-                    num_queues, backend_num_queues
+                    "vhost-user-fs requested too many queues ({num_queues}) since the backend only supports {backend_num_queues}\n"
                 );
                 return Err(Error::BadQueueNum);
             }
@@ -230,7 +229,7 @@ impl Drop for Fs {
         if let Some(thread) = self.epoll_thread.take()
             && let Err(e) = thread.join()
         {
-            error!("Error joining thread: {:?}", e);
+            error!("Error joining thread: {e:?}");
         }
     }
 }
@@ -311,7 +310,7 @@ impl VirtioDevice for Fs {
         if let Some(vu) = &self.vu_common.vu
             && let Err(e) = vu.lock().unwrap().reset_vhost_user()
         {
-            error!("Failed to reset vhost-user daemon: {:?}", e);
+            error!("Failed to reset vhost-user daemon: {e:?}");
             return None;
         }
 

@@ -221,7 +221,7 @@ pub struct Tpm {
 impl Tpm {
     pub fn new(path: String) -> Result<Self> {
         let emulator = Emulator::new(path)
-            .map_err(|e| Error::Init(anyhow!("Failed while initializing tpm Emulator: {:?}", e)))?;
+            .map_err(|e| Error::Init(anyhow!("Failed while initializing tpm Emulator: {e:?}")))?;
         let mut tpm = Tpm {
             emulator,
             regs: [0; TPM_CRB_R_MAX],
@@ -331,8 +331,7 @@ impl Tpm {
 
         if let Err(e) = self.emulator.startup_tpm(self.backend_buff_size) {
             return Err(Error::Init(anyhow!(
-                "Failed while running Startup TPM. Error: {:?}",
-                e
+                "Failed while running Startup TPM. Error: {e:?}"
             )));
         }
         Ok(())
@@ -460,7 +459,7 @@ impl BusDevice for Tpm {
                         && (self.regs[CRB_CTRL_START as usize] & CRB_START_INVOKE != 0)
                         && let Err(e) = self.emulator.cancel_cmd()
                     {
-                        error!("Failed to run cancel command. Error: {:?}", e);
+                        error!("Failed to run cancel command. Error: {e:?}");
                     }
                 }
                 CRB_CTRL_START => {
@@ -481,10 +480,7 @@ impl BusDevice for Tpm {
                     }
                 }
                 CRB_LOC_CTRL => {
-                    warn!(
-                        "CRB_LOC_CTRL locality to write = {:?} val = {:?}",
-                        locality, v
-                    );
+                    warn!("CRB_LOC_CTRL locality to write = {locality:?} val = {v:?}");
                     match v {
                         CRB_LOC_CTRL_RESET_ESTABLISHMENT_BIT => {}
                         CRB_LOC_CTRL_RELINQUISH => {
@@ -517,7 +513,7 @@ impl BusDevice for Tpm {
                             );
                         }
                         _ => {
-                            error!("Invalid value to write in CRB_LOC_CTRL {:#X} ", v);
+                            error!("Invalid value to write in CRB_LOC_CTRL {v:#X} ");
                         }
                     }
                 }

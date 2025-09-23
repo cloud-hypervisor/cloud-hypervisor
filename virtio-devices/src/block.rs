@@ -178,7 +178,7 @@ impl BlockEpollHandler {
             // "A device MUST set the status byte to VIRTIO_BLK_S_IOERR for a write request
             // if the VIRTIO_BLK_F_RO feature if offered, and MUST NOT write any data."
             if let Err(e) = Self::check_request(self.acked_features, request.request_type) {
-                warn!("Request check failed: {:x?} {:?}", request, e);
+                warn!("Request check failed: {request:x?} {e:?}");
                 desc_chain
                     .memory()
                     .write_obj(VIRTIO_BLK_S_IOERR, request.status_addr)
@@ -257,7 +257,7 @@ impl BlockEpollHandler {
                 let status = match result {
                     Ok(_) => VIRTIO_BLK_S_OK,
                     Err(e) => {
-                        warn!("Request failed: {:x?} {:?}", request, e);
+                        warn!("Request failed: {request:x?} {e:?}");
                         VIRTIO_BLK_S_IOERR
                     }
                 };
@@ -285,10 +285,7 @@ impl BlockEpollHandler {
             Err(e) => {
                 // If batch submission fails, report VIRTIO_BLK_S_IOERR for all requests.
                 for (user_data, request) in batch_inflight_requests {
-                    warn!(
-                        "Request failed with batch submission: {:x?} {:?}",
-                        request, e
-                    );
+                    warn!("Request failed with batch submission: {request:x?} {e:?}");
                     let desc_index = user_data;
                     let mem = self.mem.memory();
                     mem.write_obj(VIRTIO_BLK_S_IOERR as u8, request.status_addr)
@@ -311,14 +308,11 @@ impl BlockEpollHandler {
             .queue
             .needs_notification(self.mem.memory().deref())
             .map_err(|e| {
-                EpollHelperError::HandleEvent(anyhow!(
-                    "Failed to check needs_notification: {:?}",
-                    e
-                ))
+                EpollHelperError::HandleEvent(anyhow!("Failed to check needs_notification: {e:?}"))
             })?
         {
             self.signal_used_queue().map_err(|e| {
-                EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {:?}", e))
+                EpollHelperError::HandleEvent(anyhow!("Failed to signal used queue: {e:?}"))
             })?;
         }
 
@@ -327,7 +321,7 @@ impl BlockEpollHandler {
 
     fn process_queue_submit_and_signal(&mut self) -> result::Result<(), EpollHelperError> {
         self.process_queue_submit().map_err(|e| {
-            EpollHelperError::HandleEvent(anyhow!("Failed to process queue (submit): {:?}", e))
+            EpollHelperError::HandleEvent(anyhow!("Failed to process queue (submit): {e:?}"))
         })?;
 
         self.try_signal_used_queue()
@@ -493,7 +487,7 @@ impl BlockEpollHandler {
         self.interrupt_cb
             .trigger(VirtioInterruptType::Queue(self.queue_index))
             .map_err(|e| {
-                error!("Failed to signal used queue: {:?}", e);
+                error!("Failed to signal used queue: {e:?}");
                 DeviceError::FailedSignalingUsedQueue(e)
             })
     }
@@ -561,7 +555,7 @@ impl EpollHelperHandler for BlockEpollHandler {
         match ev_type {
             QUEUE_AVAIL_EVENT => {
                 self.queue_evt.read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
 
                 let rate_limit_reached = self.rate_limiter.as_ref().is_some_and(|r| r.is_blocked());
@@ -573,13 +567,12 @@ impl EpollHelperHandler for BlockEpollHandler {
             }
             COMPLETION_EVENT => {
                 self.disk_image.notifier().read().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {:?}", e))
+                    EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
 
                 self.process_queue_complete().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to process queue (complete): {:?}",
-                        e
+                        "Failed to process queue (complete): {e:?}"
                     ))
                 })?;
 
@@ -589,8 +582,7 @@ impl EpollHelperHandler for BlockEpollHandler {
                 if !rate_limit_reached {
                     self.process_queue_submit().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to process queue (submit): {:?}",
-                            e
+                            "Failed to process queue (submit): {e:?}"
                         ))
                     })?;
                 }
@@ -602,8 +594,7 @@ impl EpollHelperHandler for BlockEpollHandler {
                     // and restart processing the queue.
                     rate_limiter.event_handler().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to process rate limiter event: {:?}",
-                            e
+                            "Failed to process rate limiter event: {e:?}"
                         ))
                     })?;
 
@@ -616,8 +607,7 @@ impl EpollHelperHandler for BlockEpollHandler {
             }
             _ => {
                 return Err(EpollHelperError::HandleEvent(anyhow!(
-                    "Unexpected event: {}",
-                    ev_type
+                    "Unexpected event: {ev_type}"
                 )));
             }
         }
@@ -671,7 +661,7 @@ impl Block {
     ) -> io::Result<Self> {
         let (disk_nsectors, avail_features, acked_features, config, paused) =
             if let Some(state) = state {
-                info!("Restoring virtio-block {}", id);
+                info!("Restoring virtio-block {id}");
                 (
                     state.disk_nsectors,
                     state.avail_features,
@@ -685,9 +675,8 @@ impl Block {
                     .map_err(|e| io::Error::other(format!("Failed getting disk size: {e}")))?;
                 if disk_size % SECTOR_SIZE != 0 {
                     warn!(
-                        "Disk size {} is not a multiple of sector size {}; \
-                 the remainder will not be visible to the guest.",
-                        disk_size, SECTOR_SIZE
+                        "Disk size {disk_size} is not a multiple of sector size {SECTOR_SIZE}; \
+                 the remainder will not be visible to the guest."
                     );
                 }
 
@@ -708,7 +697,7 @@ impl Block {
                 }
 
                 let topology = disk_image.topology();
-                info!("Disk topology: {:?}", topology);
+                info!("Disk topology: {topology:?}");
 
                 let logical_block_size = if topology.logical_block_size > 512 {
                     topology.logical_block_size
@@ -939,7 +928,7 @@ impl VirtioDevice for Block {
                     .disk_image
                     .new_async_io(queue_size as u32)
                     .map_err(|e| {
-                        error!("failed to create new AsyncIo: {}", e);
+                        error!("failed to create new AsyncIo: {e}");
                         ActivateError::BadActivate
                     })?,
                 disk_nsectors: self.disk_nsectors,
