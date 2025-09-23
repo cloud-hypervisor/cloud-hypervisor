@@ -28,7 +28,6 @@ updates:
       rust-vmm:
         patterns:
           - "*"
-  target-branch: main
 - package-ecosystem: cargo
   directories:
     - "/"
