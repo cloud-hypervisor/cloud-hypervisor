@@ -106,7 +106,7 @@ members = [
 [workspace.dependencies]
 # rust-vmm crates
 acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main" }
-kvm-bindings = "0.12.0"
+kvm-bindings = "0.12.1"
 kvm-ioctls = "0.22.0"
 # TODO: update to 0.13.1+
 linux-loader = { git = "https://github.com/rust-vmm/linux-loader", branch = "main" }
@@ -114,8 +114,8 @@ mshv-bindings = "0.5.2"
 mshv-ioctls = "0.5.2"
 seccompiler = "0.5.0"
 vfio-bindings = { version = "0.5.0", default-features = false }
-vfio-ioctls = { version = "0.5.0", default-features = false }
-vfio_user = { version = "0.1.0", default-features = false }
+vfio-ioctls = { version = "=0.5.0", default-features = false }
+vfio_user = { version = "=0.1.0", default-features = false }
 vhost = { version = "0.14.0", default-features = false }
 vhost-user-backend = { version = "0.20.0", default-features = false }
 virtio-bindings = "0.2.6"
@@ -152,3 +152,7 @@ thiserror = "2.0.12"
 uuid = { version = "1.18.1" }
 wait-timeout = "0.2.1"
 zerocopy = { version = "0.8.26", default-features = false }
+
+[patch.crates-io]
+kvm-bindings = { git = "https://github.com/kylin-wangdi/kvm" }
+kvm-ioctls = { git = "https://github.com/kylin-wangdi/kvm" }
