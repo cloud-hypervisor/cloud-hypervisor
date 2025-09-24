@@ -68,6 +68,7 @@ pub struct CpusConfig {
     pub affinity: Option<Vec<CpuAffinity>>,
     #[serde(default)]
     pub features: CpuFeatures,
+    pub nesting: Option<bool>,
 }
 
 pub const DEFAULT_VCPUS: u32 = 1;
@@ -82,6 +83,7 @@ impl Default for CpusConfig {
             max_phys_bits: DEFAULT_MAX_PHYS_BITS,
             affinity: None,
             features: CpuFeatures::default(),
+            nesting: None,
         }
     }
 }
