@@ -215,7 +215,7 @@ impl From<&VmConfig> for hypervisor::HypervisorVmConfig {
     fn from(_value: &VmConfig) -> Self {
         hypervisor::HypervisorVmConfig {
             #[cfg(feature = "tdx")]
-            tdx_enabled: _value.platform.as_ref().map(|p| p.tdx).unwrap_or(false),
+            tdx_enabled: _value.platform.as_ref().is_some_and(|p| p.tdx),
             #[cfg(feature = "sev_snp")]
             sev_snp_enabled: _value.is_sev_snp_enabled(),
             #[cfg(feature = "sev_snp")]
@@ -2397,6 +2397,7 @@ mod unit_tests {
                 max_phys_bits: 46,
                 affinity: None,
                 features: CpuFeatures::default(),
+                nested: true,
             },
             memory: MemoryConfig {
                 size: 536_870_912,
