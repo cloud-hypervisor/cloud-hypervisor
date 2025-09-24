@@ -2361,6 +2361,7 @@ mod unit_tests {
                 max_phys_bits: 46,
                 affinity: None,
                 features: CpuFeatures::default(),
+                nesting: true,
             },
             memory: MemoryConfig {
                 size: 536_870_912,
