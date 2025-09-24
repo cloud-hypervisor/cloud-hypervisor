@@ -35,6 +35,7 @@ pub struct CpuFeatures {
     #[cfg(target_arch = "x86_64")]
     #[serde(default)]
     pub amx: bool,
+    pub nested: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
