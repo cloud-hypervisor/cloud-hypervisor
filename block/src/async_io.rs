@@ -80,7 +80,7 @@ pub enum AsyncIoError {
     #[error("Failed synchronizing file")]
     Fsync(#[source] std::io::Error),
     /// Failed submitting batch requests.
-    #[error("Failed submitting batch requests: {0}")]
+    #[error("Failed submitting batch requests")]
     SubmitBatchRequests(#[source] std::io::Error),
 }
 
