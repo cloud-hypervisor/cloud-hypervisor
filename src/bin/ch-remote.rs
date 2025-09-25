@@ -877,6 +877,7 @@ fn coredump_config(destination_url: &str) -> String {
 fn receive_migration_data(url: &str) -> String {
     let receive_migration_data = vmm::api::VmReceiveMigrationData {
         receiver_url: url.to_owned(),
+        net_fds: None,
     };
 
     serde_json::to_string(&receive_migration_data).unwrap()
