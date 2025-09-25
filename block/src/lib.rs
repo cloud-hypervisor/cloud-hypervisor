@@ -999,9 +999,10 @@ impl Default for DiskTopology {
 }
 
 ioctl_io_nr!(BLKSSZGET, 0x12, 104);
-ioctl_io_nr!(BLKPBSZGET, 0x12, 123);
+ioctl_io_nr!(BLKDISCARD, 0x12, 119);
 ioctl_io_nr!(BLKIOMIN, 0x12, 120);
 ioctl_io_nr!(BLKIOOPT, 0x12, 121);
+ioctl_io_nr!(BLKPBSZGET, 0x12, 123);
 
 enum BlockSize {
     LogicalBlock,
