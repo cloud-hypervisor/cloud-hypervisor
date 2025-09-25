@@ -33,6 +33,7 @@ use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
+use std::os::fd::RawFd;
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
@@ -996,9 +997,11 @@ impl Default for DiskTopology {
 }
 
 ioctl_io_nr!(BLKSSZGET, 0x12, 104);
-ioctl_io_nr!(BLKPBSZGET, 0x12, 123);
+ioctl_io_nr!(BLKDISCARD, 0x12, 119);
 ioctl_io_nr!(BLKIOMIN, 0x12, 120);
 ioctl_io_nr!(BLKIOOPT, 0x12, 121);
+ioctl_io_nr!(BLKPBSZGET, 0x12, 123);
+ioctl_io_nr!(BLKZEROOUT, 0x12, 127);
 
 #[derive(Copy, Clone)]
 enum BlockSize {
@@ -1009,10 +1012,10 @@ enum BlockSize {
 }
 
 impl DiskTopology {
-    fn is_block_device(f: &File) -> std::io::Result<bool> {
+    fn is_block_device(f: RawFd) -> std::io::Result<bool> {
         let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
         // SAFETY: FFI call with a valid fd and buffer
-        let ret = unsafe { libc::fstat(f.as_raw_fd(), stat.as_mut_ptr()) };
+        let ret = unsafe { libc::fstat(f, stat.as_mut_ptr()) };
         if ret != 0 {
             return Err(std::io::Error::last_os_error());
         }
@@ -1046,7 +1049,7 @@ impl DiskTopology {
     }
 
     pub fn probe(f: &File) -> std::io::Result<Self> {
-        if !Self::is_block_device(f)? {
+        if !Self::is_block_device(f.as_raw_fd())? {
             return Ok(DiskTopology::default());
         }
 

@@ -7,13 +7,14 @@ use std::fs::File;
 use std::io::{Error, ErrorKind, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 
+use libc::ioctl;
 use log::warn;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::DiskTopology;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
+use crate::{BLKDISCARD, BLKZEROOUT, DiskTopology};
 
 const ZERO_BUFFER_SIZE: usize = 64 * 1024;
 
@@ -54,6 +55,7 @@ impl DiskFile for RawFileDiskSync {
 
 pub struct RawFileSync {
     fd: RawFd,
+    is_block_dev: bool,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
 }
@@ -62,6 +64,7 @@ impl RawFileSync {
     pub fn new(fd: RawFd) -> Self {
         RawFileSync {
             fd,
+            is_block_dev: DiskTopology::is_block_device(fd).expect("Failed to get fd type"),
             eventfd: EventFd::new(libc::EFD_NONBLOCK).expect("Failed creating EventFd for RawFile"),
             completion_list: VecDeque::new(),
         }
@@ -143,14 +146,26 @@ impl AsyncIo for RawFileSync {
     }
 
     fn punch_hole(&mut self, offset: u64, len: u64, user_data: u64) -> AsyncIoResult<()> {
-        // SAFETY: FFI call with valid arguments
-        let result = unsafe {
-            libc::fallocate(
-                self.fd,
-                libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
-                offset as libc::off_t,
-                len as libc::off_t,
-            )
+        let result = if self.is_block_dev {
+            let range: [u64; 2] = [offset, len];
+            // SAFETY: FFI call with valid arguments
+            unsafe {
+                ioctl(
+                    self.fd as libc::c_int,
+                    BLKDISCARD() as _,
+                    &range as *const u64,
+                )
+            }
+        } else {
+            // SAFETY: FFI call with valid arguments
+            unsafe {
+                libc::fallocate(
+                    self.fd,
+                    libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
+                    offset as libc::off_t,
+                    len as libc::off_t,
+                )
+            }
         };
         if result < 0 {
             return Err(AsyncIoError::PunchHole(std::io::Error::last_os_error()));
@@ -166,16 +181,28 @@ impl AsyncIo for RawFileSync {
         len: usize,
         user_data: Option<u64>,
     ) -> std::io::Result<usize> {
-        // SAFETY: FFI call with valid arguments
-        if unsafe {
-            libc::fallocate(
-                self.fd,
-                libc::FALLOC_FL_ZERO_RANGE | libc::FALLOC_FL_KEEP_SIZE,
-                offset as libc::off_t,
-                len as libc::off_t,
-            )
-        } == 0
-        {
+        let result = if self.is_block_dev {
+            let range: [u64; 2] = [offset, len as u64];
+            // SAFETY: FFI call with valid arguments
+            unsafe {
+                ioctl(
+                    self.fd as libc::c_int,
+                    BLKZEROOUT() as _,
+                    &range as *const u64,
+                )
+            }
+        } else {
+            // SAFETY: FFI call with valid arguments
+            unsafe {
+                libc::fallocate(
+                    self.fd,
+                    libc::FALLOC_FL_ZERO_RANGE | libc::FALLOC_FL_KEEP_SIZE,
+                    offset as libc::off_t,
+                    len as libc::off_t,
+                )
+            }
+        };
+        if result == 0 {
             return Ok(len);
         }
 
