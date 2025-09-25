@@ -5,16 +5,29 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Error, ErrorKind, Seek, SeekFrom};
+use std::mem::zeroed;
 use std::os::unix::io::{AsRawFd, RawFd};
 
+use libc::{S_IFBLK, S_IFMT, fstat, ioctl, stat};
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::DiskTopology;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
+use crate::{BLKDISCARD, DiskTopology};
 
 const ZERO_BUFFER_SIZE: usize = 64 * 1024;
+
+fn is_block_device(fd: RawFd) -> bool {
+    // SAFETY: FFI call
+    let mut st: stat = unsafe { zeroed() };
+    // SAFETY: fstat is a system call that takes a fd and a pointer to a stat structure.
+    let result = unsafe { fstat(fd, &mut st) };
+    if result != 0 {
+        return false;
+    }
+    (st.st_mode & S_IFMT) == S_IFBLK
+}
 
 pub struct RawFileDiskSync {
     file: File,
@@ -142,18 +155,31 @@ impl AsyncIo for RawFileSync {
     }
 
     fn punch_hole(&mut self, offset: u64, len: u64, user_data: u64) -> AsyncIoResult<()> {
-        // SAFETY: FFI call with valid arguments
-        let result = unsafe {
-            libc::fallocate(
-                self.fd,
-                libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
-                offset as libc::off_t,
-                len as libc::off_t,
-            )
+        let result = if is_block_device(self.fd) {
+            let range: [u64; 2] = [offset, len];
+            // SAFETY: FFI call with valid arguments
+            unsafe {
+                ioctl(
+                    self.fd as libc::c_int,
+                    BLKDISCARD() as _,
+                    &range as *const u64,
+                )
+            }
+        } else {
+            // SAFETY: FFI call with valid arguments
+            unsafe {
+                libc::fallocate(
+                    self.fd,
+                    libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
+                    offset as libc::off_t,
+                    len as libc::off_t,
+                )
+            }
         };
-        if result < 0 {
+        if result != 0 {
             return Err(AsyncIoError::PunchHole(std::io::Error::last_os_error()));
         }
+
         self.completion_list.push_back((user_data, result as i32));
         self.eventfd.write(1).unwrap();
         Ok(())
