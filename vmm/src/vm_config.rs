@@ -154,6 +154,12 @@ pub struct MemoryZoneConfig {
     pub hotplugged_size: Option<u64>,
     #[serde(default)]
     pub prefault: bool,
+    #[serde(
+        default,
+        serialize_with = "serialize_memory_zone_fd",
+        deserialize_with = "deserialize_memory_zone_fd"
+    )]
+    pub fd: Option<i32>,
 }
 
 impl ApplyLandlock for MemoryZoneConfig {
@@ -218,6 +224,44 @@ impl Default for MemoryConfig {
             zones: None,
             thp: true,
         }
+    }
+}
+
+impl MemoryConfig {
+    pub fn expect_fds(&self) -> usize {
+        let Some(zones) = self.zones.as_ref() else {
+            return 0;
+        };
+
+        let mut counter = 0;
+        for zone in zones {
+            if zone.fd.is_some() {
+                counter += 1;
+            }
+        }
+
+        counter
+    }
+
+    pub fn consume_fds(&mut self, fds: Vec<i32>) -> Result<(), PayloadConfigError> {
+        if self.expect_fds() != fds.len() {
+            return Err(PayloadConfigError::FdCountMismatch);
+        }
+
+        if fds.is_empty() {
+            return Ok(());
+        }
+
+        let zones = self.zones.as_mut().unwrap();
+        let mut idx = 0;
+        for zone in zones {
+            if zone.fd.is_some() {
+                zone.fd = Some(fds[idx]);
+                idx += 1;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -378,6 +422,38 @@ where
             "FDs in 'NetConfig' won't be deserialized as they are most likely invalid now. Deserializing them as -1."
         );
         Ok(Some(vec![-1; invalid_fds.len()]))
+    } else {
+        Ok(None)
+    }
+}
+
+fn serialize_memory_zone_fd<S>(x: &Option<i32>, s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    if let Some(_x) = x {
+        warn!(
+            "'MemoryZone' contains an FD that can't be serialized correctly. Serializing it as an invalid FD."
+        );
+        let invalid_fd = -1_i32;
+        s.serialize_some(&invalid_fd)
+    } else {
+        s.serialize_none()
+    }
+}
+
+fn deserialize_memory_zone_fd<'de, D>(d: D) -> Result<Option<i32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let invalid_fd: Option<i32> = Option::deserialize(d)?;
+    if let Some(fd) = invalid_fd {
+        if fd != -1 {
+            warn!(
+                "'MemoryZone' contains an FD that can't be deserialized correctly. Deserializing it as an invalid FD."
+            );
+        }
+        Ok(Some(-1))
     } else {
         Ok(None)
     }
@@ -691,6 +767,9 @@ pub enum PayloadConfigError {
     /// No bootitem provided: neither firmware nor kernel.
     #[error("No bootitem provided: neither firmware nor kernel")]
     MissingBootitem,
+    /// The number of received FDs do not match the number of expected FDs.
+    #[error("The number of received FDs do not match the number of expected FDs")]
+    FdCountMismatch,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1042,5 +1121,13 @@ impl VmConfig {
         } else {
             self.cpus.max_vcpus
         }
+    }
+
+    pub fn expect_fds(&self) -> usize {
+        self.memory.expect_fds()
+    }
+
+    pub fn consume_fds(&mut self, fds: Vec<i32>) -> Result<(), PayloadConfigError> {
+        self.memory.consume_fds(fds)
     }
 }

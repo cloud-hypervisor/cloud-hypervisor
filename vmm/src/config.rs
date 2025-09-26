@@ -940,6 +940,7 @@ impl MemoryConfig {
                     hotplug_size,
                     hotplugged_size,
                     prefault,
+                    fd: None,
                 });
             }
             Some(zones)
@@ -2242,6 +2243,8 @@ pub struct RestoreConfig {
     #[serde(default)]
     pub prefault: bool,
     #[serde(default)]
+    pub mem_fds: Option<Vec<i32>>,
+    #[serde(default)]
     pub net_fds: Option<Vec<RestoredNetConfig>>,
 }
 
@@ -2256,7 +2259,11 @@ impl RestoreConfig {
 
     pub fn parse(restore: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("source_url").add("prefault").add("net_fds");
+        parser
+            .add("source_url")
+            .add("prefault")
+            .add("mem_fds")
+            .add("net_fds");
         parser.parse(restore).map_err(Error::ParseRestore)?;
 
         let source_url = parser
@@ -2268,6 +2275,10 @@ impl RestoreConfig {
             .map_err(Error::ParseRestore)?
             .unwrap_or(Toggle(false))
             .0;
+        let mem_fds = parser
+            .convert::<IntegerList>("mem_fds")
+            .map_err(Error::ParseNetwork)?
+            .map(|v| v.0.iter().map(|e| *e as i32).collect());
         let net_fds = parser
             .convert::<Tuple<String, Vec<u64>>>("net_fds")
             .map_err(Error::ParseRestore)?
@@ -2284,14 +2295,22 @@ impl RestoreConfig {
         Ok(RestoreConfig {
             source_url,
             prefault,
+            mem_fds,
             net_fds,
         })
     }
 
-    // Ensure all net devices from 'VmConfig' backed by FDs have a
+    // Ensure the number of provided mem FDs matches the number of expected
+    // mem FDs. Also ensure all net devices from 'VmConfig' backed by FDs have a
     // corresponding 'RestoreNetConfig' with a matched 'id' and expected
     // number of FDs.
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        assert_eq!(
+            self.mem_fds.as_ref().map_or(0, |fds| fds.len()),
+            vm_config.memory.expect_fds(),
+            "Mismatched number of mem FDs in VM restore."
+        );
+
         let mut restored_net_with_fds = HashMap::new();
         for n in self.net_fds.iter().flatten() {
             assert_eq!(
@@ -3882,6 +3901,7 @@ mod tests {
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
                 prefault: false,
+                mem_fds: None,
                 net_fds: None,
             }
         );
@@ -3892,6 +3912,7 @@ mod tests {
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
                 prefault: false,
+                mem_fds: None,
                 net_fds: Some(vec![
                     RestoredNetConfig {
                         id: "net0".to_string(),
@@ -3972,6 +3993,7 @@ mod tests {
         let valid_config = RestoreConfig {
             source_url: PathBuf::from("/path/to/snapshot"),
             prefault: false,
+            mem_fds: None,
             net_fds: Some(vec![
                 RestoredNetConfig {
                     id: "net0".to_string(),
@@ -4046,6 +4068,7 @@ mod tests {
         let another_valid_config = RestoreConfig {
             source_url: PathBuf::from("/path/to/snapshot"),
             prefault: false,
+            mem_fds: None,
             net_fds: None,
         };
         snapshot_vm_config.net = Some(vec![NetConfig {
