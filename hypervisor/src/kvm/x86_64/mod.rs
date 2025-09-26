@@ -19,6 +19,7 @@ pub use {
     kvm_bindings::kvm_msr_entry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
     kvm_bindings::kvm_sregs, kvm_bindings::kvm_vcpu_events as VcpuEvents,
     kvm_bindings::kvm_xcrs as ExtendedControlRegisters, kvm_bindings::kvm_xsave,
+    kvm_bindings::nested::KvmNestedStateBuffer,
 };
 
 use crate::arch::x86::{
@@ -75,6 +76,9 @@ pub struct VcpuKvmState {
     pub xcrs: ExtendedControlRegisters,
     pub mp_state: MpState,
     pub tsc_khz: Option<u32>,
+    // Option to prevent useless 8K (de)serialization when no nested
+    // state exists.
+    pub nested_state: Option<KvmNestedStateBuffer>,
 }
 
 impl From<SegmentRegister> for kvm_segment {
