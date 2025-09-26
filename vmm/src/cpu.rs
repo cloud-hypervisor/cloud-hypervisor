@@ -730,11 +730,16 @@ impl CpuManager {
             if amx_tile != 0 {
                 return Err(Error::AmxEnable(anyhow!("Guest AMX usage not supported")));
             } else {
-                let mask: usize = 0;
-                // SAFETY: the mask being modified (not marked mutable as it is
-                // modified in unsafe only which is permitted) isn't in use elsewhere.
+                let mut mask: usize = 0;
+                // SAFETY: Syscall with valid parameters. We use a raw mutable pointer to
+                // the `mask` place in order to ensure that we do not violate Rust's
+                // aliasing rules.
                 let result = unsafe {
-                    libc::syscall(libc::SYS_arch_prctl, ARCH_GET_XCOMP_GUEST_PERM, &mask)
+                    libc::syscall(
+                        libc::SYS_arch_prctl,
+                        ARCH_GET_XCOMP_GUEST_PERM,
+                        &raw mut mask,
+                    )
                 };
                 if result != 0 || (mask & XFEATURE_XTILEDATA_MASK) != XFEATURE_XTILEDATA_MASK {
                     return Err(Error::AmxEnable(anyhow!("Guest AMX usage not supported")));
