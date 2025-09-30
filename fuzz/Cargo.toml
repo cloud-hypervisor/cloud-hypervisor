@@ -30,7 +30,7 @@ linux-loader = { git = "https://github.com/rust-vmm/linux-loader", branch = "mai
   "pe",
 ] }
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
-mshv-bindings = "0.6.0"
+mshv-bindings = "0.6.2"
 net_util = { path = "../net_util" }
 seccompiler = "0.5.0"
 virtio-devices = { path = "../virtio-devices" }
@@ -40,7 +40,7 @@ vm-memory = "0.16.0"
 vm-migration = { path = "../vm-migration" }
 vm-virtio = { path = "../vm-virtio" }
 vmm = { path = "../vmm", features = ["guest_debug"] }
-vmm-sys-util = "0.14.0"
+vmm-sys-util = "0.15.0"
 
 # Prevent this from interfering with workspaces
 [workspace]
