@@ -131,7 +131,7 @@ igvm = { git = "https://github.com/microsoft/igvm", branch = "main" }
 igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main" }
 
 # serde crates
-serde = "1.0.226"
+serde = "1.0.228"
 serde_json = "1.0.145"
 serde_with = { version = "3.14.1", default-features = false }
 
@@ -146,10 +146,10 @@ dirs = "6.0.0"
 env_logger = "0.11.8"
 epoll = "4.4.0"
 flume = "0.11.1"
-libc = "0.2.167"
+libc = "0.2.176"
 log = "0.4.28"
 signal-hook = "0.3.18"
-thiserror = "2.0.16"
+thiserror = "2.0.17"
 uuid = { version = "1.18.1" }
 wait-timeout = "0.2.1"
 zerocopy = { version = "0.8.27", default-features = false }
