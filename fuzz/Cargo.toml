@@ -21,7 +21,7 @@ block = { path = "../block" }
 devices = { path = "../devices" }
 epoll = "4.3.3"
 hypervisor = { path = "../hypervisor", features = ["mshv_emulator"] }
-libc = "0.2.155"
+libc = "0.2.176"
 libfuzzer-sys = "0.4.10"
 # TODO: update to 0.13.1+
 linux-loader = { git = "https://github.com/rust-vmm/linux-loader", branch = "main", features = [
