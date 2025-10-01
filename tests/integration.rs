@@ -10914,7 +10914,7 @@ mod live_migration {
             );
         };
 
-        // Post live-migration check to make sure the destination VM is funcational
+        // Post live-migration check to make sure the destination VM is functioning
         let r = std::panic::catch_unwind(|| {
             // Perform same checks to validate VM has been properly migrated
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
