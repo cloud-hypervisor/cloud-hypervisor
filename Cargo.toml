@@ -133,7 +133,7 @@ igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main" }
 # serde crates
 serde = "1.0.228"
 serde_json = "1.0.145"
-serde_with = { version = "3.14.1", default-features = false }
+serde_with = { version = "3.15.0", default-features = false }
 
 # other crates
 anyhow = "1.0.99"
