@@ -1065,6 +1065,8 @@ impl VmConfig {
             sev_snp_enabled: self.platform.as_ref().map(|p| p.sev_snp).unwrap_or(false),
             #[cfg(feature = "sev_snp")]
             mem_size: self.memory.total_size(),
+            #[cfg(feature = "mshv")]
+            nested_enabled: self.cpus.features.nested,
         }
     }
 }
