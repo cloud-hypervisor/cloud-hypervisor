@@ -1066,6 +1066,8 @@ impl VmConfig {
             sev_snp_enabled: self.is_sev_snp_enabled(),
             #[cfg(feature = "sev_snp")]
             mem_size: self.memory.total_size(),
+            #[cfg(feature = "mshv")]
+            nested_enabled: self.cpus.nesting,
         }
     }
 }
