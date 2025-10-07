@@ -1057,4 +1057,14 @@ impl VmConfig {
             self.cpus.max_vcpus
         }
     }
+    pub(crate) fn to_hypervisor_vm_config(&self) -> hypervisor::HypervisorVmConfig {
+        hypervisor::HypervisorVmConfig {
+            #[cfg(feature = "tdx")]
+            tdx_enabled: self.platform.as_ref().map(|p| p.tdx).unwrap_or(false),
+            #[cfg(feature = "sev_snp")]
+            sev_snp_enabled: self.platform.as_ref().map(|p| p.sev_snp).unwrap_or(false),
+            #[cfg(feature = "sev_snp")]
+            mem_size: self.memory.total_size(),
+        }
+    }
 }
