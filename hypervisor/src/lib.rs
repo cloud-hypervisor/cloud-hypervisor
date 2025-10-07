@@ -64,7 +64,7 @@ pub use vm::{
 
 pub use crate::hypervisor::{Hypervisor, HypervisorError};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum HypervisorType {
     #[cfg(feature = "kvm")]
     Kvm,
