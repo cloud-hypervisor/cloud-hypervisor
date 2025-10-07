@@ -2887,19 +2887,22 @@ impl Snapshottable for Vm {
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         let common_cpuid = {
-            let amx = self.config.lock().unwrap().cpus.features.amx;
-            let phys_bits = physical_bits(
-                self.hypervisor.as_ref(),
-                self.config.lock().unwrap().cpus.max_phys_bits,
-            );
+            let guard = self.config.lock().unwrap();
+            let amx = guard.cpus.features.amx;
+            let phys_bits = physical_bits(&self.hypervisor, guard.cpus.max_phys_bits);
+            let kvm_hyperv = guard.cpus.kvm_hyperv;
+            let profile = guard.cpus.profile;
+            // Drop the guard before function call
+            core::mem::drop(guard);
             arch::generate_common_cpuid(
                 self.hypervisor.as_ref(),
                 &arch::CpuidConfig {
                     phys_bits,
-                    kvm_hyperv: self.config.lock().unwrap().cpus.kvm_hyperv,
+                    kvm_hyperv,
                     #[cfg(feature = "tdx")]
                     tdx: false,
                     amx,
+                    profile,
                 },
             )
             .map_err(|e| {
