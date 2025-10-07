@@ -1001,6 +1001,7 @@ mod unit_tests {
                 features: CpuFeatures::default(),
                 nested: true,
                 core_scheduling: CoreScheduling::Vm,
+                profile: Default::default(),
             },
             memory: MemoryConfig {
                 size: 536_870_912,

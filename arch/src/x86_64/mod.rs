@@ -39,7 +39,7 @@ use vm_memory::{
     GuestMemoryRegion,
 };
 
-use crate::{GuestMemoryMmap, InitramfsConfig, RegionType};
+use crate::{CpuProfile, GuestMemoryMmap, InitramfsConfig, RegionType};
 
 // While modern architectures support more than 255 CPUs via x2APIC,
 // legacy devices such as mptable support at most 254 CPUs.
@@ -98,6 +98,7 @@ pub struct CpuidConfig {
     #[cfg(feature = "tdx")]
     pub tdx: bool,
     pub amx: bool,
+    pub profile: CpuProfile,
 }
 
 #[derive(Debug, Error)]
