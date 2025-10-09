@@ -2169,6 +2169,25 @@ impl RequestHandler for Vmm {
                         &mut socket,
                         existing_memory_files.take(),
                     )?);
+
+                    // TODO: add something like self.vm_config.apply_fds()?
+                    // Override FDs from the deserialized config.
+                    if let Some(ref restored_net_configs) = receive_data_migration.net_fds {
+                        // Update VM's net configurations with new fds received for restore operation
+                        let mut vm_config = self.vm_config.as_mut().unwrap().lock().unwrap();
+                        {
+                            for net in restored_net_configs {
+                                for net_config in vm_config.net.iter_mut().flatten() {
+                                    // update only if the net dev is backed by FDs
+                                    if net_config.id == Some(net.id.clone())
+                                        && net_config.fds.is_some()
+                                    {
+                                        net_config.fds.clone_from(&net.fds);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 Command::State => {
                     info!("State Command Received");
