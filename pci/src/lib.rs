@@ -11,6 +11,7 @@ extern crate log;
 mod bus;
 mod configuration;
 mod device;
+mod mmap;
 mod msi;
 mod msix;
 mod vfio;
