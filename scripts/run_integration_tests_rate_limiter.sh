@@ -20,25 +20,25 @@ fi
 
 cp scripts/sha1sums-x86_64 "$WORKLOADS_DIR"
 
-FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.qcow2"
-FOCAL_OS_IMAGE_URL="https://ch-images.azureedge.net/$FOCAL_OS_IMAGE_NAME"
-FOCAL_OS_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_IMAGE_NAME"
-if [ ! -f "$FOCAL_OS_IMAGE" ]; then
+JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
+JAMMY_OS_IMAGE_URL="https://ch-images.azureedge.net/$JAMMY_OS_IMAGE_NAME"
+JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
+if [ ! -f "$JAMMY_OS_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
-    time wget --quiet $FOCAL_OS_IMAGE_URL || exit 1
+    time wget --quiet $JAMMY_OS_IMAGE_URL || exit 1
     popd || exit
 fi
 
-FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.raw"
-FOCAL_OS_RAW_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME"
-if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
+JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
+JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
+if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
-    time qemu-img convert -p -f qcow2 -O raw $FOCAL_OS_IMAGE_NAME $FOCAL_OS_RAW_IMAGE_NAME || exit 1
+    time qemu-img convert -p -f qcow2 -O raw $JAMMY_OS_IMAGE_NAME $JAMMY_OS_RAW_IMAGE_NAME || exit 1
     popd || exit
 fi
 
 pushd "$WORKLOADS_DIR" || exit
-if ! grep focal sha1sums-x86_64 | sha1sum --check; then
+if ! grep jammy sha1sums-x86_64 | sha1sum --check; then
     echo "sha1sum validation of images failed, remove invalid images to fix the issue."
     exit 1
 fi
