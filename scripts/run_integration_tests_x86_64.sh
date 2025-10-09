@@ -178,7 +178,7 @@ ulimit -l unlimited
 ulimit -n 4096
 
 export RUST_BACKTRACE=1
-time cargo test --release --target "$BUILD_TARGET" $test_features "common_parallel::$test_filter" -- ${test_binary_args[*]}
+time cargo test --release --target "$BUILD_TARGET" $test_features "common_parallel::$test_filter" -- ${test_binary_args[*]} --test-threads=$((($(nproc) * 3) / 4))
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
