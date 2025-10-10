@@ -11,13 +11,14 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 use std::{env, fmt, fs, io, thread};
 
+use rand::Rng;
 use serde_json::Value;
 use ssh2::Session;
 use thiserror::Error;
@@ -1390,6 +1391,38 @@ impl<'a> GuestCommand<'a> {
     pub fn default_net(&mut self) -> &mut Self {
         self.args(["--net", self.guest.default_net_string().as_str()])
     }
+
+    pub fn kernel_cmdline(
+        &mut self,
+        kernel: &'a str,
+        cmdline: Option<&'a str>,
+        platform: Option<&'a str>,
+    ) -> &mut Self {
+        if is_guest_vm_type_cvm() {
+            let igvm = direct_igvm_boot_path(Some("hvc0"));
+            self.command.args(["--igvm", igvm.to_str().unwrap()]);
+            self.command
+                .args(["--host-data", generate_host_data().as_str()]);
+
+            if let Some(platform_arg) = platform {
+                self.command
+                    .args(["--platform", &format!("{platform_arg},sev_snp=on")]);
+            } else {
+                self.command.args(["--platform", "sev_snp=on"]);
+            }
+        } else {
+            self.command.args(["--kernel", kernel]);
+
+            if let Some(cmdline_arg) = cmdline {
+                self.command.args(["--cmdline", cmdline_arg]);
+            }
+
+            if let Some(platform_arg) = platform {
+                self.command.args(["--platform", platform_arg]);
+            }
+        }
+        self
+    }
 }
 
 pub fn clh_command(cmd: &str) -> String {
@@ -1754,6 +1787,54 @@ pub fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Ve
     // Parse the ethr latency test output
     let content = fs::read(log_file).map_err(Error::EthrLogFile)?;
     parse_ethr_latency_output(&content)
+}
+
+// Get the environment variable value if it exists
+pub fn get_env_var(var_name: &str) -> Option<String> {
+    env::var(var_name).ok()
+}
+
+// Check if the GUEST_VM_TYPE is set to CVM
+// If not set, it is assumed to be a regular VM
+pub fn is_guest_vm_type_cvm() -> bool {
+    get_env_var("GUEST_VM_TYPE") == Some("CVM".to_string())
+}
+
+// Generate a random 64 hex string to be used as host data for IGVM boot
+pub fn generate_host_data() -> String {
+    let mut rng = rand::rng();
+    #[allow(clippy::format_collect)]
+    let hex_string: String = (0..64)
+        .map(|_| rng.random_range(0..=15))
+        .map(|num| format!("{num:x}"))
+        .collect();
+
+    hex_string
+}
+
+// Get the IGVM boot file path based on the console type
+// If the file does not exist, return an empty path
+pub fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
+    // get the default hvc0 igvm file if console string is not passed
+    let console_str = console.unwrap_or("hvc0");
+
+    if console_str != "hvc0" && console_str != "ttyS0" {
+        panic!(
+            "{}",
+            format!("IGVM console should be hvc0 or ttyS0, got: {console_str}")
+        );
+    }
+
+    // Path /igvm_files in docker volume maps to host vm path /usr/share/cloud-hypervisor/cvm
+    // Please add directory as volume to docker container as /igvm_files
+    // Refer ./scripts/dev_cli.sh for this
+    let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
+    let igvm_path_exist = Path::new(&igvm_filepath);
+    if igvm_path_exist.exists() {
+        PathBuf::from(igvm_filepath)
+    } else {
+        PathBuf::from("")
+    }
 }
 
 // parse the bar address from the output of `lspci -vv`

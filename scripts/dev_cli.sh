@@ -28,6 +28,9 @@ CTR_CLH_ROOT_DIR="/cloud-hypervisor"
 CTR_CLH_CARGO_BUILT_DIR="${CTR_CLH_ROOT_DIR}/build"
 CTR_CLH_CARGO_TARGET="${CTR_CLH_CARGO_BUILT_DIR}/cargo_target"
 CTR_CLH_INTEGRATION_WORKLOADS="/root/workloads"
+SRC_IGVM_FILES_PATH="/usr/share/cloud-hypervisor/cvm"
+DEST_IGVM_FILES_PATH="$CLH_INTEGRATION_WORKLOADS/igvm_files"
+CTR_IGVM_FILES_PATH="/igvm_files"
 
 # Container networking option
 CTR_CLH_NET="bridge"
@@ -168,6 +171,23 @@ process_volumes_args() {
         fi
         exported_volumes="$exported_volumes --volume $var"
     done
+}
+
+# Copy IGVM files to the workloads directory
+# This is needed for the IGVM integration tests to run
+#   $1 - source path
+#   $2 - destination path
+copy_igvm_files() {
+    src=$1
+    dest=$2
+
+    if [ -d "$src" ]; then
+        say "Moving IGVM files from $src to $dest"
+        cp "$src"/* "$dest"
+    else
+        say_err "IGVM File path '$src' not found on host"
+        exit 1
+    fi
 }
 
 cmd_help() {
@@ -423,6 +443,13 @@ cmd_tests() {
     fi
 
     if [ "$integration" = true ]; then
+        # for cvm guest run please do, export GUEST_VM_TYPE=CVM
+        if [ "$GUEST_VM_TYPE" = "CVM" ]; then
+            mkdir -p "$DEST_IGVM_FILES_PATH"
+            copy_igvm_files "$SRC_IGVM_FILES_PATH" "$DEST_IGVM_FILES_PATH"
+            CVM_VOLUMES="--volume $DEST_IGVM_FILES_PATH:$CTR_IGVM_FILES_PATH"
+        fi
+
         say "Running integration tests for $target..."
         $DOCKER_RUNTIME run \
             --workdir "$CTR_CLH_ROOT_DIR" \
@@ -435,7 +462,7 @@ cmd_tests() {
             --volume /dev:/dev \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
             ${exported_volumes:+"$exported_volumes"} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
+            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" "${CVM_VOLUMES}" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
