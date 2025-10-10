@@ -44,6 +44,7 @@ jobs:
   infra-setup:
     name: ${{ inputs.ARCH }} VM Provision
     runs-on: mshv
+    continue-on-error: true
     outputs:
       PRIVATE_IP: ${{ steps.get-vm-ip.outputs.PRIVATE_IP }}
     steps:
