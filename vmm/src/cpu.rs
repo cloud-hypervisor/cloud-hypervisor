@@ -644,6 +644,7 @@ struct VcpuState {
     handle: Option<thread::JoinHandle<()>>,
     kill: Arc<AtomicBool>,
     vcpu_run_interrupted: Arc<AtomicBool>,
+    /// Used to ACK stat changes from the run vCPU loop to the CPU Manager.
     paused: Arc<AtomicBool>,
 }
 
@@ -1012,9 +1013,9 @@ impl CpuManager {
         #[cfg(feature = "guest_debug")]
         let vm_debug_evt = self.vm_debug_evt.try_clone().unwrap();
         let panic_exit_evt = self.exit_evt.try_clone().unwrap();
-        let vcpu_kill_signalled = self.vcpus_kill_signalled.clone();
-        let vcpu_pause_signalled = self.vcpus_pause_signalled.clone();
-        let vcpu_kick_signalled = self.vcpus_kick_signalled.clone();
+        let vcpus_kill_signalled = self.vcpus_kill_signalled.clone();
+        let vcpus_pause_signalled = self.vcpus_pause_signalled.clone();
+        let vcpus_kick_signalled = self.vcpus_kick_signalled.clone();
 
         let vcpu_kill = self.vcpu_states[usize::try_from(vcpu_id).unwrap()]
             .kill
@@ -1107,7 +1108,7 @@ impl CpuManager {
                             // loads and stores to different atomics and we need
                             // to see them in a consistent order in all threads
 
-                            if vcpu_pause_signalled.load(Ordering::SeqCst) {
+                            if vcpus_pause_signalled.load(Ordering::SeqCst) {
                                 // As a pause can be caused by PIO & MMIO exits then we need to ensure they are
                                 // completed by returning to KVM_RUN. From the kernel docs:
                                 //
@@ -1136,13 +1137,14 @@ impl CpuManager {
                                 vcpu_run_interrupted.store(true, Ordering::SeqCst);
 
                                 vcpu_paused.store(true, Ordering::SeqCst);
-                                while vcpu_pause_signalled.load(Ordering::SeqCst) {
+                                while vcpus_pause_signalled.load(Ordering::SeqCst) {
                                     thread::park();
                                 }
+                                vcpu_paused.store(false, Ordering::SeqCst);
                                 vcpu_run_interrupted.store(false, Ordering::SeqCst);
                             }
 
-                            if vcpu_kick_signalled.load(Ordering::SeqCst) {
+                            if vcpus_kick_signalled.load(Ordering::SeqCst) {
                                 vcpu_run_interrupted.store(true, Ordering::SeqCst);
                                 #[cfg(target_arch = "x86_64")]
                                 match vcpu.lock().as_ref().unwrap().vcpu.nmi() {
@@ -1155,7 +1157,7 @@ impl CpuManager {
                             }
 
                             // We've been told to terminate
-                            if vcpu_kill_signalled.load(Ordering::SeqCst)
+                            if vcpus_kill_signalled.load(Ordering::SeqCst)
                                 || vcpu_kill.load(Ordering::SeqCst)
                             {
                                 vcpu_run_interrupted.store(true, Ordering::SeqCst);
@@ -1174,7 +1176,7 @@ impl CpuManager {
                                         info!("VmExit::Debug");
                                         #[cfg(feature = "guest_debug")]
                                         {
-                                            vcpu_pause_signalled.store(true, Ordering::SeqCst);
+                                            vcpus_pause_signalled.store(true, Ordering::SeqCst);
                                             let raw_tid = get_raw_tid(vcpu_id as usize);
                                             vm_debug_evt.write(raw_tid as u64).unwrap();
                                         }
@@ -1235,7 +1237,7 @@ impl CpuManager {
                             }
 
                             // We've been told to terminate
-                            if vcpu_kill_signalled.load(Ordering::SeqCst)
+                            if vcpus_kill_signalled.load(Ordering::SeqCst)
                                 || vcpu_kill.load(Ordering::SeqCst)
                             {
                                 vcpu_run_interrupted.store(true, Ordering::SeqCst);
@@ -2350,10 +2352,9 @@ impl Pausable for CpuManager {
 
         self.signal_vcpus();
 
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         for vcpu in self.vcpus.iter() {
-            let mut vcpu = vcpu.lock().unwrap();
-            vcpu.pause()?;
-            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            let vcpu = vcpu.lock().unwrap();
             if !self.config.kvm_hyperv {
                 vcpu.vcpu.notify_guest_clock_paused().map_err(|e| {
                     MigratableError::Pause(anyhow!(
@@ -2367,6 +2368,7 @@ impl Pausable for CpuManager {
         // activated vCPU change their state to ensure they have parked.
         for state in self.vcpu_states.iter() {
             if state.active() {
+                // wait for vCPU to update state
                 while !state.paused.load(Ordering::SeqCst) {
                     // To avoid a priority inversion with the vCPU thread
                     thread::sleep(std::time::Duration::from_millis(1));
@@ -2378,20 +2380,26 @@ impl Pausable for CpuManager {
     }
 
     fn resume(&mut self) -> std::result::Result<(), MigratableError> {
-        for vcpu in self.vcpus.iter() {
-            vcpu.lock().unwrap().resume()?;
-        }
-
-        // Toggle the vCPUs pause boolean
+        // Ensure that vCPUs keep running after being unpark() in
+        // their run vCPU loop.
         self.vcpus_pause_signalled.store(false, Ordering::SeqCst);
 
-        // Unpark all the VCPU threads.
-        // Once unparked, the next thing they will do is checking for the pause
-        // boolean. Since it'll be set to false, they will exit their pause loop
-        // and go back to vmx root.
-        for state in self.vcpu_states.iter() {
-            state.paused.store(false, Ordering::SeqCst);
-            state.unpark_thread();
+        // Unpark all the vCPU threads.
+        // Step 1/2: signal each thread
+        {
+            for state in self.vcpu_states.iter() {
+                state.unpark_thread();
+            }
+        }
+        // Step 2/2: wait for state ACK
+        {
+            for state in self.vcpu_states.iter() {
+                // wait for vCPU to update state
+                while state.paused.load(Ordering::SeqCst) {
+                    // To avoid a priority inversion with the vCPU thread
+                    thread::sleep(std::time::Duration::from_millis(1));
+                }
+            }
         }
         Ok(())
     }
