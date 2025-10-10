@@ -74,10 +74,26 @@ if [ "${TEST_ARCH}" == "aarch64" ]; then
     if [ ! -d "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR" ]; then
         mkdir -p "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR"
     fi
-    # Mount the 'raw' image, replace the fio and umount the working folder
-    guestmount -a "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_NAME" -m /dev/sda1 "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR" || exit 1
-    cp "$WORKLOADS_DIR"/fio "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR"/usr/bin/fio
-    guestunmount "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR"
+    # Mount image partition
+    IMG="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_NAME"
+    # Get the sector size from the disk image
+    SECTOR_SIZE=$(fdisk -l "$IMG" | awk '/Sector size/ {print $4; exit}')
+    # Get the starting sector of the first partition (e.g., /dev/sda1 or $IMG'1)
+    START_SECTOR=$(fdisk -l "$IMG" | awk '$1 == "'"$IMG"'1" {print $2; exit}')
+    # Calculate the byte offset to the start of the partition
+    OFFSET=$((START_SECTOR * SECTOR_SIZE))
+
+    # Create a loop device that points to the partition using the calculated offset
+    LOOP_DEV=$(sudo losetup -f --show -o "$OFFSET" "$IMG")
+
+    # Mount the loop device (which represents the partition) to the temporary directory
+    sudo mount "$LOOP_DEV" "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR"
+    # Replace the existing kernel image with the new compressed kernel file
+    cp "$WORKLOADS_DIR"/Image-arm64.gz "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR"/boot/vmlinuz
+    # Unmount the image partition
+    sudo umount "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR"
+    # Detach the loop device to free it up
+    sudo losetup -d "$LOOP_DEV"
 fi
 
 # Prepare linux image (build from source or download pre-built)

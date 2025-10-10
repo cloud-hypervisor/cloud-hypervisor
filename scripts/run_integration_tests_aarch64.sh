@@ -135,10 +135,27 @@ update_workloads() {
     cp "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME" "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME"
     FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR="$WORKLOADS_DIR/focal-server-cloudimg-root"
     mkdir -p "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"
-    # Mount the 'raw' image, replace the compressed kernel file and umount the working folder
-    guestmount -a "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME" -m /dev/sda1 "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR" || exit 1
+
+    # Mount image partition
+    IMG="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME"
+    # Get the sector size from the disk image
+    SECTOR_SIZE=$(fdisk -l "$IMG" | awk '/Sector size/ {print $4; exit}')
+    # Get the starting sector of the first partition (e.g., /dev/sda1 or $IMG'1)
+    START_SECTOR=$(fdisk -l "$IMG" | awk '$1 == "'"$IMG"'1" {print $2; exit}')
+    # Calculate the byte offset to the start of the partition
+    OFFSET=$((START_SECTOR * SECTOR_SIZE))
+
+    # Create a loop device that points to the partition using the calculated offset
+    LOOP_DEV=$(sudo losetup -f --show -o "$OFFSET" "$IMG")
+
+    # Mount the loop device (which represents the partition) to the temporary directory
+    sudo mount "$LOOP_DEV" "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"
+    # Replace the existing kernel image with the new compressed kernel file
     cp "$WORKLOADS_DIR"/Image-arm64.gz "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"/boot/vmlinuz
-    guestunmount "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"
+    # Unmount the image partition
+    sudo umount "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"
+    # Detach the loop device to free it up
+    sudo losetup -d "$LOOP_DEV"
 
     # Build virtiofsd
     build_virtiofsd
@@ -170,10 +187,10 @@ update_workloads() {
 
 process_common_args "$@"
 
-# aarch64 not supported for MSHV
-if [[ "$hypervisor" = "mshv" ]]; then
-    echo "AArch64 is not supported in Microsoft Hypervisor"
-    exit 1
+test_features=""
+
+if [ "$hypervisor" = "mshv" ]; then
+    test_features="--features mshv"
 fi
 
 # lock the workloads folder to avoid parallel updating by different containers
@@ -192,7 +209,7 @@ fi
 
 export RUST_BACKTRACE=1
 
-cargo build --all --release --target "$BUILD_TARGET"
+cargo build --features mshv --all --release --target "$BUILD_TARGET"
 
 # Enable KSM with some reasonable parameters so that it won't take too long
 # for the memory to be merged between two processes.
@@ -207,13 +224,13 @@ echo "$PAGE_NUM" | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`
-time cargo test "common_parallel::$test_filter" --target "$BUILD_TARGET" -- --test-threads=$(($(nproc) / 8)) ${test_binary_args[*]}
+time cargo test "common_parallel::$test_filter" --target "$BUILD_TARGET" $test_features -- --test-threads=$(($(nproc) / 8)) ${test_binary_args[*]}
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
-    time cargo test "common_sequential::$test_filter" --target "$BUILD_TARGET" -- --test-threads=1 ${test_binary_args[*]}
+    time cargo test "common_sequential::$test_filter" --target "$BUILD_TARGET" $test_features -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -221,7 +238,7 @@ fi
 
 # Run all ACPI test cases
 if [ $RES -eq 0 ]; then
-    time cargo test "aarch64_acpi::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
+    time cargo test "aarch64_acpi::$test_filter" --target "$BUILD_TARGET" $test_features -- ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -229,14 +246,14 @@ fi
 
 # Run all test cases related to live migration
 if [ $RES -eq 0 ]; then
-    time cargo test "live_migration_parallel::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
+    time cargo test "live_migration_parallel::$test_filter" --target "$BUILD_TARGET" $test_features -- ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
 fi
 
 if [ $RES -eq 0 ]; then
-    time cargo test "live_migration_sequential::$test_filter" --target "$BUILD_TARGET" -- --test-threads=1 ${test_binary_args[*]}
+    time cargo test "live_migration_sequential::$test_filter" --target "$BUILD_TARGET" $test_features -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
