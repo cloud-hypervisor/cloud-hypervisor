@@ -187,10 +187,10 @@ update_workloads() {
 
 process_common_args "$@"
 
-# aarch64 not supported for MSHV
-if [[ "$hypervisor" = "mshv" ]]; then
-    echo "AArch64 is not supported in Microsoft Hypervisor"
-    exit 1
+test_features=""
+
+if [ "$hypervisor" = "mshv" ]; then
+    test_features="--features mshv"
 fi
 
 # lock the workloads folder to avoid parallel updating by different containers
@@ -209,7 +209,7 @@ fi
 
 export RUST_BACKTRACE=1
 
-cargo build --all --release --target "$BUILD_TARGET"
+cargo build --features mshv --all --release --target "$BUILD_TARGET"
 
 # Enable KSM with some reasonable parameters so that it won't take too long
 # for the memory to be merged between two processes.
@@ -224,13 +224,13 @@ echo "$PAGE_NUM" | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`
-time cargo test "common_parallel::$test_filter" --target "$BUILD_TARGET" -- --test-threads=$(($(nproc) / 8)) ${test_binary_args[*]}
+time cargo test "common_parallel::$test_filter" --target "$BUILD_TARGET" $test_features -- --test-threads=$(($(nproc) / 8)) ${test_binary_args[*]}
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
-    time cargo test "common_sequential::$test_filter" --target "$BUILD_TARGET" -- --test-threads=1 ${test_binary_args[*]}
+    time cargo test "common_sequential::$test_filter" --target "$BUILD_TARGET" $test_features -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -238,7 +238,7 @@ fi
 
 # Run all ACPI test cases
 if [ $RES -eq 0 ]; then
-    time cargo test "aarch64_acpi::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
+    time cargo test "aarch64_acpi::$test_filter" --target "$BUILD_TARGET" $test_features -- ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -246,14 +246,14 @@ fi
 
 # Run all test cases related to live migration
 if [ $RES -eq 0 ]; then
-    time cargo test "live_migration_parallel::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
+    time cargo test "live_migration_parallel::$test_filter" --target "$BUILD_TARGET" $test_features -- ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
 fi
 
 if [ $RES -eq 0 ]; then
-    time cargo test "live_migration_sequential::$test_filter" --target "$BUILD_TARGET" -- --test-threads=1 ${test_binary_args[*]}
+    time cargo test "live_migration_sequential::$test_filter" --target "$BUILD_TARGET" $test_features -- --test-threads=1 ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
