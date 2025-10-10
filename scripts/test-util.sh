@@ -179,3 +179,76 @@ download_ovmf() {
     time wget --quiet $OVMF_FW_URL || exit 1
     popd || exit
 }
+
+# Function to mount image partition, execute commands, and cleanup.
+# Arguments: $1: Image file path, $2: Mount directory, $3+: Commands to execute.
+mount_and_exec() {
+    local IMG="$1"
+    local MOUNT_DIR="$2"
+    local LOOP_DEV=""
+    local PARTITION_DEV=""
+    local COMMAND_STATUS=0
+
+    if [ ! -f "$IMG" ] || [ -z "$MOUNT_DIR" ]; then return 1; fi
+    mkdir -p "$MOUNT_DIR"
+
+    # Create loop device for the entire disk image
+    LOOP_DEV=$(sudo losetup -f --show "$IMG")
+    if [ -z "$LOOP_DEV" ]; then return 1; fi
+
+    # Scan for partitions and define partition device node (p1)
+    sudo partprobe "$LOOP_DEV" 2>/dev/null
+    PARTITION_DEV="${LOOP_DEV}p1"
+
+    # Wait for partition node
+    if ! sudo test -b "$PARTITION_DEV"; then
+        sleep 1
+        if ! sudo test -b "$PARTITION_DEV"; then
+            sudo losetup -d "$LOOP_DEV" || true
+            return 1
+        fi
+    fi
+
+    # Mount the partition
+    if ! sudo mount "$PARTITION_DEV" "$MOUNT_DIR"; then
+        sudo losetup -d "$LOOP_DEV" || true
+        return 1
+    fi
+
+    # Execute the commands
+    shift 2
+    "$@"
+    COMMAND_STATUS=$?
+
+    # Unmount and Detach
+    sudo umount "$MOUNT_DIR" || true
+    sudo losetup -d "$LOOP_DEV" || true
+
+    if [ $COMMAND_STATUS -ne 0 ]; then return 1; fi
+
+    return 0
+}
+
+# Function to copy a file from the host into the mounted disk image.
+# Arguments:
+#   $1: Image file path
+#   $2: Mount directory
+#   $3: Source file path
+#   $4: Destination file path
+copy_to_image() {
+    local IMG="$1"
+    local MOUNT_DIR="$2"
+    local SRC_FILE="$3"
+    local DST_PATH="$4"
+
+    if [ ! -f "$SRC_FILE" ] || [ -z "$DST_PATH" ]; then
+        echo "Source file or destination path is empty"
+        return 1
+    fi
+
+    # Define the command to copy the file
+    local COPY_COMMAND="sudo cp \"$SRC_FILE\" \"$MOUNT_DIR/$DST_PATH\""
+
+    mount_and_exec "$IMG" "$MOUNT_DIR" /bin/bash -c "$COPY_COMMAND"
+    return $?
+}
