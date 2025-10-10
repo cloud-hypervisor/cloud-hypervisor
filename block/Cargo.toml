@@ -20,7 +20,7 @@ smallvec = "1.15.1"
 thiserror = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 virtio-bindings = { workspace = true }
-virtio-queue = { workspace = true }
+virtio-queue = { workspace = true, features = ["test-utils"] }
 vm-memory = { workspace = true, features = [
   "backend-atomic",
   "backend-bitmap",
@@ -28,3 +28,6 @@ vm-memory = { workspace = true, features = [
 ] }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { workspace = true }
+
+[dev-dependencies]
+epoll = { workspace = true }
