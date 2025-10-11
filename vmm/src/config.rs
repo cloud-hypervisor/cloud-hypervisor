@@ -648,6 +648,10 @@ impl CpusConfig {
                     features.amx = true;
                     Ok(())
                 }
+                "nested" => {
+                    features.nested = true;
+                    Ok(())
+                }
                 _ => Err(Error::InvalidCpuFeatures(s)),
             }?;
         }
