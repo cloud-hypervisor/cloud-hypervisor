@@ -111,7 +111,7 @@ kvm-bindings = "0.12.1"
 kvm-ioctls = "0.22.1"
 # TODO: update to 0.13.1+
 linux-loader = { git = "https://github.com/rust-vmm/linux-loader", branch = "main" }
-mshv-bindings = "0.6.0"
+mshv-bindings = "0.6.4"
 mshv-ioctls = "0.6.0"
 seccompiler = "0.5.0"
 vfio-bindings = { version = "0.6.0", default-features = false }
@@ -122,8 +122,8 @@ vhost-user-backend = { version = "0.20.0", default-features = false }
 virtio-bindings = "0.2.6"
 virtio-queue = "0.16.0"
 vm-fdt = { git = "https://github.com/rust-vmm/vm-fdt", branch = "main" }
-vm-memory = "0.16.1"
-vmm-sys-util = "0.14.0"
+vm-memory = "0.17.1"
+vmm-sys-util = "0.15.0"
 
 # igvm crates
 # TODO: bump to 0.3.5 release
