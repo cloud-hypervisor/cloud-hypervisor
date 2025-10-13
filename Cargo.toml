@@ -120,7 +120,7 @@ vhost = { version = "0.14.0", default-features = false }
 vhost-user-backend = { version = "0.20.0", default-features = false }
 virtio-bindings = "0.2.6"
 virtio-queue = "0.16.0"
-vm-fdt = { git = "https://github.com/rust-vmm/vm-fdt", branch = "main" }
+vm-fdt = "0.3.0"
 vm-memory = "0.16.1"
 vmm-sys-util = "0.14.0"
 
