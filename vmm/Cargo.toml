@@ -48,7 +48,7 @@ epoll = { workspace = true }
 event_monitor = { path = "../event_monitor" }
 flume = { workspace = true }
 futures = { version = "0.3.31", optional = true }
-gdbstub = { version = "0.7.7", optional = true }
+gdbstub = { version = "0.7.8", optional = true }
 gdbstub_arch = { version = "0.3.2", optional = true }
 hex = { version = "0.4.3", optional = true }
 hypervisor = { path = "../hypervisor" }
