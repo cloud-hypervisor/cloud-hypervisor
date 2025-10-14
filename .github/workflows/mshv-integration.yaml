@@ -26,6 +26,7 @@ jobs:
     continue-on-error: true
     steps:
       - name: Run integration tests
+        timeout-minutes: 60
         env:
           KEY: azure_key_${{ github.run_id }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
