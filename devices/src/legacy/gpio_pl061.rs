@@ -345,7 +345,7 @@ mod tests {
             &self,
             _index: InterruptIndex,
             _config: InterruptSourceConfig,
-            _masked: bool,
+            _masked_state: usize,
             _set_gsi: bool,
         ) -> result::Result<(), std::io::Error> {
             Ok(())
