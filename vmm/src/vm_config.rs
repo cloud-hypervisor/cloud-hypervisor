@@ -54,6 +54,22 @@ pub fn default_cpuconfig_max_phys_bits() -> u8 {
     DEFAULT_MAX_PHYS_BITS
 }
 
+// Some runtime objects, such as net devices and memory zones, may
+// be provided to Cloud Hypervisor via file descriptors constructed
+// "externally". For example, when a unix domain socket is used to
+// configure/create a new VM via VmCreate HTTP API command, the API
+// client may send file descriptors via SCM_RIGHTS UDS side-channel.
+// `ExternalFdsConfig` will then contain the list of devices (`ids`)
+// that are to receive the FDs; in the API call `ExternalFdsConfig::fds`
+// field will initially be empty, and the API handler will populate
+// it with file descriptors received via the "side channel".
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ExternalFdsConfig {
+    pub ids: Vec<String>,
+    #[serde(default)]
+    pub fds: Vec<i32>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpusConfig {
     pub boot_vcpus: u32,
@@ -154,6 +170,10 @@ pub struct MemoryZoneConfig {
     pub hotplugged_size: Option<u64>,
     #[serde(default)]
     pub prefault: bool,
+
+    // Not serialized/deserialized, as it is populated via ExternalFdsConfig.
+    #[serde(skip)]
+    pub fd: Option<i32>,
 }
 
 impl ApplyLandlock for MemoryZoneConfig {
@@ -218,6 +238,24 @@ impl Default for MemoryConfig {
             zones: None,
             thp: true,
         }
+    }
+}
+
+impl MemoryConfig {
+    pub fn consume_fds(&mut self, fds: &ExternalFdsConfig) -> Result<(), PayloadConfigError> {
+        if fds.ids.is_empty() {
+            return Ok(());
+        }
+
+        let zones = self.zones.as_mut().unwrap();
+        for zone in zones {
+            let Some(idx) = fds.ids.iter().position(|id| id == &zone.id) else {
+                continue;
+            };
+            zone.fd = Some(fds.fds[idx]);
+        }
+
+        Ok(())
     }
 }
 
@@ -324,13 +362,7 @@ pub struct NetConfig {
     pub vhost_mode: VhostMode,
     #[serde(default)]
     pub id: Option<String>,
-    // Special deserialize handling:
-    // Therefore, we don't serialize FDs, and whatever value is here after
-    // deserialization is invalid.
-    //
-    // Valid FDs are transmitted via a different channel (SCM_RIGHTS message)
-    // and will be populated into this struct on the destination VMM eventually.
-    #[serde(default, deserialize_with = "deserialize_netconfig_fds")]
+    #[serde(skip)]
     pub fds: Option<Vec<i32>>,
     #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
@@ -342,6 +374,12 @@ pub struct NetConfig {
     pub offload_ufo: bool,
     #[serde(default = "default_netconfig_true")]
     pub offload_csum: bool,
+}
+
+impl NetConfig {
+    pub fn consume_fds(&mut self, fds: Vec<i32>) {
+        self.fds = Some(fds);
+    }
 }
 
 pub fn default_netconfig_true() -> bool {
@@ -366,21 +404,6 @@ pub const DEFAULT_NET_QUEUE_SIZE: u16 = 256;
 
 pub fn default_netconfig_queue_size() -> u16 {
     DEFAULT_NET_QUEUE_SIZE
-}
-
-fn deserialize_netconfig_fds<'de, D>(d: D) -> Result<Option<Vec<i32>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let invalid_fds: Option<Vec<i32>> = Option::deserialize(d)?;
-    if let Some(invalid_fds) = invalid_fds {
-        debug!(
-            "FDs in 'NetConfig' won't be deserialized as they are most likely invalid now. Deserializing them as -1."
-        );
-        Ok(Some(vec![-1; invalid_fds.len()]))
-    } else {
-        Ok(None)
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -695,6 +718,9 @@ pub enum PayloadConfigError {
     /// Specifying a kernel or firmware is not supported when an igvm is provided.
     #[error("Specifying a kernel or firmware is not supported when an igvm is provided")]
     IgvmPlusOtherPayloads,
+    /// The number of received FDs do not match the number of expected FDs.
+    #[error("The number of received FDs do not match the number of expected FDs")]
+    FdCountMismatch,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -950,6 +976,9 @@ pub struct VmConfig {
     pub landlock_rules: Option<Vec<LandlockConfig>>,
     #[cfg(feature = "ivshmem")]
     pub ivshmem: Option<IvshmemConfig>,
+
+    #[serde(default)]
+    pub external_fds: Option<ExternalFdsConfig>,
 }
 
 impl VmConfig {
@@ -1055,5 +1084,49 @@ impl VmConfig {
         } else {
             self.cpus.max_vcpus
         }
+    }
+
+    pub fn consume_fds(&mut self, fds: Vec<i32>) -> Result<(), PayloadConfigError> {
+        // Update self.external_fds, if appropriate.
+        let Some(external_fds) = self.external_fds.as_mut() else {
+            if fds.is_empty() {
+                return Ok(());
+            } else {
+                return Err(PayloadConfigError::FdCountMismatch);
+            }
+        };
+
+        if external_fds.ids.len() != fds.len() {
+            return Err(PayloadConfigError::FdCountMismatch);
+        }
+
+        if fds.is_empty() {
+            return Ok(());
+        }
+
+        external_fds.fds = fds;
+
+        // Consume memory fds.
+        self.memory.consume_fds(external_fds)?;
+
+        // Consume net fds.
+        let Some(nets) = self.net.as_mut() else {
+            return Ok(());
+        };
+
+        for net in nets {
+            let Some(net_id) = net.id.clone() else {
+                continue;
+            };
+            let mut fds = vec![];
+            for idx in 0..external_fds.ids.len() {
+                if external_fds.ids[idx] == net_id {
+                    fds.push(external_fds.fds[idx]);
+                }
+            }
+            net.consume_fds(fds);
+        }
+
+        Ok(())
     }
 }

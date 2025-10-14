@@ -854,11 +854,12 @@ fn restore_config(config: &str) -> Result<(String, Vec<i32>), Error> {
     let mut restore_config = RestoreConfig::parse(config).map_err(Error::Restore)?;
     // RestoreConfig is modified on purpose to take out the file descriptors.
     // These fds are passed to the server side process via SCM_RIGHTS
-    let fds = match &mut restore_config.net_fds {
-        Some(net_fds) => net_fds
-            .iter_mut()
-            .flat_map(|net| net.fds.take().unwrap_or_default())
-            .collect(),
+    let fds = match &mut restore_config.external_fds {
+        Some(external_fds) => {
+            let mut fds = vec![];
+            core::mem::swap(&mut fds, &mut external_fds.fds);
+            fds
+        }
         None => Vec::new(),
     };
     let restore_config = serde_json::to_string(&restore_config).unwrap();
