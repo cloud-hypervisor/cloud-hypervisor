@@ -37,7 +37,10 @@ use signal_hook::iterator::{Handle, Signals};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_memory::bitmap::{AtomicBitmap, BitmapSlice};
-use vm_memory::{ReadVolatile, VolatileMemoryError, VolatileSlice, WriteVolatile};
+use vm_memory::{
+    GuestAddress, GuestAddressSpace, GuestMemory, ReadVolatile, VolatileMemoryError, VolatileSlice,
+    WriteVolatile,
+};
 use vm_migration::protocol::*;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -1136,10 +1139,36 @@ impl Vmm {
         T: Read + ReadVolatile,
     {
         // Read table
-        let table = MemoryRangeTable::read_from(socket, req.length())?;
+        let ranges = MemoryRangeTable::read_from(socket, req.length())?;
+        let mem = memory_manager.guest_memory().memory();
 
-        // And then read the memory itself
-        memory_manager.receive_memory_regions(&table, socket)?;
+        for range in ranges.regions() {
+            let mut offset: u64 = 0;
+            // Here we are manually handling the retry in case we can't the
+            // whole region at once because we can't use the implementation
+            // from vm-memory::GuestMemory of read_exact_from() as it is not
+            // following the correct behavior. For more info about this issue
+            // see: https://github.com/rust-vmm/vm-memory/issues/174
+            loop {
+                let bytes_read = mem
+                    .read_volatile_from(
+                        GuestAddress(range.gpa + offset),
+                        socket,
+                        (range.length - offset) as usize,
+                    )
+                    .map_err(|e| {
+                        MigratableError::MigrateReceive(anyhow!(
+                            "Error receiving memory from socket: {e}",
+                        ))
+                    })?;
+                offset += bytes_read as u64;
+
+                if offset == range.length {
+                    break;
+                }
+            }
+        }
+
         Ok(())
     }
 
