@@ -19,7 +19,7 @@ use vhost::{VhostBackend, VringConfigData};
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
-use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
+use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
@@ -27,7 +27,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::{
     ActivateError, ActivateResult, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK,
     DEVICE_FEATURES_OK, GuestMemoryMmap, VIRTIO_F_IOMMU_PLATFORM, VirtioCommon, VirtioDevice,
-    VirtioInterrupt, VirtioInterruptType,
+    VirtioInterrupt, VirtioInterruptType, get_host_address_range,
 };
 
 #[derive(Error, Debug)]
@@ -326,15 +326,26 @@ impl Vdpa {
             .map_err(Error::SetStatus)
     }
 
-    fn dma_map(
+    /// # SAFETY
+    ///
+    /// `host_vaddr` must point to `size` bytes of valid memory.
+    unsafe fn dma_map(
         &mut self,
         iova: u64,
         size: u64,
         host_vaddr: *const u8,
         readonly: bool,
     ) -> Result<()> {
-        let iova_last = iova + size - 1;
+        let Some(iova_last) = iova.checked_add(size) else {
+            return Err(Error::InvalidIovaRange(iova, u64::MAX));
+        };
+        let Some(iova_last) = iova_last.checked_sub(1) else {
+            return Err(Error::InvalidIovaRange(0, 0));
+        };
         if iova < self.iova_range.first || iova_last > self.iova_range.last {
+            return Err(Error::InvalidIovaRange(iova, iova_last));
+        }
+        if isize::try_from(size).is_err() {
             return Err(Error::InvalidIovaRange(iova, iova_last));
         }
 
@@ -537,11 +548,10 @@ impl<M: GuestAddressSpace> VdpaDmaMapping<M> {
 
 impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M> {
     fn map(&self, iova: u64, gpa: u64, size: u64) -> result::Result<(), io::Error> {
+        let usize_size = size.try_into().unwrap();
         let mem = self.memory.memory();
         let guest_addr = GuestAddress(gpa);
-        let user_addr = if mem.check_range(guest_addr, size as usize) {
-            mem.get_host_address(guest_addr).unwrap() as *const u8
-        } else {
+        let Some(user_addr) = get_host_address_range(&*mem, guest_addr, usize_size) else {
             return Err(io::Error::other(format!(
                 "failed to convert guest address 0x{gpa:x} into \
                      host user virtual address"
@@ -552,16 +562,20 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VdpaDmaMapping<M
             "DMA map iova 0x{:x}, gpa 0x{:x}, size 0x{:x}, host_addr 0x{:x}",
             iova, gpa, size, user_addr as u64
         );
-        self.device
-            .lock()
-            .unwrap()
-            .dma_map(iova, size, user_addr, false)
-            .map_err(|e| {
-                io::Error::other(format!(
-                    "failed to map memory for vDPA device, \
+        // SAFETY: get_host_address_range() guarantees that
+        // user_addr points to `size` bytes of memory.
+        unsafe {
+            self.device
+                .lock()
+                .unwrap()
+                .dma_map(iova, size, user_addr, false)
+                .map_err(|e| {
+                    io::Error::other(format!(
+                        "failed to map memory for vDPA device, \
                          iova 0x{iova:x}, gpa 0x{gpa:x}, size 0x{size:x}: {e:?}"
-                ))
-            })
+                    ))
+                })
+        }
     }
 
     fn unmap(&self, iova: u64, size: u64) -> std::result::Result<(), std::io::Error> {
