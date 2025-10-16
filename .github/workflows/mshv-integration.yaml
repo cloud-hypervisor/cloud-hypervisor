@@ -1,4 +1,4 @@
-name: MSHV Integration Tests
+name: Cloud Hypervisor Tests (MSHV) (x86_64)
 on: [pull_request_target, merge_group]
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
       USERNAME: ${{ secrets.MSHV_USERNAME }}
 
   run-tests:
-    name: Integration Tests
+    name: Integration Tests (x86_64)
     needs: infra-setup
     if: ${{ always() && needs.infra-setup.result == 'success' }}
     runs-on: mshv
