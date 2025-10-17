@@ -60,8 +60,6 @@ write_files:
         [Service]
         Type=simple
         ExecStart=/usr/bin/cloud-hypervisor-notify-booted.sh
-        Restart=on-failure
-        RestartSec=2
 
         [Install]
         WantedBy=multi-user.target
@@ -73,4 +71,18 @@ write_files:
         #!/bin/bash
         set -e
 
-        echo -n "@DEFAULT_TCP_LISTENER_MESSAGE" > /dev/tcp/@HOST_IP/@TCP_LISTENER_PORT
+        COUNT=0
+        COUNT_LIMIT=90
+        while true; do
+            if [[ "$COUNT" -ge "$COUNT_LIMIT" ]]; then
+                echo "Failed to notify that the guest has booted after $COUNT_LIMIT attempts."
+                exit 1
+            fi
+
+            if timeout 5s bash -c "echo -n \"@DEFAULT_TCP_LISTENER_MESSAGE\" > /dev/tcp/@HOST_IP/@TCP_LISTENER_PORT"; then
+                exit 0
+            else
+                sleep 2
+                COUNT=$((COUNT+1))
+            fi
+        done
