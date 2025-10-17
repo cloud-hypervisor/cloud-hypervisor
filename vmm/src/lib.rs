@@ -686,6 +686,40 @@ pub struct Vmm {
     console_info: Option<ConsoleInfo>,
 }
 
+/// Abstract over the different types of listeners that can be used to receive connections.
+#[derive(Debug)]
+enum ReceiveListener {
+    Tcp(TcpListener),
+    Unix(UnixListener, Option<PathBuf>),
+}
+
+impl ReceiveListener {
+    /// Block until a connection is accepted.
+    fn accept(&mut self) -> std::result::Result<SocketStream, std::io::Error> {
+        match self {
+            ReceiveListener::Tcp(listener) => listener
+                .accept()
+                .map(|(socket, _)| SocketStream::Tcp(socket)),
+            ReceiveListener::Unix(listener, opt_path) => {
+                let socket = listener
+                    .accept()
+                    .map(|(socket, _)| SocketStream::Unix(socket))?;
+
+                // Remove the UNIX socket file after accepting the connection. Is this actually safe? If a user
+                // moves the file and creates a new one with the same name, we will delete the wrong file.
+                // Sounds like a confused deputy to me.
+                //
+                // TODO Don't do this?
+                if let Some(path) = opt_path.take() {
+                    std::fs::remove_file(&path)?;
+                }
+
+                Ok(socket)
+            }
+        }
+    }
+}
+
 /// The receiver's state machine behind the migration protocol.
 enum ReceiveMigrationState {
     /// The connection is established and we haven't received any commands yet.
@@ -1217,39 +1251,22 @@ impl Vmm {
         }
     }
 
-    fn receive_migration_socket(
+    fn receive_migration_listener(
         receiver_url: &str,
-    ) -> std::result::Result<SocketStream, MigratableError> {
+    ) -> std::result::Result<ReceiveListener, MigratableError> {
         if let Some(address) = receiver_url.strip_prefix("tcp:") {
-            let listener = TcpListener::bind(address).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error binding to TCP socket: {e}"))
-            })?;
-
-            let (socket, _addr) = listener.accept().map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!(
-                    "Error accepting connection on TCP socket: {e}"
-                ))
-            })?;
-
-            Ok(SocketStream::Tcp(socket))
+            TcpListener::bind(address)
+                .map_err(|e| {
+                    MigratableError::MigrateReceive(anyhow!("Error binding to TCP socket: {e}"))
+                })
+                .map(ReceiveListener::Tcp)
         } else {
             let path = Vmm::socket_url_to_path(receiver_url)?;
-            let listener = UnixListener::bind(&path).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error binding to UNIX socket: {e}"))
-            })?;
-
-            let (socket, _addr) = listener.accept().map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!(
-                    "Error accepting connection on UNIX socket: {e}"
-                ))
-            })?;
-
-            // Remove the UNIX socket file after accepting the connection
-            std::fs::remove_file(&path).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error removing UNIX socket file: {e}"))
-            })?;
-
-            Ok(SocketStream::Unix(socket))
+            UnixListener::bind(&path)
+                .map_err(|e| {
+                    MigratableError::MigrateReceive(anyhow!("Error binding to UNIX socket: {e}"))
+                })
+                .map(|listener| ReceiveListener::Unix(listener, Some(path)))
         }
     }
 
@@ -2306,8 +2323,12 @@ impl RequestHandler for Vmm {
             receive_data_migration.receiver_url
         );
 
+        let mut listener = Vmm::receive_migration_listener(&receive_data_migration.receiver_url)?;
         // Accept the connection and get the socket
-        let mut socket = Vmm::receive_migration_socket(&receive_data_migration.receiver_url)?;
+        let mut socket = listener.accept().map_err(|e| {
+            warn!("Failed to accept migration connection: {e}");
+            MigratableError::MigrateReceive(anyhow!("Failed to accept migration connection: {e}"))
+        })?;
 
         let mut state = ReceiveMigrationState::Established;
 
