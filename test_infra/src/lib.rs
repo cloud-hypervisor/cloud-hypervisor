@@ -91,16 +91,12 @@ pub enum WaitForBootError {
 }
 
 impl GuestNetworkConfig {
-    pub fn wait_vm_boot(&self, custom_timeout: Option<u32>) -> Result<(), WaitForBootError> {
+    pub fn wait_vm_boot(&self, custom_timeout: u32) -> Result<(), WaitForBootError> {
         let start = std::time::Instant::now();
         // The 'port' is unique per 'GUEST' and listening to wild-card ip avoids retrying on 'TcpListener::bind()'
         let listen_addr = format!("0.0.0.0:{}", self.tcp_listener_port);
         let expected_guest_addr = self.guest_ip0.as_str();
         let mut s = String::new();
-        let timeout = match custom_timeout {
-            Some(t) => t,
-            None => DEFAULT_TCP_LISTENER_TIMEOUT,
-        };
 
         let mut closure = || -> Result<(), WaitForBootError> {
             let listener =
@@ -122,15 +118,18 @@ impl GuestNetworkConfig {
             .expect("Cannot add 'tcp_listener' event to epoll");
             let mut events = [epoll::Event::new(epoll::Events::empty(), 0); 1];
             loop {
-                let num_events =
-                    match epoll::wait(epoll_fd, (timeout * 1000) as i32, &mut events[..]) {
-                        Ok(num_events) => Ok(num_events),
-                        Err(e) => match e.raw_os_error() {
-                            Some(libc::EAGAIN) | Some(libc::EINTR) => continue,
-                            _ => Err(e),
-                        },
-                    }
-                    .map_err(WaitForBootError::EpollWait)?;
+                let num_events = match epoll::wait(
+                    epoll_fd,
+                    (custom_timeout * 1000).try_into().unwrap(),
+                    &mut events[..],
+                ) {
+                    Ok(num_events) => Ok(num_events),
+                    Err(e) => match e.raw_os_error() {
+                        Some(libc::EAGAIN) | Some(libc::EINTR) => continue,
+                        _ => Err(e),
+                    },
+                }
+                .map_err(WaitForBootError::EpollWait)?;
                 if num_events == 0 {
                     return Err(WaitForBootError::EpollWaitTimeout);
                 }
@@ -163,7 +162,7 @@ impl GuestNetworkConfig {
                 let duration = start.elapsed();
                 eprintln!(
                     "\n\n==== Start 'wait_vm_boot' (FAILED) ==== \
-                    \n\nduration =\"{duration:?}, timeout = {timeout}s\" \
+                    \n\nduration =\"{duration:?}, timeout = {custom_timeout}s\" \
                     \nlisten_addr=\"{listen_addr}\" \
                     \nexpected_guest_addr=\"{expected_guest_addr}\" \
                     \nmessage=\"{s}\" \
@@ -1085,7 +1084,17 @@ impl Guest {
         .map_err(Error::Parsing)
     }
 
-    pub fn wait_vm_boot(&self, custom_timeout: Option<u32>) -> Result<(), Error> {
+    fn default_boot_timeout(&self) -> u32 {
+        self.boot_timeout
+    }
+
+    pub fn wait_vm_boot(&self) -> Result<(), Error> {
+        self.network
+            .wait_vm_boot(self.default_boot_timeout())
+            .map_err(Error::WaitForBoot)
+    }
+
+    pub fn wait_vm_boot_custom_timeout(&self, custom_timeout: u32) -> Result<(), Error> {
         self.network
             .wait_vm_boot(custom_timeout)
             .map_err(Error::WaitForBoot)
@@ -1223,7 +1232,7 @@ impl Guest {
         );
     }
 
-    pub fn reboot_linux(&self, current_reboot_count: u32, custom_timeout: Option<u32>) {
+    pub fn reboot_linux(&self, current_reboot_count: u32) {
         let list_boots_cmd = "sudo last | grep -c reboot";
         let boot_count = self
             .ssh_command(list_boots_cmd)
@@ -1235,7 +1244,7 @@ impl Guest {
         assert_eq!(boot_count, current_reboot_count + 1);
         self.ssh_command("sudo reboot").unwrap();
 
-        self.wait_vm_boot(custom_timeout).unwrap();
+        self.wait_vm_boot().unwrap();
         let boot_count = self
             .ssh_command(list_boots_cmd)
             .unwrap()
