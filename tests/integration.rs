@@ -219,7 +219,7 @@ fn _test_api_shutdown(target_api: TargetApi, guest: Guest) {
         // Then boot it
         assert!(target_api.remote_command("boot", None));
 
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         // Check that the VM booted as expected
         assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
@@ -239,7 +239,7 @@ fn _test_api_shutdown(target_api: TargetApi, guest: Guest) {
         // Then boot it again
         assert!(target_api.remote_command("boot", None));
 
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         // Check that the VM booted as expected
         assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
@@ -284,7 +284,7 @@ fn _test_api_delete(target_api: TargetApi, guest: Guest) {
         // Then boot it
         assert!(target_api.remote_command("boot", None));
 
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         // Check that the VM booted as expected
         assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
@@ -306,7 +306,7 @@ fn _test_api_delete(target_api: TargetApi, guest: Guest) {
         // Then boot it again
         assert!(target_api.remote_command("boot", None));
 
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         // Check that the VM booted as expected
         assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
@@ -766,7 +766,7 @@ fn setup_ovs_dpdk_guests(
     let guest_net_iface = "enp0s5";
 
     let r = std::panic::catch_unwind(|| {
-        guest1.wait_vm_boot(None).unwrap();
+        guest1.wait_vm_boot().unwrap();
 
         guest1
             .ssh_command(&format!(
@@ -811,7 +811,7 @@ fn setup_ovs_dpdk_guests(
                     .unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest2.wait_vm_boot(None).unwrap();
+        guest2.wait_vm_boot().unwrap();
 
         guest2
             .ssh_command(&format!(
@@ -999,7 +999,7 @@ fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8, 
         .unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
         assert_eq!(
             guest.get_cpu_count().unwrap_or_default(),
             u32::from(total_vcpus)
@@ -1114,7 +1114,7 @@ fn _test_guest_numa_nodes(acpi: bool) {
         .unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         guest.check_numa_common(
             Some(&[960_000, 1_920_000, 2_880_000]),
@@ -1180,7 +1180,7 @@ fn _test_power_button(acpi: bool) {
     let child = cmd.spawn().unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
         assert!(remote_command(&api_socket, "power-button", None));
     });
 
@@ -1272,7 +1272,7 @@ fn test_vhost_user_net(
     }
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         if let Some(tap_name) = tap {
             let tap_count = exec_host_command_output(&format!("ip link | grep -c {tap_name}"));
@@ -1418,7 +1418,7 @@ fn test_vhost_user_blk(
         .unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         // Check both if /dev/vdc exists and if the block size is 16M.
         assert_eq!(
@@ -1560,7 +1560,7 @@ fn test_boot_from_vhost_user_blk(
         .unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         // Just check the VM booted correctly.
         assert_eq!(guest.get_cpu_count().unwrap_or_default(), num_queues as u32);
@@ -1646,7 +1646,7 @@ fn _test_virtio_fs(
     let mut child = guest_command.capture_output().spawn().unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         if hotplug {
             // Add fs to the VM
@@ -1820,7 +1820,7 @@ fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
         .unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         // Check for the presence of /dev/pmem0
         assert_eq!(
@@ -1837,7 +1837,7 @@ fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
         assert_eq!(guest.ssh_command("sudo umount /mnt").unwrap(), "");
         assert_eq!(guest.ssh_command("ls /mnt").unwrap(), "");
 
-        guest.reboot_linux(0, None);
+        guest.reboot_linux(1);
         assert_eq!(guest.ssh_command("sudo mount /dev/pmem0 /mnt").unwrap(), "");
         assert_eq!(
             guest
@@ -1890,7 +1890,7 @@ fn _test_virtio_vsock(hotplug: bool) {
     let mut child = cmd.capture_output().spawn().unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         if hotplug {
             let (cmd_success, cmd_output) = remote_command_w_output(
@@ -1914,7 +1914,7 @@ fn _test_virtio_vsock(hotplug: bool) {
 
         // Validate vsock works as expected.
         guest.check_vsock(socket.as_str());
-        guest.reboot_linux(0, None);
+        guest.reboot_linux(1);
         // Validate vsock still works after a reboot.
         guest.check_vsock(socket.as_str());
 
@@ -1963,7 +1963,7 @@ fn test_memory_mergeable(mergeable: bool) {
         .unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest1.wait_vm_boot(None).unwrap();
+        guest1.wait_vm_boot().unwrap();
     });
     if r.is_err() {
         kill_child(&mut child1);
@@ -1989,7 +1989,7 @@ fn test_memory_mergeable(mergeable: bool) {
         .unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest2.wait_vm_boot(None).unwrap();
+        guest2.wait_vm_boot().unwrap();
         let ksm_ps_guest2 = get_ksm_pages_shared();
 
         if mergeable {
@@ -2263,7 +2263,7 @@ fn _test_virtio_iommu(acpi: bool) {
         .unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         // Verify the virtio-iommu device is present.
         assert!(
@@ -2515,7 +2515,7 @@ fn _test_simple_launch(guest: &Guest) {
         .unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(Some(120)).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
         assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
@@ -2628,7 +2628,7 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(Some(120)).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
 
@@ -2683,7 +2683,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert!(
                     guest
@@ -2729,7 +2729,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
             let pid = child.id();
             let taskset_vcpu0 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep vcpu0 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
             assert_eq!(String::from_utf8_lossy(&taskset_vcpu0.stdout).trim(), "0,2");
@@ -2782,7 +2782,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
             let pid = child.id();
             let taskset_q0 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep disk1_q0 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
             assert_eq!(String::from_utf8_lossy(&taskset_q0.stdout).trim(), "0,2");
@@ -2817,7 +2817,7 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
 
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         let r = std::panic::catch_unwind(|| {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 48);
@@ -2854,7 +2854,7 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
 
-        guest.wait_vm_boot(Some(120)).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         let r = std::panic::catch_unwind(|| {
             assert!(guest.get_total_memory().unwrap_or_default() > 128_000_000);
@@ -2898,7 +2898,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert!(guest.get_total_memory().unwrap_or_default() > 2_880_000);
 
@@ -2917,7 +2917,7 @@ mod common_parallel {
             thread::sleep(std::time::Duration::new(5, 0));
             assert!(guest.get_total_memory().unwrap_or_default() > 4_800_000);
 
-            guest.reboot_linux(0, None);
+            guest.reboot_linux(1);
 
             // Check the amount of RAM after reboot
             assert!(guest.get_total_memory().unwrap_or_default() > 4_800_000);
@@ -2982,7 +2982,7 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
 
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         let r = std::panic::catch_unwind(|| {
             let (cmd_success, cmd_output) = remote_command_w_output(
@@ -3038,7 +3038,7 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
 
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         #[cfg(target_arch = "x86_64")]
         let grep_cmd = "grep -c PCI-MSI /proc/interrupts";
@@ -3078,7 +3078,7 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
 
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         #[cfg(target_arch = "aarch64")]
         let iface = "enp0s4";
@@ -3157,7 +3157,7 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
 
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         let grep_cmd = "lspci | grep \"Host bridge\" | wc -l";
 
@@ -3274,7 +3274,7 @@ mod common_parallel {
         let cmd = "cat /sys/block/vdc/device/../numa_node";
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert_eq!(
                 guest
@@ -3312,7 +3312,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
@@ -3362,7 +3362,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
@@ -3428,7 +3428,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Check both if /dev/vdc exists and if the block size is 16M.
             assert_eq!(
@@ -3595,7 +3595,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Check both if /dev/vdc exists and if the block size is 100 MiB.
             assert_eq!(
@@ -3668,7 +3668,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(Some(120)).unwrap();
+            guest.wait_vm_boot().unwrap();
         });
 
         kill_child(&mut child);
@@ -3771,7 +3771,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert_eq!(
                 guest
@@ -3818,7 +3818,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert_eq!(
                 guest
@@ -3854,7 +3854,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert_eq!(
                 guest
@@ -3895,7 +3895,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert_eq!(
                 guest
@@ -4000,7 +4000,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Simple checks to validate the VM booted properly
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
@@ -4037,7 +4037,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             let tap_count = exec_host_command_output("ip link | grep -c mytap1");
             assert_eq!(String::from_utf8_lossy(&tap_count.stdout).trim(), "1");
@@ -4077,7 +4077,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Test that PMU exists.
             assert_eq!(
@@ -4114,7 +4114,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Test that there is no ttyS0
             assert_eq!(
@@ -4162,7 +4162,7 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Test that there is a ttyS0
             assert_eq!(
@@ -4218,7 +4218,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Test that there is a ttyS0
             assert_eq!(
@@ -4278,7 +4278,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Test that there is a ttyS0
             assert_eq!(
@@ -4340,7 +4340,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
             // Get pty fd for console
             let console_path = get_pty_path(&api_socket, "console");
             _test_pty_interaction(console_path);
@@ -4389,7 +4389,7 @@ mod common_parallel {
             .unwrap();
 
         let _ = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
         });
 
         let mut socat_command = Command::new("socat");
@@ -4454,7 +4454,7 @@ mod common_parallel {
         let cmd = format!("echo {text} | sudo tee /dev/hvc0");
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert!(
                 guest
@@ -4497,7 +4497,7 @@ mod common_parallel {
             .spawn()
             .unwrap();
 
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         guest.ssh_command("sudo shutdown -h now").unwrap();
 
@@ -4794,7 +4794,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
@@ -4888,7 +4888,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // 2 network interfaces + default localhost ==> 3 interfaces
             assert_eq!(
@@ -4992,7 +4992,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
 
@@ -5012,7 +5012,7 @@ mod common_parallel {
                 u32::from(desired_vcpus)
             );
 
-            guest.reboot_linux(0, None);
+            guest.reboot_linux(1);
 
             assert_eq!(
                 guest.get_cpu_count().unwrap_or_default(),
@@ -5081,7 +5081,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
 
@@ -5102,7 +5102,7 @@ mod common_parallel {
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
             assert!(guest.get_total_memory().unwrap_or_default() < 960_000);
 
-            guest.reboot_linux(0, None);
+            guest.reboot_linux(1);
 
             assert!(guest.get_total_memory().unwrap_or_default() < 960_000);
 
@@ -5127,7 +5127,7 @@ mod common_parallel {
             let desired_ram = 1024 << 20;
             resize_command(&api_socket, None, Some(desired_ram), None, None);
 
-            guest.reboot_linux(1, None);
+            guest.reboot_linux(1);
 
             assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
             assert!(guest.get_total_memory().unwrap_or_default() < 1_920_000);
@@ -5163,7 +5163,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
 
@@ -5191,7 +5191,7 @@ mod common_parallel {
             assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
             assert!(guest.get_total_memory().unwrap_or_default() < 1_920_000);
 
-            guest.reboot_linux(0, None);
+            guest.reboot_linux(0);
 
             // Check the amount of memory after reboot is 1GiB
             assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
@@ -5234,7 +5234,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
             assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
@@ -5293,7 +5293,7 @@ mod common_parallel {
             .spawn()
             .unwrap();
 
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         let r = std::panic::catch_unwind(|| {
             let overhead = get_vmm_overhead(child.id(), guest_memory_size_kb);
@@ -5337,7 +5337,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Check /dev/vdc is not there
             assert_eq!(
@@ -5410,7 +5410,7 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Check /dev/vdc is not there
             assert_eq!(
@@ -5508,7 +5508,7 @@ mod common_parallel {
                 .unwrap();
 
             // Reboot the VM.
-            guest.reboot_linux(0, None);
+            guest.reboot_linux(1);
 
             // Check still there after reboot
             assert_eq!(
@@ -5536,7 +5536,7 @@ mod common_parallel {
                 0
             );
 
-            guest.reboot_linux(1, None);
+            guest.reboot_linux(1);
 
             // Check device still absent
             assert_eq!(
@@ -5740,7 +5740,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // MIN-IO column
             assert_eq!(
@@ -5809,7 +5809,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Wait for balloon memory's initialization and check its size.
             // The virtio-balloon driver might take a few seconds to report the
@@ -5863,7 +5863,7 @@ mod common_parallel {
 
         let pid = child.id();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Check the initial RSS is less than 1GiB
             let rss = process_rss_kib(pid);
@@ -5952,7 +5952,7 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Check /dev/pmem0 is not there
             assert_eq!(
@@ -6003,7 +6003,7 @@ mod common_parallel {
                 1
             );
 
-            guest.reboot_linux(0, None);
+            guest.reboot_linux(0);
 
             // Check still there after reboot
             assert_eq!(
@@ -6031,7 +6031,7 @@ mod common_parallel {
                 0
             );
 
-            guest.reboot_linux(1, None);
+            guest.reboot_linux(1);
 
             // Check still absent after reboot
             assert_eq!(
@@ -6184,7 +6184,7 @@ mod common_parallel {
                 2
             );
 
-            guest.reboot_linux(0, None);
+            guest.reboot_linux(1);
 
             // Check still there after reboot
             // 1 network interfaces + default localhost ==> 2 interfaces
@@ -6273,7 +6273,7 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             let orig_counters = get_counters(&api_socket);
             guest
@@ -6312,7 +6312,7 @@ mod common_parallel {
         let vmcore_file = temp_vmcore_file_path(&guest.tmp_dir);
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert!(remote_command(&api_socket, "pause", None));
 
@@ -6360,7 +6360,7 @@ mod common_parallel {
         let vmcore_file = temp_vmcore_file_path(&guest.tmp_dir);
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert!(remote_command(
                 &api_socket,
@@ -6401,7 +6401,7 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             let mut expected_reboot_count = 1;
 
@@ -6427,7 +6427,7 @@ mod common_parallel {
             // Trigger a panic (sync first). We need to do this inside a screen with a delay so the SSH command returns.
             guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
             // Allow some time for the watchdog to trigger (max 30s) and reboot to happen
-            guest.wait_vm_boot(Some(50)).unwrap();
+            guest.wait_vm_boot().unwrap();
             // Check a reboot is triggered by the watchdog
             expected_reboot_count += 1;
             assert_eq!(get_reboot_count(&guest), expected_reboot_count);
@@ -6484,7 +6484,7 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Trigger guest a panic
             make_guest_panic(&guest);
@@ -6552,7 +6552,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert_eq!(
                 guest
@@ -6564,7 +6564,7 @@ mod common_parallel {
                 2
             );
 
-            guest.reboot_linux(0, None);
+            guest.reboot_linux(1);
 
             assert_eq!(
                 guest
@@ -6700,7 +6700,7 @@ mod common_parallel {
         // gets tested through wait_vm_boot() as it expects to receive a
         // HTTP request, and through the SSH command as well.
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert_eq!(
                 guest
@@ -6712,7 +6712,7 @@ mod common_parallel {
                 2
             );
 
-            guest.reboot_linux(0, None);
+            guest.reboot_linux(1);
 
             assert_eq!(
                 guest
@@ -6954,7 +6954,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Hotplug the SPDK-NVMe device to the VM
             let (cmd_success, cmd_output) = remote_command_w_output(
@@ -7000,7 +7000,7 @@ mod common_parallel {
             assert_eq!(guest.ssh_command("sudo umount /mnt").unwrap(), "");
             assert_eq!(guest.ssh_command("ls /mnt").unwrap(), "");
 
-            guest.reboot_linux(0, None);
+            guest.reboot_linux(1);
             assert_eq!(
                 guest.ssh_command("sudo mount /dev/nvme0n1 /mnt").unwrap(),
                 ""
@@ -7047,7 +7047,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Check both if /dev/vdc exists and if the block size is 128M.
             assert_eq!(
@@ -7171,7 +7171,7 @@ mod common_parallel {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Check we can find network interface related to vDPA device
             assert_eq!(
@@ -7247,7 +7247,7 @@ mod common_parallel {
         thread::sleep(std::time::Duration::new(10, 0));
         let mut child = guest_cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
             assert_eq!(
                 guest.ssh_command("ls /dev/tpm0").unwrap().trim(),
                 "/dev/tpm0"
@@ -7302,7 +7302,7 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let mut r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
         });
 
         kill_child(&mut child);
@@ -7346,7 +7346,7 @@ mod common_parallel {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert!(remote_command(&api_socket, "nmi", None));
 
@@ -7415,7 +7415,7 @@ mod dbus_api {
 
             // Then boot it
             assert!(http_api.remote_command("boot", None));
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Check that the VM booted as expected
             assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
@@ -7434,7 +7434,7 @@ mod dbus_api {
 
             // Then boot it again
             assert!(http_api.remote_command("boot", None));
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Check that the VM booted as expected
             assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
@@ -7572,7 +7572,7 @@ mod ivshmem {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Make sure the source VM is functional
             // Check the number of vCPUs
@@ -7719,7 +7719,7 @@ mod ivshmem {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
             _test_ivshmem(&guest, ivshmem_file_path, file_size);
         });
         kill_child(&mut child);
@@ -7783,7 +7783,7 @@ mod ivshmem {
         let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
@@ -8016,7 +8016,7 @@ mod common_sequential {
         let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
@@ -8284,7 +8284,7 @@ mod common_sequential {
         let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // close the fds after VM boots, as CH duplicates them before using
             for tap in taps.iter() {
@@ -8481,7 +8481,7 @@ mod common_sequential {
         let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
@@ -9623,7 +9623,7 @@ mod vfio {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
 
@@ -9673,7 +9673,7 @@ mod vfio {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Hotplug the card to the VM
             let (cmd_success, cmd_output) = remote_command_w_output(
@@ -9721,12 +9721,12 @@ mod vfio {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Check the VFIO device works after boot
             guest.check_nvidia_gpu();
 
-            guest.reboot_linux(0, None);
+            guest.reboot_linux(1);
 
             // Check the VFIO device works after reboot
             guest.check_nvidia_gpu();
@@ -9761,7 +9761,7 @@ mod vfio {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             assert!(
                 guest
@@ -9987,7 +9987,7 @@ mod live_migration {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Make sure the source VM is functional
             // Check the number of vCPUs
@@ -10151,7 +10151,7 @@ mod live_migration {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Make sure the source VM is functional
             // Check the number of vCPUs
@@ -10352,7 +10352,7 @@ mod live_migration {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Make sure the source VM is functional
             // Check the number of vCPUs
@@ -10578,7 +10578,7 @@ mod live_migration {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Make sure the source VM is functional
             // Check the number of vCPUs
@@ -10684,7 +10684,7 @@ mod live_migration {
             // Trigger a panic (sync first). We need to do this inside a screen with a delay so the SSH command returns.
             guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
             // Allow some time for the watchdog to trigger (max 30s) and reboot to happen
-            guest.wait_vm_boot(Some(50)).unwrap();
+            guest.wait_vm_boot().unwrap();
             // Check a reboot is triggered by the watchdog
             expected_reboot_count += 1;
             assert_eq!(get_reboot_count(&guest), expected_reboot_count);
@@ -10869,7 +10869,7 @@ mod live_migration {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             // Make sure the source VM is functaionl
             // Check the number of vCPUs
@@ -11085,7 +11085,7 @@ mod live_migration {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
             // Ensure the source VM is running normally
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
             assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
@@ -11311,7 +11311,7 @@ mod aarch64_acpi {
                 .unwrap();
 
             let r = std::panic::catch_unwind(|| {
-                guest.wait_vm_boot(Some(120)).unwrap();
+                guest.wait_vm_boot().unwrap();
 
                 assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
                 assert!(guest.get_total_memory().unwrap_or_default() > 400_000);
@@ -11411,7 +11411,7 @@ mod rate_limiter {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
             let measured_bps =
                 measure_virtio_net_throughput(test_timeout, num_queues / 2, &guest, rx, true)
                     .unwrap();
@@ -11497,7 +11497,7 @@ mod rate_limiter {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             let fio_command = format!(
                 "sudo fio --filename=/dev/vdc --name=test --output-format=json \
@@ -11591,7 +11591,7 @@ mod rate_limiter {
             .unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
 
             let mut fio_command = format!(
                 "sudo fio --name=global --output-format=json \
@@ -11691,7 +11691,7 @@ mod fw_cfg {
         let mut child = cmd.spawn().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot(None).unwrap();
+            guest.wait_vm_boot().unwrap();
             // Wait a while for guest
             thread::sleep(std::time::Duration::new(3, 0));
             let result = guest
