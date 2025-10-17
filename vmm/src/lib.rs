@@ -63,8 +63,8 @@ use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
-    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
-    VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, ExternalFdsConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig,
+    VdpaConfig, VmConfig, VsockConfig,
 };
 
 #[cfg(not(target_arch = "riscv64"))]
@@ -1613,22 +1613,14 @@ impl RequestHandler for Vmm {
         let vm_config = Arc::new(Mutex::new(
             recv_vm_config(source_url).map_err(VmError::Restore)?,
         ));
-        restore_cfg
-            .validate(&vm_config.lock().unwrap().clone())
-            .map_err(VmError::ConfigValidation)?;
 
-        // Update VM's net configurations with new fds received for restore operation
-        if let (Some(restored_nets), Some(vm_net_configs)) =
-            (restore_cfg.net_fds, &mut vm_config.lock().unwrap().net)
-        {
-            for net in restored_nets.iter() {
-                for net_config in vm_net_configs.iter_mut() {
-                    // update only if the net dev is backed by FDs
-                    if net_config.id == Some(net.id.clone()) && net_config.fds.is_some() {
-                        net_config.fds.clone_from(&net.fds);
-                    }
-                }
-            }
+        if let Some(external_fds) = restore_cfg.external_fds.clone() {
+            let ExternalFdsConfig { ids, fds } = external_fds;
+            let mut vm_config = vm_config.lock().unwrap();
+            vm_config.external_fds = Some(vm_config::ExternalFdsConfig { ids, fds: vec![] });
+            vm_config
+                .consume_fds(fds)
+                .map_err(|_| VmError::InvalidExternalFds)?;
         }
 
         self.vm_restore(source_url, vm_config, restore_cfg.prefault)
@@ -2432,6 +2424,7 @@ mod unit_tests {
             landlock_rules: None,
             #[cfg(feature = "ivshmem")]
             ivshmem: None,
+            external_fds: None,
         })
     }
 

@@ -8208,6 +8208,192 @@ mod common_sequential {
 
     #[test]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #6970")]
+    #[cfg(not(feature = "mshv"))]
+    fn test_memfds() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let kernel_path = direct_kernel_boot_path();
+
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
+        let disk_path = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
+
+        // Spawn an "empty" instance of Cloud Hypervisor that is only listening on an API socket.
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_source])
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        // Wait for the child to spawn, otherwise UnixStream::connect() fails with file-not-found error.
+        thread::sleep(Duration::new(2, 0));
+
+        // Work with the child using the API socket.
+        let r = std::panic::catch_unwind(|| {
+            // Prepare the VM config.
+            let vm_config = r#"{
+                "cpus":{"boot_vcpus": 4, "max_vcpus": 4},
+                "memory":{
+                    "size": 0,
+                    "zones": [{"id": "mem0", "size": 536870912, "shared": true}]
+                },
+                "console": {"mode": "Off"},
+                "serial": {"mode": "Tty"},
+                "disks":[{"path":"__DISK__"}],
+                "payload":{"kernel":"__KERNEL__", "cmdline":"__CMDLINE__"},
+                "external_fds":{"ids":["mem0"]}
+            }"#;
+
+            let vm_config = vm_config
+                .replace("__KERNEL__", kernel_path.as_os_str().to_str().unwrap())
+                .replace("__DISK__", disk_path.as_str())
+                .replace("__CMDLINE__", DIRECT_KERNEL_BOOT_CMDLINE);
+
+            // Create a mem FD.
+            let memfd_name_tag = format!("{}.memfd", temp_api_path(&guest.tmp_dir));
+            let c_memfd_name_tag = std::ffi::CString::new(memfd_name_tag).unwrap();
+            let mem_fd =
+                unsafe { libc::memfd_create(c_memfd_name_tag.as_ptr(), libc::MFD_CLOEXEC) };
+            assert!(mem_fd > 0);
+            assert_eq!(0, unsafe { libc::ftruncate(mem_fd, 536870912) });
+
+            let mut api_socket =
+                std::os::unix::net::UnixStream::connect(api_socket_source).unwrap();
+
+            api_client::simple_api_full_command_with_fds(
+                &mut api_socket,
+                "PUT",
+                "vm.create",
+                Some(vm_config.as_str()),
+                vec![mem_fd],
+            )
+            .unwrap();
+
+            // Boot the VM.
+            api_client::simple_api_full_command(&mut api_socket, "PUT", "vm.boot", None).unwrap();
+
+            // Pause the VM.
+            api_client::simple_api_command(&mut api_socket, "PUT", "pause", None).unwrap();
+
+            // Create the snapshot directory.
+            let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+
+            // Snapshot the VM.
+            let snapshot_config = format!("{{\"destination_url\": \"file://{snapshot_dir}\"}}");
+            api_client::simple_api_command(
+                &mut api_socket,
+                "PUT",
+                "snapshot",
+                Some(&snapshot_config),
+            )
+            .unwrap();
+
+            // Delete the VM so that we can restore it.
+            api_client::simple_api_command(&mut api_socket, "PUT", "delete", None).unwrap();
+
+            // Verify that the snapshot dir contains only two files:
+            // the config and the state, without guest mem.
+            let file_count = std::fs::read_dir(snapshot_dir.as_str())
+                .unwrap()
+                .filter(|entry| entry.is_ok())
+                .count();
+            assert_eq!(file_count, 2);
+
+            // Restore the VM.
+            let restore_config = format!(
+                "{{\"source_url\":\"file://{snapshot_dir}\",\"prefault\":false,\"external_fds\":{{\"ids\":[\"mem0\"]}}}}"
+            );
+            api_client::simple_api_command_with_fds(
+                &mut api_socket,
+                "PUT",
+                "restore",
+                Some(&restore_config),
+                vec![mem_fd],
+            )
+            .unwrap();
+
+            // Resume the VM.
+            api_client::simple_api_command(&mut api_socket, "PUT", "resume", None).unwrap();
+
+            // Validate events.
+            //
+            // There is no way that we can ensure the 'write()' to the
+            // event file is completed when the 'resume' request is
+            // returned successfully, because the 'write()' was done
+            // asynchronously from a different thread of Cloud
+            // Hypervisor (e.g. the event-monitor thread).
+            thread::sleep(std::time::Duration::new(1, 0));
+
+            let all_events = [
+                &MetaEvent {
+                    event: "starting".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "booting".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "booted".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "pausing".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "paused".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "snapshotting".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "snapshotted".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "shutdown".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "deleted".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "restoring".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "restored".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "resuming".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "resumed".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "activated".to_string(),
+                    device_id: None,
+                },
+            ];
+            assert!(check_sequential_events(&all_events, &event_path));
+        });
+
+        // Shutdown the target VM and check console output
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    #[cfg_attr(target_arch = "aarch64", ignore = "See #6970")]
     fn test_snapshot_restore_with_fd() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -8333,8 +8519,9 @@ mod common_sequential {
         )
         .unwrap();
         let restore_params = format!(
-            "source_url=file://{},net_fds=[{}@[{},{}]]",
+            "source_url=file://{},external_ids=[{},{}],external_fds=[{},{}]",
             snapshot_dir,
+            net_id,
             net_id,
             taps[0].as_raw_fd(),
             taps[1].as_raw_fd()
