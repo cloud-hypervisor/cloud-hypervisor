@@ -1,7 +1,3 @@
 d4a44acc6014d5f83dea1c625c43d677a95fa75f alpine-minirootfs-x86_64.tar.gz
-f1eccdc5e1b515dbad294426ab081b47ebfb97c0 focal-server-cloudimg-amd64-custom-20210609-0.qcow2
-7f5a8358243a96adf61f5c20139b29f308f2c0e3 focal-server-cloudimg-amd64-custom-20210609-0.raw
-5f10738920efb74f0bf854cadcd1b1fd544e49c8 jammy-server-cloudimg-amd64-custom-20241017-0.qcow2
-c1dfbe7abde400e675844568dbe9d3914222f6de jammy-server-cloudimg-amd64-custom-20241017-0.raw
 540ac358429305d7aa94e15363665d1c9d845982 hypervisor-fw
 4e96fd0914a44005d40707b2b0c7e829e4086bd5 CLOUDHV.fd

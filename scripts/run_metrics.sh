@@ -62,6 +62,7 @@ if ! grep focal sha1sums-"${TEST_ARCH}" | sha1sum --check; then
     echo "sha1sum validation of images failed, remove invalid images to fix the issue."
     exit 1
 fi
+
 popd || exit
 
 if [ "${TEST_ARCH}" == "aarch64" ]; then
