@@ -18,7 +18,7 @@ if [ "$hypervisor" = "mshv" ]; then
     test_features="--features mshv"
 fi
 
-cp scripts/sha1sums-x86_64 "$WORKLOADS_DIR"
+cp scripts/sha1sums-x86_64* "$WORKLOADS_DIR"
 
 if [ ! -f "$WORKLOADS_DIR/hypervisor-fw" ]; then
     download_hypervisor_fw
@@ -57,7 +57,7 @@ if [ ! -f "$ALPINE_INITRAMFS_IMAGE" ]; then
 fi
 
 pushd "$WORKLOADS_DIR" || exit
-if ! sha1sum sha1sums-x86_64 --check; then
+if ! sha1sum sha1sums-x86_64 sha1sums-x86_64-common --check; then
     echo "sha1sum validation of images failed, remove invalid images to fix the issue."
     exit 1
 fi

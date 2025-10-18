@@ -28,6 +28,9 @@ CTR_CLH_ROOT_DIR="/cloud-hypervisor"
 CTR_CLH_CARGO_BUILT_DIR="${CTR_CLH_ROOT_DIR}/build"
 CTR_CLH_CARGO_TARGET="${CTR_CLH_CARGO_BUILT_DIR}/cargo_target"
 CTR_CLH_INTEGRATION_WORKLOADS="/root/workloads"
+SRC_IGVM_FILES_PATH="/usr/share/cloud-hypervisor/cvm"
+DEST_IGVM_FILES_PATH="$CLH_INTEGRATION_WORKLOADS/igvm_files"
+CTR_IGVM_FILES_PATH="/igvm_files"
 
 # Container networking option
 CTR_CLH_NET="bridge"
@@ -170,6 +173,23 @@ process_volumes_args() {
     done
 }
 
+# Copy IGVM files to the workloads directory
+# This is needed for the IGVM integration tests to run
+#   $1 - source path
+#   $2 - destination path
+copy_igvm_files() {
+    src=$1
+    dest=$2
+
+    if [ -d "$src" ]; then
+        say "Copying IGVM files from $src to $dest"
+        cp "$src"/* "$dest"
+    else
+        say_err "IGVM File path '$src' not found on host"
+        exit 1
+    fi
+}
+
 cmd_help() {
     echo ""
     echo "Cloud Hypervisor $(basename "$0")"
@@ -197,6 +217,7 @@ cmd_help() {
     echo "        --integration-windows        Run the Windows guest integration tests."
     echo "        --integration-live-migration Run the live-migration integration tests."
     echo "        --integration-rate-limiter   Run the rate-limiter integration tests."
+    echo "        --integration-cvm            Run the Confidential VM integration tests."
     echo "        --libc                       Select the C library Cloud Hypervisor will be built against. Default is gnu"
     echo "        --metrics                    Generate performance metrics"
     echo "        --coverage                   Generate code coverage information"
@@ -330,6 +351,7 @@ cmd_tests() {
     integration_windows=false
     integration_live_migration=false
     integration_rate_limiter=false
+    integration_cvm=false
     metrics=false
     coverage=false
     libc="gnu"
@@ -348,6 +370,7 @@ cmd_tests() {
         "--integration-windows") { integration_windows=true; } ;;
         "--integration-live-migration") { integration_live_migration=true; } ;;
         "--integration-rate-limiter") { integration_rate_limiter=true; } ;;
+        "--integration-cvm") { integration_cvm=true; } ;;
         "--metrics") { metrics=true; } ;;
         "--coverage") { coverage=true; } ;;
         "--libc")
@@ -444,6 +467,33 @@ cmd_tests() {
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             "$CTR_IMAGE" \
             dbus-run-session ./scripts/run_integration_tests_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
+    fi
+
+    if [ "$integration_cvm" = true ]; then
+        mkdir -p "$DEST_IGVM_FILES_PATH"
+        copy_igvm_files "$SRC_IGVM_FILES_PATH" "$DEST_IGVM_FILES_PATH"
+        say "Running CVM integration tests for $target..."
+        $DOCKER_RUNTIME run \
+            --workdir "$CTR_CLH_ROOT_DIR" \
+            --rm \
+            --privileged \
+            --security-opt seccomp=unconfined \
+            --ipc=host \
+            --net="$CTR_CLH_NET" \
+            --mount type=tmpfs,destination=/tmp \
+            --volume /dev:/dev \
+            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+            --volume "$DEST_IGVM_FILES_PATH:$CTR_IGVM_FILES_PATH" \
+            ${exported_volumes:+"$exported_volumes"} \
+            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
+            --env USER="root" \
+            --env BUILD_TARGET="$target" \
+            --env RUSTFLAGS="$rustflags" \
+            --env TARGET_CC="$target_cc" \
+            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
+            "$CTR_IMAGE" \
+            ./scripts/run_integration_tests_cvm.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration_vfio" = true ]; then

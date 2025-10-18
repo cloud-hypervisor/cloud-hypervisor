@@ -13,13 +13,14 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 use std::{env, fmt, fs, io, thread};
 
+use rand::{Rng, rng};
 use serde_json::Value;
 use ssh2::Session;
 use thiserror::Error;
@@ -850,6 +851,7 @@ pub enum GuestParamKey {
     KernelPath = 1,
     KernelCmdline = 2,
     BootTimeout = 3,
+    ConsoleType = 4,
 }
 pub struct Guest {
     pub tmp_dir: TempDir,
@@ -1409,7 +1411,18 @@ impl<'a> GuestCommand<'a> {
     }
 
     pub fn default_kernel_cmdline(&mut self) -> &mut Self {
-        if let Some(fw) = self.guest.params.get(&GuestParamKey::FwPath) {
+        if self.guest.vm_type == GuestVmType::Cvm {
+            let console_str = if let Some(c) = self.guest.params.get(&GuestParamKey::ConsoleType) {
+                c.downcast_ref::<String>().unwrap().as_str()
+            } else {
+                "hvc0"
+            };
+            let igvm = direct_igvm_boot_path(Some(console_str));
+            self.command.args(["--igvm", igvm.to_str().unwrap()]);
+            self.command
+                .args(["--host-data", generate_host_data().as_str()]);
+            self.command.args(["--platform", "sev_snp=on"]);
+        } else if let Some(fw) = self.guest.params.get(&GuestParamKey::FwPath) {
             let fw_str = fw.downcast_ref::<String>().unwrap();
             self.command.args(["--kernel", fw_str.as_str()]);
         } else if let Some(kernel) = self.guest.params.get(&GuestParamKey::KernelPath) {
@@ -1816,4 +1829,37 @@ pub fn extract_bar_address(output: &str, device_desc: &str, bar_index: usize) ->
 pub enum GuestVmType {
     Regular,
     Cvm,
+}
+
+// Get the direct igvm boot file path based on the console type
+fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
+    // get the default hvc0 igvm file if console string is not passed
+    let console_str = console.unwrap_or("hvc0");
+
+    if console_str != "hvc0" && console_str != "ttyS0" {
+        panic!(
+            "{}",
+            format!("IGVM console should be hvc0 or ttyS0, got: {console_str}")
+        );
+    }
+
+    let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
+    let igvm_path_exist = Path::new(&igvm_filepath);
+    if igvm_path_exist.exists() {
+        PathBuf::from(igvm_filepath)
+    } else {
+        PathBuf::from("")
+    }
+}
+
+// Generate a random 64-character hex string for host data
+fn generate_host_data() -> String {
+    let mut rng = rng();
+    #[allow(clippy::format_collect)]
+    let hex_string: String = (0..64)
+        .map(|_| rng.random_range(0..=15))
+        .map(|num| format!("{num:x}"))
+        .collect();
+
+    hex_string
 }
