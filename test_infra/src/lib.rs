@@ -18,6 +18,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use std::{env, fmt, fs, io, thread};
 
+use rand::{Rng, rng};
 use serde_json::Value;
 use ssh2::Session;
 use thiserror::Error;
@@ -75,6 +76,7 @@ pub struct GuestNetworkConfig {
 pub const DEFAULT_TCP_LISTENER_MESSAGE: &str = "booted";
 pub const DEFAULT_TCP_LISTENER_PORT: u16 = 8000;
 pub const DEFAULT_TCP_LISTENER_TIMEOUT: i32 = 120;
+pub const DEFAULT_CVM_TCP_LISTENER_TIMEOUT: i32 = 120;
 
 #[derive(Error, Debug)]
 pub enum WaitForBootError {
@@ -888,6 +890,7 @@ pub struct Guest {
     pub boot_timeout: i32,
     pub kernel_path: Option<String>,
     pub kernel_cmdline: Option<String>,
+    pub console_type: Option<String>,
 }
 
 // Return the next id that can be used for this guest. This is stored in a
@@ -956,6 +959,7 @@ impl Guest {
             boot_timeout: DEFAULT_TCP_LISTENER_TIMEOUT,
             kernel_path: None,
             kernel_cmdline: None,
+            console_type: None,
         }
     }
 
@@ -1478,8 +1482,19 @@ impl<'a> GuestCommand<'a> {
     }
 
     pub fn default_kernel_cmdline(&mut self) -> &mut Self {
-        if let Some(kernel) = &self.guest.kernel_path {
-            self.command.args(["--kernel", kernel]);
+        if self.guest.vm_type == GuestVmType::Confidential {
+            let console_str = if let Some(c) = &self.guest.console_type {
+                c.as_str()
+            } else {
+                "hvc0"
+            };
+            let igvm = direct_igvm_boot_path(Some(console_str));
+            self.command.args(["--igvm", igvm.to_str().unwrap()]);
+            self.command
+                .args(["--host-data", generate_host_data().as_str()]);
+            self.command.args(["--platform", "sev_snp=on"]);
+        } else if let Some(kernel) = &self.guest.kernel_path {
+            self.command.args(["--kernel", kernel.as_str()]);
             if let Some(cmdline) = &self.guest.kernel_cmdline {
                 self.command.args(["--cmdline", cmdline]);
             }
@@ -1889,4 +1904,37 @@ pub fn extract_bar_address(output: &str, device_desc: &str, bar_index: usize) ->
 pub enum GuestVmType {
     Regular,
     Confidential,
+}
+
+// Get the direct igvm boot file path based on the console type
+fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
+    // get the default hvc0 igvm file if console string is not passed
+    let console_str = console.unwrap_or("hvc0");
+
+    if console_str != "hvc0" && console_str != "ttyS0" {
+        panic!(
+            "{}",
+            format!("IGVM console should be hvc0 or ttyS0, got: {console_str}")
+        );
+    }
+
+    let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
+    let igvm_path_exist = Path::new(&igvm_filepath);
+    if igvm_path_exist.exists() {
+        PathBuf::from(igvm_filepath)
+    } else {
+        PathBuf::from("")
+    }
+}
+
+// Generate a random 64-character hex string for host data
+fn generate_host_data() -> String {
+    let mut rng = rng();
+    #[allow(clippy::format_collect)]
+    let hex_string: String = (0..64)
+        .map(|_| rng.random_range(0..=15))
+        .map(|num| format!("{num:x}"))
+        .collect();
+
+    hex_string
 }
