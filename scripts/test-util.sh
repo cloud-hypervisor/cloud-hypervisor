@@ -179,3 +179,68 @@ download_ovmf() {
     time wget --quiet $OVMF_FW_URL || exit 1
     popd || exit
 }
+
+# Function to mount image partition, execute commands, and cleanup.
+# Arguments: $1: Image file path, $2: Mount directory, $3+: Commands to execute.
+execute_on_mounted_image() {
+    local IMG="$1"
+    local MOUNT_DIR="$2"
+    local LOOP_DEV=""
+    local PARTITION_DEV=""
+    local COMMAND_STATUS=0
+
+    if [ ! -f "$IMG" ] || [ -z "$MOUNT_DIR" ]; then return 1; fi
+    mkdir -p "$MOUNT_DIR"
+
+    # Create loop device for the entire disk image
+    LOOP_DEV=$(sudo losetup -f --show "$IMG")
+    if [ $? -ne 0 ]; then return 1; fi
+
+    # Scan for partitions and define partition device node (p1)
+    sudo partprobe "$LOOP_DEV" 2>/dev/null
+    PARTITION_DEV="${LOOP_DEV}p1"
+
+    # Wait for partition node
+    if ! sudo test -b "$PARTITION_DEV"; then
+        sleep 1
+        if ! sudo test -b "$PARTITION_DEV"; then
+            sudo losetup -d "$LOOP_DEV"
+            return 1
+        fi
+    fi
+
+    # Mount the partition
+    sudo mount "$PARTITION_DEV" "$MOUNT_DIR"
+    if [ $? -ne 0 ]; then
+        sudo losetup -d "$LOOP_DEV" || true
+        return 1
+    fi
+
+    # Execute the commands
+    shift 2
+    "$@"
+    COMMAND_STATUS=$?
+
+    # Unmount and Detach
+    sudo umount "$MOUNT_DIR" || true
+    sudo losetup -d "$LOOP_DEV" || true
+
+    if [ $COMMAND_STATUS -ne 0 ]; then return 1; fi
+
+    return 0
+}
+
+# Function to update the kernel in a mounted image.
+# Arguments: $1: Image file path, $2: Mount directory.
+update_kernel_in_image() {
+    local IMG="$1"
+    local MOUNT_DIR="$2"
+    local NEW_KERNEL="$WORKLOADS_DIR/Image-arm64.gz"
+
+    if [ ! -f "$NEW_KERNEL" ]; then return 1; fi
+
+    local COPY_COMMAND="sudo cp \"$NEW_KERNEL\" \"$MOUNT_DIR/boot/vmlinuz\""
+
+    execute_on_mounted_image "$IMG" "$MOUNT_DIR" /bin/bash -c "$COPY_COMMAND"
+    return $?
+}
