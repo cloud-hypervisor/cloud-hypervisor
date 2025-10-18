@@ -35,6 +35,7 @@ pub struct CpuFeatures {
     #[cfg(target_arch = "x86_64")]
     #[serde(default)]
     pub amx: bool,
+    pub nested_virt: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -1054,6 +1055,18 @@ impl VmConfig {
             ))
         } else {
             self.cpus.max_vcpus
+        }
+    }
+    pub(crate) fn to_hypervisor_vm_config(&self) -> hypervisor::HypervisorVmConfig {
+        hypervisor::HypervisorVmConfig {
+            #[cfg(feature = "tdx")]
+            tdx_enabled: self.platform.as_ref().map(|p| p.tdx).unwrap_or(false),
+            #[cfg(feature = "sev_snp")]
+            sev_snp_enabled: self.is_sev_snp_enabled(),
+            #[cfg(feature = "sev_snp")]
+            mem_size: self.memory.total_size(),
+            #[cfg(feature = "mshv")]
+            nested_enabled: self.cpus.features.nested_virt,
         }
     }
 }
