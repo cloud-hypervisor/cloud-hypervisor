@@ -12862,3 +12862,18 @@ mod fw_cfg {
         handle_child_output(r, &output);
     }
 }
+
+#[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+mod common_cvm {
+    use vm_memory::GuestAddress;
+
+    use crate::*;
+    #[test]
+    fn test_focal_simple_launch() {
+        let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let mut guest = Guest::new(Box::new(disk_config));
+        guest.vm_type = GuestVmType::Confidential;
+        guest.boot_timeout = DEFAULT_CVM_TCP_LISTENER_TIMEOUT;
+        _test_simple_launch(&guest)
+    }
+}

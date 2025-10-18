@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1009,SC2048,SC2086,SC1073,SC1040,SC1072
+# shellcheck source=/dev/null
 set -x
 
 hypervisor="kvm"
