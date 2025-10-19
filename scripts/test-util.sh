@@ -179,3 +179,47 @@ download_ovmf() {
     time wget --quiet $OVMF_FW_URL || exit 1
     popd || exit
 }
+
+download_x86_guest_images() {
+    FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.qcow2"
+    FOCAL_OS_IMAGE_URL="https://ch-images.azureedge.net/$FOCAL_OS_IMAGE_NAME"
+    FOCAL_OS_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_IMAGE_NAME"
+    if [ ! -f "$FOCAL_OS_IMAGE" ]; then
+        pushd "$WORKLOADS_DIR" || exit
+        time wget --quiet $FOCAL_OS_IMAGE_URL || exit 1
+        popd || exit
+    fi
+
+    FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0.raw"
+    FOCAL_OS_RAW_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME"
+    if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
+        pushd "$WORKLOADS_DIR" || exit
+        time qemu-img convert -p -f qcow2 -O raw $FOCAL_OS_IMAGE_NAME $FOCAL_OS_RAW_IMAGE_NAME || exit 1
+        popd || exit
+    fi
+
+    FOCAL_OS_QCOW_BACKING_FILE_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0-backing.qcow2"
+    FOCAL_OS_QCOW_BACKING_FILE_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_QCOW_BACKING_FILE_IMAGE_NAME"
+    if [ ! -f "$FOCAL_OS_QCOW_BACKING_FILE_IMAGE" ]; then
+        pushd "$WORKLOADS_DIR" || exit
+        time qemu-img create -f qcow2 -b "$FOCAL_OS_IMAGE" -F qcow2 $FOCAL_OS_QCOW_BACKING_FILE_IMAGE_NAME
+        popd || exit
+    fi
+
+    JAMMY_OS_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.qcow2"
+    JAMMY_OS_IMAGE_URL="https://ch-images.azureedge.net/$JAMMY_OS_IMAGE_NAME"
+    JAMMY_OS_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_IMAGE_NAME"
+    if [ ! -f "$JAMMY_OS_IMAGE" ]; then
+        pushd "$WORKLOADS_DIR" || exit
+        time wget --quiet $JAMMY_OS_IMAGE_URL || exit 1
+        popd || exit
+    fi
+
+    JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0.raw"
+    JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
+    if [ ! -f "$JAMMY_OS_RAW_IMAGE" ]; then
+        pushd "$WORKLOADS_DIR" || exit
+        time qemu-img convert -p -f qcow2 -O raw $JAMMY_OS_IMAGE_NAME $JAMMY_OS_RAW_IMAGE_NAME || exit 1
+        popd || exit
+    fi
+}
