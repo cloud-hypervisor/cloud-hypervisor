@@ -11,6 +11,7 @@ CLASSE = "CLASSE"
 Dake = "Dake"
 EXTINT = "EXTINT"
 INOUT = "INOUT"
+MSIS = "MSIS" # MSIs (Message Signaled Interrupt)
 SME = "SME" # Secure Memory Encryption
 THR = "THR" # Transmitter Holding Register
 TRANSLATER = "TRANSLATER"
