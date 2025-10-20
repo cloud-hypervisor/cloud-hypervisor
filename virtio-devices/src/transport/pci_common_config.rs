@@ -330,11 +330,6 @@ impl VirtioPciCommonConfig {
                     let mut locked_device = device.lock().unwrap();
                     locked_device
                         .ack_features(u64::from(value) << (self.driver_feature_select * 32));
-                } else {
-                    warn!(
-                        "invalid ack_features (page {}, value 0x{:x})",
-                        self.driver_feature_select, value
-                    );
                 }
             }
             0x20 => self.with_queue_mut(queues, |q| q.set_desc_table_address(Some(value), None)),
