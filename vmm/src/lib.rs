@@ -718,6 +718,127 @@ impl ReceiveListener {
             }
         }
     }
+
+    fn try_clone(&self) -> std::result::Result<Self, std::io::Error> {
+        match self {
+            ReceiveListener::Tcp(listener) => listener.try_clone().map(ReceiveListener::Tcp),
+            ReceiveListener::Unix(listener, opt_path) => listener
+                .try_clone()
+                .map(|listener| ReceiveListener::Unix(listener, opt_path.clone())),
+        }
+    }
+}
+
+/// Handles a `Memory` request by writing its payload to the VM memory.
+fn vm_receive_memory<T>(
+    req: &Request,
+    socket: &mut T,
+    guest_mem: &GuestMemoryAtomic<GuestMemoryMmap>,
+) -> std::result::Result<(), MigratableError>
+where
+    T: Read + ReadVolatile,
+{
+    assert_eq!(req.command(), Command::Memory);
+
+    // Read table
+    let ranges = MemoryRangeTable::read_from(socket, req.length())?;
+    let mem = guest_mem.memory();
+
+    for range in ranges.regions() {
+        let mut offset: u64 = 0;
+        // Here we are manually handling the retry in case we can't the
+        // whole region at once because we can't use the implementation
+        // from vm-memory::GuestMemory of read_exact_from() as it is not
+        // following the correct behavior. For more info about this issue
+        // see: https://github.com/rust-vmm/vm-memory/issues/174
+        loop {
+            let bytes_read = mem
+                .read_volatile_from(
+                    GuestAddress(range.gpa + offset),
+                    socket,
+                    (range.length - offset) as usize,
+                )
+                .map_err(|e| {
+                    MigratableError::MigrateReceive(anyhow!(
+                        "Error receiving memory from socket: {e}",
+                    ))
+                })?;
+            offset += bytes_read as u64;
+
+            if offset == range.length {
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// We keep track of additional connections for receiving VM migration data
+/// here.
+struct ReceiveAdditionalConnections {
+    accept_thread: std::thread::JoinHandle<()>,
+}
+
+impl ReceiveAdditionalConnections {
+    /// Starts a thread to accept incoming connections and handle them. These
+    /// additional connections are used to receive additional memory regions
+    /// during VM migration.
+    fn new(
+        listener: ReceiveListener,
+        guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    ) -> std::result::Result<Self, std::io::Error> {
+        let accept_thread = std::thread::spawn(move || {
+            let mut listener = listener;
+            let mut threads: Vec<std::thread::JoinHandle<()>> = Vec::new();
+            while let Ok(mut socket) = listener.accept() {
+                let guest_memory = guest_memory.clone();
+
+                // We handle errors locally and log them. Passing them along is
+                // painful with little value.
+                threads.push(std::thread::spawn(move || {
+                    loop {
+                        let req = match Request::read_from(&mut socket) {
+                            Ok(req) => req,
+                            Err(e) => {
+                                error!("Failed to read request: {e}");
+                                break;
+                            }
+                        };
+
+                        if req.command() != Command::Memory {
+                            error!("Dropping connection. Only Memory commands are allowed on additional connections");
+                            break;
+                        }
+
+                        if let Err(e) = vm_receive_memory(&req, &mut socket, &guest_memory) {
+                            error!("Failed to receive memory: {e}");
+                            break;
+                        }
+                    }
+                }));
+            }
+
+            info!("Stopped accepting additional connections. Cleaning up threads.");
+            threads.into_iter().for_each(|thread| {
+                thread.join().unwrap();
+            });
+        });
+
+        Ok(Self { accept_thread })
+    }
+}
+
+impl Drop for ReceiveAdditionalConnections {
+    fn drop(&mut self) {
+        // TODO Here we should make sure to shut down the accept thread before
+        // joining it. This is currently not so easy, because we don't have a
+        // way to signal the thread to stop accepting connections.
+
+        if !self.accept_thread.is_finished() {
+            warn!("Accept thread is still running");
+        }
+    }
 }
 
 /// The receiver's state machine behind the migration protocol.
@@ -739,6 +860,7 @@ enum ReceiveMigrationState {
     Configured(
         Arc<Mutex<MemoryManager>>,
         GuestMemoryAtomic<GuestMemoryMmap>,
+        ReceiveAdditionalConnections,
     ),
 
     /// Memory is populated and we received the state. The VM is ready to go.
@@ -937,6 +1059,7 @@ impl Vmm {
     /// _not_ write any response to the socket.
     fn vm_receive_migration_step(
         &mut self,
+        listener: &ReceiveListener,
         socket: &mut SocketStream,
         state: ReceiveMigrationState,
         req: &Request,
@@ -950,19 +1073,32 @@ impl Vmm {
             )))
         };
 
+        #[allow(clippy::type_complexity)]
         let mut configure_vm = |socket: &mut SocketStream,
                                 memory_files: HashMap<u32, File>|
          -> std::result::Result<
             (
                 Arc<Mutex<MemoryManager>>,
                 GuestMemoryAtomic<GuestMemoryMmap>,
+                ReceiveAdditionalConnections,
             ),
             MigratableError,
         > {
             let memory_manager = self.vm_receive_config(req, socket, memory_files)?;
 
             let guest_memory = memory_manager.lock().unwrap().guest_memory();
-            Ok((memory_manager, guest_memory))
+            Ok((
+                memory_manager,
+                guest_memory.clone(),
+                listener
+                    .try_clone()
+                    .and_then(|l| ReceiveAdditionalConnections::new(l, guest_memory))
+                    .map_err(|e| {
+                        MigratableError::MigrateReceive(anyhow!(
+                            "Failed to create receive additional connections: {e}"
+                        ))
+                    })?,
+            ))
         };
 
         let recv_memory_fd = |socket: &mut SocketStream,
@@ -986,28 +1122,33 @@ impl Vmm {
             },
             Started => match req.command() {
                 Command::MemoryFd => recv_memory_fd(socket, Vec::new()).map(MemoryFdsReceived),
-                Command::Config => {
-                    configure_vm(socket, Default::default()).map(|res| Configured(res.0, res.1))
-                }
+                Command::Config => configure_vm(socket, Default::default())
+                    .map(|res| Configured(res.0, res.1, res.2)),
                 _ => invalid_command(),
             },
             MemoryFdsReceived(memory_files) => match req.command() {
                 Command::MemoryFd => recv_memory_fd(socket, memory_files).map(MemoryFdsReceived),
                 Command::Config => configure_vm(socket, HashMap::from_iter(memory_files))
-                    .map(|res| Configured(res.0, res.1)),
+                    .map(|res| Configured(res.0, res.1, res.2)),
                 _ => invalid_command(),
             },
-            Configured(memory_manager, guest_memory) => match req.command() {
-                Command::Memory => {
-                    self.vm_receive_memory(req, socket, &guest_memory)?;
-                    Ok(Configured(memory_manager, guest_memory))
+            Configured(memory_manager, guest_memory, receive_additional_connections) => {
+                match req.command() {
+                    Command::Memory => {
+                        vm_receive_memory(req, socket, &guest_memory)?;
+                        Ok(Configured(
+                            memory_manager,
+                            guest_memory,
+                            receive_additional_connections,
+                        ))
+                    }
+                    Command::State => {
+                        self.vm_receive_state(req, socket, memory_manager)?;
+                        Ok(StateReceived)
+                    }
+                    _ => invalid_command(),
                 }
-                Command::State => {
-                    self.vm_receive_state(req, socket, memory_manager)?;
-                    Ok(StateReceived)
-                }
-                _ => invalid_command(),
-            },
+            }
             StateReceived => match req.command() {
                 Command::Complete => {
                     // The unwrap is safe, because the state machine makes sure we called
@@ -1173,49 +1314,6 @@ impl Vmm {
             MigratableError::MigrateReceive(anyhow!("Failed restoring the Vm: {e}"))
         })?;
         self.vm = Some(vm);
-
-        Ok(())
-    }
-
-    fn vm_receive_memory<T>(
-        &mut self,
-        req: &Request,
-        socket: &mut T,
-        guest_mem: &GuestMemoryAtomic<GuestMemoryMmap>,
-    ) -> std::result::Result<(), MigratableError>
-    where
-        T: Read + ReadVolatile,
-    {
-        // Read table
-        let ranges = MemoryRangeTable::read_from(socket, req.length())?;
-        let mem = guest_mem.memory();
-
-        for range in ranges.regions() {
-            let mut offset: u64 = 0;
-            // Here we are manually handling the retry in case we can't the
-            // whole region at once because we can't use the implementation
-            // from vm-memory::GuestMemory of read_exact_from() as it is not
-            // following the correct behavior. For more info about this issue
-            // see: https://github.com/rust-vmm/vm-memory/issues/174
-            loop {
-                let bytes_read = mem
-                    .read_volatile_from(
-                        GuestAddress(range.gpa + offset),
-                        socket,
-                        (range.length - offset) as usize,
-                    )
-                    .map_err(|e| {
-                        MigratableError::MigrateReceive(anyhow!(
-                            "Error receiving memory from socket: {e}",
-                        ))
-                    })?;
-                offset += bytes_read as u64;
-
-                if offset == range.length {
-                    break;
-                }
-            }
-        }
 
         Ok(())
     }
@@ -2337,6 +2435,7 @@ impl RequestHandler for Vmm {
             trace!("Command {:?} received", req.command());
 
             let (response, new_state) = match self.vm_receive_migration_step(
+                &listener,
                 &mut socket,
                 state,
                 &req,
