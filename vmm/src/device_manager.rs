@@ -1720,7 +1720,13 @@ impl DeviceManager {
             let vgic_state = vgic_snapshot
                 .to_state()
                 .map_err(DeviceManagerError::RestoreGetState)?;
-            let saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
+            let mut saved_vcpu_states = self.cpu_manager.lock().unwrap().get_saved_states();
+            #[cfg(target_arch = "aarch64")]
+            {
+                let saved_parked_vcpu_states = self.cpu_manager.lock().unwrap().get_parked_saved_states();
+                saved_vcpu_states.extend(saved_parked_vcpu_states);
+            }
+
             interrupt_controller
                 .lock()
                 .unwrap()

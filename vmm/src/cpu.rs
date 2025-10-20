@@ -1334,7 +1334,11 @@ impl CpuManager {
                                         match state {
                                             CpuState::Kvm(kvm_state) => {
                                                 debug!(
-                                                    "hypercall got first 4 regs = {} {} {} {}", kvm_state.core_regs.regs.regs[0], kvm_state.core_regs.regs.regs[1], kvm_state.core_regs.regs.regs[2], kvm_state.core_regs.regs.regs[3]
+                                                    "hypercall got first 4 regs = {} {} {} {}",
+                                                    kvm_state.core_regs.regs.regs[0],
+                                                    kvm_state.core_regs.regs.regs[1],
+                                                    kvm_state.core_regs.regs.regs[2],
+                                                    kvm_state.core_regs.regs.regs[3]
                                                 );
                                                 match kvm_state.core_regs.regs.regs[0] as u32 {
                                                     PSCI_0_2_FN64_CPU_ON => {
@@ -2696,8 +2700,10 @@ impl Pausable for CpuManager {
         // boolean. Since it'll be set to false, they will exit their pause loop
         // and go back to vmx root.
         for state in self.vcpu_states.iter() {
-            state.paused.store(false, Ordering::SeqCst);
-            state.unpark_thread();
+            if state.active() {
+                state.paused.store(false, Ordering::SeqCst);
+                state.unpark_thread();
+            }
         }
         Ok(())
     }
@@ -2713,6 +2719,12 @@ impl Snapshottable for CpuManager {
 
         // The CpuManager snapshot is a collection of all vCPUs snapshots.
         for vcpu in &self.vcpus {
+            let mut vcpu = vcpu.lock().unwrap();
+            cpu_manager_snapshot.add_snapshot(vcpu.id(), vcpu.snapshot()?);
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        for vcpu in &self.parked_vcpus {
             let mut vcpu = vcpu.lock().unwrap();
             cpu_manager_snapshot.add_snapshot(vcpu.id(), vcpu.snapshot()?);
         }
