@@ -369,7 +369,7 @@ fn _test_api_pause_resume(target_api: TargetApi, guest: Guest) {
         // SSH into the VM should fail
         ssh_command_ip(
             "grep -c processor /proc/cpuinfo",
-            &guest.network.guest_ip,
+            &guest.network.guest_ip0,
             2,
             5,
         )
@@ -575,7 +575,7 @@ fn prepare_vhost_user_net_daemon(
 
     // Start the daemon
     let mut net_params = format!(
-        "ip={ip},mask=255.255.255.0,socket={vunet_socket_path},num_queues={num_queues},queue_size=1024,client={client_mode}"
+        "ip={ip},mask=255.255.255.128,socket={vunet_socket_path},num_queues={num_queues},queue_size=1024,client={client_mode}"
     );
 
     if let Some(tap) = tap {
@@ -777,7 +777,7 @@ fn setup_ovs_dpdk_guests(
             .ssh_command(&format!("sudo ip link set up dev {guest_net_iface}"))
             .unwrap();
 
-        let guest_ip = guest1.network.guest_ip.clone();
+        let guest_ip = guest1.network.guest_ip0.clone();
         thread::spawn(move || {
             ssh_command_ip(
                 "nc -l 12345",
@@ -1221,7 +1221,7 @@ fn test_vhost_user_net(
 
     let (mut daemon_command, vunet_socket_path) = prepare_daemon(
         &guest.tmp_dir,
-        &guest.network.host_ip,
+        &guest.network.host_ip0,
         tap,
         mtu,
         num_queues,
@@ -1230,7 +1230,7 @@ fn test_vhost_user_net(
 
     let net_params = format!(
         "vhost_user=true,mac={},socket={},num_queues={},queue_size=1024{},vhost_mode={},mtu=3000",
-        guest.network.guest_mac,
+        guest.network.guest_mac0,
         vunet_socket_path,
         num_queues,
         if let Some(host_mac) = host_mac {
@@ -4021,8 +4021,8 @@ mod common_parallel {
             .args([
                 "--net",
                 guest.default_net_string().as_str(),
-                "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.0",
-                "tap=mytap1,mac=fe:1f:9e:e1:60:f2,ip=192.168.4.1,mask=255.255.255.0",
+                "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.128",
+                "tap=mytap1,mac=fe:1f:9e:e1:60:f2,ip=192.168.4.1,mask=255.255.255.128",
             ])
             .capture_output()
             .spawn()
@@ -4608,7 +4608,7 @@ mod common_parallel {
             ])
             .args([
                 "--net",
-                format!("tap={},mac={}", vfio_tap0, guest.network.guest_mac).as_str(),
+                format!("tap={},mac={}", vfio_tap0, guest.network.guest_mac0).as_str(),
                 format!(
                     "tap={},mac={},iommu=on",
                     vfio_tap1, guest.network.l2_guest_mac1
@@ -4873,7 +4873,7 @@ mod common_parallel {
             .args([
                 "--net",
                 guest.default_net_string().as_str(),
-                "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.0",
+                "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.128",
             ])
             .capture_output()
             .spawn()
@@ -5864,7 +5864,7 @@ mod common_parallel {
 
             // Spawn a command inside the guest to consume 2GiB of RAM for 60
             // seconds
-            let guest_ip = guest.network.guest_ip.clone();
+            let guest_ip = guest.network.guest_ip0.clone();
             thread::spawn(move || {
                 ssh_command_ip(
                     "stress --vm 1 --vm-bytes 2G --vm-keep --timeout 60",
@@ -6513,7 +6513,7 @@ mod common_parallel {
         let taps = net_util::open_tap(
             Some("chtap0"),
             Some(std::net::IpAddr::V4(
-                std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap(),
+                std::net::Ipv4Addr::from_str(&guest.network.host_ip0).unwrap(),
             )),
             None,
             &mut None,
@@ -6535,7 +6535,7 @@ mod common_parallel {
                     "fd=[{},{}],mac={},num_queues={}",
                     taps[0].as_raw_fd(),
                     taps[1].as_raw_fd(),
-                    guest.network.guest_mac,
+                    guest.network.guest_mac0,
                     num_queue_pairs * 2
                 ),
             ])
@@ -6606,7 +6606,7 @@ mod common_parallel {
         assert!(
             exec_host_command_status(&format!(
                 "sudo ip link set {} address {} up",
-                guest_macvtap_name, guest.network.guest_mac
+                guest_macvtap_name, guest.network.guest_mac0
             ))
             .success()
         );
@@ -6638,7 +6638,7 @@ mod common_parallel {
         assert!(
             exec_host_command_status(&format!(
                 "sudo ip address add {}/24 dev {}",
-                guest.network.host_ip, host_macvtap_name
+                guest.network.host_ip0, host_macvtap_name
             ))
             .success()
         );
@@ -6658,7 +6658,7 @@ mod common_parallel {
 
         let net_params = format!(
             "fd=[{},{}],mac={},num_queues=4",
-            tap_fd1, tap_fd2, guest.network.guest_mac
+            tap_fd1, tap_fd2, guest.network.guest_mac0
         );
 
         if !hotplug {
@@ -6760,7 +6760,7 @@ mod common_parallel {
             assert!(exec_host_command_status("ovs-vsctl del-port vhost-user1").success());
 
             // Spawn a new netcat listener in the first VM
-            let guest_ip = guest1.network.guest_ip.clone();
+            let guest_ip = guest1.network.guest_ip0.clone();
             thread::spawn(move || {
                 ssh_command_ip(
                     "nc -l 12345",
@@ -6829,7 +6829,7 @@ mod common_parallel {
             assert!(remote_command(&api_socket_restored, "resume", None));
 
             // Spawn a new netcat listener in the first VM
-            let guest_ip = guest1.network.guest_ip.clone();
+            let guest_ip = guest1.network.guest_ip0.clone();
             thread::spawn(move || {
                 ssh_command_ip(
                     "nc -l 12345",
@@ -7487,8 +7487,8 @@ mod ivshmem {
         let console_text = String::from("On a branch floating down river a cricket, singing.");
         let net_id = "net123";
         let net_params = format!(
-            "id={},tap=,mac={},ip={},mask=255.255.255.0",
-            net_id, guest.network.guest_mac, guest.network.host_ip
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
 
         let memory_param: &[&str] = if local {
@@ -7963,8 +7963,8 @@ mod common_sequential {
 
         let net_id = "net123";
         let net_params = format!(
-            "id={},tap=,mac={},ip={},mask=255.255.255.0",
-            net_id, guest.network.guest_mac, guest.network.host_ip
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
         let mut mem_params = "size=2G";
 
@@ -8223,7 +8223,7 @@ mod common_sequential {
         let taps = net_util::open_tap(
             Some(tap_name),
             Some(std::net::IpAddr::V4(
-                std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap(),
+                std::net::Ipv4Addr::from_str(&guest.network.host_ip0).unwrap(),
             )),
             None,
             &mut None,
@@ -8233,12 +8233,12 @@ mod common_sequential {
         )
         .unwrap();
         let net_params = format!(
-            "id={},fd=[{},{}],mac={},ip={},mask=255.255.255.0,num_queues={}",
+            "id={},fd=[{},{}],mac={},ip={},mask=255.255.255.128,num_queues={}",
             net_id,
             taps[0].as_raw_fd(),
             taps[1].as_raw_fd(),
-            guest.network.guest_mac,
-            guest.network.host_ip,
+            guest.network.guest_mac0,
+            guest.network.host_ip0,
             num_queue_pairs * 2
         );
 
@@ -8323,7 +8323,7 @@ mod common_sequential {
         let taps = net_util::open_tap(
             Some(tap_name),
             Some(std::net::IpAddr::V4(
-                std::net::Ipv4Addr::from_str(&guest.network.host_ip).unwrap(),
+                std::net::Ipv4Addr::from_str(&guest.network.host_ip0).unwrap(),
             )),
             None,
             &mut None,
@@ -8629,7 +8629,7 @@ mod windows {
             ssh_command_ip_with_auth(
                 cmd,
                 &self.auth,
-                &self.guest.network.guest_ip,
+                &self.guest.network.guest_ip0,
                 DEFAULT_SSH_RETRIES,
                 DEFAULT_SSH_TIMEOUT,
             )
@@ -8673,14 +8673,14 @@ mod windows {
         }
 
         fn run_dnsmasq(&self) -> std::process::Child {
-            let listen_address = format!("--listen-address={}", self.guest.network.host_ip);
+            let listen_address = format!("--listen-address={}", self.guest.network.host_ip0);
             let dhcp_host = format!(
                 "--dhcp-host={},{}",
-                self.guest.network.guest_mac, self.guest.network.guest_ip
+                self.guest.network.guest_mac0, self.guest.network.guest_ip0
             );
             let dhcp_range = format!(
                 "--dhcp-range=eth,{},{}",
-                self.guest.network.guest_ip, self.guest.network.guest_ip
+                self.guest.network.guest_ip0, self.guest.network.guest_ip0
             );
 
             Command::new("dnsmasq")
@@ -8820,7 +8820,7 @@ mod windows {
             let out = ssh_command_ip_with_auth(
                 cmd,
                 &self.auth,
-                &self.guest.network.guest_ip,
+                &self.guest.network.guest_ip0,
                 {
                     let mut ret = 1;
                     let mut tmo_acc = 0;
@@ -8954,9 +8954,9 @@ mod windows {
             .args([
                 "--net",
                 format!(
-                    "tap=,mac={},ip={},mask=255.255.255.0,num_queues=8",
-                    windows_guest.guest().network.guest_mac,
-                    windows_guest.guest().network.host_ip
+                    "tap=,mac={},ip={},mask=255.255.255.128,num_queues=8",
+                    windows_guest.guest().network.guest_mac0,
+                    windows_guest.guest().network.host_ip0
                 )
                 .as_str(),
             ])
@@ -9923,8 +9923,8 @@ mod live_migration {
         let console_text = String::from("On a branch floating down river a cricket, singing.");
         let net_id = "net123";
         let net_params = format!(
-            "id={},tap=,mac={},ip={},mask=255.255.255.0",
-            net_id, guest.network.guest_mac, guest.network.host_ip
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
 
         let memory_param: &[&str] = if local {
@@ -10077,8 +10077,8 @@ mod live_migration {
         let console_text = String::from("On a branch floating down river a cricket, singing.");
         let net_id = "net123";
         let net_params = format!(
-            "id={},tap=,mac={},ip={},mask=255.255.255.0",
-            net_id, guest.network.guest_mac, guest.network.host_ip
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
 
         let memory_param: &[&str] = if local {
@@ -10266,8 +10266,8 @@ mod live_migration {
         let console_text = String::from("On a branch floating down river a cricket, singing.");
         let net_id = "net123";
         let net_params = format!(
-            "id={},tap=,mac={},ip={},mask=255.255.255.0",
-            net_id, guest.network.guest_mac, guest.network.host_ip
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
 
         let memory_param: &[&str] = if local {
@@ -10513,8 +10513,8 @@ mod live_migration {
         let console_text = String::from("On a branch floating down river a cricket, singing.");
         let net_id = "net123";
         let net_params = format!(
-            "id={},tap=,mac={},ip={},mask=255.255.255.0",
-            net_id, guest.network.guest_mac, guest.network.host_ip
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
 
         let memory_param: &[&str] = if local {
@@ -10771,7 +10771,7 @@ mod live_migration {
         let r = std::panic::catch_unwind(|| {
             // Perform same checks to validate VM has been properly migrated
             // Spawn a new netcat listener in the OVS VM
-            let guest_ip = ovs_guest.network.guest_ip.clone();
+            let guest_ip = ovs_guest.network.guest_ip0.clone();
             thread::spawn(move || {
                 ssh_command_ip(
                     "nc -l 12345",
@@ -10819,8 +10819,8 @@ mod live_migration {
         let kernel_path = direct_kernel_boot_path();
         let net_id = "net123";
         let net_params = format!(
-            "id={},tap=,mac={},ip={},mask=255.255.255.0",
-            net_id, guest.network.guest_mac, guest.network.host_ip
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
 
         let boot_vcpus = 2;
@@ -11027,8 +11027,8 @@ mod live_migration {
         let console_text = String::from("On a branch floating down river a cricket, singing.");
         let net_id = "net123";
         let net_params = format!(
-            "id={},tap=,mac={},ip={},mask=255.255.255.0",
-            net_id, guest.network.guest_mac, guest.network.host_ip
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
         let memory_param: &[&str] = &["--memory", "size=4G,shared=on"];
         let boot_vcpus = 2;
@@ -11382,9 +11382,9 @@ mod rate_limiter {
         let limit_bps = (bw_size * 8 * 1000) as f64 / bw_refill_time as f64;
 
         let net_params = format!(
-            "tap=,mac={},ip={},mask=255.255.255.0,num_queues={},queue_size={},bw_size={},bw_refill_time={}",
-            guest.network.guest_mac,
-            guest.network.host_ip,
+            "tap=,mac={},ip={},mask=255.255.255.128,num_queues={},queue_size={},bw_size={},bw_refill_time={}",
+            guest.network.guest_mac0,
+            guest.network.host_ip0,
             num_queues,
             queue_size,
             bw_size,

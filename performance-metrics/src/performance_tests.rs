@@ -119,8 +119,8 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
     let num_queues = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
     let net_params = format!(
-        "tap=,mac={},ip={},mask=255.255.255.0,num_queues={},queue_size={}",
-        guest.network.guest_mac, guest.network.host_ip, num_queues, queue_size,
+        "tap=,mac={},ip={},mask=255.255.255.128,num_queues={},queue_size={}",
+        guest.network.guest_mac0, guest.network.host_ip0, num_queues, queue_size,
     );
 
     let mut child = GuestCommand::new(&guest)
@@ -160,8 +160,8 @@ pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
     let num_queues = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
     let net_params = format!(
-        "tap=,mac={},ip={},mask=255.255.255.0,num_queues={},queue_size={}",
-        guest.network.guest_mac, guest.network.host_ip, num_queues, queue_size,
+        "tap=,mac={},ip={},mask=255.255.255.128,num_queues={},queue_size={}",
+        guest.network.guest_mac0, guest.network.host_ip0, num_queues, queue_size,
     );
 
     let mut child = GuestCommand::new(&guest)
