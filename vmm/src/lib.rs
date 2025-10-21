@@ -882,6 +882,56 @@ impl ReceiveMigrationState {
     }
 }
 
+/// Establishes a connection to a migration destination socket (TCP or UNIX).
+fn send_migration_socket(
+    destination_url: &str,
+) -> std::result::Result<SocketStream, MigratableError> {
+    if let Some(address) = destination_url.strip_prefix("tcp:") {
+        info!("Connecting to TCP socket at {address}");
+
+        let socket = TcpStream::connect(address).map_err(|e| {
+            MigratableError::MigrateSend(anyhow!("Error connecting to TCP socket: {e}"))
+        })?;
+
+        Ok(SocketStream::Tcp(socket))
+    } else if let Some(path) = destination_url.strip_prefix("unix:") {
+        info!("Connecting to UNIX socket at {path:?}");
+
+        let socket = UnixStream::connect(path).map_err(|e| {
+            MigratableError::MigrateSend(anyhow!("Error connecting to UNIX socket: {e}"))
+        })?;
+
+        Ok(SocketStream::Unix(socket))
+    } else {
+        Err(MigratableError::MigrateSend(anyhow!(
+            "Invalid destination: {destination_url}"
+        )))
+    }
+}
+
+/// Creates a listener socket for receiving incoming migration connections (TCP or UNIX).
+fn receive_migration_listener(
+    receiver_url: &str,
+) -> std::result::Result<ReceiveListener, MigratableError> {
+    if let Some(address) = receiver_url.strip_prefix("tcp:") {
+        TcpListener::bind(address)
+            .map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error binding to TCP socket: {e}"))
+            })
+            .map(ReceiveListener::Tcp)
+    } else if let Some(path) = receiver_url.strip_prefix("unix:") {
+        UnixListener::bind(path)
+            .map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error binding to UNIX socket: {e}"))
+            })
+            .map(|listener| ReceiveListener::Unix(listener, Some(path.into())))
+    } else {
+        Err(MigratableError::MigrateSend(anyhow!(
+            "Invalid source: {receiver_url}"
+        )))
+    }
+}
+
 impl Vmm {
     pub const HANDLED_SIGNALS: [i32; 2] = [SIGTERM, SIGINT];
 
@@ -1318,56 +1368,6 @@ impl Vmm {
         Ok(())
     }
 
-    fn socket_url_to_path(url: &str) -> result::Result<PathBuf, MigratableError> {
-        url.strip_prefix("unix:")
-            .ok_or_else(|| {
-                MigratableError::MigrateSend(anyhow!("Could not extract path from URL: {url}"))
-            })
-            .map(|s| s.into())
-    }
-
-    fn send_migration_socket(
-        destination_url: &str,
-    ) -> std::result::Result<SocketStream, MigratableError> {
-        if let Some(address) = destination_url.strip_prefix("tcp:") {
-            info!("Connecting to TCP socket at {address}");
-
-            let socket = TcpStream::connect(address).map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("Error connecting to TCP socket: {e}"))
-            })?;
-
-            Ok(SocketStream::Tcp(socket))
-        } else {
-            let path = Vmm::socket_url_to_path(destination_url)?;
-            info!("Connecting to UNIX socket at {path:?}");
-
-            let socket = UnixStream::connect(&path).map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("Error connecting to UNIX socket: {e}"))
-            })?;
-
-            Ok(SocketStream::Unix(socket))
-        }
-    }
-
-    fn receive_migration_listener(
-        receiver_url: &str,
-    ) -> std::result::Result<ReceiveListener, MigratableError> {
-        if let Some(address) = receiver_url.strip_prefix("tcp:") {
-            TcpListener::bind(address)
-                .map_err(|e| {
-                    MigratableError::MigrateReceive(anyhow!("Error binding to TCP socket: {e}"))
-                })
-                .map(ReceiveListener::Tcp)
-        } else {
-            let path = Vmm::socket_url_to_path(receiver_url)?;
-            UnixListener::bind(&path)
-                .map_err(|e| {
-                    MigratableError::MigrateReceive(anyhow!("Error binding to UNIX socket: {e}"))
-                })
-                .map(|listener| ReceiveListener::Unix(listener, Some(path)))
-        }
-    }
-
     // Send memory from the given table.
     // Returns true if there were dirty pages to send
     fn vm_send_memory(
@@ -1399,7 +1399,7 @@ impl Vmm {
         send_data_migration: &VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
         // Set up the socket connection
-        let mut socket = Self::send_migration_socket(&send_data_migration.destination_url)?;
+        let mut socket = send_migration_socket(&send_data_migration.destination_url)?;
 
         // Start the migration
         Request::start().write_to(&mut socket)?;
@@ -2413,7 +2413,7 @@ impl RequestHandler for Vmm {
             receive_data_migration.receiver_url
         );
 
-        let mut listener = Vmm::receive_migration_listener(&receive_data_migration.receiver_url)?;
+        let mut listener = receive_migration_listener(&receive_data_migration.receiver_url)?;
         // Accept the connection and get the socket
         let mut socket = listener.accept().map_err(|e| {
             warn!("Failed to accept migration connection: {e}");
