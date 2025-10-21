@@ -4,23 +4,29 @@ ethernets:
     match:
       macaddress: 12:34:56:78:90:ab
     addresses:
-    - 192.168.2.2/24
+    - 192.168.2.2/25
     gateway4: 192.168.2.1
   id1:
     match:
       macaddress: de:ad:be:ef:12:34
     addresses:
-    - 192.168.2.3/24
+    - 192.168.2.3/25
     gateway4: 192.168.2.1
   id2:
     match:
       macaddress: de:ad:be:ef:34:56
     addresses:
-    - 192.168.2.4/24
+    - 192.168.2.4/25
     gateway4: 192.168.2.1
   id3:
     match:
       macaddress: de:ad:be:ef:56:78
     addresses:
-    - 192.168.2.5/24
+    - 192.168.2.5/25
     gateway4: 192.168.2.1
+  id4:
+    match:
+      macaddress: de:ad:be:ef:78:90
+    addresses:
+    - 192.168.2.130/25
+    gateway4: 192.168.2.129

@@ -57,12 +57,15 @@ pub enum Error {
 }
 
 pub struct GuestNetworkConfig {
-    pub guest_ip: String,
+    pub guest_ip0: String,
+    pub host_ip0: String,
+    pub guest_mac0: String,
+    pub guest_ip1: String,
+    pub host_ip1: String,
+    pub guest_mac1: String,
     pub l2_guest_ip1: String,
     pub l2_guest_ip2: String,
     pub l2_guest_ip3: String,
-    pub host_ip: String,
-    pub guest_mac: String,
     pub l2_guest_mac1: String,
     pub l2_guest_mac2: String,
     pub l2_guest_mac3: String,
@@ -92,7 +95,7 @@ impl GuestNetworkConfig {
         let start = std::time::Instant::now();
         // The 'port' is unique per 'GUEST' and listening to wild-card ip avoids retrying on 'TcpListener::bind()'
         let listen_addr = format!("0.0.0.0:{}", self.tcp_listener_port);
-        let expected_guest_addr = self.guest_ip.as_str();
+        let expected_guest_addr = self.guest_ip0.as_str();
         let mut s = String::new();
         let timeout = match custom_timeout {
             Some(t) => t,
@@ -277,7 +280,7 @@ impl DiskConfig for UbuntuDiskConfig {
             "@DEFAULT_TCP_LISTENER_MESSAGE",
             DEFAULT_TCP_LISTENER_MESSAGE,
         );
-        user_data_string = user_data_string.replace("@HOST_IP", &network.host_ip);
+        user_data_string = user_data_string.replace("@HOST_IP", &network.host_ip0);
         user_data_string =
             user_data_string.replace("@TCP_LISTENER_PORT", &network.tcp_listener_port.to_string());
 
@@ -293,13 +296,17 @@ impl DiskConfig for UbuntuDiskConfig {
             .read_to_string(&mut network_config_string)
             .expect("Expected reading network-config file to succeed");
 
-        network_config_string = network_config_string.replace("192.168.2.1", &network.host_ip);
-        network_config_string = network_config_string.replace("192.168.2.2", &network.guest_ip);
+        network_config_string = network_config_string.replace("192.168.2.1", &network.host_ip0);
+        network_config_string = network_config_string.replace("192.168.2.2", &network.guest_ip0);
+        network_config_string = network_config_string.replace("192.168.2.129", &network.host_ip1);
+        network_config_string = network_config_string.replace("192.168.2.130", &network.guest_ip1);
         network_config_string = network_config_string.replace("192.168.2.3", &network.l2_guest_ip1);
         network_config_string = network_config_string.replace("192.168.2.4", &network.l2_guest_ip2);
         network_config_string = network_config_string.replace("192.168.2.5", &network.l2_guest_ip3);
         network_config_string =
-            network_config_string.replace("12:34:56:78:90:ab", &network.guest_mac);
+            network_config_string.replace("12:34:56:78:90:ab", &network.guest_mac0);
+        network_config_string =
+            network_config_string.replace("de:ad:be:ef:78:90", &network.guest_mac1);
         network_config_string =
             network_config_string.replace("de:ad:be:ef:12:34", &network.l2_guest_mac1);
         network_config_string =
@@ -858,12 +865,15 @@ impl Guest {
         let tmp_dir = TempDir::new_with_prefix("/tmp/ch").unwrap();
 
         let network = GuestNetworkConfig {
-            guest_ip: format!("{class}.{id}.2"),
+            guest_ip0: format!("{class}.{id}.2"),
+            host_ip0: format!("{class}.{id}.1"),
+            guest_mac0: format!("12:34:56:78:90:{id:02x}"),
+            guest_ip1: format!("{class}.{id}.130"),
+            host_ip1: format!("{class}.{id}.129"),
+            guest_mac1: format!("de:ad:be:ef:78:{id:02x}"),
             l2_guest_ip1: format!("{class}.{id}.3"),
             l2_guest_ip2: format!("{class}.{id}.4"),
             l2_guest_ip3: format!("{class}.{id}.5"),
-            host_ip: format!("{class}.{id}.1"),
-            guest_mac: format!("12:34:56:78:90:{id:02x}"),
             l2_guest_mac1: format!("de:ad:be:ef:12:{id:02x}"),
             l2_guest_mac2: format!("de:ad:be:ef:34:{id:02x}"),
             l2_guest_mac3: format!("de:ad:be:ef:56:{id:02x}"),
@@ -889,29 +899,29 @@ impl Guest {
 
     pub fn default_net_string(&self) -> String {
         format!(
-            "tap=,mac={},ip={},mask=255.255.255.0",
-            self.network.guest_mac, self.network.host_ip
+            "tap=,mac={},ip={},mask=255.255.255.128",
+            self.network.guest_mac0, self.network.host_ip0
         )
     }
 
     pub fn default_net_string_w_iommu(&self) -> String {
         format!(
-            "tap=,mac={},ip={},mask=255.255.255.0,iommu=on",
-            self.network.guest_mac, self.network.host_ip
+            "tap=,mac={},ip={},mask=255.255.255.128,iommu=on",
+            self.network.guest_mac0, self.network.host_ip0
         )
     }
 
     pub fn default_net_string_w_mtu(&self, mtu: u16) -> String {
         format!(
-            "tap=,mac={},ip={},mask=255.255.255.0,mtu={}",
-            self.network.guest_mac, self.network.host_ip, mtu
+            "tap=,mac={},ip={},mask=255.255.255.128,mtu={}",
+            self.network.guest_mac0, self.network.host_ip0, mtu
         )
     }
 
     pub fn ssh_command(&self, command: &str) -> Result<String, SshCommandError> {
         ssh_command_ip(
             command,
-            &self.network.guest_ip,
+            &self.network.guest_ip0,
             DEFAULT_SSH_RETRIES,
             DEFAULT_SSH_TIMEOUT,
         )
@@ -921,7 +931,7 @@ impl Guest {
     pub fn ssh_command_l1(&self, command: &str) -> Result<String, SshCommandError> {
         ssh_command_ip(
             command,
-            &self.network.guest_ip,
+            &self.network.guest_ip0,
             DEFAULT_SSH_RETRIES,
             DEFAULT_SSH_TIMEOUT,
         )
@@ -963,8 +973,8 @@ impl Guest {
                  cpu_count,
                  kernel_path,
                  kernel_cmd,
-                 self.network.host_ip,
-                 self.network.guest_mac,
+                 self.network.host_ip0,
+                 self.network.guest_mac0,
                  self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
                  self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
         }
@@ -1109,7 +1119,7 @@ impl Guest {
     pub fn check_vsock(&self, socket: &str) {
         // Listen from guest on vsock CID=3 PORT=16
         // SOCKET-LISTEN:<domain>:<protocol>:<local-address>
-        let guest_ip = self.network.guest_ip.clone();
+        let guest_ip = self.network.guest_ip0.clone();
         let listen_socat = thread::spawn(move || {
             ssh_command_ip("sudo socat - SOCKET-LISTEN:40:0:x00x00x10x00x00x00x03x00x00x00x00x00x00x00 > vsock_log", &guest_ip, DEFAULT_SSH_RETRIES, DEFAULT_SSH_TIMEOUT).unwrap();
         });
@@ -1612,7 +1622,7 @@ pub fn measure_virtio_net_throughput(
         cmd.args([
             "-J", // Output in JSON format
             "-c",
-            &guest.network.guest_ip,
+            &guest.network.guest_ip0,
             "-p",
             &format!("{}", default_port + n),
             "-t",
@@ -1710,7 +1720,7 @@ pub fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Ve
     scp_to_guest(
         Path::new(ethr_path),
         Path::new(ethr_remote_path),
-        &guest.network.guest_ip,
+        &guest.network.guest_ip0,
         //DEFAULT_SSH_RETRIES,
         1,
         DEFAULT_SSH_TIMEOUT,
@@ -1732,7 +1742,7 @@ pub fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Ve
     let mut c = Command::new(ethr_path)
         .args([
             "-c",
-            &guest.network.guest_ip,
+            &guest.network.guest_ip0,
             "-t",
             "l",
             "-o",
