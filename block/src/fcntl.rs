@@ -101,13 +101,52 @@ impl LockState {
     }
 }
 
+/// The granularity of the advisory lock.
+///
+/// The granularity has significant implications in typical cloud deployments
+/// with network storage. The Linux kernel will sync advisory locks to network
+/// file systems, but these backends may have different policies and handle
+/// locks differently. For example, Netapp speaks a NFS API but will treat
+/// advisory OFD locks for the whole file as mandatory locks, whereas byte-range
+/// locks for the whole file will remain advisory [0].
+///
+/// As it is a valid use case to prevent multiple CHV instances from accessing
+/// the same disk but disk management software (e.g., Cinder in OpenStack)
+/// should be able to snapshot disks while VMs are running, we need special
+/// control over the lock granularity. Therefore, it is a valid use case to lock
+/// the whole byte range of a disk image without technically locking the whole
+/// file - to get the best of both worlds.
+///
+/// [0] https://kb.netapp.com/on-prem/ontap/da/NAS/NAS-KBs/How_is_Mandatory_Locking_supported_for_NFSv4_on_ONTAP_9
+#[derive(Clone, Copy, Debug)]
+pub enum LockGranularity {
+    WholeFile,
+    ByteRange(u64 /* from, inclusive */, u64 /* len */),
+}
+
+impl LockGranularity {
+    const fn l_start(self) -> u64 {
+        match self {
+            LockGranularity::WholeFile => 0,
+            LockGranularity::ByteRange(start, _) => start,
+        }
+    }
+
+    const fn l_len(self) -> u64 {
+        match self {
+            LockGranularity::WholeFile => 0, /* EOF */
+            LockGranularity::ByteRange(_, len) => len,
+        }
+    }
+}
+
 /// Returns a [`struct@libc::flock`] structure for the whole file.
-const fn get_flock(lock_type: LockType) -> libc::flock {
+const fn get_flock(lock_type: LockType, granularity: LockGranularity) -> libc::flock {
     libc::flock {
         l_type: lock_type.to_libc_val() as libc::c_short,
         l_whence: libc::SEEK_SET as libc::c_short,
-        l_start: 0,
-        l_len: 0, /* EOF */
+        l_start: granularity.l_start() as libc::c_long,
+        l_len: granularity.l_len() as libc::c_long,
         l_pid: 0, /* filled by callee */
     }
 }
@@ -122,8 +161,13 @@ const fn get_flock(lock_type: LockType) -> libc::flock {
 /// - `file`: The file to acquire a lock for [`LockType`]. The file's state will
 ///   be logically mutated, but not technically.
 /// - `lock_type`: The [`LockType`]
-pub fn try_acquire_lock<Fd: AsRawFd>(file: Fd, lock_type: LockType) -> Result<(), LockError> {
-    let flock = get_flock(lock_type);
+/// - `granularity`: The [`LockGranularity`].
+pub fn try_acquire_lock<Fd: AsRawFd>(
+    file: Fd,
+    lock_type: LockType,
+    granularity: LockGranularity,
+) -> Result<(), LockError> {
+    let flock = get_flock(lock_type, granularity);
 
     let res = fcntl(file.as_raw_fd(), FcntlArg::F_OFD_SETLK(&flock));
     match res {
@@ -146,8 +190,9 @@ pub fn try_acquire_lock<Fd: AsRawFd>(file: Fd, lock_type: LockType) -> Result<()
 ///
 /// # Parameters
 /// - `file`: The file to clear all locks for [`LockType`].
-pub fn clear_lock<Fd: AsRawFd>(file: Fd) -> Result<(), LockError> {
-    try_acquire_lock(file, LockType::Unlock)
+/// - `granularity`: The [`LockGranularity`].
+pub fn clear_lock<Fd: AsRawFd>(file: Fd, granularity: LockGranularity) -> Result<(), LockError> {
+    try_acquire_lock(file, LockType::Unlock, granularity)
 }
 
 /// Returns the current lock state using [`fcntl`] with respect to the given
@@ -155,8 +200,12 @@ pub fn clear_lock<Fd: AsRawFd>(file: Fd) -> Result<(), LockError> {
 ///
 /// # Parameters
 /// - `file`: The file for which to get the lock state.
-pub fn get_lock_state<Fd: AsRawFd>(file: Fd) -> Result<LockState, LockError> {
-    let mut flock = get_flock(LockType::Write);
+/// - `granularity`: The [`LockGranularity`].
+pub fn get_lock_state<Fd: AsRawFd>(
+    file: Fd,
+    granularity: LockGranularity,
+) -> Result<LockState, LockError> {
+    let mut flock = get_flock(LockType::Write, granularity);
     let res = fcntl(file.as_raw_fd(), FcntlArg::F_OFD_GETLK(&mut flock));
     match res {
         0 => {
