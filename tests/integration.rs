@@ -6085,7 +6085,7 @@ mod common_parallel {
 
         let mut child = cmd.spawn().unwrap();
 
-        thread::sleep(std::time::Duration::new(20, 0));
+        guest.wait_vm_boot(None).unwrap();
 
         let r = std::panic::catch_unwind(|| {
             // Add network
