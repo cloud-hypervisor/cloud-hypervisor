@@ -6072,6 +6072,7 @@ mod common_parallel {
             .args(["--memory", "size=512M"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_net()
             .default_disks()
             .capture_output();
 
@@ -6093,8 +6094,9 @@ mod common_parallel {
                 "add-net",
                 Some(
                     format!(
-                        "{}{},id=test0",
-                        guest.default_net_string(),
+                        "id=test0,tap=,mac={},ip={},mask=255.255.255.128{}",
+                        guest.network.guest_mac1,
+                        guest.network.host_ip1,
                         if let Some(pci_segment) = pci_segment {
                             format!(",pci_segment={pci_segment}")
                         } else {
@@ -6113,13 +6115,13 @@ mod common_parallel {
             } else {
                 assert!(
                     String::from_utf8_lossy(&cmd_output)
-                        .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:05.0\"}")
+                        .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
                 );
             }
 
             thread::sleep(std::time::Duration::new(5, 0));
 
-            // 1 network interfaces + default localhost ==> 2 interfaces
+            // 2 network interfaces + default localhost ==> 3 interfaces
             assert_eq!(
                 guest
                     .ssh_command("ip -o link | wc -l")
@@ -6127,20 +6129,22 @@ mod common_parallel {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
-                2
+                3
             );
 
             // Remove network
             assert!(remote_command(&api_socket, "remove-device", Some("test0"),));
             thread::sleep(std::time::Duration::new(5, 0));
 
+            // Add network
             let (cmd_success, cmd_output) = remote_command_w_output(
                 &api_socket,
                 "add-net",
                 Some(
                     format!(
-                        "{}{},id=test1",
-                        guest.default_net_string(),
+                        "id=test1,tap=,mac={},ip={},mask=255.255.255.128{}",
+                        guest.network.guest_mac1,
+                        guest.network.host_ip1,
                         if let Some(pci_segment) = pci_segment {
                             format!(",pci_segment={pci_segment}")
                         } else {
@@ -6159,13 +6163,13 @@ mod common_parallel {
             } else {
                 assert!(
                     String::from_utf8_lossy(&cmd_output)
-                        .contains("{\"id\":\"test1\",\"bdf\":\"0000:00:05.0\"}")
+                        .contains("{\"id\":\"test1\",\"bdf\":\"0000:00:06.0\"}")
                 );
             }
 
             thread::sleep(std::time::Duration::new(5, 0));
 
-            // 1 network interfaces + default localhost ==> 2 interfaces
+            // 2 network interfaces + default localhost ==> 3 interfaces
             assert_eq!(
                 guest
                     .ssh_command("ip -o link | wc -l")
@@ -6173,13 +6177,12 @@ mod common_parallel {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
-                2
+                3
             );
 
             guest.reboot_linux(0, None);
 
-            // Check still there after reboot
-            // 1 network interfaces + default localhost ==> 2 interfaces
+            // 2 network interfaces + default localhost ==> 3 interfaces
             assert_eq!(
                 guest
                     .ssh_command("ip -o link | wc -l")
@@ -6187,7 +6190,7 @@ mod common_parallel {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
-                2
+                3
             );
         });
 
