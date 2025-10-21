@@ -6132,6 +6132,21 @@ mod common_parallel {
                 3
             );
 
+            // Test the same using the added network interface's IP
+            assert_eq!(
+                ssh_command_ip(
+                    "ip -o link | wc -l",
+                    &guest.network.guest_ip1,
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT
+                )
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+                3
+            );
+
             // Remove network
             assert!(remote_command(&api_socket, "remove-device", Some("test0"),));
             thread::sleep(std::time::Duration::new(5, 0));
@@ -6190,6 +6205,21 @@ mod common_parallel {
                     .trim()
                     .parse::<u32>()
                     .unwrap_or_default(),
+                3
+            );
+
+            // Test the same using the added network interface's IP
+            assert_eq!(
+                ssh_command_ip(
+                    "ip -o link | wc -l",
+                    &guest.network.guest_ip1,
+                    DEFAULT_SSH_RETRIES,
+                    DEFAULT_SSH_TIMEOUT
+                )
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
                 3
             );
         });
