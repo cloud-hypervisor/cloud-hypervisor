@@ -11,13 +11,14 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::io::Write;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::mem::size_of;
 use std::os::unix::thread::JoinHandleExt;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering, fence};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{cmp, io, result, thread};
 
@@ -55,7 +56,7 @@ use hypervisor::arch::x86::msr_index;
 #[cfg(feature = "tdx")]
 use hypervisor::kvm::{TdxExitDetails, TdxExitStatus};
 use hypervisor::{CpuState, HypervisorCpuError, VmExit, VmOps};
-use libc::{c_void, siginfo_t};
+use libc::{c_int, c_void, siginfo_t};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use linux_loader::elf::Elf64_Nhdr;
 use seccompiler::{SeccompAction, apply_filter};
@@ -207,6 +208,12 @@ pub enum Error {
     #[cfg(target_arch = "x86_64")]
     #[error("Failed to inject NMI")]
     NmiError(#[source] hypervisor::HypervisorCpuError),
+
+    /// Cannot clean init vcpu TLS.
+    #[error("Failed to initialise vCPU TLS")]
+    VcpuTlsInit,
+    #[error("vCPU TLS not present")]
+    VcpuTlsNotPresent,
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -401,7 +408,92 @@ pub struct Vcpu {
     vendor: CpuVendor,
 }
 
+// Using this for easier explicit type-casting to help IDEs interpret the code.
+type VcpuCell = Cell<Option<*mut Vcpu>>;
+
 impl Vcpu {
+    thread_local!(static TLS_VCPU_PTR: VcpuCell = const {Cell::new(None)});
+
+    /// Associates `self` with the current thread.
+    ///
+    /// It is a prerequisite to successfully run `init_thread_local_data()` before using
+    /// `run_on_thread_local()` on the current thread.
+    /// This function will return an error if there already is a `Vcpu` present in the TLS.
+    fn init_thread_local_data(&mut self) -> Result<()> {
+        Self::TLS_VCPU_PTR.with(|cell: &VcpuCell| {
+            if cell.get().is_some() {
+                return Err(Error::VcpuTlsInit);
+            }
+            cell.set(Some(self as *mut Vcpu));
+            Ok(())
+        })
+    }
+
+    /// Deassociates `self` from the current thread.
+    ///
+    /// Should be called if the current `self` had called `init_thread_local_data()` and
+    /// now needs to move to a different thread.
+    ///
+    /// Fails if `self` was not previously associated with the current thread.
+    fn reset_thread_local_data(&mut self) -> Result<()> {
+        // Best-effort to clean up TLS. If the `Vcpu` was moved to another thread
+        // _before_ running this, then there is nothing we can do.
+        Self::TLS_VCPU_PTR.with(|cell: &VcpuCell| {
+            if let Some(vcpu_ptr) = cell.get()
+                && std::ptr::eq(vcpu_ptr, self as *const Vcpu)
+            {
+                Self::TLS_VCPU_PTR.with(|cell: &VcpuCell| cell.take());
+                return Ok(());
+            }
+            Err(Error::VcpuTlsNotPresent)
+        })
+    }
+
+    /// Runs `func` for the `Vcpu` associated with the current thread.
+    ///
+    /// It requires that `init_thread_local_data()` was run on this thread.
+    ///
+    /// Fails if there is no `Vcpu` associated with the current thread.
+    ///
+    /// # Safety
+    ///
+    /// This is marked unsafe as it allows temporary aliasing through
+    /// dereferencing from pointer an already borrowed `Vcpu`.
+    unsafe fn run_on_thread_local<F>(func: F) -> Result<()>
+    where
+        F: FnOnce(&mut Vcpu),
+    {
+        Self::TLS_VCPU_PTR.with(|cell: &VcpuCell| {
+            if let Some(vcpu_ptr) = cell.get() {
+                // SAFETY: Dereferencing here is safe since `TLS_VCPU_PTR` is populated/non-empty,
+                // and it is being cleared on `Vcpu::drop` so there is no dangling pointer.
+                let vcpu_ref: &mut Vcpu = unsafe { &mut *vcpu_ptr };
+                func(vcpu_ref);
+                Ok(())
+            } else {
+                Err(Error::VcpuTlsNotPresent)
+            }
+        })
+    }
+
+    /// Registers a signal handler which makes use of TLS and kvm immediate exit to
+    /// kick the vcpu running on the current thread, if there is one.
+    pub fn register_kick_signal_handler() {
+        extern "C" fn handle_signal(_: c_int, _: *mut siginfo_t, _: *mut c_void) {
+            // SAFETY: This is safe because it's temporarily aliasing the `Vcpu` object, but we are
+            // only reading `vcpu.fd` which does not change for the lifetime of the `Vcpu`.
+            unsafe {
+                let _ = Vcpu::run_on_thread_local(|vcpu| {
+                    vcpu.vcpu.set_immediate_exit(true);
+                    fence(Ordering::Release);
+                });
+            }
+        }
+        // This uses an async signal safe handler to kill the vcpu handles.
+        register_signal_handler(SIGRTMIN(), handle_signal)
+            .expect("Failed to register vcpu signal handler");
+    }
+
     /// Constructs a new VCPU for `vm`.
     ///
     /// # Arguments
@@ -545,6 +637,11 @@ impl Vcpu {
     }
 }
 
+impl Drop for Vcpu {
+    fn drop(&mut self) {
+        let _ = self.reset_thread_local_data();
+    }
+}
 impl Pausable for Vcpu {}
 impl Snapshottable for Vcpu {
     fn id(&self) -> String {
@@ -1099,6 +1196,7 @@ impl CpuManager {
             thread::Builder::new()
                 .name(format!("vcpu{vcpu_id}"))
                 .spawn(move || {
+                    vcpu.lock().unwrap().init_thread_local_data().expect("Failed to initialise vCPU TLS");
                     // Schedule the thread to run on the expected CPU set
                     if let Some(cpuset) = cpuset.as_ref() {
                         // SAFETY: FFI call with correct arguments
@@ -1128,10 +1226,7 @@ impl CpuManager {
                             return;
                         }
 
-                    extern "C" fn handle_signal(_: i32, _: *mut siginfo_t, _: *mut c_void) {}
-                    // This uses an async signal safe handler to kill the vcpu handles.
-                    register_signal_handler(SIGRTMIN(), handle_signal)
-                        .expect("Failed to register vcpu signal handler");
+                    Vcpu::register_kick_signal_handler();
                     // Block until all CPUs are ready.
                     vcpu_thread_barrier.wait();
 
