@@ -132,6 +132,7 @@ impl RequestHandler for StubApiRequestHandler {
                     max_phys_bits: 46,
                     affinity: None,
                     features: CpuFeatures::default(),
+                    external_fds: None,
                 },
                 memory: MemoryConfig {
                     size: 536_870_912,

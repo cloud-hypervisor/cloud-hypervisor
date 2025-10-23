@@ -56,6 +56,9 @@ pub enum Error {
     /// Missing restore source_url parameter.
     #[error("Error parsing --restore: source_url missing")]
     ParseRestoreSourceUrlMissing,
+    /// Invalid restore external_fds parameter.
+    #[error("Error parsing --restore: invalid external_fds")]
+    ParseRestoreBadExternalFds(#[source] OptionParserError),
     /// Error parsing CPU options
     #[error("Error parsing --cpus")]
     ParseCpus(#[source] OptionParserError),
@@ -319,9 +322,12 @@ pub enum ValidationError {
     /// Restore expects all net ids that have fds
     #[error("Net id {0} is associated with FDs and is required")]
     RestoreMissingRequiredNetId(String),
-    /// Number of FDs passed during Restore are incorrect to the NetConfig
+    /// Number of FDs passed to the NetConfig during Restore are incorrect
     #[error("Number of Net FDs passed for '{0}' during Restore: {1}. Expected: {2}")]
     RestoreNetFdCountMismatch(String, usize, usize),
+    /// Number of FDs passed during Restore are incorrect
+    #[error("Number of FDs passed during Restore: {0}. Expected: {1}")]
+    RestoreFdCountMismatch(usize, usize),
     /// Path provided in landlock-rules doesn't exist
     #[error("Path {0:?} provided in landlock-rules does not exist")]
     LandlockPathDoesNotExist(PathBuf),
@@ -940,6 +946,7 @@ impl MemoryConfig {
                     hotplug_size,
                     hotplugged_size,
                     prefault,
+                    fd: None,
                 });
             }
             Some(zones)
@@ -2201,62 +2208,29 @@ impl NumaConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
-pub struct RestoredNetConfig {
-    pub id: String,
-    #[serde(default)]
-    pub num_fds: usize,
-    // Special deserialize handling:
-    // A serialize-deserialize cycle typically happens across processes.
-    // Therefore, we don't serialize FDs, and whatever value is here after
-    // deserialization is invalid.
-    //
-    // Valid FDs are transmitted via a different channel (SCM_RIGHTS message)
-    // and will be populated into this struct on the destination VMM eventually.
-    #[serde(default, deserialize_with = "deserialize_restorednetconfig_fds")]
-    pub fds: Option<Vec<i32>>,
-}
-
-fn deserialize_restorednetconfig_fds<'de, D>(
-    d: D,
-) -> std::result::Result<Option<Vec<i32>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let invalid_fds: Option<Vec<i32>> = Option::deserialize(d)?;
-    if let Some(invalid_fds) = invalid_fds {
-        // If the live-migration path is used properly, new FDs are passed as
-        // SCM_RIGHTS message. So, we don't get them from the serialized JSON
-        // anyway.
-        debug!(
-            "FDs in 'RestoredNetConfig' won't be deserialized as they are most likely invalid now. Deserializing them as -1."
-        );
-        Ok(Some(vec![-1; invalid_fds.len()]))
-    } else {
-        Ok(None)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct RestoreConfig {
     pub source_url: PathBuf,
     #[serde(default)]
     pub prefault: bool,
     #[serde(default)]
-    pub net_fds: Option<Vec<RestoredNetConfig>>,
+    pub external_fds: Option<ExternalFdsConfig>,
 }
 
 impl RestoreConfig {
     pub const SYNTAX: &'static str = "Restore from a VM snapshot. \
         \nRestore parameters \"source_url=<source_url>,prefault=on|off,\
-        net_fds=<list_of_net_ids_with_their_associated_fds>\" \
         \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo) \
         \n`prefault` brings memory pages in when enabled (disabled by default) \
-        \n`net_fds` is a list of net ids with new file descriptors. \
-        Only net devices backed by FDs directly are needed as input.";
+        \n`external_ids` is a list of memory zone IDs and/or net device IDs that will receive FDs; \
+        \n`external_fds` is the list of FDs for the IDs.";
 
     pub fn parse(restore: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("source_url").add("prefault").add("net_fds");
+        parser
+            .add("source_url")
+            .add("prefault")
+            .add("external_ids")
+            .add("external_fds");
         parser.parse(restore).map_err(Error::ParseRestore)?;
 
         let source_url = parser
@@ -2268,67 +2242,74 @@ impl RestoreConfig {
             .map_err(Error::ParseRestore)?
             .unwrap_or(Toggle(false))
             .0;
-        let net_fds = parser
-            .convert::<Tuple<String, Vec<u64>>>("net_fds")
-            .map_err(Error::ParseRestore)?
-            .map(|v| {
-                v.0.iter()
-                    .map(|(id, fds)| RestoredNetConfig {
-                        id: id.clone(),
-                        num_fds: fds.len(),
-                        fds: Some(fds.iter().map(|e| *e as i32).collect()),
-                    })
-                    .collect()
+
+        let ids = parser
+            .convert::<StringList>("external_ids")
+            .map_err(Error::ParseRestoreBadExternalFds)?
+            .map(|v| v.0.to_vec());
+
+        let fds: Option<Vec<i32>> = parser
+            .convert::<IntegerList>("external_fds")
+            .map_err(Error::ParseNetwork)?
+            .map(|v| v.0.iter().map(|e| *e as i32).collect());
+
+        if ids.is_none() && fds.is_none() {
+            return Ok(RestoreConfig {
+                source_url,
+                prefault,
+                external_fds: None,
             });
+        }
+
+        let Some(ids) = ids else {
+            return Err(Error::ParseRestoreBadExternalFds(
+                OptionParserError::InvalidValue("external_ids".to_owned()),
+            ));
+        };
+
+        let Some(fds) = fds else {
+            return Err(Error::ParseRestoreBadExternalFds(
+                OptionParserError::InvalidValue("external_fds".to_owned()),
+            ));
+        };
+
+        if ids.len() != fds.len() {
+            return Err(Error::ParseRestoreBadExternalFds(
+                OptionParserError::InvalidValue("external ids/fds don't match".to_owned()),
+            ));
+        }
+
+        let external_fds = Some(ExternalFdsConfig { ids, fds });
 
         Ok(RestoreConfig {
             source_url,
             prefault,
-            net_fds,
+            external_fds,
         })
     }
 
-    // Ensure all net devices from 'VmConfig' backed by FDs have a
-    // corresponding 'RestoreNetConfig' with a matched 'id' and expected
-    // number of FDs.
-    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        let mut restored_net_with_fds = HashMap::new();
-        for n in self.net_fds.iter().flatten() {
-            assert_eq!(
-                n.num_fds,
-                n.fds.as_ref().map_or(0, |f| f.len()),
-                "Invalid 'RestoredNetConfig' with conflicted fields."
-            );
-            if restored_net_with_fds.insert(n.id.clone(), n).is_some() {
-                return Err(ValidationError::IdentifierNotUnique(n.id.clone()));
+    pub fn consume_fds(&mut self, fds: Vec<i32>) -> ValidationResult<()> {
+        // Update self.external_fds, if appropriate.
+        let Some(external_fds) = self.external_fds.as_mut() else {
+            if fds.is_empty() {
+                return Ok(());
+            } else {
+                return Err(ValidationError::RestoreFdCountMismatch(0, fds.len()));
             }
+        };
+
+        if external_fds.ids.len() != fds.len() {
+            return Err(ValidationError::RestoreFdCountMismatch(
+                external_fds.ids.len(),
+                fds.len(),
+            ));
         }
 
-        for net_fds in vm_config.net.iter().flatten() {
-            if let Some(expected_fds) = &net_fds.fds {
-                let expected_id = net_fds
-                    .id
-                    .as_ref()
-                    .expect("Invalid 'NetConfig' with empty 'id' for VM restore.");
-                if let Some(r) = restored_net_with_fds.remove(expected_id) {
-                    if r.num_fds != expected_fds.len() {
-                        return Err(ValidationError::RestoreNetFdCountMismatch(
-                            expected_id.clone(),
-                            r.num_fds,
-                            expected_fds.len(),
-                        ));
-                    }
-                } else {
-                    return Err(ValidationError::RestoreMissingRequiredNetId(
-                        expected_id.clone(),
-                    ));
-                }
-            }
+        if fds.is_empty() {
+            return Ok(());
         }
 
-        if !restored_net_with_fds.is_empty() {
-            warn!("Ignoring unused 'net_fds' for VM restore.")
-        }
+        external_fds.fds = fds;
 
         Ok(())
     }
@@ -3024,6 +3005,7 @@ impl VmConfig {
             landlock_rules,
             #[cfg(feature = "ivshmem")]
             ivshmem,
+            external_fds: None,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -3153,6 +3135,7 @@ impl Clone for VmConfig {
             landlock_rules: self.landlock_rules.clone(),
             #[cfg(feature = "ivshmem")]
             ivshmem: self.ivshmem.clone(),
+            external_fds: self.external_fds.clone(),
             ..*self
         }
     }
@@ -3882,178 +3865,20 @@ mod tests {
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
                 prefault: false,
-                net_fds: None,
+                external_fds: None,
             }
         );
         assert_eq!(
-            RestoreConfig::parse(
-                "source_url=/path/to/snapshot,prefault=off,net_fds=[net0@[3,4],net1@[5,6,7,8]]"
-            )?,
+            RestoreConfig::parse("source_url=/path/to/snapshot,prefault=off")?,
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
                 prefault: false,
-                net_fds: Some(vec![
-                    RestoredNetConfig {
-                        id: "net0".to_string(),
-                        num_fds: 2,
-                        fds: Some(vec![3, 4]),
-                    },
-                    RestoredNetConfig {
-                        id: "net1".to_string(),
-                        num_fds: 4,
-                        fds: Some(vec![5, 6, 7, 8]),
-                    }
-                ]),
+                external_fds: None,
             }
         );
         // Parsing should fail as source_url is a required field
         RestoreConfig::parse("prefault=off").unwrap_err();
         Ok(())
-    }
-
-    #[test]
-    fn test_restore_config_validation() {
-        // interested in only VmConfig.net, so set rest to default values
-        let mut snapshot_vm_config = VmConfig {
-            cpus: CpusConfig::default(),
-            memory: MemoryConfig::default(),
-            payload: None,
-            rate_limit_groups: None,
-            disks: None,
-            rng: RngConfig::default(),
-            balloon: None,
-            fs: None,
-            pmem: None,
-            serial: default_serial(),
-            console: default_console(),
-            #[cfg(target_arch = "x86_64")]
-            debug_console: DebugConsoleConfig::default(),
-            devices: None,
-            user_devices: None,
-            vdpa: None,
-            vsock: None,
-            #[cfg(feature = "pvmemcontrol")]
-            pvmemcontrol: None,
-            pvpanic: false,
-            iommu: false,
-            numa: None,
-            watchdog: false,
-            #[cfg(feature = "guest_debug")]
-            gdb: false,
-            pci_segments: None,
-            platform: None,
-            tpm: None,
-            preserved_fds: None,
-            net: Some(vec![
-                NetConfig {
-                    id: Some("net0".to_owned()),
-                    num_queues: 2,
-                    fds: Some(vec![-1, -1, -1, -1]),
-                    ..net_fixture()
-                },
-                NetConfig {
-                    id: Some("net1".to_owned()),
-                    num_queues: 1,
-                    fds: Some(vec![-1, -1]),
-                    ..net_fixture()
-                },
-                NetConfig {
-                    id: Some("net2".to_owned()),
-                    fds: None,
-                    ..net_fixture()
-                },
-            ]),
-            landlock_enable: false,
-            landlock_rules: None,
-            #[cfg(feature = "ivshmem")]
-            ivshmem: None,
-        };
-
-        let valid_config = RestoreConfig {
-            source_url: PathBuf::from("/path/to/snapshot"),
-            prefault: false,
-            net_fds: Some(vec![
-                RestoredNetConfig {
-                    id: "net0".to_string(),
-                    num_fds: 4,
-                    fds: Some(vec![3, 4, 5, 6]),
-                },
-                RestoredNetConfig {
-                    id: "net1".to_string(),
-                    num_fds: 2,
-                    fds: Some(vec![7, 8]),
-                },
-            ]),
-        };
-        valid_config.validate(&snapshot_vm_config).unwrap();
-
-        let mut invalid_config = valid_config.clone();
-        invalid_config.net_fds = Some(vec![RestoredNetConfig {
-            id: "netx".to_string(),
-            num_fds: 4,
-            fds: Some(vec![3, 4, 5, 6]),
-        }]);
-        assert_eq!(
-            invalid_config.validate(&snapshot_vm_config),
-            Err(ValidationError::RestoreMissingRequiredNetId(
-                "net0".to_string()
-            ))
-        );
-
-        invalid_config.net_fds = Some(vec![
-            RestoredNetConfig {
-                id: "net0".to_string(),
-                num_fds: 4,
-                fds: Some(vec![3, 4, 5, 6]),
-            },
-            RestoredNetConfig {
-                id: "net0".to_string(),
-                num_fds: 4,
-                fds: Some(vec![3, 4, 5, 6]),
-            },
-        ]);
-        assert_eq!(
-            invalid_config.validate(&snapshot_vm_config),
-            Err(ValidationError::IdentifierNotUnique("net0".to_string()))
-        );
-
-        invalid_config.net_fds = Some(vec![RestoredNetConfig {
-            id: "net0".to_string(),
-            num_fds: 4,
-            fds: Some(vec![3, 4, 5, 6]),
-        }]);
-        assert_eq!(
-            invalid_config.validate(&snapshot_vm_config),
-            Err(ValidationError::RestoreMissingRequiredNetId(
-                "net1".to_string()
-            ))
-        );
-
-        invalid_config.net_fds = Some(vec![RestoredNetConfig {
-            id: "net0".to_string(),
-            num_fds: 2,
-            fds: Some(vec![3, 4]),
-        }]);
-        assert_eq!(
-            invalid_config.validate(&snapshot_vm_config),
-            Err(ValidationError::RestoreNetFdCountMismatch(
-                "net0".to_string(),
-                2,
-                4
-            ))
-        );
-
-        let another_valid_config = RestoreConfig {
-            source_url: PathBuf::from("/path/to/snapshot"),
-            prefault: false,
-            net_fds: None,
-        };
-        snapshot_vm_config.net = Some(vec![NetConfig {
-            id: Some("net2".to_owned()),
-            fds: None,
-            ..net_fixture()
-        }]);
-        another_valid_config.validate(&snapshot_vm_config).unwrap();
     }
 
     fn platform_fixture() -> PlatformConfig {
@@ -4160,6 +3985,7 @@ mod tests {
             landlock_rules: None,
             #[cfg(feature = "ivshmem")]
             ivshmem: None,
+            external_fds: None,
         };
 
         valid_config.validate().unwrap();
