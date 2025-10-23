@@ -8366,8 +8366,9 @@ mod common_sequential {
         )
         .unwrap();
         let restore_params = format!(
-            "source_url=file://{},net_fds=[{}@[{},{}]]",
+            "source_url=file://{},external_ids=[{},{}],external_fds=[{},{}]",
             snapshot_dir,
+            net_id,
             net_id,
             taps[0].as_raw_fd(),
             taps[1].as_raw_fd()

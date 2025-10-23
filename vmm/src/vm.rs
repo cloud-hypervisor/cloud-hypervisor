@@ -217,6 +217,9 @@ pub enum Error {
     #[error("Cannot restore VM")]
     Restore(#[source] MigratableError),
 
+    #[error("Invalid external FDs")]
+    InvalidExternalFds,
+
     #[error("Cannot send VM snapshot")]
     SnapshotSend(#[source] MigratableError),
 
