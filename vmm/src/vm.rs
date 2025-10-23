@@ -3548,7 +3548,7 @@ pub fn test_vm() {
     mem.write_slice(&code, load_addr)
         .expect("Writing code to memory failed");
 
-    let vcpu = vm.create_vcpu(0, None).expect("new Vcpu failed");
+    let mut vcpu = vm.create_vcpu(0, None).expect("new Vcpu failed");
 
     let mut vcpu_sregs = vcpu.get_sregs().expect("get sregs failed");
     vcpu_sregs.cs.base = 0;

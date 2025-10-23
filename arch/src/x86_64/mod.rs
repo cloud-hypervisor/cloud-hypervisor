@@ -775,7 +775,7 @@ pub fn generate_common_cpuid(
 }
 
 pub fn configure_vcpu(
-    vcpu: &Arc<dyn hypervisor::Vcpu>,
+    vcpu: &dyn hypervisor::Vcpu,
     id: u32,
     boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
     cpuid: Vec<CpuIdEntry>,

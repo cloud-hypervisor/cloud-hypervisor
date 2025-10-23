@@ -604,7 +604,7 @@ impl cpu::Vcpu for MshvVcpu {
     }
 
     #[allow(non_upper_case_globals)]
-    fn run(&self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
+    fn run(&mut self) -> std::result::Result<cpu::VmExit, cpu::HypervisorCpuError> {
         match self.fd.run() {
             Ok(x) => match x.header.message_type {
                 hv_message_type_HVMSG_X64_HALT => {
@@ -1821,7 +1821,7 @@ impl vm::Vm for MshvVm {
         &self,
         id: u32,
         vm_ops: Option<Arc<dyn VmOps>>,
-    ) -> vm::Result<Arc<dyn cpu::Vcpu>> {
+    ) -> vm::Result<Box<dyn cpu::Vcpu>> {
         let id: u8 = id.try_into().unwrap();
         let vcpu_fd = self
             .fd
@@ -1869,7 +1869,7 @@ impl vm::Vm for MshvVm {
             #[cfg(feature = "sev_snp")]
             host_access_pages: ArcSwap::new(self.host_access_pages.load().clone()),
         };
-        Ok(Arc::new(vcpu))
+        Ok(Box::new(vcpu))
     }
 
     #[cfg(target_arch = "x86_64")]

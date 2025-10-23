@@ -392,7 +392,7 @@ macro_rules! round_up {
 /// A wrapper around creating and using a kvm-based VCPU.
 pub struct Vcpu {
     // The hypervisor abstracted CPU.
-    vcpu: Arc<dyn hypervisor::Vcpu>,
+    vcpu: Box<dyn hypervisor::Vcpu>,
     id: u32,
     #[cfg(target_arch = "aarch64")]
     mpidr: u64,
@@ -450,15 +450,16 @@ impl Vcpu {
         #[cfg(target_arch = "aarch64")]
         {
             self.init(vm)?;
-            self.mpidr = arch::configure_vcpu(&self.vcpu, self.id, boot_setup)
+            self.mpidr = arch::configure_vcpu(self.vcpu.as_ref(), self.id, boot_setup)
                 .map_err(Error::VcpuConfiguration)?;
         }
         #[cfg(target_arch = "riscv64")]
-        arch::configure_vcpu(&self.vcpu, self.id, boot_setup).map_err(Error::VcpuConfiguration)?;
+        arch::configure_vcpu(self.vcpu.as_ref(), self.id, boot_setup)
+            .map_err(Error::VcpuConfiguration)?;
         info!("Configuring vCPU: cpu_id = {}", self.id);
         #[cfg(target_arch = "x86_64")]
         arch::configure_vcpu(
-            &self.vcpu,
+            self.vcpu.as_ref(),
             self.id,
             boot_setup,
             cpuid,
@@ -515,7 +516,7 @@ impl Vcpu {
     ///
     /// Note that the state of the VCPU and associated VM must be setup first for this to do
     /// anything useful.
-    pub fn run(&self) -> std::result::Result<VmExit, HypervisorCpuError> {
+    pub fn run(&mut self) -> std::result::Result<VmExit, HypervisorCpuError> {
         self.vcpu.run()
     }
 
@@ -1166,12 +1167,12 @@ impl CpuManager {
 
                                 #[cfg(feature = "kvm")]
                                 if matches!(hypervisor_type, HypervisorType::Kvm) {
-                                    vcpu.lock().as_ref().unwrap().vcpu.set_immediate_exit(true);
+                                    vcpu.lock().unwrap().vcpu.set_immediate_exit(true);
                                     if !matches!(vcpu.lock().unwrap().run(), Ok(VmExit::Ignore)) {
                                         error!("Unexpected VM exit on \"immediate_exit\" run");
                                         break;
                                     }
-                                    vcpu.lock().as_ref().unwrap().vcpu.set_immediate_exit(false);
+                                    vcpu.lock().unwrap().vcpu.set_immediate_exit(false);
                                 }
 
                                 vcpu_run_interrupted.store(true, Ordering::SeqCst);
@@ -1204,10 +1205,7 @@ impl CpuManager {
                                 break;
                             }
 
-                            #[cfg(feature = "tdx")]
                             let mut vcpu = vcpu.lock().unwrap();
-                            #[cfg(not(feature = "tdx"))]
-                            let vcpu = vcpu.lock().unwrap();
                             // vcpu.run() returns false on a triple-fault so trigger a reset
                             match vcpu.run() {
                                 Ok(run) => match run {
@@ -1248,8 +1246,7 @@ impl CpuManager {
                                     }
                                     #[cfg(feature = "tdx")]
                                     VmExit::Tdx => {
-                                        if let Some(vcpu) = Arc::get_mut(&mut vcpu.vcpu) {
-                                            match vcpu.get_tdx_exit_details() {
+                                            match vcpu.vcpu.get_tdx_exit_details() {
                                                 Ok(details) => match details {
                                                     TdxExitDetails::GetQuote => warn!("TDG_VP_VMCALL_GET_QUOTE not supported"),
                                                     TdxExitDetails::SetupEventNotifyInterrupt => {
@@ -1258,13 +1255,7 @@ impl CpuManager {
                                                 },
                                                 Err(e) => error!("Unexpected TDX VMCALL: {}", e),
                                             }
-                                            vcpu.set_tdx_status(TdxExitStatus::InvalidOperand);
-                                        } else {
-                                            // We should never reach this code as
-                                            // this means the design from the code
-                                            // is wrong.
-                                            unreachable!("Couldn't get a mutable reference from Arc<dyn Vcpu> as there are multiple instances");
-                                        }
+                                            vcpu.vcpu.set_tdx_status(TdxExitStatus::InvalidOperand);
                                     }
                                 },
 
@@ -3011,7 +3002,7 @@ mod tests {
         let lint0_mode_expected = set_apic_delivery_mode(lint0, APIC_MODE_EXTINT);
         let lint1_mode_expected = set_apic_delivery_mode(lint1, APIC_MODE_NMI);
 
-        set_lint(&vcpu).unwrap();
+        set_lint(vcpu.as_ref()).unwrap();
 
         // Compute the value that represents LVT0 and LVT1 after set_lint.
         let klapic_actual: LapicState = vcpu.get_lapic().unwrap();
@@ -3028,7 +3019,7 @@ mod tests {
             .create_vm(HypervisorVmConfig::default())
             .expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0, None).unwrap();
-        setup_fpu(&vcpu).unwrap();
+        setup_fpu(vcpu.as_ref()).unwrap();
 
         let expected_fpu: FpuState = FpuState {
             fcw: 0x37f,
@@ -3054,7 +3045,7 @@ mod tests {
             .create_vm(HypervisorVmConfig::default())
             .expect("new VM fd creation failed");
         let vcpu = vm.create_vcpu(0, None).unwrap();
-        setup_msrs(&vcpu).unwrap();
+        setup_msrs(vcpu.as_ref()).unwrap();
 
         // This test will check against the last MSR entry configured (the tenth one).
         // See create_msr_entries for details.
@@ -3089,7 +3080,7 @@ mod tests {
         expected_regs.set_rip(1);
 
         setup_regs(
-            &vcpu,
+            vcpu.as_ref(),
             arch::EntryPoint {
                 entry_addr: vm_memory::GuestAddress(expected_regs.get_rip()),
                 setup_header: None,
@@ -3116,7 +3107,7 @@ mod tests {
         expected_regs.set_rsi(ZERO_PAGE_START.0);
 
         setup_regs(
-            &vcpu,
+            vcpu.as_ref(),
             arch::EntryPoint {
                 entry_addr: vm_memory::GuestAddress(expected_regs.get_rip()),
                 setup_header: Some(setup_header {
