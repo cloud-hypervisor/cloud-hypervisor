@@ -123,7 +123,7 @@ use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
     VhostMode, VmConfig, VsockConfig,
 };
-use crate::{DEVICE_MANAGER_SNAPSHOT_ID, GuestRegionMmap, PciDeviceInfo, device_node};
+use crate::{DEVICE_MANAGER_SNAPSHOT_ID, GuestRegionMmap, PciDeviceInfo, config, device_node};
 
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 const MMIO_LEN: u64 = 0x1000;
@@ -666,6 +666,9 @@ pub enum DeviceManagerError {
     /// Error adding fw_cfg to bus.
     #[error("Error adding fw_cfg to bus")]
     ErrorAddingFwCfgToBus(#[source] vm_device::BusError),
+
+    #[error("Multiple use of the same FD is misconfiguration")]
+    ExternalFdMisconfiguration(#[source] config::Error),
 }
 
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
@@ -2944,7 +2947,8 @@ impl DeviceManager {
                     self.config
                         .lock()
                         .unwrap()
-                        .add_preserved_fds(fds.iter().cloned());
+                        .add_preserved_fds(fds.iter().cloned())
+                        .map_err(DeviceManagerError::ExternalFdMisconfiguration)?;
                 }
 
                 Arc::new(Mutex::new(net))

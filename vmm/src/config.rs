@@ -175,6 +175,10 @@ pub enum Error {
     /// Failed Parsing FwCfgItem config
     #[error("Error parsing --fw-cfg-config items")]
     ParseFwCfgItem(#[source] OptionParserError),
+    #[error(
+        "Misconfiguration! Attempted to add FD {0} to the preserved FDs but it is already preserved!"
+    )]
+    FdAlreadyPreserved(RawFd),
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]
@@ -3098,16 +3102,15 @@ impl VmConfig {
     /// # Safety
     /// To use this safely, the caller must guarantee that the input
     /// FDs are all valid.
-    pub unsafe fn add_preserved_fds(&mut self, fds: impl IntoIterator<Item = RawFd>) {
+    pub unsafe fn add_preserved_fds(&mut self, fds: impl IntoIterator<Item = RawFd>) -> Result<()> {
         for fd in fds.into_iter() {
-            if self.preserved_fds.contains(&fd) {
-                log::warn!(
-                    "FD {fd} is already preserved. Using the same FD multiple times causes most likely unexpected behavior"
-                )
-            } else {
-                self.preserved_fds.insert(fd);
+            let already_preserved = self.preserved_fds.insert(fd);
+            if already_preserved {
+                return Err(Error::FdAlreadyPreserved(fd));
             }
         }
+
+        Ok(())
     }
 
     #[cfg(feature = "tdx")]
@@ -4806,7 +4809,7 @@ mod tests {
         let fd2 = unsafe { libc::dup(File::open("/dev/null").unwrap().as_raw_fd()) };
         // SAFETY: safe as both FDs are valid
         unsafe {
-            still_valid_config.add_preserved_fds([fd1, fd2]);
+            still_valid_config.add_preserved_fds([fd1, fd2]).unwrap();
         }
         let _still_valid_config = still_valid_config.clone();
     }
