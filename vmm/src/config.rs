@@ -3,13 +3,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 #[cfg(feature = "ivshmem")]
 use std::fs;
 use std::os::fd::RawFd;
 use std::path::PathBuf;
-use std::result;
 use std::str::FromStr;
+use std::{mem, result};
 
 use clap::ArgMatches;
 use option_parser::{
@@ -3024,7 +3024,7 @@ impl VmConfig {
             pci_segments,
             platform,
             tpm,
-            preserved_fds: HashSet::new(),
+            preserved_fds: BTreeSet::new(),
             landlock_enable: vm_params.landlock_enable,
             landlock_rules,
             #[cfg(feature = "ivshmem")]
@@ -3104,8 +3104,9 @@ impl VmConfig {
     /// FDs are all valid.
     pub unsafe fn add_preserved_fds(&mut self, fds: impl IntoIterator<Item = RawFd>) -> Result<()> {
         for fd in fds.into_iter() {
-            let already_preserved = self.preserved_fds.insert(fd);
+            let already_preserved = !self.preserved_fds.insert(fd);
             if already_preserved {
+                debug!("Preserved FDs: {:?}", self.preserved_fds);
                 return Err(Error::FdAlreadyPreserved(fd));
             }
         }
@@ -3167,7 +3168,9 @@ impl Clone for VmConfig {
 
 impl Drop for VmConfig {
     fn drop(&mut self) {
-        for fd in self.preserved_fds.drain() {
+        // There is no .drain() for BTreeSet yet
+        let fds = mem::take(&mut self.preserved_fds);
+        for fd in fds {
             // SAFETY: FFI call with valid FDs
             unsafe { libc::close(fd) };
         }
@@ -3176,7 +3179,6 @@ impl Drop for VmConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use std::fs::File;
     use std::os::unix::io::AsRawFd;
 
@@ -3949,7 +3951,7 @@ mod tests {
             pci_segments: None,
             platform: None,
             tpm: None,
-            preserved_fds: HashSet::new(),
+            preserved_fds: BTreeSet::new(),
             net: Some(vec![
                 NetConfig {
                     id: Some("net0".to_owned()),
@@ -4161,7 +4163,7 @@ mod tests {
             pci_segments: None,
             platform: None,
             tpm: None,
-            preserved_fds: HashSet::new(),
+            preserved_fds: BTreeSet::new(),
             landlock_enable: false,
             landlock_rules: None,
             #[cfg(feature = "ivshmem")]

@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::os::fd::RawFd;
 use std::path::{Path, PathBuf};
@@ -946,7 +946,7 @@ pub struct VmConfig {
     // causes the FDs to be closed early. This allows management software to
     // gracefully clean up resources (e.g., libvirt closes tap devices).
     #[serde(skip)]
-    pub preserved_fds: HashSet<RawFd>,
+    pub preserved_fds: BTreeSet<RawFd>,
     #[serde(default)]
     pub landlock_enable: bool,
     pub landlock_rules: Option<Vec<LandlockConfig>>,

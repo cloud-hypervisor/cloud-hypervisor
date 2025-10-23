@@ -2328,7 +2328,7 @@ const DEVICE_MANAGER_SNAPSHOT_ID: &str = "device-manager";
 
 #[cfg(test)]
 mod unit_tests {
-    use std::collections::HashSet;
+    use std::collections::BTreeSet;
 
     use super::*;
     #[cfg(target_arch = "x86_64")]
@@ -2428,7 +2428,7 @@ mod unit_tests {
             pci_segments: None,
             platform: None,
             tpm: None,
-            preserved_fds: HashSet::new(),
+            preserved_fds: BTreeSet::new(),
             landlock_enable: false,
             landlock_rules: None,
             #[cfg(feature = "ivshmem")]
