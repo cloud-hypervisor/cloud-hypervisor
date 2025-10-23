@@ -74,10 +74,9 @@ if [ "${TEST_ARCH}" == "aarch64" ]; then
     if [ ! -d "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR" ]; then
         mkdir -p "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR"
     fi
-    # Mount the 'raw' image, replace the fio and umount the working folder
-    guestmount -a "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_NAME" -m /dev/sda1 "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR" || exit 1
-    cp "$WORKLOADS_DIR"/fio "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR"/usr/bin/fio
-    guestunmount "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR"
+    # Mount image partition
+    IMG="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_NAME"
+    update_kernel_in_image "$IMG" "$FOCAL_OS_RAW_IMAGE_UPDATE_TOOL_ROOT_DIR" "$WORKLOADS_DIR/fio"
 fi
 
 # Prepare linux image (build from source or download pre-built)
