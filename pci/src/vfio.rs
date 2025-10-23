@@ -6,9 +6,9 @@
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::io;
+use std::os::fd::BorrowedFd;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
-use std::ptr::null_mut;
 use std::sync::{Arc, Barrier, Mutex};
 
 use anyhow::anyhow;
@@ -34,6 +34,7 @@ use vm_memory::{Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestUsiz
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::mmap::MmapRegion;
 use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
 use crate::msix::MsixConfigState;
 use crate::{
@@ -258,12 +259,11 @@ impl Interrupt {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub struct UserMemoryRegion {
     pub slot: u32,
     pub start: u64,
-    pub size: u64,
-    pub host_addr: u64,
+    pub mapping: Arc<crate::mmap::MmapRegion>,
 }
 
 #[derive(Clone)]
@@ -275,18 +275,23 @@ pub struct MmioRegion {
     pub(crate) user_memory_regions: Vec<UserMemoryRegion>,
 }
 
-trait MmioRegionRange {
+/// # Safety
+///
+/// [`Self::find_user_address`] must always either return `Err`
+/// or a pointer to `size` bytes of valid memory.
+unsafe trait MmioRegionRange {
     fn check_range(&self, guest_addr: u64, size: u64) -> bool;
-    fn find_user_address(&self, guest_addr: u64) -> Result<u64, io::Error>;
+    fn find_user_address(&self, guest_addr: u64, size: u64) -> Result<*mut u8, io::Error>;
 }
 
-impl MmioRegionRange for Vec<MmioRegion> {
+// SAFETY: See the comment in `find_user_address`.
+unsafe impl MmioRegionRange for Vec<MmioRegion> {
     // Check if a guest address is within the range of mmio regions
     fn check_range(&self, guest_addr: u64, size: u64) -> bool {
+        let Some(guest_addr_end) = guest_addr.checked_add(size) else {
+            return false;
+        };
         for region in self.iter() {
-            let Some(guest_addr_end) = guest_addr.checked_add(size) else {
-                return false;
-            };
             let Some(region_end) = region.start.raw_value().checked_add(region.length) else {
                 return false;
             };
@@ -298,14 +303,33 @@ impl MmioRegionRange for Vec<MmioRegion> {
     }
 
     // Locate the user region address for a guest address within all mmio regions
-    fn find_user_address(&self, guest_addr: u64) -> Result<u64, io::Error> {
+    fn find_user_address(&self, guest_addr: u64, size: u64) -> Result<*mut u8, io::Error> {
         for region in self.iter() {
             for user_region in region.user_memory_regions.iter() {
-                if guest_addr >= user_region.start
-                    && guest_addr < user_region.start + user_region.size
-                {
-                    return Ok(user_region.host_addr + (guest_addr - user_region.start));
+                let mapping: &MmapRegion = &user_region.mapping;
+                let start: u64 = user_region.start;
+                let len: u64 = mapping.len().try_into().unwrap();
+                // See if the guest address is inside the region.
+                let Some(offset_from_start) = guest_addr.checked_sub(start) else {
+                    continue;
+                };
+                if offset_from_start >= len {
+                    continue;
                 }
+                // Check that the size is in bounds.
+                // This enforces the invariant promised by implementing MmioRegionRange.
+                assert!(
+                    size <= len - offset_from_start,
+                    "Attempt to read {size} bytes at offset {offset_from_start} into \
+a region of size {len}"
+                );
+                // SAFETY: MmapRegion guarantees that mapping.addr points to at least
+                // mapping.len() bytes of valid memory.  offset_from_start is equal
+                // to guest_addr - start, which was checked to be less than mapping.len().
+                // Therefore, the returned pointer is still in the range of valid memory.
+                // Also, since mapping.len() fit in usize, offset_from_start must as well,
+                // so the cast is safe.
+                return Ok(unsafe { mapping.addr().add(offset_from_start as usize) });
             }
         }
 
@@ -1585,7 +1609,8 @@ impl VfioPciDevice {
     /// * `mem_slot` - The closure to return a memory slot.
     pub fn map_mmio_regions(&mut self) -> Result<(), VfioPciError> {
         let fd = self.device.as_raw_fd();
-
+        // SAFETY: fd is guaranteed valid
+        let fd = unsafe { BorrowedFd::borrow_raw(fd) };
         for region in self.common.mmio_regions.iter_mut() {
             let region_flags = self.device.get_region_flags(region.index);
             if region_flags & VFIO_REGION_INFO_FLAG_MMAP != 0 {
@@ -1626,69 +1651,65 @@ impl VfioPciDevice {
                 )?;
 
                 for area in sparse_areas.iter() {
-                    // SAFETY: FFI call with correct arguments
-                    let host_addr = unsafe {
-                        libc::mmap(
-                            null_mut(),
-                            area.size as usize,
-                            prot,
-                            libc::MAP_SHARED,
-                            fd,
-                            mmap_offset as libc::off_t + area.offset as libc::off_t,
-                        )
+                    let mapping = match MmapRegion::mmap(
+                        area.size,
+                        prot,
+                        fd,
+                        mmap_offset,
+                        area.offset,
+                    ) {
+                        Ok(mapping) => mapping,
+                        Err(_) => {
+                            error!(
+                                "Could not mmap sparse area (offset = 0x{:x}, size = 0x{:x}): {}",
+                                mmap_offset,
+                                area.size,
+                                std::io::Error::last_os_error()
+                            );
+                            return Err(VfioPciError::MmapArea);
+                        }
                     };
-
-                    if std::ptr::eq(host_addr, libc::MAP_FAILED) {
-                        error!(
-                            "Could not mmap sparse area (offset = 0x{:x}, size = 0x{:x}): {}",
-                            area.offset,
-                            area.size,
-                            std::io::Error::last_os_error()
-                        );
-                        return Err(VfioPciError::MmapArea);
-                    }
-
-                    if !is_page_size_aligned(area.size) || !is_page_size_aligned(area.offset) {
-                        warn!(
-                            "Could not mmap sparse area that is not page size aligned (offset = 0x{:x}, size = 0x{:x})",
-                            area.offset, area.size,
-                        );
-                        return Ok(());
-                    }
 
                     let user_memory_region = UserMemoryRegion {
                         slot: self.memory_slot_allocator.next_memory_slot(),
                         start: region.start.0 + area.offset,
-                        size: area.size,
-                        host_addr: host_addr as u64,
+                        mapping: Arc::new(mapping),
                     };
-
-                    region.user_memory_regions.push(user_memory_region);
-
-                    let mem_region = self.vm.make_user_memory_region(
-                        user_memory_region.slot,
-                        user_memory_region.start,
-                        user_memory_region.size,
-                        user_memory_region.host_addr,
-                        false,
-                        false,
-                    );
-
-                    self.vm
-                        .create_user_memory_region(mem_region)
-                        .map_err(VfioPciError::CreateUserMemoryRegion)?;
+                    // SAFETY: MmapRegion invariants guarantee that
+                    // user_memory_region.mapping.addr() points to
+                    // user_memory_region.mapping.len() bytes of
+                    // valid memory that will only be unmapped with munmap().
+                    unsafe {
+                        self.vm.create_user_memory_region(
+                            user_memory_region.slot,
+                            user_memory_region.start,
+                            user_memory_region.mapping.len(),
+                            user_memory_region.mapping.addr(),
+                            false,
+                            false,
+                        )
+                    }
+                    .map_err(VfioPciError::CreateUserMemoryRegion)?;
 
                     if !self.iommu_attached {
-                        self.container
-                            .vfio_dma_map(
+                        // vfio_dma_map should be unsafe but isn't.
+                        #[allow(unused_unsafe)]
+                        // SAFETY: MmapRegion invariants guarantee that
+                        // user_memory_region.mapping.addr() points to
+                        // user_memory_region.mapping.len() bytes of
+                        // valid memory that will only be unmapped with munmap().
+                        unsafe {
+                            self.container.vfio_dma_map(
                                 user_memory_region.start,
-                                user_memory_region.size,
-                                user_memory_region.host_addr,
+                                user_memory_region.mapping.len().try_into().unwrap(),
+                                (user_memory_region.mapping.addr() as usize)
+                                    .try_into()
+                                    .unwrap(),
                             )
-                            .map_err(|e| {
-                                VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf)
-                            })?;
+                        }
+                        .map_err(|e| VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf))?;
                     }
+                    region.user_memory_regions.push(user_memory_region);
                 }
             }
         }
@@ -1697,75 +1718,45 @@ impl VfioPciDevice {
     }
 
     pub fn unmap_mmio_regions(&mut self) {
-        for region in self.common.mmio_regions.iter() {
-            for user_memory_region in region.user_memory_regions.iter() {
+        for region in self.common.mmio_regions.iter_mut() {
+            for user_memory_region in region.user_memory_regions.drain(..) {
+                let len = user_memory_region.mapping.len();
+                let host_addr = user_memory_region.mapping.addr();
                 // Unmap from vfio container
                 if !self.iommu_attached
                     && let Err(e) = self
                         .container
-                        .vfio_dma_unmap(user_memory_region.start, user_memory_region.size)
+                        .vfio_dma_unmap(user_memory_region.start, len.try_into().unwrap())
                         .map_err(|e| VfioPciError::DmaUnmap(e, self.device_path.clone(), self.bdf))
                 {
                     error!(
                         "Could not unmap mmio region from vfio container: \
                             iova 0x{:x}, size 0x{:x}: {}, ",
-                        user_memory_region.start, user_memory_region.size, e
+                        user_memory_region.start, len, e
                     );
                 }
 
                 // Remove region
-                let r = self.vm.make_user_memory_region(
-                    user_memory_region.slot,
-                    user_memory_region.start,
-                    user_memory_region.size,
-                    user_memory_region.host_addr,
-                    false,
-                    false,
-                );
-
-                if let Err(e) = self.vm.remove_user_memory_region(r) {
+                // SAFETY: only valid entries are added to the user_memory_regions field
+                // of the entries of self.common.mmio_regions.
+                // Also, host_addr..host_addr + len is valid by the MmapRegion invariants.
+                if let Err(e) = unsafe {
+                    self.vm.remove_user_memory_region(
+                        user_memory_region.slot,
+                        user_memory_region.start,
+                        len,
+                        host_addr,
+                        false,
+                        false,
+                    )
+                } {
                     error!("Could not remove the userspace memory region: {e}");
                 }
 
                 self.memory_slot_allocator
                     .free_memory_slot(user_memory_region.slot);
-
-                // SAFETY: FFI call with correct arguments
-                let ret = unsafe {
-                    libc::munmap(
-                        user_memory_region.host_addr as *mut libc::c_void,
-                        user_memory_region.size as usize,
-                    )
-                };
-                if ret != 0 {
-                    error!(
-                        "Could not unmap region {}, error:{}",
-                        region.index,
-                        io::Error::last_os_error()
-                    );
-                }
             }
         }
-    }
-
-    pub fn dma_map(&self, iova: u64, size: u64, user_addr: u64) -> Result<(), VfioPciError> {
-        if !self.iommu_attached {
-            self.container
-                .vfio_dma_map(iova, size, user_addr)
-                .map_err(|e| VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf))?;
-        }
-
-        Ok(())
-    }
-
-    pub fn dma_unmap(&self, iova: u64, size: u64) -> Result<(), VfioPciError> {
-        if !self.iommu_attached {
-            self.container
-                .vfio_dma_unmap(iova, size)
-                .map_err(|e| VfioPciError::DmaUnmap(e, self.device_path.clone(), self.bdf))?;
-        }
-
-        Ok(())
     }
 
     pub fn mmio_regions(&self) -> Vec<MmioRegion> {
@@ -1883,35 +1874,38 @@ impl PciDevice for VfioPciDevice {
                 region.start = GuestAddress(new_base);
 
                 for user_memory_region in region.user_memory_regions.iter_mut() {
+                    let len = user_memory_region.mapping.len();
+                    let host_addr = user_memory_region.mapping.addr();
                     // Unmap the old MMIO region from vfio container
                     if !self.iommu_attached
                         && let Err(e) = self
                             .container
-                            .vfio_dma_unmap(user_memory_region.start, user_memory_region.size)
+                            .vfio_dma_unmap(user_memory_region.start, len.try_into().unwrap())
                             .map_err(|e| {
                                 VfioPciError::DmaUnmap(e, self.device_path.clone(), self.bdf)
                             })
                     {
                         error!(
                             "Could not unmap mmio region from vfio container: \
-                                iova 0x{:x}, size 0x{:x}: {}, ",
-                            user_memory_region.start, user_memory_region.size, e
+iova 0x{:x}, size 0x{:x}: {}, ",
+                            user_memory_region.start, len, e
                         );
                     }
-
                     // Remove old region
-                    let old_mem_region = self.vm.make_user_memory_region(
-                        user_memory_region.slot,
-                        user_memory_region.start,
-                        user_memory_region.size,
-                        user_memory_region.host_addr,
-                        false,
-                        false,
-                    );
-
-                    self.vm
-                        .remove_user_memory_region(old_mem_region)
-                        .map_err(io::Error::other)?;
+                    // SAFETY: MmapRegion invariants guarantee that
+                    // host_addr points to len bytes of
+                    // valid memory that will only be unmapped with munmap().
+                    unsafe {
+                        self.vm.remove_user_memory_region(
+                            user_memory_region.slot,
+                            user_memory_region.start,
+                            len,
+                            host_addr,
+                            false,
+                            false,
+                        )
+                    }
+                    .map_err(io::Error::other)?;
 
                     // Update the user memory region with the correct start address.
                     if new_base > old_base {
@@ -1921,37 +1915,43 @@ impl PciDevice for VfioPciDevice {
                     }
 
                     // Insert new region
-                    let new_mem_region = self.vm.make_user_memory_region(
-                        user_memory_region.slot,
-                        user_memory_region.start,
-                        user_memory_region.size,
-                        user_memory_region.host_addr,
-                        false,
-                        false,
-                    );
-
-                    self.vm
-                        .create_user_memory_region(new_mem_region)
-                        .map_err(io::Error::other)?;
+                    // SAFETY: MmapRegion invariants guarantee that
+                    // host_addr points to len bytes of
+                    // valid memory that will only be unmapped with munmap().
+                    unsafe {
+                        self.vm.create_user_memory_region(
+                            user_memory_region.slot,
+                            user_memory_region.start,
+                            len,
+                            host_addr,
+                            false,
+                            false,
+                        )
+                    }
+                    .map_err(io::Error::other)?;
 
                     // Map the moved mmio region to vfio container
                     if !self.iommu_attached {
-                        self.container
-                            .vfio_dma_map(
+                        // vfio_dma_map is unsound and ought to be marked as unsafe
+                        #[allow(unused_unsafe)]
+                        // SAFETY: MmapRegion invariants guarantee that
+                        // host_addr points to len bytes of
+                        // valid memory that will only be unmapped with munmap().
+                        unsafe {
+                            self.container.vfio_dma_map(
                                 user_memory_region.start,
-                                user_memory_region.size,
-                                user_memory_region.host_addr,
+                                len.try_into().unwrap(),
+                                (host_addr as usize).try_into().unwrap(),
                             )
-                            .map_err(|e| {
-                                VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf)
-                            })
-                            .map_err(|e| {
-                                io::Error::other(format!(
-                                    "Could not map mmio region to vfio container: \
-                                    iova 0x{:x}, size 0x{:x}: {}, ",
-                                    user_memory_region.start, user_memory_region.size, e
-                                ))
-                            })?;
+                        }
+                        .map_err(|e| VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf))
+                        .map_err(|e| {
+                            io::Error::other(format!(
+                                "Could not map mmio region to vfio container: \
+iova 0x{:x}, size 0x{:x}: {}, ",
+                                user_memory_region.start, len, e
+                            ))
+                        })?;
                     }
                 }
             }
@@ -1985,6 +1985,7 @@ impl Snapshottable for VfioPciDevice {
         Ok(vfio_pci_dev_snapshot)
     }
 }
+
 impl Transportable for VfioPciDevice {}
 impl Migratable for VfioPciDevice {}
 
@@ -2018,11 +2019,17 @@ impl<M: GuestAddressSpace> VfioDmaMapping<M> {
 
 impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M> {
     fn map(&self, iova: u64, gpa: u64, size: u64) -> std::result::Result<(), io::Error> {
+        let Ok(usize_size): Result<usize, _> = size.try_into() else {
+            return Err(io::Error::other(format!("size {size} overflows usize")));
+        };
         let mem = self.memory.memory();
         let guest_addr = GuestAddress(gpa);
-        let user_addr = if mem.check_range(guest_addr, size as usize) {
-            match mem.get_host_address(guest_addr) {
-                Ok(t) => t as u64,
+        let user_addr = if mem.check_range(guest_addr, usize_size) {
+            match mem.get_slice(guest_addr, usize_size) {
+                Ok(t) => {
+                    assert!(t.len() >= usize_size);
+                    Ok(t.ptr_guard_mut())
+                }
                 Err(e) => {
                     return Err(io::Error::other(format!(
                         "unable to retrieve user address for gpa 0x{gpa:x} from guest memory region: {e}"
@@ -2030,21 +2037,36 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
                 }
             }
         } else if self.mmio_regions.lock().unwrap().check_range(gpa, size) {
-            self.mmio_regions.lock().unwrap().find_user_address(gpa)?
+            Err(self
+                .mmio_regions
+                .lock()
+                .unwrap()
+                .find_user_address(gpa, size)?)
         } else {
             return Err(io::Error::other(format!(
                 "failed to locate guest address 0x{gpa:x} in guest memory"
             )));
         };
+        let user_addr = match user_addr {
+            Ok(p) => p.as_ptr(),
+            Err(p) => p,
+        };
 
-        self.container
-            .vfio_dma_map(iova, size, user_addr)
-            .map_err(|e| {
-                io::Error::other(format!(
-                    "failed to map memory for VFIO container, \
+        // vfio_dma_map is unsound and ought to be marked as unsafe
+        #[allow(unused_unsafe)]
+        // SAFETY: find_user_address and GuestMemory::get_slice() guarantee that
+        // the returned pointer is valid for up to `usize_size` bytes.
+        // `usize_size` is always equal to `size` due to the above `try_into()` call.
+        unsafe {
+            self.container
+                .vfio_dma_map(iova, size, (user_addr as usize).try_into().unwrap())
+        }
+        .map_err(|e| {
+            io::Error::other(format!(
+                "failed to map memory for VFIO container, \
                          iova 0x{iova:x}, gpa 0x{gpa:x}, size 0x{size:x}: {e:?}"
-                ))
-            })
+            ))
+        })
     }
 
     fn unmap(&self, iova: u64, size: u64) -> std::result::Result<(), io::Error> {

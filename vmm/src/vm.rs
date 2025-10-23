@@ -2247,15 +2247,23 @@ impl Vm {
         let mem = guest_memory.memory();
 
         for section in sections {
-            self.vm
-                .tdx_init_memory_region(
-                    mem.get_host_address(GuestAddress(section.address)).unwrap() as u64,
+            let size = section.size.try_into().unwrap();
+            // SAFETY: get_host_address_range does proper bounds checking
+            unsafe {
+                self.vm.tdx_init_memory_region(
+                    virtio_devices::get_host_address_range(
+                        &*mem,
+                        GuestAddress(section.address),
+                        size,
+                    )
+                    .unwrap(),
                     section.address,
-                    section.size,
+                    size,
                     /* TDVF_SECTION_ATTRIBUTES_EXTENDMR */
                     section.attributes == 1,
                 )
-                .map_err(Error::InitializeTdxMemoryRegion)?;
+            }
+            .map_err(Error::InitializeTdxMemoryRegion)?;
         }
 
         Ok(())
@@ -3533,17 +3541,19 @@ pub fn test_vm() {
         .expect("new VM creation failed");
 
     for (index, region) in mem.iter().enumerate() {
-        let mem_region = vm.make_user_memory_region(
-            index as u32,
-            region.start_addr().raw_value(),
-            region.len(),
-            region.as_ptr() as u64,
-            false,
-            false,
-        );
-
-        vm.create_user_memory_region(mem_region)
-            .expect("Cannot configure guest memory");
+        // SAFETY: region was allocated by GuestMemoryMmap which ensures the
+        // needed invariants.
+        unsafe {
+            vm.create_user_memory_region(
+                index as u32,
+                region.start_addr().raw_value(),
+                region.len().try_into().unwrap(),
+                region.as_ptr() as _,
+                false,
+                false,
+            )
+            .expect("Cannot configure guest memory")
+        }
     }
     mem.write_slice(&code, load_addr)
         .expect("Writing code to memory failed");
