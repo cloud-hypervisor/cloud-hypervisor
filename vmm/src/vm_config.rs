@@ -483,6 +483,7 @@ pub enum ConsoleOutputMode {
     Tty,
     File,
     Socket,
+    Tcp,
     Null,
 }
 
@@ -494,6 +495,7 @@ pub struct ConsoleConfig {
     #[serde(default)]
     pub iommu: bool,
     pub socket: Option<PathBuf>,
+    pub url: Option<PathBuf>,
 }
 
 pub fn default_consoleconfig_file() -> Option<PathBuf> {
@@ -856,6 +858,7 @@ pub fn default_serial() -> ConsoleConfig {
         mode: ConsoleOutputMode::Null,
         iommu: false,
         socket: None,
+        url: None,
     }
 }
 
@@ -865,6 +868,7 @@ pub fn default_console() -> ConsoleConfig {
         mode: ConsoleOutputMode::Tty,
         iommu: false,
         socket: None,
+        url: None,
     }
 }
 
