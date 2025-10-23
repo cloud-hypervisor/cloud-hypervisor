@@ -446,6 +446,7 @@ impl Vcpu {
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
         #[cfg(target_arch = "x86_64")] topology: (u16, u16, u16, u16),
+        #[cfg(feature = "igvm")] igvm_enabled: bool,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
@@ -457,16 +458,26 @@ impl Vcpu {
         arch::configure_vcpu(&self.vcpu, self.id, boot_setup).map_err(Error::VcpuConfiguration)?;
         info!("Configuring vCPU: cpu_id = {}", self.id);
         #[cfg(target_arch = "x86_64")]
-        arch::configure_vcpu(
-            &self.vcpu,
-            self.id,
-            boot_setup,
-            cpuid,
-            kvm_hyperv,
-            self.vendor,
-            topology,
-        )
-        .map_err(Error::VcpuConfiguration)?;
+        {
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "igvm")] {
+                    let setup_registers = !igvm_enabled;
+                }  else {
+                    let setup_registers = true;
+                }
+            }
+            arch::configure_vcpu(
+                &self.vcpu,
+                self.id,
+                boot_setup,
+                cpuid,
+                kvm_hyperv,
+                self.vendor,
+                topology,
+                setup_registers,
+            )
+            .map_err(Error::VcpuConfiguration)?;
+        }
 
         Ok(())
     }
@@ -520,9 +531,13 @@ impl Vcpu {
     }
 
     #[cfg(feature = "sev_snp")]
-    pub fn set_sev_control_register(&self, vmsa_pfn: u64) -> Result<()> {
+    pub fn set_sev_control_register(
+        &self,
+        vmsa_pfn: u64,
+        vmsa: igvm::snp_defs::SevVmsa,
+    ) -> Result<()> {
         self.vcpu
-            .set_sev_control_register(vmsa_pfn)
+            .set_sev_control_register(vmsa_pfn, vmsa)
             .map_err(Error::SetSevControlRegister)
     }
 
@@ -593,6 +608,8 @@ pub struct CpuManager {
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     #[cfg(feature = "sev_snp")]
     sev_snp_enabled: bool,
+    #[cfg(feature = "igvm")]
+    igvm_enabled: bool,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -753,6 +770,7 @@ impl CpuManager {
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         numa_nodes: &NumaNodes,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
+        #[cfg(feature = "igvm")] igvm_enabled: bool,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         if config.max_vcpus > hypervisor.get_max_vcpus() {
             return Err(Error::MaximumVcpusExceeded(
@@ -856,6 +874,8 @@ impl CpuManager {
             hypervisor: hypervisor.clone(),
             #[cfg(feature = "sev_snp")]
             sev_snp_enabled,
+            #[cfg(feature = "igvm")]
+            igvm_enabled,
         })))
     }
 
@@ -932,11 +952,15 @@ impl CpuManager {
     ) -> Result<()> {
         let mut vcpu = vcpu.lock().unwrap();
 
-        #[cfg(feature = "sev_snp")]
-        if self.sev_snp_enabled {
+        #[cfg(all(feature = "sev_snp", feature = "mshv"))]
+        if self.sev_snp_enabled
+            && self.hypervisor.hypervisor_type() == hypervisor::HypervisorType::Mshv
+        {
             if let Some((kernel_entry_point, _)) = boot_setup {
+                use zerocopy::FromZeros;
                 vcpu.set_sev_control_register(
                     kernel_entry_point.entry_addr.0 / crate::igvm::HV_PAGE_SIZE,
+                    igvm::snp_defs::SevVmsa::new_zeroed(),
                 )?;
             }
 
@@ -973,6 +997,8 @@ impl CpuManager {
             self.cpuid.clone(),
             self.config.kvm_hyperv,
             topology,
+            #[cfg(feature = "igvm")]
+            self.igvm_enabled,
         )?;
 
         #[cfg(target_arch = "aarch64")]
@@ -2051,7 +2077,7 @@ impl CpuManager {
         &self.vcpus_kill_signalled
     }
 
-    #[cfg(feature = "igvm")]
+    #[cfg(all(feature = "igvm", feature = "mshv"))]
     pub(crate) fn get_cpuid_leaf(
         &self,
         cpu_id: u8,
@@ -2072,6 +2098,11 @@ impl CpuManager {
     #[cfg(feature = "sev_snp")]
     pub(crate) fn sev_snp_enabled(&self) -> bool {
         self.sev_snp_enabled
+    }
+
+    #[cfg(feature = "igvm")]
+    pub(crate) fn hypervisor_type(&self) -> hypervisor::HypervisorType {
+        self.hypervisor.hypervisor_type()
     }
 
     pub(crate) fn nmi(&self) -> Result<()> {
