@@ -6,7 +6,6 @@
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
-use std::sync::Arc;
 use std::{mem, result};
 
 use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
@@ -67,7 +66,7 @@ pub type Result<T> = result::Result<T, Error>;
 /// # Arguments
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
-pub fn setup_fpu(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
+pub fn setup_fpu(vcpu: &dyn hypervisor::Vcpu) -> Result<()> {
     let fpu: FpuState = FpuState {
         fcw: 0x37f,
         mxcsr: 0x1f80,
@@ -82,7 +81,7 @@ pub fn setup_fpu(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
 /// # Arguments
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
-pub fn setup_msrs(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
+pub fn setup_msrs(vcpu: &dyn hypervisor::Vcpu) -> Result<()> {
     vcpu.set_msrs(&vcpu.boot_msr_entries())
         .map_err(Error::SetModelSpecificRegisters)?;
 
@@ -95,7 +94,7 @@ pub fn setup_msrs(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
 /// * `entry_point` - Description of the boot entry to set up.
-pub fn setup_regs(vcpu: &Arc<dyn hypervisor::Vcpu>, entry_point: EntryPoint) -> Result<()> {
+pub fn setup_regs(vcpu: &dyn hypervisor::Vcpu, entry_point: EntryPoint) -> Result<()> {
     let mut regs = vcpu.create_standard_regs();
     match entry_point.setup_header {
         None => {
@@ -121,7 +120,7 @@ pub fn setup_regs(vcpu: &Arc<dyn hypervisor::Vcpu>, entry_point: EntryPoint) -> 
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
 pub fn setup_sregs(
     mem: &GuestMemoryMmap,
-    vcpu: &Arc<dyn hypervisor::Vcpu>,
+    vcpu: &dyn hypervisor::Vcpu,
     enable_x2_apic_mode: bool,
 ) -> Result<()> {
     let mut sregs: SpecialRegisters = vcpu.get_sregs().map_err(Error::GetStatusRegisters)?;

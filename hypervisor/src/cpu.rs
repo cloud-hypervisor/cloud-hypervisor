@@ -526,7 +526,7 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Triggers the running of the current virtual CPU returning an exit reason.
     ///
-    fn run(&self) -> std::result::Result<VmExit, HypervisorCpuError>;
+    fn run(&mut self) -> std::result::Result<VmExit, HypervisorCpuError>;
     #[cfg(target_arch = "x86_64")]
     ///
     /// Translate guest virtual address to guest physical address
@@ -542,7 +542,7 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Set the "immediate_exit" state
     ///
-    fn set_immediate_exit(&self, _exit: bool) {}
+    fn set_immediate_exit(&mut self, _exit: bool) {}
     #[cfg(feature = "tdx")]
     ///
     /// Returns the details about TDX exit reason

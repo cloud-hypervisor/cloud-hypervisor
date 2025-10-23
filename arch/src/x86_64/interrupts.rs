@@ -6,7 +6,6 @@
 // found in the LICENSE-BSD-3-Clause file.
 
 use std::result;
-use std::sync::Arc;
 
 pub type Result<T> = result::Result<T, hypervisor::HypervisorCpuError>;
 
@@ -24,7 +23,7 @@ pub fn set_apic_delivery_mode(reg: u32, mode: u32) -> u32 {
 ///
 /// # Arguments
 /// * `vcpu` - The VCPU object to configure.
-pub fn set_lint(vcpu: &Arc<dyn hypervisor::Vcpu>) -> Result<()> {
+pub fn set_lint(vcpu: &dyn hypervisor::Vcpu) -> Result<()> {
     let mut klapic = vcpu.get_lapic()?;
 
     let lvt_lint0 = klapic.get_klapic_reg(APIC_LVT0);
