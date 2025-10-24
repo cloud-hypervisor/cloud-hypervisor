@@ -1172,7 +1172,8 @@ impl CpuManager {
                                         error!("Unexpected VM exit on \"immediate_exit\" run");
                                         break;
                                     }
-                                    vcpu.lock().unwrap().vcpu.set_immediate_exit(false);
+                                    // No need to unset immediate exit - done by the KVM hypervisor
+                                    // implementation on -EINTR error.
                                 }
 
                                 vcpu_run_interrupted.store(true, Ordering::SeqCst);
