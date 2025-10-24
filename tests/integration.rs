@@ -2642,16 +2642,19 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // See issue #7433
     fn test_cpu_topology_421() {
         test_cpu_topology(4, 2, 1, false);
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // See issue #7433
     fn test_cpu_topology_142() {
         test_cpu_topology(1, 4, 2, false);
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // See issue #7433
     fn test_cpu_topology_262() {
         test_cpu_topology(2, 6, 2, false);
     }
@@ -4955,6 +4958,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // See issue #7435
     #[cfg(target_arch = "x86_64")]
     fn test_cpu_hotplug() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -7250,6 +7254,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // See issue #7439
     #[cfg(target_arch = "x86_64")]
     fn test_tpm() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -7983,6 +7988,7 @@ mod common_sequential {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // See issue #7437
     fn test_snapshot_restore_basic() {
         _test_snapshot_restore(false);
     }
@@ -8240,6 +8246,7 @@ mod common_sequential {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // See issue #7437
     #[cfg_attr(target_arch = "aarch64", ignore = "See #6970")]
     fn test_snapshot_restore_with_fd() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -8463,6 +8470,7 @@ mod common_sequential {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // See issue #7437
     #[cfg(target_arch = "x86_64")]
     fn test_snapshot_restore_pvpanic() {
         _test_snapshot_restore_devices(true);
