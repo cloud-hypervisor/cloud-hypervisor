@@ -202,7 +202,7 @@ fi
 if [ $RES -eq 0 ]; then
     cargo build --features "mshv,fw_cfg" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
-    time cargo test "fw_cfg::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
+    time cargo test $test_features "fw_cfg::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
     RES=$?
 fi
 
