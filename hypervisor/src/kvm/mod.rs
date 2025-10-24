@@ -2009,7 +2009,11 @@ impl cpu::Vcpu for KvmVcpu {
             },
 
             Err(ref e) => match e.errno() {
-                libc::EAGAIN | libc::EINTR => Ok(cpu::VmExit::Ignore),
+                libc::EAGAIN => Ok(cpu::VmExit::Ignore),
+                libc::EINTR => {
+                    self.fd.set_kvm_immediate_exit(false.into());
+                    Ok(cpu::VmExit::Ignore)
+                }
                 _ => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
                     "VCPU error {e:?}"
                 ))),
