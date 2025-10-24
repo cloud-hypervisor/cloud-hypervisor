@@ -76,7 +76,7 @@ jobs:
               fi
             done
 
-            sudo ./scripts/dev_cli.sh tests --hypervisor mshv --integration -- -- --skip common_parallel::test_tpm --skip common_parallel::test_cpu_topology_421 --skip common_parallel::test_cpu_topology_142 --skip common_parallel::test_cpu_topology_262 --skip common_sequential::test_snapshot_restore_basic --skip common_sequential::test_snapshot_restore_with_fd --skip common_sequential::test_snapshot_restore_pvpanic --skip virtio_net_latency_us --skip common_parallel::test_cpu_hotplug
+            sudo ./scripts/dev_cli.sh tests --hypervisor mshv --integration
           EOF
 
   cleanup:
