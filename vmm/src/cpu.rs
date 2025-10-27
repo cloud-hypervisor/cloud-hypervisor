@@ -449,6 +449,7 @@ impl Vcpu {
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
         #[cfg(target_arch = "x86_64")] topology: (u16, u16, u16, u16),
+        #[cfg(target_arch = "x86_64")] nested: bool,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
@@ -469,6 +470,7 @@ impl Vcpu {
             kvm_hyperv,
             self.vendor,
             topology,
+            nested,
         )
         .map_err(Error::VcpuConfiguration)?;
 
@@ -987,6 +989,7 @@ impl CpuManager {
             self.cpuid.clone(),
             self.config.kvm_hyperv,
             topology,
+            self.config.nested,
         )?;
 
         #[cfg(target_arch = "aarch64")]
