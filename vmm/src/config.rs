@@ -669,6 +669,19 @@ impl CpusConfig {
             nesting,
         })
     }
+
+    pub fn nested_supported(&self, hypervisor_type: hypervisor::HypervisorType) -> bool {
+        let default_nested = match hypervisor_type {
+            #[cfg(feature = "kvm")]
+            hypervisor::HypervisorType::Kvm => true,
+            #[cfg(feature = "mshv")]
+            hypervisor::HypervisorType::Mshv => false,
+        };
+        match &self.nesting {
+            Some(nesting) => *nesting,
+            None => default_nested,
+        }
+    }
 }
 
 impl PciSegmentConfig {

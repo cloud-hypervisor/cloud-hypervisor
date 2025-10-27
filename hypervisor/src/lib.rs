@@ -196,7 +196,6 @@ pub struct HypervisorVmConfig {
     pub sev_snp_enabled: bool,
     #[cfg(feature = "sev_snp")]
     pub mem_size: u64,
-    #[cfg(feature = "mshv")]
     pub nested_enabled: bool,
 }
 

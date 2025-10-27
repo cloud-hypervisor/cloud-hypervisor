@@ -1009,7 +1009,10 @@ impl Vm {
 
         let vm = Self::create_hypervisor_vm(
             &hypervisor,
-            vm_config.lock().unwrap().to_hypervisor_vm_config(),
+            vm_config
+                .lock()
+                .unwrap()
+                .to_hypervisor_vm_config(hypervisor.hypervisor_type()),
         )?;
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
