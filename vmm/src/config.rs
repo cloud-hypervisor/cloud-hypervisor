@@ -659,6 +659,14 @@ impl CpusConfig {
             .map_err(Error::ParseCpus)?
             .is_none_or(|toggle| toggle.0);
 
+        // Nested virtualization is always turned on for aarch64 and riscv64
+        // TODO: revisit this when nested support can be turned of on these architectures
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+        if !nested {
+            return Err(Error::ParseCpus(OptionParserError::InvalidValue(
+                "nested=off is not supported on aarch64 and riscv64 architectures".to_string(),
+            )));
+        }
         Ok(CpusConfig {
             boot_vcpus,
             max_vcpus,
