@@ -44,6 +44,8 @@ pub const MAX_SUPPORTED_CPUS_LEGACY: u32 = 254;
 #[cfg(feature = "kvm")]
 const TSC_DEADLINE_TIMER_ECX_BIT: u8 = 24; // tsc deadline timer ecx bit.
 const HYPERVISOR_ECX_BIT: u8 = 31; // Hypervisor ecx bit.
+const VMX_ECX_BIT: u8 = 5; // VMX for Intel
+const SVM_ECX_BIT: u8 = 2; // SVM for AMD
 const MTRR_EDX_BIT: u8 = 12; // Hypervisor ecx bit.
 const INVARIANT_TSC_EDX_BIT: u8 = 8; // Invariant TSC bit on 0x8000_0007 EDX
 const AMX_BF16: u8 = 22; // AMX tile computation on bfloat16 numbers
@@ -806,6 +808,7 @@ pub fn generate_common_cpuid(
     Ok(cpuid)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn configure_vcpu(
     vcpu: &dyn hypervisor::Vcpu,
     id: u32,
@@ -814,6 +817,7 @@ pub fn configure_vcpu(
     kvm_hyperv: bool,
     cpu_vendor: CpuVendor,
     topology: (u16, u16, u16, u16),
+    nested: bool,
 ) -> super::Result<()> {
     let x2apic_id = get_x2apic_id(id, Some(topology));
 
@@ -832,6 +836,17 @@ pub fn configure_vcpu(
             entry.ebx &= 0xffffff;
             entry.ebx |= x2apic_id << 24;
             apic_id_patched = true;
+            if !nested {
+                // Disable nested virtualization for Intel
+                entry.ecx &= !(1 << VMX_ECX_BIT);
+            }
+            break;
+        }
+        if entry.function == 0x8000_0001 {
+            if !nested {
+                // Disable the nested virtualization for AMD
+                entry.ecx &= !(1 << SVM_ECX_BIT);
+            }
             break;
         }
     }
