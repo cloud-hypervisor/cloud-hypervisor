@@ -39,7 +39,6 @@ use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Instant;
 use std::{cmp, result};
 
@@ -260,7 +259,7 @@ pub struct Request {
 impl Request {
     pub fn parse<B: Bitmap + 'static>(
         desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<vm_memory::GuestMemoryMmap<B>>>,
-        access_platform: Option<&Arc<dyn AccessPlatform>>,
+        access_platform: Option<&dyn AccessPlatform>,
     ) -> result::Result<Request, Error> {
         let hdr_desc = desc_chain
             .next()

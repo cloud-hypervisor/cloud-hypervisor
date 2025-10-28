@@ -2,8 +2,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::sync::Arc;
-
 use thiserror::Error;
 use virtio_bindings::virtio_net::{
     VIRTIO_NET_CTRL_GUEST_OFFLOADS, VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET, VIRTIO_NET_CTRL_MQ,
@@ -67,7 +65,7 @@ impl CtrlQueue {
         &mut self,
         mem: &GuestMemoryMmap,
         queue: &mut Queue,
-        access_platform: Option<&Arc<dyn AccessPlatform>>,
+        access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<()> {
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(mem) {
             let ctrl_desc = desc_chain.next().ok_or(Error::NoControlHeaderDescriptor)?;

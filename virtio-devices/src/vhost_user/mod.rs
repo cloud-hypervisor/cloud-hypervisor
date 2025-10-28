@@ -228,7 +228,7 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
                     .iter()
                     .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
                     .collect(),
-                &self.virtio_interrupt,
+                self.virtio_interrupt.as_ref(),
                 self.acked_features,
                 self.acked_protocol_features,
                 &self.backend_req_handler,
@@ -332,7 +332,7 @@ impl VhostUserCommon {
                     .iter()
                     .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
                     .collect(),
-                &interrupt_cb,
+                interrupt_cb.as_ref(),
                 acked_features,
                 &backend_req_handler,
                 inflight.as_mut(),

@@ -413,7 +413,7 @@ impl Vcpu {
     pub fn new(
         id: u32,
         apic_id: u32,
-        vm: &Arc<dyn hypervisor::Vm>,
+        vm: &dyn hypervisor::Vm,
         vm_ops: Option<Arc<dyn VmOps>>,
         #[cfg(target_arch = "x86_64")] cpu_vendor: CpuVendor,
     ) -> Result<Self> {
@@ -441,7 +441,7 @@ impl Vcpu {
     /// * `cpuid` - (x86_64) CpuId, wrapper over the `kvm_cpuid2` structure.
     pub fn configure(
         &mut self,
-        #[cfg(target_arch = "aarch64")] vm: &Arc<dyn hypervisor::Vm>,
+        #[cfg(target_arch = "aarch64")] vm: &dyn hypervisor::Vm,
         boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
         #[cfg(target_arch = "x86_64")] cpuid: Vec<CpuIdEntry>,
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
@@ -486,7 +486,7 @@ impl Vcpu {
 
     /// Initializes an aarch64 specific vcpu for booting Linux.
     #[cfg(target_arch = "aarch64")]
-    pub fn init(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
+    pub fn init(&self, vm: &dyn hypervisor::Vm) -> Result<()> {
         use std::arch::is_aarch64_feature_detected;
         #[allow(clippy::nonminimal_bool)]
         let sve_supported =
@@ -748,7 +748,7 @@ impl CpuManager {
         exit_evt: EventFd,
         reset_evt: EventFd,
         #[cfg(feature = "guest_debug")] vm_debug_evt: EventFd,
-        hypervisor: &Arc<dyn hypervisor::Hypervisor>,
+        hypervisor: Arc<dyn hypervisor::Hypervisor>,
         seccomp_action: SeccompAction,
         vm_ops: Arc<dyn VmOps>,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
@@ -854,7 +854,7 @@ impl CpuManager {
             proximity_domain_per_cpu,
             affinity,
             dynamic,
-            hypervisor: hypervisor.clone(),
+            hypervisor,
             #[cfg(feature = "sev_snp")]
             sev_snp_enabled,
         })))
@@ -863,7 +863,7 @@ impl CpuManager {
     #[cfg(target_arch = "x86_64")]
     pub fn populate_cpuid(
         &mut self,
-        hypervisor: &Arc<dyn hypervisor::Hypervisor>,
+        hypervisor: &dyn hypervisor::Hypervisor,
         #[cfg(feature = "tdx")] tdx: bool,
     ) -> Result<()> {
         self.cpuid = {
@@ -897,7 +897,7 @@ impl CpuManager {
         let mut vcpu = Vcpu::new(
             cpu_id,
             x2apic_id,
-            &self.vm,
+            self.vm.as_ref(),
             Some(self.vm_ops.clone()),
             #[cfg(target_arch = "x86_64")]
             self.hypervisor.get_cpu_vendor(),
@@ -906,7 +906,7 @@ impl CpuManager {
         if let Some(snapshot) = snapshot {
             // AArch64 vCPUs should be initialized after created.
             #[cfg(target_arch = "aarch64")]
-            vcpu.init(&self.vm)?;
+            vcpu.init(self.vm.as_ref())?;
 
             let state: CpuState = snapshot.to_state().map_err(|e| {
                 Error::VcpuCreate(anyhow!("Could not get vCPU state from snapshot {e:?}"))
@@ -977,7 +977,7 @@ impl CpuManager {
         )?;
 
         #[cfg(target_arch = "aarch64")]
-        vcpu.configure(&self.vm, boot_setup)?;
+        vcpu.configure(self.vm.as_ref(), boot_setup)?;
 
         #[cfg(target_arch = "riscv64")]
         vcpu.configure(boot_setup)?;

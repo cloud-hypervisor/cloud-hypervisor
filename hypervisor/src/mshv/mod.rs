@@ -1306,7 +1306,7 @@ impl cpu::Vcpu for MshvVcpu {
     #[cfg(target_arch = "aarch64")]
     fn vcpu_set_processor_features(
         &self,
-        _vm: &Arc<dyn crate::Vm>,
+        _vm: &dyn crate::Vm,
         _kvi: &mut crate::VcpuInit,
         _id: u32,
     ) -> cpu::Result<()> {

@@ -1449,7 +1449,7 @@ impl VfioPciDevice {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
-        vm: &Arc<dyn hypervisor::Vm>,
+        vm: Arc<dyn hypervisor::Vm>,
         device: VfioDevice,
         container: Arc<VfioContainer>,
         msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
@@ -1478,7 +1478,7 @@ impl VfioPciDevice {
 
         let vfio_pci_device = VfioPciDevice {
             id,
-            vm: vm.clone(),
+            vm,
             device,
             container,
             common,

@@ -284,7 +284,7 @@ impl VirtioDevice for Blk {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         self.guest_memory = Some(mem.clone());
 
         let backend_req_handler: Option<FrontendReqHandler<BackendReqHandler>> = None;

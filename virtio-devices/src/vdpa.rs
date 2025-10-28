@@ -216,7 +216,7 @@ impl Vdpa {
     fn activate_vdpa(
         &mut self,
         mem: &GuestMemoryMmap,
-        virtio_interrupt: &Arc<dyn VirtioInterrupt>,
+        virtio_interrupt: &dyn VirtioInterrupt,
         queues: Vec<(usize, Queue, EventFd)>,
     ) -> Result<()> {
         assert!(self.vhost.is_some());
@@ -245,15 +245,15 @@ impl Vdpa {
                 queue_size,
                 flags: 0u32,
                 desc_table_addr: queue.desc_table().translate_gpa(
-                    self.common.access_platform.as_ref(),
+                    self.common.access_platform.as_deref(),
                     queue_size as usize * std::mem::size_of::<RawDescriptor>(),
                 ),
                 used_ring_addr: queue.used_ring().translate_gpa(
-                    self.common.access_platform.as_ref(),
+                    self.common.access_platform.as_deref(),
                     4 + queue_size as usize * 8,
                 ),
                 avail_ring_addr: queue.avail_ring().translate_gpa(
-                    self.common.access_platform.as_ref(),
+                    self.common.access_platform.as_deref(),
                     4 + queue_size as usize * 2,
                 ),
                 log_addr: None,
@@ -421,7 +421,7 @@ impl VirtioDevice for Vdpa {
         virtio_interrupt: Arc<dyn VirtioInterrupt>,
         queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.activate_vdpa(&mem.memory(), &virtio_interrupt, queues)
+        self.activate_vdpa(&mem.memory(), virtio_interrupt.as_ref(), queues)
             .map_err(ActivateError::ActivateVdpa)?;
 
         // Store the virtio interrupt handler as we need to return it on reset

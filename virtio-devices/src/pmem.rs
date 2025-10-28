@@ -105,7 +105,7 @@ struct Request {
 impl Request {
     fn parse(
         desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<GuestMemoryMmap>>,
-        access_platform: Option<&Arc<dyn AccessPlatform>>,
+        access_platform: Option<&dyn AccessPlatform>,
     ) -> result::Result<Request, Error> {
         let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
         // The descriptor contains the request type which MUST be readable.
@@ -165,7 +165,7 @@ impl PmemEpollHandler {
     fn process_queue(&mut self) -> result::Result<bool, Error> {
         let mut used_descs = false;
         while let Some(mut desc_chain) = self.queue.pop_descriptor_chain(self.mem.memory()) {
-            let len = match Request::parse(&mut desc_chain, self.access_platform.as_ref()) {
+            let len = match Request::parse(&mut desc_chain, self.access_platform.as_deref()) {
                 Ok(ref req) if (req.type_ == RequestType::Flush) => {
                     let status_code = match self.disk.sync_all() {
                         Ok(()) => VIRTIO_PMEM_RESP_TYPE_OK,
@@ -387,7 +387,7 @@ impl VirtioDevice for Pmem {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
         if let Some(disk) = self.disk.as_ref() {
             let disk = disk.try_clone().map_err(|e| {

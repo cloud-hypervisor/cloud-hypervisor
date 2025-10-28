@@ -1433,11 +1433,11 @@ impl DeviceManager {
         )?;
 
         #[cfg(target_arch = "aarch64")]
-        self.add_legacy_devices(&legacy_interrupt_manager)?;
+        self.add_legacy_devices(legacy_interrupt_manager.as_ref())?;
 
         {
             self.ged_notification_device = self.add_acpi_devices(
-                &legacy_interrupt_manager,
+                legacy_interrupt_manager.as_ref(),
                 self.reset_evt
                     .try_clone()
                     .map_err(DeviceManagerError::EventFd)?,
@@ -1450,7 +1450,7 @@ impl DeviceManager {
         self.original_termios_opt = original_termios_opt;
 
         self.console = self.add_console_devices(
-            &legacy_interrupt_manager,
+            legacy_interrupt_manager.as_ref(),
             &mut virtio_devices,
             console_info,
             console_resize_pipe,
@@ -1813,7 +1813,7 @@ impl DeviceManager {
 
     fn add_acpi_devices(
         &mut self,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+        interrupt_manager: &dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
         reset_evt: EventFd,
         exit_evt: EventFd,
     ) -> DeviceManagerResult<Option<Arc<Mutex<devices::AcpiGedDevice>>>> {
@@ -1999,7 +1999,7 @@ impl DeviceManager {
     #[cfg(target_arch = "aarch64")]
     fn add_legacy_devices(
         &mut self,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+        interrupt_manager: &dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
     ) -> DeviceManagerResult<()> {
         // Add a RTC device
         let rtc_irq = self
@@ -2133,7 +2133,7 @@ impl DeviceManager {
     #[cfg(target_arch = "x86_64")]
     fn add_serial_device(
         &mut self,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+        interrupt_manager: &dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
         serial_writer: Option<Box<dyn io::Write + Send>>,
     ) -> DeviceManagerResult<Arc<Mutex<Serial>>> {
         // Serial is tied to IRQ #4
@@ -2184,7 +2184,7 @@ impl DeviceManager {
     #[cfg(target_arch = "aarch64")]
     fn add_serial_device(
         &mut self,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+        interrupt_manager: &dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
         serial_writer: Option<Box<dyn io::Write + Send>>,
     ) -> DeviceManagerResult<Arc<Mutex<Pl011>>> {
         let id = String::from(SERIAL_DEVICE_NAME);
@@ -2248,7 +2248,7 @@ impl DeviceManager {
     #[cfg(target_arch = "riscv64")]
     fn add_serial_device(
         &mut self,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+        interrupt_manager: &dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
         serial_writer: Option<Box<dyn io::Write + Send>>,
     ) -> DeviceManagerResult<Arc<Mutex<Serial>>> {
         let id = String::from(SERIAL_DEVICE_NAME);
@@ -2398,7 +2398,7 @@ impl DeviceManager {
     /// - virtio-console
     fn add_console_devices(
         &mut self,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+        interrupt_manager: &dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
         virtio_devices: &mut Vec<MetaVirtioDevice>,
         console_info: Option<ConsoleInfo>,
         console_resize_pipe: Option<Arc<File>>,
@@ -3790,7 +3790,7 @@ impl DeviceManager {
 
         let vfio_pci_device = VfioPciDevice::new(
             vfio_name.clone(),
-            &self.address_manager.vm,
+            self.address_manager.vm.clone(),
             vfio_device,
             vfio_container,
             self.msi_interrupt_manager.clone(),
@@ -3956,7 +3956,7 @@ impl DeviceManager {
 
         let mut vfio_user_pci_device = VfioUserPciDevice::new(
             vfio_user_name.clone(),
-            &self.address_manager.vm,
+            self.address_manager.vm.clone(),
             client.clone(),
             self.msi_interrupt_manager.clone(),
             legacy_interrupt_group,
@@ -4134,7 +4134,7 @@ impl DeviceManager {
                 virtio_device,
                 msix_num,
                 access_platform,
-                &self.msi_interrupt_manager,
+                self.msi_interrupt_manager.as_ref(),
                 pci_device_bdf.into(),
                 self.activate_evt
                     .try_clone()
@@ -4706,12 +4706,12 @@ impl DeviceManager {
         #[cfg(target_arch = "x86_64")]
         // Remove the device from the IO bus
         self.io_bus()
-            .remove_by_device(&bus_device)
+            .remove_by_device(bus_device.as_ref())
             .map_err(DeviceManagerError::RemoveDeviceFromIoBus)?;
 
         // Remove the device from the MMIO bus
         self.mmio_bus()
-            .remove_by_device(&bus_device)
+            .remove_by_device(bus_device.as_ref())
             .map_err(DeviceManagerError::RemoveDeviceFromMmioBus)?;
 
         // Remove the device from the list of BusDevice held by the

@@ -493,7 +493,7 @@ impl VmOps for VmOpsHandler {
     }
 }
 
-pub fn physical_bits(hypervisor: &Arc<dyn hypervisor::Hypervisor>, max_phys_bits: u8) -> u8 {
+pub fn physical_bits(hypervisor: &dyn hypervisor::Hypervisor, max_phys_bits: u8) -> u8 {
     let host_phys_bits = get_host_cpu_phys_bits(hypervisor);
 
     cmp::min(host_phys_bits, max_phys_bits)
@@ -592,7 +592,7 @@ impl Vm {
             reset_evt.try_clone().map_err(Error::EventFdClone)?,
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
-            &hypervisor,
+            hypervisor.clone(),
             seccomp_action.clone(),
             vm_ops,
             #[cfg(feature = "tdx")]
@@ -608,7 +608,7 @@ impl Vm {
             .lock()
             .unwrap()
             .populate_cpuid(
-                &hypervisor,
+                hypervisor.as_ref(),
                 #[cfg(feature = "tdx")]
                 tdx_enabled,
             )
@@ -1015,7 +1015,7 @@ impl Vm {
         };
 
         let vm = Self::create_hypervisor_vm(
-            &hypervisor,
+            hypervisor.as_ref(),
             #[cfg(feature = "tdx")]
             tdx_enabled,
             #[cfg(feature = "sev_snp")]
@@ -1029,7 +1029,10 @@ impl Vm {
             vm.enable_x2apic_api().unwrap();
         }
 
-        let phys_bits = physical_bits(&hypervisor, vm_config.lock().unwrap().cpus.max_phys_bits);
+        let phys_bits = physical_bits(
+            hypervisor.as_ref(),
+            vm_config.lock().unwrap().cpus.max_phys_bits,
+        );
 
         let memory_manager = if let Some(snapshot) =
             snapshot_from_id(snapshot.as_ref(), MEMORY_MANAGER_SNAPSHOT_ID)
@@ -1078,7 +1081,7 @@ impl Vm {
     }
 
     pub fn create_hypervisor_vm(
-        hypervisor: &Arc<dyn hypervisor::Hypervisor>,
+        hypervisor: &dyn hypervisor::Hypervisor,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
         #[cfg(feature = "sev_snp")] mem_size: u64,
@@ -2876,11 +2879,11 @@ impl Snapshottable for Vm {
         let common_cpuid = {
             let amx = self.config.lock().unwrap().cpus.features.amx;
             let phys_bits = physical_bits(
-                &self.hypervisor,
+                self.hypervisor.as_ref(),
                 self.config.lock().unwrap().cpus.max_phys_bits,
             );
             arch::generate_common_cpuid(
-                &self.hypervisor,
+                self.hypervisor.as_ref(),
                 &arch::CpuidConfig {
                     phys_bits,
                     kvm_hyperv: self.config.lock().unwrap().cpus.kvm_hyperv,

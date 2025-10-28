@@ -45,7 +45,7 @@ impl TxVirtio {
         tap: &Tap,
         queue: &mut Queue,
         rate_limiter: &mut Option<RateLimiter>,
-        access_platform: Option<&Arc<dyn AccessPlatform>>,
+        access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<bool, NetQueuePairError> {
         let mut retry_write = false;
         let mut rate_limit_reached = false;
@@ -173,7 +173,7 @@ impl RxVirtio {
         tap: &Tap,
         queue: &mut Queue,
         rate_limiter: &mut Option<RateLimiter>,
-        access_platform: Option<&Arc<dyn AccessPlatform>>,
+        access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<bool, NetQueuePairError> {
         let mut exhausted_descs = true;
         let mut rate_limit_reached = false;
@@ -413,7 +413,7 @@ impl NetQueuePair {
             &self.tap,
             queue,
             &mut self.tx_rate_limiter,
-            self.access_platform.as_ref(),
+            self.access_platform.as_deref(),
         )?;
 
         // We got told to try again when writing to the tap. Wait for the TAP to be writable
@@ -463,7 +463,7 @@ impl NetQueuePair {
             &self.tap,
             queue,
             &mut self.rx_rate_limiter,
-            self.access_platform.as_ref(),
+            self.access_platform.as_deref(),
         )?;
         let rate_limit_reached = self
             .rx_rate_limiter

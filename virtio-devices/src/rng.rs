@@ -76,7 +76,7 @@ impl RngEpollHandler {
                 .memory()
                 .read_volatile_from(
                     desc.addr()
-                        .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
+                        .translate_gva(self.access_platform.as_deref(), desc.len() as usize),
                     &mut self.random_file,
                     desc.len() as usize,
                 )
@@ -248,7 +248,7 @@ impl VirtioDevice for Rng {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         if let Some(file) = self.random_file.as_ref() {

@@ -124,7 +124,7 @@ where
         while let Some(mut desc_chain) = self.queues[0].pop_descriptor_chain(self.mem.memory()) {
             let used_len = match VsockPacket::from_rx_virtq_head(
                 &mut desc_chain,
-                self.access_platform.as_ref(),
+                self.access_platform.as_deref(),
             ) {
                 Ok(mut pkt) => {
                     if self.backend.write().unwrap().recv_pkt(&mut pkt).is_ok() {
@@ -166,7 +166,7 @@ where
         while let Some(mut desc_chain) = self.queues[1].pop_descriptor_chain(self.mem.memory()) {
             let pkt = match VsockPacket::from_tx_virtq_head(
                 &mut desc_chain,
-                self.access_platform.as_ref(),
+                self.access_platform.as_deref(),
             ) {
                 Ok(pkt) => pkt,
                 Err(e) => {
@@ -430,7 +430,7 @@ where
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         let mut virtqueues = Vec::new();

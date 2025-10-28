@@ -171,7 +171,7 @@ impl BlockEpollHandler {
         let mut batch_inflight_requests = Vec::new();
 
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
-            let mut request = Request::parse(&mut desc_chain, self.access_platform.as_ref())
+            let mut request = Request::parse(&mut desc_chain, self.access_platform.as_deref())
                 .map_err(Error::RequestParsing)?;
 
             // For virtio spec compliance
@@ -905,7 +905,7 @@ impl VirtioDevice for Block {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
 
         self.update_writeback();
 

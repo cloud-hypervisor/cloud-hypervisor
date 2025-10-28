@@ -6,7 +6,6 @@
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
-use std::sync::Arc;
 pub mod interrupts;
 pub mod layout;
 mod mpspec;
@@ -547,7 +546,7 @@ impl CpuidFeatureEntry {
 }
 
 pub fn generate_common_cpuid(
-    hypervisor: &Arc<dyn hypervisor::Hypervisor>,
+    hypervisor: &dyn hypervisor::Hypervisor,
     config: &CpuidConfig,
 ) -> super::Result<Vec<CpuIdEntry>> {
     // SAFETY: cpuid called with valid leaves
@@ -1258,7 +1257,7 @@ pub fn initramfs_load_addr(
     Ok(aligned_addr)
 }
 
-pub fn get_host_cpu_phys_bits(hypervisor: &Arc<dyn hypervisor::Hypervisor>) -> u8 {
+pub fn get_host_cpu_phys_bits(hypervisor: &dyn hypervisor::Hypervisor) -> u8 {
     // SAFETY: call cpuid with valid leaves
     unsafe {
         let leaf = x86_64::__cpuid(0x8000_0000);

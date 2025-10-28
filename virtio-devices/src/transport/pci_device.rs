@@ -382,7 +382,7 @@ impl VirtioPciDevice {
         device: Arc<Mutex<dyn VirtioDevice>>,
         msix_num: u16,
         access_platform: Option<Arc<dyn AccessPlatform>>,
-        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        interrupt_manager: &dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>,
         pci_device_bdf: u32,
         activate_evt: EventFd,
         use_64bit_bar: bool,
@@ -815,8 +815,8 @@ impl VirtioPciDevice {
         !self.device_activated.load(Ordering::SeqCst) && self.is_driver_ready()
     }
 
-    pub fn dma_handler(&self) -> Option<&Arc<dyn ExternalDmaMapping>> {
-        self.dma_handler.as_ref()
+    pub fn dma_handler(&self) -> Option<&dyn ExternalDmaMapping> {
+        self.dma_handler.as_deref()
     }
 }
 
