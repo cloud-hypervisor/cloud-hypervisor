@@ -2098,7 +2098,7 @@ impl cpu::Vcpu for KvmVcpu {
     #[cfg(target_arch = "aarch64")]
     fn vcpu_set_processor_features(
         &self,
-        vm: &Arc<dyn crate::Vm>,
+        vm: &dyn crate::Vm,
         kvi: &mut crate::VcpuInit,
         id: u32,
     ) -> cpu::Result<()> {

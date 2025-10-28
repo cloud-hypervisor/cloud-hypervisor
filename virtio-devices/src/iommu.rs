@@ -1079,7 +1079,7 @@ impl VirtioDevice for Iommu {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         let (_, request_queue, request_queue_evt) = queues.remove(0);

@@ -180,7 +180,7 @@ pub fn initramfs_load_addr(
     }
 }
 
-pub fn get_host_cpu_phys_bits(hypervisor: &Arc<dyn hypervisor::Hypervisor>) -> u8 {
+pub fn get_host_cpu_phys_bits(hypervisor: &dyn hypervisor::Hypervisor) -> u8 {
     let host_cpu_phys_bits = hypervisor.get_host_ipa_limit().try_into().unwrap();
     if host_cpu_phys_bits == 0 {
         // Host kernel does not support `get_host_ipa_limit`,

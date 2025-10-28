@@ -591,7 +591,7 @@ impl VirtioDevice for Balloon {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         let (kill_evt, pause_evt) = self.common.dup_eventfds();
 
         let mut virtqueues = Vec::new();

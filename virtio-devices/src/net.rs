@@ -100,7 +100,11 @@ impl EpollHelperHandler for NetCtrlEpollHandler {
                     ))
                 })?;
                 self.ctrl_q
-                    .process(mem.deref(), &mut self.queue, self.access_platform.as_ref())
+                    .process(
+                        mem.deref(),
+                        &mut self.queue,
+                        self.access_platform.as_deref(),
+                    )
                     .map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!(
                             "Failed to process control queue: {e:?}"
@@ -693,7 +697,7 @@ impl VirtioDevice for Net {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
 
         let num_queues = queues.len();
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());

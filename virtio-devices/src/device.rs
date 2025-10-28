@@ -221,7 +221,7 @@ impl VirtioCommon {
     pub fn activate(
         &mut self,
         queues: &[(usize, Queue, EventFd)],
-        interrupt_cb: &Arc<dyn VirtioInterrupt>,
+        interrupt_cb: Arc<dyn VirtioInterrupt>,
     ) -> ActivateResult {
         if queues.len() < self.min_queues.into() {
             error!(
@@ -246,7 +246,7 @@ impl VirtioCommon {
 
         // Save the interrupt EventFD as we need to return it on reset
         // but clone it to pass into the thread.
-        self.interrupt_cb = Some(interrupt_cb.clone());
+        self.interrupt_cb = Some(interrupt_cb);
 
         Ok(())
     }

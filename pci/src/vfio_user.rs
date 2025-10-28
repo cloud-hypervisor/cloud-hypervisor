@@ -69,7 +69,7 @@ impl VfioUserPciDevice {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
-        vm: &Arc<dyn hypervisor::Vm>,
+        vm: Arc<dyn hypervisor::Vm>,
         client: Arc<Mutex<Client>>,
         msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
@@ -103,7 +103,7 @@ impl VfioUserPciDevice {
 
         Ok(Self {
             id,
-            vm: vm.clone(),
+            vm,
             client,
             common,
             memory_slot_allocator,

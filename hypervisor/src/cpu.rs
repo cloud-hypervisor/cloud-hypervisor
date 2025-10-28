@@ -10,9 +10,6 @@
 //
 //
 
-#[cfg(target_arch = "aarch64")]
-use std::sync::Arc;
-
 use thiserror::Error;
 #[cfg(not(target_arch = "riscv64"))]
 use vm_memory::GuestAddress;
@@ -473,7 +470,7 @@ pub trait Vcpu: Send + Sync {
     #[cfg(target_arch = "aarch64")]
     fn vcpu_set_processor_features(
         &self,
-        vm: &Arc<dyn crate::Vm>,
+        vm: &dyn crate::Vm,
         kvi: &mut VcpuInit,
         id: u32,
     ) -> Result<()>;

@@ -17,7 +17,6 @@
 //! to temporary buffers, before passing it on to the vsock backend.
 
 use std::ops::Deref;
-use std::sync::Arc;
 
 use byteorder::{ByteOrder, LittleEndian};
 use virtio_queue::DescriptorChain;
@@ -111,7 +110,7 @@ impl VsockPacket {
     ///
     pub fn from_tx_virtq_head<M>(
         desc_chain: &mut DescriptorChain<M>,
-        access_platform: Option<&Arc<dyn AccessPlatform>>,
+        access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<Self>
     where
         M: Clone + Deref,
@@ -203,7 +202,7 @@ impl VsockPacket {
     ///
     pub fn from_rx_virtq_head<M>(
         desc_chain: &mut DescriptorChain<M>,
-        access_platform: Option<&Arc<dyn AccessPlatform>>,
+        access_platform: Option<&dyn AccessPlatform>,
     ) -> Result<Self>
     where
         M: Clone + Deref,

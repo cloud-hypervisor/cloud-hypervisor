@@ -40,7 +40,7 @@ impl InterruptRoute {
         })
     }
 
-    pub fn enable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
+    pub fn enable(&self, vm: &dyn hypervisor::Vm) -> Result<()> {
         if !self.registered.load(Ordering::Acquire) {
             vm.register_irqfd(&self.irq_fd, self.gsi)
                 .map_err(|e| io::Error::other(format!("Failed registering irq_fd: {e}")))?;
@@ -52,7 +52,7 @@ impl InterruptRoute {
         Ok(())
     }
 
-    pub fn disable(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
+    pub fn disable(&self, vm: &dyn hypervisor::Vm) -> Result<()> {
         if self.registered.load(Ordering::Acquire) {
             vm.unregister_irqfd(&self.irq_fd, self.gsi)
                 .map_err(|e| io::Error::other(format!("Failed unregistering irq_fd: {e}")))?;
@@ -122,7 +122,7 @@ impl MsiInterruptGroup {
 impl InterruptSourceGroup for MsiInterruptGroup {
     fn enable(&self) -> Result<()> {
         for (_, route) in self.irq_routes.iter() {
-            route.enable(&self.vm)?;
+            route.enable(self.vm.as_ref())?;
         }
 
         Ok(())
@@ -130,7 +130,7 @@ impl InterruptSourceGroup for MsiInterruptGroup {
 
     fn disable(&self) -> Result<()> {
         for (_, route) in self.irq_routes.iter() {
-            route.disable(&self.vm)?;
+            route.disable(self.vm.as_ref())?;
         }
 
         Ok(())
@@ -172,7 +172,7 @@ impl InterruptSourceGroup for MsiInterruptGroup {
             // So it's required to call disable() (which deassign KVM_IRQFD) before
             // set_gsi_routes() to avoid kernel panic (see #3827)
             if masked {
-                route.disable(&self.vm)?;
+                route.disable(self.vm.as_ref())?;
             }
 
             let mut routes = self.gsi_msi_routes.lock().unwrap();
@@ -185,7 +185,7 @@ impl InterruptSourceGroup for MsiInterruptGroup {
             // panic on kernel which not have commit a80ced6ea514
             // (KVM: SVM: fix panic on out-of-bounds guest IRQ).
             if !masked {
-                route.enable(&self.vm)?;
+                route.enable(self.vm.as_ref())?;
             }
 
             return Ok(());

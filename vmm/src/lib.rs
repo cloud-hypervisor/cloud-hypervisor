@@ -873,7 +873,7 @@ impl Vmm {
         }
 
         let vm = Vm::create_hypervisor_vm(
-            &self.hypervisor,
+            self.hypervisor.as_ref(),
             #[cfg(feature = "tdx")]
             false,
             #[cfg(feature = "sev_snp")]
@@ -892,8 +892,10 @@ impl Vmm {
             vm.enable_x2apic_api().unwrap();
         }
 
-        let phys_bits =
-            vm::physical_bits(&self.hypervisor, config.lock().unwrap().cpus.max_phys_bits);
+        let phys_bits = vm::physical_bits(
+            self.hypervisor.as_ref(),
+            config.lock().unwrap().cpus.max_phys_bits,
+        );
 
         let memory_manager = MemoryManager::new(
             vm,
@@ -1129,10 +1131,12 @@ impl Vmm {
             };
 
             let amx = vm_config.lock().unwrap().cpus.features.amx;
-            let phys_bits =
-                vm::physical_bits(&hypervisor, vm_config.lock().unwrap().cpus.max_phys_bits);
+            let phys_bits = vm::physical_bits(
+                hypervisor.as_ref(),
+                vm_config.lock().unwrap().cpus.max_phys_bits,
+            );
             arch::generate_common_cpuid(
-                &hypervisor,
+                hypervisor.as_ref(),
                 &arch::CpuidConfig {
                     phys_bits,
                     kvm_hyperv: vm_config.lock().unwrap().cpus.kvm_hyperv,
@@ -1268,9 +1272,10 @@ impl Vmm {
         let dest_cpuid = &{
             let vm_config = &src_vm_config.lock().unwrap();
 
-            let phys_bits = vm::physical_bits(&self.hypervisor, vm_config.cpus.max_phys_bits);
+            let phys_bits =
+                vm::physical_bits(self.hypervisor.as_ref(), vm_config.cpus.max_phys_bits);
             arch::generate_common_cpuid(
-                &self.hypervisor.clone(),
+                self.hypervisor.as_ref(),
                 &arch::CpuidConfig {
                     phys_bits,
                     kvm_hyperv: vm_config.cpus.kvm_hyperv,

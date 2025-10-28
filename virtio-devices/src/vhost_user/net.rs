@@ -295,7 +295,7 @@ impl VirtioDevice for Net {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         self.guest_memory = Some(mem.clone());
 
         let num_queues = queues.len();

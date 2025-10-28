@@ -217,7 +217,7 @@ impl ConsoleEpollHandler {
                 .write_slice(
                     &source_slice[..],
                     desc.addr()
-                        .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
+                        .translate_gva(self.access_platform.as_deref(), desc.len() as usize),
                 )
                 .map_err(Error::GuestMemoryWrite)?;
 
@@ -253,7 +253,7 @@ impl ConsoleEpollHandler {
                     .memory()
                     .write_volatile_to(
                         desc.addr()
-                            .translate_gva(self.access_platform.as_ref(), desc.len() as usize),
+                            .translate_gva(self.access_platform.as_deref(), desc.len() as usize),
                         &mut buf,
                         desc.len() as usize,
                     )
@@ -707,7 +707,7 @@ impl VirtioDevice for Console {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.common.activate(&queues, &interrupt_cb)?;
+        self.common.activate(&queues, interrupt_cb.clone())?;
         self.resizer
             .acked_features
             .store(self.common.acked_features, Ordering::Relaxed);

@@ -192,12 +192,13 @@ impl Bus {
     }
 
     /// Removes all entries referencing the given device.
-    pub fn remove_by_device(&self, device: &Arc<dyn BusDeviceSync>) -> Result<()> {
+    pub fn remove_by_device(&self, device: &dyn BusDeviceSync) -> Result<()> {
         let mut device_list = self.devices.write().unwrap();
         let mut remove_key_list = Vec::new();
 
         for (key, value) in device_list.iter() {
-            if Arc::ptr_eq(&value.upgrade().unwrap(), device) {
+            let value = value.upgrade().unwrap();
+            if core::ptr::eq(Arc::as_ptr(&value), device) {
                 remove_key_list.push(*key);
             }
         }

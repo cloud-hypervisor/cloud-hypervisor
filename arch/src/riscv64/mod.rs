@@ -156,7 +156,7 @@ pub fn initramfs_load_addr(
     }
 }
 
-pub fn get_host_cpu_phys_bits(_hypervisor: &Arc<dyn hypervisor::Hypervisor>) -> u8 {
+pub fn get_host_cpu_phys_bits(_hypervisor: &dyn hypervisor::Hypervisor) -> u8 {
     40
 }
 
