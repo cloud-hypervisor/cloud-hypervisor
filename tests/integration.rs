@@ -7473,6 +7473,7 @@ mod dbus_api {
 }
 
 mod ivshmem {
+    #[cfg(not(feature = "mshv"))]
     use std::fs::remove_dir_all;
     use std::process::Command;
 
@@ -7721,6 +7722,7 @@ mod ivshmem {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_ivshmem() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -7874,11 +7876,13 @@ mod ivshmem {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_ivshmem() {
         _test_live_migration_ivshmem(false)
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))]
     fn test_live_migration_ivshmem_local() {
         _test_live_migration_ivshmem(true)
     }
