@@ -8,6 +8,7 @@ use std::fs::File;
 use std::io::{Read, Write, stdout};
 use std::net::{TcpListener, TcpStream};
 use std::num::NonZeroU32;
+use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::panic::AssertUnwindSafe;
@@ -692,11 +693,59 @@ pub struct Vmm {
     console_info: Option<ConsoleInfo>,
 }
 
+/// Wait for a file descriptor to become readable. In this case, we return
+/// true. In case, the eventfd was signaled, return false.
+fn wait_for_readable(
+    fd: &impl AsFd,
+    eventfd: &EventFd,
+) -> std::result::Result<bool, std::io::Error> {
+    let fd_event = eventfd.as_raw_fd().as_raw_fd();
+    let fd_io = fd.as_fd().as_raw_fd();
+    let mut poll_fds = [
+        libc::pollfd {
+            fd: fd_event,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd: fd_io,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+    ];
+
+    // SAFETY: This is safe, because the file descriptors are valid and the
+    // poll_fds array is properly initialized.
+    let ret = unsafe { libc::poll(poll_fds.as_mut_ptr(), poll_fds.len() as libc::nfds_t, -1) };
+
+    if ret < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    if poll_fds[0].revents & libc::POLLIN != 0 {
+        return Ok(false);
+    }
+    if poll_fds[1].revents & libc::POLLIN != 0 {
+        return Ok(true);
+    }
+
+    panic!("Poll returned, but neither file descriptor is readable?");
+}
+
 /// Abstract over the different types of listeners that can be used to receive connections.
 #[derive(Debug)]
 enum ReceiveListener {
     Tcp(TcpListener),
     Unix(UnixListener, Option<PathBuf>),
+}
+
+impl AsFd for ReceiveListener {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        match self {
+            ReceiveListener::Tcp(listener) => listener.as_fd(),
+            ReceiveListener::Unix(listener, _) => listener.as_fd(),
+        }
+    }
 }
 
 impl ReceiveListener {
@@ -723,6 +772,16 @@ impl ReceiveListener {
                 Ok(socket)
             }
         }
+    }
+
+    /// Same as accept(), but returns None if the eventfd is signaled.
+    fn abortable_accept(
+        &mut self,
+        eventfd: &EventFd,
+    ) -> std::result::Result<Option<SocketStream>, std::io::Error> {
+        wait_for_readable(&self, eventfd)?
+            .then(|| self.accept())
+            .transpose()
     }
 
     fn try_clone(&self) -> std::result::Result<Self, std::io::Error> {
@@ -783,10 +842,19 @@ where
 /// We keep track of additional connections for receiving VM migration data
 /// here.
 struct ReceiveAdditionalConnections {
-    accept_thread: std::thread::JoinHandle<()>,
+    terminate_fd: EventFd,
+
+    // This is only an option to be able to join it in the destructor.
+    accept_thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl ReceiveAdditionalConnections {
+    /// Create a pair of file descriptors that map to the same underlying event_fd.
+    fn event_fd_pair() -> std::result::Result<(EventFd, EventFd), std::io::Error> {
+        let event_fd = EventFd::new(0)?;
+        Ok((event_fd.try_clone()?, event_fd))
+    }
+
     /// Starts a thread to accept incoming connections and handle them. These
     /// additional connections are used to receive additional memory regions
     /// during VM migration.
@@ -794,10 +862,13 @@ impl ReceiveAdditionalConnections {
         listener: ReceiveListener,
         guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> std::result::Result<Self, std::io::Error> {
+        let (terminate_fd1, terminate_fd2) = Self::event_fd_pair()?;
+
         let accept_thread = std::thread::spawn(move || {
+            let terminate_fd = terminate_fd2;
             let mut listener = listener;
             let mut threads: Vec<std::thread::JoinHandle<()>> = Vec::new();
-            while let Ok(mut socket) = listener.accept() {
+            while let Ok(Some(mut socket)) = listener.abortable_accept(&terminate_fd) {
                 let guest_memory = guest_memory.clone();
 
                 // We handle errors locally and log them. Passing them along is
@@ -836,19 +907,34 @@ impl ReceiveAdditionalConnections {
             });
         });
 
-        Ok(Self { accept_thread })
+        Ok(Self {
+            accept_thread: Some(accept_thread),
+            terminate_fd: terminate_fd1,
+        })
+    }
+
+    /// Stop accepting additional connections and tear down all connections.
+    ///
+    /// This function does not wait for the operation to complete.
+    fn signal_termination(&self) {
+        // It's not really worth propagating this error, because it only happens if
+        // something hit the fan and we can't really do anything about it.
+        if let Err(e) = self.terminate_fd.write(1) {
+            error!("Failed to wake up other threads: {e}");
+        }
     }
 }
 
 impl Drop for ReceiveAdditionalConnections {
     fn drop(&mut self) {
-        // TODO Here we should make sure to shut down the accept thread before
-        // joining it. This is currently not so easy, because we don't have a
-        // way to signal the thread to stop accepting connections.
+        self.signal_termination();
+        // This unwrap is safe, because we never write a None into
+        // self.accept_thread in other places.
+        let _accept_thread = self.accept_thread.take().unwrap();
 
-        if !self.accept_thread.is_finished() {
-            warn!("Accept thread is still running");
-        }
+        // TODO The accept thread tries to join all threads it started, but we
+        // haven't implemented tearing them down yet.
+        // accept_thread.join().unwrap();
     }
 }
 
