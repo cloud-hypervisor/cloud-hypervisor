@@ -17,9 +17,9 @@ pub mod page_size;
 mod system;
 
 pub use crate::address::AddressAllocator;
-pub use crate::gsi::GsiAllocator;
 #[cfg(target_arch = "x86_64")]
 pub use crate::gsi::GsiApic;
+pub use crate::gsi::{GsiAllocator, GSI_INVALID};
 pub use crate::system::SystemAllocator;
 mod memory_slot;
 pub use memory_slot::MemorySlotAllocator;
