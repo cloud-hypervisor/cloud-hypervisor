@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Read, Write, stdout};
+use std::io::{ErrorKind, Read, Write, stdout};
 use std::net::{TcpListener, TcpStream};
 use std::num::NonZeroU32;
 use std::os::fd::{AsFd, BorrowedFd};
@@ -34,7 +34,7 @@ use console_devices::{ConsoleInfo, pre_create_console_devices};
 use event_monitor::event;
 use landlock::LandlockError;
 use libc::{EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW, tcsetattr, termios};
-use log::{error, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
 use seccompiler::{SeccompAction, apply_filter};
@@ -288,6 +288,15 @@ impl Write for SocketStream {
         match self {
             SocketStream::Unix(stream) => stream.flush(),
             SocketStream::Tcp(stream) => stream.flush(),
+        }
+    }
+}
+
+impl AsFd for SocketStream {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        match self {
+            SocketStream::Unix(s) => s.as_fd(),
+            SocketStream::Tcp(s) => s.as_fd(),
         }
     }
 }
@@ -855,6 +864,56 @@ impl ReceiveAdditionalConnections {
         Ok((event_fd.try_clone()?, event_fd))
     }
 
+    /// Handle incoming requests.
+    ///
+    /// For now we only handle `Command::Memory` requests here. Everything else
+    /// needs to come via the main connection. This function returns when the
+    /// abort_event_fd is triggered or the connection is closed or encountered
+    /// an error.
+    fn handle_requests(
+        socket: &mut SocketStream,
+        abort_event_fd: &EventFd,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    ) -> std::result::Result<(), MigratableError> {
+        loop {
+            if !wait_for_readable(socket, abort_event_fd).map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Failed to poll descriptors: {e}"))
+            })? {
+                info!("Got signal to tear down connection.");
+                return Ok(());
+            }
+
+            // TODO We only check whether we should abort when waiting for a new
+            // request. If the sender just stops sending data mid-request, we
+            // should still be abortable, but we are not... In this case, we
+            // will hang forever. But given that the sender is also in charge of
+            // driving the migration to completion, this is not a major concern.
+            // In the long run, it would be preferable to move I/O to
+            // asynchronous tasks to be able to handle aborts more gracefully.
+
+            let req = match Request::read_from(socket) {
+                Ok(req) => req,
+                Err(MigratableError::MigrateSocket(io_error))
+                    if io_error.kind() == ErrorKind::UnexpectedEof =>
+                {
+                    debug!("Connection closed by peer");
+                    return Ok(());
+                }
+                Err(e) => return Err(e),
+            };
+
+            if req.command() != Command::Memory {
+                return Err(MigratableError::MigrateReceive(anyhow!(
+                    "Dropping connection. Only Memory commands are allowed on additional connections, but got {:?}",
+                    req.command()
+                )));
+            }
+
+            vm_receive_memory(&req, socket, guest_memory)?;
+            Response::ok().write_to(socket)?;
+        }
+    }
+
     /// Starts a thread to accept incoming connections and handle them. These
     /// additional connections are used to receive additional memory regions
     /// during VM migration.
@@ -870,33 +929,16 @@ impl ReceiveAdditionalConnections {
             let mut threads: Vec<std::thread::JoinHandle<()>> = Vec::new();
             while let Ok(Some(mut socket)) = listener.abortable_accept(&terminate_fd) {
                 let guest_memory = guest_memory.clone();
+                let terminate_fd = terminate_fd.try_clone().unwrap();
 
                 // We handle errors locally and log them. Passing them along is
                 // painful with little value.
                 threads.push(std::thread::spawn(move || {
-                    loop {
-                        let req = match Request::read_from(&mut socket) {
-                            Ok(req) => req,
-                            Err(e) => {
-                                error!("Failed to read request: {e}");
-                                break;
-                            }
-                        };
-
-                        if req.command() != Command::Memory {
-                            error!("Dropping connection. Only Memory commands are allowed on additional connections");
-                            break;
-                        }
-
-                        if let Err(e) = vm_receive_memory(&req, &mut socket, &guest_memory) {
-                            error!("Failed to receive memory: {e}");
-                            break;
-                        }
-
-                        if let Err(e) = Response::ok().write_to(&mut socket) {
-                            error!("Failed to send response: {e}");
-                            break;
-                        }
+                    if let Err(e) = Self::handle_requests(&mut socket, &terminate_fd, &guest_memory)
+                    {
+                        error!(
+                            "Failed to read more requests on additional receive connection: {e}"
+                        );
                     }
                 }));
             }
