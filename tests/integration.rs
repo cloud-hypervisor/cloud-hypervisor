@@ -7987,6 +7987,7 @@ mod common_sequential {
     // through each ssh command. There's no need to perform a dedicated test to
     // verify the migration went well for virtio-net.
     #[test]
+    #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_hotplug_virtiomem() {
         _test_snapshot_restore(true);
     }
