@@ -68,6 +68,7 @@ pub struct CpusConfig {
     pub affinity: Option<Vec<CpuAffinity>>,
     #[serde(default)]
     pub features: CpuFeatures,
+    pub nesting: bool,
 }
 
 pub const DEFAULT_VCPUS: u32 = 1;
@@ -82,6 +83,7 @@ impl Default for CpusConfig {
             max_phys_bits: DEFAULT_MAX_PHYS_BITS,
             affinity: None,
             features: CpuFeatures::default(),
+            nesting: true,
         }
     }
 }
@@ -1054,6 +1056,18 @@ impl VmConfig {
             ))
         } else {
             self.cpus.max_vcpus
+        }
+    }
+    pub(crate) fn to_hypervisor_vm_config(&self) -> hypervisor::HypervisorVmConfig {
+        hypervisor::HypervisorVmConfig {
+            #[cfg(feature = "tdx")]
+            tdx_enabled: self.platform.as_ref().map(|p| p.tdx).unwrap_or(false),
+            #[cfg(feature = "sev_snp")]
+            sev_snp_enabled: self.is_sev_snp_enabled(),
+            #[cfg(feature = "sev_snp")]
+            mem_size: self.memory.total_size(),
+            #[cfg(feature = "mshv")]
+            nested_enabled: self.cpus.nesting,
         }
     }
 }

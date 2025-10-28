@@ -597,7 +597,8 @@ impl CpusConfig {
             .add("kvm_hyperv")
             .add("max_phys_bits")
             .add("affinity")
-            .add("features");
+            .add("features")
+            .add("nesting");
         parser.parse(cpus).map_err(Error::ParseCpus)?;
 
         let boot_vcpus: u32 = parser
@@ -652,6 +653,11 @@ impl CpusConfig {
             }?;
         }
 
+        let nesting = parser
+            .convert::<Toggle>("nesting")
+            .map_err(Error::ParseCpus)?
+            .unwrap_or(Toggle(true))
+            .0;
         Ok(CpusConfig {
             boot_vcpus,
             max_vcpus,
@@ -660,6 +666,7 @@ impl CpusConfig {
             max_phys_bits,
             affinity,
             features,
+            nesting,
         })
     }
 }
