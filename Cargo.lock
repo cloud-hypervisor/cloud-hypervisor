@@ -294,9 +294,9 @@ dependencies = [
 
 [[package]]
 name = "bitfield-struct"
-version = "0.11.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3ca019570363e800b05ad4fd890734f28ac7b72f563ad8a35079efb793616f8"
+checksum = "8769c4854c5ada2852ddf6fd09d15cf43d4c2aaeccb4de6432f5402f08a6003b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -539,7 +539,7 @@ dependencies = [
  "acpi_tables",
  "anyhow",
  "arch",
- "bitfield-struct 0.11.0",
+ "bitfield-struct 0.12.1",
  "bitflags 2.9.4",
  "byteorder",
  "event_monitor",
@@ -927,7 +927,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arc-swap",
- "bitfield-struct 0.11.0",
+ "bitfield-struct 0.12.1",
  "byteorder",
  "cfg-if",
  "concat-idents",
