@@ -453,6 +453,13 @@ impl ApplyLandlock for FsConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub enum AccessMode {
+    #[default]
+    Write,
+    Discard,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PmemConfig {
     pub file: PathBuf,
@@ -461,7 +468,7 @@ pub struct PmemConfig {
     #[serde(default)]
     pub iommu: bool,
     #[serde(default)]
-    pub discard_writes: bool,
+    pub access_mode: AccessMode,
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
@@ -470,7 +477,10 @@ pub struct PmemConfig {
 
 impl ApplyLandlock for PmemConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        let access = if self.discard_writes { "r" } else { "rw" };
+        let access = match self.access_mode {
+            AccessMode::Discard => "r",
+            AccessMode::Write => "rw",
+        };
         landlock.add_rule_with_access(&self.file, access)?;
         Ok(())
     }

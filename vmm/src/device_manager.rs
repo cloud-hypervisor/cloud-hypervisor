@@ -119,9 +119,9 @@ use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 #[cfg(feature = "ivshmem")]
 use crate::vm_config::IvshmemConfig;
 use crate::vm_config::{
-    ConsoleOutputMode, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
-    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
-    VhostMode, VmConfig, VsockConfig,
+    AccessMode, ConsoleOutputMode, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS,
+    DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig,
+    UserDeviceConfig, VdpaConfig, VhostMode, VmConfig, VsockConfig,
 };
 use crate::{DEVICE_MANAGER_SNAPSHOT_ID, GuestRegionMmap, PciDeviceInfo, device_node};
 
@@ -3177,7 +3177,10 @@ impl DeviceManager {
 
         let mut file = OpenOptions::new()
             .read(true)
-            .write(!pmem_cfg.discard_writes)
+            .write(match pmem_cfg.access_mode {
+                AccessMode::Write => true,
+                AccessMode::Discard => false,
+            })
             .custom_flags(custom_flags)
             .open(&pmem_cfg.file)
             .map_err(DeviceManagerError::PmemFileOpen)?;
@@ -3231,10 +3234,9 @@ impl DeviceManager {
             region_size as usize,
             PROT_READ | PROT_WRITE,
             MAP_NORESERVE
-                | if pmem_cfg.discard_writes {
-                    MAP_PRIVATE
-                } else {
-                    MAP_SHARED
+                | match pmem_cfg.access_mode {
+                    AccessMode::Write => MAP_SHARED,
+                    AccessMode::Discard => MAP_PRIVATE,
                 },
         )
         .map_err(DeviceManagerError::NewMmapRegion)?;

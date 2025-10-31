@@ -587,6 +587,22 @@ impl FromStr for CpuTopology {
     }
 }
 
+pub enum ParsePmemAccessModeError {
+    InvalidValue(String),
+}
+
+impl FromStr for AccessMode {
+    type Err = ParsePmemAccessModeError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "write" => Ok(AccessMode::Write),
+            "discard" => Ok(AccessMode::Discard),
+            _ => Err(ParsePmemAccessModeError::InvalidValue(s.to_owned())),
+        }
+    }
+}
+
 impl CpusConfig {
     pub fn parse(cpus: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1754,7 +1770,7 @@ impl FwCfgItem {
 impl PmemConfig {
     pub const SYNTAX: &'static str = "Persistent memory parameters \
     \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
-    discard_writes=on|off,id=<device_id>,pci_segment=<segment_id>\"";
+    access_mode=write|discard,id=<device_id>,pci_segment=<segment_id>\"";
 
     pub fn parse(pmem: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1762,7 +1778,7 @@ impl PmemConfig {
             .add("size")
             .add("file")
             .add("iommu")
-            .add("discard_writes")
+            .add("access_mode")
             .add("id")
             .add("pci_segment");
         parser.parse(pmem).map_err(Error::ParsePersistentMemory)?;
@@ -1777,11 +1793,10 @@ impl PmemConfig {
             .map_err(Error::ParsePersistentMemory)?
             .unwrap_or(Toggle(false))
             .0;
-        let discard_writes = parser
-            .convert::<Toggle>("discard_writes")
+        let access_mode = parser
+            .convert::<AccessMode>("access_mode")
             .map_err(Error::ParsePersistentMemory)?
-            .unwrap_or(Toggle(false))
-            .0;
+            .unwrap_or_default();
         let id = parser.get("id");
         let pci_segment = parser
             .convert("pci_segment")
@@ -1792,7 +1807,7 @@ impl PmemConfig {
             file,
             size,
             iommu,
-            discard_writes,
+            access_mode,
             id,
             pci_segment,
         })
@@ -3657,7 +3672,7 @@ mod tests {
             file: PathBuf::from("/tmp/pmem"),
             size: Some(128 << 20),
             iommu: false,
-            discard_writes: false,
+            access_mode: AccessMode::Write,
             id: None,
             pci_segment: 0,
         }
@@ -3680,9 +3695,9 @@ mod tests {
             }
         );
         assert_eq!(
-            PmemConfig::parse("file=/tmp/pmem,size=128M,iommu=on,discard_writes=on")?,
+            PmemConfig::parse("file=/tmp/pmem,size=128M,iommu=on,access_mode=discard")?,
             PmemConfig {
-                discard_writes: true,
+                access_mode: AccessMode::Discard,
                 iommu: true,
                 ..pmem_fixture()
             }
