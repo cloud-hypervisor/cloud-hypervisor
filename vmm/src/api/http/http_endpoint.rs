@@ -6,11 +6,11 @@
 
 //! # HTTP Endpoints of the Cloud Hypervisor API
 //!
-//! ## Special Handling for Devices Backed by Network File Descriptors (FDs) (e.g., virtio-net)
+//! ## Special Handling for Externally Provided File Descriptors (FDs) (e.g., virtio-net)
 //!
 //! Some of the HTTP handlers here implement special logic for devices
-//! **backed by network FDs** to enable live-migration, state save/resume
-//! (restore), and similar VM lifecycle events.
+//! **backed by externally opened FDs** to enable live-migration,
+//! state save/resume (restore), and similar VM lifecycle events.
 //!
 //! The utilized mechanism requires that the control software (e.g., libvirt)
 //! connects to Cloud Hypervisor by using a UNIX domain socket and that it
@@ -47,8 +47,8 @@ use crate::api::http::{EndpointHandler, HttpError, error_response};
 use crate::api::{
     AddDisk, ApiAction, ApiError, ApiRequest, NetConfig, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem,
     VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBoot, VmConfig, VmCounters, VmDelete, VmNmi, VmPause,
-    VmPowerButton, VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore,
-    VmResume, VmSendMigration, VmShutdown, VmSnapshot,
+    VmPowerButton, VmReboot, VmReceiveMigration, VmReceiveMigrationData, VmRemoveDevice, VmResize,
+    VmResizeZone, VmRestore, VmResume, VmSendMigration, VmShutdown, VmSnapshot,
 };
 use crate::config::RestoreConfig;
 use crate::cpu::Error as CpuError;
@@ -424,13 +424,12 @@ vm_action_put_handler_body!(VmAddUserDevice);
 vm_action_put_handler_body!(VmRemoveDevice);
 vm_action_put_handler_body!(VmResizeZone);
 vm_action_put_handler_body!(VmSnapshot);
-vm_action_put_handler_body!(VmReceiveMigration);
 vm_action_put_handler_body!(VmSendMigration);
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 vm_action_put_handler_body!(VmCoredump);
 
-// Special handling for virtio-net devices backed by network FDs.
+// Special handling for externally provided FDs.
 // See module description for more info.
 impl PutHandler for VmAddNet {
     fn handle_request(
@@ -453,6 +452,34 @@ impl PutHandler for VmAddNet {
 }
 
 impl GetHandler for VmAddNet {}
+
+// Special handling for externally provided FDs.
+// See module description for more info.
+impl PutHandler for VmReceiveMigration {
+    fn handle_request(
+        &'static self,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+        body: &Option<Body>,
+        files: Vec<File>,
+    ) -> std::result::Result<Option<Body>, HttpError> {
+        if let Some(body) = body {
+            let mut net_cfg: VmReceiveMigrationData = serde_json::from_slice(body.raw())?;
+            if let Some(cfgs) = &mut net_cfg.net_fds {
+                let mut cfgs = cfgs.iter_mut().collect::<Vec<&mut _>>();
+                let cfgs = cfgs.as_mut_slice();
+                attach_fds_to_cfgs(files, cfgs)?;
+            }
+
+            self.send(api_notifier, api_sender, net_cfg)
+                .map_err(HttpError::ApiError)
+        } else {
+            Err(HttpError::BadRequest)
+        }
+    }
+}
+
+impl GetHandler for VmReceiveMigration {}
 
 impl PutHandler for VmResize {
     fn handle_request(
@@ -482,7 +509,7 @@ impl PutHandler for VmResize {
 
 impl GetHandler for VmResize {}
 
-// Special handling for virtio-net devices backed by network FDs.
+// Special handling for externally provided FDs.
 // See module description for more info.
 impl PutHandler for VmRestore {
     fn handle_request(
