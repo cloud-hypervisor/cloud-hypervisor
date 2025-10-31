@@ -3179,7 +3179,7 @@ impl DeviceManager {
             .read(true)
             .write(match pmem_cfg.access_mode {
                 AccessMode::Write => true,
-                AccessMode::Discard => false,
+                AccessMode::Read | AccessMode::Discard => false,
             })
             .custom_flags(custom_flags)
             .open(&pmem_cfg.file)
@@ -3232,12 +3232,14 @@ impl DeviceManager {
         let mmap_region = MmapRegion::build(
             Some(FileOffset::new(cloned_file, 0)),
             region_size as usize,
-            PROT_READ | PROT_WRITE,
-            MAP_NORESERVE
-                | match pmem_cfg.access_mode {
-                    AccessMode::Write => MAP_SHARED,
-                    AccessMode::Discard => MAP_PRIVATE,
-                },
+            match pmem_cfg.access_mode {
+                AccessMode::Read => PROT_READ,
+                AccessMode::Write | AccessMode::Discard => PROT_READ | PROT_WRITE,
+            },
+            match pmem_cfg.access_mode {
+                AccessMode::Read | AccessMode::Write => MAP_SHARED | MAP_NORESERVE,
+                AccessMode::Discard => MAP_PRIVATE | MAP_NORESERVE,
+            },
         )
         .map_err(DeviceManagerError::NewMmapRegion)?;
         let host_addr: u64 = mmap_region.as_ptr() as u64;

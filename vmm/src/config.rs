@@ -596,6 +596,7 @@ impl FromStr for AccessMode {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
+            "read" => Ok(AccessMode::Read),
             "write" => Ok(AccessMode::Write),
             "discard" => Ok(AccessMode::Discard),
             _ => Err(ParsePmemAccessModeError::InvalidValue(s.to_owned())),

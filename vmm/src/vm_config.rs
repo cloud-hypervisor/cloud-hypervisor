@@ -455,6 +455,7 @@ impl ApplyLandlock for FsConfig {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub enum AccessMode {
+    Read,
     #[default]
     Write,
     Discard,
@@ -478,7 +479,7 @@ pub struct PmemConfig {
 impl ApplyLandlock for PmemConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         let access = match self.access_mode {
-            AccessMode::Discard => "r",
+            AccessMode::Read | AccessMode::Discard => "r",
             AccessMode::Write => "rw",
         };
         landlock.add_rule_with_access(&self.file, access)?;
