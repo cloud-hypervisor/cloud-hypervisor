@@ -34,6 +34,12 @@ on:
       USERNAME:
         required: true
     outputs:
+      RG_NAME:
+        description: 'Resource group of the VM'
+        value: ${{ jobs.infra-setup.outputs.RG_NAME }}
+      VM_NAME:
+        description: 'Name of the VM'
+        value: ${{ jobs.infra-setup.outputs.VM_NAME }}
       PRIVATE_IP:
         description: 'Private IP of the VM'
         value: ${{ jobs.infra-setup.outputs.PRIVATE_IP }}
@@ -46,6 +52,8 @@ jobs:
     runs-on: mshv
     continue-on-error: true
     outputs:
+      RG_NAME: ${{ steps.rg-setup.outputs.RG_NAME }}
+      VM_NAME: ${{ steps.vm-setup.outputs.VM_NAME }}
       PRIVATE_IP: ${{ steps.get-vm-ip.outputs.PRIVATE_IP }}
     steps:
       - name: Install & login to AZ CLI
@@ -112,6 +120,7 @@ jobs:
           # Create the resource group
           echo "Creating resource group in location: ${LOCATION}"
           az group create --name ${RG} --location ${LOCATION}
+          echo "RG_NAME=${RG}" >> $GITHUB_OUTPUT
           echo "Resource group created successfully."
 
       - name: Generate SSH Key
@@ -173,6 +182,9 @@ jobs:
             --security-type Standard \
             --output json
 
+          az vm boot-diagnostics enable --name ${VM_NAME} --resource-group ${RG}
+
+          echo "VM_NAME=${VM_NAME}" >> $GITHUB_OUTPUT
           echo "VM creation process completed successfully."
 
       - name: Get VM Private IP
