@@ -79,6 +79,28 @@ jobs:
             sudo ./scripts/dev_cli.sh tests --hypervisor mshv --integration
           EOF
 
+      - name: Dump dmesg
+        if: always()
+        continue-on-error: true
+        env:
+          KEY: azure_key_${{ github.run_id }}
+          PRIVATE_IP: ${{ needs.infra-setup.outputs.PRIVATE_IP }}
+          USERNAME: ${{ secrets.MSHV_USERNAME }}
+        run: |
+          ssh -i ~/.ssh/${KEY} -o StrictHostKeyChecking=no ${USERNAME}@${PRIVATE_IP} << EOF
+            sudo dmesg
+          EOF
+
+      - name: Dump serial console logs
+        if: always()
+        continue-on-error: true
+        env:
+          RG_NAME: ${{ needs.infra-setup.outputs.RG_NAME }}
+          VM_NAME: ${{ needs.infra-setup.outputs.VM_NAME }}
+        run: |
+          set -e
+          az vm boot-diagnostics get-boot-log --name "${VM_NAME}" --resource-group "${RG_NAME}" | jq -r
+
   cleanup:
     name: Cleanup
     needs: run-tests
