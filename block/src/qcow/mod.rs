@@ -1070,21 +1070,7 @@ impl QcowFile {
 
         let l2_index = self.l2_table_index(address) as usize;
 
-        if !self.l2_cache.contains_key(l1_index) {
-            // Not in the cache.
-            let table =
-                VecCache::from_vec(Self::read_l2_cluster(&mut self.raw_file, l2_addr_disk)?);
-
-            let l1_table = &self.l1_table;
-            let raw_file = &mut self.raw_file;
-            self.l2_cache.insert(l1_index, table, |index, evicted| {
-                raw_file.write_pointer_table(
-                    l1_table[index],
-                    evicted.get_values(),
-                    CLUSTER_USED_FLAG,
-                )
-            })?;
-        };
+        self.cache_l2_cluster(l1_index, l2_addr_disk, false)?;
 
         let cluster_addr = self.l2_cache.get(l1_index).unwrap()[l2_index];
         if cluster_addr == 0 {
@@ -1109,28 +1095,9 @@ impl QcowFile {
 
         let mut set_refcounts = Vec::new();
 
-        if !self.l2_cache.contains_key(l1_index) {
-            // Not in the cache.
-            let l2_table = if l2_addr_disk == 0 {
-                // Allocate a new cluster to store the L2 table and update the L1 table to point
-                // to the new table.
-                let new_addr: u64 = self.get_new_cluster(None)?;
-                // The cluster refcount starts at one meaning it is used but doesn't need COW.
-                set_refcounts.push((new_addr, 1));
-                self.l1_table[l1_index] = new_addr;
-                VecCache::new(self.l2_entries as usize)
-            } else {
-                VecCache::from_vec(Self::read_l2_cluster(&mut self.raw_file, l2_addr_disk)?)
-            };
-            let l1_table = &self.l1_table;
-            let raw_file = &mut self.raw_file;
-            self.l2_cache.insert(l1_index, l2_table, |index, evicted| {
-                raw_file.write_pointer_table(
-                    l1_table[index],
-                    evicted.get_values(),
-                    CLUSTER_USED_FLAG,
-                )
-            })?;
+        if let Some(new_addr) = self.cache_l2_cluster(l1_index, l2_addr_disk, true)? {
+            // The cluster refcount starts at one meaning it is used but doesn't need COW.
+            set_refcounts.push((new_addr, 1));
         }
 
         let cluster_addr = match self.l2_cache.get(l1_index).unwrap()[l2_index] {
@@ -1247,20 +1214,7 @@ impl QcowFile {
             return Ok(false);
         }
 
-        if !self.l2_cache.contains_key(l1_index) {
-            // Not in the cache.
-            let table =
-                VecCache::from_vec(Self::read_l2_cluster(&mut self.raw_file, l2_addr_disk)?);
-            let l1_table = &self.l1_table;
-            let raw_file = &mut self.raw_file;
-            self.l2_cache.insert(l1_index, table, |index, evicted| {
-                raw_file.write_pointer_table(
-                    l1_table[index],
-                    evicted.get_values(),
-                    CLUSTER_USED_FLAG,
-                )
-            })?;
-        }
+        self.cache_l2_cluster(l1_index, l2_addr_disk, false)?;
 
         let cluster_addr = self.l2_cache.get(l1_index).unwrap()[l2_index];
         // If cluster_addr != 0, the cluster is allocated.
@@ -1319,20 +1273,7 @@ impl QcowFile {
             return Ok(());
         }
 
-        if !self.l2_cache.contains_key(l1_index) {
-            // Not in the cache.
-            let table =
-                VecCache::from_vec(Self::read_l2_cluster(&mut self.raw_file, l2_addr_disk)?);
-            let l1_table = &self.l1_table;
-            let raw_file = &mut self.raw_file;
-            self.l2_cache.insert(l1_index, table, |index, evicted| {
-                raw_file.write_pointer_table(
-                    l1_table[index],
-                    evicted.get_values(),
-                    CLUSTER_USED_FLAG,
-                )
-            })?;
-        }
+        self.cache_l2_cluster(l1_index, l2_addr_disk, false)?;
 
         let cluster_addr = self.l2_cache.get(l1_index).unwrap()[l2_index];
         if cluster_addr == 0 {
@@ -1415,6 +1356,41 @@ impl QcowFile {
             .iter()
             .map(|entry| *entry & L2_TABLE_OFFSET_MASK)
             .collect())
+    }
+
+    // Put an L2 cluster to the cache with evicting less-used cluster
+    // The new cluster may be allocated if necessary
+    // (may_alloc argument is true and l2_addr_disk == 0)
+    fn cache_l2_cluster(
+        &mut self,
+        l1_index: usize,
+        l2_addr_disk: u64,
+        may_alloc: bool,
+    ) -> std::io::Result<Option<u64>> {
+        let mut new_cluster: Option<u64> = None;
+        if !self.l2_cache.contains_key(l1_index) {
+            // Not in the cache.
+            let l2_table = if may_alloc && l2_addr_disk == 0 {
+                // Allocate a new cluster to store the L2 table and update the L1 table to point
+                // to the new table.
+                let new_addr: u64 = self.get_new_cluster(None)?;
+                new_cluster = Some(new_addr);
+                self.l1_table[l1_index] = new_addr;
+                VecCache::new(self.l2_entries as usize)
+            } else {
+                VecCache::from_vec(Self::read_l2_cluster(&mut self.raw_file, l2_addr_disk)?)
+            };
+            let l1_table = &self.l1_table;
+            let raw_file = &mut self.raw_file;
+            self.l2_cache.insert(l1_index, l2_table, |index, evicted| {
+                raw_file.write_pointer_table(
+                    l1_table[index],
+                    evicted.get_values(),
+                    CLUSTER_USED_FLAG,
+                )
+            })?;
+        }
+        Ok(new_cluster)
     }
 
     // Set the refcount for a cluster with the given address.
