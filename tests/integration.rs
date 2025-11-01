@@ -1808,7 +1808,7 @@ fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
                 pmem_temp_file.as_path().to_str().unwrap(),
                 if specify_size { ",size=128M" } else { "" },
                 if discard_writes {
-                    ",discard_writes=on"
+                    ",access_mode=discard"
                 } else {
                     ""
                 }
@@ -11105,7 +11105,7 @@ mod live_migration {
             .args([
                 "--pmem",
                 format!(
-                    "file={},discard_writes=on",
+                    "file={},access_mode=discard",
                     pmem_temp_file.as_path().to_str().unwrap(),
                 )
                 .as_str(),
