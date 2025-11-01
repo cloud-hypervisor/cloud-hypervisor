@@ -56,13 +56,6 @@ or a fd with `--api-socket fd=...`.
 
 ```
 $ ./target/debug/cloud-hypervisor --api-socket path=/tmp/cloud-hypervisor.sock
-Cloud Hypervisor Guest
-    API server: /tmp/cloud-hypervisor.sock
-    vCPUs: 1
-    Memory: 512 MB
-    Kernel: None
-    Kernel cmdline:
-    Disk(s): None
 ```
 
 #### REST API Endpoints
@@ -121,13 +114,6 @@ the REST API available at `/tmp/cloud-hypervisor.sock`:
 
 ```
 $ ./target/debug/cloud-hypervisor --api-socket /tmp/cloud-hypervisor.sock
-Cloud Hypervisor Guest
-    API server: /tmp/cloud-hypervisor.sock
-    vCPUs: 1
-    Memory: 512 MB
-    Kernel: None
-    Kernel cmdline:
-    Disk(s): None
 ```
 
 ##### Create a Virtual Machine
