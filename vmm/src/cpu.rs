@@ -1428,13 +1428,30 @@ impl CpuManager {
     /// Signal to the spawned threads (vCPUs and console signal handler).
     ///
     /// For the vCPU threads this will interrupt the KVM_RUN ioctl() allowing
-    /// the loop to check the shared state booleans.
-    fn signal_vcpus(&self) {
+    /// the loop to check the shared state booleans. To avoid races where the signal is handled
+    /// between checking the shared state booleans and entering KVM_RUN also set the KVM immediate
+    /// exit to force out of KVM_RUN ioctl() early.
+    fn signal_vcpus(&mut self) {
+        // If the lock is unavailable it is almost certainly due to being in KVM_RUN itself so the
+        // signal will kick it out.
+        for vcpu in &mut self.vcpus {
+            match vcpu.try_lock() {
+                Ok(mut vcpu) => {
+                    vcpu.vcpu.set_immediate_exit(true);
+                }
+                Err(std::sync::TryLockError::WouldBlock) => {}
+                Err(e) => {
+                    unreachable!("{e:?}")
+                }
+            }
+        }
+
         // Splitting this into two loops reduced the time to pause many vCPUs
         // massively. Example: 254 vCPUs. >254ms -> ~4ms.
         for state in self.vcpu_states.iter() {
             state.signal_thread();
         }
+
         for state in self.vcpu_states.iter() {
             state.wait_until_signal_acknowledged();
         }
@@ -2066,7 +2083,7 @@ impl CpuManager {
         self.sev_snp_enabled
     }
 
-    pub(crate) fn nmi(&self) -> Result<()> {
+    pub(crate) fn nmi(&mut self) -> Result<()> {
         self.vcpus_kick_signalled.store(true, Ordering::SeqCst);
         self.signal_vcpus();
         self.vcpus_kick_signalled.store(false, Ordering::SeqCst);
