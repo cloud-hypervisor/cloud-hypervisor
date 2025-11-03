@@ -2036,6 +2036,7 @@ dependencies = [
  "dirs",
  "epoll",
  "libc",
+ "rand",
  "serde_json",
  "ssh2",
  "thiserror 2.0.17",
