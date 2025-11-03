@@ -820,11 +820,30 @@ impl Vmm {
         })
     }
 
+    /// Try to receive a file descriptor from a socket. Returns the slot number and the file descriptor.
+    fn vm_receive_memory_fd(
+        socket: &mut SocketStream,
+    ) -> std::result::Result<(u32, File), MigratableError> {
+        if let SocketStream::Unix(unix_socket) = socket {
+            let mut buf = [0u8; 4];
+            let (_, file) = unix_socket.recv_with_fd(&mut buf).map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error receiving slot from socket: {e}"))
+            })?;
+
+            file.ok_or_else(|| MigratableError::MigrateReceive(anyhow!("Failed to receive socket")))
+                .map(|file| (u32::from_le_bytes(buf), file))
+        } else {
+            Err(MigratableError::MigrateReceive(anyhow!(
+                "Unsupported socket type"
+            )))
+        }
+    }
+
     fn vm_receive_config<T>(
         &mut self,
         req: &Request,
         socket: &mut T,
-        existing_memory_files: Option<HashMap<u32, File>>,
+        existing_memory_files: HashMap<u32, File>,
     ) -> std::result::Result<Arc<Mutex<MemoryManager>>, MigratableError>
     where
         T: Read + Write,
@@ -2126,7 +2145,7 @@ impl RequestHandler for Vmm {
 
         let mut started = false;
         let mut memory_manager: Option<Arc<Mutex<MemoryManager>>> = None;
-        let mut existing_memory_files = None;
+        let mut existing_memory_files = vec![];
         loop {
             let req = Request::read_from(&mut socket)?;
             match req.command() {
@@ -2148,7 +2167,7 @@ impl RequestHandler for Vmm {
                     memory_manager = Some(self.vm_receive_config(
                         &req,
                         &mut socket,
-                        existing_memory_files.take(),
+                        HashMap::from_iter(existing_memory_files.drain(..)),
                     )?);
                 }
                 Command::State => {
@@ -2190,34 +2209,9 @@ impl RequestHandler for Vmm {
                         continue;
                     }
 
-                    match &mut socket {
-                        SocketStream::Unix(unix_socket) => {
-                            let mut buf = [0u8; 4];
-                            let (_, file) = unix_socket.recv_with_fd(&mut buf).map_err(|e| {
-                                MigratableError::MigrateReceive(anyhow!(
-                                    "Error receiving slot from socket: {e}"
-                                ))
-                            })?;
+                    existing_memory_files.push(Self::vm_receive_memory_fd(&mut socket)?);
 
-                            if existing_memory_files.is_none() {
-                                existing_memory_files = Some(HashMap::default());
-                            }
-
-                            if let Some(ref mut existing_memory_files) = existing_memory_files {
-                                let slot = u32::from_le_bytes(buf);
-                                existing_memory_files.insert(slot, file.unwrap());
-                            }
-
-                            Response::ok().write_to(&mut socket)?;
-                        }
-                        SocketStream::Tcp(_tcp_socket) => {
-                            // For TCP sockets, we cannot transfer file descriptors
-                            warn!(
-                                "MemoryFd command received over TCP socket, which is not supported"
-                            );
-                            Response::error().write_to(&mut socket)?;
-                        }
-                    }
+                    Response::ok().write_to(&mut socket)?;
                 }
                 Command::Complete => {
                     info!("Complete Command Received");
