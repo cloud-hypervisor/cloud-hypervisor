@@ -995,7 +995,7 @@ impl MemoryManager {
         phys_bits: u8,
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         restore_data: Option<&MemoryManagerSnapshotData>,
-        existing_memory_files: Option<HashMap<u32, File>>,
+        existing_memory_files: HashMap<u32, File>,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         trace_scoped!("MemoryManager::new");
 
@@ -1030,7 +1030,7 @@ impl MemoryManager {
                 &data.guest_ram_mappings,
                 &zones,
                 prefault,
-                existing_memory_files.unwrap_or_default(),
+                existing_memory_files,
                 config.thp,
             )?;
             let guest_memory =
@@ -1263,7 +1263,7 @@ impl MemoryManager {
                 #[cfg(feature = "tdx")]
                 false,
                 Some(&mem_snapshot),
-                None,
+                Default::default(),
             )?;
 
             mm.lock()
