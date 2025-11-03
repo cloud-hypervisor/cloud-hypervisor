@@ -2477,6 +2477,12 @@ impl Pausable for CpuManager {
     }
 
     fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+        // Clear the immediate_exit flag that will have been set during pause. This is an optimisation
+        // as would be cleared after the first KVM_RUN anyway via the return of `-EINTR`
+        for vcpu in &mut self.vcpus {
+            vcpu.lock().unwrap().vcpu.set_immediate_exit(false);
+        }
+
         // Ensure that vCPUs keep running after being unpark() in
         // their run vCPU loop.
         self.vcpus_pause_signalled.store(false, Ordering::SeqCst);
