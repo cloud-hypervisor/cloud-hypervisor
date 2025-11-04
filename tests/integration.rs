@@ -2867,6 +2867,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // See #7456
     fn test_user_defined_memory_regions() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -2934,6 +2935,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // See #7456
     fn test_guest_numa_nodes() {
         _test_guest_numa_nodes(false);
     }
@@ -5136,6 +5138,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // See #7456
     fn test_virtio_mem() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -5840,6 +5843,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))] // See #7456
     fn test_virtio_balloon_free_page_reporting() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
