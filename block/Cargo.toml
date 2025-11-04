@@ -11,6 +11,7 @@ io_uring = ["dep:io-uring"]
 [dependencies]
 byteorder = { workspace = true }
 crc-any = "2.5.0"
+flate2 = "1.0"
 io-uring = { version = "0.7.10", optional = true }
 libc = { workspace = true }
 log = { workspace = true }
@@ -28,3 +29,4 @@ vm-memory = { workspace = true, features = [
 ] }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { workspace = true }
+zstd = "0.13"
