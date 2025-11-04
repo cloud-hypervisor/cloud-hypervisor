@@ -153,6 +153,9 @@ pub enum Error {
     #[error("Failed to join on vCPU threads: {0:?}")]
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
 
+    #[error("Timeout when waiting for signal to be acknowledged")]
+    SignalAcknowledgeTimeout,
+
     #[error("Error adding CpuManager to MMIO bus")]
     BusError(#[source] vm_device::BusError),
 
@@ -707,21 +710,31 @@ impl VcpuState {
         }
     }
 
-    /// Blocks until the vCPU thread has acknowledged the signal.
+    /// Blocks until the vCPU thread has acknowledged the signal. It retries to send
+    /// the signal every 10ms. Times out after 1000ms.
     ///
     /// This is the counterpart of [`Self::signal_thread`].
-    fn wait_until_signal_acknowledged(&self) {
+    fn wait_until_signal_acknowledged(&self) -> Result<()> {
         if let Some(_handle) = self.handle.as_ref() {
+            let mut count = 0;
             loop {
                 if self.vcpu_run_interrupted.load(Ordering::SeqCst) {
-                    break;
+                    return Ok(());
                 } else {
                     // This is more effective than thread::yield_now() at
                     // avoiding a priority inversion with the vCPU thread
                     thread::sleep(std::time::Duration::from_millis(1));
+                    count += 1;
+                    if count >= 1000 {
+                        return Err(Error::SignalAcknowledgeTimeout);
+                    } else if count % 10 == 0 {
+                        warn!("vCPU thread did not respond in {count}ms to signal - retrying");
+                        self.signal_thread();
+                    }
                 }
             }
         }
+        Ok(())
     }
 
     fn join_thread(&mut self) -> Result<()> {
@@ -1356,7 +1369,7 @@ impl CpuManager {
         let state = &mut self.vcpu_states[usize::try_from(cpu_id).unwrap()];
         state.kill.store(true, Ordering::SeqCst);
         state.signal_thread();
-        state.wait_until_signal_acknowledged();
+        state.wait_until_signal_acknowledged()?;
         state.join_thread()?;
         state.handle = None;
 
@@ -1428,15 +1441,17 @@ impl CpuManager {
     ///
     /// For the vCPU threads this will interrupt the KVM_RUN ioctl() allowing
     /// the loop to check the shared state booleans.
-    fn signal_vcpus(&self) {
+    fn signal_vcpus(&mut self) -> Result<()> {
         // Splitting this into two loops reduced the time to pause many vCPUs
         // massively. Example: 254 vCPUs. >254ms -> ~4ms.
         for state in self.vcpu_states.iter() {
             state.signal_thread();
         }
         for state in self.vcpu_states.iter() {
-            state.wait_until_signal_acknowledged();
+            state.wait_until_signal_acknowledged()?;
         }
+
+        Ok(())
     }
 
     pub fn shutdown(&mut self) -> Result<()> {
@@ -1451,7 +1466,7 @@ impl CpuManager {
             state.unpark_thread();
         }
 
-        self.signal_vcpus();
+        self.signal_vcpus()?;
 
         // Wait for all the threads to finish. This removes the state from the vector.
         for mut state in self.vcpu_states.drain(..) {
@@ -2065,9 +2080,9 @@ impl CpuManager {
         self.sev_snp_enabled
     }
 
-    pub(crate) fn nmi(&self) -> Result<()> {
+    pub(crate) fn nmi(&mut self) -> Result<()> {
         self.vcpus_kick_signalled.store(true, Ordering::SeqCst);
-        self.signal_vcpus();
+        self.signal_vcpus()?;
         self.vcpus_kick_signalled.store(false, Ordering::SeqCst);
 
         Ok(())
@@ -2429,7 +2444,8 @@ impl Pausable for CpuManager {
         // Tell the vCPUs to pause themselves next time they exit
         self.vcpus_pause_signalled.store(true, Ordering::SeqCst);
 
-        self.signal_vcpus();
+        self.signal_vcpus()
+            .map_err(|e| MigratableError::Pause(anyhow!("Error signalling vCPUs: {e}")))?;
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         for vcpu in self.vcpus.iter() {
