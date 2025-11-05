@@ -1006,7 +1006,7 @@ pub struct DeviceManager {
     // VFIO container
     // Only one container can be created, therefore it is stored as part of the
     // DeviceManager to be reused.
-    vfio_container: Option<Arc<VfioContainer>>,
+    vfio_container: Arc<Mutex<Option<Arc<VfioContainer>>>>,
 
     // Paravirtualized IOMMU
     iommu_device: Option<Arc<Mutex<virtio_devices::Iommu>>>,
@@ -1320,7 +1320,7 @@ impl DeviceManager {
             msi_interrupt_manager,
             legacy_interrupt_manager: None,
             passthrough_device: None,
-            vfio_container: None,
+            vfio_container: Arc::new(Mutex::new(None)),
             iommu_device: None,
             iommu_mapping: None,
             iommu_attached_devices: None,
@@ -3724,14 +3724,16 @@ impl DeviceManager {
             }
 
             vfio_container
-        } else if let Some(vfio_container) = &self.vfio_container {
-            Arc::clone(vfio_container)
         } else {
-            let vfio_container = self.create_vfio_container()?;
-            needs_dma_mapping = true;
-            self.vfio_container = Some(Arc::clone(&vfio_container));
-
-            vfio_container
+            let mut vfio_container_guard = self.vfio_container.lock().unwrap();
+            if let Some(vfio_container) = vfio_container_guard.as_ref() {
+                Arc::clone(vfio_container)
+            } else {
+                let vfio_container = self.create_vfio_container()?;
+                needs_dma_mapping = true;
+                *vfio_container_guard = Some(Arc::clone(&vfio_container));
+                vfio_container
+            }
         };
 
         let vfio_device = VfioDevice::new(&device_cfg.path, Arc::clone(&vfio_container))
@@ -4356,14 +4358,17 @@ impl DeviceManager {
         }
 
         // Take care of updating the memory for VFIO PCI devices.
-        if let Some(vfio_container) = &self.vfio_container {
-            vfio_container
-                .vfio_dma_map(
-                    new_region.start_addr().raw_value(),
-                    new_region.len(),
-                    new_region.as_ptr() as u64,
-                )
-                .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
+        {
+            let vfio_container_guard = self.vfio_container.lock().unwrap();
+            if let Some(vfio_container) = vfio_container_guard.as_ref() {
+                vfio_container
+                    .vfio_dma_map(
+                        new_region.start_addr().raw_value(),
+                        new_region.len(),
+                        new_region.as_ptr() as u64,
+                    )
+                    .map_err(DeviceManagerError::UpdateMemoryForVfioPciDevice)?;
+            }
         }
 
         // Take care of updating the memory for vfio-user devices.
@@ -4962,9 +4967,12 @@ impl DeviceManager {
 
     fn cleanup_vfio_container(&mut self) {
         // Drop the 'vfio container' instance when "Self" is the only reference
-        if let Some(1) = self.vfio_container.as_ref().map(Arc::strong_count) {
+        let mut vfio_container_guard = self.vfio_container.lock().unwrap();
+        if let Some(container) = vfio_container_guard.as_ref()
+            && Arc::strong_count(container) == 1
+        {
             debug!("Drop 'vfio container' given no active 'vfio devices'.");
-            self.vfio_container = None;
+            *vfio_container_guard = None;
         }
     }
 }
