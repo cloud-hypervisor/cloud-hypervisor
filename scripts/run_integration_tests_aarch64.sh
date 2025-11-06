@@ -134,11 +134,12 @@ update_workloads() {
     FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME="focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw"
     cp "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_NAME" "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME"
     FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR="$WORKLOADS_DIR/focal-server-cloudimg-root"
+    NEW_KERNEL="$WORKLOADS_DIR/Image-arm64.gz"
+    DST_KERNEL_PATH="boot/vmlinuz"
     mkdir -p "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"
-    # Mount the 'raw' image, replace the compressed kernel file and umount the working folder
-    guestmount -a "$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME" -m /dev/sda1 "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR" || exit 1
-    cp "$WORKLOADS_DIR"/Image-arm64.gz "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"/boot/vmlinuz
-    guestunmount "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR"
+    IMG="$WORKLOADS_DIR/$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_NAME"
+    # Mount image partition, copy kernel, and unmount
+    copy_to_image "$IMG" "$FOCAL_OS_RAW_IMAGE_UPDATE_KERNEL_ROOT_DIR" "$NEW_KERNEL" "$DST_KERNEL_PATH" || exit 1
 
     # Build virtiofsd
     build_virtiofsd

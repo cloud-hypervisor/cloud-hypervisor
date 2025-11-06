@@ -179,3 +179,103 @@ download_ovmf() {
     time wget --quiet $OVMF_FW_URL || exit 1
     popd || exit
 }
+
+# Function to mount image partition, execute commands, and cleanup.
+# Arguments: $1: Image file path, $2: Mount directory, $3+: Commands to execute.
+mount_and_exec() {
+    local IMG="$1"
+    local MOUNT_DIR="$2"
+    local LOOP_DEV=""
+    local PARTITION_DEV=""
+    local COMMAND_STATUS=0
+
+    # Cleanup function to unmount and detach loop device
+    # shellcheck disable=SC2317
+    cleanup() {
+        if [ -n "$MOUNT_DIR" ]; then
+            echo "Cleanup: Unmounting $MOUNT_DIR..." >&2
+            sudo umount -l "$MOUNT_DIR" 2>/dev/null || true
+        fi
+        if [ -n "$LOOP_DEV" ]; then
+            echo "Cleanup: Detaching loop device $LOOP_DEV..." >&2
+            sudo losetup -d "$LOOP_DEV" 2>/dev/null || true
+        fi
+    }
+
+    if [ ! -f "$IMG" ] || [ -z "$MOUNT_DIR" ]; then
+        echo "ERROR: Image path ($IMG) or mount directory ($MOUNT_DIR) is invalid." >&2
+        return 1
+    fi
+    mkdir -p "$MOUNT_DIR"
+
+    # Create loop device for the entire disk image
+    LOOP_DEV=$(sudo losetup -f --show "$IMG")
+    if [ -z "$LOOP_DEV" ]; then
+        echo "ERROR: Failed to create loop device for $IMG." >&2
+        return 1
+    fi
+
+    # Set the trap now that LOOP_DEV is active.
+    trap cleanup EXIT INT TERM
+
+    # Scan for partitions and define partition device node (p1)
+    sudo partprobe "$LOOP_DEV" 2>/dev/null
+    PARTITION_DEV="${LOOP_DEV}p1"
+
+    local MAX_RETRIES=5
+    local RETRY_DELAY=1
+
+    # Wait for partition node with retries
+    for i in $(seq 1 "$MAX_RETRIES"); do
+        if sudo test -b "$PARTITION_DEV"; then
+            break
+        fi
+        if [ "$i" -eq "$MAX_RETRIES" ]; then
+            echo "ERROR: Partition device node $PARTITION_DEV not found after $MAX_RETRIES attempts." >&2
+            return 1
+        fi
+        echo "Partition node $PARTITION_DEV not found, waiting $RETRY_DELAY second(s)... (Attempt $i/$MAX_RETRIES)" >&2
+        sleep "$RETRY_DELAY"
+    done
+
+    # Mount the partition
+    if ! sudo mount "$PARTITION_DEV" "$MOUNT_DIR"; then
+        echo "ERROR: Failed to mount $PARTITION_DEV." >&2
+        return 1
+    fi
+
+    # Execute the commands
+    shift 2
+    "$@"
+    COMMAND_STATUS=$?
+
+    trap - EXIT INT TERM
+    return $COMMAND_STATUS
+}
+
+# Function to copy a file from the host into the mounted disk image.
+# Arguments:
+#   $1: Image file path
+#   $2: Mount directory
+#   $3: Source file path
+#   $4: Destination file path
+copy_to_image() {
+    local IMG="$1"
+    local MOUNT_DIR="$2"
+    local SRC_FILE="$3"
+    local DST_PATH="$4"
+
+    if [ ! -f "$SRC_FILE" ]; then
+        echo "ERROR: Source file not found at $SRC_FILE." >&2
+        return 1
+    elif [ -z "$DST_PATH" ]; then
+        echo "ERROR: Destination path cannot be empty." >&2
+        return 1
+    fi
+
+    # Define the command to copy the file
+    local COPY_COMMAND="sudo cp \"$SRC_FILE\" \"$MOUNT_DIR/$DST_PATH\""
+
+    mount_and_exec "$IMG" "$MOUNT_DIR" /bin/bash -c "$COPY_COMMAND"
+    return $?
+}
