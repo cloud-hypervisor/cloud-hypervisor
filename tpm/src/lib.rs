@@ -46,10 +46,10 @@ pub enum Commands {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Failed converting buf to PTM ")]
-    ConvertToPtm(#[source] anyhow::Error),
+    #[error("Failed converting buf to PTM: {0}")]
+    ConvertToPtm(String),
 }
-type Result<T> = anyhow::Result<T, Error>;
+type Result<T> = std::result::Result<T, Error>;
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum MemberType {
@@ -99,7 +99,7 @@ impl Ptm for PtmResult {
         let expected_len = 4;
         let len = buf.len();
         if len != expected_len {
-            return Err(Error::ConvertToPtm(anyhow!(
+            return Err(Error::ConvertToPtm(format!(
                 "PtmRes buffer is of incorrect length. Got {len} expected {expected_len}."
             )));
         }
@@ -136,7 +136,7 @@ impl Ptm for PtmCap {
         let expected_len = 8;
         let len = buf.len();
         if len != expected_len {
-            return Err(Error::ConvertToPtm(anyhow!(
+            return Err(Error::ConvertToPtm(format!(
                 "Response for GetCapability cmd is of incorrect length. Got {len} expected {expected_len}."
             )));
         }
@@ -197,7 +197,7 @@ impl Ptm for PtmEst {
         let expected_len = 8;
         let len = buf.len();
         if len != expected_len {
-            return Err(Error::ConvertToPtm(anyhow!(
+            return Err(Error::ConvertToPtm(format!(
                 "Response for GetTpmEstablished cmd is of incorrect length. Got {len} expected {expected_len}."
             )));
         }
@@ -259,7 +259,7 @@ impl Ptm for PtmInit {
         let expected_len = 4;
         let len = buf.len();
         if len != expected_len {
-            return Err(Error::ConvertToPtm(anyhow!(
+            return Err(Error::ConvertToPtm(format!(
                 "Response for Init cmd is of incorrect length. Got {len} expected {expected_len}."
             )));
         }
@@ -348,7 +348,7 @@ impl Ptm for PtmSetBufferSize {
         let expected_len = 16;
         let len = buf.len();
         if len != expected_len {
-            return Err(Error::ConvertToPtm(anyhow!(
+            return Err(Error::ConvertToPtm(format!(
                 "Response for CmdSetBufferSize cmd is of incorrect length. Got {len} expected {expected_len}."
             )));
         }
