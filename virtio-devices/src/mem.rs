@@ -391,6 +391,8 @@ impl BlocksState {
             }
         }
 
+        // TODO We can avoid creating a new bitmap here, if we switch the code
+        // to use Vec<u64> to keep dirty bits and just pass it as is.
         MemoryRangeTable::from_bitmap(bitmap, start_addr, VIRTIO_MEM_DEFAULT_BLOCK_SIZE)
     }
 }
