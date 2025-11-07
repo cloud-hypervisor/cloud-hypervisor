@@ -9,6 +9,7 @@ use thiserror::Error;
 
 use crate::protocol::MemoryRangeTable;
 
+mod bitpos_iterator;
 pub mod protocol;
 
 #[derive(Error, Debug)]
