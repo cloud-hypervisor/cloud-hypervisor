@@ -5,10 +5,12 @@
 
 use std::io::{Read, Write};
 
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use vm_memory::ByteValued;
 
 use crate::MigratableError;
+use crate::bitpos_iterator::BitposIteratorExt;
 
 // Migration protocol
 // 1: Source establishes communication with destination (file socket or TCP connection.)
@@ -211,38 +213,47 @@ pub struct MemoryRange {
     pub length: u64,
 }
 
+impl MemoryRange {
+    /// Turn an iterator over the dirty bitmap into an iterator of dirty ranges.
+    pub fn dirty_ranges(
+        bitmap: impl IntoIterator<Item = u64>,
+        start_addr: u64,
+        page_size: u64,
+    ) -> impl Iterator<Item = Self> {
+        bitmap
+            .into_iter()
+            .bit_positions()
+            // Turn them into single-element ranges for coalesce.
+            .map(|b| b..(b + 1))
+            // Merge adjacent ranges.
+            .coalesce(|prev, curr| {
+                if prev.end == curr.start {
+                    Ok(prev.start..curr.end)
+                } else {
+                    Err((prev, curr))
+                }
+            })
+            .map(move |r| Self {
+                gpa: start_addr + r.start * page_size,
+                length: (r.end - r.start) * page_size,
+            })
+    }
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct MemoryRangeTable {
     data: Vec<MemoryRange>,
 }
 
 impl MemoryRangeTable {
-    pub fn from_bitmap(bitmap: Vec<u64>, start_addr: u64, page_size: u64) -> Self {
-        let mut table = MemoryRangeTable::default();
-        let mut entry: Option<MemoryRange> = None;
-        for (i, block) in bitmap.iter().enumerate() {
-            for j in 0..64 {
-                let is_page_dirty = ((block >> j) & 1u64) != 0u64;
-                let page_offset = ((i * 64) + j) as u64 * page_size;
-                if is_page_dirty {
-                    if let Some(entry) = &mut entry {
-                        entry.length += page_size;
-                    } else {
-                        entry = Some(MemoryRange {
-                            gpa: start_addr + page_offset,
-                            length: page_size,
-                        });
-                    }
-                } else if let Some(entry) = entry.take() {
-                    table.push(entry);
-                }
-            }
+    pub fn from_bitmap(
+        bitmap: impl IntoIterator<Item = u64>,
+        start_addr: u64,
+        page_size: u64,
+    ) -> Self {
+        Self {
+            data: MemoryRange::dirty_ranges(bitmap, start_addr, page_size).collect(),
         }
-        if let Some(entry) = entry.take() {
-            table.push(entry);
-        }
-
-        table
     }
 
     pub fn regions(&self) -> &[MemoryRange] {
