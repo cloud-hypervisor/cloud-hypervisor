@@ -2600,11 +2600,10 @@ impl Migratable for MemoryManager {
                 }
             };
 
-            let dirty_bitmap: Vec<u64> = vm_dirty_bitmap
+            let dirty_bitmap = vm_dirty_bitmap
                 .iter()
                 .zip(vmm_dirty_bitmap.iter())
-                .map(|(x, y)| x | y)
-                .collect();
+                .map(|(x, y)| x | y);
 
             let sub_table = MemoryRangeTable::from_bitmap(dirty_bitmap, r.gpa, 4096);
 
