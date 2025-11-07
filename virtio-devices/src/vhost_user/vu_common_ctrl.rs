@@ -570,12 +570,16 @@ impl VhostUserHandle {
             // divide it by 8.
             let len = region.size() / 8;
             // SAFETY: region is of size len
-            let bitmap = unsafe {
+            let bitmap: &[u64] = unsafe {
                 // Cast the pointer to u64
                 let ptr = region.as_ptr() as *const u64;
-                std::slice::from_raw_parts(ptr, len).to_vec()
+                std::slice::from_raw_parts(ptr, len)
             };
-            Ok(MemoryRangeTable::from_bitmap(bitmap, 0, 4096))
+            Ok(MemoryRangeTable::from_bitmap(
+                bitmap.iter().copied(),
+                0,
+                4096,
+            ))
         } else {
             Err(Error::MissingShmLogRegion)
         }
