@@ -608,6 +608,10 @@ pub struct VirtioBlockConfig {
     pub max_write_zeroes_seg: u32,
     pub write_zeroes_may_unmap: u8,
     pub unused1: [u8; 3],
+    pub max_secure_erase_sectors: u32,
+    pub max_secure_erase_seg: u32,
+    pub secure_erase_sector_alignment: u32,
+    pub zoned: VirtioBlockZonedCharacteristics,
 }
 #[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
 #[repr(C, packed)]
@@ -615,6 +619,17 @@ pub struct VirtioBlockGeometry {
     pub cylinders: u16,
     pub heads: u8,
     pub sectors: u8,
+}
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
+#[repr(C, packed)]
+pub struct VirtioBlockZonedCharacteristics {
+    pub zone_sectors: u32,
+    pub max_open_zones: u32,
+    pub max_active_zones: u32,
+    pub max_append_sectors: u32,
+    pub write_granularity: u32,
+    pub model: u8,
+    pub unused2: [u8; 3usize],
 }
 
 // SAFETY: data structure only contain a series of integers

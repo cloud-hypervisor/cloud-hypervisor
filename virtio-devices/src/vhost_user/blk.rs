@@ -16,7 +16,7 @@ use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontend
 use virtio_bindings::virtio_blk::{
     VIRTIO_BLK_F_BLK_SIZE, VIRTIO_BLK_F_CONFIG_WCE, VIRTIO_BLK_F_DISCARD, VIRTIO_BLK_F_FLUSH,
     VIRTIO_BLK_F_GEOMETRY, VIRTIO_BLK_F_MQ, VIRTIO_BLK_F_RO, VIRTIO_BLK_F_SEG_MAX,
-    VIRTIO_BLK_F_SIZE_MAX, VIRTIO_BLK_F_TOPOLOGY, VIRTIO_BLK_F_WRITE_ZEROES,
+    VIRTIO_BLK_F_SIZE_MAX, VIRTIO_BLK_F_TOPOLOGY, VIRTIO_BLK_F_WRITE_ZEROES, VIRTIO_BLK_F_ZONED,
 };
 use virtio_queue::Queue;
 use vm_memory::{ByteValued, GuestMemoryAtomic};
@@ -108,6 +108,7 @@ impl Blk {
                 | (1 << VIRTIO_BLK_F_CONFIG_WCE)
                 | (1 << VIRTIO_BLK_F_DISCARD)
                 | (1 << VIRTIO_BLK_F_WRITE_ZEROES)
+                | (1 << VIRTIO_BLK_F_ZONED)
                 | DEFAULT_VIRTIO_FEATURES;
 
             if num_queues > 1 {
