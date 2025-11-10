@@ -137,7 +137,7 @@ struct BlockEpollHandler {
     queue: Queue,
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     disk_image: Box<dyn AsyncIo>,
-    disk_nsectors: u64,
+    disk_nsectors: Arc<AtomicU64>,
     interrupt_cb: Arc<dyn VirtioInterrupt>,
     serial: Vec<u8>,
     kill_evt: EventFd,
@@ -234,7 +234,7 @@ impl BlockEpollHandler {
 
             let result = request.execute_async(
                 desc_chain.memory(),
-                self.disk_nsectors,
+                self.disk_nsectors.load(Ordering::SeqCst),
                 self.disk_image.as_mut(),
                 &self.serial,
                 desc_chain.head_index() as u64,
@@ -625,7 +625,7 @@ pub struct Block {
     id: String,
     disk_image: Box<dyn DiskFile>,
     disk_path: PathBuf,
-    disk_nsectors: u64,
+    disk_nsectors: Arc<AtomicU64>,
     config: VirtioBlockConfig,
     writeback: Arc<AtomicBool>,
     counters: BlockCounters,
@@ -753,7 +753,7 @@ impl Block {
             id,
             disk_image,
             disk_path,
-            disk_nsectors,
+            disk_nsectors: Arc::new(AtomicU64::new(disk_nsectors)),
             config,
             writeback: Arc::new(AtomicBool::new(true)),
             counters: BlockCounters::default(),
@@ -843,7 +843,7 @@ impl Block {
     fn state(&self) -> BlockState {
         BlockState {
             disk_path: self.disk_path.to_str().unwrap().to_owned(),
-            disk_nsectors: self.disk_nsectors,
+            disk_nsectors: self.disk_nsectors.load(Ordering::SeqCst),
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
             config: self.config,
@@ -957,7 +957,7 @@ impl VirtioDevice for Block {
                         error!("failed to create new AsyncIo: {e}");
                         ActivateError::BadActivate
                     })?,
-                disk_nsectors: self.disk_nsectors,
+                disk_nsectors: self.disk_nsectors.clone(),
                 interrupt_cb: interrupt_cb.clone(),
                 serial: self.serial.clone(),
                 kill_evt,
