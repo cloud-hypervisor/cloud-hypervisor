@@ -82,8 +82,19 @@ you want to merge your changes to `cloud-hypervisor`:
 1. Within your fork, create a branch for your contribution.
 1. [Create a pull request](https://help.github.com/articles/creating-a-pull-request-from-a-fork/)
    against the main branch of the Cloud Hypervisor repository.
-1. To update your pull request amend existing commits whenever applicable and
-   then push the new changes to your pull request branch.
+1. We value good git commit hygiene. Commit messages must follow the pattern: \
+   ```
+   <component>: <title>
+   
+   <optional description, explaining WHY the changes are beneficial>
+   
+    Signed-off-by: <user> <email>
+   ```
+   Your commits should be grouped into meaningful units. Having multiple commits
+   is acceptable as long as each one makes sense, and doesn't prevent git
+   bisecting.
+1. To update your pull request, amend existing commits whenever applicable and
+   then force-push the new changes to your pull request branch.
 1. Once the pull request is approved it can be integrated.
 
 ## Issue tracking
