@@ -134,6 +134,10 @@ pub enum ApiError {
     #[error("The VM could not be resized")]
     VmResize(#[source] VmError),
 
+    /// The disk could not be resized.
+    #[error("The disk could not be resized")]
+    VmResizeDisk(#[source] VmError),
+
     /// The memory zone could not be resized.
     #[error("The memory zone could not be resized")]
     VmResizeZone(#[source] VmError),
@@ -221,6 +225,12 @@ pub struct VmResizeData {
     pub desired_vcpus: Option<u32>,
     pub desired_ram: Option<u64>,
     pub desired_balloon: Option<u64>,
+}
+
+#[derive(Clone, Deserialize, Serialize, Default, Debug)]
+pub struct VmResizeDiskData {
+    pub id: String,
+    pub desired_size: u64,
 }
 
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
@@ -1119,6 +1129,41 @@ impl ApiAction for VmResize {
                     resize_data.desired_balloon,
                 )
                 .map_err(ApiError::VmResize)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
+}
+
+pub struct VmResizeDisk;
+
+impl ApiAction for VmResizeDisk {
+    type RequestBody = VmResizeDiskData;
+    type ResponseBody = Option<Body>;
+
+    fn request(
+        &self,
+        resize_disk_data: Self::RequestBody,
+        response_sender: Sender<ApiResponse>,
+    ) -> ApiRequest {
+        Box::new(move |vmm| {
+            let response = vmm
+                .vm_resize_disk(resize_disk_data.id, resize_disk_data.desired_size)
+                .map_err(ApiError::VmResizeDisk)
                 .map(|_| ApiResponsePayload::Empty);
 
             response_sender
