@@ -670,6 +670,10 @@ pub enum DeviceManagerError {
     /// Error adding fw_cfg to bus.
     #[error("Error adding fw_cfg to bus")]
     ErrorAddingFwCfgToBus(#[source] vm_device::BusError),
+
+    /// Disk resizing failed.
+    #[error("Disk resize error")]
+    DiskResize(#[source] virtio_devices::block::Error),
 }
 
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
@@ -4899,6 +4903,18 @@ impl DeviceManager {
         }
 
         0
+    }
+
+    pub fn resize_disk(&mut self, device_id: &str, new_size: u64) -> DeviceManagerResult<()> {
+        for dev in &self.block_devices {
+            let mut disk = dev.lock().unwrap();
+            if disk.id() == device_id {
+                return disk
+                    .resize(new_size)
+                    .map_err(DeviceManagerError::DiskResize);
+            }
+        }
+        Err(DeviceManagerError::UnknownDeviceId(device_id.to_string()))
     }
 
     pub fn device_tree(&self) -> Arc<Mutex<DeviceTree>> {

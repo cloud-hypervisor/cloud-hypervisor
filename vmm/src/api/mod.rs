@@ -315,6 +315,8 @@ pub trait RequestHandler {
 
     fn vm_resize_zone(&mut self, id: String, desired_ram: u64) -> Result<(), VmError>;
 
+    fn vm_resize_disk(&mut self, id: String, desired_size: u64) -> Result<(), VmError>;
+
     fn vm_add_device(&mut self, device_cfg: DeviceConfig) -> Result<Option<Vec<u8>>, VmError>;
 
     fn vm_add_user_device(

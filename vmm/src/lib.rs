@@ -1962,6 +1962,16 @@ impl RequestHandler for Vmm {
         }
     }
 
+    fn vm_resize_disk(&mut self, id: String, desired_size: u64) -> result::Result<(), VmError> {
+        self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
+
+        if let Some(ref mut vm) = self.vm {
+            return vm.resize_disk(&id, desired_size);
+        }
+
+        Err(VmError::ResizeDisk)
+    }
+
     fn vm_resize_zone(&mut self, id: String, desired_ram: u64) -> result::Result<(), VmError> {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 

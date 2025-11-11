@@ -18,7 +18,7 @@ use std::sync::{Arc, Barrier};
 use std::{io, result};
 
 use anyhow::anyhow;
-use block::async_io::{AsyncIo, AsyncIoError, DiskFile};
+use block::async_io::{AsyncIo, AsyncIoError, DiskFile, DiskFileError};
 use block::fcntl::{LockError, LockGranularity, LockType, get_lock_state};
 use block::{
     ExecuteAsync, ExecuteError, Request, RequestType, VirtioBlockConfig, build_serial, fcntl,
@@ -95,6 +95,16 @@ pub enum Error {
         /// The path of the disk image.
         path: PathBuf,
     },
+    #[error("Disk image size is not a multiple of {}", SECTOR_SIZE)]
+    InvalidSize,
+    #[error("Failed to pause vcpus")]
+    PauseVcpus(#[source] MigratableError),
+    #[error("Failed to resume vcpus")]
+    ResumeVcpus(#[source] MigratableError),
+    #[error("Failed signal config interrupt")]
+    ConfigChange(#[source] io::Error),
+    #[error("Disk resize failed")]
+    DiskResize(#[source] DiskFileError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -868,6 +878,34 @@ impl Block {
             }
         );
         self.writeback.store(writeback, Ordering::Release);
+    }
+
+    pub fn resize(&mut self, new_size: u64) -> Result<()> {
+        if !new_size.is_multiple_of(SECTOR_SIZE) {
+            return Err(Error::InvalidSize);
+        }
+
+        self.disk_image
+            .resize(new_size)
+            .map_err(Error::DiskResize)?;
+
+        let nsectors = new_size / SECTOR_SIZE;
+
+        self.common.pause().map_err(Error::PauseVcpus)?;
+
+        self.disk_nsectors.store(nsectors, Ordering::SeqCst);
+        self.config.capacity = nsectors;
+        self.state().disk_nsectors = nsectors;
+
+        self.common.resume().map_err(Error::ResumeVcpus)?;
+
+        if let Some(interrupt_cb) = self.common.interrupt_cb.as_ref() {
+            interrupt_cb
+                .trigger(VirtioInterruptType::Config)
+                .map_err(Error::ConfigChange)
+        } else {
+            Ok(())
+        }
     }
 
     #[cfg(fuzzing)]
