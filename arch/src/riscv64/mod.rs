@@ -12,6 +12,8 @@ pub mod uefi;
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 
 use hypervisor::arch::riscv64::aia::Vaia;
@@ -51,6 +53,22 @@ pub enum Error {
     /// Error configuring the general purpose registers
     #[error("Error configuring the general purpose registers")]
     RegsConfiguration(#[source] hypervisor::HypervisorCpuError),
+
+    /// Error opening /proc/cpuinfo
+    #[error("Error opening /proc/cpuinfo")]
+    OpenCpuInfo(#[source] std::io::Error),
+
+    /// Error reading /proc/cpuinfo
+    #[error("Error reading /proc/cpuinfo")]
+    ReadCpuInfo(#[source] std::io::Error),
+
+    /// Invalid ISA string
+    #[error("Invalid ISA string: {0}")]
+    InvalidIsaString(String),
+
+    /// Error parsing /proc/cpuinfo
+    #[error("Error parsing /proc/cpuinfo")]
+    CpuInfoParsing,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -104,6 +122,43 @@ pub fn arch_memory_regions() -> Vec<(GuestAddress, usize, RegionType)> {
     ]
 }
 
+// Read the first "isa" string from /proc/cpuinfo and filter out the H extension,
+// while correctly preserving multi-letter extensions.
+fn isa_string_from_host() -> Result<String, Error> {
+    let file = File::open("/proc/cpuinfo").map_err(Error::OpenCpuInfo)?;
+    let reader = BufReader::new(file);
+
+    for line in reader.lines() {
+        let line = line.map_err(Error::ReadCpuInfo)?;
+        let trimmed_line = line.trim();
+
+        if trimmed_line.starts_with("isa") {
+            let parts: Vec<&str> = trimmed_line.split(':').collect();
+            if parts.len() == 2 {
+                let isa_string = parts[1].trim();
+
+                // Split the string by underscores to separate single letter vs long-form
+                // extensions
+                let mut components: Vec<String> =
+                    isa_string.split('_').map(|s| s.to_string()).collect();
+
+                if components.is_empty() {
+                    return Err(Error::InvalidIsaString(isa_string.to_string()));
+                }
+
+                // Remove H extension if present in single letter extensions
+                let first_component = components[0].chars().filter(|&c| c != 'h').collect();
+
+                components[0] = first_component;
+
+                return Ok(components.join("_"));
+            }
+        }
+    }
+
+    Err(Error::CpuInfoParsing)
+}
+
 /// Configures the system and should be called once per vm before starting vcpu threads.
 #[allow(clippy::too_many_arguments)]
 pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
@@ -115,10 +170,12 @@ pub fn configure_system<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Bui
     pci_space_info: &[PciSpaceInfo],
     aia_device: &Arc<Mutex<dyn Vaia>>,
 ) -> super::Result<()> {
+    let isa_string = isa_string_from_host()?;
     let fdt_final = fdt::create_fdt(
         guest_mem,
         cmdline,
         num_vcpu,
+        &isa_string,
         device_info,
         aia_device,
         initrd,

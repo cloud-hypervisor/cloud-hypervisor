@@ -65,6 +65,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     guest_mem: &GuestMemoryMmap,
     cmdline: &str,
     num_vcpu: u32,
+    isa_string: &str,
     device_info: &HashMap<(DeviceType, String), T, S>,
     aia_device: &Arc<Mutex<dyn Vaia>>,
     initrd: &Option<InitramfsConfig>,
@@ -84,7 +85,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     // Properties
     fdt.property_u32("#address-cells", ADDRESS_CELLS)?;
     fdt.property_u32("#size-cells", SIZE_CELLS)?;
-    create_cpu_nodes(&mut fdt, num_vcpu)?;
+    create_cpu_nodes(&mut fdt, num_vcpu, isa_string)?;
     create_memory_node(&mut fdt, guest_mem)?;
     create_chosen_node(&mut fdt, cmdline, initrd)?;
     create_aia_node(&mut fdt, aia_device)?;
@@ -108,7 +109,7 @@ pub fn write_fdt_to_memory(fdt_final: Vec<u8>, guest_mem: &GuestMemoryMmap) -> R
 }
 
 // Following are the auxiliary function for creating the different nodes that we append to our FDT.
-fn create_cpu_nodes(fdt: &mut FdtWriter, num_cpus: u32) -> FdtWriterResult<()> {
+fn create_cpu_nodes(fdt: &mut FdtWriter, num_cpus: u32, isa_string: &str) -> FdtWriterResult<()> {
     // See https://elixir.bootlin.com/linux/v6.10/source/Documentation/devicetree/bindings/riscv/cpus.yaml
     let cpus = fdt.begin_node("cpus")?;
     // As per documentation, on RISC-V 64-bit systems value should be set to 1.
@@ -123,7 +124,7 @@ fn create_cpu_nodes(fdt: &mut FdtWriter, num_cpus: u32) -> FdtWriterResult<()> {
         fdt.property_string("device_type", "cpu")?;
         fdt.property_string("compatible", "riscv")?;
         fdt.property_string("mmu-type", "sv48")?;
-        fdt.property_string("riscv,isa", "rv64imafdc_smaia_ssaia")?;
+        fdt.property_string("riscv,isa", isa_string)?;
         fdt.property_string("status", "okay")?;
         fdt.property_u32("reg", cpu_index)?;
         fdt.property_u32("phandle", CPU_BASE_PHANDLE + cpu_index)?;
