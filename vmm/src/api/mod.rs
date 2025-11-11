@@ -118,8 +118,8 @@ pub enum ApiError {
     #[error("The VM could not be snapshotted")]
     VmSnapshot(#[source] VmError),
 
-    /// The VM could not restored.
-    #[error("The VM could not restored")]
+    /// The VM could not be restored.
+    #[error("The VM could not be restored")]
     VmRestore(#[source] VmError),
 
     /// The VM could not be coredumped.
