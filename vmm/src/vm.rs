@@ -246,6 +246,9 @@ pub enum Error {
     #[error("Failed resizing a memory zone")]
     ResizeZone,
 
+    #[error("Failed resizing a disk image")]
+    ResizeDisk,
+
     #[error("Cannot activate virtio devices")]
     ActivateVirtioDevices(#[source] DeviceManagerError),
 
@@ -1702,6 +1705,16 @@ impl Vm {
         }
 
         event!("vm", "resized");
+
+        Ok(())
+    }
+
+    pub fn resize_disk(&mut self, id: &str, desired_size: u64) -> Result<()> {
+        self.device_manager
+            .lock()
+            .unwrap()
+            .resize_disk(id, desired_size)
+            .map_err(Error::DeviceManager)?;
 
         Ok(())
     }
