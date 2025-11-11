@@ -18,6 +18,14 @@ pub enum DiskFileError {
     /// Failed creating a new AsyncIo.
     #[error("Failed creating a new AsyncIo")]
     NewAsyncIo(#[source] std::io::Error),
+
+    /// Unsupported operation.
+    #[error("Unsupported operation")]
+    Unsupported,
+
+    /// Resize failed
+    #[error("Resize failed")]
+    ResizeError,
 }
 
 pub type DiskFileResult<T> = std::result::Result<T, DiskFileError>;
@@ -61,6 +69,8 @@ pub trait DiskFile: Send {
     fn topology(&mut self) -> DiskTopology {
         DiskTopology::default()
     }
+    fn resize(&mut self, size: u64) -> DiskFileResult<()>;
+
     /// Returns the file descriptor of the underlying disk image file.
     ///
     /// The file descriptor is supposed to be used for `fcntl()` calls but no

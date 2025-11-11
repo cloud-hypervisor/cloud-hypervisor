@@ -34,6 +34,10 @@ impl DiskFile for FixedVhdDiskAsync {
         ) as Box<dyn AsyncIo>)
     }
 
+    fn resize(&mut self, _size: u64) -> DiskFileResult<()> {
+        Err(DiskFileError::Unsupported)
+    }
+
     fn fd(&mut self) -> BorrowedDiskFd<'_> {
         BorrowedDiskFd::new(self.0.as_raw_fd())
     }

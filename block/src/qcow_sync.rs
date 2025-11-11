@@ -38,6 +38,10 @@ impl DiskFile for QcowDiskSync {
         Ok(Box::new(QcowSync::new(self.qcow_file.clone())) as Box<dyn AsyncIo>)
     }
 
+    fn resize(&mut self, _size: u64) -> DiskFileResult<()> {
+        Err(DiskFileError::Unsupported)
+    }
+
     fn fd(&mut self) -> BorrowedDiskFd<'_> {
         BorrowedDiskFd::new(self.qcow_file.as_raw_fd())
     }

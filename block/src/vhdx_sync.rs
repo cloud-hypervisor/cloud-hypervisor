@@ -38,6 +38,10 @@ impl DiskFile for VhdxDiskSync {
         )
     }
 
+    fn resize(&mut self, _size: u64) -> DiskFileResult<()> {
+        Err(DiskFileError::Unsupported)
+    }
+
     fn fd(&mut self) -> BorrowedDiskFd<'_> {
         BorrowedDiskFd::new(self.vhdx_file.as_raw_fd())
     }
