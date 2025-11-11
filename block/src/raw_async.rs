@@ -55,6 +55,10 @@ impl DiskFile for RawFileDisk {
         }
     }
 
+    fn resize(&mut self, size: u64) -> DiskFileResult<()> {
+        self.file.set_len(size).map_err(DiskFileError::ResizeError)
+    }
+
     fn fd(&mut self) -> BorrowedDiskFd<'_> {
         BorrowedDiskFd::new(self.file.as_raw_fd())
     }
