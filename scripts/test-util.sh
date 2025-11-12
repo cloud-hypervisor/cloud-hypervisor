@@ -49,7 +49,7 @@ checkout_repo() {
 build_custom_linux() {
     ARCH=$(uname -m)
     LINUX_CUSTOM_DIR="$WORKLOADS_DIR/linux-custom"
-    LINUX_CUSTOM_BRANCH="ch-6.12.8"
+    LINUX_CUSTOM_BRANCH="ch-6.16.9"
     LINUX_CUSTOM_URL="https://github.com/cloud-hypervisor/linux.git"
 
     checkout_repo "$LINUX_CUSTOM_DIR" "$LINUX_CUSTOM_URL" "$LINUX_CUSTOM_BRANCH"
@@ -140,7 +140,7 @@ download_hypervisor_fw() {
 }
 
 download_linux() {
-    KERNEL_TAG="ch-release-v6.12.8-20250613"
+    KERNEL_TAG="ch-release-v6.16.9-20251112"
     if [ -n "$AUTH_DOWNLOAD_TOKEN" ]; then
         echo "Using authenticated download from GitHub"
         KERNEL_URLS=$(curl --silent https://api.github.com/repos/cloud-hypervisor/linux/releases/tags/${KERNEL_TAG} \
