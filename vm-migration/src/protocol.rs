@@ -207,19 +207,28 @@ impl Response {
 }
 
 #[repr(C)]
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryRange {
     pub gpa: u64,
     pub length: u64,
 }
 
-impl MemoryRange {
-    /// Turn an iterator over the dirty bitmap into an iterator of dirty ranges.
-    pub fn dirty_ranges(
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct MemoryRangeTable {
+    data: Vec<MemoryRange>,
+}
+
+impl MemoryRangeTable {
+    /// Converts an iterator over a dirty bitmap into an iterator of dirty
+    /// [`MemoryRange`]s, merging consecutive dirty pages into contiguous ranges.
+    ///
+    /// A memory page (i.e., a range) is marked dirty when its corresponding bit
+    /// is set.
+    fn dirty_ranges_iter(
         bitmap: impl IntoIterator<Item = u64>,
         start_addr: u64,
         page_size: u64,
-    ) -> impl Iterator<Item = Self> {
+    ) -> impl Iterator<Item = MemoryRange> {
         bitmap
             .into_iter()
             .bit_positions()
@@ -233,26 +242,23 @@ impl MemoryRange {
                     Err((prev, curr))
                 }
             })
-            .map(move |r| Self {
+            .map(move |r| MemoryRange {
                 gpa: start_addr + r.start * page_size,
                 length: (r.end - r.start) * page_size,
             })
     }
-}
 
-#[derive(Clone, Default, Serialize, Deserialize)]
-pub struct MemoryRangeTable {
-    data: Vec<MemoryRange>,
-}
-
-impl MemoryRangeTable {
-    pub fn from_bitmap(
+    /// Creates a new [`MemoryRangeTable`] from a bitmap (represented as
+    /// multiple `u64`) where each bit corresponds to a dirty memory page.
+    ///
+    /// Only dirty ranges are represented in the resulting bitmap.
+    pub fn from_dirty_bitmap(
         bitmap: impl IntoIterator<Item = u64>,
         start_addr: u64,
         page_size: u64,
     ) -> Self {
         Self {
-            data: MemoryRange::dirty_ranges(bitmap, start_addr, page_size).collect(),
+            data: Self::dirty_ranges_iter(bitmap, start_addr, page_size).collect(),
         }
     }
 
@@ -310,5 +316,37 @@ impl MemoryRangeTable {
             data.extend(table.data);
         }
         Self { data }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::protocol::{MemoryRange, MemoryRangeTable};
+
+    #[test]
+    fn test_memory_range_table_from_dirty_ranges_iter() {
+        let input = [0b1111_1110_1110, 0b1_0000];
+
+        let start_gpa = 0x1000;
+        let page_size = 0x1000;
+
+        let range = MemoryRangeTable::from_dirty_bitmap(input, start_gpa, page_size);
+        assert_eq!(
+            range.regions(),
+            &[
+                MemoryRange {
+                    gpa: start_gpa + page_size,
+                    length: page_size * 3,
+                },
+                MemoryRange {
+                    gpa: start_gpa + 5 * page_size,
+                    length: page_size * 7,
+                },
+                MemoryRange {
+                    gpa: start_gpa + (64 + 4) * page_size,
+                    length: page_size,
+                }
+            ]
+        );
     }
 }

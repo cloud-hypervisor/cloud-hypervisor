@@ -575,7 +575,7 @@ impl VhostUserHandle {
                 let ptr = region.as_ptr() as *const u64;
                 std::slice::from_raw_parts(ptr, len)
             };
-            Ok(MemoryRangeTable::from_bitmap(
+            Ok(MemoryRangeTable::from_dirty_bitmap(
                 bitmap.iter().copied(),
                 0,
                 4096,
