@@ -550,6 +550,8 @@ fn vmm_thread_rules(
         (libc::SYS_accept4, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_access, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_arch_prctl, vec![]),
         (libc::SYS_bind, vec![]),
         (libc::SYS_brk, vec![]),
         (libc::SYS_clock_gettime, vec![]),
