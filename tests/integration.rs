@@ -2283,7 +2283,7 @@ fn _test_virtio_iommu(acpi: bool) {
         // contains "0000:00:02.0" which is the first disk.
         //
         // Verify the iommu group of the first disk.
-        let iommu_group = !acpi as i32;
+        let iommu_group = if acpi { 0 } else { 2 };
         assert_eq!(
             guest
                 .ssh_command(format!("ls /sys/kernel/iommu_groups/{iommu_group}/devices").as_str())
@@ -2293,7 +2293,7 @@ fn _test_virtio_iommu(acpi: bool) {
         );
 
         // Verify the iommu group of the second disk.
-        let iommu_group = if acpi { 1 } else { 2 };
+        let iommu_group = if acpi { 1 } else { 3 };
         assert_eq!(
             guest
                 .ssh_command(format!("ls /sys/kernel/iommu_groups/{iommu_group}/devices").as_str())
@@ -2303,7 +2303,7 @@ fn _test_virtio_iommu(acpi: bool) {
         );
 
         // Verify the iommu group of the network card.
-        let iommu_group = if acpi { 2 } else { 3 };
+        let iommu_group = if acpi { 2 } else { 4 };
         assert_eq!(
             guest
                 .ssh_command(format!("ls /sys/kernel/iommu_groups/{iommu_group}/devices").as_str())
