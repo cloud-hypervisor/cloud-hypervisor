@@ -3007,7 +3007,7 @@ mod common_parallel {
             );
             assert_eq!(
                 guest
-                    .ssh_command("ls /sys/kernel/iommu_groups/0/devices")
+                    .ssh_command("ls /sys/kernel/iommu_groups/1/devices")
                     .unwrap()
                     .trim(),
                 "0001:00:01.0"
@@ -7126,7 +7126,7 @@ mod common_parallel {
             );
             assert_eq!(
                 guest
-                    .ssh_command("ls /sys/kernel/iommu_groups/0/devices")
+                    .ssh_command("ls /sys/kernel/iommu_groups/1/devices")
                     .unwrap()
                     .trim(),
                 "0001:00:01.0"
