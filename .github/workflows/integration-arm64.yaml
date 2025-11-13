@@ -1,7 +1,7 @@
 name: Cloud Hypervisor Tests (ARM64)
-on: [pull_request, merge_group]
+on: workflow_call
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: integration-arm64-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -24,7 +24,6 @@ jobs:
         timeout-minutes: 60
         run: scripts/dev_cli.sh tests --integration --libc musl
       - name: Install Azure CLI
-        if: ${{ github.event_name != 'pull_request' }}
         run: |
           sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg
           curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
@@ -32,7 +31,6 @@ jobs:
           sudo apt update
           sudo apt install -y azure-cli
       - name: Download Windows image
-        if: ${{ github.event_name != 'pull_request' }}
         shell: bash
         run: |
           IMG_BASENAME=windows-11-iot-enterprise-aarch64.raw
@@ -49,6 +47,5 @@ jobs:
           az storage blob download --container-name private-images --file "$IMG_GZ_PATH" --name "$IMG_GZ_BLOB_NAME" --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
           gzip -d $IMG_GZ_PATH
       - name: Run Windows guest integration tests
-        if: ${{ github.event_name != 'pull_request' }}
         timeout-minutes: 30
         run: scripts/dev_cli.sh tests --integration-windows --libc musl

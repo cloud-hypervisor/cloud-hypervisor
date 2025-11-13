@@ -1,21 +1,19 @@
 name: Cloud Hypervisor Tests (Windows Guest)
-on: [merge_group, pull_request]
+on: workflow_call
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: integration-windows-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
     name: Tests (Windows Guest)
-    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'garm-jammy-16' }}
+    runs-on: 'garm-jammy-16'
     steps:
       - name: Code checkout
-        if: ${{ github.event_name != 'pull_request' }}
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Install Docker
-        if: ${{ github.event_name != 'pull_request' }}
         run: |
           sudo apt-get update
           sudo apt-get -y install ca-certificates curl gnupg
@@ -25,7 +23,6 @@ jobs:
           sudo apt-get update
           sudo apt install -y docker-ce docker-ce-cli
       - name: Install Azure CLI
-        if: ${{ github.event_name != 'pull_request' }}
         run: |
           sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg
           curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
@@ -33,18 +30,12 @@ jobs:
           sudo apt update
           sudo apt install -y azure-cli
       - name: Download Windows image
-        if: ${{ github.event_name != 'pull_request' }}
         run: |
           mkdir $HOME/workloads
           az storage blob download --container-name private-images --file "$HOME/workloads/windows-server-2022-amd64-2.raw" --name windows-server-2022-amd64-2.raw --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
       - name: Run Windows guest integration tests
-        if: ${{ github.event_name != 'pull_request' }}
         timeout-minutes: 15
         run: scripts/dev_cli.sh tests --integration-windows
       - name: Run Windows guest integration tests for musl
-        if: ${{ github.event_name != 'pull_request' }}
         timeout-minutes: 15
         run: scripts/dev_cli.sh tests --integration-windows --libc musl
-      - name: Skipping build for PR
-        if: ${{ github.event_name == 'pull_request' }}
-        run: echo "Skipping build for PR"

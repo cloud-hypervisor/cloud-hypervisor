@@ -1,0 +1,21 @@
+name: Run Post-Approval tests
+on:
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  run_windows_integration:
+    name: "Run Windows Integration tests"
+    if: github.event.review.state == 'approved'
+    uses: ./.github/workflows/integration-windows.yaml
+    secrets: inherit
+  run_arm64_integration:
+    name: "Run ARM64 integration tests"
+    if: github.event.review.state == 'approved'
+    uses: ./.github/workflows/integration-arm64.yaml
+    secrets: inherit
+  # run_vfio_integration:
+  #   name: "Run VFIO integration tests"
+  #   if: github.event.review.state == 'approved'
+  #   uses: ./.github/workflows/integration-vfio.yaml
+  #   secrets: inherit
