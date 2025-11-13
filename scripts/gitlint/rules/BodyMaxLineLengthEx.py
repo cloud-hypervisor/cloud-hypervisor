@@ -4,6 +4,30 @@ from gitlint.rules import LineRule, RuleViolation, CommitMessageBody
 import re
 
 
+IGNORE_PREFIXES = [
+    # Please sort alphabetically
+    "Acked-by: ",
+    "Co-authored-by: ",
+    "Co-developed-by: ",
+    "Debugged-by: ",
+    "Diagnosed-by: ",
+    "Explained-by: ",
+    "Fixed-by: ",
+    "Fixes: ",
+    "Helped-by: ",
+    "Inspired-by: ",
+    "On-behalf-of: ",
+    "Originally-by: ",
+    "Reported-by: ",
+    "Reviewed-and-tested-by: ",
+    "Reviewed-by: ",
+    "Signed-off-by: ",
+    "Suggested-by: ",
+    "Tested-by: ",
+    "Triggered-by: ",
+]
+
+
 class BodyMaxLineLengthEx(LineRule):
     """A rule to enforce a line limit of 72 characters, except for valid cases."""
 
@@ -43,6 +67,11 @@ class BodyMaxLineLengthEx(LineRule):
 
             if is_link:
                 return
+
+            # Don't check lines with allowed prefixes
+            for prefix in IGNORE_PREFIXES:
+                if line.startswith(prefix):
+                    return None
 
             return [
                 RuleViolation(self.id, f"Line '{line}' exceeds limit of {self.max_len}")
