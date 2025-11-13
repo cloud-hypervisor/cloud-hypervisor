@@ -86,6 +86,7 @@ The Cloud Hypervisor API exposes the following actions through its endpoints:
 | Restore the VM from a snapshot     | `/vm.restore`           | `/schemas/RestoreConfig`        | N/A                      | The VM is created but not booted                       |
 | Add/remove CPUs to/from the VM     | `/vm.resize`            | `/schemas/VmResize`             | N/A                      | The VM is booted                                       |
 | Add/remove memory from the VM      | `/vm.resize`            | `/schemas/VmResize`             | N/A                      | The VM is booted                                       |
+| Resize a disk attached to the VM   | `/vm.resize-disk`       | `/schemas/VmResizeDisk`         | N/A                      | The VM is created                                      |
 | Add/remove memory from a zone      | `/vm.resize-zone`       | `/schemas/VmResizeZone`         | N/A                      | The VM is booted                                       |
 | Dump the VM information            | `/vm.info`              | N/A                             | `/schemas/VmInfo`        | The VM is created                                      |
 | Add VFIO PCI device to the VM      | `/vm.add-device`        | `/schemas/VmAddDevice`          | `/schemas/PciDeviceInfo` | The VM is booted                                       |
