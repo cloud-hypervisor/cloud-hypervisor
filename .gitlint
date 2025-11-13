@@ -1,7 +1,7 @@
 [general]
 extra-path=scripts/gitlint/rules
 regex-style-search=true
-ignore=body-max-line-length
+ignore=body-max-line-length,body-hard-tab
 
 [ignore-by-author-name]
 regex=dependabot
