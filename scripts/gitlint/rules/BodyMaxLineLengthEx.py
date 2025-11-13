@@ -6,6 +6,7 @@ import re
 
 IGNORE_PREFIXES = [
     # Please sort alphabetically
+    " ",
     "Acked-by: ",
     "Co-authored-by: ",
     "Co-developed-by: ",
@@ -25,6 +26,7 @@ IGNORE_PREFIXES = [
     "Suggested-by: ",
     "Tested-by: ",
     "Triggered-by: ",
+    "\t",
 ]
 
 
