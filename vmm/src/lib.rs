@@ -674,6 +674,39 @@ pub struct Vmm {
     console_info: Option<ConsoleInfo>,
 }
 
+/// The receiver's state machine behind the migration protocol.
+enum ReceiveMigrationState {
+    /// The connection is established and we haven't received any commands yet.
+    Established,
+
+    /// We received the start command.
+    Started,
+
+    /// We received file descriptors for memory. This can only happen on UNIX domain sockets.
+    MemoryFdsReceived(Vec<(u32, File)>),
+
+    /// We received the VM configuration. We keep the memory configuration around to populate guest memory. From this point on, the sender can start sending memory updates.
+    Configured(Arc<Mutex<MemoryManager>>),
+
+    /// Memory is populated and we received the state. The VM is ready to go.
+    StateReceived,
+
+    /// The migration is successful.
+    Completed,
+
+    /// The migration couldn't complete, either due to an error or because the sender abandoned the migration.
+    Aborted,
+}
+
+impl ReceiveMigrationState {
+    fn finished(&self) -> bool {
+        matches!(
+            self,
+            ReceiveMigrationState::Completed | ReceiveMigrationState::Aborted
+        )
+    }
+}
+
 impl Vmm {
     pub const HANDLED_SIGNALS: [i32; 2] = [SIGTERM, SIGINT];
 
@@ -826,14 +859,117 @@ impl Vmm {
         })
     }
 
+    /// Try to receive a file descriptor from a socket. Returns the slot number and the file descriptor.
+    fn vm_receive_memory_fd(
+        socket: &mut SocketStream,
+    ) -> std::result::Result<(u32, File), MigratableError> {
+        if let SocketStream::Unix(unix_socket) = socket {
+            let mut buf = [0u8; 4];
+            let (_, file) = unix_socket.recv_with_fd(&mut buf).map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error receiving slot from socket: {}", e))
+            })?;
+
+            file.ok_or_else(|| MigratableError::MigrateReceive(anyhow!("Failed to receive socket")))
+                .map(|file| (u32::from_le_bytes(buf), file))
+        } else {
+            Err(MigratableError::MigrateReceive(anyhow!(
+                "Unsupported socket type"
+            )))
+        }
+    }
+
+    /// Handle a migration command and advance the protocol state machine.
+    ///
+    /// **Note**: This function is responsible for consuming any payloads! It also must
+    /// _not_ write any response to the socket.
+    fn vm_receive_migration_step(
+        &mut self,
+        socket: &mut SocketStream,
+        state: ReceiveMigrationState,
+        req: &Request,
+        _receive_data_migration: &VmReceiveMigrationData,
+    ) -> std::result::Result<ReceiveMigrationState, MigratableError> {
+        use ReceiveMigrationState::*;
+
+        let invalid_command = || {
+            Err(MigratableError::MigrateReceive(anyhow!(
+                "Can't handle command in current state"
+            )))
+        };
+
+        let mut configure_vm =
+            |socket: &mut SocketStream,
+             memory_files: HashMap<u32, File>|
+             -> std::result::Result<ReceiveMigrationState, MigratableError> {
+                let memory_manager = self.vm_receive_config(req, socket, memory_files)?;
+
+                Ok(Configured(memory_manager))
+            };
+
+        let recv_memory_fd =
+            |socket: &mut SocketStream,
+             mut memory_files: Vec<(u32, File)>|
+             -> std::result::Result<ReceiveMigrationState, MigratableError> {
+                let (slot, file) = Self::vm_receive_memory_fd(socket)?;
+
+                memory_files.push((slot, file));
+                Ok(MemoryFdsReceived(memory_files))
+            };
+
+        if req.command() == Command::Abandon {
+            return Ok(Aborted);
+        }
+
+        match state {
+            Established => match req.command() {
+                Command::Start => Ok(Started),
+                _ => invalid_command(),
+            },
+            Started => match req.command() {
+                Command::MemoryFd => recv_memory_fd(socket, Vec::new()),
+                Command::Config => configure_vm(socket, Default::default()),
+                _ => invalid_command(),
+            },
+            MemoryFdsReceived(memory_files) => match req.command() {
+                Command::MemoryFd => recv_memory_fd(socket, memory_files),
+                Command::Config => configure_vm(socket, HashMap::from_iter(memory_files)),
+                _ => invalid_command(),
+            },
+            Configured(memory_manager) => match req.command() {
+                Command::Memory => {
+                    self.vm_receive_memory(req, socket, &mut memory_manager.lock().unwrap())?;
+                    Ok(Configured(memory_manager))
+                }
+                Command::State => {
+                    self.vm_receive_state(req, socket, memory_manager.clone())?;
+                    Ok(StateReceived)
+                }
+                _ => invalid_command(),
+            },
+            StateReceived => match req.command() {
+                Command::Complete => {
+                    // The unwrap is safe, because the state machine makes sure we called
+                    // vm_receive_state before, which creates the VM.
+                    let vm = self.vm.as_mut().unwrap();
+                    vm.resume()?;
+                    Ok(Completed)
+                }
+                _ => invalid_command(),
+            },
+            Completed | Aborted => {
+                unreachable!("Performed a step on the finished state machine")
+            }
+        }
+    }
+
     fn vm_receive_config<T>(
         &mut self,
         req: &Request,
         socket: &mut T,
-        existing_memory_files: Option<HashMap<u32, File>>,
+        existing_memory_files: HashMap<u32, File>,
     ) -> std::result::Result<Arc<Mutex<MemoryManager>>, MigratableError>
     where
-        T: Read + Write,
+        T: Read,
     {
         // Read in config data along with memory manager data
         let mut data: Vec<u8> = Vec::new();
@@ -913,8 +1049,6 @@ impl Vmm {
             ))
         })?;
 
-        Response::ok().write_to(socket)?;
-
         Ok(memory_manager)
     }
 
@@ -925,7 +1059,7 @@ impl Vmm {
         mm: Arc<Mutex<MemoryManager>>,
     ) -> std::result::Result<(), MigratableError>
     where
-        T: Read + Write,
+        T: Read,
     {
         // Read in state data
         let mut data: Vec<u8> = Vec::new();
@@ -978,12 +1112,9 @@ impl Vmm {
 
         // Create VM
         vm.restore().map_err(|e| {
-            Response::error().write_to(socket).ok();
-            MigratableError::MigrateReceive(anyhow!("Failed restoring the Vm: {e}"))
+            MigratableError::MigrateReceive(anyhow!("Failed restoring the Vm: {}", e))
         })?;
         self.vm = Some(vm);
-
-        Response::ok().write_to(socket)?;
 
         Ok(())
     }
@@ -995,18 +1126,13 @@ impl Vmm {
         memory_manager: &mut MemoryManager,
     ) -> std::result::Result<(), MigratableError>
     where
-        T: Read + ReadVolatile + Write,
+        T: Read + ReadVolatile,
     {
         // Read table
         let table = MemoryRangeTable::read_from(socket, req.length())?;
 
         // And then read the memory itself
-        memory_manager
-            .receive_memory_regions(&table, socket)
-            .inspect_err(|_| {
-                Response::error().write_to(socket).ok();
-            })?;
-        Response::ok().write_to(socket)?;
+        memory_manager.receive_memory_regions(&table, socket)?;
         Ok(())
     }
 
@@ -1628,7 +1754,7 @@ impl RequestHandler for Vmm {
             for net in restored_nets.iter() {
                 for net_config in vm_net_configs.iter_mut() {
                     // update only if the net dev is backed by FDs
-                    if net_config.id == Some(net.id.clone()) && net_config.fds.is_some() {
+                    if net_config.id.as_ref() == Some(&net.id) && net_config.fds.is_some() {
                         net_config.fds.clone_from(&net.fds);
                     }
                 }
@@ -2147,120 +2273,33 @@ impl RequestHandler for Vmm {
         // Accept the connection and get the socket
         let mut socket = Vmm::receive_migration_socket(&receive_data_migration.receiver_url)?;
 
-        let mut started = false;
-        let mut memory_manager: Option<Arc<Mutex<MemoryManager>>> = None;
-        let mut existing_memory_files = None;
-        loop {
+        let mut state = ReceiveMigrationState::Established;
+
+        while !state.finished() {
             let req = Request::read_from(&mut socket)?;
-            match req.command() {
-                Command::Invalid => info!("Invalid Command Received"),
-                Command::Start => {
-                    info!("Start Command Received");
-                    started = true;
+            trace!("Command {:?} received", req.command());
 
-                    Response::ok().write_to(&mut socket)?;
+            let (response, new_state) = match self.vm_receive_migration_step(
+                &mut socket,
+                state,
+                &req,
+                &receive_data_migration,
+            ) {
+                Ok(next_state) => (Response::ok(), next_state),
+                Err(err) => {
+                    warn!("Migration command {:?} failed: {}", req.command(), err);
+                    (Response::error(), ReceiveMigrationState::Aborted)
                 }
-                Command::Config => {
-                    info!("Config Command Received");
+            };
 
-                    if !started {
-                        warn!("Migration not started yet");
-                        Response::error().write_to(&mut socket)?;
-                        continue;
-                    }
-                    memory_manager = Some(self.vm_receive_config(
-                        &req,
-                        &mut socket,
-                        existing_memory_files.take(),
-                    )?);
-                }
-                Command::State => {
-                    info!("State Command Received");
+            state = new_state;
+            assert_eq!(response.length(), 0);
+            response.write_to(&mut socket)?;
+        }
 
-                    if !started {
-                        warn!("Migration not started yet");
-                        Response::error().write_to(&mut socket)?;
-                        continue;
-                    }
-                    if let Some(mm) = memory_manager.take() {
-                        self.vm_receive_state(&req, &mut socket, mm)?;
-                    } else {
-                        warn!("Configuration not sent yet");
-                        Response::error().write_to(&mut socket)?;
-                    }
-                }
-                Command::Memory => {
-                    info!("Memory Command Received");
-
-                    if !started {
-                        warn!("Migration not started yet");
-                        Response::error().write_to(&mut socket)?;
-                        continue;
-                    }
-                    if let Some(mm) = memory_manager.as_ref() {
-                        self.vm_receive_memory(&req, &mut socket, &mut mm.lock().unwrap())?;
-                    } else {
-                        warn!("Configuration not sent yet");
-                        Response::error().write_to(&mut socket)?;
-                    }
-                }
-                Command::MemoryFd => {
-                    info!("MemoryFd Command Received");
-
-                    if !started {
-                        warn!("Migration not started yet");
-                        Response::error().write_to(&mut socket)?;
-                        continue;
-                    }
-
-                    match &mut socket {
-                        SocketStream::Unix(unix_socket) => {
-                            let mut buf = [0u8; 4];
-                            let (_, file) = unix_socket.recv_with_fd(&mut buf).map_err(|e| {
-                                MigratableError::MigrateReceive(anyhow!(
-                                    "Error receiving slot from socket: {e}"
-                                ))
-                            })?;
-
-                            if existing_memory_files.is_none() {
-                                existing_memory_files = Some(HashMap::default())
-                            }
-
-                            if let Some(ref mut existing_memory_files) = existing_memory_files {
-                                let slot = u32::from_le_bytes(buf);
-                                existing_memory_files.insert(slot, file.unwrap());
-                            }
-
-                            Response::ok().write_to(&mut socket)?;
-                        }
-                        SocketStream::Tcp(_tcp_socket) => {
-                            // For TCP sockets, we cannot transfer file descriptors
-                            warn!(
-                                "MemoryFd command received over TCP socket, which is not supported"
-                            );
-                            Response::error().write_to(&mut socket)?;
-                        }
-                    }
-                }
-                Command::Complete => {
-                    info!("Complete Command Received");
-                    if let Some(ref mut vm) = self.vm.as_mut() {
-                        vm.resume()?;
-                        Response::ok().write_to(&mut socket)?;
-                    } else {
-                        warn!("VM not created yet");
-                        Response::error().write_to(&mut socket)?;
-                    }
-                    break;
-                }
-                Command::Abandon => {
-                    info!("Abandon Command Received");
-                    self.vm = None;
-                    self.vm_config = None;
-                    Response::ok().write_to(&mut socket).ok();
-                    break;
-                }
-            }
+        if let ReceiveMigrationState::Aborted = state {
+            self.vm = None;
+            self.vm_config = None;
         }
 
         Ok(())
