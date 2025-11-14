@@ -27,7 +27,7 @@ fi
 cargo build --features mshv --all --release --target "$BUILD_TARGET"
 
 export RUST_BACKTRACE=1
-time cargo test "vfio::test_nvidia" -- --test-threads=1 ${test_binary_args[*]}
+time cargo nextest run --test-threads=1 "vfio::test_nvidia" -- ${test_binary_args[*]}
 RES=$?
 
 exit $RES
