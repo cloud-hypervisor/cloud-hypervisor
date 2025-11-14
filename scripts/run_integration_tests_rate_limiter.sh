@@ -56,7 +56,7 @@ fi
 cargo build --features mshv --all --release --target "$BUILD_TARGET"
 
 export RUST_BACKTRACE=1
-time cargo test $test_features "rate_limiter::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
+time cargo nextest run $test_features --test-threads=1 "rate_limiter::$test_filter" -- ${test_binary_args[*]}
 RES=$?
 
 exit $RES
