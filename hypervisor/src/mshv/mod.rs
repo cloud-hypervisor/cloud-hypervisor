@@ -14,7 +14,10 @@ use arc_swap::ArcSwap;
 use mshv_bindings::*;
 #[cfg(target_arch = "x86_64")]
 use mshv_ioctls::InterruptRequest;
-use mshv_ioctls::{Mshv, NoDatamatch, VcpuFd, VmFd, VmType, set_registers_64};
+use mshv_ioctls::{
+    Mshv, NoDatamatch, VcpuFd, VmFd, VmType, make_default_partition_create_arg,
+    make_default_synthetic_features_mask, set_registers_64,
+};
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
 #[cfg(feature = "sev_snp")]
@@ -336,10 +339,14 @@ impl hypervisor::Hypervisor for MshvHypervisor {
                 VmType::Normal
             };
         }
-
+        let mut create_args = make_default_partition_create_arg(mshv_vm_type);
+        if _config.nested {
+            create_args.pt_flags |= 1 << MSHV_PT_BIT_NESTED_VIRTUALIZATION;
+        }
+        let synthetic_features_mask = make_default_synthetic_features_mask();
         let fd: VmFd;
         loop {
-            match self.mshv.create_vm_with_type(mshv_vm_type) {
+            match self.mshv.create_vm_with_args(&create_args) {
                 Ok(res) => fd = res,
                 Err(e) => {
                     if e.errno() == libc::EINTR {
@@ -354,7 +361,11 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             }
             break;
         }
-
+        fd.set_partition_property(
+            hv_partition_property_code_HV_PARTITION_PROPERTY_SYNTHETIC_PROC_FEATURES,
+            synthetic_features_mask,
+        )
+        .map_err(|e| hypervisor::HypervisorError::SetPartitionProperty(e.into()))?;
         let vm_fd = Arc::new(fd);
 
         #[cfg(target_arch = "x86_64")]
