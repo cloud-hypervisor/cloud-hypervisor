@@ -1,8 +1,12 @@
 name: Cloud Hypervisor Tests (MSHV) (x86_64)
-on: [pull_request_target, merge_group]
+on:
+  pull_request_review:
+    types: [submitted]
+  workflow_dispatch:
 
 jobs:
   infra-setup:
+    if: (github.event_name == 'pull_request_review' && github.event.review.state == 'approved') || github.event_name == 'workflow_dispatch'
     name: MSHV Infra Setup (x86_64)
     uses: ./.github/workflows/mshv-infra.yaml
     with:

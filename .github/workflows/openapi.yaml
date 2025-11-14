@@ -1,5 +1,5 @@
 name: Cloud Hypervisor OpenAPI Validation
-on: [pull_request, merge_group]
+on: pull_request
 
 jobs:
   Validate:

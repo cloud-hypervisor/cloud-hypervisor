@@ -1,5 +1,5 @@
 name: Cloud Hypervisor Quality Checks
-on: [pull_request, merge_group]
+on: pull_request
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -42,7 +42,7 @@ jobs:
           components: clippy
 
       - name: Bisectability Check (default features)
-        if: ${{ github.event_name == 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu' }}
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         run: |
           set -e
           commits=$(git rev-list origin/${{ github.base_ref }}..${{ github.sha }})
@@ -161,7 +161,6 @@ jobs:
         run: test -z "$(git status --porcelain)"
 
   typos:
-    if: github.event_name == 'pull_request'
     name: Typos / Spellcheck
     runs-on: ubuntu-latest
     steps:

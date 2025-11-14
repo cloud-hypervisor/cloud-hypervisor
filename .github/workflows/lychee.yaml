@@ -1,5 +1,6 @@
 name: Link Check (lychee)
 on: pull_request
+
 jobs:
   link_check:
     name: Link Check

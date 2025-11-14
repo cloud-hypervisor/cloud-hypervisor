@@ -1,5 +1,5 @@
 name: Cloud Hypervisor Code Formatting
-on: [pull_request, merge_group]
+on: pull_request
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
