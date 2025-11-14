@@ -7,7 +7,6 @@ use std::os::unix::io::RawFd;
 use std::path::Path;
 use std::{mem, ptr};
 
-use anyhow::anyhow;
 use libc::{c_void, sockaddr_storage, socklen_t};
 use thiserror::Error;
 
@@ -45,23 +44,23 @@ pub fn is_selftest(input: &[u8]) -> bool {
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Could not initialize emulator's backend")]
-    InitializeEmulator(#[source] anyhow::Error),
-    #[error("Failed to create data fd to pass to swtpm")]
-    PrepareDataFd(#[source] anyhow::Error),
-    #[error("Failed to run Control Cmd")]
-    RunControlCmd(#[source] anyhow::Error),
-    #[error("Emulator doesn't implement min required capabilities")]
-    CheckCaps(#[source] anyhow::Error),
-    #[error("Emulator failed to deliver request")]
-    DeliverRequest(#[source] anyhow::Error),
-    #[error("Emulator failed to send/receive msg on data fd")]
-    SendReceive(#[source] anyhow::Error),
-    #[error("Incorrect response to Self Test")]
-    SelfTest(#[source] anyhow::Error),
+    #[error("Could not initialize emulator's backend: {0}")]
+    InitializeEmulator(String),
+    #[error("Failed to create data fd to pass to swtpm: {0}")]
+    PrepareDataFd(String),
+    #[error("Failed to run Control Cmd: {0}")]
+    RunControlCmd(String),
+    #[error("Emulator doesn't implement min required capabilities: {0}")]
+    CheckCaps(String),
+    #[error("Emulator failed to deliver request: {0}")]
+    DeliverRequest(String),
+    #[error("Emulator failed to send/receive msg on data fd: {0}")]
+    SendReceive(String),
+    #[error("Incorrect response to Self Test: {0}")]
+    SelfTest(String),
 }
 
-type Result<T> = anyhow::Result<T, Error>;
+type Result<T> = std::result::Result<T, Error>;
 
 pub struct BackendCmd<'a> {
     // This buffer is used for both input and output.
@@ -87,14 +86,14 @@ impl Emulator {
     ///
     pub fn new(path: String) -> Result<Self> {
         if !Path::new(&path).exists() {
-            return Err(Error::InitializeEmulator(anyhow!(
+            return Err(Error::InitializeEmulator(format!(
                 "The input TPM Socket path: {path:?} does not exist"
             )));
         }
         let mut socket = SocketDev::new();
-        socket.init(path).map_err(|e| {
-            Error::InitializeEmulator(anyhow!("Failed while initializing tpm emulator: {e:?}"))
-        })?;
+        socket
+            .init(path)
+            .map_err(|e| Error::InitializeEmulator(format!("{e:?}")))?;
 
         let mut emulator = Self {
             caps: 0,
@@ -108,15 +107,15 @@ impl Emulator {
 
         emulator.probe_caps()?;
         if !emulator.check_caps() {
-            return Err(Error::InitializeEmulator(anyhow!(
-                "Required capabilities not supported by tpm backend"
-            )));
+            return Err(Error::InitializeEmulator(
+                "Required capabilities not supported by tpm backend".to_string(),
+            ));
         }
 
         if !emulator.get_established_flag() {
-            return Err(Error::InitializeEmulator(anyhow!(
-                "TPM not in established state"
-            )));
+            return Err(Error::InitializeEmulator(
+                "TPM not in established state".to_string(),
+            ));
         }
 
         Ok(emulator)
@@ -133,7 +132,7 @@ impl Emulator {
         unsafe {
             let ret = libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr());
             if ret == -1 {
-                return Err(Error::PrepareDataFd(anyhow!(
+                return Err(Error::PrepareDataFd(format!(
                     "Failed to prepare data fd for tpm emulator. Error Code {:?}",
                     std::io::Error::last_os_error()
                 )));
@@ -159,7 +158,7 @@ impl Emulator {
                 std::mem::size_of::<net_gen::iff::timeval>() as u32,
             );
             if ret == -1 {
-                return Err(Error::PrepareDataFd(anyhow!(
+                return Err(Error::PrepareDataFd(format!(
                     "Failed to set receive timeout on data fd socket. Error Code {:?}",
                     std::io::Error::last_os_error()
                 )));
@@ -231,20 +230,20 @@ impl Emulator {
         debug!("full Control request {buf:02X?}");
 
         let written = self.control_socket.write(&buf).map_err(|e| {
-            Error::RunControlCmd(anyhow!(
+            Error::RunControlCmd(format!(
                 "Failed while running {cmd:02X?} Control Cmd. Error: {e:?}"
             ))
         })?;
 
         if written < buf.len() {
-            return Err(Error::RunControlCmd(anyhow!(
+            return Err(Error::RunControlCmd(format!(
                 "Truncated write while running {cmd:02X?} Control Cmd",
             )));
         }
 
         // The largest response is 16 bytes so far.
         if msg_len_out > 16 {
-            return Err(Error::RunControlCmd(anyhow!(
+            return Err(Error::RunControlCmd(format!(
                 "Response size is too large for Cmd {cmd:02X?}, max 16 wanted {msg_len_out}"
             )));
         }
@@ -253,7 +252,7 @@ impl Emulator {
 
         // Every Control Cmd gets at least a result code in response. Read it
         let read_size = self.control_socket.read(&mut output).map_err(|e| {
-            Error::RunControlCmd(anyhow!(
+            Error::RunControlCmd(format!(
                 "Failed while reading response for Control Cmd: {cmd:02X?}. Error: {e:?}"
             ))
         })?;
@@ -261,7 +260,7 @@ impl Emulator {
         if msg_len_out != 0 {
             msg.update_ptm_with_response(&output[0..read_size])
                 .map_err(|e| {
-                    Error::RunControlCmd(anyhow!(
+                    Error::RunControlCmd(format!(
                         "Failed while converting response of Control Cmd: {cmd:02X?} to PTM. Error: {e:?}"
                     ))
                 })?;
@@ -271,7 +270,7 @@ impl Emulator {
         }
 
         if msg.get_result_code() != TPM_SUCCESS {
-            return Err(Error::RunControlCmd(anyhow!(
+            return Err(Error::RunControlCmd(format!(
                 "Control Cmd returned error code : {:?}",
                 msg.get_result_code()
             )));
@@ -333,7 +332,7 @@ impl Emulator {
         unsafe {
             let ret = libc::sendmsg(self.data_fd, &msghdr, 0);
             if ret == -1 {
-                return Err(Error::SendReceive(anyhow!(
+                return Err(Error::SendReceive(format!(
                     "Failed to send tpm command over Data FD. Error Code {:?}",
                     std::io::Error::last_os_error()
                 )));
@@ -352,7 +351,7 @@ impl Emulator {
                 &mut len as *mut socklen_t,
             );
             if ret == -1 {
-                return Err(Error::SendReceive(anyhow!(
+                return Err(Error::SendReceive(format!(
                     "Failed to receive response for tpm command over Data FD. Error Code {:?}",
                     std::io::Error::last_os_error()
                 )));
@@ -365,7 +364,7 @@ impl Emulator {
         );
 
         if isselftest && output_len < 10 {
-            return Err(Error::SelfTest(anyhow!(
+            return Err(Error::SelfTest(format!(
                 "Self test response should have 10 bytes. Only {output_len:?} returned"
             )));
         }
@@ -378,9 +377,9 @@ impl Emulator {
 
         // Check if emulator implements Cancel Cmd
         if (self.caps & PTM_CAP_CANCEL_TPM_CMD) != PTM_CAP_CANCEL_TPM_CMD {
-            return Err(Error::CheckCaps(anyhow!(
-                "Emulator does not implement 'Cancel Command' Capability"
-            )));
+            return Err(Error::CheckCaps(
+                "Emulator does not implement 'Cancel Command' Capability".to_string(),
+            ));
         }
         self.run_control_cmd(
             Commands::CmdCancelTpmCmd,
