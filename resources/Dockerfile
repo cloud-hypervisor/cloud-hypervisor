@@ -112,6 +112,7 @@ RUN export ARCH="$(uname -m)" \
             $RUST_TOOLCHAIN-x86_64-unknown-linux-musl; fi \
     && if [ "$TARGETARCH" = "amd64" ]; then rustup component add rustfmt; fi \
     && if [ "$TARGETARCH" = "amd64" ]; then rustup component add clippy; fi \
+    && cargo install cargo-nextest --locked \
     && rm -rf "$CARGO_HOME/registry" \
     && ln -s "$CARGO_REGISTRY_DIR" "$CARGO_HOME/registry" \
     && rm -rf "$CARGO_HOME/git" \
