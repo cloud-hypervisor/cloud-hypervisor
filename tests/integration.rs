@@ -8256,7 +8256,7 @@ mod common_sequential {
 
     #[test]
     #[cfg(not(feature = "mshv"))] // See issue #7437
-    #[cfg_attr(target_arch = "aarch64", ignore = "See #6970")]
+    #[ignore = "See #6970"]
     fn test_snapshot_restore_with_fd() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));

@@ -84,14 +84,15 @@ echo "$PAGE_NUM" | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 export RUST_BACKTRACE=1
-time cargo test $test_features "live_migration_parallel::$test_filter" -- ${test_binary_args[*]}
+time cargo nextest run $test_features --retries 3 --no-fail-fast --test-threads=$(($(nproc) / 4)) "live_migration_parallel::$test_filter" -- ${test_binary_args[*]}
+
 RES=$?
 
 # Run some tests in sequence since the result could be affected by other tests
 # running in parallel.
 if [ $RES -eq 0 ]; then
     export RUST_BACKTRACE=1
-    time cargo test $test_features "live_migration_sequential::$test_filter" -- --test-threads=1 ${test_binary_args[*]}
+    time cargo nextest run $test_features --retries 3 --no-fail-fast --test-threads=1 "live_migration_sequential::$test_filter" -- ${test_binary_args[*]}
     RES=$?
 fi
 

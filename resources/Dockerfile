@@ -8,7 +8,7 @@
 FROM ubuntu:24.04 AS dev
 
 ARG TARGETARCH
-ARG RUST_TOOLCHAIN="1.88.0"
+ARG RUST_TOOLCHAIN="1.89.0"
 ARG CLH_SRC_DIR="/cloud-hypervisor"
 ARG CLH_BUILD_DIR="$CLH_SRC_DIR/build"
 ARG CARGO_REGISTRY_DIR="$CLH_BUILD_DIR/cargo_registry"
@@ -112,6 +112,7 @@ RUN export ARCH="$(uname -m)" \
             $RUST_TOOLCHAIN-x86_64-unknown-linux-musl; fi \
     && if [ "$TARGETARCH" = "amd64" ]; then rustup component add rustfmt; fi \
     && if [ "$TARGETARCH" = "amd64" ]; then rustup component add clippy; fi \
+    && cargo install cargo-nextest --locked \
     && rm -rf "$CARGO_HOME/registry" \
     && ln -s "$CARGO_REGISTRY_DIR" "$CARGO_HOME/registry" \
     && rm -rf "$CARGO_HOME/git" \

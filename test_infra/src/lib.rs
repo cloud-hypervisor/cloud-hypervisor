@@ -7,14 +7,14 @@
 
 use std::ffi::OsStr;
 use std::fmt::Display;
-use std::io::{Read, Write};
+use std::fs::OpenOptions;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
-use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 use std::{env, fmt, fs, io, thread};
 
@@ -849,12 +849,43 @@ pub fn kill_child(child: &mut Child) {
 
 pub const PIPE_SIZE: i32 = 32 << 20;
 
-static NEXT_VM_ID: LazyLock<Mutex<u8>> = LazyLock::new(|| Mutex::new(1));
-
 pub struct Guest {
     pub tmp_dir: TempDir,
     pub disk_config: Box<dyn DiskConfig>,
     pub network: GuestNetworkConfig,
+}
+
+// Return the next id that can be used for this guest. This is stored in a
+// file in the filesystem and is protected by a filesystem lock allowing
+// multiple test processes to safely access it with the process blocking
+// until the lock is released.
+fn next_guest_id() -> u8 {
+    let mut id_file_path = dirs::home_dir().unwrap();
+    id_file_path.push("workloads");
+    id_file_path.push("id.counter");
+
+    let mut id_file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .read(true)
+        .open(id_file_path)
+        .unwrap();
+
+    id_file.lock().unwrap();
+
+    // Use a string in the file for (human) readability
+    let mut buf = String::default();
+    id_file.read_to_string(&mut buf).unwrap();
+    let id = buf.trim().parse::<u8>().unwrap_or(1);
+    let next_id = u8::max(1, id.overflowing_add(1).0);
+    id_file.set_len(0).unwrap();
+    id_file.seek(SeekFrom::Start(0)).unwrap();
+    id_file.write_all(next_id.to_string().as_bytes()).unwrap();
+
+    id_file.unlock().unwrap();
+
+    id
 }
 
 // Safe to implement as we know we have no interior mutability
@@ -890,11 +921,7 @@ impl Guest {
     }
 
     pub fn new(disk_config: Box<dyn DiskConfig>) -> Self {
-        let mut guard = NEXT_VM_ID.lock().unwrap();
-        let id = *guard;
-        *guard = id + 1;
-
-        Self::new_from_ip_range(disk_config, "192.168", id)
+        Self::new_from_ip_range(disk_config, "192.168", next_guest_id())
     }
 
     pub fn default_net_string(&self) -> String {

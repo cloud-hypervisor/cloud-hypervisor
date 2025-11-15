@@ -18,7 +18,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install Rust toolchain
-        run: /opt/scripts/exec-in-qemu.sh rustup default 1.88.0
+        run: /opt/scripts/exec-in-qemu.sh rustup default 1.89.0
 
       - name: Build test (kvm)
         run: /opt/scripts/exec-in-qemu.sh cargo rustc --locked --no-default-features --features "kvm"
