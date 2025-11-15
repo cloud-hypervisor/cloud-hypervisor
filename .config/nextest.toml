@@ -1,0 +1,3 @@
+[profile.default]
+# Don't let one individual test run for more than 10 minutes
+slow-timeout = { period = "60s", terminate-after = 10 }
