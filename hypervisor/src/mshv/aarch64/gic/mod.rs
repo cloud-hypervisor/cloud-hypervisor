@@ -121,6 +121,6 @@ impl Vgic for MshvGicV2M {
     }
 
     fn save_data_tables(&self) -> Result<()> {
-        unimplemented!()
+        Ok(())
     }
 }
