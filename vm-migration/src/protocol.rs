@@ -5,10 +5,12 @@
 
 use std::io::{Read, Write};
 
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use vm_memory::ByteValued;
 
 use crate::MigratableError;
+use crate::bitpos_iterator::BitposIteratorExt;
 
 // Migration protocol
 // 1: Source establishes communication with destination (file socket or TCP connection.)
@@ -205,7 +207,7 @@ impl Response {
 }
 
 #[repr(C)]
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryRange {
     pub gpa: u64,
     pub length: u64,
@@ -217,32 +219,47 @@ pub struct MemoryRangeTable {
 }
 
 impl MemoryRangeTable {
-    pub fn from_bitmap(bitmap: Vec<u64>, start_addr: u64, page_size: u64) -> Self {
-        let mut table = MemoryRangeTable::default();
-        let mut entry: Option<MemoryRange> = None;
-        for (i, block) in bitmap.iter().enumerate() {
-            for j in 0..64 {
-                let is_page_dirty = ((block >> j) & 1u64) != 0u64;
-                let page_offset = ((i * 64) + j) as u64 * page_size;
-                if is_page_dirty {
-                    if let Some(entry) = &mut entry {
-                        entry.length += page_size;
-                    } else {
-                        entry = Some(MemoryRange {
-                            gpa: start_addr + page_offset,
-                            length: page_size,
-                        });
-                    }
-                } else if let Some(entry) = entry.take() {
-                    table.push(entry);
+    /// Converts an iterator over a dirty bitmap into an iterator of dirty
+    /// [`MemoryRange`]s, merging consecutive dirty pages into contiguous ranges.
+    ///
+    /// A memory page (i.e., a range) is marked dirty when its corresponding bit
+    /// is set.
+    fn dirty_ranges_iter(
+        bitmap: impl IntoIterator<Item = u64>,
+        start_addr: u64,
+        page_size: u64,
+    ) -> impl Iterator<Item = MemoryRange> {
+        bitmap
+            .into_iter()
+            .bit_positions()
+            // Turn them into single-element ranges for coalesce.
+            .map(|b| b..(b + 1))
+            // Merge adjacent ranges.
+            .coalesce(|prev, curr| {
+                if prev.end == curr.start {
+                    Ok(prev.start..curr.end)
+                } else {
+                    Err((prev, curr))
                 }
-            }
-        }
-        if let Some(entry) = entry.take() {
-            table.push(entry);
-        }
+            })
+            .map(move |r| MemoryRange {
+                gpa: start_addr + r.start * page_size,
+                length: (r.end - r.start) * page_size,
+            })
+    }
 
-        table
+    /// Creates a new [`MemoryRangeTable`] from a bitmap (represented as
+    /// multiple `u64`) where each bit corresponds to a dirty memory page.
+    ///
+    /// Only dirty ranges are represented in the resulting bitmap.
+    pub fn from_dirty_bitmap(
+        bitmap: impl IntoIterator<Item = u64>,
+        start_addr: u64,
+        page_size: u64,
+    ) -> Self {
+        Self {
+            data: Self::dirty_ranges_iter(bitmap, start_addr, page_size).collect(),
+        }
     }
 
     pub fn regions(&self) -> &[MemoryRange] {
@@ -299,5 +316,37 @@ impl MemoryRangeTable {
             data.extend(table.data);
         }
         Self { data }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::protocol::{MemoryRange, MemoryRangeTable};
+
+    #[test]
+    fn test_memory_range_table_from_dirty_ranges_iter() {
+        let input = [0b1111_1110_1110, 0b1_0000];
+
+        let start_gpa = 0x1000;
+        let page_size = 0x1000;
+
+        let range = MemoryRangeTable::from_dirty_bitmap(input, start_gpa, page_size);
+        assert_eq!(
+            range.regions(),
+            &[
+                MemoryRange {
+                    gpa: start_gpa + page_size,
+                    length: page_size * 3,
+                },
+                MemoryRange {
+                    gpa: start_gpa + 5 * page_size,
+                    length: page_size * 7,
+                },
+                MemoryRange {
+                    gpa: start_gpa + (64 + 4) * page_size,
+                    length: page_size,
+                }
+            ]
+        );
     }
 }
