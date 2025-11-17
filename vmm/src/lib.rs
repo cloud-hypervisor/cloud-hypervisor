@@ -1815,12 +1815,9 @@ impl RequestHandler for Vmm {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         if let Some(ref mut vm) = self.vm {
-            if let Err(e) = vm.resize(desired_vcpus, desired_ram, desired_balloon) {
-                error!("Error when resizing VM: {e:?}");
-                Err(e)
-            } else {
-                Ok(())
-            }
+            vm.resize(desired_vcpus, desired_ram, desired_balloon)
+                .inspect_err(|e| error!("Error when resizing VM: {e:?}"))?;
+            Ok(())
         } else {
             let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
             if let Some(desired_vcpus) = desired_vcpus {
@@ -1842,12 +1839,9 @@ impl RequestHandler for Vmm {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         if let Some(ref mut vm) = self.vm {
-            if let Err(e) = vm.resize_zone(id, desired_ram) {
-                error!("Error when resizing VM: {e:?}");
-                Err(e)
-            } else {
-                Ok(())
-            }
+            vm.resize_zone(id, desired_ram)
+                .inspect_err(|e| error!("Error when resizing zone: {e:?}"))?;
+            Ok(())
         } else {
             // Update VmConfig by setting the new desired ram.
             let memory_config = &mut self.vm_config.as_ref().unwrap().lock().unwrap().memory;
@@ -1926,12 +1920,9 @@ impl RequestHandler for Vmm {
 
     fn vm_remove_device(&mut self, id: String) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            if let Err(e) = vm.remove_device(id) {
-                error!("Error when removing device from the VM: {e:?}");
-                Err(e)
-            } else {
-                Ok(())
-            }
+            vm.remove_device(id)
+                .inspect_err(|e| error!("Error when removing device from the VM: {e:?}"))?;
+            Ok(())
         } else if let Some(ref config) = self.vm_config {
             let mut config = config.lock().unwrap();
             if config.remove_device(&id) {
