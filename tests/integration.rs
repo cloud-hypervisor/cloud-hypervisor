@@ -39,6 +39,10 @@ mod x86_64 {
     pub const JAMMY_VFIO_IMAGE_NAME: &str =
         "jammy-server-cloudimg-amd64-custom-vfio-20241012-0.raw";
     pub const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-amd64-custom-20210609-0.qcow2";
+    pub const FOCAL_IMAGE_NAME_QCOW2_ZLIB: &str =
+        "focal-server-cloudimg-amd64-custom-20210609-0-zlib.qcow2";
+    pub const FOCAL_IMAGE_NAME_QCOW2_ZSTD: &str =
+        "focal-server-cloudimg-amd64-custom-20210609-0-zstd.qcow2";
     pub const FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE: &str =
         "focal-server-cloudimg-amd64-custom-20210609-0-backing.qcow2";
     pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhd";
@@ -58,6 +62,10 @@ mod aarch64 {
     pub const FOCAL_IMAGE_UPDATE_KERNEL_NAME: &str =
         "focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw";
     pub const FOCAL_IMAGE_NAME_QCOW2: &str = "focal-server-cloudimg-arm64-custom-20210929-0.qcow2";
+    pub const FOCAL_IMAGE_NAME_QCOW2_ZLIB: &str =
+        "focal-server-cloudimg-arm64-custom-20210929-0-zlib.qcow2";
+    pub const FOCAL_IMAGE_NAME_QCOW2_ZSTD: &str =
+        "focal-server-cloudimg-arm64-custom-20210929-0-zstd.qcow2";
     pub const FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE: &str =
         "focal-server-cloudimg-arm64-custom-20210929-0-backing.qcow2";
     pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhd";
@@ -3485,6 +3493,16 @@ mod common_parallel {
     #[test]
     fn test_virtio_block_qcow2() {
         _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2, false, false)
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_zlib() {
+        _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2_ZLIB, false, false)
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_zstd() {
+        _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2_ZSTD, false, false)
     }
 
     #[test]
