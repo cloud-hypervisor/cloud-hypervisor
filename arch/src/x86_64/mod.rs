@@ -1303,9 +1303,10 @@ fn update_cpuid_topology(
     let die_width = u16::BITS - (dies_per_package - 1).leading_zeros() + core_width;
 
     // The very old way: a flat number of logical CPUs per package: CPUID.1H:EBX[23:16] bits.
+    let core_count = dies_per_package as u32 * cores_per_die as u32 * threads_per_core as u32;
     let mut cpu_ebx = CpuidPatch::get_cpuid_reg(cpuid, 0x1, None, CpuidReg::EBX).unwrap_or(0);
-    cpu_ebx |= ((dies_per_package as u32) * (cores_per_die as u32) * (threads_per_core as u32))
-        & (0xff << 16);
+    cpu_ebx &= !(0xff << 16);
+    cpu_ebx |= (core_count & 0xff) << 16;
     CpuidPatch::set_cpuid_reg(cpuid, 0x1, None, CpuidReg::EBX, cpu_ebx);
 
     let mut cpu_edx = CpuidPatch::get_cpuid_reg(cpuid, 0x1, None, CpuidReg::EDX).unwrap_or(0);
