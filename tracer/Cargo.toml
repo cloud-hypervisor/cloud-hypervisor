@@ -12,3 +12,6 @@ serde_json = { workspace = true }
 
 [features]
 tracing = []
+
+[lints]
+workspace = true

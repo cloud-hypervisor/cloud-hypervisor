@@ -28,3 +28,6 @@ vm-memory = { workspace = true, features = [
 ] }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { workspace = true }
+
+[lints]
+workspace = true

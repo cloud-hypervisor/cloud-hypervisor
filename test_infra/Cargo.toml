@@ -13,3 +13,6 @@ ssh2 = { version = "0.9.5", features = ["vendored-openssl"] }
 thiserror = { workspace = true }
 vmm-sys-util = { workspace = true }
 wait-timeout = { workspace = true }
+
+[lints]
+workspace = true

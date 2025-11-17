@@ -19,3 +19,6 @@ vhost-user-backend = { workspace = true }
 virtio-bindings = { workspace = true }
 vm-memory = { workspace = true }
 vmm-sys-util = { workspace = true }
+
+[lints]
+workspace = true
