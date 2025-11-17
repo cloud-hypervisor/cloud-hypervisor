@@ -12,3 +12,6 @@ log = { workspace = true }
 net_gen = { path = "../net_gen" }
 thiserror = { workspace = true }
 vmm-sys-util = { workspace = true }
+
+[lints]
+workspace = true

@@ -63,3 +63,6 @@ version = "1.21.0"
 
 [dev-dependencies]
 env_logger = { workspace = true }
+
+[lints]
+workspace = true

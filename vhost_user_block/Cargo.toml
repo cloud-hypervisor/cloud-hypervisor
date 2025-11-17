@@ -19,3 +19,6 @@ virtio-bindings = { workspace = true }
 virtio-queue = { workspace = true }
 vm-memory = { workspace = true }
 vmm-sys-util = { workspace = true }
+
+[lints]
+workspace = true

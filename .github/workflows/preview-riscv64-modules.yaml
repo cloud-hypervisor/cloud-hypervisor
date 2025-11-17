@@ -27,10 +27,10 @@ jobs:
         run: /opt/scripts/exec-in-qemu.sh rustup default 1.89.0
 
       - name: Build ${{ matrix.module }} Module (kvm)
-        run: /opt/scripts/exec-in-qemu.sh cargo rustc --locked -p ${{ matrix.module }} --no-default-features --features "kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+        run: /opt/scripts/exec-in-qemu.sh cargo rustc --locked -p ${{ matrix.module }} --no-default-features --features "kvm" -- -D warnings
 
       - name: Clippy ${{ matrix.module }} Module (kvm)
-        run: /opt/scripts/exec-in-qemu.sh cargo clippy --locked -p ${{ matrix.module }} --no-default-features --features "kvm" -- -D warnings -D clippy::undocumented_unsafe_blocks -W clippy::assertions_on_result_states
+        run: /opt/scripts/exec-in-qemu.sh cargo clippy --locked -p ${{ matrix.module }} --no-default-features --features "kvm" -- -D warnings
 
       - name: Test ${{ matrix.module }} Module (kvm)
         run: /opt/scripts/exec-in-qemu.sh cargo test --locked -p ${{ matrix.module }} --no-default-features --features "kvm"

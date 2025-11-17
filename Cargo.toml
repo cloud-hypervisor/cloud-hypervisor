@@ -76,6 +76,9 @@ sev_snp = ["igvm", "mshv", "vmm/sev_snp"]
 tdx = ["vmm/tdx"]
 tracing = ["tracer/tracing", "vmm/tracing"]
 
+[lints]
+workspace = true
+
 [workspace]
 members = [
   "api_client",
@@ -152,3 +155,9 @@ thiserror = "2.0.17"
 uuid = { version = "1.18.1" }
 wait-timeout = "0.2.1"
 zerocopy = { version = "0.8.27", default-features = false }
+
+[workspace.lints.clippy]
+# Any clippy lint in alphabetical order, including lint groups:
+# https://rust-lang.github.io/rust-clippy/master/index.html
+assertions_on_result_states = "deny"
+undocumented_unsafe_blocks = "deny"

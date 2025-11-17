@@ -27,3 +27,6 @@ vmm-sys-util = { workspace = true }
 pnet = "0.35.0"
 pnet_datalink = "0.35.0"
 serde_json = { workspace = true }
+
+[lints]
+workspace = true

@@ -9,3 +9,6 @@ flume = { workspace = true }
 libc = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
+
+[lints]
+workspace = true

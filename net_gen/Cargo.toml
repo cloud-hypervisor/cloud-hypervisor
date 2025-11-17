@@ -7,3 +7,6 @@ version = "0.1.0"
 
 [dependencies]
 vmm-sys-util = { workspace = true }
+
+[lints]
+workspace = true
