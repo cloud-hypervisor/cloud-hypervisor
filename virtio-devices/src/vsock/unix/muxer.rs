@@ -867,7 +867,7 @@ impl VsockMuxer {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use std::cmp::min;
     use std::io::Write;
     use std::path::{Path, PathBuf};
@@ -875,7 +875,7 @@ mod tests {
     use virtio_queue::QueueOwnedT;
 
     use super::super::super::csm::defs as csm_defs;
-    use super::super::super::tests::TestContext as VsockTestContext;
+    use super::super::super::unit_tests::TestContext as VsockTestContext;
     use super::*;
 
     impl PartiallyReadCommand {

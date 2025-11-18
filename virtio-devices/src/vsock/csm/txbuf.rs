@@ -142,7 +142,7 @@ impl TxBuf {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 
     use super::*;

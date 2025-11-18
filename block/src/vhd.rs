@@ -117,7 +117,7 @@ pub fn is_fixed_vhd(f: &mut File) -> std::io::Result<bool> {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use std::fs::File;
     use std::io::{Seek, SeekFrom, Write};
 

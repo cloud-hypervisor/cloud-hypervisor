@@ -216,7 +216,7 @@ impl BusDevice for Rtc {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
     use crate::{
         read_be_u16, read_be_u32, read_le_i32, read_le_u16, read_le_u64, write_be_u16,

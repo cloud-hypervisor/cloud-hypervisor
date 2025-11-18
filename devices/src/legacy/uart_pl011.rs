@@ -453,7 +453,7 @@ impl Transportable for Pl011 {}
 impl Migratable for Pl011 {}
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use std::sync::Mutex;
 
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};

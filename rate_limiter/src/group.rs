@@ -297,7 +297,7 @@ impl Drop for RateLimiterGroup {
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+pub(crate) mod unit_tests {
     use std::os::fd::AsRawFd;
     use std::thread;
     use std::time::Duration;

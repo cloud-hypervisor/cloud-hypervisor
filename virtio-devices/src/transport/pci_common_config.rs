@@ -392,7 +392,7 @@ impl Snapshottable for VirtioPciCommonConfig {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use vm_memory::GuestMemoryAtomic;
     use vmm_sys_util::eventfd::EventFd;
 

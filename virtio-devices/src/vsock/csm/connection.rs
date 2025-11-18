@@ -670,14 +670,14 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use std::io::{Error as IoError, Result as IoResult};
 
     use libc::EFD_NONBLOCK;
     use virtio_queue::QueueOwnedT;
     use vmm_sys_util::eventfd::EventFd;
 
-    use super::super::super::tests::TestContext;
+    use super::super::super::unit_tests::TestContext;
     use super::super::defs as csm_defs;
     use super::*;
 

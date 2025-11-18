@@ -189,7 +189,7 @@ pub fn virtio_features_to_tap_offload(features: u64) -> c_uint {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     #[test]

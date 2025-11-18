@@ -152,7 +152,7 @@ impl DoubleEndedIterator for BftIter<'_> {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::{DeviceNode, DeviceTree};
 
     #[test]

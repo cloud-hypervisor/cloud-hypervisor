@@ -161,7 +161,7 @@ pub trait VsockChannel {
 pub trait VsockBackend: VsockChannel + VsockEpollListener + Send {}
 
 #[cfg(any(test, fuzzing))]
-pub mod tests {
+pub mod unit_tests {
     use std::os::unix::io::AsRawFd;
     use std::path::PathBuf;
     use std::sync::{Arc, RwLock};

@@ -442,7 +442,7 @@ impl Parseable for StringList {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     #[test]

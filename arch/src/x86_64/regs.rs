@@ -196,7 +196,7 @@ pub fn configure_segments_and_sregs(
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use vm_memory::GuestAddress;
 
     use super::*;

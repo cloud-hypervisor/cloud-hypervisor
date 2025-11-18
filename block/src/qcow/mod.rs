@@ -1815,7 +1815,7 @@ pub fn detect_image_type(file: &mut RawFile) -> Result<ImageType> {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use std::fs::File;
     use std::path::Path;
 

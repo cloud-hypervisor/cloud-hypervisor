@@ -2992,7 +2992,7 @@ impl CpuElf64Writable for CpuManager {
 
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use arch::layout::{BOOT_STACK_POINTER, ZERO_PAGE_START};
     use arch::x86_64::interrupts::*;
     use arch::x86_64::regs::*;
@@ -3140,7 +3140,7 @@ mod tests {
 
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     #[cfg(feature = "kvm")]
     use std::{mem, mem::offset_of};
 

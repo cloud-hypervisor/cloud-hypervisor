@@ -340,7 +340,7 @@ impl Transportable for Serial {}
 impl Migratable for Serial {}
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use std::sync::Mutex;
 
     use vm_device::interrupt::{InterruptIndex, InterruptSourceConfig};

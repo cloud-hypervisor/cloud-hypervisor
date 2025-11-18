@@ -798,7 +798,7 @@ impl BusDevice for FwCfg {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use std::ffi::CString;
     use std::io::Write;
 

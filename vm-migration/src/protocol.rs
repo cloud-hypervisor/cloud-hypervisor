@@ -320,7 +320,7 @@ impl MemoryRangeTable {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use crate::protocol::{MemoryRange, MemoryRangeTable};
 
     #[test]

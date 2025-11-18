@@ -418,13 +418,13 @@ impl VsockPacket {
 
 #[cfg(test)]
 #[allow(clippy::undocumented_unsafe_blocks)]
-mod tests {
+mod unit_tests {
     use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
     use virtio_queue::QueueOwnedT;
     use vm_memory::GuestAddress;
     use vm_virtio::queue::testing::VirtqDesc as GuestQDesc;
 
-    use super::super::tests::TestContext;
+    use super::super::unit_tests::TestContext;
     use super::*;
     use crate::GuestMemoryMmap;
     use crate::vsock::defs::MAX_PKT_BUF_SIZE;

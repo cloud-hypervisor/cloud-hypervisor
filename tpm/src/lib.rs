@@ -381,7 +381,7 @@ impl Ptm for PtmSetBufferSize {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
     #[test]
     fn test_ptmresult() -> Result<()> {
