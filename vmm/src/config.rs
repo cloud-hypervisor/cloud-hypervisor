@@ -4681,7 +4681,7 @@ mod unit_tests {
         // Test empty string serial (should be valid)
         let mut empty_serial_config = valid_config.clone();
         empty_serial_config.disks = Some(vec![DiskConfig {
-            serial: Some("".to_string()),
+            serial: Some(String::new()),
             ..disk_fixture()
         }]);
         empty_serial_config.validate().unwrap();
@@ -4755,7 +4755,7 @@ mod unit_tests {
                 #[cfg(feature = "igvm")]
                 igvm: None,
                 #[cfg(feature = "sev_snp")]
-                host_data: Some("".to_string()),
+                host_data: Some(String::new()),
                 #[cfg(feature = "fw_cfg")]
                 fw_cfg_config: None,
             });
