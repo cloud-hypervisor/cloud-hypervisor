@@ -491,7 +491,7 @@ impl PvmemcontrolBusDevice {
         } else {
             std::ptr::null()
         };
-        debug!("addr {:X} length {} name {:?}", addr, length, name);
+        debug!("addr {addr:X} length {length} name {name:?}");
 
         // SAFETY: [`base`, `base` + `len`) is guest memory
         self.operate_on_memory_range(addr, length, |base, len| unsafe {
@@ -581,7 +581,7 @@ impl PvmemcontrolBusDevice {
                     ..Default::default()
                 },
                 Error::GuestMemory(err) => {
-                    warn!("{}", err);
+                    warn!("{err}");
                     PvmemcontrolResp {
                         ret_errno: (libc::EINVAL as u32).into(),
                         ret_code: (func_code as u32).into(),
@@ -606,7 +606,7 @@ impl PvmemcontrolBusDevice {
         let response: PvmemcontrolResp = match self.handle_request(request) {
             Ok(x) => x,
             Err(e) => {
-                warn!("cannot process request {:?} with error {}", request, e);
+                warn!("cannot process request {request:?} with error {e}");
                 return;
             }
         };

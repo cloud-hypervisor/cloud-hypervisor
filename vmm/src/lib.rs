@@ -945,7 +945,7 @@ impl Vmm {
         })?;
         #[cfg(feature = "guest_debug")]
         let debug_evt = self.vm_debug_evt.try_clone().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error cloning debug EventFd: {}", e))
+            MigratableError::MigrateReceive(anyhow!("Error cloning debug EventFd: {e}"))
         })?;
         let activate_evt = self.activate_evt.try_clone().map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error cloning activate EventFd: {e}"))

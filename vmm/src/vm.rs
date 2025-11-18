@@ -2072,13 +2072,12 @@ impl Vm {
             // No need to allocate if the section falls within guest RAM ranges
             if boot_guest_memory.address_in_range(GuestAddress(section.address)) {
                 info!(
-                    "Not allocating TDVF Section: {:x?} since it is already part of guest RAM",
-                    section
+                    "Not allocating TDVF Section: {section:x?} since it is already part of guest RAM"
                 );
                 continue;
             }
 
-            info!("Allocating TDVF Section: {:x?}", section);
+            info!("Allocating TDVF Section: {section:x?}");
             self.memory_manager
                 .lock()
                 .unwrap()
@@ -2106,7 +2105,7 @@ impl Vm {
         let mut payload_info = None;
         let mut hob_offset = None;
         for section in sections {
-            info!("Populating TDVF Section: {:x?}", section);
+            info!("Populating TDVF Section: {section:x?}");
             match section.r#type {
                 TdvfSectionType::Bfv | TdvfSectionType::Cfv => {
                     info!("Copying section to guest memory");

@@ -219,7 +219,7 @@ impl InterruptSourceGroup for LegacyUserspaceInterruptGroup {
             .lock()
             .unwrap()
             .service_irq(self.irq as usize)
-            .map_err(|e| io::Error::other(format!("failed to inject IRQ #{}: {:?}", self.irq, e)))
+            .map_err(|e| io::Error::other(format!("failed to inject IRQ #{}: {e:?}", self.irq)))
     }
 
     fn update(

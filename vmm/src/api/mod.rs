@@ -757,7 +757,7 @@ impl ApiAction for VmCoredump {
         response_sender: Sender<ApiResponse>,
     ) -> ApiRequest {
         Box::new(move |vmm| {
-            info!("API request event: VmCoredump {:?}", coredump_data);
+            info!("API request event: VmCoredump {coredump_data:?}");
 
             let response = vmm
                 .vm_coredump(&coredump_data.destination_url)

@@ -52,7 +52,7 @@ impl Tracer {
 
         file.flush().unwrap();
 
-        warn!("Trace output: {}", path);
+        warn!("Trace output: {path}");
     }
 
     fn add_event(&mut self, event: TraceEvent) {

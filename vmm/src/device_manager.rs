@@ -3447,7 +3447,7 @@ impl DeviceManager {
         let (pci_segment_id, pci_device_bdf, resources) =
             self.pci_resources(&id, pci_segment_id)?;
 
-        info!("Creating pvmemcontrol device: id = {}", id);
+        info!("Creating pvmemcontrol device: id = {id}");
         let (pvmemcontrol_pci_device, pvmemcontrol_bus_device) =
             devices::pvmemcontrol::PvmemcontrolDevice::make_device(
                 id.clone(),
@@ -4222,7 +4222,7 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Option<Arc<Mutex<devices::IvshmemDevice>>>> {
         let id = String::from(IVSHMEM_DEVICE_NAME);
         let pci_segment_id = 0x0_u16;
-        info!("Creating ivshmem device {}", id);
+        info!("Creating ivshmem device {id}");
 
         let (pci_segment_id, pci_device_bdf, resources) =
             self.pci_resources(&id, pci_segment_id)?;
@@ -4982,7 +4982,7 @@ impl IvshmemOps for IvshmemHandler {
         size: usize,
         backing_file: Option<PathBuf>,
     ) -> Result<(Arc<GuestRegionMmap>, UserspaceMapping), IvshmemError> {
-        info!("Creating ivshmem mem region at 0x{:x}", start_addr);
+        info!("Creating ivshmem mem region at 0x{start_addr:x}");
 
         let region = MemoryManager::create_ram_region(
             &backing_file,

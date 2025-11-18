@@ -136,9 +136,7 @@ pub trait CpuStateManager: Clone {
                     .checked_add(segment_register.base)
                     .ok_or_else(|| {
                         PlatformError::InvalidAddress(anyhow!(
-                            "Logical address {:#x} cannot be linearized with segment {:#x?}",
-                            logical_addr,
-                            segment_register
+                            "Logical address {logical_addr:#x} cannot be linearized with segment {segment_register:#x?}"
                         ))
                     })?)
             }
@@ -164,9 +162,7 @@ pub trait CpuStateManager: Clone {
                 if segment_type_expand_down(segment_type) {
                     if logical_addr >= segment_limit.into() {
                         return Err(PlatformError::InvalidAddress(anyhow!(
-                            "{:#x} is off limits {:#x} (expand down)",
-                            logical_addr,
-                            segment_limit
+                            "{logical_addr:#x} is off limits {segment_limit:#x} (expand down)"
                         )));
                     }
 
@@ -179,16 +175,14 @@ pub trait CpuStateManager: Clone {
 
                 if logical_addr > segment_limit.into() {
                     return Err(PlatformError::InvalidAddress(anyhow!(
-                        "{:#x} is off limits {:#x}",
-                        logical_addr,
-                        segment_limit
+                        "{logical_addr:#x} is off limits {segment_limit:#x}"
                     )));
                 }
 
                 Ok(logical_addr.wrapping_add(segment_register.base))
             }
 
-            _ => Err(PlatformError::UnsupportedCpuMode(anyhow!("{:?}", mode))),
+            _ => Err(PlatformError::UnsupportedCpuMode(anyhow!("{mode:?}"))),
         }
     }
 }
@@ -252,8 +246,7 @@ impl CpuStateManager for EmulatorCpuState {
 
             r => {
                 return Err(PlatformError::InvalidRegister(anyhow!(
-                    "read_reg invalid GPR {:?}",
-                    r
+                    "read_reg invalid GPR {r:?}"
                 )));
             }
         };
@@ -276,18 +269,17 @@ impl CpuStateManager for EmulatorCpuState {
             }
         } else {
             return Err(PlatformError::InvalidRegister(anyhow!(
-                "read_reg invalid GPR {:?}",
-                reg
+                "read_reg invalid GPR {reg:?}"
             )));
         };
 
-        debug!("Register read: {:#x} from {:?}", reg_value, reg);
+        debug!("Register read: {reg_value:#x} from {reg:?}");
 
         Ok(reg_value)
     }
 
     fn write_reg(&mut self, reg: Register, val: u64) -> Result<(), PlatformError> {
-        debug!("Register write: {:#x} to {:?}", val, reg);
+        debug!("Register write: {val:#x} to {reg:?}");
 
         // SDM Vol 1 - 3.4.1.1
         //
@@ -312,8 +304,7 @@ impl CpuStateManager for EmulatorCpuState {
             }
         } else {
             return Err(PlatformError::InvalidRegister(anyhow!(
-                "write_reg invalid register {:?}",
-                reg
+                "write_reg invalid register {reg:?}"
             )));
         };
 
@@ -373,8 +364,7 @@ impl CpuStateManager for EmulatorCpuState {
             Register::CR8 => set_reg!(self.sregs.cr8, mask, reg_value),
             _ => {
                 return Err(PlatformError::InvalidRegister(anyhow!(
-                    "write_reg invalid register {:?}",
-                    reg
+                    "write_reg invalid register {reg:?}"
                 )));
             }
         }
@@ -385,8 +375,7 @@ impl CpuStateManager for EmulatorCpuState {
     fn read_segment(&self, reg: Register) -> Result<SegmentRegister, PlatformError> {
         if !reg.is_segment_register() {
             return Err(PlatformError::InvalidRegister(anyhow!(
-                "read_segment {:?} is not a segment register",
-                reg
+                "read_segment {reg:?} is not a segment register"
             )));
         }
 
@@ -398,8 +387,7 @@ impl CpuStateManager for EmulatorCpuState {
             Register::GS => Ok(self.sregs.gs),
             Register::SS => Ok(self.sregs.ss),
             r => Err(PlatformError::InvalidRegister(anyhow!(
-                "read_segment invalid register {:?}",
-                r
+                "read_segment invalid register {r:?}"
             ))),
         }
     }
@@ -410,7 +398,7 @@ impl CpuStateManager for EmulatorCpuState {
         segment_register: SegmentRegister,
     ) -> Result<(), PlatformError> {
         if !reg.is_segment_register() {
-            return Err(PlatformError::InvalidRegister(anyhow!("{:?}", reg)));
+            return Err(PlatformError::InvalidRegister(anyhow!("{reg:?}")));
         }
 
         match reg {
@@ -420,7 +408,7 @@ impl CpuStateManager for EmulatorCpuState {
             Register::FS => self.sregs.fs = segment_register,
             Register::GS => self.sregs.gs = segment_register,
             Register::SS => self.sregs.ss = segment_register,
-            r => return Err(PlatformError::InvalidRegister(anyhow!("{:?}", r))),
+            r => return Err(PlatformError::InvalidRegister(anyhow!("{r:?}"))),
         }
 
         Ok(())
@@ -590,7 +578,7 @@ impl<T: CpuStateManager> Emulator<'_, T> {
                     .fetch(last_decoded_ip, &mut fetched_insn_stream)
                     .map_err(EmulationError::PlatformEmulationError)?;
 
-                debug!("Fetched {:x?}", fetched_insn_stream);
+                debug!("Fetched {fetched_insn_stream:x?}");
 
                 // Once we have the new stream, we must create a new decoder
                 // and emulate one last instruction from the last decoded IP.

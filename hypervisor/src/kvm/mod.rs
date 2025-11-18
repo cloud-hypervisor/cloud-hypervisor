@@ -627,7 +627,7 @@ impl vm::Vm for KvmVm {
     ///
     fn create_vgic(&self, config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
         let gic_device = KvmGicV3Its::new(self, config)
-            .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {:?}", e)))?;
+            .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {e:?}")))?;
         Ok(Arc::new(Mutex::new(gic_device)))
     }
 
@@ -1971,9 +1971,7 @@ impl cpu::Vcpu for KvmVcpu {
                         Ok(cpu::VmExit::Shutdown)
                     } else {
                         Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
-                            "Unexpected system event with type 0x{:x}, flags 0x{:x?}",
-                            event_type,
-                            flags
+                            "Unexpected system event with type 0x{event_type:x}, flags 0x{flags:x?}",
                         )))
                     }
                 }

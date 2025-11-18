@@ -645,7 +645,7 @@ pub fn block_io_uring_is_supported() -> bool {
         let io_uring = match IoUring::new(1) {
             Ok(io_uring) => io_uring,
             Err(e) => {
-                info!("{} failed to create io_uring instance: {}", error_msg, e);
+                info!("{error_msg} failed to create io_uring instance: {e}");
                 return false;
             }
         };
@@ -658,26 +658,26 @@ pub fn block_io_uring_is_supported() -> bool {
         match submitter.register_probe(&mut probe) {
             Ok(_) => {}
             Err(e) => {
-                info!("{} failed to register a probe: {}", error_msg, e);
+                info!("{error_msg} failed to register a probe: {e}");
                 return false;
             }
         }
 
         // Check IORING_OP_FSYNC is supported
         if !probe.is_supported(opcode::Fsync::CODE) {
-            info!("{} IORING_OP_FSYNC operation not supported", error_msg);
+            info!("{error_msg} IORING_OP_FSYNC operation not supported");
             return false;
         }
 
         // Check IORING_OP_READV is supported
         if !probe.is_supported(opcode::Readv::CODE) {
-            info!("{} IORING_OP_READV operation not supported", error_msg);
+            info!("{error_msg} IORING_OP_READV operation not supported");
             return false;
         }
 
         // Check IORING_OP_WRITEV is supported
         if !probe.is_supported(opcode::Writev::CODE) {
-            info!("{} IORING_OP_WRITEV operation not supported", error_msg);
+            info!("{error_msg} IORING_OP_WRITEV operation not supported");
             return false;
         }
 
