@@ -491,12 +491,12 @@ impl RateLimiter {
             BucketUpdate::Disabled => guard.bandwidth = None,
             BucketUpdate::Update(tb) => guard.bandwidth = Some(tb),
             BucketUpdate::None => (),
-        };
+        }
         match ops {
             BucketUpdate::Disabled => guard.ops = None,
             BucketUpdate::Update(tb) => guard.ops = Some(tb),
             BucketUpdate::None => (),
-        };
+        }
     }
 }
 

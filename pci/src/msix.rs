@@ -288,7 +288,7 @@ impl MsixConfig {
                         self.table_entries[index].vector_ctl = value;
                     }
                     _ => error!("invalid offset"),
-                };
+                }
 
                 debug!("MSI_W TABLE offset 0x{offset:x} data 0x{value:x}");
             }
@@ -304,12 +304,12 @@ impl MsixConfig {
                         self.table_entries[index].vector_ctl = (value >> 32) as u32;
                     }
                     _ => error!("invalid offset"),
-                };
+                }
 
                 debug!("MSI_W TABLE offset 0x{offset:x} data 0x{value:x}");
             }
             _ => error!("invalid data length"),
-        };
+        }
 
         let table_entry = &self.table_entries[index];
 

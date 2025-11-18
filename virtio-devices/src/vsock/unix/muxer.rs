@@ -753,7 +753,7 @@ impl VsockMuxer {
                         conn.kill();
                         warn!("vsock: unable to ack host connection: {err:?}");
                     }
-                };
+                }
             }
 
             // If the connection wasn't previously scheduled for RX, add it to our RX queue.
@@ -975,7 +975,7 @@ mod unit_tests {
                     EpollListener::LocalStream(_) => local_lsn_count += 1,
                     EpollListener::Connection { .. } => conn_lsn_count += 1,
                     _ => (),
-                };
+                }
             }
             (local_lsn_count, conn_lsn_count)
         }

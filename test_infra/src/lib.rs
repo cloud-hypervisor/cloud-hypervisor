@@ -644,7 +644,7 @@ fn scp_to_guest_with_auth(
                     return Err(e);
                 }
             }
-        };
+        }
         thread::sleep(std::time::Duration::new((timeout * counter).into(), 0));
     }
     Ok(())
@@ -730,7 +730,7 @@ pub fn ssh_command_ip_with_auth(
                     return Err(e);
                 }
             }
-        };
+        }
         thread::sleep(std::time::Duration::new((timeout * counter).into(), 0));
     }
     Ok(s)
@@ -1334,7 +1334,7 @@ impl<'a> GuestCommand<'a> {
             Debug => {
                 self.command.args(["-vv"]);
             }
-        };
+        }
 
         if self.print_cmd {
             println!(

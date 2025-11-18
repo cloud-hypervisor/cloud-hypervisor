@@ -1201,7 +1201,7 @@ fn main() {
             server_api_error_display_modifier,
         );
         process::exit(1)
-    };
+    }
 }
 
 #[cfg(test)]

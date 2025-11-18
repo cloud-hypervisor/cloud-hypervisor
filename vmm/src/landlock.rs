@@ -61,7 +61,7 @@ impl TryFrom<&str> for LandlockAccess {
                         format!("Invalid access: {c}").to_string(),
                     ));
                 }
-            };
+            }
         }
         Ok(LandlockAccess { access })
     }

@@ -779,7 +779,7 @@ fn create_acpi_tables_internal(
 
         prev_tbl_len = slit.len() as u64;
         prev_tbl_addr = slit_addr;
-    };
+    }
 
     #[cfg(target_arch = "aarch64")]
     {
@@ -957,7 +957,7 @@ pub fn create_acpi_tables_tdx(
 
         // SLIT
         tables.push(create_slit_table(numa_nodes));
-    };
+    }
 
     // VIOT
     if let Some((iommu_bdf, devices_bdf)) = device_manager.lock().unwrap().iommu_attached_devices()

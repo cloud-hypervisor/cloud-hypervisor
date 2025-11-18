@@ -275,7 +275,7 @@ impl RateLimiterGroup {
                         error!("rate-limit-group worker panicked");
                         exit_evt.write(1).unwrap();
                     }
-                };
+                }
             })
             .map(|thread| self.epoll_thread.insert(thread))
             .map_err(Error::ThreadSpawn)?;

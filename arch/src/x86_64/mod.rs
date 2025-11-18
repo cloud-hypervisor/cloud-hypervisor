@@ -824,7 +824,7 @@ pub fn configure_vcpu(
                                * APIC_BUS_CYCLE_NS */
                 ..Default::default()
             });
-        };
+        }
     }
 
     for c in &cpuid {

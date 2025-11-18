@@ -54,7 +54,7 @@ where
                         thread_exit_evt.write(1).ok();
                     }
                 }
-            };
+            }
         })
         .map(|thread| epoll_threads.push(thread))
         .map_err(|e| {

@@ -464,7 +464,7 @@ impl VmOps for VmOpsHandler {
                 info!("Barrier released");
             }
             _ => {}
-        };
+        }
         Ok(())
     }
 
@@ -488,7 +488,7 @@ impl VmOps for VmOpsHandler {
                 info!("Barrier released");
             }
             _ => {}
-        };
+        }
         Ok(())
     }
 }

@@ -748,7 +748,7 @@ impl Vmm {
                                         error!("Error creating Landlock object: {e:?}");
                                         exit_evt.write(1).ok();
                                     }
-                                };
+                                }
                             }
 
                             std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -1513,7 +1513,7 @@ impl RequestHandler for Vmm {
             // If we don't have a config, we cannot boot a VM.
             if self.vm_config.is_none() {
                 return Err(VmError::VmMissingConfig);
-            };
+            }
 
             // console_info is set to None in vm_shutdown. re-populate here if empty
             if self.console_info.is_none() {

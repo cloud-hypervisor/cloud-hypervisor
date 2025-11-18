@@ -101,7 +101,7 @@ fn set_op<T: CpuStateManager>(
             platform.write_memory(addr, &value.to_le_bytes()[..op_size])?;
         }
         k => return Err(PlatformError::InvalidOperand(anyhow!("{:?}", k))),
-    };
+    }
 
     Ok(())
 }

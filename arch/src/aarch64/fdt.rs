@@ -1150,7 +1150,7 @@ fn print_node(node: fdt_parser::node::FdtNode<'_, '_>, n_spaces: usize) {
                 array,
                 indent = (n_spaces + 2)
             );
-        };
+        }
     }
 
     // Print children nodes if there is any

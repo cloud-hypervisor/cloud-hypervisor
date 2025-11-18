@@ -73,7 +73,7 @@ fn split_commas(s: &str) -> OptionParserResult<Vec<String>> {
                 continue;
             }
             _ => {}
-        };
+        }
         current.push(c);
     }
     list.push(current);

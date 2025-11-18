@@ -593,7 +593,7 @@ impl PciConfiguration {
                     writable_bits[9] = 0xfff0_fff0; // Memory base and limit
                     writable_bits[15] = 0xffff_00ff; // Bridge control (r/w), interrupt line (r/w)
                 }
-            };
+            }
             registers[11] = (u32::from(subsystem_id) << 16) | u32::from(subsystem_vendor_id);
 
             (

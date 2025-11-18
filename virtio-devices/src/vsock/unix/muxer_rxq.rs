@@ -102,7 +102,7 @@ impl MuxerRxQ {
             MuxerRx::ConnRx(_) => {
                 self.synced = false;
             }
-        };
+        }
 
         false
     }

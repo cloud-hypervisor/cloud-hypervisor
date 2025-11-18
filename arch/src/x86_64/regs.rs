@@ -108,7 +108,7 @@ pub fn setup_regs(vcpu: &dyn hypervisor::Vcpu, entry_point: EntryPoint) -> Resul
             regs.set_rsp(BOOT_STACK_POINTER.raw_value());
             regs.set_rsi(ZERO_PAGE_START.raw_value());
         }
-    };
+    }
     vcpu.set_regs(&regs).map_err(Error::SetBaseRegisters)
 }
 

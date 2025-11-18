@@ -7683,7 +7683,7 @@ mod ivshmem {
                 None,
                 "source VM was not terminated successfully.",
             );
-        };
+        }
 
         // Post live-migration check to make sure the destination VM is functional
         let r = std::panic::catch_unwind(|| {
@@ -10098,7 +10098,7 @@ mod live_migration {
                 None,
                 "source VM was not terminated successfully.",
             );
-        };
+        }
 
         // Post live-migration check to make sure the destination VM is functional
         let r = std::panic::catch_unwind(|| {
@@ -10272,7 +10272,7 @@ mod live_migration {
                 None,
                 "source VM was not terminated successfully.",
             );
-        };
+        }
 
         // Post live-migration check to make sure the destination VM is functional
         let r = std::panic::catch_unwind(|| {
@@ -10490,7 +10490,7 @@ mod live_migration {
                 None,
                 "source VM was not terminated successfully.",
             );
-        };
+        }
 
         // Post live-migration check to make sure the destination VM is functional
         let r = std::panic::catch_unwind(|| {
@@ -10706,7 +10706,7 @@ mod live_migration {
                 None,
                 "source VM was not terminated successfully.",
             );
-        };
+        }
 
         // Post live-migration check to make sure the destination VM is functional
         let r = std::panic::catch_unwind(|| {
@@ -10816,7 +10816,7 @@ mod live_migration {
                 Some(ovs_child),
                 "source VM was not terminated successfully.",
             );
-        };
+        }
 
         // Post live-migration check to make sure the destination VM is functional
         let r = std::panic::catch_unwind(|| {
@@ -10963,7 +10963,7 @@ mod live_migration {
                 None,
                 "source VM was not terminated successfully.",
             );
-        };
+        }
 
         // Post live-migration check to make sure the destination VM is functioning
         let r = std::panic::catch_unwind(|| {
@@ -11177,7 +11177,7 @@ mod live_migration {
                 None,
                 "Source VM was not terminated successfully.",
             );
-        };
+        }
 
         // After live migration, ensure the destination VM is running normally
         let r = std::panic::catch_unwind(|| {

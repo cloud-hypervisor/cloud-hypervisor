@@ -124,7 +124,7 @@ impl EpollHelperHandler for NetCtrlEpollHandler {
                             "Error getting notification state of control queue: {e}"
                         )));
                     }
-                };
+                }
             }
             _ => {
                 return Err(EpollHelperError::HandleEvent(anyhow!(

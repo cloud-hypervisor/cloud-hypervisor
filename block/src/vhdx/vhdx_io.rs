@@ -128,7 +128,7 @@ pub fn read(
             _ => {
                 return Err(VhdxIoError::InvalidBatEntryState);
             }
-        };
+        }
         sector_count -= sector.free_sectors;
         sector_index += sector.free_sectors;
         read_count += sector.free_bytes as usize;
@@ -210,7 +210,7 @@ pub fn write(
             _ => {
                 return Err(VhdxIoError::InvalidBatEntryState);
             }
-        };
+        }
         sector_count -= sector.free_sectors;
         sector_index += sector.free_sectors;
         write_count += sector.free_bytes as usize;
