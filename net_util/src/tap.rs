@@ -638,13 +638,6 @@ mod unit_tests {
         }
     }
 
-    fn tap_name_to_string(tap: &Tap) -> String {
-        let null_pos = tap.if_name.iter().position(|x| *x == 0).unwrap();
-        str::from_utf8(&tap.if_name[..null_pos])
-            .unwrap()
-            .to_string()
-    }
-
     // Given a buffer of appropriate size, this fills in the relevant fields based on the
     // provided information. Payload refers to the UDP payload.
     fn pnet_build_packet(buf: &mut [u8], dst_mac: MacAddr, payload: &[u8]) {
@@ -785,7 +778,7 @@ mod unit_tests {
         tap.enable().unwrap();
 
         // Send a packet to the interface. We expect to be able to receive it on the associated fd.
-        pnet_send_packet(tap_name_to_string(&tap));
+        pnet_send_packet(tap.if_name_as_str().to_owned());
 
         let mut buf = [0u8; 4096];
 
@@ -843,7 +836,7 @@ mod unit_tests {
         tap.set_ip_addr(ip_addr, Some(netmask)).unwrap();
         tap.enable().unwrap();
 
-        let (mac, _, mut rx) = pnet_get_mac_tx_rx(tap_name_to_string(&tap));
+        let (mac, _, mut rx) = pnet_get_mac_tx_rx(tap.if_name_as_str().to_owned());
 
         let payload = DATA_STRING.as_bytes();
 
