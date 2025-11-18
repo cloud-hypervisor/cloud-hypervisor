@@ -83,7 +83,10 @@ PAGE_NUM=$((12288 * 1024 / HUGEPAGESIZE))
 echo "$PAGE_NUM" | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
+# Common configuration for every test run
 export RUST_BACKTRACE=1
+export RUSTFLAGS="$RUSTFLAGS"
+
 time cargo nextest run $test_features --retries 3 --no-fail-fast --test-threads=$(($(nproc) / 4)) "live_migration_parallel::$test_filter" -- ${test_binary_args[*]}
 
 RES=$?

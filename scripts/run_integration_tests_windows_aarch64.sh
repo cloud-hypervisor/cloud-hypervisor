@@ -36,7 +36,9 @@ dmsetup mknodes
 dmsetup create windows-snapshot-base --table "0 $img_blk_size snapshot-origin /dev/mapper/windows-base"
 dmsetup mknodes
 
+# Common configuration for every test run
 export RUST_BACKTRACE=1
+export RUSTFLAGS="$RUSTFLAGS"
 
 cargo build --all --release --target "$BUILD_TARGET"
 

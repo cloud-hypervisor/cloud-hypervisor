@@ -55,7 +55,10 @@ fi
 
 cargo build --features mshv --all --release --target "$BUILD_TARGET"
 
+# Common configuration for every test run
 export RUST_BACKTRACE=1
+export RUSTFLAGS="$RUSTFLAGS"
+
 time cargo nextest run $test_features --test-threads=1 "rate_limiter::$test_filter" -- ${test_binary_args[*]}
 RES=$?
 

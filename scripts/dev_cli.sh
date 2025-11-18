@@ -47,6 +47,9 @@ CARGO_GIT_REGISTRY_DIR="${CLH_BUILD_DIR}/cargo_git_registry"
 # Full path to the cargo target dir on the host.
 CARGO_TARGET_DIR="${CLH_BUILD_DIR}/cargo_target"
 
+# Let tests know that the special environment is set up.
+RUSTFLAGS="${RUSTFLAGS} --cfg devcli_testenv"
+
 # Send a decorated message to stdout, followed by a new line
 #
 say() {

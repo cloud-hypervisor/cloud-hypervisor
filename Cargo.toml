@@ -162,3 +162,7 @@ zerocopy = { version = "0.8.27", default-features = false }
 # https://rust-lang.github.io/rust-clippy/master/index.html
 assertions_on_result_states = "deny"
 undocumented_unsafe_blocks = "deny"
+
+[workspace.lints.rust]
+# `level = warn` is irrelevant here but mandatory for rustc/cargo
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(devcli_testenv)'] }
