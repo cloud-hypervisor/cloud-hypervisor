@@ -739,7 +739,7 @@ impl VcpuState {
 
     fn join_thread(&mut self) -> Result<()> {
         if let Some(handle) = self.handle.take() {
-            handle.join().map_err(Error::ThreadCleanup)?
+            handle.join().map_err(Error::ThreadCleanup)?;
         }
 
         Ok(())
@@ -747,7 +747,7 @@ impl VcpuState {
 
     fn unpark_thread(&self) {
         if let Some(handle) = self.handle.as_ref() {
-            handle.thread().unpark()
+            handle.thread().unpark();
         }
     }
 }
@@ -823,7 +823,7 @@ impl CpuManager {
             let mut cpu_list = Vec::new();
             for (proximity_domain, numa_node) in numa_nodes.iter() {
                 for cpu in numa_node.cpus.iter() {
-                    cpu_list.push((*cpu, *proximity_domain))
+                    cpu_list.push((*cpu, *proximity_domain));
                 }
             }
             cpu_list
@@ -1263,7 +1263,7 @@ impl CpuManager {
                                                 Ok(details) => match details {
                                                     TdxExitDetails::GetQuote => warn!("TDG_VP_VMCALL_GET_QUOTE not supported"),
                                                     TdxExitDetails::SetupEventNotifyInterrupt => {
-                                                        warn!("TDG_VP_VMCALL_SETUP_EVENT_NOTIFY_INTERRUPT not supported")
+                                                        warn!("TDG_VP_VMCALL_SETUP_EVENT_NOTIFY_INTERRUPT not supported");
                                                     }
                                                 },
                                                 Err(e) => error!("Unexpected TDX VMCALL: {e}"),
@@ -1424,7 +1424,7 @@ impl CpuManager {
             cmp::Ordering::Greater => {
                 let vcpus = self.create_vcpus(desired_vcpus, None)?;
                 for vcpu in vcpus {
-                    self.configure_vcpu(vcpu, None)?
+                    self.configure_vcpu(vcpu, None)?;
                 }
                 self.activate_vcpus(desired_vcpus, true, None)?;
                 Ok(true)
@@ -2223,7 +2223,7 @@ impl Aml for CpuNotify {
             &aml::Equal::new(&aml::Arg(0), &self.cpu_id),
             vec![&aml::Notify::new(&object, &aml::Arg(1))],
         )
-        .to_aml_bytes(sink)
+        .to_aml_bytes(sink);
     }
 }
 
@@ -2338,9 +2338,9 @@ impl Aml for CpuMethods {
                     &aml::Release::new("\\_SB_.PRES.CPLK".into()),
                 ],
             )
-            .to_aml_bytes(sink)
+            .to_aml_bytes(sink);
         } else {
-            aml::Method::new("CSCN".into(), 0, true, vec![]).to_aml_bytes(sink)
+            aml::Method::new("CSCN".into(), 0, true, vec![]).to_aml_bytes(sink);
         }
     }
 }
@@ -2435,7 +2435,7 @@ impl Aml for CpuManager {
             cpu_data_inner.push(cpu_device);
         }
 
-        aml::Device::new("_SB_.CPUS".into(), cpu_data_inner).to_aml_bytes(sink)
+        aml::Device::new("_SB_.CPUS".into(), cpu_data_inner).to_aml_bytes(sink);
     }
 }
 

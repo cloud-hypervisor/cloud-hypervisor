@@ -228,7 +228,7 @@ impl VhostUserBackendMut for VhostUserNetBackend {
                 {
                     vring
                         .signal_used_queue()
-                        .map_err(Error::FailedSignalingUsedQueue)?
+                        .map_err(Error::FailedSignalingUsedQueue)?;
                 }
             }
             3 => {
@@ -240,7 +240,7 @@ impl VhostUserBackendMut for VhostUserNetBackend {
                 {
                     vring
                         .signal_used_queue()
-                        .map_err(Error::FailedSignalingUsedQueue)?
+                        .map_err(Error::FailedSignalingUsedQueue)?;
                 }
             }
             _ => return Err(Error::HandleEventUnknownEvent.into()),
@@ -406,7 +406,7 @@ pub fn start_net_backend(backend_command: &str) {
 
     for thread in net_backend.read().unwrap().threads.iter() {
         if let Err(e) = thread.lock().unwrap().kill_evt.write(1) {
-            error!("Error shutting down worker thread: {e:?}")
+            error!("Error shutting down worker thread: {e:?}");
         }
     }
 }

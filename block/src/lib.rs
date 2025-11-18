@@ -122,7 +122,7 @@ pub fn build_serial(disk_path: &Path) -> Vec<u8> {
             // This will also zero out any leftover bytes.
             let disk_id = m.as_bytes();
             let bytes_to_copy = cmp::min(disk_id.len(), VIRTIO_BLK_ID_BYTES as usize);
-            default_serial[..bytes_to_copy].clone_from_slice(&disk_id[..bytes_to_copy])
+            default_serial[..bytes_to_copy].clone_from_slice(&disk_id[..bytes_to_copy]);
         }
     }
     default_serial
@@ -563,7 +563,7 @@ impl Request {
                         aligned_operation.aligned_ptr as *const u8,
                         aligned_operation.origin_ptr as *mut u8,
                         aligned_operation.size,
-                    )
+                    );
                 };
             }
 
@@ -574,7 +574,7 @@ impl Request {
                 dealloc(
                     aligned_operation.aligned_ptr as *mut u8,
                     aligned_operation.layout,
-                )
+                );
             };
         }
 
@@ -582,7 +582,7 @@ impl Request {
     }
 
     pub fn set_writeback(&mut self, writeback: bool) {
-        self.writeback = writeback
+        self.writeback = writeback;
     }
 }
 

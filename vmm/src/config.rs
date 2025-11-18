@@ -1835,11 +1835,11 @@ impl ConsoleConfig {
 
         if parser.is_set("off") {
         } else if parser.is_set("pty") {
-            mode = ConsoleOutputMode::Pty
+            mode = ConsoleOutputMode::Pty;
         } else if parser.is_set("tty") {
-            mode = ConsoleOutputMode::Tty
+            mode = ConsoleOutputMode::Tty;
         } else if parser.is_set("null") {
-            mode = ConsoleOutputMode::Null
+            mode = ConsoleOutputMode::Null;
         } else if parser.is_set("file") {
             mode = ConsoleOutputMode::File;
             file =
@@ -1890,11 +1890,11 @@ impl DebugConsoleConfig {
 
         if parser.is_set("off") {
         } else if parser.is_set("pty") {
-            mode = ConsoleOutputMode::Pty
+            mode = ConsoleOutputMode::Pty;
         } else if parser.is_set("tty") {
-            mode = ConsoleOutputMode::Tty
+            mode = ConsoleOutputMode::Tty;
         } else if parser.is_set("null") {
-            mode = ConsoleOutputMode::Null
+            mode = ConsoleOutputMode::Null;
         } else if parser.is_set("file") {
             mode = ConsoleOutputMode::File;
             file =
@@ -2327,7 +2327,7 @@ impl RestoreConfig {
         }
 
         if !restored_net_with_fds.is_empty() {
-            warn!("Ignoring unused 'net_fds' for VM restore.")
+            warn!("Ignoring unused 'net_fds' for VM restore.");
         }
 
         Ok(())

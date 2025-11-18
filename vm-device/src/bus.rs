@@ -43,7 +43,7 @@ impl<B: BusDevice> BusDeviceSync for Mutex<B> {
     fn read(&self, base: u64, offset: u64, data: &mut [u8]) {
         self.lock()
             .expect("Failed to acquire device lock")
-            .read(base, offset, data)
+            .read(base, offset, data);
     }
     /// Writes at `offset` into this device
     fn write(&self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
@@ -275,7 +275,7 @@ mod unit_tests {
 
         fn write(&self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
             for (i, v) in data.iter().enumerate() {
-                assert_eq!(*v, (offset as u8) + (i as u8))
+                assert_eq!(*v, (offset as u8) + (i as u8));
             }
 
             None

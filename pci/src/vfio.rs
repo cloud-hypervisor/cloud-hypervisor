@@ -238,14 +238,14 @@ impl Interrupt {
     fn msix_write_table(&mut self, offset: u64, data: &[u8]) {
         if let Some(msix) = &mut self.msix {
             let offset = offset - u64::from(msix.cap.table_offset());
-            msix.bar.write_table(offset, data)
+            msix.bar.write_table(offset, data);
         }
     }
 
     fn msix_read_table(&self, offset: u64, data: &mut [u8]) {
         if let Some(msix) = &self.msix {
             let offset = offset - u64::from(msix.cap.table_offset());
-            msix.bar.read_table(offset, data)
+            msix.bar.read_table(offset, data);
         }
     }
 
@@ -344,7 +344,7 @@ pub(crate) trait Vfio: Send + Sync {
 
     fn write_config_dword(&self, offset: u32, buf: u32) {
         let data: [u8; 4] = buf.to_le_bytes();
-        self.write_config(offset, &data)
+        self.write_config(offset, &data);
     }
 
     fn read_config(&self, offset: u32, data: &mut [u8]) {
@@ -352,7 +352,7 @@ pub(crate) trait Vfio: Send + Sync {
     }
 
     fn write_config(&self, offset: u32, data: &[u8]) {
-        self.region_write(VFIO_PCI_CONFIG_REGION_INDEX, offset.into(), data)
+        self.region_write(VFIO_PCI_CONFIG_REGION_INDEX, offset.into(), data);
     }
 
     fn enable_msi(&self, fds: Vec<&EventFd>) -> Result<(), VfioError> {
@@ -408,11 +408,11 @@ impl VfioDeviceWrapper {
 
 impl Vfio for VfioDeviceWrapper {
     fn region_read(&self, index: u32, offset: u64, data: &mut [u8]) {
-        self.device.region_read(index, data, offset)
+        self.device.region_read(index, data, offset);
     }
 
     fn region_write(&self, index: u32, offset: u64, data: &[u8]) {
-        self.device.region_write(index, data, offset)
+        self.device.region_write(index, data, offset);
     }
 
     fn get_irq_info(&self, irq_index: u32) -> Option<VfioIrq> {
@@ -641,7 +641,7 @@ impl VfioCommon {
                     flags & PCI_CONFIG_BAR_PREFETCHABLE,
                     PCI_CONFIG_BAR_PREFETCHABLE
                 ) {
-                    prefetchable = PciBarPrefetchable::Prefetchable
+                    prefetchable = PciBarPrefetchable::Prefetchable;
                 }
 
                 // To get size write all 1s
@@ -1786,7 +1786,7 @@ impl Drop for VfioPciDevice {
         if let Some(msi) = &self.common.interrupt.msi
             && msi.cfg.enabled()
         {
-            self.common.disable_msi()
+            self.common.disable_msi();
         }
 
         if self.common.interrupt.intx_in_use() {
@@ -1797,7 +1797,7 @@ impl Drop for VfioPciDevice {
 
 impl BusDevice for VfioPciDevice {
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
-        self.read_bar(base, offset, data)
+        self.read_bar(base, offset, data);
     }
 
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
@@ -1870,7 +1870,7 @@ impl PciDevice for VfioPciDevice {
     }
 
     fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]) {
-        self.common.read_bar(base, offset, data)
+        self.common.read_bar(base, offset, data);
     }
 
     fn write_bar(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {

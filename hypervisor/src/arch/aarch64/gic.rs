@@ -66,7 +66,7 @@ impl<'de> Deserialize<'de> for GicState {
             assert!(
                 std::mem::size_of::<GicStateDefaultDeserialize>()
                     == std::mem::size_of::<GicState>()
-            )
+            );
         };
 
         let value: serde_json::Value = Deserialize::deserialize(deserializer)?;

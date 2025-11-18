@@ -87,7 +87,7 @@ impl BusDevice for Cmos {
                         }
                     }
                 } else {
-                    self.data[(self.index & INDEX_MASK) as usize] = data[0]
+                    self.data[(self.index & INDEX_MASK) as usize] = data[0];
                 }
             }
             o => warn!("bad write offset on CMOS device: {o}"),

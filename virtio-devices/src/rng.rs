@@ -239,7 +239,7 @@ impl VirtioDevice for Rng {
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn activate(
@@ -297,7 +297,7 @@ impl VirtioDevice for Rng {
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
-        self.common.set_access_platform(access_platform)
+        self.common.set_access_platform(access_platform);
     }
 }
 

@@ -300,7 +300,7 @@ impl RateLimiterInner {
         self.timer_fd
             .reset(dur, None)
             .expect("Can't arm the timer (unexpected 'timerfd_settime' failure).");
-        flag.store(true, Ordering::Relaxed)
+        flag.store(true, Ordering::Relaxed);
     }
 }
 

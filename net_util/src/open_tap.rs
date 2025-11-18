@@ -91,9 +91,9 @@ fn open_tap_rx_q_0(
         );
     }
     if let Some(mac) = host_mac {
-        tap.set_mac_addr(*mac).map_err(Error::TapSetMac)?
+        tap.set_mac_addr(*mac).map_err(Error::TapSetMac)?;
     } else {
-        *host_mac = Some(tap.get_mac_addr().map_err(Error::TapGetMac)?)
+        *host_mac = Some(tap.get_mac_addr().map_err(Error::TapGetMac)?);
     }
     if let Some(mtu) = mtu {
         tap.set_mtu(mtu as i32).map_err(Error::TapSetMtu)?;

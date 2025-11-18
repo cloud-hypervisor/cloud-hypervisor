@@ -390,7 +390,7 @@ impl PvmemcontrolDevice {
             .iter()
             .skip(offset as usize)
             .zip(data.iter_mut())
-            .for_each(|(src, dest)| *dest = *src)
+            .for_each(|(src, dest)| *dest = *src);
     }
 
     /// can only write to transport payload
@@ -402,7 +402,7 @@ impl PvmemcontrolDevice {
             .iter_mut()
             .skip(offset as usize)
             .zip(data.iter())
-            .for_each(|(dest, src)| *dest = *src)
+            .for_each(|(dest, src)| *dest = *src);
     }
 
     fn find_connection(&self, conn: GuestConnection) -> Option<GuestAddress> {
@@ -650,13 +650,13 @@ impl PvmemcontrolBusDevice {
                             .ok_or(Error::InvalidConnection(conn.command))
                     })
                     .map(|gpa| self.handle_pvmemcontrol_request(gpa))
-                    .unwrap_or_else(|err| warn!("{:?}", err));
+                    .unwrap_or_else(|err| warn!("{err:?}"));
             }
         }
     }
 
     fn handle_guest_read(&self, offset: u64, data: &mut [u8]) {
-        self.dev.read().unwrap().read_transport(offset, data)
+        self.dev.read().unwrap().read_transport(offset, data);
     }
 }
 
@@ -760,7 +760,7 @@ impl PciDevice for PvmemcontrolPciDevice {
         _mmio64_allocator: &mut AddressAllocator,
     ) -> Result<(), PciDeviceError> {
         for bar in self.bar_regions.drain(..) {
-            mmio32_allocator.free(GuestAddress(bar.addr()), bar.size())
+            mmio32_allocator.free(GuestAddress(bar.addr()), bar.size());
         }
         Ok(())
     }
@@ -805,7 +805,7 @@ impl Migratable for PvmemcontrolPciDevice {}
 
 impl BusDeviceSync for PvmemcontrolBusDevice {
     fn read(&self, _base: u64, offset: u64, data: &mut [u8]) {
-        self.handle_guest_read(offset, data)
+        self.handle_guest_read(offset, data);
     }
 
     fn write(&self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {

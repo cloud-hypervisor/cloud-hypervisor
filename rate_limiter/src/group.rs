@@ -72,7 +72,7 @@ impl RateLimiterGroupHandle {
     /// Can be used to *manually* add tokens to a bucket. Useful for reverting a
     /// `consume()` if needed.
     pub fn manual_replenish(&self, tokens: u64, token_type: TokenType) {
-        self.inner.rate_limiter.manual_replenish(tokens, token_type)
+        self.inner.rate_limiter.manual_replenish(tokens, token_type);
     }
 
     /// This function needs to be called every time there is an event on the
@@ -250,7 +250,7 @@ impl RateLimiterGroup {
                                     inner.rate_limiter.event_handler().unwrap();
                                     let handles = inner.handles.lock().unwrap();
                                     for handle in handles.iter() {
-                                        handle.write(1).map_err(Error::EventFdWrite)?
+                                        handle.write(1).map_err(Error::EventFdWrite)?;
                                     }
                                 }
                                 EpollDispatch::Kill => {

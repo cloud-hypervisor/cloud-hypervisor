@@ -874,7 +874,7 @@ impl MetaEvent {
         if v["event"].as_str().unwrap() == self.event {
             if let Some(device_id) = &self.device_id {
                 if v["properties"]["id"].as_str().unwrap() == device_id {
-                    matched = true
+                    matched = true;
                 }
             } else {
                 matched = true;
@@ -2028,7 +2028,7 @@ fn _get_vmm_overhead(pid: u32, guest_memory_size: u32) -> HashMap<String, u32> {
             let values: Vec<&str> = l.split_whitespace().collect();
             region_name = values.last().unwrap().trim().to_string();
             if region_name == "0" {
-                region_name = "anonymous".to_string()
+                region_name = "anonymous".to_string();
             }
         }
 
@@ -2509,13 +2509,13 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_focal_hypervisor_fw() {
-        test_simple_launch(fw_path(FwType::RustHypervisorFirmware), FOCAL_IMAGE_NAME)
+        test_simple_launch(fw_path(FwType::RustHypervisorFirmware), FOCAL_IMAGE_NAME);
     }
 
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_focal_ovmf() {
-        test_simple_launch(fw_path(FwType::Ovmf), FOCAL_IMAGE_NAME)
+        test_simple_launch(fw_path(FwType::Ovmf), FOCAL_IMAGE_NAME);
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -3470,27 +3470,27 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_io_uring() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, false, true)
+        _test_virtio_block(FOCAL_IMAGE_NAME, false, true);
     }
 
     #[test]
     fn test_virtio_block_aio() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, true, false)
+        _test_virtio_block(FOCAL_IMAGE_NAME, true, false);
     }
 
     #[test]
     fn test_virtio_block_sync() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, true, true)
+        _test_virtio_block(FOCAL_IMAGE_NAME, true, true);
     }
 
     #[test]
     fn test_virtio_block_qcow2() {
-        _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2, false, false)
+        _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2, false, false);
     }
 
     #[test]
     fn test_virtio_block_qcow2_backing_file() {
-        _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE, false, false)
+        _test_virtio_block(FOCAL_IMAGE_NAME_QCOW2_BACKING_FILE, false, false);
     }
 
     #[test]
@@ -3515,7 +3515,7 @@ mod common_parallel {
             .output()
             .expect("Expect generating VHD image from RAW image");
 
-        _test_virtio_block(FOCAL_IMAGE_NAME_VHD, false, false)
+        _test_virtio_block(FOCAL_IMAGE_NAME_VHD, false, false);
     }
 
     #[test]
@@ -3539,7 +3539,7 @@ mod common_parallel {
             .output()
             .expect("Expect generating dynamic VHDx image from RAW image");
 
-        _test_virtio_block(FOCAL_IMAGE_NAME_VHDX, false, false)
+        _test_virtio_block(FOCAL_IMAGE_NAME_VHDX, false, false);
     }
 
     #[test]
@@ -3677,7 +3677,7 @@ mod common_parallel {
 
     #[test]
     fn test_vhost_user_net_default() {
-        test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon, false, false)
+        test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon, false, false);
     }
 
     #[test]
@@ -3688,7 +3688,7 @@ mod common_parallel {
             &prepare_vhost_user_net_daemon,
             false,
             false,
-        )
+        );
     }
 
     #[test]
@@ -3699,12 +3699,12 @@ mod common_parallel {
             &prepare_vhost_user_net_daemon,
             false,
             false,
-        )
+        );
     }
 
     #[test]
     fn test_vhost_user_net_multiple_queues() {
-        test_vhost_user_net(None, 4, &prepare_vhost_user_net_daemon, false, false)
+        test_vhost_user_net(None, 4, &prepare_vhost_user_net_daemon, false, false);
     }
 
     #[test]
@@ -3715,40 +3715,40 @@ mod common_parallel {
             &prepare_vhost_user_net_daemon,
             false,
             false,
-        )
+        );
     }
 
     #[test]
     fn test_vhost_user_net_host_mac() {
-        test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon, true, false)
+        test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon, true, false);
     }
 
     #[test]
     fn test_vhost_user_net_client_mode() {
-        test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon, false, true)
+        test_vhost_user_net(None, 2, &prepare_vhost_user_net_daemon, false, true);
     }
 
     #[test]
     #[cfg(not(target_arch = "aarch64"))]
     fn test_vhost_user_blk_default() {
-        test_vhost_user_blk(2, false, false, Some(&prepare_vubd))
+        test_vhost_user_blk(2, false, false, Some(&prepare_vubd));
     }
 
     #[test]
     #[cfg(not(target_arch = "aarch64"))]
     fn test_vhost_user_blk_readonly() {
-        test_vhost_user_blk(1, true, false, Some(&prepare_vubd))
+        test_vhost_user_blk(1, true, false, Some(&prepare_vubd));
     }
 
     #[test]
     #[cfg(not(target_arch = "aarch64"))]
     fn test_vhost_user_blk_direct() {
-        test_vhost_user_blk(1, false, true, Some(&prepare_vubd))
+        test_vhost_user_blk(1, false, true, Some(&prepare_vubd));
     }
 
     #[test]
     fn test_boot_from_vhost_user_blk_default() {
-        test_boot_from_vhost_user_blk(1, false, false, Some(&prepare_vubd))
+        test_boot_from_vhost_user_blk(1, false, false, Some(&prepare_vubd));
     }
 
     #[test]
@@ -3928,32 +3928,32 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_fs() {
-        _test_virtio_fs(&prepare_virtiofsd, false, None)
+        _test_virtio_fs(&prepare_virtiofsd, false, None);
     }
 
     #[test]
     fn test_virtio_fs_hotplug() {
-        _test_virtio_fs(&prepare_virtiofsd, true, None)
+        _test_virtio_fs(&prepare_virtiofsd, true, None);
     }
 
     #[test]
     fn test_virtio_fs_multi_segment_hotplug() {
-        _test_virtio_fs(&prepare_virtiofsd, true, Some(15))
+        _test_virtio_fs(&prepare_virtiofsd, true, Some(15));
     }
 
     #[test]
     fn test_virtio_fs_multi_segment() {
-        _test_virtio_fs(&prepare_virtiofsd, false, Some(15))
+        _test_virtio_fs(&prepare_virtiofsd, false, Some(15));
     }
 
     #[test]
     fn test_virtio_pmem_discard_writes() {
-        test_virtio_pmem(true, false)
+        test_virtio_pmem(true, false);
     }
 
     #[test]
     fn test_virtio_pmem_with_size() {
-        test_virtio_pmem(true, true)
+        test_virtio_pmem(true, true);
     }
 
     #[test]
@@ -4353,7 +4353,7 @@ mod common_parallel {
 
         let r = std::panic::catch_unwind(|| {
             // Check that the cloud-hypervisor binary actually terminated
-            assert!(output.status.success())
+            assert!(output.status.success());
         });
         handle_child_output(r, &output);
     }
@@ -4806,7 +4806,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_vsock() {
-        _test_virtio_vsock(false)
+        _test_virtio_vsock(false);
     }
 
     #[test]
@@ -4819,7 +4819,7 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        _test_api_shutdown(TargetApi::new_http_api(&guest.tmp_dir), guest)
+        _test_api_shutdown(TargetApi::new_http_api(&guest.tmp_dir), guest);
     }
 
     #[test]
@@ -4835,7 +4835,7 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        _test_api_pause_resume(TargetApi::new_http_api(&guest.tmp_dir), guest)
+        _test_api_pause_resume(TargetApi::new_http_api(&guest.tmp_dir), guest);
     }
 
     #[test]
@@ -4843,12 +4843,12 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        _test_api_create_boot(TargetApi::new_http_api(&guest.tmp_dir), guest)
+        _test_api_create_boot(TargetApi::new_http_api(&guest.tmp_dir), guest);
     }
 
     #[test]
     fn test_virtio_iommu() {
-        _test_virtio_iommu(cfg!(target_arch = "x86_64"))
+        _test_virtio_iommu(cfg!(target_arch = "x86_64"));
     }
 
     #[test]
@@ -4957,7 +4957,7 @@ mod common_parallel {
 
     #[test]
     fn test_memory_mergeable_off() {
-        test_memory_mergeable(false)
+        test_memory_mergeable(false);
     }
 
     #[test]
@@ -5558,13 +5558,13 @@ mod common_parallel {
 
     #[test]
     fn test_disk_hotplug() {
-        _test_disk_hotplug(false)
+        _test_disk_hotplug(false);
     }
 
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_disk_hotplug_with_landlock() {
-        _test_disk_hotplug(true)
+        _test_disk_hotplug(true);
     }
 
     fn create_loop_device(backing_file_path: &str, block_size: u32, num_retries: usize) -> String {
@@ -5909,12 +5909,12 @@ mod common_parallel {
 
     #[test]
     fn test_pmem_hotplug() {
-        _test_pmem_hotplug(None)
+        _test_pmem_hotplug(None);
     }
 
     #[test]
     fn test_pmem_multi_segment_hotplug() {
-        _test_pmem_hotplug(Some(15))
+        _test_pmem_hotplug(Some(15));
     }
 
     fn _test_pmem_hotplug(pci_segment: Option<u16>) {
@@ -6054,12 +6054,12 @@ mod common_parallel {
 
     #[test]
     fn test_net_hotplug() {
-        _test_net_hotplug(None)
+        _test_net_hotplug(None);
     }
 
     #[test]
     fn test_net_multi_segment_hotplug() {
-        _test_net_hotplug(Some(15))
+        _test_net_hotplug(Some(15));
     }
 
     fn _test_net_hotplug(pci_segment: Option<u16>) {
@@ -6772,13 +6772,13 @@ mod common_parallel {
     #[test]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #5443")]
     fn test_macvtap() {
-        _test_macvtap(false, "guestmacvtap0", "hostmacvtap0")
+        _test_macvtap(false, "guestmacvtap0", "hostmacvtap0");
     }
 
     #[test]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #5443")]
     fn test_macvtap_hotplug() {
-        _test_macvtap(true, "guestmacvtap1", "hostmacvtap1")
+        _test_macvtap(true, "guestmacvtap1", "hostmacvtap1");
     }
 
     #[test]
@@ -7487,7 +7487,7 @@ mod dbus_api {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        _test_api_create_boot(TargetApi::new_dbus_api(&guest.tmp_dir), guest)
+        _test_api_create_boot(TargetApi::new_dbus_api(&guest.tmp_dir), guest);
     }
 
     #[test]
@@ -7495,7 +7495,7 @@ mod dbus_api {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        _test_api_shutdown(TargetApi::new_dbus_api(&guest.tmp_dir), guest)
+        _test_api_shutdown(TargetApi::new_dbus_api(&guest.tmp_dir), guest);
     }
 
     #[test]
@@ -7511,7 +7511,7 @@ mod dbus_api {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        _test_api_pause_resume(TargetApi::new_dbus_api(&guest.tmp_dir), guest)
+        _test_api_pause_resume(TargetApi::new_dbus_api(&guest.tmp_dir), guest);
     }
 }
 
@@ -7921,13 +7921,13 @@ mod ivshmem {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_ivshmem() {
-        _test_live_migration_ivshmem(false)
+        _test_live_migration_ivshmem(false);
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_live_migration_ivshmem_local() {
-        _test_live_migration_ivshmem(true)
+        _test_live_migration_ivshmem(true);
     }
 }
 
@@ -7939,7 +7939,7 @@ mod common_sequential {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_memory_mergeable_on() {
-        test_memory_mergeable(true)
+        test_memory_mergeable(true);
     }
 
     pub(crate) fn snapshot_and_check_events(
@@ -8018,7 +8018,7 @@ mod common_sequential {
         let mut mem_params = "size=2G";
 
         if use_hotplug {
-            mem_params = "size=2G,hotplug_method=virtio-mem,hotplug_size=32G"
+            mem_params = "size=2G,hotplug_method=virtio-mem,hotplug_size=32G";
         }
 
         let cloudinit_params = format!(
@@ -8635,7 +8635,7 @@ mod common_sequential {
 
     #[test]
     fn test_virtio_pmem_persist_writes() {
-        test_virtio_pmem(false, false)
+        test_virtio_pmem(false, false);
     }
 }
 
@@ -9690,12 +9690,12 @@ mod vfio {
 
     #[test]
     fn test_nvidia_card_memory_hotplug_acpi() {
-        test_nvidia_card_memory_hotplug("acpi")
+        test_nvidia_card_memory_hotplug("acpi");
     }
 
     #[test]
     fn test_nvidia_card_memory_hotplug_virtio_mem() {
-        test_nvidia_card_memory_hotplug("virtio-mem")
+        test_nvidia_card_memory_hotplug("virtio-mem");
     }
 
     #[test]
@@ -11203,12 +11203,12 @@ mod live_migration {
         use super::*;
         #[test]
         fn test_live_migration_basic() {
-            _test_live_migration(false, false)
+            _test_live_migration(false, false);
         }
 
         #[test]
         fn test_live_migration_local() {
-            _test_live_migration(false, true)
+            _test_live_migration(false, true);
         }
 
         #[test]
@@ -11218,37 +11218,37 @@ mod live_migration {
 
         #[test]
         fn test_live_migration_watchdog() {
-            _test_live_migration_watchdog(false, false)
+            _test_live_migration_watchdog(false, false);
         }
 
         #[test]
         fn test_live_migration_watchdog_local() {
-            _test_live_migration_watchdog(false, true)
+            _test_live_migration_watchdog(false, true);
         }
 
         #[test]
         fn test_live_upgrade_basic() {
-            _test_live_migration(true, false)
+            _test_live_migration(true, false);
         }
 
         #[test]
         fn test_live_upgrade_local() {
-            _test_live_migration(true, true)
+            _test_live_migration(true, true);
         }
 
         #[test]
         fn test_live_upgrade_watchdog() {
-            _test_live_migration_watchdog(true, false)
+            _test_live_migration_watchdog(true, false);
         }
 
         #[test]
         fn test_live_upgrade_watchdog_local() {
-            _test_live_migration_watchdog(true, true)
+            _test_live_migration_watchdog(true, true);
         }
         #[test]
         #[cfg(target_arch = "x86_64")]
         fn test_live_migration_with_landlock() {
-            _test_live_migration_with_landlock()
+            _test_live_migration_with_landlock();
         }
     }
 
@@ -11259,42 +11259,42 @@ mod live_migration {
 
         #[test]
         fn test_live_migration_balloon() {
-            _test_live_migration_balloon(false, false)
+            _test_live_migration_balloon(false, false);
         }
 
         #[test]
         fn test_live_migration_balloon_local() {
-            _test_live_migration_balloon(false, true)
+            _test_live_migration_balloon(false, true);
         }
 
         #[test]
         fn test_live_upgrade_balloon() {
-            _test_live_migration_balloon(true, false)
+            _test_live_migration_balloon(true, false);
         }
 
         #[test]
         fn test_live_upgrade_balloon_local() {
-            _test_live_migration_balloon(true, true)
+            _test_live_migration_balloon(true, true);
         }
 
         #[test]
         fn test_live_migration_numa() {
-            _test_live_migration_numa(false, false)
+            _test_live_migration_numa(false, false);
         }
 
         #[test]
         fn test_live_migration_numa_local() {
-            _test_live_migration_numa(false, true)
+            _test_live_migration_numa(false, true);
         }
 
         #[test]
         fn test_live_upgrade_numa() {
-            _test_live_migration_numa(true, false)
+            _test_live_migration_numa(true, false);
         }
 
         #[test]
         fn test_live_upgrade_numa_local() {
-            _test_live_migration_numa(true, true)
+            _test_live_migration_numa(true, true);
         }
 
         // Require to run ovs-dpdk tests sequentially because they rely on the same ovs-dpdk setup
@@ -11395,7 +11395,7 @@ mod aarch64_acpi {
 
     #[test]
     fn test_virtio_iommu() {
-        _test_virtio_iommu(true)
+        _test_virtio_iommu(true);
     }
 }
 
@@ -11674,7 +11674,7 @@ mod rate_limiter {
     #[test]
     fn test_rate_limiter_block_bandwidth() {
         _test_rate_limiter_block(true, 1);
-        _test_rate_limiter_block(true, 2)
+        _test_rate_limiter_block(true, 2);
     }
 
     #[test]

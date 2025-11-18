@@ -26,9 +26,9 @@ impl BusDevice for FwDebugDevice {
     /// Upon read return the magic value to indicate that there is a debug port
     fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
         if data.len() == 1 {
-            data[0] = 0xe9
+            data[0] = 0xe9;
         } else {
-            error!("Invalid read size on debug port: {}", data.len())
+            error!("Invalid read size on debug port: {}", data.len());
         }
     }
 
@@ -36,7 +36,7 @@ impl BusDevice for FwDebugDevice {
         if data.len() == 1 {
             print!("{}", data[0] as char);
         } else {
-            error!("Invalid write size on debug port: {}", data.len())
+            error!("Invalid write size on debug port: {}", data.len());
         }
 
         None

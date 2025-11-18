@@ -1399,7 +1399,7 @@ impl cpu::Vcpu for MshvVcpu {
         if self.vp_index == 0 {
             self.fd
                 .set_misc_regs(&state.misc)
-                .map_err(|e| cpu::HypervisorCpuError::SetMiscRegs(e.into()))?
+                .map_err(|e| cpu::HypervisorCpuError::SetMiscRegs(e.into()))?;
         }
         self.fd
             .set_debug_regs(&state.dbg)

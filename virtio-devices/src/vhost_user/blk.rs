@@ -244,7 +244,7 @@ impl VirtioDevice for Blk {
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -346,7 +346,7 @@ impl VirtioDevice for Blk {
     }
 
     fn shutdown(&mut self) {
-        self.vu_common.shutdown()
+        self.vu_common.shutdown();
     }
 
     fn add_memory_region(

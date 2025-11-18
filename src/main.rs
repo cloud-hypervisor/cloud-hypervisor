@@ -770,7 +770,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         .map_err(Error::VmmThread)?;
 
     if let Some(api_handle) = vmm_thread_handle.http_api_handle {
-        http_api_graceful_shutdown(api_handle).map_err(Error::HttpApiShutdown)?
+        http_api_graceful_shutdown(api_handle).map_err(Error::HttpApiShutdown)?;
     }
 
     #[cfg(feature = "dbus_api")]
@@ -2010,6 +2010,6 @@ mod unit_tests {
         let (default_vcpus, default_memory, default_rng) = prepare_default_values();
         let args = get_cli_options_sorted(default_vcpus, default_memory, default_rng);
 
-        assert_args_sorted(|| args.iter())
+        assert_args_sorted(|| args.iter());
     }
 }

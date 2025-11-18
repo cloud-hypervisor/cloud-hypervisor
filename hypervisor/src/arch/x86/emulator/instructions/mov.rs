@@ -699,7 +699,7 @@ mod unit_tests {
         }
 
         for (register, instruction_prefix) in test_inputs {
-            helper(register, instruction_prefix)
+            helper(register, instruction_prefix);
         }
     }
 
@@ -760,7 +760,7 @@ mod unit_tests {
         }
 
         for (register, instruction_prefix) in test_inputs {
-            helper(register, instruction_prefix)
+            helper(register, instruction_prefix);
         }
     }
 }

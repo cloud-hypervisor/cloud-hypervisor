@@ -1627,7 +1627,7 @@ impl Vm {
 
         // Wait for all the threads to finish
         for thread in self.threads.drain(..) {
-            thread.join().map_err(Error::ThreadCleanup)?
+            thread.join().map_err(Error::ThreadCleanup)?;
         }
         *state = new_state;
 
@@ -2350,7 +2350,7 @@ impl Vm {
                         &self.memory_manager,
                         &self.numa_nodes,
                         tpm_enabled,
-                    )?
+                    )?;
                 }
             }
         }

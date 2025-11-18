@@ -209,7 +209,7 @@ impl IvshmemDevice {
 
 impl BusDevice for IvshmemDevice {
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
-        self.read_bar(base, offset, data)
+        self.read_bar(base, offset, data);
     }
 
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {

@@ -119,12 +119,12 @@ impl SystemAllocator {
     /// Free an IO address range.
     /// We can only free a range if it matches exactly an already allocated range.
     pub fn free_io_addresses(&mut self, address: GuestAddress, size: GuestUsize) {
-        self.io_address_space.free(address, size)
+        self.io_address_space.free(address, size);
     }
 
     /// Free a platform MMIO address range.
     /// We can only free a range if it matches exactly an already allocated range.
     pub fn free_platform_mmio_addresses(&mut self, address: GuestAddress, size: GuestUsize) {
-        self.platform_mmio_address_space.free(address, size)
+        self.platform_mmio_address_space.free(address, size);
     }
 }

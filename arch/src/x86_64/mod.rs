@@ -634,7 +634,7 @@ pub fn generate_common_cpuid(
             // Clear AMX related bits if the AMX feature is not enabled
             0x7 => {
                 if !config.amx && entry.index == 0 {
-                    entry.edx &= !((1 << AMX_BF16) | (1 << AMX_TILE) | (1 << AMX_INT8))
+                    entry.edx &= !((1 << AMX_BF16) | (1 << AMX_TILE) | (1 << AMX_INT8));
                 }
             }
             0xd =>
@@ -701,7 +701,7 @@ pub fn generate_common_cpuid(
                         | (1 << KVM_FEATURE_CLOCKSOURCE_STABLE_BIT)
                         | (1 << KVM_FEATURE_ASYNC_PF_BIT)
                         | (1 << KVM_FEATURE_ASYNC_PF_VMEXIT_BIT)
-                        | (1 << KVM_FEATURE_STEAL_TIME_BIT))
+                        | (1 << KVM_FEATURE_STEAL_TIME_BIT));
                 }
             }
             _ => {}

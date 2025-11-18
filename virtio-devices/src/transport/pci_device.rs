@@ -395,7 +395,7 @@ impl VirtioPciDevice {
         for _ in locked_device.queue_max_sizes().iter() {
             queue_evts.push(EventFd::new(EFD_NONBLOCK).map_err(|e| {
                 VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!("Failed creating eventfd: {e}"))
-            })?)
+            })?);
         }
         let num_queues = locked_device.queue_max_sizes().len();
 
@@ -748,7 +748,7 @@ impl VirtioPciDevice {
             let bar_offset: u32 =
                 // SAFETY: we know self.cap_pci_cfg_info.cap.cap.offset is 32bits long.
                 unsafe { std::mem::transmute(self.cap_pci_cfg_info.cap.cap.offset) };
-            self.read_bar(0, bar_offset as u64, data)
+            self.read_bar(0, bar_offset as u64, data);
         }
     }
 
@@ -1240,7 +1240,7 @@ impl PciDevice for VirtioPciDevice {
 
 impl BusDevice for VirtioPciDevice {
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
-        self.read_bar(base, offset, data)
+        self.read_bar(base, offset, data);
     }
 
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {

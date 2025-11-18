@@ -274,7 +274,7 @@ impl VfioUserPciDevice {
 
 impl BusDevice for VfioUserPciDevice {
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
-        self.read_bar(base, offset, data)
+        self.read_bar(base, offset, data);
     }
 
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
@@ -440,7 +440,7 @@ impl PciDevice for VfioUserPciDevice {
     }
 
     fn read_bar(&mut self, base: u64, offset: u64, data: &mut [u8]) {
-        self.common.read_bar(base, offset, data)
+        self.common.read_bar(base, offset, data);
     }
 
     fn write_bar(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
@@ -514,7 +514,7 @@ impl Drop for VfioUserPciDevice {
         if let Some(msi) = &self.common.interrupt.msi
             && msi.cfg.enabled()
         {
-            self.common.disable_msi()
+            self.common.disable_msi();
         }
 
         if self.common.interrupt.intx_in_use() {

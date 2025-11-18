@@ -120,7 +120,7 @@ impl CtrlQueue {
                             tap.set_offload(virtio_features_to_tap_offload(features))
                                 .map_err(|e| {
                                     error!("Error programming tap offload: {e:?}");
-                                    ok = false
+                                    ok = false;
                                 })
                                 .ok();
                         }

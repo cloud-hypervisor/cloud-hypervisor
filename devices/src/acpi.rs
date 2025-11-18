@@ -44,7 +44,7 @@ impl AcpiShutdownDevice {
 impl BusDevice for AcpiShutdownDevice {
     // Spec has all fields as zero
     fn read(&mut self, _base: u64, _offset: u64, data: &mut [u8]) {
-        data.fill(0)
+        data.fill(0);
     }
 
     fn write(&mut self, _base: u64, _offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
@@ -213,7 +213,7 @@ impl Aml for AcpiGedDevice {
                 ),
             ],
         )
-        .to_aml_bytes(sink)
+        .to_aml_bytes(sink);
     }
 }
 

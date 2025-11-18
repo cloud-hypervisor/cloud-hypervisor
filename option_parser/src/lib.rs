@@ -407,7 +407,7 @@ fn dequote(s: &str) -> String {
         } else {
             out.push(i);
         }
-        prev_byte = i
+        prev_byte = i;
     }
     assert!(!in_quotes, "split_commas didn't reject unbalanced quotes");
     // SAFETY: the non-ASCII bytes in the output are the same
@@ -515,6 +515,6 @@ mod unit_tests {
 
     #[test]
     fn check_dequote() {
-        assert_eq!(dequote("a\u{3b2}\"a\"\"\""), "a\u{3b2}a\"")
+        assert_eq!(dequote("a\u{3b2}\"a\"\"\""), "a\u{3b2}a\"");
     }
 }

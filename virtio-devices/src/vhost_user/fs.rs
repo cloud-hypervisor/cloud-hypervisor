@@ -252,7 +252,7 @@ impl VirtioDevice for Fs {
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -326,7 +326,7 @@ impl VirtioDevice for Fs {
     }
 
     fn shutdown(&mut self) {
-        self.vu_common.shutdown()
+        self.vu_common.shutdown();
     }
 
     fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
@@ -361,7 +361,7 @@ impl VirtioDevice for Fs {
                 addr: cache.0.addr,
                 len: cache.0.len,
                 mergeable: false,
-            })
+            });
         }
 
         mappings

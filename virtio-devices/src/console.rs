@@ -694,7 +694,7 @@ impl VirtioDevice for Console {
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -766,7 +766,7 @@ impl VirtioDevice for Console {
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
-        self.common.set_access_platform(access_platform)
+        self.common.set_access_platform(access_platform);
     }
 }
 

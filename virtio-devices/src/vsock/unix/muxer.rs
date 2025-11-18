@@ -476,7 +476,7 @@ impl VsockMuxer {
                     })
                     .unwrap_or_else(|err| {
                         info!("vsock: error adding local-init connection: {err:?}");
-                    })
+                    });
                 }
             }
 
