@@ -2401,7 +2401,8 @@ mod unit_tests {
             },
             console: ConsoleConfig {
                 file: None,
-                mode: ConsoleOutputMode::Tty,
+                // Caution: Don't use `Tty` to not mess with users terminal
+                mode: ConsoleOutputMode::Off,
                 iommu: false,
                 socket: None,
             },
