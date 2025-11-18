@@ -158,8 +158,18 @@ wait-timeout = "0.2.1"
 zerocopy = { version = "0.8.27", default-features = false }
 
 [workspace.lints.clippy]
-# Any clippy lint in alphabetical order, including lint groups:
+# Any clippy lint (group) in alphabetical order:
 # https://rust-lang.github.io/rust-clippy/master/index.html
+
+# Groups
+all = "deny"         # shorthand for the other groups but here for compleness
+complexity = "deny"
+correctness = "deny"
+perf = "deny"
+style = "deny"
+suspicious = "deny"
+
+# Individual Lints
 assertions_on_result_states = "deny"
 undocumented_unsafe_blocks = "deny"
 
