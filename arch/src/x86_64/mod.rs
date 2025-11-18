@@ -622,7 +622,7 @@ pub fn generate_common_cpuid(
         let caps = hypervisor
             .tdx_capabilities()
             .map_err(Error::TdxCapabilities)?;
-        info!("TDX capabilities {:#?}", caps);
+        info!("TDX capabilities {caps:#?}");
         Some(caps)
     } else {
         None

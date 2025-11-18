@@ -172,6 +172,7 @@ suspicious = "deny"
 # Individual Lints
 assertions_on_result_states = "deny"
 undocumented_unsafe_blocks = "deny"
+uninlined_format_args = "deny"
 unnecessary_semicolon = "deny"
 
 [workspace.lints.rust]

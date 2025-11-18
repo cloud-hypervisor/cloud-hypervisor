@@ -2074,7 +2074,7 @@ impl MemoryManager {
             }
         }
 
-        debug!("coredump total bytes {}", total_bytes);
+        debug!("coredump total bytes {total_bytes}");
         Ok(())
     }
 

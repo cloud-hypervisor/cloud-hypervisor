@@ -158,7 +158,7 @@ impl PlatformEmulator for MshvEmulatorContext<'_> {
             .map_err(|e| PlatformError::GetCpuStateFailure(e.into()))?;
 
         debug!("mshv emulator: Getting new CPU state");
-        debug!("mshv emulator: {:#x?}", regs);
+        debug!("mshv emulator: {regs:#x?}");
 
         Ok(EmulatorCpuState { regs, sregs })
     }

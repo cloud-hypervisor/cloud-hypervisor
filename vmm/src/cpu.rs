@@ -1266,7 +1266,7 @@ impl CpuManager {
                                                         warn!("TDG_VP_VMCALL_SETUP_EVENT_NOTIFY_INTERRUPT not supported")
                                                     }
                                                 },
-                                                Err(e) => error!("Unexpected TDX VMCALL: {}", e),
+                                                Err(e) => error!("Unexpected TDX VMCALL: {e}"),
                                             }
                                             vcpu.vcpu.set_tdx_status(TdxExitStatus::InvalidOperand);
                                     }
@@ -1922,7 +1922,7 @@ impl CpuManager {
         // or low (0x000xxx...).
         let high_range = extract_bits_64!(gva, 55, 1);
         if high_range == 0 {
-            info!("VA (0x{:x}) range is not supported!", gva);
+            info!("VA (0x{gva:x}) range is not supported!");
             return Ok(gva);
         }
 

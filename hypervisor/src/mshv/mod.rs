@@ -705,7 +705,7 @@ impl cpu::Vcpu for MshvVcpu {
                     let gva = info.guest_virtual_address;
                     let gpa = info.guest_physical_address;
 
-                    debug!("Unmapped GPA exit: GVA {:x} GPA {:x}", gva, gpa);
+                    debug!("Unmapped GPA exit: GVA {gva:x} GPA {gpa:x}");
 
                     let context = MshvEmulatorContext {
                         vcpu: self,
@@ -739,7 +739,7 @@ impl cpu::Vcpu for MshvVcpu {
                     let gva = info.guest_virtual_address;
                     let gpa = info.guest_physical_address;
 
-                    debug!("Exit ({:?}) GVA {:x} GPA {:x}", msg_type, gva, gpa);
+                    debug!("Exit ({msg_type:?}) GVA {gva:x} GPA {gpa:x}");
 
                     let mut context = MshvEmulatorContext {
                         vcpu: self,
@@ -777,8 +777,7 @@ impl cpu::Vcpu for MshvVcpu {
                     assert!(num_ranges >= 1);
                     if num_ranges > 1 {
                         return Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
-                            "Unhandled VCPU exit(GPA_ATTRIBUTE_INTERCEPT): Expected num_ranges to be 1 but found num_ranges {:?}",
-                            num_ranges
+                            "Unhandled VCPU exit(GPA_ATTRIBUTE_INTERCEPT): Expected num_ranges to be 1 but found num_ranges {num_ranges:?}"
                         )));
                     }
 
@@ -786,10 +785,7 @@ impl cpu::Vcpu for MshvVcpu {
                     let mut gpas = Vec::new();
                     let ranges = info.ranges;
                     let (gfn_start, gfn_count) = snp::parse_gpa_range(ranges[0]).unwrap();
-                    debug!(
-                        "Releasing pages: gfn_start: {:x?}, gfn_count: {:?}",
-                        gfn_start, gfn_count
-                    );
+                    debug!("Releasing pages: gfn_start: {gfn_start:x?}, gfn_count: {gfn_count:?}");
                     let gpa_start = gfn_start * HV_PAGE_SIZE as u64;
                     for i in 0..gfn_count {
                         gpas.push(gpa_start + i * HV_PAGE_SIZE as u64);
@@ -818,7 +814,7 @@ impl cpu::Vcpu for MshvVcpu {
                     self.vm_fd
                         .modify_gpa_host_access(&gpa_list[0])
                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(anyhow!(
-                            "Unhandled VCPU exit: attribute intercept - couldn't modify host access {}", e
+                            "Unhandled VCPU exit: attribute intercept - couldn't modify host access {e}"
                         )))?;
                     // Guest is revoking the shared access, so we need to update the bitmap
                     self.host_access_pages.rcu(|_bitmap| {
@@ -835,9 +831,7 @@ impl cpu::Vcpu for MshvVcpu {
                     let gpa = info.guest_physical_address;
 
                     Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
-                        "Unhandled VCPU exit: Unaccepted GPA({:x}) found at GVA({:x})",
-                        gpa,
-                        gva,
+                        "Unhandled VCPU exit: Unaccepted GPA({gpa:x}) found at GVA({gva:x})",
                     )))
                 }
                 #[cfg(target_arch = "x86_64")]
@@ -905,8 +899,7 @@ impl cpu::Vcpu for MshvVcpu {
                                 << GHCB_INFO_BIT_WIDTH)
                                 as u64;
                             debug!(
-                                "GHCB_INFO_HYP_FEATURE_REQUEST: Supported features: {:0x}",
-                                ghcb_response
+                                "GHCB_INFO_HYP_FEATURE_REQUEST: Supported features: {ghcb_response:0x}"
                             );
                             let arr_reg_name_value =
                                 [(hv_register_name_HV_X64_REGISTER_GHCB, ghcb_response)];
@@ -1182,8 +1175,7 @@ impl cpu::Vcpu for MshvVcpu {
                                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
 
                                     debug!(
-                                        "SNP guest request: req_gpa {:0x} rsp_gpa {:0x}",
-                                        req_gpa, rsp_gpa
+                                        "SNP guest request: req_gpa {req_gpa:0x} rsp_gpa {rsp_gpa:0x}"
                                     );
 
                                     set_svm_field_u64_ptr!(ghcb, exit_info2, 0);
@@ -1194,8 +1186,7 @@ impl cpu::Vcpu for MshvVcpu {
                                     let apic_id =
                                         info.__bindgen_anon_2.__bindgen_anon_1.sw_exit_info1 >> 32;
                                     debug!(
-                                        "SNP AP CREATE REQUEST with VMSA GPA {:0x}, and APIC ID {:?}",
-                                        vmsa_gpa, apic_id
+                                        "SNP AP CREATE REQUEST with VMSA GPA {vmsa_gpa:0x}, and APIC ID {apic_id:?}"
                                     );
 
                                     let mshv_ap_create_req = mshv_sev_snp_ap_create {
@@ -1220,16 +1211,14 @@ impl cpu::Vcpu for MshvVcpu {
                     Ok(cpu::VmExit::Ignore)
                 }
                 exit => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
-                    "Unhandled VCPU exit {:?}",
-                    exit
+                    "Unhandled VCPU exit {exit:?}"
                 ))),
             },
 
             Err(e) => match e.errno() {
                 libc::EAGAIN | libc::EINTR => Ok(cpu::VmExit::Ignore),
                 _ => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
-                    "VCPU error {:?}",
-                    e
+                    "VCPU error {e:?}"
                 ))),
             },
         }
@@ -1576,7 +1565,7 @@ impl MshvVcpu {
         // SAFETY: Accessing a union element from bindgen generated bindings.
         let prev_ghcb_gpa = unsafe { reg_assocs[0].value.reg64 };
 
-        debug!("Prev GHCB GPA is {:x}", prev_ghcb_gpa);
+        debug!("Prev GHCB GPA is {prev_ghcb_gpa:x}");
 
         let mut ghcb_gpa = hv_x64_register_sev_ghcb::default();
 
@@ -2224,7 +2213,7 @@ impl vm::Vm for MshvVm {
     #[cfg(target_arch = "aarch64")]
     fn create_vgic(&self, config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
         let gic_device = MshvGicV2M::new(self, config)
-            .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {:?}", e)))?;
+            .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {e:?}")))?;
 
         // Register GICD address with the hypervisor
         self.fd
@@ -2233,7 +2222,7 @@ impl vm::Vm for MshvVm {
                 gic_device.dist_addr,
             )
             .map_err(|e| {
-                vm::HypervisorVmError::CreateVgic(anyhow!("Failed to set GICD address: {}", e))
+                vm::HypervisorVmError::CreateVgic(anyhow!("Failed to set GICD address: {e}"))
             })?;
 
         // Register GITS address with the hypervisor
@@ -2244,7 +2233,7 @@ impl vm::Vm for MshvVm {
                 gic_device.gits_addr,
             )
             .map_err(|e| {
-                vm::HypervisorVmError::CreateVgic(anyhow!("Failed to set GITS address: {}", e))
+                vm::HypervisorVmError::CreateVgic(anyhow!("Failed to set GITS address: {e}"))
             })?;
 
         Ok(Arc::new(Mutex::new(gic_device)))
@@ -2265,8 +2254,7 @@ impl vm::Vm for MshvVm {
             )
             .map_err(|e| {
                 vm::HypervisorVmError::SetVmProperty(anyhow!(
-                    "Failed to set partition property: {}",
-                    e
+                    "Failed to set partition property: {e}"
                 ))
             })
     }
@@ -2281,8 +2269,7 @@ impl vm::Vm for MshvVm {
             )
             .map_err(|e| {
                 vm::HypervisorVmError::SetVmProperty(anyhow!(
-                    "Failed to set partition property: {}",
-                    e
+                    "Failed to set partition property: {e}"
                 ))
             })
     }
@@ -2363,8 +2350,7 @@ impl vm::Vm for MshvVm {
                 )
                 .map_err(|e| {
                     vm::HypervisorVmError::InitializeVm(anyhow!(
-                        "Failed to set GIC LPI support: {}",
-                        e
+                        "Failed to set GIC LPI support: {e}",
                     ))
                 })?;
 
@@ -2375,8 +2361,7 @@ impl vm::Vm for MshvVm {
                 )
                 .map_err(|e| {
                     vm::HypervisorVmError::InitializeVm(anyhow!(
-                        "Failed to set arch timer interrupt ID: {}",
-                        e
+                        "Failed to set arch timer interrupt ID: {e}",
                     ))
                 })?;
 
@@ -2387,8 +2372,7 @@ impl vm::Vm for MshvVm {
                 )
                 .map_err(|e| {
                     vm::HypervisorVmError::InitializeVm(anyhow!(
-                        "Failed to set PMU interrupt ID: {}",
-                        e
+                        "Failed to set PMU interrupt ID: {e}",
                     ))
                 })?;
         }

@@ -167,10 +167,7 @@ impl Pausable for Gic {
         // Flush tables to guest RAM
         let vgic = self.vgic.as_ref().unwrap().clone();
         vgic.lock().unwrap().save_data_tables().map_err(|e| {
-            MigratableError::Pause(anyhow!(
-                "Could not save GICv3ITS GIC pending tables {:?}",
-                e
-            ))
+            MigratableError::Pause(anyhow!("Could not save GICv3ITS GIC pending tables {e:?}",))
         })?;
         Ok(())
     }
