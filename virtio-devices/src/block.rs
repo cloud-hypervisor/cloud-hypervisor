@@ -223,7 +223,7 @@ impl BlockEpollHandler {
                         queue.go_to_previous_position();
                         break;
                     }
-                };
+                }
             }
 
             request.set_writeback(self.writeback.load(Ordering::Acquire));

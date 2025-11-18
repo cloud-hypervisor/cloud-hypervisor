@@ -710,7 +710,7 @@ impl FwCfg {
                 let bytes = n.to_le_bytes();
                 data.copy_from_slice(&bytes[start..end]);
             }
-        };
+        }
         Some(size as u8)
     }
 
@@ -756,7 +756,7 @@ impl BusDevice for FwCfg {
                     "fw_cfg: read from unknown port {port:#x}: {size:#x} bytes and offset {offset:#x}."
                 );
             }
-        };
+        }
     }
 
     fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
@@ -792,7 +792,7 @@ impl BusDevice for FwCfg {
             _ => debug!(
                 "fw_cfg: write to unknown port {port:#x}: {size:#x} bytes and offset {offset:#x} ."
             ),
-        };
+        }
         None
     }
 }

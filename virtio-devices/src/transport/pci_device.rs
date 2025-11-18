@@ -1192,7 +1192,7 @@ impl PciDevice for VirtioPciDevice {
                 }
             }
             _ => (),
-        };
+        }
 
         // Try and activate the device if the driver status has changed
         if self.needs_activation() {

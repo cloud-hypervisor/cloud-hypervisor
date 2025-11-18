@@ -259,7 +259,7 @@ impl Write for RawFile {
                 // SAFETY: tmp_ptr was allocated by alloc_zeroed with layout
                 unsafe { dealloc(tmp_ptr, layout) };
                 return Err(io::Error::last_os_error());
-            };
+            }
 
             tmp_buf[file_offset..(file_offset + buf_len)].copy_from_slice(buf);
 

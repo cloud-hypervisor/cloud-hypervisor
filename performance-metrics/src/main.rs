@@ -790,7 +790,7 @@ fn main() {
                     eprintln!("Aborting test due to error: '{e:?}'");
                     std::process::exit(1);
                 }
-            };
+            }
         }
     }
 

@@ -642,7 +642,7 @@ impl VfioCommon {
                     PCI_CONFIG_BAR_PREFETCHABLE
                 ) {
                     prefetchable = PciBarPrefetchable::Prefetchable
-                };
+                }
 
                 // To get size write all 1s
                 self.vfio_wrapper
@@ -941,7 +941,7 @@ impl VfioCommon {
                 PciCapabilityId::PciExpress => pci_express_cap_found = true,
                 PciCapabilityId::PowerManagement => power_management_cap_found = true,
                 _ => {}
-            };
+            }
 
             let cap_next = self.vfio_wrapper.read_config_byte((cap_iter + 1).into())
                 & PCI_CONFIG_CAPABILITY_PTR_MASK;

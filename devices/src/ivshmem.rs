@@ -233,20 +233,18 @@ impl PciDevice for IvshmemDevice {
         if let Some(resources) = resources {
             for resource in resources {
                 match resource {
-                    Resource::PciBar { index, base, .. } => {
-                        match index {
-                            IVSHMEM_BAR0_IDX => {
-                                bar0_addr = Some(GuestAddress(base));
-                            }
-                            IVSHMEM_BAR1_IDX => {}
-                            IVSHMEM_BAR2_IDX => {
-                                bar2_addr = Some(GuestAddress(base));
-                            }
-                            _ => {
-                                error!("Unexpected pci bar index {index}");
-                            }
-                        };
-                    }
+                    Resource::PciBar { index, base, .. } => match index {
+                        IVSHMEM_BAR0_IDX => {
+                            bar0_addr = Some(GuestAddress(base));
+                        }
+                        IVSHMEM_BAR1_IDX => {}
+                        IVSHMEM_BAR2_IDX => {
+                            bar2_addr = Some(GuestAddress(base));
+                        }
+                        _ => {
+                            error!("Unexpected pci bar index {index}");
+                        }
+                    },
                     _ => {
                         error!("Unexpected resource {resource:?}");
                     }
@@ -348,7 +346,7 @@ impl PciDevice for IvshmemDevice {
             _ => {
                 warn!("Invalid bar_idx: {bar_idx}");
             }
-        };
+        }
     }
 
     fn write_bar(&mut self, base: u64, offset: u64, _data: &[u8]) -> Option<Arc<Barrier>> {

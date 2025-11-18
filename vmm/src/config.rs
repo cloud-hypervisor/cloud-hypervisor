@@ -2514,10 +2514,10 @@ impl VmConfig {
         let mut tty_consoles = Vec::new();
         if self.console.mode == ConsoleOutputMode::Tty {
             tty_consoles.push("virtio-console");
-        };
+        }
         if self.serial.mode == ConsoleOutputMode::Tty {
             tty_consoles.push("serial-console");
-        };
+        }
         #[cfg(target_arch = "x86_64")]
         if self.debug_console.mode == ConsoleOutputMode::Tty {
             tty_consoles.push("debug-console");

@@ -91,7 +91,7 @@ impl BusDevice for Cmos {
                 }
             }
             o => warn!("bad write offset on CMOS device: {o}"),
-        };
+        }
         None
     }
 

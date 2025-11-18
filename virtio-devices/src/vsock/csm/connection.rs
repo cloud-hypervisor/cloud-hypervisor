@@ -252,7 +252,7 @@ where
                     self.last_fwd_cnt_to_peer = self.fwd_cnt;
                     return Ok(());
                 }
-            };
+            }
         }
 
         // A credit update is basically a no-op, so we should only waste a perfectly fine RX
@@ -380,7 +380,7 @@ where
                     pkt.hdr()
                 );
             }
-        };
+        }
 
         Ok(())
     }
@@ -459,7 +459,7 @@ where
                             // it does, so let's absorb it.
                         }
                         _ => self.kill(),
-                    };
+                    }
                     0
                 });
             self.fwd_cnt += Wrapping(flushed as u32);

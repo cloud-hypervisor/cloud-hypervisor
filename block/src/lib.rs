@@ -398,7 +398,7 @@ impl Request {
                         .map_err(ExecuteError::Write)?;
                 }
                 RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
-            };
+            }
         }
         Ok(len)
     }
@@ -901,7 +901,7 @@ impl DiskTopology {
         };
         if ret != 0 {
             return Err(std::io::Error::last_os_error());
-        };
+        }
 
         Ok(block_size)
     }
