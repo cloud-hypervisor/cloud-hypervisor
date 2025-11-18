@@ -1561,8 +1561,7 @@ impl BalloonConfig {
         let size = parser
             .convert::<ByteSized>("size")
             .map_err(Error::ParseBalloon)?
-            .map(|v| v.0)
-            .unwrap_or(0);
+            .map_or(0, |v| v.0);
 
         let deflate_on_oom = parser
             .convert::<Toggle>("deflate_on_oom")

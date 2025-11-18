@@ -1161,7 +1161,7 @@ fn main() {
             if let Some(api_client::Error::ServerResponse(status_code, body)) =
                 error.downcast_ref::<api_client::Error>()
             {
-                let body = body.as_ref().map(|body| body.as_str()).unwrap_or("");
+                let body = body.as_ref().map_or("", |body| body.as_str());
 
                 // Retrieve the list of error messages back.
                 let lines: Vec<&str> = match serde_json::from_str(body) {

@@ -733,9 +733,7 @@ impl Block {
                 (disk_nsectors, avail_features, 0, config, false)
             };
 
-        let serial = serial
-            .map(Vec::from)
-            .unwrap_or_else(|| build_serial(&disk_path));
+        let serial = serial.map_or_else(|| build_serial(&disk_path), Vec::from);
 
         Ok(Block {
             common: VirtioCommon {
