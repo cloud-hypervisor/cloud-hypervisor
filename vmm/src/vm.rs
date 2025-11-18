@@ -3439,6 +3439,72 @@ mod unit_tests {
             )
         );
     }
+
+    #[test]
+    pub fn test_vm() {
+        use hypervisor::VmExit;
+        use vm_memory::{Address, GuestMemory, GuestMemoryRegion};
+        // This example based on https://lwn.net/Articles/658511/
+        let code = [
+            0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
+            0x00, 0xd8, /* add %bl, %al */
+            0x04, b'0', /* add $'0', %al */
+            0xee, /* out %al, (%dx) */
+            0xb0, b'\n', /* mov $'\n', %al */
+            0xee,  /* out %al, (%dx) */
+            0xf4,  /* hlt */
+        ];
+
+        let mem_size = 0x1000;
+        let load_addr = GuestAddress(0x1000);
+        let mem = GuestMemoryMmap::from_ranges(&[(load_addr, mem_size)]).unwrap();
+
+        let hv = hypervisor::new().unwrap();
+        let vm = hv
+            .create_vm(HypervisorVmConfig::default())
+            .expect("new VM creation failed");
+
+        for (index, region) in mem.iter().enumerate() {
+            let mem_region = vm.make_user_memory_region(
+                index as u32,
+                region.start_addr().raw_value(),
+                region.len(),
+                region.as_ptr() as u64,
+                false,
+                false,
+            );
+
+            vm.create_user_memory_region(mem_region)
+                .expect("Cannot configure guest memory");
+        }
+        mem.write_slice(&code, load_addr)
+            .expect("Writing code to memory failed");
+
+        let mut vcpu = vm.create_vcpu(0, None).expect("new Vcpu failed");
+
+        let mut vcpu_sregs = vcpu.get_sregs().expect("get sregs failed");
+        vcpu_sregs.cs.base = 0;
+        vcpu_sregs.cs.selector = 0;
+        vcpu.set_sregs(&vcpu_sregs).expect("set sregs failed");
+
+        let mut vcpu_regs = vcpu.get_regs().expect("get regs failed");
+        vcpu_regs.set_rip(0x1000);
+        vcpu_regs.set_rax(2);
+        vcpu_regs.set_rbx(3);
+        vcpu_regs.set_rflags(2);
+        vcpu.set_regs(&vcpu_regs).expect("set regs failed");
+
+        loop {
+            match vcpu.run().expect("run failed") {
+                VmExit::Reset => {
+                    println!("HLT");
+                    break;
+                }
+                VmExit::Ignore => {}
+                r => panic!("unexpected exit reason: {r:?}"),
+            }
+        }
+    }
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -3507,72 +3573,5 @@ mod unit_tests {
             true,
         )
         .unwrap();
-    }
-}
-
-#[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-#[test]
-pub fn test_vm() {
-    use hypervisor::VmExit;
-    use vm_memory::{Address, GuestMemory, GuestMemoryRegion};
-    // This example based on https://lwn.net/Articles/658511/
-    let code = [
-        0xba, 0xf8, 0x03, /* mov $0x3f8, %dx */
-        0x00, 0xd8, /* add %bl, %al */
-        0x04, b'0', /* add $'0', %al */
-        0xee, /* out %al, (%dx) */
-        0xb0, b'\n', /* mov $'\n', %al */
-        0xee,  /* out %al, (%dx) */
-        0xf4,  /* hlt */
-    ];
-
-    let mem_size = 0x1000;
-    let load_addr = GuestAddress(0x1000);
-    let mem = GuestMemoryMmap::from_ranges(&[(load_addr, mem_size)]).unwrap();
-
-    let hv = hypervisor::new().unwrap();
-    let vm = hv
-        .create_vm(HypervisorVmConfig::default())
-        .expect("new VM creation failed");
-
-    for (index, region) in mem.iter().enumerate() {
-        let mem_region = vm.make_user_memory_region(
-            index as u32,
-            region.start_addr().raw_value(),
-            region.len(),
-            region.as_ptr() as u64,
-            false,
-            false,
-        );
-
-        vm.create_user_memory_region(mem_region)
-            .expect("Cannot configure guest memory");
-    }
-    mem.write_slice(&code, load_addr)
-        .expect("Writing code to memory failed");
-
-    let mut vcpu = vm.create_vcpu(0, None).expect("new Vcpu failed");
-
-    let mut vcpu_sregs = vcpu.get_sregs().expect("get sregs failed");
-    vcpu_sregs.cs.base = 0;
-    vcpu_sregs.cs.selector = 0;
-    vcpu.set_sregs(&vcpu_sregs).expect("set sregs failed");
-
-    let mut vcpu_regs = vcpu.get_regs().expect("get regs failed");
-    vcpu_regs.set_rip(0x1000);
-    vcpu_regs.set_rax(2);
-    vcpu_regs.set_rbx(3);
-    vcpu_regs.set_rflags(2);
-    vcpu.set_regs(&vcpu_regs).expect("set regs failed");
-
-    loop {
-        match vcpu.run().expect("run failed") {
-            VmExit::Reset => {
-                println!("HLT");
-                break;
-            }
-            VmExit::Ignore => {}
-            r => panic!("unexpected exit reason: {r:?}"),
-        }
     }
 }
