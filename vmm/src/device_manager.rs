@@ -2113,8 +2113,7 @@ impl DeviceManager {
             .debug_console
             .clone()
             .iobase
-            .map(|port| port as u64)
-            .unwrap_or(debug_console::DEFAULT_PORT);
+            .map_or(debug_console::DEFAULT_PORT, |port| port as u64);
 
         self.bus_devices
             .push(Arc::clone(&debug_console) as Arc<dyn BusDeviceSync>);

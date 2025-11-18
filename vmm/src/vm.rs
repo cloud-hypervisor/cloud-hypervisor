@@ -763,8 +763,7 @@ impl Vm {
                 .unwrap()
                 .payload
                 .as_ref()
-                .map(|p| p.fw_cfg_config.is_some())
-                .unwrap_or(false);
+                .is_some_and(|p| p.fw_cfg_config.is_some());
             if fw_cfg_config {
                 device_manager
                     .lock()
@@ -2338,8 +2337,7 @@ impl Vm {
                 .unwrap()
                 .payload
                 .as_ref()
-                .map(|p| p.fw_cfg_config.is_some())
-                .unwrap_or(false);
+                .is_some_and(|p| p.fw_cfg_config.is_some());
             if fw_cfg_enabled {
                 let fw_cfg_config = self
                     .config

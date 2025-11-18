@@ -104,7 +104,7 @@ unsafe fn close_unused_fds(keep_fds: &mut [RawFd]) {
         // The next fd is the one at i, because the indexes in the
         // iterator are offset by one due to the initial 0.
         let next_keep_fd = keep_fds.get(i);
-        let last = next_keep_fd.map(|fd| fd - 1).unwrap_or(RawFd::MAX);
+        let last = next_keep_fd.map_or(RawFd::MAX, |fd| fd - 1);
 
         if first > last {
             continue;

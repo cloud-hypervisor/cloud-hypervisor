@@ -735,9 +735,7 @@ impl Block {
                 (disk_nsectors, avail_features, 0, config, false)
             };
 
-        let serial = serial
-            .map(Vec::from)
-            .unwrap_or_else(|| build_serial(&disk_path));
+        let serial = serial.map_or_else(|| build_serial(&disk_path), Vec::from);
 
         Ok(Block {
             common: VirtioCommon {
@@ -773,21 +771,20 @@ impl Block {
     // TODO In future, we could add a `lock_granularity=` configuration to the CLI.
     // For now, we stick to QEMU behavior.
     fn lock_granularity(&mut self) -> LockGranularity {
-        let fallback = LockGranularity::WholeFile;
-
-        self.disk_image
-            .size()
-            .map(|size| LockGranularity::ByteRange(0, size))
+        self.disk_image.size().map_or_else(
             // use a safe fallback
-            .unwrap_or_else(|e| {
-                log::warn!(
+            |e| {
+                let fallback = LockGranularity::WholeFile;
+                warn!(
                     "Can't get disk size for id={},path={}, falling back to {:?}: error: {e}",
                     self.id,
                     self.disk_path.display(),
                     fallback
                 );
                 fallback
-            })
+            },
+            |size| LockGranularity::ByteRange(0, size),
+        )
     }
 
     /// Tries to set an advisory lock for the corresponding disk image.
