@@ -1743,14 +1743,13 @@ impl Vm {
                         zone.hotplugged_size = Some(hotplugged_size);
 
                         return Ok(());
-                    } else {
-                        error!(
-                            "Invalid to ask less ({}) than boot RAM ({}) for \
-                            this memory zone",
-                            desired_memory, zone.size,
-                        );
-                        return Err(Error::ResizeZone);
                     }
+                    error!(
+                        "Invalid to ask less ({}) than boot RAM ({}) for \
+                        this memory zone",
+                        desired_memory, zone.size,
+                    );
+                    return Err(Error::ResizeZone);
                 }
             }
         }

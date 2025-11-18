@@ -168,12 +168,11 @@ impl TokenBucket {
                 self.last_update = Instant::now();
                 // No need to continue to the refill process, we still have burst budget to consume from.
                 return BucketReduction::Success;
-            } else {
-                // We still have burst budget for *some* of the tokens requests.
-                // The tokens left unfulfilled will be consumed from current `self.budget`.
-                tokens -= self.one_time_burst;
-                self.one_time_burst = 0;
             }
+            // We still have burst budget for *some* of the tokens requests.
+            // The tokens left unfulfilled will be consumed from current `self.budget`.
+            tokens -= self.one_time_burst;
+            self.one_time_burst = 0;
         }
 
         // Compute time passed since last refill/update.

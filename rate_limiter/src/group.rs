@@ -234,9 +234,8 @@ impl RateLimiterGroup {
                             Err(e) => {
                                 if e.kind() == io::ErrorKind::Interrupted {
                                     continue;
-                                } else {
-                                    return Err(Error::Epoll(e));
                                 }
+                                return Err(Error::Epoll(e));
                             }
                         };
 
