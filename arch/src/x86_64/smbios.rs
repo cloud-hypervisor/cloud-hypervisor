@@ -272,7 +272,7 @@ pub fn setup_smbios(
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     #[test]

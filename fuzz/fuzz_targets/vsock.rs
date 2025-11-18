@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
-use virtio_devices::vsock::tests::TestBackend;
+use virtio_devices::vsock::unit_tests::TestBackend;
 use virtio_devices::{VirtioDevice, VirtioInterrupt, VirtioInterruptType};
 use virtio_queue::{Queue, QueueT};
 use vm_memory::bitmap::AtomicBitmap;

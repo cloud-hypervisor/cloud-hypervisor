@@ -1428,7 +1428,7 @@ fn update_cpuid_topology(
     }
 }
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use linux_loader::loader::bootparam::boot_e820_entry;
 
     use super::*;

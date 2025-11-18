@@ -297,7 +297,7 @@ pub fn setup_mptable(
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use vm_memory::bitmap::BitmapSlice;
     use vm_memory::{GuestUsize, VolatileMemoryError, VolatileSlice, WriteVolatile};
 

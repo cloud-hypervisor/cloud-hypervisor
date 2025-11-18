@@ -135,7 +135,7 @@ impl<T: Cacheable> CacheMap<T> {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     struct NumCache(());

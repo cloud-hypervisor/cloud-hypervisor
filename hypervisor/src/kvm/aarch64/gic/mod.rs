@@ -481,7 +481,7 @@ impl Vgic for KvmGicV3Its {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use crate::HypervisorVmConfig;
     use crate::aarch64::gic::{
         get_dist_regs, get_icc_regs, get_redist_regs, set_dist_regs, set_icc_regs, set_redist_regs,

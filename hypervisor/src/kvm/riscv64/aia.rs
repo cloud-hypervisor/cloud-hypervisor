@@ -250,7 +250,7 @@ impl Vaia for KvmAiaImsics {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use crate::HypervisorVmConfig;
     use crate::arch::riscv64::aia::VaiaConfig;
     use crate::kvm::KvmAiaImsics;

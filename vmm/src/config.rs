@@ -3170,7 +3170,7 @@ impl Drop for VmConfig {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use std::fs::File;
     use std::os::unix::io::AsRawFd;
 

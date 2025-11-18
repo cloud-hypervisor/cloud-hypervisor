@@ -2937,7 +2937,7 @@ impl KvmVcpu {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     #[test]
     #[cfg(target_arch = "riscv64")]
     fn test_get_and_set_regs() {

@@ -550,7 +550,7 @@ impl AsRawFd for Tap {
 
 #[cfg(test)]
 #[cfg(devcli_testenv)] // we need special permissions in the ENV to create Tap devices
-mod tests {
+mod unit_tests {
     use std::net::Ipv4Addr;
     use std::sync::{LazyLock, Mutex, mpsc};
     use std::time::Duration;

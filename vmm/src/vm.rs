@@ -3167,7 +3167,7 @@ impl GuestDebuggable for Vm {
 
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     fn test_vm_state_transitions(state: VmState) {
@@ -3443,7 +3443,7 @@ mod tests {
 
 #[cfg(target_arch = "aarch64")]
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use arch::aarch64::fdt::create_fdt;
     use arch::aarch64::layout;
     use arch::{DeviceType, MmioDeviceInfo};

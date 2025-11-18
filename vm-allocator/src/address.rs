@@ -215,7 +215,7 @@ impl AddressAllocator {
 }
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     #[test]

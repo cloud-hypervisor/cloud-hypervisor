@@ -74,7 +74,7 @@ pub trait BitposIteratorExt: Iterator<Item = u64> + Sized {
 impl<I: Iterator<Item = u64> + Sized> BitposIteratorExt for I {}
 
 #[cfg(test)]
-mod tests {
+mod unit_tests {
     use super::*;
 
     fn bitpos_check(inp: &[u64], out: &[u64]) {
