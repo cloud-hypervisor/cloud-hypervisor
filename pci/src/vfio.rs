@@ -910,16 +910,15 @@ impl VfioCommon {
             let cap_id = self.vfio_wrapper.read_config_byte(cap_next.into());
             if PciCapabilityId::from(cap_id) == PciCapabilityId::MsiX {
                 return Some(cap_next as usize);
-            } else {
-                let cap_ptr = self.vfio_wrapper.read_config_byte((cap_next + 1).into())
-                    & PCI_CONFIG_CAPABILITY_PTR_MASK;
+            }
+            let cap_ptr = self.vfio_wrapper.read_config_byte((cap_next + 1).into())
+                & PCI_CONFIG_CAPABILITY_PTR_MASK;
 
-                // See parse_capabilities below for an explanation.
-                if cap_ptr != cap_next {
-                    cap_next = cap_ptr;
-                } else {
-                    break;
-                }
+            // See parse_capabilities below for an explanation.
+            if cap_ptr != cap_next {
+                cap_next = cap_ptr;
+            } else {
+                break;
             }
         }
 

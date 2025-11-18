@@ -726,17 +726,16 @@ impl VcpuState {
             loop {
                 if self.vcpu_run_interrupted.load(Ordering::SeqCst) {
                     return Ok(());
-                } else {
-                    // This is more effective than thread::yield_now() at
-                    // avoiding a priority inversion with the vCPU thread
-                    thread::sleep(std::time::Duration::from_millis(1));
-                    count += 1;
-                    if count >= 1000 {
-                        return Err(Error::SignalAcknowledgeTimeout);
-                    } else if count % 10 == 0 {
-                        warn!("vCPU thread did not respond in {count}ms to signal - retrying");
-                        self.signal_thread();
-                    }
+                }
+                // This is more effective than thread::yield_now() at
+                // avoiding a priority inversion with the vCPU thread
+                thread::sleep(std::time::Duration::from_millis(1));
+                count += 1;
+                if count >= 1000 {
+                    return Err(Error::SignalAcknowledgeTimeout);
+                } else if count % 10 == 0 {
+                    warn!("vCPU thread did not respond in {count}ms to signal - retrying");
+                    self.signal_thread();
                 }
             }
         }
@@ -807,21 +806,20 @@ impl CpuManager {
 
             if amx_tile != 0 {
                 return Err(Error::AmxEnable(anyhow!("Guest AMX usage not supported")));
-            } else {
-                let mut mask: usize = 0;
-                // SAFETY: Syscall with valid parameters. We use a raw mutable pointer to
-                // the `mask` place in order to ensure that we do not violate Rust's
-                // aliasing rules.
-                let result = unsafe {
-                    libc::syscall(
-                        libc::SYS_arch_prctl,
-                        ARCH_GET_XCOMP_GUEST_PERM,
-                        &raw mut mask,
-                    )
-                };
-                if result != 0 || (mask & XFEATURE_XTILEDATA_MASK) != XFEATURE_XTILEDATA_MASK {
-                    return Err(Error::AmxEnable(anyhow!("Guest AMX usage not supported")));
-                }
+            }
+            let mut mask: usize = 0;
+            // SAFETY: Syscall with valid parameters. We use a raw mutable pointer to
+            // the `mask` place in order to ensure that we do not violate Rust's
+            // aliasing rules.
+            let result = unsafe {
+                libc::syscall(
+                    libc::SYS_arch_prctl,
+                    ARCH_GET_XCOMP_GUEST_PERM,
+                    &raw mut mask,
+                )
+            };
+            if result != 0 || (mask & XFEATURE_XTILEDATA_MASK) != XFEATURE_XTILEDATA_MASK {
+                return Err(Error::AmxEnable(anyhow!("Guest AMX usage not supported")));
             }
         }
 

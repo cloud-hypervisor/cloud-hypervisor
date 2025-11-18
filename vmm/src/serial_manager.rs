@@ -289,9 +289,8 @@ impl SerialManager {
                                     // be considered as a regular error. Instead it is more
                                     // appropriate to retry, by calling into epoll_wait().
                                     continue;
-                                } else {
-                                    return Err(Error::Epoll(e));
                                 }
+                                return Err(Error::Epoll(e));
                             }
                         };
 

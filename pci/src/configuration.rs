@@ -948,12 +948,11 @@ impl PciConfiguration {
                     self.pending_bar_reprogram
                 );
                 return self.pending_bar_reprogram.drain(..).collect();
-            } else {
-                info!(
-                    "MSE bit is disabled. No BAR reprogramming parameter is returned: {:x?}",
-                    self.pending_bar_reprogram
-                );
             }
+            info!(
+                "MSE bit is disabled. No BAR reprogramming parameter is returned: {:x?}",
+                self.pending_bar_reprogram
+            );
         }
 
         Vec::new()

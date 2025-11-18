@@ -303,9 +303,8 @@ impl hypervisor::Hypervisor for MshvHypervisor {
                         // ioctl has been interrupted, we have to retry as
                         // this can't be considered as a regular error.
                         continue;
-                    } else {
-                        return Err(hypervisor::HypervisorError::VmCreate(e.into()));
                     }
+                    return Err(hypervisor::HypervisorError::VmCreate(e.into()));
                 }
             }
             break;
