@@ -14,10 +14,29 @@ License](https://opensource.org/licenses/Apache-2.0).
 ## Coding Style
 
 We follow the [Rust Style](https://github.com/rust-lang/rust/tree/HEAD/src/doc/style-guide/src)
-convention and enforce it through the Continuous Integration (CI) process calling into `rustfmt`
-for each submitted Pull Request (PR).
+convention and enforce it through the Continuous Integration (CI) process calling into `rustfmt`,
+`clippy`, and other well-known code quality tool of the ecosystem for each submitted Pull Request (PR).
 
 ## Basic Checks
+
+```sh
+# We currently rely on nightly-only formatting features
+cargo +nightly fmt --all
+cargo check --all --all-targets --tests 
+cargo clippy --all --all-targets --tests
+# Please note that this will not execute integration tests.
+cargo test --all --all-targets --tests
+```
+
+### \[Optional\] Run Integration Tests
+
+_Caution: These tests are taking a long time to complete (40+ mins) and need special setup._
+
+```sh
+ bash ./scripts/dev_cli.sh tests --integration -- --test-filter '<optionally filter test by name pattern>' 
+```
+
+### Setup Commit Hook
 
 Please consider creating the following hook as `.git/hooks/pre-commit` in order
 to ensure basic correctness of your code. You can extend this further if you
@@ -26,7 +45,7 @@ have specific features that you regularly develop against.
 ```sh
 #!/bin/sh
 
-cargo fmt -- --check || exit 1
+cargo +nightly fmt -- --check || exit 1
 cargo check --locked --all --all-targets --tests || exit 1
 cargo clippy --locked --all --all-targets --tests -- -D warnings || exit 1
 ```
