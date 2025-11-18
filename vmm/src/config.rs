@@ -1562,8 +1562,7 @@ impl BalloonConfig {
         let size = parser
             .convert::<ByteSized>("size")
             .map_err(Error::ParseBalloon)?
-            .map(|v| v.0)
-            .unwrap_or(0);
+            .map_or(0, |v| v.0);
 
         let deflate_on_oom = parser
             .convert::<Toggle>("deflate_on_oom")
@@ -2482,7 +2481,7 @@ impl VmConfig {
 
         #[cfg(feature = "tdx")]
         {
-            let tdx_enabled = self.platform.as_ref().map(|p| p.tdx).unwrap_or(false);
+            let tdx_enabled = self.platform.as_ref().is_some_and(|p| p.tdx);
             // At this point we know payload isn't None.
             if tdx_enabled && self.payload.as_ref().unwrap().firmware.is_none() {
                 return Err(ValidationError::TdxFirmwareMissing);
@@ -3110,12 +3109,12 @@ impl VmConfig {
 
     #[cfg(feature = "tdx")]
     pub fn is_tdx_enabled(&self) -> bool {
-        self.platform.as_ref().map(|p| p.tdx).unwrap_or(false)
+        self.platform.as_ref().is_some_and(|p| p.tdx)
     }
 
     #[cfg(feature = "sev_snp")]
     pub fn is_sev_snp_enabled(&self) -> bool {
-        self.platform.as_ref().map(|p| p.sev_snp).unwrap_or(false)
+        self.platform.as_ref().is_some_and(|p| p.sev_snp)
     }
 }
 
