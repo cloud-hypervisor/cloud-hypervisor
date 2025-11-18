@@ -1237,7 +1237,7 @@ fn test_vhost_user_net(
         if let Some(host_mac) = host_mac {
             format!(",host_mac={host_mac}")
         } else {
-            "".to_owned()
+            String::new()
         },
         if client_mode_daemon {
             "server"
@@ -1636,7 +1636,7 @@ fn _test_virtio_fs(
         if let Some(pci_segment) = pci_segment {
             format!(",pci_segment={pci_segment}")
         } else {
-            "".to_owned()
+            String::new()
         }
     );
 
@@ -1730,7 +1730,7 @@ fn _test_virtio_fs(
                 if let Some(pci_segment) = pci_segment {
                     format!(",pci_segment={pci_segment}")
                 } else {
-                    "".to_owned()
+                    String::new()
                 }
             );
 
@@ -2019,7 +2019,7 @@ fn _get_vmm_overhead(pid: u32, guest_memory_size: u32) -> HashMap<String, u32> {
     let reader = io::BufReader::new(smaps);
 
     let mut skip_map: bool = false;
-    let mut region_name: String = "".to_string();
+    let mut region_name: String = String::new();
     let mut region_maps = HashMap::new();
     for line in reader.lines() {
         let l = line.unwrap();
@@ -5977,7 +5977,7 @@ mod common_parallel {
                     if let Some(pci_segment) = pci_segment {
                         format!(",pci_segment={pci_segment}")
                     } else {
-                        "".to_owned()
+                        String::new()
                     }
                 )),
             );
@@ -6109,7 +6109,7 @@ mod common_parallel {
                         if let Some(pci_segment) = pci_segment {
                             format!(",pci_segment={pci_segment}")
                         } else {
-                            "".to_owned()
+                            String::new()
                         }
                     )
                     .as_str(),
@@ -6172,7 +6172,7 @@ mod common_parallel {
                         if let Some(pci_segment) = pci_segment {
                             format!(",pci_segment={pci_segment}")
                         } else {
-                            "".to_owned()
+                            String::new()
                         }
                     )
                     .as_str(),
