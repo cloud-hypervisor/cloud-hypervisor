@@ -688,7 +688,7 @@ impl Console {
 
     pub fn update_console_size(&self) {
         if let Some(resizer) = self.console_resizer.as_ref() {
-            resizer.update_console_size()
+            resizer.update_console_size();
         }
     }
 }
@@ -1171,7 +1171,7 @@ impl DeviceManager {
         if let Some(pci_segments) = &config.lock().unwrap().pci_segments {
             for pci_segment in pci_segments.iter() {
                 mmio32_aperture_weights[pci_segment.pci_segment as usize] =
-                    pci_segment.mmio32_aperture_weight
+                    pci_segment.mmio32_aperture_weight;
             }
         }
 
@@ -1191,7 +1191,7 @@ impl DeviceManager {
         if let Some(pci_segments) = &config.lock().unwrap().pci_segments {
             for pci_segment in pci_segments.iter() {
                 mmio64_aperture_weights[pci_segment.pci_segment as usize] =
-                    pci_segment.mmio64_aperture_weight
+                    pci_segment.mmio64_aperture_weight;
             }
         }
 
@@ -1460,7 +1460,7 @@ impl DeviceManager {
         if let Some(tpm) = self.config.clone().lock().unwrap().tpm.as_ref() {
             let tpm_dev = self.add_tpm_device(tpm.socket.clone())?;
             self.bus_devices
-                .push(Arc::clone(&tpm_dev) as Arc<dyn BusDeviceSync>)
+                .push(Arc::clone(&tpm_dev) as Arc<dyn BusDeviceSync>);
         }
         self.legacy_interrupt_manager = Some(legacy_interrupt_manager);
 
@@ -4606,7 +4606,7 @@ impl DeviceManager {
                     self.mmio_regions
                         .lock()
                         .unwrap()
-                        .retain(|x| x.start != mmio_region.start)
+                        .retain(|x| x.start != mmio_region.start);
                 }
 
                 (
@@ -5078,7 +5078,7 @@ impl Aml for TpmDevice {
                 ),
             ],
         )
-        .to_aml_bytes(sink)
+        .to_aml_bytes(sink);
     }
 }
 
@@ -5098,7 +5098,7 @@ impl Aml for DeviceManager {
         }
         let mut pci_scan_inner: Vec<&dyn Aml> = Vec::new();
         for method in &pci_scan_methods {
-            pci_scan_inner.push(method)
+            pci_scan_inner.push(method);
         }
 
         // PCI hotplug controller
@@ -5171,7 +5171,7 @@ impl Aml for DeviceManager {
                 true,
                 segment.mmio_config_address as u32,
                 layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT as u32,
-            ))
+            ));
         }
 
         let mut mbrd_memory_refs = Vec::new();
@@ -5281,7 +5281,7 @@ impl Aml for DeviceManager {
             .unwrap()
             .lock()
             .unwrap()
-            .to_aml_bytes(sink)
+            .to_aml_bytes(sink);
     }
 }
 
@@ -5432,7 +5432,7 @@ impl BusDevice for DeviceManager {
             _ => error!("Accessing unknown location at base 0x{base:x}, offset 0x{offset:x}"),
         }
 
-        debug!("PCI_HP_REG_R: base 0x{base:x}, offset 0x{offset:x}, data {data:?}")
+        debug!("PCI_HP_REG_R: base 0x{base:x}, offset 0x{offset:x}, data {data:?}");
     }
 
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<std::sync::Barrier>> {

@@ -2131,7 +2131,7 @@ impl Aml for MemoryNotify {
             &aml::Equal::new(&aml::Arg(0), &self.slot_id),
             vec![&aml::Notify::new(&object, &aml::Arg(1))],
         )
-        .to_aml_bytes(sink)
+        .to_aml_bytes(sink);
     }
 }
 
@@ -2178,7 +2178,7 @@ impl Aml for MemorySlot {
                 ),
             ],
         )
-        .to_aml_bytes(sink)
+        .to_aml_bytes(sink);
     }
 }
 
@@ -2361,7 +2361,7 @@ impl Aml for MemoryMethods {
                 &aml::Return::new(&aml::Path::new("MR64")),
             ],
         )
-        .to_aml_bytes(sink)
+        .to_aml_bytes(sink);
     }
 }
 

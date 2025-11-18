@@ -522,7 +522,7 @@ impl BlockEpollHandler {
                     "Failed scheduling the virtqueue thread {} on the expected CPU set: {}",
                     self.queue_index,
                     io::Error::last_os_error()
-                )
+                );
             }
         }
     }
@@ -562,7 +562,7 @@ impl EpollHelperHandler for BlockEpollHandler {
 
                 // Process the queue only when the rate limit is not reached
                 if !rate_limit_reached {
-                    self.process_queue_submit_and_signal()?
+                    self.process_queue_submit_and_signal()?;
                 }
             }
             COMPLETION_EVENT => {
@@ -598,7 +598,7 @@ impl EpollHelperHandler for BlockEpollHandler {
                         ))
                     })?;
 
-                    self.process_queue_submit_and_signal()?
+                    self.process_queue_submit_and_signal()?;
                 } else {
                     return Err(EpollHelperError::HandleEvent(anyhow!(
                         "Unexpected 'RATE_LIMITER_EVENT' when rate_limiter is not enabled."
@@ -874,7 +874,7 @@ impl VirtioDevice for Block {
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -1027,7 +1027,7 @@ impl VirtioDevice for Block {
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
-        self.common.set_access_platform(access_platform)
+        self.common.set_access_platform(access_platform);
     }
 }
 

@@ -487,7 +487,7 @@ fn measure_restore_time(
             \n\n==== Start child stderr ====\n\n{}\n\n==== End child stderr ====",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
-        )
+        );
     })
 }
 

@@ -261,7 +261,7 @@ impl BusDevice for Gpio {
             let index = ((offset - GPIO_ID_LOW) >> 2) as usize;
             value = u32::from(GPIO_ID[index]);
         } else if offset < OFS_DATA {
-            value = self.data & ((offset >> 2) as u32)
+            value = self.data & ((offset >> 2) as u32);
         } else {
             value = match offset {
                 GPIODIR => self.dir,

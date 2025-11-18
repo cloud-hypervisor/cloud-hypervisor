@@ -304,7 +304,7 @@ fn align_hob(v: u64) -> u64 {
 
 impl TdHob {
     fn update_offset<T>(&mut self) {
-        self.current_offset = align_hob(self.current_offset + std::mem::size_of::<T>() as u64)
+        self.current_offset = align_hob(self.current_offset + std::mem::size_of::<T>() as u64);
     }
 
     pub fn start(offset: u64) -> TdHob {
@@ -528,7 +528,7 @@ mod unit_tests {
         let mut f = std::fs::File::open("tdvf.fd").unwrap();
         let (sections, _) = parse_tdvf_sections(&mut f).unwrap();
         for section in sections {
-            eprintln!("{section:x?}")
+            eprintln!("{section:x?}");
         }
     }
 }

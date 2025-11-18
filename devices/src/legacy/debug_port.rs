@@ -62,7 +62,7 @@ impl DebugPort {
 
 impl BusDevice for DebugPort {
     fn read(&mut self, _base: u64, _offset: u64, _data: &mut [u8]) {
-        error!("Invalid read to debug port")
+        error!("Invalid read to debug port");
     }
 
     fn write(

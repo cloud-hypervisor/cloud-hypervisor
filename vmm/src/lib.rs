@@ -1466,7 +1466,7 @@ impl Vmm {
 
         // Wait for all the threads to finish
         for thread in self.threads.drain(..) {
-            thread.join().map_err(Error::ThreadCleanup)?
+            thread.join().map_err(Error::ThreadCleanup)?;
         }
 
         Ok(())
@@ -2214,7 +2214,7 @@ impl RequestHandler for Vmm {
                             })?;
 
                             if existing_memory_files.is_none() {
-                                existing_memory_files = Some(HashMap::default())
+                                existing_memory_files = Some(HashMap::default());
                             }
 
                             if let Some(ref mut existing_memory_files) = existing_memory_files {

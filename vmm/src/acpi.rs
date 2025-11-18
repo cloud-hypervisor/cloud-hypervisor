@@ -309,7 +309,7 @@ fn create_srat_table(
                 region,
                 proximity_domain,
                 MemAffinityFlags::ENABLE,
-            ))
+            ));
         }
 
         for region in &node.hotplug_regions {
@@ -317,7 +317,7 @@ fn create_srat_table(
                 region,
                 proximity_domain,
                 MemAffinityFlags::ENABLE | MemAffinityFlags::HOTPLUGGABLE,
-            ))
+            ));
         }
 
         for cpu in &node.cpus {

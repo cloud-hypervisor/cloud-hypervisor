@@ -46,7 +46,7 @@ pub mod testing {
 
         // Writes to the actual memory location.
         pub fn set(&self, val: T) {
-            self.mem.write_obj(val, self.location).unwrap()
+            self.mem.write_obj(val, self.location).unwrap();
         }
 
         // This function returns a place in memory which holds a value of type U, and starts
@@ -143,7 +143,7 @@ pub mod testing {
 
             for _ in 1..qsize as usize {
                 let x = ring.last().unwrap().next_place();
-                ring.push(x)
+                ring.push(x);
             }
 
             let event = ring.last().unwrap().next_place();

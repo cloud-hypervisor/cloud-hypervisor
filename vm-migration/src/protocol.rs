@@ -267,7 +267,7 @@ impl MemoryRangeTable {
     }
 
     pub fn push(&mut self, range: MemoryRange) {
-        self.data.push(range)
+        self.data.push(range);
     }
 
     pub fn read_from(fd: &mut dyn Read, length: u64) -> Result<MemoryRangeTable, MigratableError> {
@@ -307,7 +307,7 @@ impl MemoryRangeTable {
     }
 
     pub fn extend(&mut self, table: Self) {
-        self.data.extend(table.data)
+        self.data.extend(table.data);
     }
 
     pub fn new_from_tables(tables: Vec<Self>) -> Self {

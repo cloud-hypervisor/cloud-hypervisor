@@ -296,7 +296,7 @@ impl LapicState {
         // Following call can't fail if the offsets defined above are correct.
         writer
             .write_u32::<LittleEndian>(value)
-            .expect("Failed to write klapic register")
+            .expect("Failed to write klapic register");
     }
 }
 

@@ -215,7 +215,7 @@ impl Serial {
     fn thr_empty(&mut self) -> Result<()> {
         if self.is_thr_intr_enabled() {
             self.add_intr_bit(IIR_THR_BIT);
-            self.trigger_interrupt()?
+            self.trigger_interrupt()?;
         }
         Ok(())
     }
@@ -223,7 +223,7 @@ impl Serial {
     fn recv_data(&mut self) -> Result<()> {
         if self.is_recv_intr_enabled() {
             self.add_intr_bit(IIR_RECV_BIT);
-            self.trigger_interrupt()?
+            self.trigger_interrupt()?;
         }
         self.line_status |= LSR_DATA_BIT;
         Ok(())
@@ -240,10 +240,10 @@ impl Serial {
     fn handle_write(&mut self, offset: u8, v: u8) -> Result<()> {
         match offset {
             DLAB_LOW if self.is_dlab_set() => {
-                self.baud_divisor = (self.baud_divisor & 0xff00) | u16::from(v)
+                self.baud_divisor = (self.baud_divisor & 0xff00) | u16::from(v);
             }
             DLAB_HIGH if self.is_dlab_set() => {
-                self.baud_divisor = (self.baud_divisor & 0x00ff) | ((u16::from(v)) << 8)
+                self.baud_divisor = (self.baud_divisor & 0x00ff) | ((u16::from(v)) << 8);
             }
             DATA => {
                 if self.is_loop() {

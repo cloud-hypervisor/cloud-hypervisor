@@ -541,7 +541,7 @@ pub fn start_block_backend(backend_command: &str) {
 
     for thread in blk_backend.read().unwrap().threads.iter() {
         if let Err(e) = thread.lock().unwrap().kill_evt.write(1) {
-            error!("Error shutting down worker thread: {e:?}")
+            error!("Error shutting down worker thread: {e:?}");
         }
     }
 }

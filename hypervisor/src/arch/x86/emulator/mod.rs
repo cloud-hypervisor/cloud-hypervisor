@@ -167,9 +167,9 @@ pub trait CpuStateManager: Clone {
                     }
 
                     if segment_register.db() != 0 {
-                        segment_limit = 0xffffffff
+                        segment_limit = 0xffffffff;
                     } else {
-                        segment_limit = 0xffff
+                        segment_limit = 0xffff;
                     }
                 }
 
@@ -427,7 +427,7 @@ impl CpuStateManager for EmulatorCpuState {
     }
 
     fn set_efer(&mut self, efer: u64) {
-        self.sregs.efer = efer
+        self.sregs.efer = efer;
     }
 
     fn flags(&self) -> u64 {

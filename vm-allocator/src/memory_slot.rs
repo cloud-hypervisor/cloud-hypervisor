@@ -23,7 +23,7 @@ impl MemorySlotAllocator {
 
     /// Release memory slot for reuse
     pub fn free_memory_slot(&mut self, slot: u32) {
-        self.memory_slot_free_list.lock().unwrap().push(slot)
+        self.memory_slot_free_list.lock().unwrap().push(slot);
     }
 
     /// Instantiate struct

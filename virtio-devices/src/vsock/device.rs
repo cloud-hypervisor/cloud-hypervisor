@@ -406,7 +406,7 @@ where
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -414,7 +414,7 @@ where
             0 if data.len() == 8 => LittleEndian::write_u64(data, self.cid),
             0 if data.len() == 4 => LittleEndian::write_u32(data, (self.cid & 0xffff_ffff) as u32),
             4 if data.len() == 4 => {
-                LittleEndian::write_u32(data, ((self.cid >> 32) & 0xffff_ffff) as u32)
+                LittleEndian::write_u32(data, ((self.cid >> 32) & 0xffff_ffff) as u32);
             }
             _ => warn!(
                 "vsock: virtio-vsock received invalid read request of {} bytes at offset {}",
@@ -481,7 +481,7 @@ where
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
-        self.common.set_access_platform(access_platform)
+        self.common.set_access_platform(access_platform);
     }
 }
 

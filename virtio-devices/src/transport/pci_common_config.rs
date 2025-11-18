@@ -203,7 +203,12 @@ impl VirtioPciCommonConfig {
             1 => self.write_common_config_byte(offset, data[0]),
             2 => self.write_common_config_word(offset, LittleEndian::read_u16(data), queues),
             4 => {
-                self.write_common_config_dword(offset, LittleEndian::read_u32(data), queues, device)
+                self.write_common_config_dword(
+                    offset,
+                    LittleEndian::read_u32(data),
+                    queues,
+                    device,
+                );
             }
             8 => self.write_common_config_qword(offset, LittleEndian::read_u64(data), queues),
             _ => error!("invalid data length for virtio write: len {}", data.len()),

@@ -321,7 +321,7 @@ impl VirtioDevice for Watchdog {
     }
 
     fn ack_features(&mut self, value: u64) {
-        self.common.ack_features(value)
+        self.common.ack_features(value);
     }
 
     fn activate(
