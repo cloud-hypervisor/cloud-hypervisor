@@ -191,7 +191,9 @@ if [ $RES -ne 0 ]; then
     exit 1
 fi
 
+# Common configuration for every test run
 export RUST_BACKTRACE=1
+export RUSTFLAGS="$RUSTFLAGS"
 
 cargo build --features mshv --all --release --target "$BUILD_TARGET"
 
