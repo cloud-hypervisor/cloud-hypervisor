@@ -5,6 +5,28 @@ hypervisor="kvm"
 test_filter=""
 build_kernel=false
 
+# Download from a url with retries
+# Args:
+#   $1: URL
+#   $2: Maximum number of retries (optional), default 3
+#   $3: Delays between retries in seconds (optional), default 5
+download_with_retries() {
+    local URL="$1"
+    local MAX_RETRIES="${2:-3}"
+    local RETRY_DELAY="${3:-5}"
+    local i
+
+    for i in $(seq 1 "$MAX_RETRIES"); do
+        echo "Attempt $i/$MAX_RETRIES: downloading $url"
+        time wget -N --quiet "$URL" && return 0
+        echo "Warning: wget failed on attempt $i. Retrying in ${RETRY_DELAY}s..." >&2
+        sleep "$RETRY_DELAY"
+    done
+
+    echo "ERROR: Failed to download $url after $MAX_RETRIES attempts." >&2
+    return 1
+}
+
 # Checkout source code of a GIT repo with specified branch and commit
 # Args:
 #   $1: Target directory
@@ -135,7 +157,7 @@ download_hypervisor_fw() {
     FW="$WORKLOADS_DIR/hypervisor-fw"
     pushd "$WORKLOADS_DIR" || exit
     rm -f "$FW"
-    time wget --quiet "$FW_URL" || exit 1
+    download_with_retries "$FW_URL" || exit 1
     popd || exit
 }
 
@@ -152,7 +174,7 @@ download_linux() {
     fi
     pushd "$WORKLOADS_DIR" || exit
     for url in $KERNEL_URLS; do
-        wget -N --quiet "$url" || exit 1
+        download_with_retries "$url" || exit 1
     done
 
     popd || exit
@@ -176,7 +198,7 @@ download_ovmf() {
     OVMF_FW="$WORKLOADS_DIR/CLOUDHV.fd"
     pushd "$WORKLOADS_DIR" || exit
     rm -f "$OVMF_FW"
-    time wget --quiet $OVMF_FW_URL || exit 1
+    download_with_retries $OVMF_FW_URL || exit 1
     popd || exit
 }
 
