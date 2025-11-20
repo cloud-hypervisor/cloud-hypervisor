@@ -1874,9 +1874,8 @@ impl RequestHandler for Vmm {
         }
 
         if let Some(ref mut vm) = self.vm {
-            let info = vm.add_device(device_cfg).map_err(|e| {
+            let info = vm.add_device(device_cfg).inspect_err(|e| {
                 error!("Error when adding new device to the VM: {e:?}");
-                e
             })?;
             serde_json::to_vec(&info)
                 .map(Some)
@@ -1903,9 +1902,8 @@ impl RequestHandler for Vmm {
         }
 
         if let Some(ref mut vm) = self.vm {
-            let info = vm.add_user_device(device_cfg).map_err(|e| {
+            let info = vm.add_user_device(device_cfg).inspect_err(|e| {
                 error!("Error when adding new user device to the VM: {e:?}");
-                e
             })?;
             serde_json::to_vec(&info)
                 .map(Some)
