@@ -519,7 +519,7 @@ pub trait Vcpu: Send + Sync {
     /// Set the vCPU state.
     /// This function is required when restoring the VM
     ///
-    fn set_state(&self, state: &CpuState) -> Result<()>;
+    fn set_state(&self, state: &CpuState, hyperv_guest: bool) -> Result<()>;
     ///
     /// Triggers the running of the current virtual CPU returning an exit reason.
     ///

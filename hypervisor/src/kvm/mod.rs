@@ -2569,7 +2569,7 @@ impl cpu::Vcpu for KvmVcpu {
     /// let state = vcpu.state().unwrap();
     /// vcpu.set_state(&state).unwrap();
     /// ```
-    fn set_state(&self, state: &CpuState) -> cpu::Result<()> {
+    fn set_state(&self, state: &CpuState, hyperv_guest: bool) -> cpu::Result<()> {
         let state: VcpuKvmState = state.clone().into();
         self.set_cpuid2(&state.cpuid)?;
         self.set_mp_state(state.mp_state.into())?;
@@ -2585,6 +2585,10 @@ impl cpu::Vcpu for KvmVcpu {
 
         if let Some(freq) = state.tsc_khz {
             self.set_tsc_khz(freq)?;
+        }
+
+        if hyperv_guest {
+            self.enable_hyperv_synic()?;
         }
 
         // Try to set all MSRs previously stored.

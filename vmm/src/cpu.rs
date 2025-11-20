@@ -925,7 +925,7 @@ impl CpuManager {
                 Error::VcpuCreate(anyhow!("Could not get vCPU state from snapshot {e:?}"))
             })?;
             vcpu.vcpu
-                .set_state(&state)
+                .set_state(&state, self.config.kvm_hyperv)
                 .map_err(|e| Error::VcpuCreate(anyhow!("Could not set the vCPU state {e:?}")))?;
 
             vcpu.saved_state = Some(state);
