@@ -450,12 +450,12 @@ impl VirtioDevice for Vdpa {
 
 impl Pausable for Vdpa {
     fn pause(&mut self) -> std::result::Result<(), MigratableError> {
-        if !self.migrating {
+        if self.migrating {
+            Ok(())
+        } else {
             Err(MigratableError::Pause(anyhow!(
                 "Can't pause a vDPA device outside live migration"
             )))
-        } else {
-            Ok(())
         }
     }
 
@@ -464,12 +464,12 @@ impl Pausable for Vdpa {
             return Ok(());
         }
 
-        if !self.migrating {
+        if self.migrating {
+            Ok(())
+        } else {
             Err(MigratableError::Resume(anyhow!(
                 "Can't resume a vDPA device outside live migration"
             )))
-        } else {
-            Ok(())
         }
     }
 }

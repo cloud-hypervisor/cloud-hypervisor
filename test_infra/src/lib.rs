@@ -757,12 +757,11 @@ pub fn ssh_command_ip(
 pub fn exec_host_command_with_retries(command: &str, retries: u32, interval: Duration) -> bool {
     for _ in 0..retries {
         let s = exec_host_command_output(command).status;
-        if !s.success() {
-            eprintln!("\n\n==== retrying in {interval:?} ===\n\n");
-            thread::sleep(interval);
-        } else {
+        if s.success() {
             return true;
         }
+        eprintln!("\n\n==== retrying in {interval:?} ===\n\n");
+        thread::sleep(interval);
     }
 
     false
@@ -1686,17 +1685,17 @@ pub fn measure_virtio_net_throughput(
             failed = true;
         }
 
-        if !failed {
-            // Safe to unwrap as we know the child has terminated successfully
-            let output = c.wait_with_output().unwrap();
-            results.push(parse_iperf3_output(&output.stdout, receive, bandwidth)?);
-        } else {
+        if failed {
             let _ = c.kill();
             let output = c.wait_with_output().unwrap();
             println!(
                 "=============== Client output [Error] ===============\n\n{}\n\n===========end============\n\n",
                 String::from_utf8_lossy(&output.stdout)
             );
+        } else {
+            // Safe to unwrap as we know the child has terminated successfully
+            let output = c.wait_with_output().unwrap();
+            results.push(parse_iperf3_output(&output.stdout, receive, bandwidth)?);
         }
     }
 

@@ -649,8 +649,10 @@ impl PvmemcontrolBusDevice {
                             .find_connection(conn)
                             .ok_or(Error::InvalidConnection(conn.command))
                     })
-                    .map(|gpa| self.handle_pvmemcontrol_request(gpa))
-                    .unwrap_or_else(|err| warn!("{err:?}"));
+                    .map_or_else(
+                        |err| warn!("{err:?}"),
+                        |gpa| self.handle_pvmemcontrol_request(gpa),
+                    );
             }
         }
     }

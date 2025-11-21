@@ -119,7 +119,9 @@ impl RefCount {
         }
 
         // Unwrap is safe here as the entry was filled directly above.
-        let dropped_cluster = if !self.refblock_cache.get(table_index).unwrap().dirty() {
+        let dropped_cluster = if self.refblock_cache.get(table_index).unwrap().dirty() {
+            None
+        } else {
             // Free the previously used block and use a new one. Writing modified counts to new
             // blocks keeps the on-disk state consistent even if it's out of date.
             if let Some((addr, _)) = new_cluster.take() {
@@ -128,8 +130,6 @@ impl RefCount {
             } else {
                 return Err(Error::NeedNewCluster);
             }
-        } else {
-            None
         };
 
         self.refblock_cache.get_mut(table_index).unwrap()[block_index] = refcount;
