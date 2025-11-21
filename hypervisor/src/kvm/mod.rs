@@ -2342,7 +2342,8 @@ impl cpu::Vcpu for KvmVcpu {
 
         // Save extra MSRs if the Hyper-V synthetic interrupt controller is
         // emulated.
-        if self.hyperv_synic.load(Ordering::Acquire) {
+        let hyperv_synic = self.hyperv_synic.load(Ordering::Acquire);
+        if hyperv_synic {
             let hyperv_synic_msrs = vec![
                 0x40000020, 0x40000021, 0x40000080, 0x40000081, 0x40000082, 0x40000083, 0x40000084,
                 0x40000090, 0x40000091, 0x40000092, 0x40000093, 0x40000094, 0x40000095, 0x40000096,
@@ -2407,6 +2408,7 @@ impl cpu::Vcpu for KvmVcpu {
             mp_state,
             tsc_khz,
             nested_state,
+            hyperv_synic,
         }
         .into())
     }
@@ -2572,6 +2574,10 @@ impl cpu::Vcpu for KvmVcpu {
 
         if let Some(freq) = state.tsc_khz {
             self.set_tsc_khz(freq)?;
+        }
+
+        if state.hyperv_synic {
+            self.enable_hyperv_synic()?;
         }
 
         // Try to set all MSRs previously stored.

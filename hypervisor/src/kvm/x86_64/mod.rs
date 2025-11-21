@@ -79,6 +79,8 @@ pub struct VcpuKvmState {
     // Option to prevent useless 8K (de)serialization when no nested
     // state exists.
     pub nested_state: Option<KvmNestedStateBuffer>,
+    #[serde(default)]
+    pub hyperv_synic: bool,
 }
 
 impl From<SegmentRegister> for kvm_segment {
