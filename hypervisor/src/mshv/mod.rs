@@ -50,7 +50,7 @@ pub use aarch64::VcpuMshvState;
 #[cfg(target_arch = "aarch64")]
 use aarch64::gic::{BASE_SPI_IRQ, MshvGicV2M};
 #[cfg(feature = "sev_snp")]
-use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
+use igvm_defs::{IGVM_VHS_SNP_ID_BLOCK, SnpPolicy};
 #[cfg(feature = "sev_snp")]
 use snp_constants::*;
 use vmm_sys_util::eventfd::EventFd;
@@ -1507,7 +1507,11 @@ impl cpu::Vcpu for MshvVcpu {
     /// Sets the AMD specific vcpu's sev control register.
     ///
     #[cfg(feature = "sev_snp")]
-    fn set_sev_control_register(&self, vmsa_pfn: u64) -> cpu::Result<()> {
+    fn set_sev_control_register(
+        &self,
+        vmsa_pfn: u64,
+        _vmsa: igvm::snp_defs::SevVmsa,
+    ) -> cpu::Result<()> {
         let sev_control_reg = snp::get_sev_control_register(vmsa_pfn);
 
         self.fd
@@ -2118,7 +2122,7 @@ impl vm::Vm for MshvVm {
 
     /// Initialize the SEV-SNP VM
     #[cfg(feature = "sev_snp")]
-    fn sev_snp_init(&self) -> vm::Result<()> {
+    fn sev_snp_init(&self, _guest_policy: SnpPolicy) -> vm::Result<()> {
         self.fd
             .set_partition_property(
                 hv_partition_property_code_HV_PARTITION_PROPERTY_ISOLATION_STATE,
@@ -2136,6 +2140,7 @@ impl vm::Vm for MshvVm {
         page_type: u32,
         page_size: u32,
         pages: &[u64],
+        _uaddrs: &[u64],
     ) -> vm::Result<()> {
         debug_assert!(page_size == hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB);
         if pages.is_empty() {
