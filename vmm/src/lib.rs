@@ -62,6 +62,7 @@ use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::migration_transport::{
     ReceiveAdditionalConnections, ReceiveListener, SendAdditionalConnections, SocketStream,
 };
+use crate::migration_worker::{MigrationThreadOut, MigrationWorker, MigrationWorkerHandle};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
@@ -88,6 +89,7 @@ pub mod landlock;
 pub mod memory_manager;
 pub mod migration;
 pub mod migration_transport;
+mod migration_worker;
 mod pci_segment;
 pub mod seccomp_filters;
 mod serial_manager;
@@ -636,6 +638,11 @@ pub struct Vmm {
     #[cfg(feature = "guest_debug")]
     vm_debug_evt: EventFd,
     version: VmmVersionInfo,
+    /// The currently running [`Vm`] instance, if any.
+    ///
+    /// This is `Some` from the boot to the shutdown of a VM. In the special
+    /// case of an ongoing live-migration, this is temporarily `None` and held
+    /// by a guard to prevent modifications to the VM.
     vm: Option<Vm>,
     vm_config: Option<Arc<Mutex<VmConfig>>>,
     seccomp_action: SeccompAction,
@@ -648,6 +655,11 @@ pub struct Vmm {
     console_info: Option<ConsoleInfo>,
     no_shutdown: bool,
     check_migration_evt: EventFd,
+    /// Handle to the [`MigrationWorker`] thread.
+    ///
+    /// This is `Some` if a migration is started and set back to `None` once
+    /// the VMM acknowledges the migration thread result.
+    migration_worker_handle: Option<MigrationWorkerHandle>,
 }
 
 /// Just a wrapper for the data that goes into
@@ -754,14 +766,14 @@ impl Vmm {
                         .name("vmm_signal_handler".to_string())
                         .spawn(move || {
                             if !signal_handler_seccomp_filter.is_empty() && let Err(e) = apply_filter(&signal_handler_seccomp_filter)
-                                    .map_err(Error::ApplySeccompFilter)
-                                {
-                                    error!("Error applying seccomp filter: {e:?}");
-                                    exit_evt.write(1).ok();
-                                    return;
-                                }
+                                .map_err(Error::ApplySeccompFilter)
+                            {
+                                error!("Error applying seccomp filter: {e:?}");
+                                exit_evt.write(1).ok();
+                                return;
+                            }
 
-                            if landlock_enable{
+                            if landlock_enable {
                                 match Landlock::new() {
                                     Ok(landlock) => {
                                         let _ = landlock.restrict_self().map_err(Error::ApplyLandlock).map_err(|e| {
@@ -779,11 +791,11 @@ impl Vmm {
                             std::panic::catch_unwind(AssertUnwindSafe(|| {
                                 Vmm::signal_handler(signals, original_termios_opt.as_ref(), &exit_evt);
                             }))
-                            .map_err(|_| {
-                                error!("vmm signal_handler thread panicked");
-                                exit_evt.write(1).ok()
-                            })
-                            .ok();
+                                .map_err(|_| {
+                                    error!("vmm signal_handler thread panicked");
+                                    exit_evt.write(1).ok()
+                                })
+                                .ok();
                         })
                         .map_err(Error::SignalHandlerSpawn)?,
                 );
@@ -862,6 +874,7 @@ impl Vmm {
             console_info: None,
             no_shutdown,
             check_migration_evt,
+            migration_worker_handle: None,
         })
     }
 
@@ -1402,14 +1415,19 @@ impl Vmm {
         Ok(())
     }
 
-    /// Performs a migration including all its phases.
+    /// Performs a live-migration.
+    ///
+    /// This function performs necessary after-migration cleanup only in the
+    /// good case. Callers are responsible for properly handling failed
+    /// migrations.
     fn send_migration(
         vm: &mut Vm,
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         hypervisor: &dyn hypervisor::Hypervisor,
         send_data_migration: &VmSendMigrationData,
-        initial_vm_state: VmState,
     ) -> result::Result<(), MigratableError> {
+        let initial_vm_state = vm.get_state();
+
         // State machine that is updated with more context as we progress.
         let mut ctx = OngoingMigrationContext::new();
 
@@ -1687,7 +1705,61 @@ impl Vmm {
     /// failure), it notifies the VMM's event loop. This function will then
     /// react to the result of the migration depending on the outcome and the
     /// configuration of the VMM.
-    fn check_migration_result(&mut self) {}
+    fn check_migration_result(&mut self) {
+        let MigrationThreadOut {
+            vm,
+            migration_res,
+            initial_vm_state,
+            ..
+        } = self
+            .migration_worker_handle
+            .take()
+            .expect("should have a migration worker handle")
+            .join();
+
+        // Resumes the VM, cleans up any migration artifacts, and gives the VM
+        // back to the VMM.
+        let mut try_resume_vm = |mut vm: Vm| {
+            // If the failure happened very late in the migration path, the VM might already be
+            // stopped. We resume it to ensure proper operation.
+            if initial_vm_state == VmState::Running && vm.get_state() == VmState::Paused {
+                match vm.resume() {
+                    Ok(_) => {
+                        info!("Resumed VM successfully after failed migration");
+                    }
+                    Err(e) => {
+                        error!("Failed resuming VM after failed migration: {e}");
+                        self.exit_evt.write(1).unwrap();
+                    }
+                }
+            }
+
+            // Ensure full VM performance. The operation is idempotent.
+            let _ = vm.stop_dirty_log().inspect_err(|e| {
+                warn!("Failed stopping dirty log after resuming VM: {e} - VM performance might be slower than usual");
+            });
+
+            // Give VMM back control.
+            self.vm = Some(vm);
+        };
+
+        match migration_res {
+            Ok(()) => {
+                //  We no longer own the VM. It now lives on the destination host.
+                self.vm = None;
+                drop(vm);
+
+                // Shutdown the VM after the migration succeeded
+                if let Err(e) = self.exit_evt.write(1) {
+                    error!("Failed shutting down the VM after migration: {e}");
+                }
+            }
+            Err(e) => {
+                error!("Migration failed: {e}");
+                try_resume_vm(vm);
+            }
+        }
+    }
 
     fn control_loop(
         &mut self,
@@ -2582,6 +2654,12 @@ impl RequestHandler for Vmm {
         Ok(())
     }
 
+    /// Dispatches a migration.
+    ///
+    /// Returns an error if the migration thread cannot be spawned. If the
+    /// thread is spawned successfully, [`Vmm::check_migration_result`] is
+    /// guaranteed to be called after the migration finishes, regardless of
+    /// whether it succeeds, is cancelled, or fails.
     fn vm_send_migration(
         &mut self,
         send_data_migration: VmSendMigrationData,
@@ -2599,6 +2677,9 @@ impl RequestHandler for Vmm {
             send_data_migration.timeout().as_secs(),
             send_data_migration.timeout_strategy
         );
+
+        // TODO Check if there is already a migration in progress
+        // will be done in next commit
 
         if !self
             .vm_config
@@ -2626,45 +2707,34 @@ impl RequestHandler for Vmm {
             )));
         }
 
-        event!("vm", "migration-started");
-        Self::send_migration(
+        // Take VM ownership. This also means that API events can no longer
+        // change the VM (e.g. net device hotplug).
+        let vm = self
+            .vm
+            .take()
+            .ok_or(MigratableError::MigrateSend(anyhow!("VM is not running")))?;
+
+        // Start migration thread:
+        match MigrationWorker::spawn(
+            // If anything goes wrong, the VMM's event loop will be notified and
+            // take back control of the VM. The VM likely keeps running without
+            // noticing that.
             vm,
+            self.check_migration_evt.try_clone().unwrap(),
+            send_data_migration,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-            self.hypervisor.as_ref(),
-            &send_data_migration,
+            self.hypervisor.clone(),
             initial_vm_state,
-        )
-        .map_err(|migration_err| {
-            error!("Migration failed: {migration_err:?}");
-            event!("vm", "migration-failed");
-
-            // Stop logging dirty pages only for non-local migrations
-            if !send_data_migration.local
-                && let Err(e) = vm.stop_dirty_log()
-            {
-                return e;
+        ) {
+            Ok(handle) => {
+                self.migration_worker_handle = Some(handle);
+                Ok(())
             }
-
-            // Only resume if the VM was originally running; a VM that was already
-            // paused before migration should remain paused after failure.
-            if initial_vm_state == VmState::Running
-                && vm.get_state() == VmState::Paused
-                && let Err(e) = vm.resume()
-            {
-                return e;
+            Err(e) => {
+                self.vm = Some(e.vm);
+                Err(MigratableError::MigrateSend(e.spawn_error.into()))
             }
-
-            migration_err
-        })?;
-
-        event!("vm", "migration-finished");
-
-        // Shutdown the VM after the migration succeeded
-        self.exit_evt.write(1).map_err(|e| {
-            MigratableError::MigrateSend(anyhow!(
-                "Failed shutting down the VM after migration: {e:?}"
-            ))
-        })
+        }
     }
 }
 
