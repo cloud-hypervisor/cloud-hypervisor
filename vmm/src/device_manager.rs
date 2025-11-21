@@ -119,9 +119,9 @@ use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 #[cfg(feature = "ivshmem")]
 use crate::vm_config::IvshmemConfig;
 use crate::vm_config::{
-    ConsoleOutputMode, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
-    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
-    VhostMode, VmConfig, VsockConfig,
+    AccessMode, ConsoleOutputMode, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS,
+    DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT, DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig,
+    UserDeviceConfig, VdpaConfig, VhostMode, VmConfig, VsockConfig,
 };
 use crate::{DEVICE_MANAGER_SNAPSHOT_ID, GuestRegionMmap, PciDeviceInfo, device_node};
 
@@ -3177,7 +3177,10 @@ impl DeviceManager {
 
         let mut file = OpenOptions::new()
             .read(true)
-            .write(!pmem_cfg.discard_writes)
+            .write(match pmem_cfg.access_mode {
+                AccessMode::Write => true,
+                AccessMode::Read | AccessMode::Discard => false,
+            })
             .custom_flags(custom_flags)
             .open(&pmem_cfg.file)
             .map_err(DeviceManagerError::PmemFileOpen)?;
@@ -3229,13 +3232,14 @@ impl DeviceManager {
         let mmap_region = MmapRegion::build(
             Some(FileOffset::new(cloned_file, 0)),
             region_size as usize,
-            PROT_READ | PROT_WRITE,
-            MAP_NORESERVE
-                | if pmem_cfg.discard_writes {
-                    MAP_PRIVATE
-                } else {
-                    MAP_SHARED
-                },
+            match pmem_cfg.access_mode {
+                AccessMode::Read => PROT_READ,
+                AccessMode::Write | AccessMode::Discard => PROT_READ | PROT_WRITE,
+            },
+            match pmem_cfg.access_mode {
+                AccessMode::Read | AccessMode::Write => MAP_SHARED | MAP_NORESERVE,
+                AccessMode::Discard => MAP_PRIVATE | MAP_NORESERVE,
+            },
         )
         .map_err(DeviceManagerError::NewMmapRegion)?;
         let host_addr: u64 = mmap_region.as_ptr() as u64;
