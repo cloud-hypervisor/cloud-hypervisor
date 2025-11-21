@@ -1347,6 +1347,7 @@ fn update_cpuid_topology(
         u32::from(threads_per_core),
     );
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(0), CpuidReg::ECX, 1 << 8);
+    CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(0), CpuidReg::EDX, x2apic_id);
 
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(1), CpuidReg::EAX, core_width);
     CpuidPatch::set_cpuid_reg(
@@ -1357,6 +1358,7 @@ fn update_cpuid_topology(
         u32::from(cores_per_die * threads_per_core),
     );
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(1), CpuidReg::ECX, 2 << 8);
+    CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(1), CpuidReg::EDX, x2apic_id);
 
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(2), CpuidReg::EAX, die_width);
     CpuidPatch::set_cpuid_reg(
@@ -1367,6 +1369,7 @@ fn update_cpuid_topology(
         u32::from(dies_per_package * cores_per_die * threads_per_core),
     );
     CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(2), CpuidReg::ECX, 5 << 8);
+    CpuidPatch::set_cpuid_reg(cpuid, 0x1f, Some(2), CpuidReg::EDX, x2apic_id);
 
     if matches!(cpu_vendor, CpuVendor::AMD) {
         CpuidPatch::set_cpuid_reg(
