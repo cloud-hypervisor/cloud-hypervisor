@@ -246,6 +246,7 @@ impl TokenBucket {
 }
 
 /// Enum that describes the type of token used.
+#[derive(Copy, Clone)]
 pub enum TokenType {
     /// Token type used for bandwidth limiting.
     Bytes,

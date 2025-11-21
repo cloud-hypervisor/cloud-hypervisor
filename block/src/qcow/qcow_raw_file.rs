@@ -144,7 +144,7 @@ impl QcowRawFile {
     }
 
     /// Writes
-    pub fn write_cluster(&mut self, address: u64, data: Vec<u8>) -> io::Result<()> {
+    pub fn write_cluster(&mut self, address: u64, data: &[u8]) -> io::Result<()> {
         let cluster_size = self.cluster_size as usize;
         self.file.seek(SeekFrom::Start(address))?;
         self.file.write_all(&data[0..cluster_size])

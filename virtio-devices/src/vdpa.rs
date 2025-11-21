@@ -217,7 +217,7 @@ impl Vdpa {
         &mut self,
         mem: &GuestMemoryMmap,
         virtio_interrupt: &dyn VirtioInterrupt,
-        queues: Vec<(usize, Queue, EventFd)>,
+        queues: &[(usize, Queue, EventFd)],
     ) -> Result<()> {
         assert!(self.vhost.is_some());
         self.vhost
@@ -421,7 +421,7 @@ impl VirtioDevice for Vdpa {
         virtio_interrupt: Arc<dyn VirtioInterrupt>,
         queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.activate_vdpa(&mem.memory(), virtio_interrupt.as_ref(), queues)
+        self.activate_vdpa(&mem.memory(), virtio_interrupt.as_ref(), &queues)
             .map_err(ActivateError::ActivateVdpa)?;
 
         // Store the virtio interrupt handler as we need to return it on reset

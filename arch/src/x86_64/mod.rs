@@ -278,7 +278,7 @@ impl CpuidPatch {
         }
     }
 
-    pub fn patch_cpuid(cpuid: &mut [CpuIdEntry], patches: Vec<CpuidPatch>) {
+    pub fn patch_cpuid(cpuid: &mut [CpuIdEntry], patches: &[CpuidPatch]) {
         for entry in cpuid {
             for patch in patches.iter() {
                 if entry.function == patch.function && entry.index == patch.index {
@@ -615,7 +615,7 @@ pub fn generate_common_cpuid(
         .get_supported_cpuid()
         .map_err(Error::CpuidGetSupported)?;
 
-    CpuidPatch::patch_cpuid(&mut cpuid, cpuid_patches);
+    CpuidPatch::patch_cpuid(&mut cpuid, &cpuid_patches);
 
     #[cfg(feature = "tdx")]
     let tdx_capabilities = if config.tdx {
@@ -1413,7 +1413,7 @@ fn update_cpuid_topology(
                     edx_bit: Some(28),
                 },
             ];
-            CpuidPatch::patch_cpuid(cpuid, cpuid_patches);
+            CpuidPatch::patch_cpuid(cpuid, &cpuid_patches);
             CpuidPatch::set_cpuid_reg(
                 cpuid,
                 0x8000_0008,

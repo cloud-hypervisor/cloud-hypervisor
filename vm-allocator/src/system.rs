@@ -59,14 +59,14 @@ impl SystemAllocator {
     /// * `io_size` - (X86) The size of IO memory.
     /// * `platform_mmio_base` - The starting address of platform MMIO memory.
     /// * `platform_mmio_size` - The size of platform MMIO memory.
-    /// * `apics` - (X86) Vector of APIC's.
+    /// * `apics` - (X86) slice of APIC's.
     ///
     pub fn new(
         io_base: GuestAddress,
         io_size: GuestUsize,
         platform_mmio_base: GuestAddress,
         platform_mmio_size: GuestUsize,
-        #[cfg(target_arch = "x86_64")] apics: Vec<GsiApic>,
+        #[cfg(target_arch = "x86_64")] apics: &[GsiApic],
     ) -> Option<Self> {
         Some(SystemAllocator {
             io_address_space: AddressAllocator::new(io_base, io_size)?,

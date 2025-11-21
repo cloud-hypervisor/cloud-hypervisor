@@ -72,7 +72,7 @@ impl PciSegment {
         address_manager
             .mmio_bus
             .insert(
-                Arc::clone(&pci_config_mmio) as Arc<dyn BusDeviceSync>,
+                &(Arc::clone(&pci_config_mmio) as Arc<dyn BusDeviceSync>),
                 mmio_config_address,
                 layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT,
             )
@@ -135,7 +135,7 @@ impl PciSegment {
         address_manager
             .io_bus
             .insert(
-                pci_config_io.clone(),
+                &(pci_config_io.clone() as Arc<dyn BusDeviceSync>),
                 PCI_CONFIG_IO_PORT,
                 PCI_CONFIG_IO_PORT_SIZE,
             )

@@ -134,7 +134,7 @@ impl PciBus {
 
     pub fn register_mapping(
         &self,
-        dev: Arc<dyn BusDeviceSync>,
+        dev: &Arc<dyn BusDeviceSync>,
         io_bus: &Bus,
         mmio_bus: &Bus,
         bars: Vec<PciBarConfiguration>,
@@ -143,12 +143,12 @@ impl PciBus {
             match bar.region_type() {
                 PciBarRegionType::IoRegion => {
                     io_bus
-                        .insert(dev.clone(), bar.addr(), bar.size())
+                        .insert(dev, bar.addr(), bar.size())
                         .map_err(PciRootError::PioInsert)?;
                 }
                 PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
                     mmio_bus
-                        .insert(dev.clone(), bar.addr(), bar.size())
+                        .insert(dev, bar.addr(), bar.size())
                         .map_err(PciRootError::MmioInsert)?;
                 }
             }

@@ -122,7 +122,7 @@ const fn get_flock(lock_type: LockType) -> libc::flock {
 /// - `file`: The file to acquire a lock for [`LockType`]. The file's state will
 ///   be logically mutated, but not technically.
 /// - `lock_type`: The [`LockType`]
-pub fn try_acquire_lock<Fd: AsRawFd>(file: Fd, lock_type: LockType) -> Result<(), LockError> {
+pub fn try_acquire_lock<Fd: AsRawFd>(file: &Fd, lock_type: LockType) -> Result<(), LockError> {
     let flock = get_flock(lock_type);
 
     let res = fcntl(file.as_raw_fd(), FcntlArg::F_OFD_SETLK(&flock));
@@ -146,7 +146,7 @@ pub fn try_acquire_lock<Fd: AsRawFd>(file: Fd, lock_type: LockType) -> Result<()
 ///
 /// # Parameters
 /// - `file`: The file to clear all locks for [`LockType`].
-pub fn clear_lock<Fd: AsRawFd>(file: Fd) -> Result<(), LockError> {
+pub fn clear_lock<Fd: AsRawFd>(file: &Fd) -> Result<(), LockError> {
     try_acquire_lock(file, LockType::Unlock)
 }
 
@@ -155,7 +155,7 @@ pub fn clear_lock<Fd: AsRawFd>(file: Fd) -> Result<(), LockError> {
 ///
 /// # Parameters
 /// - `file`: The file for which to get the lock state.
-pub fn get_lock_state<Fd: AsRawFd>(file: Fd) -> Result<LockState, LockError> {
+pub fn get_lock_state<Fd: AsRawFd>(file: &Fd) -> Result<LockState, LockError> {
     let mut flock = get_flock(LockType::Write);
     let res = fcntl(file.as_raw_fd(), FcntlArg::F_OFD_GETLK(&mut flock));
     match res {
