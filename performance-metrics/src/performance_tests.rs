@@ -137,7 +137,7 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
         .unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
         measure_virtio_net_throughput(test_timeout, num_queues / 2, &guest, rx, bandwidth).unwrap()
     });
 
@@ -178,7 +178,7 @@ pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
         .unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         // 'ethr' tool will measure the latency multiple times with provided test time
         let latency = measure_virtio_net_latency(&guest, control.test_timeout).unwrap();
@@ -405,7 +405,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
         .unwrap();
 
     let r = std::panic::catch_unwind(|| {
-        guest.wait_vm_boot(None).unwrap();
+        guest.wait_vm_boot().unwrap();
 
         let fio_command = format!(
             "sudo fio --filename=/dev/vdc --name=test --output-format=json \
