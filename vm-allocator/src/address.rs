@@ -68,10 +68,10 @@ impl AddressAllocator {
     }
 
     fn align_address(&self, address: GuestAddress, alignment: GuestUsize) -> GuestAddress {
-        let align_adjust = if !address.raw_value().is_multiple_of(alignment) {
-            alignment - (address.raw_value() % alignment)
-        } else {
+        let align_adjust = if address.raw_value().is_multiple_of(alignment) {
             0
+        } else {
+            alignment - (address.raw_value() % alignment)
         };
 
         address.unchecked_add(align_adjust)

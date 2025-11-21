@@ -217,7 +217,7 @@ impl Vdpa {
         &mut self,
         mem: &GuestMemoryMmap,
         virtio_interrupt: &dyn VirtioInterrupt,
-        queues: Vec<(usize, Queue, EventFd)>,
+        queues: &[(usize, Queue, EventFd)],
     ) -> Result<()> {
         assert!(self.vhost.is_some());
         self.vhost
@@ -421,7 +421,7 @@ impl VirtioDevice for Vdpa {
         virtio_interrupt: Arc<dyn VirtioInterrupt>,
         queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
-        self.activate_vdpa(&mem.memory(), virtio_interrupt.as_ref(), queues)
+        self.activate_vdpa(&mem.memory(), virtio_interrupt.as_ref(), &queues)
             .map_err(ActivateError::ActivateVdpa)?;
 
         // Store the virtio interrupt handler as we need to return it on reset
@@ -450,12 +450,12 @@ impl VirtioDevice for Vdpa {
 
 impl Pausable for Vdpa {
     fn pause(&mut self) -> std::result::Result<(), MigratableError> {
-        if !self.migrating {
+        if self.migrating {
+            Ok(())
+        } else {
             Err(MigratableError::Pause(anyhow!(
                 "Can't pause a vDPA device outside live migration"
             )))
-        } else {
-            Ok(())
         }
     }
 
@@ -464,12 +464,12 @@ impl Pausable for Vdpa {
             return Ok(());
         }
 
-        if !self.migrating {
+        if self.migrating {
+            Ok(())
+        } else {
             Err(MigratableError::Resume(anyhow!(
                 "Can't resume a vDPA device outside live migration"
             )))
-        } else {
-            Ok(())
         }
     }
 }

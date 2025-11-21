@@ -468,15 +468,15 @@ impl VfioCommon {
         vfio_wrapper: Arc<dyn Vfio>,
         subclass: &dyn PciSubclass,
         bdf: PciBdf,
-        snapshot: Option<Snapshot>,
+        snapshot: Option<&Snapshot>,
         x_nv_gpudirect_clique: Option<u8>,
     ) -> Result<Self, VfioPciError> {
-        let pci_configuration_state =
-            vm_migration::state_from_id(snapshot.as_ref(), PCI_CONFIGURATION_ID).map_err(|e| {
-                VfioPciError::RetrievePciConfigurationState(anyhow!(
-                    "Failed to get PciConfigurationState from Snapshot: {e}"
-                ))
-            })?;
+        let pci_configuration_state = vm_migration::state_from_id(snapshot, PCI_CONFIGURATION_ID)
+            .map_err(|e| {
+            VfioPciError::RetrievePciConfigurationState(anyhow!(
+                "Failed to get PciConfigurationState from Snapshot: {e}"
+            ))
+        })?;
 
         let configuration = PciConfiguration::new(
             0,
@@ -516,18 +516,16 @@ impl VfioCommon {
                     "Failed to get VfioCommonState from Snapshot: {e}"
                 ))
             })?;
-        let msi_state =
-            vm_migration::state_from_id(snapshot.as_ref(), MSI_CONFIG_ID).map_err(|e| {
-                VfioPciError::RetrieveMsiConfigState(anyhow!(
-                    "Failed to get MsiConfigState from Snapshot: {e}"
-                ))
-            })?;
-        let msix_state =
-            vm_migration::state_from_id(snapshot.as_ref(), MSIX_CONFIG_ID).map_err(|e| {
-                VfioPciError::RetrieveMsixConfigState(anyhow!(
-                    "Failed to get MsixConfigState from Snapshot: {e}"
-                ))
-            })?;
+        let msi_state = vm_migration::state_from_id(snapshot, MSI_CONFIG_ID).map_err(|e| {
+            VfioPciError::RetrieveMsiConfigState(anyhow!(
+                "Failed to get MsiConfigState from Snapshot: {e}"
+            ))
+        })?;
+        let msix_state = vm_migration::state_from_id(snapshot, MSIX_CONFIG_ID).map_err(|e| {
+            VfioPciError::RetrieveMsixConfigState(anyhow!(
+                "Failed to get MsixConfigState from Snapshot: {e}"
+            ))
+        })?;
 
         if let Some(state) = state.as_ref() {
             vfio_common.set_state(state, msi_state, msix_state)?;
@@ -573,7 +571,7 @@ impl VfioCommon {
         allocator: &Arc<Mutex<SystemAllocator>>,
         mmio32_allocator: &mut AddressAllocator,
         mmio64_allocator: &mut AddressAllocator,
-        resources: Option<Vec<Resource>>,
+        resources: Option<&[Resource]>,
     ) -> Result<Vec<PciBarConfiguration>, PciDeviceError> {
         let mut bars = Vec::new();
         let mut bar_id = VFIO_PCI_BAR0_REGION_INDEX;
@@ -589,7 +587,7 @@ impl VfioCommon {
             let mut flags: u32 = 0;
 
             let mut restored_bar_addr = None;
-            if let Some(resources) = &resources {
+            if let Some(resources) = resources {
                 for resource in resources {
                     if let Resource::PciBar {
                         index,
@@ -621,20 +619,20 @@ impl VfioCommon {
                 flags = self.vfio_wrapper.read_config_dword(bar_offset);
 
                 // Is this an IO BAR?
-                let io_bar = if bar_id != VFIO_PCI_ROM_REGION_INDEX {
-                    matches!(flags & PCI_CONFIG_IO_BAR, PCI_CONFIG_IO_BAR)
-                } else {
+                let io_bar = if bar_id == VFIO_PCI_ROM_REGION_INDEX {
                     false
+                } else {
+                    matches!(flags & PCI_CONFIG_IO_BAR, PCI_CONFIG_IO_BAR)
                 };
 
                 // Is this a 64-bit BAR?
-                let is_64bit_bar = if bar_id != VFIO_PCI_ROM_REGION_INDEX {
+                let is_64bit_bar = if bar_id == VFIO_PCI_ROM_REGION_INDEX {
+                    false
+                } else {
                     matches!(
                         flags & PCI_CONFIG_MEMORY_BAR_64BIT,
                         PCI_CONFIG_MEMORY_BAR_64BIT
                     )
-                } else {
-                    false
                 };
 
                 if matches!(
@@ -885,17 +883,15 @@ impl VfioCommon {
             let cap_id = self.vfio_wrapper.read_config_byte(cap_next.into());
             if PciCapabilityId::from(cap_id) == PciCapabilityId::MsiX {
                 return Some(cap_next as usize);
-            } else {
-                let cap_ptr = self.vfio_wrapper.read_config_byte((cap_next + 1).into())
-                    & PCI_CONFIG_CAPABILITY_PTR_MASK;
-
-                // See parse_capabilities below for an explanation.
-                if cap_ptr != cap_next {
-                    cap_next = cap_ptr;
-                } else {
-                    break;
-                }
             }
+            let cap_ptr = self.vfio_wrapper.read_config_byte((cap_next + 1).into())
+                & PCI_CONFIG_CAPABILITY_PTR_MASK;
+
+            // See parse_capabilities below for an explanation.
+            if cap_ptr == cap_next {
+                break;
+            }
+            cap_next = cap_ptr;
         }
 
         None
@@ -1457,7 +1453,7 @@ impl VfioPciDevice {
         iommu_attached: bool,
         bdf: PciBdf,
         memory_slot_allocator: MemorySlotAllocator,
-        snapshot: Option<Snapshot>,
+        snapshot: Option<&Snapshot>,
         x_nv_gpudirect_clique: Option<u8>,
         device_path: PathBuf,
     ) -> Result<Self, VfioPciError> {
@@ -1472,7 +1468,7 @@ impl VfioPciDevice {
             Arc::new(vfio_wrapper) as Arc<dyn Vfio>,
             &PciVfioSubclass::VfioSubclass,
             bdf,
-            vm_migration::snapshot_from_id(snapshot.as_ref(), VFIO_COMMON_ID),
+            vm_migration::snapshot_from_id(snapshot, VFIO_COMMON_ID),
             x_nv_gpudirect_clique,
         )?;
 
@@ -1485,7 +1481,7 @@ impl VfioPciDevice {
             iommu_attached,
             memory_slot_allocator,
             bdf,
-            device_path: device_path.clone(),
+            device_path,
         };
 
         Ok(vfio_pci_device)
@@ -1842,8 +1838,12 @@ impl PciDevice for VfioPciDevice {
         mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,
     ) -> Result<Vec<PciBarConfiguration>, PciDeviceError> {
-        self.common
-            .allocate_bars(allocator, mmio32_allocator, mmio64_allocator, resources)
+        self.common.allocate_bars(
+            allocator,
+            mmio32_allocator,
+            mmio64_allocator,
+            resources.as_deref(),
+        )
     }
 
     fn free_bars(

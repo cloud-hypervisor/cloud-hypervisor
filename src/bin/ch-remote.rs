@@ -399,7 +399,7 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                     .get_one::<String>("net_config")
                     .unwrap(),
             )?;
-            simple_api_command_with_fds(socket, "PUT", "add-net", Some(&net_config), fds)
+            simple_api_command_with_fds(socket, "PUT", "add-net", Some(&net_config), &fds)
                 .map_err(Error::HttpApiClient)
         }
         Some("add-user-device") => {
@@ -454,7 +454,7 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                     .get_one::<String>("restore_config")
                     .unwrap(),
             )?;
-            simple_api_command_with_fds(socket, "PUT", "restore", Some(&restore_config), fds)
+            simple_api_command_with_fds(socket, "PUT", "restore", Some(&restore_config), &fds)
                 .map_err(Error::HttpApiClient)
         }
         Some("coredump") => {
@@ -1161,7 +1161,7 @@ fn main() {
             if let Some(api_client::Error::ServerResponse(status_code, body)) =
                 error.downcast_ref::<api_client::Error>()
             {
-                let body = body.as_ref().map(|body| body.as_str()).unwrap_or("");
+                let body = body.as_ref().map_or("", |body| body.as_str());
 
                 // Retrieve the list of error messages back.
                 let lines: Vec<&str> = match serde_json::from_str(body) {

@@ -1143,7 +1143,7 @@ impl DeviceManager {
         force_iommu: bool,
         boot_id_list: BTreeSet<String>,
         #[cfg(not(target_arch = "riscv64"))] timestamp: Instant,
-        snapshot: Option<Snapshot>,
+        snapshot: Option<&Snapshot>,
         dynamic: bool,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         trace_scoped!("DeviceManager::new");
@@ -1269,7 +1269,7 @@ impl DeviceManager {
             address_manager
                 .mmio_bus
                 .insert(
-                    cpu_manager.clone(),
+                    &(cpu_manager.clone() as Arc<dyn BusDeviceSync>),
                     acpi_address.0,
                     CPU_MANAGER_ACPI_SIZE as u64,
                 )
@@ -1355,7 +1355,7 @@ impl DeviceManager {
             timestamp,
             pending_activations: Arc::new(Mutex::new(Vec::default())),
             acpi_platform_addresses: AcpiPlatformAddresses::default(),
-            snapshot,
+            snapshot: snapshot.cloned(),
             rate_limit_groups,
             mmio_regions: Arc::new(Mutex::new(Vec::new())),
             #[cfg(feature = "fw_cfg")]
@@ -1369,7 +1369,7 @@ impl DeviceManager {
         address_manager
             .mmio_bus
             .insert(
-                Arc::clone(&device_manager) as Arc<dyn BusDeviceSync>,
+                &(device_manager.clone() as Arc<dyn BusDeviceSync>),
                 acpi_address.0,
                 DEVICE_MANAGER_ACPI_SIZE as u64,
             )
@@ -1417,7 +1417,7 @@ impl DeviceManager {
                 self.address_manager
                     .mmio_bus
                     .insert(
-                        Arc::clone(&self.memory_manager) as Arc<dyn BusDeviceSync>,
+                        &(self.memory_manager.clone() as Arc<dyn BusDeviceSync>),
                         acpi_address.0,
                         MEMORY_MANAGER_ACPI_SIZE as u64,
                     )
@@ -1507,7 +1507,11 @@ impl DeviceManager {
         #[cfg(target_arch = "x86_64")]
         self.address_manager
             .io_bus
-            .insert(fw_cfg, PORT_FW_CFG_BASE, PORT_FW_CFG_WIDTH)
+            .insert(
+                &(fw_cfg.clone() as Arc<dyn BusDeviceSync>),
+                PORT_FW_CFG_BASE,
+                PORT_FW_CFG_WIDTH,
+            )
             .map_err(DeviceManagerError::ErrorAddingFwCfgToBus)?;
 
         // default address for fw_cfg on arm via mmio
@@ -1783,7 +1787,7 @@ impl DeviceManager {
             ioapic::Ioapic::new(
                 id.clone(),
                 APIC_START,
-                Arc::clone(&self.msi_interrupt_manager),
+                self.msi_interrupt_manager.as_ref(),
                 state_from_id(self.snapshot.as_ref(), id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
@@ -1791,14 +1795,14 @@ impl DeviceManager {
         ));
 
         self.interrupt_controller = Some(interrupt_controller.clone());
+        let interrupt_controller_dyn: Arc<dyn BusDeviceSync> = interrupt_controller.clone();
 
         self.address_manager
             .mmio_bus
-            .insert(interrupt_controller.clone(), IOAPIC_START.0, IOAPIC_SIZE)
+            .insert(&interrupt_controller_dyn, IOAPIC_START.0, IOAPIC_SIZE)
             .map_err(DeviceManagerError::BusError)?;
 
-        self.bus_devices
-            .push(Arc::clone(&interrupt_controller) as Arc<dyn BusDeviceSync>);
+        self.bus_devices.push(interrupt_controller_dyn);
 
         // Fill the device tree with a new node. In case of restore, we
         // know there is nothing to do, so we can simply override the
@@ -1845,7 +1849,11 @@ impl DeviceManager {
 
             self.address_manager
                 .io_bus
-                .insert(shutdown_device, shutdown_pio_address.into(), 0x4)
+                .insert(
+                    &(shutdown_device.clone() as Arc<dyn BusDeviceSync>),
+                    shutdown_pio_address.into(),
+                    0x4,
+                )
                 .map_err(DeviceManagerError::BusError)?;
 
             self.acpi_platform_addresses.sleep_control_reg_address =
@@ -1887,7 +1895,7 @@ impl DeviceManager {
         self.address_manager
             .mmio_bus
             .insert(
-                ged_device.clone(),
+                &(ged_device.clone() as Arc<dyn BusDeviceSync>),
                 ged_address.0,
                 devices::acpi::GED_DEVICE_ACPI_SIZE as u64,
             )
@@ -1913,7 +1921,11 @@ impl DeviceManager {
 
             self.address_manager
                 .io_bus
-                .insert(pm_timer_device, pm_timer_pio_address.into(), 0x4)
+                .insert(
+                    &(pm_timer_device.clone() as Arc<dyn BusDeviceSync>),
+                    pm_timer_pio_address.into(),
+                    0x4,
+                )
                 .map_err(DeviceManagerError::BusError)?;
 
             self.acpi_platform_addresses.pm_timer_address =
@@ -1942,7 +1954,7 @@ impl DeviceManager {
 
         self.address_manager
             .io_bus
-            .insert(i8042, 0x61, 0x4)
+            .insert(&(i8042.clone() as Arc<dyn BusDeviceSync>), 0x61, 0x4)
             .map_err(DeviceManagerError::BusError)?;
         {
             // Add a CMOS emulated device
@@ -1970,7 +1982,7 @@ impl DeviceManager {
 
             self.address_manager
                 .io_bus
-                .insert(cmos, 0x70, 0x2)
+                .insert(&(cmos.clone() as Arc<dyn BusDeviceSync>), 0x70, 0x2)
                 .map_err(DeviceManagerError::BusError)?;
 
             let fwdebug = Arc::new(Mutex::new(devices::legacy::FwDebugDevice::new()));
@@ -1980,7 +1992,7 @@ impl DeviceManager {
 
             self.address_manager
                 .io_bus
-                .insert(fwdebug, 0x402, 0x1)
+                .insert(&(fwdebug.clone() as Arc<dyn BusDeviceSync>), 0x402, 0x1)
                 .map_err(DeviceManagerError::BusError)?;
         }
 
@@ -1990,7 +2002,7 @@ impl DeviceManager {
             .push(Arc::clone(&debug_port) as Arc<dyn BusDeviceSync>);
         self.address_manager
             .io_bus
-            .insert(debug_port, 0x80, 0x1)
+            .insert(&(debug_port.clone() as Arc<dyn BusDeviceSync>), 0x80, 0x1)
             .map_err(DeviceManagerError::BusError)?;
 
         Ok(())
@@ -2061,7 +2073,7 @@ impl DeviceManager {
 
         self.address_manager
             .mmio_bus
-            .insert(gpio_device.clone(), addr.0, MMIO_LEN)
+            .insert(&gpio_device, addr.0, MMIO_LEN)
             .map_err(DeviceManagerError::BusError)?;
 
         self.gpio_device = Some(gpio_device.clone());
@@ -2101,8 +2113,7 @@ impl DeviceManager {
             .debug_console
             .clone()
             .iobase
-            .map(|port| port as u64)
-            .unwrap_or(debug_console::DEFAULT_PORT);
+            .map_or(debug_console::DEFAULT_PORT, |port| port as u64);
 
         self.bus_devices
             .push(Arc::clone(&debug_console) as Arc<dyn BusDeviceSync>);
@@ -2116,7 +2127,11 @@ impl DeviceManager {
 
         self.address_manager
             .io_bus
-            .insert(debug_console.clone(), port, 0x1)
+            .insert(
+                &(debug_console.clone() as Arc<dyn BusDeviceSync>),
+                port,
+                0x1,
+            )
             .map_err(DeviceManagerError::BusError)?;
 
         // Fill the device tree with a new node. In case of restore, we
@@ -2167,7 +2182,7 @@ impl DeviceManager {
 
         self.address_manager
             .io_bus
-            .insert(serial.clone(), 0x3f8, 0x8)
+            .insert(&(serial.clone() as Arc<dyn BusDeviceSync>), 0x3f8, 0x8)
             .map_err(DeviceManagerError::BusError)?;
 
         // Fill the device tree with a new node. In case of restore, we
@@ -2219,7 +2234,7 @@ impl DeviceManager {
 
         self.address_manager
             .mmio_bus
-            .insert(serial.clone(), addr.0, MMIO_LEN)
+            .insert(&serial, addr.0, MMIO_LEN)
             .map_err(DeviceManagerError::BusError)?;
 
         self.id_to_dev_info.insert(
@@ -2282,7 +2297,7 @@ impl DeviceManager {
 
         self.address_manager
             .mmio_bus
-            .insert(serial.clone(), addr.0, MMIO_LEN)
+            .insert(&serial, addr.0, MMIO_LEN)
             .map_err(DeviceManagerError::BusError)?;
 
         self.id_to_dev_info.insert(
@@ -2478,7 +2493,7 @@ impl DeviceManager {
         tpm_path: PathBuf,
     ) -> DeviceManagerResult<Arc<Mutex<devices::tpm::Tpm>>> {
         // Create TPM Device
-        let tpm = devices::tpm::Tpm::new(tpm_path.to_str().unwrap().to_string()).map_err(|e| {
+        let tpm = devices::tpm::Tpm::new(tpm_path.to_str().unwrap()).map_err(|e| {
             DeviceManagerError::CreateTpmDevice(anyhow!("Failed to create TPM Device : {e:?}"))
         })?;
         let tpm = Arc::new(Mutex::new(tpm));
@@ -2487,7 +2502,7 @@ impl DeviceManager {
         self.address_manager
             .mmio_bus
             .insert(
-                tpm.clone(),
+                &(tpm.clone() as Arc<dyn BusDeviceSync>),
                 arch::layout::TPM_START.0,
                 arch::layout::TPM_SIZE,
             )
@@ -3877,7 +3892,7 @@ impl DeviceManager {
 
         pci_bus
             .register_mapping(
-                bus_device,
+                &bus_device,
                 self.address_manager.io_bus.as_ref(),
                 self.address_manager.mmio_bus.as_ref(),
                 bars.clone(),
@@ -5214,17 +5229,16 @@ impl Aml for DeviceManager {
         #[cfg(target_arch = "x86_64")]
         let serial_irq = 4;
         #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-        let serial_irq =
-            if self.config.lock().unwrap().serial.clone().mode != ConsoleOutputMode::Off {
-                self.get_device_info()
-                    .clone()
-                    .get(&(DeviceType::Serial, DeviceType::Serial.to_string()))
-                    .unwrap()
-                    .irq()
-            } else {
-                // If serial is turned off, add a fake device with invalid irq.
-                31
-            };
+        let serial_irq = if self.config.lock().unwrap().serial.mode != ConsoleOutputMode::Off {
+            self.get_device_info()
+                .clone()
+                .get(&(DeviceType::Serial, DeviceType::Serial.to_string()))
+                .unwrap()
+                .irq()
+        } else {
+            // If serial is turned off, add a fake device with invalid irq.
+            31
+        };
         if self.config.lock().unwrap().serial.mode != ConsoleOutputMode::Off {
             aml::Device::new(
                 "_SB_.COM1".into(),

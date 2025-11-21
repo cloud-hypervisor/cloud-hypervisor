@@ -147,7 +147,11 @@ impl Bus {
         None
     }
 
-    pub fn insert(&self, device: Arc<dyn BusDeviceSync>, base: u64, len: u64) -> Result<()> {
+    /// Inserts a new device into the Bus.
+    ///
+    /// The `device` of type <code>&[Arc]<dyn [BusDeviceSync]></code> will be
+    /// stored as [`Weak`] reference.
+    pub fn insert(&self, device: &Arc<dyn BusDeviceSync>, base: u64, len: u64) -> Result<()> {
         if len == 0 {
             return Err(Error::ZeroSizedRange);
         }
@@ -167,7 +171,7 @@ impl Bus {
             .devices
             .write()
             .unwrap()
-            .insert(BusRange { base, len }, Arc::downgrade(&device))
+            .insert(BusRange { base, len }, Arc::downgrade(device))
             .is_some()
         {
             return Err(Error::Overlap);
@@ -229,7 +233,7 @@ impl Bus {
         self.remove(old_base, old_len)?;
 
         // Insert the new address range
-        self.insert(device, new_base, new_len)
+        self.insert(&device, new_base, new_len)
     }
 
     /// Reads data from the device that owns the range containing `addr` and puts it into `data`.
@@ -285,29 +289,29 @@ mod unit_tests {
     #[test]
     fn bus_insert() {
         let bus = Bus::new();
-        let dummy = Arc::new(DummyDevice);
-        bus.insert(dummy.clone(), 0x10, 0).unwrap_err();
-        bus.insert(dummy.clone(), 0x10, 0x10).unwrap();
+        let dummy: Arc<dyn BusDeviceSync> = Arc::new(DummyDevice);
+        bus.insert(&dummy, 0x10, 0).unwrap_err();
+        bus.insert(&dummy, 0x10, 0x10).unwrap();
 
-        let result = bus.insert(dummy.clone(), 0x0f, 0x10);
+        let result = bus.insert(&dummy, 0x0f, 0x10);
         assert_eq!(format!("{result:?}"), "Err(Overlap)");
 
-        bus.insert(dummy.clone(), 0x10, 0x10).unwrap_err();
-        bus.insert(dummy.clone(), 0x10, 0x15).unwrap_err();
-        bus.insert(dummy.clone(), 0x12, 0x15).unwrap_err();
-        bus.insert(dummy.clone(), 0x12, 0x01).unwrap_err();
-        bus.insert(dummy.clone(), 0x0, 0x20).unwrap_err();
-        bus.insert(dummy.clone(), 0x20, 0x05).unwrap();
-        bus.insert(dummy.clone(), 0x25, 0x05).unwrap();
-        bus.insert(dummy, 0x0, 0x10).unwrap();
+        bus.insert(&dummy, 0x10, 0x10).unwrap_err();
+        bus.insert(&dummy, 0x10, 0x15).unwrap_err();
+        bus.insert(&dummy, 0x12, 0x15).unwrap_err();
+        bus.insert(&dummy, 0x12, 0x01).unwrap_err();
+        bus.insert(&dummy, 0x0, 0x20).unwrap_err();
+        bus.insert(&dummy, 0x20, 0x05).unwrap();
+        bus.insert(&dummy, 0x25, 0x05).unwrap();
+        bus.insert(&dummy, 0x0, 0x10).unwrap();
     }
 
     #[test]
     #[allow(clippy::redundant_clone)]
     fn bus_read_write() {
         let bus = Bus::new();
-        let dummy = Arc::new(DummyDevice);
-        bus.insert(dummy.clone(), 0x10, 0x10).unwrap();
+        let dummy: Arc<dyn BusDeviceSync> = Arc::new(DummyDevice);
+        bus.insert(&dummy, 0x10, 0x10).unwrap();
         bus.read(0x10, &mut [0, 0, 0, 0]).unwrap();
         bus.write(0x10, &[0, 0, 0, 0]).unwrap();
         bus.read(0x11, &mut [0, 0, 0, 0]).unwrap();
@@ -324,8 +328,8 @@ mod unit_tests {
     #[allow(clippy::redundant_clone)]
     fn bus_read_write_values() {
         let bus = Bus::new();
-        let dummy = Arc::new(ConstantDevice);
-        bus.insert(dummy.clone(), 0x10, 0x10).unwrap();
+        let dummy: Arc<dyn BusDeviceSync> = Arc::new(ConstantDevice);
+        bus.insert(&dummy, 0x10, 0x10).unwrap();
 
         let mut values = [0, 1, 2, 3];
         bus.read(0x10, &mut values).unwrap();
@@ -350,8 +354,8 @@ mod unit_tests {
 
         let bus = Bus::new();
         let mut data = [1, 2, 3, 4];
-        let device = Arc::new(DummyDevice);
-        bus.insert(device.clone(), 0x10, 0x10).unwrap();
+        let device: Arc<dyn BusDeviceSync> = Arc::new(DummyDevice);
+        bus.insert(&device, 0x10, 0x10).unwrap();
         bus.write(0x10, &data).unwrap();
         bus.read(0x10, &mut data).unwrap();
         assert_eq!(data, [1, 2, 3, 4]);
