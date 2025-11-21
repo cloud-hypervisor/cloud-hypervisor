@@ -52,7 +52,7 @@ use crate::bitpos_iterator::BitposIteratorExt;
 // The source can at any time send an "abandon request" to cancel
 
 #[repr(u16)]
-#[derive(Copy, Clone, Default)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
 pub enum Command {
     #[default]
     Invalid,
@@ -174,6 +174,10 @@ impl Response {
 
     pub fn status(&self) -> Status {
         self.status
+    }
+
+    pub fn length(&self) -> u64 {
+        self.length
     }
 
     pub fn read_from(fd: &mut dyn Read) -> Result<Response, MigratableError> {
