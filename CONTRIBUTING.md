@@ -26,6 +26,9 @@ cargo check --all --all-targets --tests
 cargo clippy --all --all-targets --tests
 # Please note that this will not execute integration tests.
 cargo test --all --all-targets --tests
+
+# To lint your last three commits
+gitlint --commits "HEAD~3..HEAD"
 ```
 
 ### \[Optional\] Run Integration Tests
