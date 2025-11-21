@@ -2733,16 +2733,15 @@ impl VmConfig {
             for numa_node in numa.iter() {
                 if let Some(memory_zones) = numa_node.memory_zones.clone() {
                     for memory_zone in memory_zones.iter() {
-                        if !used_numa_node_memory_zones.contains_key(memory_zone) {
-                            used_numa_node_memory_zones
-                                .insert(memory_zone.to_string(), numa_node.guest_numa_id);
-                        } else {
+                        if used_numa_node_memory_zones.contains_key(memory_zone) {
                             return Err(ValidationError::MemoryZoneReused(
                                 memory_zone.to_string(),
                                 *used_numa_node_memory_zones.get(memory_zone).unwrap(),
                                 numa_node.guest_numa_id,
                             ));
                         }
+                        used_numa_node_memory_zones
+                            .insert(memory_zone.to_string(), numa_node.guest_numa_id);
                     }
                 }
 
@@ -2756,15 +2755,14 @@ impl VmConfig {
                                 numa_node.guest_numa_id,
                             ));
                         }
-                        if !used_pci_segments.contains_key(pci_segment) {
-                            used_pci_segments.insert(*pci_segment, numa_node.guest_numa_id);
-                        } else {
+                        if used_pci_segments.contains_key(pci_segment) {
                             return Err(ValidationError::PciSegmentReused(
                                 *pci_segment,
                                 *used_pci_segments.get(pci_segment).unwrap(),
                                 numa_node.guest_numa_id,
                             ));
                         }
+                        used_pci_segments.insert(*pci_segment, numa_node.guest_numa_id);
                     }
                 }
             }

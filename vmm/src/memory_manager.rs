@@ -766,61 +766,7 @@ impl MemoryManager {
     ) -> Result<(u64, Vec<MemoryZoneConfig>, bool), Error> {
         let mut allow_mem_hotplug = false;
 
-        if !user_provided_zones {
-            if config.zones.is_some() {
-                error!(
-                    "User defined memory regions can't be provided if the \
-                    memory size is not 0"
-                );
-                return Err(Error::InvalidMemoryParameters);
-            }
-
-            if config.hotplug_size.is_some() {
-                allow_mem_hotplug = true;
-            }
-
-            if let Some(hotplugged_size) = config.hotplugged_size {
-                if let Some(hotplug_size) = config.hotplug_size {
-                    if hotplugged_size > hotplug_size {
-                        error!(
-                            "'hotplugged_size' {hotplugged_size} can't be bigger than \
-                            'hotplug_size' {hotplug_size}",
-                        );
-                        return Err(Error::InvalidMemoryParameters);
-                    }
-                } else {
-                    error!(
-                        "Invalid to define 'hotplugged_size' when there is\
-                        no 'hotplug_size'"
-                    );
-                    return Err(Error::InvalidMemoryParameters);
-                }
-                if config.hotplug_method == HotplugMethod::Acpi {
-                    error!(
-                        "Invalid to define 'hotplugged_size' with hotplug \
-                        method 'acpi'"
-                    );
-                    return Err(Error::InvalidMemoryParameters);
-                }
-            }
-
-            // Create a single zone from the global memory config. This lets
-            // us reuse the codepath for user defined memory zones.
-            let zones = vec![MemoryZoneConfig {
-                id: String::from(DEFAULT_MEMORY_ZONE),
-                size: config.size,
-                file: None,
-                shared: config.shared,
-                hugepages: config.hugepages,
-                hugepage_size: config.hugepage_size,
-                host_numa_node: None,
-                hotplug_size: config.hotplug_size,
-                hotplugged_size: config.hotplugged_size,
-                prefault: config.prefault,
-            }];
-
-            Ok((config.size, zones, allow_mem_hotplug))
-        } else {
+        if user_provided_zones {
             if config.zones.is_none() {
                 error!(
                     "User defined memory regions must be provided if the \
@@ -880,6 +826,60 @@ impl MemoryManager {
             }
 
             Ok((total_ram_size, zones, allow_mem_hotplug))
+        } else {
+            if config.zones.is_some() {
+                error!(
+                    "User defined memory regions can't be provided if the \
+                    memory size is not 0"
+                );
+                return Err(Error::InvalidMemoryParameters);
+            }
+
+            if config.hotplug_size.is_some() {
+                allow_mem_hotplug = true;
+            }
+
+            if let Some(hotplugged_size) = config.hotplugged_size {
+                if let Some(hotplug_size) = config.hotplug_size {
+                    if hotplugged_size > hotplug_size {
+                        error!(
+                            "'hotplugged_size' {hotplugged_size} can't be bigger than \
+                            'hotplug_size' {hotplug_size}",
+                        );
+                        return Err(Error::InvalidMemoryParameters);
+                    }
+                } else {
+                    error!(
+                        "Invalid to define 'hotplugged_size' when there is\
+                        no 'hotplug_size'"
+                    );
+                    return Err(Error::InvalidMemoryParameters);
+                }
+                if config.hotplug_method == HotplugMethod::Acpi {
+                    error!(
+                        "Invalid to define 'hotplugged_size' with hotplug \
+                        method 'acpi'"
+                    );
+                    return Err(Error::InvalidMemoryParameters);
+                }
+            }
+
+            // Create a single zone from the global memory config. This lets
+            // us reuse the codepath for user defined memory zones.
+            let zones = vec![MemoryZoneConfig {
+                id: String::from(DEFAULT_MEMORY_ZONE),
+                size: config.size,
+                file: None,
+                shared: config.shared,
+                hugepages: config.hugepages,
+                hugepage_size: config.hugepage_size,
+                host_numa_node: None,
+                hotplug_size: config.hotplug_size,
+                hotplugged_size: config.hotplugged_size,
+                prefault: config.prefault,
+            }];
+
+            Ok((config.size, zones, allow_mem_hotplug))
         }
     }
 

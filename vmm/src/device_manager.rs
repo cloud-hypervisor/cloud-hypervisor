@@ -5246,15 +5246,15 @@ impl Aml for DeviceManager {
         let serial_irq = 4;
         #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         let serial_irq =
-            if self.config.lock().unwrap().serial.clone().mode != ConsoleOutputMode::Off {
+            if self.config.lock().unwrap().serial.clone().mode == ConsoleOutputMode::Off {
+                // If serial is turned off, add a fake device with invalid irq.
+                31
+            } else {
                 self.get_device_info()
                     .clone()
                     .get(&(DeviceType::Serial, DeviceType::Serial.to_string()))
                     .unwrap()
                     .irq()
-            } else {
-                // If serial is turned off, add a fake device with invalid irq.
-                31
             };
         if self.config.lock().unwrap().serial.mode != ConsoleOutputMode::Off {
             aml::Device::new(

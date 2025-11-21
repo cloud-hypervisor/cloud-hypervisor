@@ -293,14 +293,7 @@ impl Request {
                 error!("Only head descriptor present: request = {req:?}");
             })?;
 
-        if !desc.has_next() {
-            status_desc = desc;
-            // Only flush requests are allowed to skip the data descriptor.
-            if req.request_type != RequestType::Flush {
-                error!("Need a data descriptor: request = {req:?}");
-                return Err(Error::DescriptorChainTooShort);
-            }
-        } else {
+        if desc.has_next() {
             req.data_descriptors.reserve_exact(1);
             while desc.has_next() {
                 if desc.is_write_only() && req.request_type == RequestType::Out {
@@ -326,6 +319,13 @@ impl Request {
                     })?;
             }
             status_desc = desc;
+        } else {
+            status_desc = desc;
+            // Only flush requests are allowed to skip the data descriptor.
+            if req.request_type != RequestType::Flush {
+                error!("Need a data descriptor: request = {req:?}");
+                return Err(Error::DescriptorChainTooShort);
+            }
         }
 
         // The status MUST always be writable.
@@ -446,7 +446,9 @@ impl Request {
             // In case it's not properly aligned, an intermediate buffer is
             // created with the correct alignment, and a copy from/to the
             // origin buffer is performed, depending on the type of operation.
-            let iov_base = if !(origin_ptr.as_ptr() as u64).is_multiple_of(SECTOR_SIZE) {
+            let iov_base = if (origin_ptr.as_ptr() as u64).is_multiple_of(SECTOR_SIZE) {
+                origin_ptr.as_ptr() as *mut libc::c_void
+            } else {
                 let layout = Layout::from_size_align(data_len, SECTOR_SIZE as usize).unwrap();
                 // SAFETY: layout has non-zero size
                 let aligned_ptr = unsafe { alloc_zeroed(layout) };
@@ -474,8 +476,6 @@ impl Request {
                 });
 
                 aligned_ptr as *mut libc::c_void
-            } else {
-                origin_ptr.as_ptr() as *mut libc::c_void
             };
 
             let iovec = libc::iovec {

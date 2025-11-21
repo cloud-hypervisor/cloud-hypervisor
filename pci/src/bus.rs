@@ -180,11 +180,11 @@ impl PciBus {
 
     pub fn get_device_id(&mut self, id: usize) -> Result<()> {
         if id < NUM_DEVICE_IDS {
-            if !self.device_ids[id] {
+            if self.device_ids[id] {
+                Err(PciRootError::AlreadyInUsePciDeviceSlot(id))
+            } else {
                 self.device_ids[id] = true;
                 Ok(())
-            } else {
-                Err(PciRootError::AlreadyInUsePciDeviceSlot(id))
             }
         } else {
             Err(PciRootError::InvalidPciDeviceSlot(id))

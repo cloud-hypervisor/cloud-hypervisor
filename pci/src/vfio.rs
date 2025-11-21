@@ -646,20 +646,20 @@ impl VfioCommon {
                 flags = self.vfio_wrapper.read_config_dword(bar_offset);
 
                 // Is this an IO BAR?
-                let io_bar = if bar_id != VFIO_PCI_ROM_REGION_INDEX {
-                    matches!(flags & PCI_CONFIG_IO_BAR, PCI_CONFIG_IO_BAR)
-                } else {
+                let io_bar = if bar_id == VFIO_PCI_ROM_REGION_INDEX {
                     false
+                } else {
+                    matches!(flags & PCI_CONFIG_IO_BAR, PCI_CONFIG_IO_BAR)
                 };
 
                 // Is this a 64-bit BAR?
-                let is_64bit_bar = if bar_id != VFIO_PCI_ROM_REGION_INDEX {
+                let is_64bit_bar = if bar_id == VFIO_PCI_ROM_REGION_INDEX {
+                    false
+                } else {
                     matches!(
                         flags & PCI_CONFIG_MEMORY_BAR_64BIT,
                         PCI_CONFIG_MEMORY_BAR_64BIT
                     )
-                } else {
-                    false
                 };
 
                 if matches!(
@@ -915,11 +915,10 @@ impl VfioCommon {
                 & PCI_CONFIG_CAPABILITY_PTR_MASK;
 
             // See parse_capabilities below for an explanation.
-            if cap_ptr != cap_next {
-                cap_next = cap_ptr;
-            } else {
+            if cap_ptr == cap_next {
                 break;
             }
+            cap_next = cap_ptr;
         }
 
         None

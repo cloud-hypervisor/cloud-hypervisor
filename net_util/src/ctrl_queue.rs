@@ -111,10 +111,7 @@ impl CtrlQueue {
                         .memory()
                         .read_obj::<u64>(data_desc_addr)
                         .map_err(Error::GuestMemory)?;
-                    if u32::from(ctrl_hdr.cmd) != VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET {
-                        warn!("Unsupported command: {}", ctrl_hdr.cmd);
-                        false
-                    } else {
+                    if u32::from(ctrl_hdr.cmd) == VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET {
                         let mut ok = true;
                         for tap in self.taps.iter_mut() {
                             info!("Reprogramming tap offload with features: {features}");
@@ -126,6 +123,9 @@ impl CtrlQueue {
                                 .ok();
                         }
                         ok
+                    } else {
+                        warn!("Unsupported command: {}", ctrl_hdr.cmd);
+                        false
                     }
                 }
                 _ => {
