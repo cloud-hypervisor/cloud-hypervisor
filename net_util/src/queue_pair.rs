@@ -88,7 +88,9 @@ impl TxVirtio {
                 next_desc = desc_chain.next();
             }
 
-            let len = if !iovecs.is_empty() {
+            let len = if iovecs.is_empty() {
+                0
+            } else {
                 // SAFETY: FFI call with correct arguments
                 let result = unsafe {
                     libc::writev(
@@ -119,8 +121,6 @@ impl TxVirtio {
                 self.counter_frames += Wrapping(1);
 
                 result as u32
-            } else {
-                0
             };
 
             // For the sake of simplicity (similar to the RX rate limiting), we always
@@ -230,7 +230,9 @@ impl RxVirtio {
                 next_desc = desc_chain.next();
             }
 
-            let len = if !iovecs.is_empty() {
+            let len = if iovecs.is_empty() {
+                0
+            } else {
                 // SAFETY: FFI call with correct arguments
                 let result = unsafe {
                     libc::readv(
@@ -268,8 +270,6 @@ impl RxVirtio {
                 self.counter_frames += Wrapping(1);
 
                 result as u32
-            } else {
-                0
             };
 
             // For the sake of simplicity (keeping the handling of RX_QUEUE_EVENT and

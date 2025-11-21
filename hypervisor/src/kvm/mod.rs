@@ -2364,7 +2364,9 @@ impl cpu::Vcpu for KvmVcpu {
 
         let expected_num_msrs = msr_entries.len();
         let num_msrs = self.get_msrs(&mut msr_entries)?;
-        let msrs = if num_msrs != expected_num_msrs {
+        let msrs = if num_msrs == expected_num_msrs {
+            msr_entries
+        } else {
             let mut faulty_msr_index = num_msrs;
             let mut msr_entries_tmp = msr_entries[..faulty_msr_index].to_vec();
 
@@ -2390,8 +2392,6 @@ impl cpu::Vcpu for KvmVcpu {
             }
 
             msr_entries_tmp
-        } else {
-            msr_entries
         };
 
         let vcpu_events = self.get_vcpu_events()?;

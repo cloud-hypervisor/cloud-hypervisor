@@ -171,6 +171,7 @@ suspicious = "deny"
 
 # Individual Lints
 assertions_on_result_states = "deny"
+if_not_else = "deny"
 manual_string_new = "deny"
 map_unwrap_or = "deny"
 redundant_else = "deny"

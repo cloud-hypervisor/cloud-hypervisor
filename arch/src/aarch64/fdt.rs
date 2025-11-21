@@ -111,9 +111,7 @@ pub fn get_cache_size(cache_level: CacheLevel) -> u32 {
     }
 
     let file_path = Path::new(&file_directory);
-    if !file_path.exists() {
-        0
-    } else {
+    if file_path.exists() {
         let src = fs::read_to_string(file_directory).expect("File not exists or file corrupted.");
         // The content of the file is as simple as a size, like: "32K"
         let src = src.trim();
@@ -127,6 +125,8 @@ pub fn get_cache_size(cache_level: CacheLevel) -> u32 {
                 "G" => 1024u32.pow(3),
                 _ => 1,
             }
+    } else {
+        0
     }
 }
 
@@ -142,11 +142,11 @@ pub fn get_cache_coherency_line_size(cache_level: CacheLevel) -> u32 {
     }
 
     let file_path = Path::new(&file_directory);
-    if !file_path.exists() {
-        0
-    } else {
+    if file_path.exists() {
         let src = fs::read_to_string(file_directory).expect("File not exists or file corrupted.");
         src.trim().parse::<u32>().unwrap()
+    } else {
+        0
     }
 }
 
@@ -162,11 +162,11 @@ pub fn get_cache_number_of_sets(cache_level: CacheLevel) -> u32 {
     }
 
     let file_path = Path::new(&file_directory);
-    if !file_path.exists() {
-        0
-    } else {
+    if file_path.exists() {
         let src = fs::read_to_string(file_directory).expect("File not exists or file corrupted.");
         src.trim().parse::<u32>().unwrap()
+    } else {
+        0
     }
 }
 
@@ -187,9 +187,7 @@ pub fn get_cache_shared(cache_level: CacheLevel) -> bool {
     }
 
     let file_path = Path::new(&file_directory);
-    if !file_path.exists() {
-        result = false;
-    } else {
+    if file_path.exists() {
         let src = fs::read_to_string(file_directory).expect("File not exists or file corrupted.");
         let src = src.trim();
         if src.is_empty() {
@@ -197,6 +195,8 @@ pub fn get_cache_shared(cache_level: CacheLevel) -> bool {
         } else {
             result = src.contains('-') || src.contains(',');
         }
+    } else {
+        result = false;
     }
 
     result
@@ -312,9 +312,7 @@ fn create_cpu_nodes(
 
     let cache_path = Path::new("/sys/devices/system/cpu/cpu0/cache");
     let cache_exist: bool = cache_path.exists();
-    if !cache_exist {
-        warn!("cache sysfs system does not exist.");
-    } else {
+    if cache_exist {
         // L1 Data Cache Info.
         l1_d_cache_size = get_cache_size(CacheLevel::L1D);
         l1_d_cache_line_size = get_cache_coherency_line_size(CacheLevel::L1D);
@@ -342,6 +340,8 @@ fn create_cpu_nodes(
         if l3_cache_size != 0 {
             l3_cache_shared = get_cache_shared(CacheLevel::L3);
         }
+    } else {
+        warn!("cache sysfs system does not exist.");
     }
 
     for (cpu_id, mpidr) in vcpu_mpidr.iter().enumerate().take(num_cpus) {
