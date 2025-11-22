@@ -3,24 +3,24 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::io;
 use std::io::Read;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 
-use anyhow::anyhow;
 use thiserror::Error;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Cannot connect to tpm Socket")]
-    ConnectToSocket(#[source] anyhow::Error),
-    #[error("Failed to read from socket")]
-    ReadFromSocket(#[source] anyhow::Error),
-    #[error("Failed to write to socket")]
-    WriteToSocket(#[source] anyhow::Error),
+    ConnectToSocket(#[source] io::Error),
+    #[error("Failed to read from socket: {0}")]
+    ReadFromSocket(String),
+    #[error("Failed to write to socket: {0}")]
+    WriteToSocket(String),
 }
-type Result<T> = anyhow::Result<T, Error>;
+type Result<T> = std::result::Result<T, Error>;
 
 #[derive(PartialEq)]
 enum SocketDevState {
@@ -65,9 +65,7 @@ impl SocketDev {
     pub fn connect(&mut self, socket_path: &str) -> Result<()> {
         self.state = SocketDevState::Connecting;
 
-        let s = UnixStream::connect(socket_path).map_err(|e| {
-            Error::ConnectToSocket(anyhow!("Failed to connect to tpm Socket. Error: {e:?}"))
-        })?;
+        let s = UnixStream::connect(socket_path).map_err(Error::ConnectToSocket)?;
         self.control_fd = s.as_raw_fd();
         self.stream = Some(s);
         self.state = SocketDevState::Connected;
@@ -92,7 +90,7 @@ impl SocketDev {
             .unwrap()
             .send_with_fd(buf, write_fd)
             .map_err(|e| {
-                Error::WriteToSocket(anyhow!("Failed to write to Socket. Error: {e:?}"))
+                Error::WriteToSocket(format!("Failed to write to Socket. Error: {e:?}"))
             })?;
 
         Ok(size)
@@ -100,9 +98,9 @@ impl SocketDev {
 
     pub fn write(&mut self, buf: &[u8]) -> Result<usize> {
         if self.stream.is_none() {
-            return Err(Error::WriteToSocket(anyhow!(
-                "Stream for tpm socket was not initialized"
-            )));
+            return Err(Error::WriteToSocket(
+                "Stream for tpm socket was not initialized".to_string(),
+            ));
         }
 
         if matches!(self.state, SocketDevState::Connected) {
@@ -115,21 +113,21 @@ impl SocketDev {
             }
             Ok(ret)
         } else {
-            Err(Error::WriteToSocket(anyhow!(
-                "TPM Socket was not in Connected State"
-            )))
+            Err(Error::WriteToSocket(
+                "TPM Socket was not in Connected State".to_string(),
+            ))
         }
     }
 
     pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         if self.stream.is_none() {
-            return Err(Error::ReadFromSocket(anyhow!(
-                "Stream for tpm socket was not initialized"
-            )));
+            return Err(Error::ReadFromSocket(
+                "Stream for tpm socket was not initialized".to_string(),
+            ));
         }
         let mut socket = self.stream.as_ref().unwrap();
         let size: usize = socket.read(buf).map_err(|e| {
-            Error::ReadFromSocket(anyhow!("Failed to read from socket. Error Code {e:?}"))
+            Error::ReadFromSocket(format!("Failed to read from socket. Error Code {e:?}"))
         })?;
         Ok(size)
     }
