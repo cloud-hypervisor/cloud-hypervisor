@@ -1007,21 +1007,9 @@ impl Vm {
             vm_config.lock().unwrap().is_tdx_enabled()
         };
 
-        #[cfg(feature = "sev_snp")]
-        let sev_snp_enabled = if snapshot.is_some() {
-            false
-        } else {
-            vm_config.lock().unwrap().is_sev_snp_enabled()
-        };
-
         let vm = Self::create_hypervisor_vm(
             hypervisor.as_ref(),
-            #[cfg(feature = "tdx")]
-            tdx_enabled,
-            #[cfg(feature = "sev_snp")]
-            sev_snp_enabled,
-            #[cfg(feature = "sev_snp")]
-            vm_config.lock().unwrap().memory.total_size(),
+            vm_config.lock().unwrap().to_hypervisor_vm_config(),
         )?;
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -1082,19 +1070,9 @@ impl Vm {
 
     pub fn create_hypervisor_vm(
         hypervisor: &dyn hypervisor::Hypervisor,
-        #[cfg(feature = "tdx")] tdx_enabled: bool,
-        #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
-        #[cfg(feature = "sev_snp")] mem_size: u64,
+        config: HypervisorVmConfig,
     ) -> Result<Arc<dyn hypervisor::Vm>> {
         hypervisor.check_required_extensions().unwrap();
-        let config = HypervisorVmConfig {
-            #[cfg(feature = "tdx")]
-            tdx_enabled,
-            #[cfg(feature = "sev_snp")]
-            sev_snp_enabled,
-            #[cfg(feature = "sev_snp")]
-            mem_size,
-        };
 
         let vm = hypervisor.create_vm(config).unwrap();
 
