@@ -46,32 +46,6 @@ update_workloads() {
         popd || exit
     fi
 
-    FOCAL_OS_QCOW2_ZLIB_FILE_IMAGE_NAME="focal-server-cloudimg-arm64-custom-20210929-0-zlib.qcow2"
-    FOCAL_OS_QCOW2_ZLIB_FILE_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_QCOW2_ZLIB_FILE_IMAGE_NAME"
-    if [ ! -f "$FOCAL_OS_QCOW2_ZLIB_FILE_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time qemu-img convert -c -f raw -O qcow2 -o compression_type=zlib \
-            "$FOCAL_OS_RAW_IMAGE" $FOCAL_OS_QCOW2_ZLIB_FILE_IMAGE_NAME
-        popd || exit
-    fi
-
-    FOCAL_OS_QCOW2_ZSTD_FILE_IMAGE_NAME="focal-server-cloudimg-arm64-custom-20210929-0-zstd.qcow2"
-    FOCAL_OS_QCOW2_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_QCOW2_ZSTD_FILE_IMAGE_NAME"
-    if [ ! -f "$FOCAL_OS_QCOW2_ZSTD_FILE_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time qemu-img convert -c -f raw -O qcow2 -o compression_type=zstd \
-            "$FOCAL_OS_RAW_IMAGE" $FOCAL_OS_QCOW2_ZSTD_FILE_IMAGE_NAME
-        popd || exit
-    fi
-
-    FOCAL_OS_QCOW2_IMAGE_BACKING_FILE_NAME="focal-server-cloudimg-arm64-custom-20210929-0-backing.qcow2"
-    FOCAL_OS_QCOW2_BACKING_FILE_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_QCOW2_IMAGE_BACKING_FILE_NAME"
-    if [ ! -f "$FOCAL_OS_QCOW2_BACKING_FILE_IMAGE" ]; then
-        pushd "$WORKLOADS_DIR" || exit
-        time qemu-img create -f qcow2 -b "$FOCAL_OS_QCOW2_ZSTD_FILE_IMAGE" -F qcow2 $FOCAL_OS_QCOW2_IMAGE_BACKING_FILE_NAME
-        popd || exit
-    fi
-
     JAMMY_OS_RAW_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0.raw"
     JAMMY_OS_RAW_IMAGE_DOWNLOAD_URL="https://ch-images.azureedge.net/$JAMMY_OS_RAW_IMAGE_NAME"
     JAMMY_OS_RAW_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_RAW_IMAGE_NAME"
@@ -87,6 +61,32 @@ update_workloads() {
     if [ ! -f "$JAMMY_OS_QCOW2_UNCOMPRESSED_IMAGE" ]; then
         pushd "$WORKLOADS_DIR" || exit
         time wget --quiet $JAMMY_OS_QCOW2_IMAGE_UNCOMPRESSED_DOWNLOAD_URL || exit 1
+        popd || exit
+    fi
+
+    JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-zlib.qcow2"
+    JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE_NAME"
+    if [ ! -f "$JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE" ]; then
+        pushd "$WORKLOADS_DIR" || exit
+        time qemu-img convert -c -f raw -O qcow2 -o compression_type=zlib \
+            "$JAMMY_OS_RAW_IMAGE" $JAMMY_OS_QCOW2_ZLIB_FILE_IMAGE_NAME
+        popd || exit
+    fi
+
+    JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-zstd.qcow2"
+    JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE_NAME"
+    if [ ! -f "$JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE" ]; then
+        pushd "$WORKLOADS_DIR" || exit
+        time qemu-img convert -c -f raw -O qcow2 -o compression_type=zstd \
+            "$JAMMY_OS_RAW_IMAGE" $JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE_NAME
+        popd || exit
+    fi
+
+    JAMMY_OS_QCOW2_IMAGE_BACKING_FILE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-backing.qcow2"
+    JAMMY_OS_QCOW2_BACKING_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW2_IMAGE_BACKING_FILE_NAME"
+    if [ ! -f "$JAMMY_OS_QCOW2_BACKING_FILE_IMAGE" ]; then
+        pushd "$WORKLOADS_DIR" || exit
+        time qemu-img create -f qcow2 -b "$JAMMY_OS_QCOW2_ZSTD_FILE_IMAGE" -F qcow2 $JAMMY_OS_QCOW2_IMAGE_BACKING_FILE_NAME
         popd || exit
     fi
 
