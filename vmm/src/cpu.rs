@@ -1702,7 +1702,7 @@ impl CpuManager {
                 n_supervisor_int_id: arch::riscv64::CLOUDHV_IRQCHIP_NUM_MSIS,
                 n_guest_int_id: arch::riscv64::CLOUDHV_IRQCHIP_NUM_MSIS,
                 geust_index_bits: 1,
-                hart_index_bits: hart_index_bits,
+                hart_index_bits,
                 group_index_bits: 1,
                 // IMSIC_MMIO_GROUP_MIN_SHIFT
                 group_index_shift: 24,
