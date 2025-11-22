@@ -9,8 +9,10 @@ use std::str::FromStr;
 use std::{fs, result};
 
 use net_util::MacAddr;
+use serde::de::Error;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use vhost::vhost_user::message::VhostUserProtocolFeatures;
 use virtio_devices::RateLimiterConfig;
 
 use crate::Landlock;
@@ -424,6 +426,54 @@ pub struct BalloonConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct PvmemcontrolConfig {}
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AvailProtocolFeatures(pub VhostUserProtocolFeatures);
+
+impl serde::Serialize for AvailProtocolFeatures {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_u64(self.0.bits())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for AvailProtocolFeatures {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let features = u64::deserialize(deserializer)?;
+        VhostUserProtocolFeatures::from_bits(features)
+            .ok_or_else(|| {
+                D::Error::custom(format_args!(
+                    "Unsupported vhost-user protocol features: \
+got {:b} but supported values are {:b}",
+                    features,
+                    VhostUserProtocolFeatures::all()
+                ))
+            })
+            .map(Self)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct VhostUserDeviceConfig {
+    pub socket: PathBuf,
+    #[serde(default = "default_vhost_user_config_num_queues")]
+    pub num_queues: usize,
+    #[serde(default = "default_vhost_user_config_queue_size")]
+    pub queue_size: u16,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub pci_segment: u16,
+    pub device_type: u32,
+    pub min_queues: u16,
+    pub avail_features: u64,
+    pub avail_protocol_features: AvailProtocolFeatures,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct FsConfig {
     pub tag: String,
@@ -436,6 +486,14 @@ pub struct FsConfig {
     pub id: Option<String>,
     #[serde(default)]
     pub pci_segment: u16,
+}
+
+pub fn default_vhost_user_config_num_queues() -> usize {
+    1
+}
+
+pub fn default_vhost_user_config_queue_size() -> u16 {
+    1024
 }
 
 pub fn default_fsconfig_num_queues() -> usize {
@@ -906,6 +964,7 @@ pub struct VmConfig {
     #[serde(default)]
     pub rng: RngConfig,
     pub balloon: Option<BalloonConfig>,
+    pub vhost_user: Option<Vec<VhostUserDeviceConfig>>,
     pub fs: Option<Vec<FsConfig>>,
     pub pmem: Option<Vec<PmemConfig>>,
     #[serde(default = "default_serial")]

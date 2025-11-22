@@ -34,7 +34,7 @@ use vmm::vm_config::IvshmemConfig;
 use vmm::vm_config::{
     BalloonConfig, DeviceConfig, DiskConfig, FsConfig, LandlockConfig, NetConfig, NumaConfig,
     PciSegmentConfig, PmemConfig, RateLimiterGroupConfig, TpmConfig, UserDeviceConfig, VdpaConfig,
-    VmConfig, VsockConfig,
+    VhostUserDeviceConfig, VmConfig, VsockConfig,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
@@ -449,6 +449,11 @@ fn get_cli_options_sorted(
             .action(ArgAction::SetTrue)
             .help("Print version")
             .num_args(0),
+        Arg::new("vhost-user-device")
+            .long("vhost-user-device")
+            .help(VhostUserDeviceConfig::SYNTAX)
+            .num_args(1..)
+            .group("vm-config"),
         Arg::new("vsock")
             .long("vsock")
             .help(VsockConfig::SYNTAX)
@@ -996,6 +1001,7 @@ mod unit_tests {
             },
             balloon: None,
             fs: None,
+            vhost_user: None,
             pmem: None,
             serial: ConsoleConfig {
                 file: None,

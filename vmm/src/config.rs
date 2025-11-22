@@ -16,6 +16,7 @@ use option_parser::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use vhost::vhost_user::VhostUserProtocolFeatures;
 use virtio_bindings::virtio_blk::VIRTIO_BLK_ID_BYTES;
 use virtio_devices::block::MINIMUM_BLOCK_QUEUE_SIZE;
 use virtio_devices::vhost_user::VIRTIO_FS_TAG_LEN;
@@ -44,6 +45,37 @@ pub enum Error {
     /// Filesystem socket is missing
     #[error("Error parsing --fs: socket missing")]
     ParseFsSockMissing,
+    /// VhostUser socket is missing
+    #[error("Error parsing --vhost-user: socket missing")]
+    ParseVhostUserSockMissing,
+    /// VhostUser number of queues is missing
+    #[error("Error parsing --vhost-user: number of queues missing")]
+    ParseVhostUserNumQueuesMissing,
+    /// VhostUser virtio ID is missing
+    #[error("Error parsing --vhost-user: virtio ID missing")]
+    ParseVhostUserVirtioIdMissing,
+    /// VhostUser available features is missing
+    #[error("Error parsing --vhost-user: available features missing")]
+    ParseVhostUserAvailFeaturesMissing,
+    /// VhostUser available protocol features is missing
+    #[error("Error parsing --vhost-user: available protocol features missing")]
+    ParseVhostUserAvailProtocolFeaturesMissing,
+    /// VhostUser available protocol features not supported
+    #[error(
+        "Error parsing --vhost-user: available protocol features not supported: \
+got 0b{:b} but only 0b{:b} supported",
+        provided, VhostUserProtocolFeatures::all().bits()
+    )]
+    ParseVhostUserAvailProtocolFeaturesUnsupported { provided: u64 },
+    /// VhostUser min queues is missing
+    #[error("Error parsing --vhost-user: min queues missing")]
+    ParseVhostUserMinQueuesMissing,
+    /// VhostUser ID is missing
+    #[error("Error parsing --vhost-user: ID missing")]
+    ParseVhostUserIdMissing,
+    /// VhostUser queue size missing
+    #[error("Error parsing --vhost-user: queue size missing")]
+    ParseVhostUserQueueSizeMissing,
     /// Missing persistent memory file parameter.
     #[error("Error parsing --pmem: file missing")]
     ParsePmemFileMissing,
@@ -92,6 +124,9 @@ pub enum Error {
     /// Error parsing persistent memory parameters
     #[error("Error parsing --pmem")]
     ParsePersistentMemory(#[source] OptionParserError),
+    /// Error parsing vhost-user parameters
+    #[error("Error parsing --vhost-user")]
+    ParseVhostUser(#[source] OptionParserError),
     /// Failed parsing console
     #[error("Error parsing --console")]
     ParseConsole(#[source] OptionParserError),
@@ -389,6 +424,7 @@ pub struct VmParams<'a> {
     pub rng: &'a str,
     pub balloon: Option<&'a str>,
     pub fs: Option<Vec<&'a str>>,
+    pub vhost_user: Option<Vec<&'a str>>,
     pub pmem: Option<Vec<&'a str>>,
     pub serial: &'a str,
     pub console: &'a str,
@@ -450,6 +486,9 @@ impl<'a> VmParams<'a> {
         let fs: Option<Vec<&str>> = args
             .get_many::<String>("fs")
             .map(|x| x.map(|y| y as &str).collect());
+        let vhost_user: Option<Vec<&str>> = args
+            .get_many::<String>("vhost-user-device")
+            .map(|x| x.map(|y| y as &str).collect());
         let pmem: Option<Vec<&str>> = args
             .get_many::<String>("pmem")
             .map(|x| x.map(|y| y as &str).collect());
@@ -504,6 +543,7 @@ impl<'a> VmParams<'a> {
             rng,
             balloon,
             fs,
+            vhost_user,
             pmem,
             serial,
             console,
@@ -1584,6 +1624,102 @@ impl BalloonConfig {
     }
 }
 
+impl VhostUserDeviceConfig {
+    pub const SYNTAX: &'static str = "virtio-vhost-user parameters \
+    \"virtio_id=<id>,socket=<socket_path>,num_queues=<number_of_queues>,\
+    queue_size=<size_of_each_queue>,id=<device_id>,pci_segment=<segment_id>,\
+    min_queues=<minimum_number_of_queues>,avail_features=<available features>,\
+    avail_protocol_features=<available vhost-user protocol features>\"";
+
+    pub fn parse(vhost_user: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser
+            .add("virtio_id")
+            .add("queue_size")
+            .add("num_queues")
+            .add("min_queues")
+            .add("socket")
+            .add("id")
+            .add("pci_segment")
+            .add("avail_features")
+            .add("avail_protocol_features");
+        parser.parse(vhost_user).map_err(Error::ParseVhostUser)?;
+
+        let socket = parser
+            .get("socket")
+            .ok_or(Error::ParseVhostUserSockMissing)?;
+
+        let queue_size = parser
+            .convert("queue_size")
+            .map_err(Error::ParseVhostUser)?
+            .ok_or(Error::ParseVhostUserQueueSizeMissing)?;
+        let num_queues = parser
+            .convert("num_queues")
+            .map_err(Error::ParseVhostUser)?
+            .ok_or(Error::ParseVhostUserNumQueuesMissing)?;
+        let device_type = parser
+            .convert("virtio_id")
+            .map_err(Error::ParseVhostUser)?
+            .ok_or(Error::ParseVhostUserVirtioIdMissing)?;
+        let min_queues = parser
+            .convert("min_queues")
+            .map_err(Error::ParseVhostUser)?
+            .ok_or(Error::ParseVhostUserMinQueuesMissing)?;
+
+        let id = parser.get("id").ok_or(Error::ParseVhostUserIdMissing)?;
+        let pci_segment = parser
+            .convert("pci_segment")
+            .map_err(Error::ParseVhostUser)?
+            .unwrap_or_default();
+        let avail_features: u64 = parser
+            .convert("avail_features")
+            .map_err(Error::ParseVhostUser)?
+            .ok_or(Error::ParseVhostUserAvailFeaturesMissing)?;
+        let avail_protocol_features: u64 = parser
+            .convert("avail_protocol_features")
+            .map_err(Error::ParseVhostUser)?
+            .ok_or(Error::ParseVhostUserAvailProtocolFeaturesMissing)?;
+        let avail_protocol_features = AvailProtocolFeatures(
+            VhostUserProtocolFeatures::from_bits(avail_protocol_features).ok_or({
+                Error::ParseVhostUserAvailProtocolFeaturesUnsupported {
+                    provided: avail_protocol_features,
+                }
+            })?,
+        );
+
+        Ok(VhostUserDeviceConfig {
+            socket: socket.into(),
+            min_queues,
+            device_type,
+            id: Some(id),
+            pci_segment,
+            avail_features,
+            avail_protocol_features,
+            num_queues,
+            queue_size,
+        })
+    }
+
+    // TODO: avoid duplication with FsConfig
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if let Some(platform_config) = vm_config.platform.as_ref() {
+            if self.pci_segment >= platform_config.num_pci_segments {
+                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+            }
+
+            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
+                && iommu_segments.contains(&self.pci_segment)
+            {
+                return Err(ValidationError::IommuNotSupportedOnSegment(
+                    self.pci_segment,
+                ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl FsConfig {
     pub const SYNTAX: &'static str = "virtio-fs parameters \
     \"tag=<tag_name>,socket=<socket_path>,num_queues=<number_of_queues>,\
@@ -2436,13 +2572,22 @@ impl VmConfig {
         id: &Option<String>,
     ) -> ValidationResult<()> {
         if let Some(id) = id.as_ref() {
-            if id.starts_with("__") {
-                return Err(ValidationError::InvalidIdentifier(id.clone()));
-            }
+            Self::validate_always_identifier(id_list, id)?;
+        }
 
-            if !id_list.insert(id.clone()) {
-                return Err(ValidationError::IdentifierNotUnique(id.clone()));
-            }
+        Ok(())
+    }
+
+    fn validate_always_identifier(
+        id_list: &mut BTreeSet<String>,
+        id: &str,
+    ) -> ValidationResult<()> {
+        if id.starts_with("__") {
+            return Err(ValidationError::InvalidIdentifier(id.to_owned()));
+        }
+
+        if !id_list.insert(id.to_owned()) {
+            return Err(ValidationError::IdentifierNotUnique(id.to_owned()));
         }
 
         Ok(())
@@ -2606,6 +2751,17 @@ impl VmConfig {
                 fs.validate(self)?;
 
                 Self::validate_identifier(&mut id_list, &fs.id)?;
+            }
+        }
+
+        if let Some(vhost_users) = &self.vhost_user {
+            if !vhost_users.is_empty() && !self.backed_by_shared_memory() {
+                return Err(ValidationError::VhostUserRequiresSharedMemory);
+            }
+            for vhost_user in vhost_users {
+                vhost_user.validate(self)?;
+
+                Self::validate_identifier(&mut id_list, &vhost_user.id)?;
             }
         }
 
@@ -2863,6 +3019,15 @@ impl VmConfig {
             fs = Some(fs_config_list);
         }
 
+        let mut vhost_user: Option<Vec<VhostUserDeviceConfig>> = None;
+        if let Some(vhost_user_list) = &vm_params.vhost_user {
+            let mut vhost_user_config_list = Vec::new();
+            for item in vhost_user_list.iter() {
+                vhost_user_config_list.push(VhostUserDeviceConfig::parse(item)?);
+            }
+            vhost_user = Some(vhost_user_config_list);
+        }
+
         let mut pmem: Option<Vec<PmemConfig>> = None;
         if let Some(pmem_list) = &vm_params.pmem {
             let mut pmem_config_list = Vec::new();
@@ -2998,6 +3163,7 @@ impl VmConfig {
             net,
             rng,
             balloon,
+            vhost_user,
             fs,
             pmem,
             serial,
@@ -3132,6 +3298,7 @@ impl Clone for VmConfig {
             #[cfg(feature = "pvmemcontrol")]
             pvmemcontrol: self.pvmemcontrol.clone(),
             fs: self.fs.clone(),
+            vhost_user: self.vhost_user.clone(),
             pmem: self.pmem.clone(),
             serial: self.serial.clone(),
             console: self.console.clone(),
@@ -3652,6 +3819,98 @@ mod unit_tests {
         Ok(())
     }
 
+    #[track_caller]
+    #[allow(clippy::too_many_arguments)]
+    fn make_vhost_user_config(
+        socket: &str,
+        virtio_id: u64,
+        num_queues: u64,
+        min_queues: u64,
+        id: &str,
+        pci_segment: u64,
+        queue_size: u64,
+        avail_features: u64,
+        avail_protocol_features: u64,
+    ) {
+        assert!(!socket.contains(",[]\n\r\0\""));
+        assert!(!id.contains(",[]\n\r\0\""));
+        let config = VhostUserDeviceConfig::parse(&format!(
+            "virtio_id={virtio_id},socket=\"{socket}\",num_queues={num_queues},\
+min_queues={min_queues},id=\"{id}\",pci_segment={pci_segment},queue_size={queue_size},\
+avail_features={avail_features},avail_protocol_features={avail_protocol_features}"
+        ));
+        let avail_protocol_features = VhostUserProtocolFeatures::from_bits(avail_protocol_features);
+        if let Some(features) = avail_protocol_features
+            && pci_segment <= u16::MAX as _
+            && num_queues <= usize::MAX as _
+            && virtio_id <= u32::MAX as _
+            && min_queues <= u16::MAX as _
+            && queue_size <= u16::MAX as _
+        {
+            assert_eq!(
+                config.unwrap(),
+                VhostUserDeviceConfig {
+                    socket: socket.into(),
+                    id: Some(id.to_owned()),
+                    device_type: u32::try_from(virtio_id).unwrap(),
+                    avail_features,
+                    avail_protocol_features: AvailProtocolFeatures(features),
+                    pci_segment: u16::try_from(pci_segment).unwrap(),
+                    num_queues: usize::try_from(num_queues).unwrap(),
+                    min_queues: u16::try_from(min_queues).unwrap(),
+                    queue_size: u16::try_from(queue_size).unwrap()
+                }
+            );
+        } else {
+            config.unwrap_err();
+        }
+    }
+
+    #[test]
+    fn test_parse_vhost_user() -> Result<()> {
+        // all parameters must be supplied, except pci_segment
+        VhostUserDeviceConfig::parse("").unwrap_err();
+        VhostUserDeviceConfig::parse("virtio_id=1").unwrap_err();
+        VhostUserDeviceConfig::parse("queue_size=1").unwrap_err();
+        VhostUserDeviceConfig::parse("socket=/tmp/sock").unwrap_err();
+        VhostUserDeviceConfig::parse("min_queues=1").unwrap_err();
+        VhostUserDeviceConfig::parse("id=1").unwrap_err();
+        make_vhost_user_config(
+            "/dev/null/doesnotexist",
+            100,
+            20,
+            5,
+            "Something",
+            10,
+            u16::MAX.into(),
+            virtio_devices::vhost_user::DEFAULT_VIRTIO_FEATURES,
+            VhostUserProtocolFeatures::all().bits(),
+        );
+        make_vhost_user_config(
+            "/dev/null/doesnotexist",
+            100,
+            20,
+            u64::MAX,
+            "Something",
+            10,
+            u16::MAX.into(),
+            virtio_devices::vhost_user::DEFAULT_VIRTIO_FEATURES,
+            VhostUserProtocolFeatures::all().bits(),
+        );
+        make_vhost_user_config(
+            "/dev/null/doesnotexist",
+            u64::from(u32::MAX) + 1,
+            20,
+            u64::MAX,
+            "Something",
+            10,
+            u16::MAX.into(),
+            virtio_devices::vhost_user::DEFAULT_VIRTIO_FEATURES,
+            VhostUserProtocolFeatures::all().bits(),
+        );
+        Ok(())
+    }
+
     fn pmem_fixture() -> PmemConfig {
         PmemConfig {
             file: PathBuf::from("/tmp/pmem"),
@@ -3921,6 +4180,7 @@ mod unit_tests {
             rate_limit_groups: None,
             disks: None,
             rng: RngConfig::default(),
+            vhost_user: None,
             balloon: None,
             fs: None,
             pmem: None,
@@ -4125,6 +4385,7 @@ mod unit_tests {
             },
             balloon: None,
             fs: None,
+            vhost_user: None,
             pmem: None,
             serial: ConsoleConfig {
                 file: None,
