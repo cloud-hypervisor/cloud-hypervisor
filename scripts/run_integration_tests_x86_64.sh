@@ -45,11 +45,31 @@ if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
     popd || exit
 fi
 
+FOCAL_OS_QCOW_ZLIB_FILE_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0-zlib.qcow2"
+FOCAL_OS_QCOW_ZLIB_FILE_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_QCOW_ZLIB_FILE_IMAGE_NAME"
+if [ ! -f "$FOCAL_OS_QCOW_ZLIB_FILE_IMAGE" ]; then
+    pushd "$WORKLOADS_DIR" || exit
+    time qemu-img convert -c -f raw -O qcow2 -o compression_type=zlib \
+        "$FOCAL_OS_RAW_IMAGE" $FOCAL_OS_QCOW_ZLIB_FILE_IMAGE_NAME
+    popd || exit
+fi
+
+FOCAL_OS_QCOW_ZSTD_FILE_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0-zstd.qcow2"
+FOCAL_OS_QCOW_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_QCOW_ZSTD_FILE_IMAGE_NAME"
+if [ ! -f "$FOCAL_OS_QCOW_ZSTD_FILE_IMAGE" ]; then
+    pushd "$WORKLOADS_DIR" || exit
+    time qemu-img convert -c -f raw -O qcow2 -o compression_type=zstd \
+        "$FOCAL_OS_RAW_IMAGE" $FOCAL_OS_QCOW_ZSTD_FILE_IMAGE_NAME
+    popd || exit
+fi
+
 FOCAL_OS_QCOW_BACKING_FILE_IMAGE_NAME="focal-server-cloudimg-amd64-custom-20210609-0-backing.qcow2"
 FOCAL_OS_QCOW_BACKING_FILE_IMAGE="$WORKLOADS_DIR/$FOCAL_OS_QCOW_BACKING_FILE_IMAGE_NAME"
 if [ ! -f "$FOCAL_OS_QCOW_BACKING_FILE_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
-    time qemu-img create -f qcow2 -b "$FOCAL_OS_IMAGE" -F qcow2 $FOCAL_OS_QCOW_BACKING_FILE_IMAGE_NAME
+    time qemu-img create -f qcow2 \
+        -b "$FOCAL_OS_QCOW_ZSTD_FILE_IMAGE" \
+        -F qcow2 $FOCAL_OS_QCOW_BACKING_FILE_IMAGE_NAME
     popd || exit
 fi
 
