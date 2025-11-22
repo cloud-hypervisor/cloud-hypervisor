@@ -50,6 +50,10 @@ impl DiskFile for RawFileDiskAio {
         }
     }
 
+    fn resize(&mut self, _size: u64) -> DiskFileResult<()> {
+        Err(DiskFileError::Unsupported)
+    }
+
     fn fd(&mut self) -> BorrowedDiskFd<'_> {
         BorrowedDiskFd::new(self.file.as_raw_fd())
     }

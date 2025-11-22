@@ -29,7 +29,7 @@ use crate::api::VmCoredump;
 use crate::api::{
     AddDisk, ApiError, ApiRequest, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem, VmAddUserDevice,
     VmAddVdpa, VmAddVsock, VmBoot, VmCounters, VmDelete, VmNmi, VmPause, VmPowerButton, VmReboot,
-    VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume,
+    VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeDisk, VmResizeZone, VmRestore, VmResume,
     VmSendMigration, VmShutdown, VmSnapshot,
 };
 use crate::landlock::Landlock;
@@ -248,6 +248,10 @@ pub static HTTP_ROUTES: LazyLock<HttpRoutes> = LazyLock::new(|| {
     r.routes.insert(
         endpoint!("/vm.resize"),
         Box::new(VmActionHandler::new(&VmResize)),
+    );
+    r.routes.insert(
+        endpoint!("/vm.resize-disk"),
+        Box::new(VmActionHandler::new(&VmResizeDisk)),
     );
     r.routes.insert(
         endpoint!("/vm.resize-zone"),

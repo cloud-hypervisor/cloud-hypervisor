@@ -47,6 +47,19 @@ impl DiskFile for RawFileDisk {
         }
     }
 
+    fn resize(&mut self, size: u64) -> DiskFileResult<()> {
+        let borrowed_fd = self.fd();
+        let raw_fd = borrowed_fd.as_raw_fd();
+
+        // SAFETY: FFI call into libc, trivially safe
+        let rc = unsafe { libc::ftruncate(raw_fd, size as libc::off_t) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(DiskFileError::ResizeError)
+        }
+    }
+
     fn fd(&mut self) -> BorrowedDiskFd<'_> {
         BorrowedDiskFd::new(self.file.as_raw_fd())
     }
