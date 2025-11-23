@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::fs::File;
-use std::io::{Error, Seek, SeekFrom};
+use std::io::{Error, ErrorKind, Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 
 use io_uring::{IoUring, opcode, types};
@@ -14,6 +14,8 @@ use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::{BatchRequest, DiskTopology, RequestType};
+
+const ZERO_BUFFER_SIZE: usize = 64 * 1024;
 
 pub struct RawFileDisk {
     file: File,
@@ -240,6 +242,88 @@ impl AsyncIo for RawFileAsync {
                 .map_err(AsyncIoError::SubmitBatchRequests)?;
         }
 
+        Ok(())
+    }
+
+    fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
+        let (submitter, mut sq, _) = self.io_uring.split();
+
+        // SAFETY: we know the file descriptor is valid.
+        unsafe {
+            sq.push(
+                &opcode::Fallocate::new(types::Fd(self.fd), length)
+                    .offset(offset)
+                    .mode(libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE)
+                    .build()
+                    .user_data(user_data),
+            )
+            .map_err(|_| AsyncIoError::PunchHole(Error::other("Submission queue is full")))?;
+        };
+
+        // Update the submission queue and submit new operations to the
+        // io_uring instance.
+        sq.sync();
+        submitter.submit().map_err(AsyncIoError::PunchHole)?;
+
+        Ok(())
+    }
+
+    fn write_zeroes_at(
+        &mut self,
+        offset: u64,
+        len: usize,
+        user_data: Option<u64>,
+    ) -> std::io::Result<usize> {
+        if let Some(user_data) = user_data {
+            self.write_all_zeroes_at(offset, len, user_data)
+                .map_err(|e| {
+                    std::io::Error::other(format!("failed to write whole buffer to file: {e}"))
+                })?;
+            return Ok(len);
+        }
+        Err(std::io::Error::new(
+            ErrorKind::InvalidData,
+            "failed to write zeroes since user_data is none",
+        ))
+    }
+
+    fn write_all_zeroes_at(
+        &mut self,
+        offset: u64,
+        len: usize,
+        user_data: u64,
+    ) -> AsyncIoResult<()> {
+        let (submitter, mut sq, _) = self.io_uring.split();
+
+        let zero_buffer = [0u8; ZERO_BUFFER_SIZE];
+        let mut total_written = 0;
+
+        let mut iovecs = Vec::with_capacity(1);
+        while total_written < len {
+            let bytes_to_write = std::cmp::min(len - total_written, ZERO_BUFFER_SIZE);
+            iovecs.push(libc::iovec {
+                // SAFETY: a pointer to our stack buffer
+                iov_base: zero_buffer.as_ptr() as *mut libc::c_void,
+                iov_len: bytes_to_write,
+            });
+            total_written += bytes_to_write;
+        }
+
+        // SAFETY: we know the file descriptor is valid.
+        unsafe {
+            sq.push(
+                &opcode::Writev::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
+                    .offset(offset)
+                    .build()
+                    .user_data(user_data),
+            )
+            .map_err(|_| AsyncIoError::WriteVectored(Error::other("Submission queue is full")))?;
+        };
+
+        // Update the submission queue and submit new operations to the
+        // io_uring instance.
+        sq.sync();
+        submitter.submit().map_err(AsyncIoError::WriteVectored)?;
         Ok(())
     }
 }

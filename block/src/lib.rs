@@ -1064,6 +1064,7 @@ impl DiskTopology {
 
 #[cfg(test)]
 mod tests {
+    use std::os::fd::FromRawFd;
     use std::sync::Arc;
 
     use virtio_bindings::bindings::virtio_ring::VRING_DESC_F_WRITE;
@@ -1077,7 +1078,11 @@ mod tests {
 
     use super::*;
     use crate::async_io::DiskFile;
+    #[cfg(feature = "io_uring")]
+    use crate::raw_async::RawFileDisk;
     use crate::raw_sync::RawFileDiskSync;
+
+    const COMPLETION_EVENT: u16 = 17;
 
     #[derive(Copy, Clone, Debug, Default)]
     #[repr(C)]
@@ -1179,8 +1184,18 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "io_uring")]
     #[test]
-    fn test_discard_wr_zeroes_request() {
+    fn test_raw_io_uring_discard_wr_zeroes_request() {
+        _test_discard_wr_zeroes_request(true);
+    }
+
+    #[test]
+    fn test_raw_sync_discard_wr_zeroes_request() {
+        _test_discard_wr_zeroes_request(false);
+    }
+
+    fn _test_discard_wr_zeroes_request(raw_async_flag: bool) {
         const NON_ZERO_VALUE: u8 = 0x55;
 
         let f = TempFile::new().unwrap().into_file();
@@ -1195,10 +1210,34 @@ mod tests {
         // 0xC00-0xE00: 6
         // 0xE00-0x1000: 7
         f.set_len(disk_size).unwrap();
-        let mut disk_image = Box::new(RawFileDiskSync::new(f)) as Box<dyn DiskFile>;
+        let mut disk_image = if raw_async_flag {
+            #[cfg(not(feature = "io_uring"))]
+            unreachable!("Checked in if statement above");
+            #[cfg(feature = "io_uring")]
+            {
+                Box::new(RawFileDisk::new(f)) as Box<dyn DiskFile>
+            }
+        } else {
+            Box::new(RawFileDiskSync::new(f)) as Box<dyn DiskFile>
+        };
         let mut disk_image_async = disk_image.new_async_io(128).unwrap();
         let disk_image_id_str = String::from("test image");
         let disk_image_id = disk_image_id_str.as_bytes();
+
+        // Create the epoll file descriptor
+        let epoll_fd = epoll::create(true).unwrap();
+        // Use 'File' to enforce closing on 'epoll_fd'
+        // SAFETY: epoll_fd is a valid fd
+        let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
+        epoll::ctl(
+            epoll_file.as_raw_fd(),
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            disk_image_async.notifier().as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, COMPLETION_EVENT.into()),
+        )
+        .unwrap();
+        let mut events = [epoll::Event::new(epoll::Events::empty(), 0); 1];
+        let timeout = -1;
 
         let mem: GuestMemoryMmap<AtomicBitmap> =
             GuestMemoryMmap::from_ranges(&[(GuestAddress(0), 0x1000_0000)]).unwrap();
@@ -1239,16 +1278,38 @@ mod tests {
 
             // We will write in file at sector 1 (offset 0x200) 0x400 bytes from 0x100 guest memory
             // address and 0x200 bytes from 0x800 address. 0 bytes should've been written in memory.
-            request
-                .execute_async(
-                    chain.memory(),
-                    disk_nsectors,
-                    disk_image_async.as_mut(),
-                    disk_image_id,
-                    chain.head_index() as u64,
-                    false,
-                )
-                .unwrap();
+            if let Ok(ExecuteAsync {
+                async_complete: true,
+                batch_request,
+            }) = request.execute_async(
+                chain.memory(),
+                disk_nsectors,
+                disk_image_async.as_mut(),
+                disk_image_id,
+                chain.head_index() as u64,
+                false,
+            ) {
+                let mut batch_requests = Vec::new();
+                if let Some(batch_request) = batch_request {
+                    match batch_request.request_type {
+                        RequestType::In | RequestType::Out => batch_requests.push(batch_request),
+                        _ => {
+                            unreachable!(
+                                "Unexpected batch request type: {:?}",
+                                request.request_type
+                            )
+                        }
+                    }
+                    disk_image_async
+                        .submit_batch_requests(&batch_requests)
+                        .unwrap();
+                }
+            }
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
             // file data now:
             // 0x000-0x300: 0
             // 0x300-0x500: NON_ZERO_VALUE
@@ -1296,16 +1357,38 @@ mod tests {
 
             // We will write in file at sector 1 (offset 0x200) 0x400 bytes from 0x100 guest memory
             // address and 0x200 bytes from 0x800 address. 0 bytes should've been written in memory.
-            request
-                .execute_async(
-                    chain.memory(),
-                    disk_nsectors,
-                    disk_image_async.as_mut(),
-                    disk_image_id,
-                    chain.head_index() as u64,
-                    false,
-                )
-                .unwrap();
+            if let Ok(ExecuteAsync {
+                async_complete: true,
+                batch_request,
+            }) = request.execute_async(
+                chain.memory(),
+                disk_nsectors,
+                disk_image_async.as_mut(),
+                disk_image_id,
+                chain.head_index() as u64,
+                false,
+            ) {
+                let mut batch_requests = Vec::new();
+                if let Some(batch_request) = batch_request {
+                    match batch_request.request_type {
+                        RequestType::In | RequestType::Out => batch_requests.push(batch_request),
+                        _ => {
+                            unreachable!(
+                                "Unexpected batch request type: {:?}",
+                                request.request_type
+                            )
+                        }
+                    }
+                    disk_image_async
+                        .submit_batch_requests(&batch_requests)
+                        .unwrap();
+                }
+            }
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
             // file data now:
             // 0x000-0x300: 0
             // 0x300-0x500: NON_ZERO_VALUE
@@ -1382,6 +1465,11 @@ mod tests {
                     false,
                 )
                 .unwrap();
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
 
             // expected file data:
             // 0x000-0x300: 0
@@ -1398,6 +1486,11 @@ mod tests {
                 0x0,
                 0x300,
             );
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
             assert_eq!(data_vec, vec![0x0; 0x300]);
 
             let data_vec = read_data_vec(
@@ -1406,6 +1499,11 @@ mod tests {
                 0x300,
                 0x100,
             );
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
             assert_eq!(data_vec, vec![NON_ZERO_VALUE; 0x100]);
 
             let data_vec = read_data_vec(
@@ -1414,6 +1512,11 @@ mod tests {
                 0x400,
                 0x400,
             );
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
             assert_eq!(data_vec, vec![0x0; 0x400]);
 
             let data_vec = read_data_vec(
@@ -1422,6 +1525,11 @@ mod tests {
                 0x800,
                 0x200,
             );
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
             assert_eq!(data_vec, vec![NON_ZERO_VALUE + 1; 0x200]);
 
             let data_vec = read_data_vec(
@@ -1430,6 +1538,11 @@ mod tests {
                 0xA00,
                 0x200,
             );
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
             assert_eq!(data_vec, vec![0; 0x200]);
 
             let data_vec = read_data_vec(
@@ -1438,6 +1551,11 @@ mod tests {
                 0xC00,
                 0x100,
             );
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
             assert_eq!(data_vec, vec![NON_ZERO_VALUE + 1; 0x100]);
 
             let data_vec = read_data_vec(
@@ -1454,6 +1572,11 @@ mod tests {
                 0xE00,
                 0x100,
             );
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
             assert_eq!(data_vec, vec![NON_ZERO_VALUE; 0x100]);
         }
 
@@ -1508,6 +1631,11 @@ mod tests {
                     false,
                 )
                 .unwrap();
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
 
             let data_vec = read_data_vec(
                 disk_image_async.as_mut(),
@@ -1515,6 +1643,12 @@ mod tests {
                 0xE00,
                 0x200,
             );
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            assert_eq!(evt_num, 1);
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
             assert_eq!(data_vec, vec![0x0; 0x200]);
             // Even though we punched a hole at the end of the file, the file size should remain the
             // same since FALLOC_FL_PUNCH_HOLE is used with FALLOC_FL_KEEP_SIZE.
@@ -1568,6 +1702,11 @@ mod tests {
                 0x800,
                 0x200,
             );
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
             // Data is != 0 before the write zeroes request.
             assert_eq!(data_vec, vec![NON_ZERO_VALUE + 1; 0x200]);
 
@@ -1608,34 +1747,50 @@ mod tests {
                     false,
                 )
                 .unwrap();
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
 
-            assert_eq!(
-                read_data_vec(
-                    disk_image_async.as_mut(),
-                    chain.head_index() as u64,
-                    0x600,
-                    0x200,
-                ),
-                vec![NON_ZERO_VALUE + 2; 0x200]
+            let data = read_data_vec(
+                disk_image_async.as_mut(),
+                chain.head_index() as u64,
+                0x600,
+                0x200,
             );
-            assert_eq!(
-                read_data_vec(
-                    disk_image_async.as_mut(),
-                    chain.head_index() as u64,
-                    0x800,
-                    0x200,
-                ),
-                vec![0; 0x200]
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
+            assert_eq!(data, vec![NON_ZERO_VALUE + 2; 0x200]);
+
+            let data = read_data_vec(
+                disk_image_async.as_mut(),
+                chain.head_index() as u64,
+                0x800,
+                0x200,
             );
-            assert_eq!(
-                read_data_vec(
-                    disk_image_async.as_mut(),
-                    chain.head_index() as u64,
-                    0xA00,
-                    0x200,
-                ),
-                vec![NON_ZERO_VALUE + 2; 0x200]
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
+            assert_eq!(data, vec![0; 0x200]);
+
+            let data = read_data_vec(
+                disk_image_async.as_mut(),
+                chain.head_index() as u64,
+                0xA00,
+                0x200,
             );
+            let evt_num = epoll::wait(epoll_file.as_raw_fd(), timeout, &mut events[..]).unwrap();
+            for event in events.iter().take(evt_num) {
+                assert_eq!(event.data as u16, COMPLETION_EVENT);
+                disk_image_async.notifier().read().unwrap();
+            }
+            assert_eq!(data, vec![NON_ZERO_VALUE + 2; 0x200]);
         }
     }
 }
