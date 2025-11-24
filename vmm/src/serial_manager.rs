@@ -6,7 +6,7 @@
 use std::fs::File;
 use std::io::Read;
 use std::net::Shutdown;
-use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::net::UnixStream;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
@@ -329,20 +329,19 @@ impl SerialManager {
                                         listener.accept().map_err(Error::AcceptConnection)?;
                                     let writer =
                                         unix_stream.try_clone().map_err(Error::CloneUnixStream)?;
-                                    reader = Some(
-                                        unix_stream.try_clone().map_err(Error::CloneUnixStream)?,
-                                    );
 
                                     epoll::ctl(
                                         epoll_fd,
                                         epoll::ControlOptions::EPOLL_CTL_ADD,
-                                        unix_stream.into_raw_fd(),
+                                        unix_stream.as_raw_fd(),
                                         epoll::Event::new(
                                             epoll::Events::EPOLLIN,
                                             EpollDispatch::File as u64,
                                         ),
                                     )
                                     .map_err(Error::Epoll)?;
+
+                                    reader = Some(unix_stream);
                                     serial.lock().unwrap().set_out(Some(Box::new(writer)));
                                 }
                                 EpollDispatch::File => {
