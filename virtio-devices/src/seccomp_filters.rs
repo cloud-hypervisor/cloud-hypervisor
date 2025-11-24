@@ -27,6 +27,7 @@ pub enum Thread {
     VirtioVhostNetCtl,
     VirtioVsock,
     VirtioWatchdog,
+    VirtioVhostUser,
 }
 
 /// Shorthand for chaining `SeccompCondition`s with the `and` operator  in a `SeccompRule`.
@@ -190,6 +191,10 @@ fn virtio_vhost_fs_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     ]
 }
 
+fn virtio_vhost_user_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
+    virtio_vhost_fs_thread_rules()
+}
+
 fn virtio_vhost_net_ctl_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![]
 }
@@ -273,6 +278,7 @@ fn get_seccomp_rules(thread_type: Thread) -> Vec<(i64, Vec<SeccompRule>)> {
         Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules(),
         Thread::VirtioVsock => virtio_vsock_thread_rules(),
         Thread::VirtioWatchdog => virtio_watchdog_thread_rules(),
+        Thread::VirtioVhostUser => virtio_vhost_user_thread_rules(),
     };
     rules.append(&mut virtio_thread_common());
     rules

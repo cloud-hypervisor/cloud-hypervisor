@@ -2390,6 +2390,7 @@ mod unit_tests {
             },
             balloon: None,
             fs: None,
+            vhost_user: None,
             pmem: None,
             serial: ConsoleConfig {
                 file: None,

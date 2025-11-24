@@ -163,6 +163,7 @@ impl RequestHandler for StubApiRequestHandler {
                 },
                 balloon: None,
                 fs: None,
+                vhost_user: None,
                 pmem: None,
                 serial: ConsoleConfig {
                     file: None,
