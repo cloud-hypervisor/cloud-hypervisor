@@ -3,6 +3,77 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+//! # Migration Protocol
+//!
+//! ## Cross-Host Migration
+//!
+//! A traditional network-based live migration where all resources are
+//! transmitted over the wire. Externally-provided FDs must be opened and
+//! managed by the management software on the destination side.
+//!
+//! **Supported migration modes**:
+//! - TCP (currently one single connection)
+//!
+//! The following mermaid sequence diagram shows a brief overview:
+//!
+//! <!-- Best viewed and edited here: https://mermaid.live/edit -->
+//! ```mermaid
+//! sequenceDiagram
+//!    Source<<->>Destination: Establish connection
+//!    Source->>Destination: Start
+//!    Destination-->>Source: OK
+//!    Source->>Destination: Config
+//!      Note right of Destination: Payload: VM Config
+//!    Destination-->>Source: OK
+//!      Note right of Source: Start Dirty Logging
+//!    loop Dirty Memory Ranges (until handover decision was made)
+//!      Source->>Destination: Memory
+//!        Note right of Destination: Payload: Memory Range Table
+//!        Note right of Destination: Payload: Memory Content
+//!      Destination-->>Source: OK
+//!      Note right of Source: VM is paused after last OK
+//!    end
+//!    Source->>Destination: Memory
+//!      Note right of Destination: Payload: Final Memory Range Table
+//!      Note right of Destination: Payload: Final Memory Content
+//!    Destination-->>Source: OK
+//!    Source->>Destination: State
+//!      Note right of Destination: Final VM State (vCPU, devices)
+//!    Destination-->>Source: OK
+//!    Source->>Destination: Complete
+//!    Destination-->>Source: OK
+//! ```
+//!
+//! ## Local Migration
+//!
+//! A simplified migration taking a few shortcuts and only working on the
+//! same host. The VM memory is not transferred over the wire but instead
+//! passed as memory FD.
+//!
+//! The following mermaid sequence diagram shows a brief overview:
+//!
+//! <!-- Best viewed and edited here: https://mermaid.live/edit -->
+//! ```mermaid
+//! sequenceDiagram
+//!    Source<<->>Destination: Establish connection
+//!    Source->>Destination: Start
+//!    Destination-->>Source: OK
+//!    loop For each Memory FD
+//!      Source->>Destination: Memory FD (1/n)
+//!        Note right of Destination: Payload: (slot: u32, fd: u32)
+//!      Destination-->>Source: OK
+//!    end
+//!    Source->>Destination: Config
+//!      Note right of Destination: Payload: VM Config
+//!    Destination-->>Source: OK
+//!      Note right of Source: VM is paused
+//!    Source->>Destination: State
+//!      Note right of Destination: Payload: Final VM State (vCPU, devices)
+//!    Destination-->>Source: OK
+//!    Source->>Destination: Complete
+//!    Destination-->>Source: OK
+//! ```
+
 use std::io::{Read, Write};
 
 use itertools::Itertools;
@@ -12,45 +83,29 @@ use vm_memory::ByteValued;
 use crate::MigratableError;
 use crate::bitpos_iterator::BitposIteratorExt;
 
-// Migration protocol
-// 1: Source establishes communication with destination (file socket or TCP connection.)
-// (The establishment is out of scope.)
-// 2: Source -> Dest : send "start command"
-// 3: Dest -> Source : sends "ok response" when read to accept state data
-// 4: Source -> Dest : sends "config command" followed by config data, length
-//                     in command is length of config data
-// 5: Dest -> Source : sends "ok response" when ready to accept memory data
-// 6: Source -> Dest : send "memory command" followed by table of u64 pairs (GPA, size)
-//                     followed by the memory described in those pairs.
-//                     !! length is size of table i.e. 16 * number of ranges !!
-// 7: Dest -> Source : sends "ok response" when ready to accept more memory data
-// 8..(n-4): Repeat steps 6 and 7 until source has no more memory to send
-// (n-3): Source -> Dest : sends "state command" followed by state data, length
-//                     in command is length of config data
-// (n-2): Dest -> Source : sends "ok response"
-// (n-1): Source -> Dest : send "complete command"
-// n: Dest -> Source: sends "ok response"
-//
-// "Local version": (Handing FDs across socket for memory)
-// 1: Source establishes communication with destination (file socket or TCP connection.)
-// (The establishment is out of scope.)
-// 2: Source -> Dest : send "start command"
-// 3: Dest -> Source : sends "ok response" when read to accept state data
-// 4: Source -> Dest : sends "config command" followed by config data, length
-//                     in command is length of config data
-// 5: Dest -> Source : sends "ok response" when ready to accept memory data
-// 6: Source -> Dest : send "memory fd command" followed by u16 slot ID and FD for memory
-// 7: Dest -> Source : sends "ok response" when received
-// 8..(n-4): Repeat steps 6 and 7 until source has no more memory to send
-// (n-3): Source -> Dest : sends "state command" followed by state data, length
-//                     in command is length of config data
-// (n-2): Dest -> Source : sends "ok response"
-// (n-1): Source -> Dest : send "complete command"
-// n: Dest -> Source: sends "ok response"
-//
-// The destination can at any time send an "error response" to cancel
-// The source can at any time send an "abandon request" to cancel
-
+/// The commands of the [live-migration protocol].
+///
+/// ### Sender State Machine
+///
+/// TODO refactor sender into state machine and add diagram
+///
+/// ### Receiver State Machine
+///
+/// <!-- Best viewed and edited here: https://mermaid.live/edit -->
+/// ```mermaid
+/// stateDiagram-v2
+///     direction TB
+///     [*] --> Started: Start
+///     Started --> MemoryFdsReceived: MemoryFd
+///     MemoryFdsReceived --> MemoryFdsReceived: MemoryFd
+///     Started --> Configured: Config
+///     MemoryFdsReceived --> Configured: Config
+///     Configured --> Configured: Memory
+///     Configured --> StateReceived: State
+///     StateReceived --> Completed: Complete
+/// ```
+///
+/// [live-migration protocol]: super::protocol
 #[repr(u16)]
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
 pub enum Command {
