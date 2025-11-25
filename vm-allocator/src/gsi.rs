@@ -40,14 +40,14 @@ pub struct GsiAllocator {
 impl GsiAllocator {
     #[cfg(target_arch = "x86_64")]
     /// New GSI allocator
-    pub fn new(apics: Vec<GsiApic>) -> Self {
+    pub fn new(apics: &[GsiApic]) -> Self {
         let mut allocator = GsiAllocator {
             apics: BTreeMap::new(),
             next_irq: 0xffff_ffff,
             next_gsi: 0,
         };
 
-        for apic in &apics {
+        for apic in apics {
             if apic.base < allocator.next_irq {
                 allocator.next_irq = apic.base;
             }

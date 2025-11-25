@@ -163,7 +163,7 @@ const fn get_flock(lock_type: LockType, granularity: LockGranularity) -> libc::f
 /// - `lock_type`: The [`LockType`]
 /// - `granularity`: The [`LockGranularity`].
 pub fn try_acquire_lock<Fd: AsRawFd>(
-    file: Fd,
+    file: &Fd,
     lock_type: LockType,
     granularity: LockGranularity,
 ) -> Result<(), LockError> {
@@ -191,7 +191,7 @@ pub fn try_acquire_lock<Fd: AsRawFd>(
 /// # Parameters
 /// - `file`: The file to clear all locks for [`LockType`].
 /// - `granularity`: The [`LockGranularity`].
-pub fn clear_lock<Fd: AsRawFd>(file: Fd, granularity: LockGranularity) -> Result<(), LockError> {
+pub fn clear_lock<Fd: AsRawFd>(file: &Fd, granularity: LockGranularity) -> Result<(), LockError> {
     try_acquire_lock(file, LockType::Unlock, granularity)
 }
 
@@ -202,7 +202,7 @@ pub fn clear_lock<Fd: AsRawFd>(file: Fd, granularity: LockGranularity) -> Result
 /// - `file`: The file for which to get the lock state.
 /// - `granularity`: The [`LockGranularity`].
 pub fn get_lock_state<Fd: AsRawFd>(
-    file: Fd,
+    file: &Fd,
     granularity: LockGranularity,
 ) -> Result<LockState, LockError> {
     let mut flock = get_flock(LockType::Write, granularity);

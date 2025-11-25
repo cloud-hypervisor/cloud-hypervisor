@@ -543,7 +543,7 @@ impl Vm {
         console_info: Option<ConsoleInfo>,
         console_resize_pipe: Option<Arc<File>>,
         original_termios: Arc<Mutex<Option<termios>>>,
-        snapshot: Option<Snapshot>,
+        snapshot: Option<&Snapshot>,
     ) -> Result<Self> {
         trace_scoped!("Vm::new_from_memory_manager");
 
@@ -658,7 +658,7 @@ impl Vm {
             boot_id_list,
             #[cfg(not(target_arch = "riscv64"))]
             timestamp,
-            snapshot_from_id(snapshot.as_ref(), DEVICE_MANAGER_SNAPSHOT_ID),
+            snapshot_from_id(snapshot, DEVICE_MANAGER_SNAPSHOT_ID),
             dynamic,
         )
         .map_err(Error::DeviceManager)?;
@@ -723,7 +723,7 @@ impl Vm {
         cpu_manager
             .lock()
             .unwrap()
-            .create_boot_vcpus(snapshot_from_id(snapshot.as_ref(), CPU_MANAGER_SNAPSHOT_ID))
+            .create_boot_vcpus(snapshot_from_id(snapshot, CPU_MANAGER_SNAPSHOT_ID))
             .map_err(Error::CpuManager)?;
 
         // For KVM, we need to create interrupt controller after we create boot vcpus.
@@ -992,7 +992,7 @@ impl Vm {
         console_info: Option<ConsoleInfo>,
         console_resize_pipe: Option<Arc<File>>,
         original_termios: Arc<Mutex<Option<termios>>>,
-        snapshot: Option<Snapshot>,
+        snapshot: Option<&Snapshot>,
         source_url: Option<&str>,
         prefault: Option<bool>,
     ) -> Result<Self> {
@@ -1035,31 +1035,30 @@ impl Vm {
             vm_config.lock().unwrap().cpus.max_phys_bits,
         );
 
-        let memory_manager = if let Some(snapshot) =
-            snapshot_from_id(snapshot.as_ref(), MEMORY_MANAGER_SNAPSHOT_ID)
-        {
-            MemoryManager::new_from_snapshot(
-                &snapshot,
-                vm.clone(),
-                &vm_config.lock().unwrap().memory.clone(),
-                source_url,
-                prefault.unwrap(),
-                phys_bits,
-            )
-            .map_err(Error::MemoryManager)?
-        } else {
-            MemoryManager::new(
-                vm.clone(),
-                &vm_config.lock().unwrap().memory.clone(),
-                None,
-                phys_bits,
-                #[cfg(feature = "tdx")]
-                tdx_enabled,
-                None,
-                None,
-            )
-            .map_err(Error::MemoryManager)?
-        };
+        let memory_manager =
+            if let Some(snapshot) = snapshot_from_id(snapshot, MEMORY_MANAGER_SNAPSHOT_ID) {
+                MemoryManager::new_from_snapshot(
+                    snapshot,
+                    vm.clone(),
+                    &vm_config.lock().unwrap().memory.clone(),
+                    source_url,
+                    prefault.unwrap(),
+                    phys_bits,
+                )
+                .map_err(Error::MemoryManager)?
+            } else {
+                MemoryManager::new(
+                    vm.clone(),
+                    &vm_config.lock().unwrap().memory.clone(),
+                    None,
+                    phys_bits,
+                    #[cfg(feature = "tdx")]
+                    tdx_enabled,
+                    None,
+                    None,
+                )
+                .map_err(Error::MemoryManager)?
+            };
 
         Vm::new_from_memory_manager(
             vm_config,

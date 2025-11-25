@@ -965,7 +965,7 @@ impl Vmm {
             self.console_info.clone(),
             self.console_resize_pipe.clone(),
             Arc::clone(&self.original_termios_opt),
-            Some(snapshot),
+            Some(&snapshot),
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {e:?}"))
@@ -1334,7 +1334,7 @@ impl Vmm {
             self.console_info.clone(),
             self.console_resize_pipe.clone(),
             Arc::clone(&self.original_termios_opt),
-            Some(snapshot),
+            Some(&snapshot),
             Some(source_url),
             Some(prefault),
         )?;

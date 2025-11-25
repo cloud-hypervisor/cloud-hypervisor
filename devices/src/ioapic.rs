@@ -191,7 +191,7 @@ impl Ioapic {
     pub fn new(
         id: String,
         apic_address: GuestAddress,
-        interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        interrupt_manager: &dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>,
         state: Option<IoapicState>,
     ) -> Result<Ioapic> {
         let interrupt_source_group = interrupt_manager

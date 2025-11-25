@@ -27,6 +27,7 @@ pub enum Error {
 type Result<T> = anyhow::Result<T, Error>;
 
 #[allow(dead_code)]
+#[derive(Copy, Clone)]
 enum LocStateFields {
     TpmEstablished,
     LocAssigned,
@@ -63,6 +64,7 @@ enum IntfId2Fields {
     Did,
 }
 
+#[derive(Copy, Clone)]
 enum CtrlStsFields {
     TpmSts,
     TpmIdle,
@@ -220,7 +222,7 @@ pub struct Tpm {
 }
 
 impl Tpm {
-    pub fn new(path: String) -> Result<Self> {
+    pub fn new(path: &str) -> Result<Self> {
         let emulator = Emulator::new(path)
             .map_err(|e| Error::Init(anyhow!("Failed while initializing tpm Emulator: {e:?}")))?;
         let mut tpm = Tpm {

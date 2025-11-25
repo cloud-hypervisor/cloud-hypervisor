@@ -1155,7 +1155,7 @@ impl DeviceManager {
         force_iommu: bool,
         boot_id_list: BTreeSet<String>,
         #[cfg(not(target_arch = "riscv64"))] timestamp: Instant,
-        snapshot: Option<Snapshot>,
+        snapshot: Option<&Snapshot>,
         dynamic: bool,
     ) -> DeviceManagerResult<Arc<Mutex<Self>>> {
         trace_scoped!("DeviceManager::new");
@@ -1367,7 +1367,7 @@ impl DeviceManager {
             timestamp,
             pending_activations: Arc::new(Mutex::new(Vec::default())),
             acpi_platform_addresses: AcpiPlatformAddresses::default(),
-            snapshot,
+            snapshot: snapshot.cloned(),
             rate_limit_groups,
             mmio_regions: Arc::new(Mutex::new(Vec::new())),
             #[cfg(feature = "fw_cfg")]
@@ -1795,7 +1795,7 @@ impl DeviceManager {
             ioapic::Ioapic::new(
                 id.clone(),
                 APIC_START,
-                Arc::clone(&self.msi_interrupt_manager),
+                self.msi_interrupt_manager.as_ref(),
                 state_from_id(self.snapshot.as_ref(), id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
             )
@@ -2489,7 +2489,7 @@ impl DeviceManager {
         tpm_path: PathBuf,
     ) -> DeviceManagerResult<Arc<Mutex<devices::tpm::Tpm>>> {
         // Create TPM Device
-        let tpm = devices::tpm::Tpm::new(tpm_path.to_str().unwrap().to_string()).map_err(|e| {
+        let tpm = devices::tpm::Tpm::new(tpm_path.to_str().unwrap()).map_err(|e| {
             DeviceManagerError::CreateTpmDevice(anyhow!("Failed to create TPM Device : {e:?}"))
         })?;
         let tpm = Arc::new(Mutex::new(tpm));

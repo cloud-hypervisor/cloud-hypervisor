@@ -399,7 +399,7 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                     .get_one::<String>("net_config")
                     .unwrap(),
             )?;
-            simple_api_command_with_fds(socket, "PUT", "add-net", Some(&net_config), fds)
+            simple_api_command_with_fds(socket, "PUT", "add-net", Some(&net_config), &fds)
                 .map_err(Error::HttpApiClient)
         }
         Some("add-user-device") => {
@@ -454,7 +454,7 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                     .get_one::<String>("restore_config")
                     .unwrap(),
             )?;
-            simple_api_command_with_fds(socket, "PUT", "restore", Some(&restore_config), fds)
+            simple_api_command_with_fds(socket, "PUT", "restore", Some(&restore_config), &fds)
                 .map_err(Error::HttpApiClient)
         }
         Some("coredump") => {

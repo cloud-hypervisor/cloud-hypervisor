@@ -66,13 +66,13 @@ pub struct PvPanicDeviceState {
 }
 
 impl PvPanicDevice {
-    pub fn new(id: String, snapshot: Option<Snapshot>) -> Result<Self, PvPanicError> {
-        let pci_configuration_state =
-            vm_migration::state_from_id(snapshot.as_ref(), PCI_CONFIGURATION_ID).map_err(|e| {
-                PvPanicError::RetrievePciConfigurationState(anyhow!(
-                    "Failed to get PciConfigurationState from Snapshot: {e}"
-                ))
-            })?;
+    pub fn new(id: String, snapshot: Option<&Snapshot>) -> Result<Self, PvPanicError> {
+        let pci_configuration_state = vm_migration::state_from_id(snapshot, PCI_CONFIGURATION_ID)
+            .map_err(|e| {
+            PvPanicError::RetrievePciConfigurationState(anyhow!(
+                "Failed to get PciConfigurationState from Snapshot: {e}"
+            ))
+        })?;
 
         let mut configuration = PciConfiguration::new(
             PVPANIC_VENDOR_ID,

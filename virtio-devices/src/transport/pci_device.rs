@@ -389,7 +389,7 @@ impl VirtioPciDevice {
         use_64bit_bar: bool,
         dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
         pending_activations: Arc<Mutex<Vec<VirtioPciDeviceActivator>>>,
-        snapshot: Option<Snapshot>,
+        snapshot: Option<&Snapshot>,
     ) -> Result<Self> {
         let mut locked_device = device.lock().unwrap();
         let mut queue_evts = Vec::new();
@@ -423,8 +423,8 @@ impl VirtioPciDevice {
                 ))
             })?;
 
-        let msix_state = vm_migration::state_from_id(snapshot.as_ref(), pci::MSIX_CONFIG_ID)
-            .map_err(|e| {
+        let msix_state =
+            vm_migration::state_from_id(snapshot, pci::MSIX_CONFIG_ID).map_err(|e| {
                 VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
                     "Failed to get MsixConfigState from Snapshot: {e}"
                 ))
@@ -462,13 +462,11 @@ impl VirtioPciDevice {
         };
 
         let pci_configuration_state =
-            vm_migration::state_from_id(snapshot.as_ref(), pci::PCI_CONFIGURATION_ID).map_err(
-                |e| {
-                    VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
-                        "Failed to get PciConfigurationState from Snapshot: {e}"
-                    ))
-                },
-            )?;
+            vm_migration::state_from_id(snapshot, pci::PCI_CONFIGURATION_ID).map_err(|e| {
+                VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
+                    "Failed to get PciConfigurationState from Snapshot: {e}"
+                ))
+            })?;
 
         let configuration = PciConfiguration::new(
             VIRTIO_PCI_VENDOR_ID,
@@ -485,13 +483,11 @@ impl VirtioPciDevice {
         );
 
         let common_config_state =
-            vm_migration::state_from_id(snapshot.as_ref(), VIRTIO_PCI_COMMON_CONFIG_ID).map_err(
-                |e| {
-                    VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
-                        "Failed to get VirtioPciCommonConfigState from Snapshot: {e}"
-                    ))
-                },
-            )?;
+            vm_migration::state_from_id(snapshot, VIRTIO_PCI_COMMON_CONFIG_ID).map_err(|e| {
+                VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
+                    "Failed to get VirtioPciCommonConfigState from Snapshot: {e}"
+                ))
+            })?;
 
         let common_config = if let Some(common_config_state) = common_config_state {
             VirtioPciCommonConfig::new(common_config_state, access_platform)

@@ -156,8 +156,8 @@ impl Snapshot {
     }
 }
 
-pub fn snapshot_from_id(snapshot: Option<&Snapshot>, id: &str) -> Option<Snapshot> {
-    snapshot.and_then(|s| s.snapshots.get(id).cloned())
+pub fn snapshot_from_id<'a>(snapshot: Option<&'a Snapshot>, id: &str) -> Option<&'a Snapshot> {
+    snapshot.and_then(|s| s.snapshots.get(id))
 }
 
 pub fn state_from_id<'a, T>(s: Option<&'a Snapshot>, id: &str) -> Result<Option<T>, MigratableError>

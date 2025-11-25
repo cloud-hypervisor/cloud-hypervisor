@@ -142,7 +142,7 @@ pub fn simple_api_full_command_with_fds_and_response<T: Read + Write + ScmSocket
     method: &str,
     full_command: &str,
     request_body: Option<&str>,
-    request_fds: Vec<RawFd>,
+    request_fds: &[RawFd],
 ) -> Result<Option<String>, Error> {
     socket
         .send_with_fds(
@@ -150,7 +150,7 @@ pub fn simple_api_full_command_with_fds_and_response<T: Read + Write + ScmSocket
                 "{method} /api/v1/{full_command} HTTP/1.1\r\nHost: localhost\r\nAccept: */*\r\n"
             )
             .as_bytes()],
-            &request_fds,
+            request_fds,
         )
         .map_err(Error::SocketSendFds)?;
 
@@ -178,7 +178,7 @@ pub fn simple_api_full_command_with_fds<T: Read + Write + ScmSocket>(
     method: &str,
     full_command: &str,
     request_body: Option<&str>,
-    request_fds: Vec<RawFd>,
+    request_fds: &[RawFd],
 ) -> Result<(), Error> {
     let response = simple_api_full_command_with_fds_and_response(
         socket,
@@ -201,7 +201,7 @@ pub fn simple_api_full_command<T: Read + Write + ScmSocket>(
     full_command: &str,
     request_body: Option<&str>,
 ) -> Result<(), Error> {
-    simple_api_full_command_with_fds(socket, method, full_command, request_body, Vec::new())
+    simple_api_full_command_with_fds(socket, method, full_command, request_body, &[])
 }
 
 pub fn simple_api_full_command_and_response<T: Read + Write + ScmSocket>(
@@ -210,13 +210,7 @@ pub fn simple_api_full_command_and_response<T: Read + Write + ScmSocket>(
     full_command: &str,
     request_body: Option<&str>,
 ) -> Result<Option<String>, Error> {
-    simple_api_full_command_with_fds_and_response(
-        socket,
-        method,
-        full_command,
-        request_body,
-        Vec::new(),
-    )
+    simple_api_full_command_with_fds_and_response(socket, method, full_command, request_body, &[])
 }
 
 pub fn simple_api_command_with_fds<T: Read + Write + ScmSocket>(
@@ -224,7 +218,7 @@ pub fn simple_api_command_with_fds<T: Read + Write + ScmSocket>(
     method: &str,
     c: &str,
     request_body: Option<&str>,
-    request_fds: Vec<RawFd>,
+    request_fds: &[RawFd],
 ) -> Result<(), Error> {
     // Create the full VM command. For VMM commands, use
     // simple_api_full_command().
@@ -239,5 +233,5 @@ pub fn simple_api_command<T: Read + Write + ScmSocket>(
     c: &str,
     request_body: Option<&str>,
 ) -> Result<(), Error> {
-    simple_api_command_with_fds(socket, method, c, request_body, Vec::new())
+    simple_api_command_with_fds(socket, method, c, request_body, &[])
 }
