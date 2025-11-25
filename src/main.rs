@@ -688,6 +688,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         .map_err(Error::EventMonitorThread)?;
     }
 
+    info!("VMM starting");
     event!("vmm", "starting");
 
     let vmm_thread_handle = vmm::start_vmm_thread(

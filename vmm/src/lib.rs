@@ -674,6 +674,19 @@ pub struct Vmm {
 impl Vmm {
     pub const HANDLED_SIGNALS: [i32; 2] = [SIGTERM, SIGINT];
 
+    /// Get VM identifier (UUID if available, otherwise process ID)
+    fn vm_id(&self) -> String {
+        if let Some(vm_config) = &self.vm_config {
+            let config = vm_config.lock().unwrap();
+            if let Some(platform) = &config.platform {
+                if let Some(uuid) = &platform.uuid {
+                    return format!("uuid={uuid}");
+                }
+            }
+        }
+        format!("pid={}", std::process::id())
+    }
+
     fn signal_handler(
         mut signals: Signals,
         original_termios_opt: Arc<Mutex<Option<termios>>>,
@@ -1569,6 +1582,8 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_pause(&mut self) -> result::Result<(), VmError> {
+        let state = self.vm.as_ref().and_then(|vm| vm.get_state().ok());
+        info!("request to pause VM: {}, state={:?}", self.vm_id(), state);
         if let Some(ref mut vm) = self.vm {
             vm.pause().map_err(VmError::Pause)
         } else {
@@ -1577,6 +1592,8 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_resume(&mut self) -> result::Result<(), VmError> {
+        let state = self.vm.as_ref().and_then(|vm| vm.get_state().ok());
+        info!("request to resume VM: {}, state={:?}", self.vm_id(), state);
         if let Some(ref mut vm) = self.vm {
             vm.resume().map_err(VmError::Resume)
         } else {
@@ -1585,6 +1602,7 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_snapshot(&mut self, destination_url: &str) -> result::Result<(), VmError> {
+        info!("request to snapshot VM: {}, destination_url={destination_url}", self.vm_id());
         if let Some(ref mut vm) = self.vm {
             // Drain console_info so that FDs are not reused
             let _ = self.console_info.take();
@@ -1610,6 +1628,7 @@ impl RequestHandler for Vmm {
         }
         // Safe to unwrap as we checked it was Some(&str).
         let source_url = source_url.unwrap();
+        info!("request to restore VM: {}, source_url={source_url}", self.vm_id());
 
         let vm_config = Arc::new(Mutex::new(
             recv_vm_config(source_url).map_err(VmError::Restore)?,
@@ -1647,6 +1666,7 @@ impl RequestHandler for Vmm {
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
     fn vm_coredump(&mut self, destination_url: &str) -> result::Result<(), VmError> {
+        info!("request to coredump VM: {}, destination_url={destination_url}", self.vm_id());
         if let Some(ref mut vm) = self.vm {
             vm.coredump(destination_url).map_err(VmError::Coredump)
         } else {
@@ -1655,6 +1675,8 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_shutdown(&mut self) -> result::Result<(), VmError> {
+        let state = self.vm.as_ref().and_then(|vm| vm.get_state().ok());
+        info!("request to shutdown VM: {}, state={:?}", self.vm_id(), state);
         let r = if let Some(ref mut vm) = self.vm.take() {
             // Drain console_info so that the FDs are not reused
             let _ = self.console_info.take();
@@ -1671,6 +1693,8 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_reboot(&mut self) -> result::Result<(), VmError> {
+        let state = self.vm.as_ref().and_then(|vm| vm.get_state().ok());
+        info!("request to reboot VM: {}, state={:?}", self.vm_id(), state);
         event!("vm", "rebooting");
 
         // First we stop the current VM
@@ -1781,6 +1805,8 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_delete(&mut self) -> result::Result<(), VmError> {
+        let state = self.vm.as_ref().and_then(|vm| vm.get_state().ok());
+        info!("request to delete VM: {}, state={:?}", self.vm_id(), state);
         if self.vm_config.is_none() {
             return Ok(());
         }
@@ -1798,6 +1824,7 @@ impl RequestHandler for Vmm {
     }
 
     fn vmm_shutdown(&mut self) -> result::Result<(), VmError> {
+        info!("request to shutdown VMM: {}", self.vm_id());
         self.vm_delete()?;
         event!("vmm", "shutdown");
         Ok(())
@@ -1809,6 +1836,10 @@ impl RequestHandler for Vmm {
         desired_ram: Option<u64>,
         desired_balloon: Option<u64>,
     ) -> result::Result<(), VmError> {
+        info!(
+            "request to resize VM: {}, desired_vcpus={:?}, desired_ram={:?}, desired_balloon={:?}",
+            self.vm_id(), desired_vcpus, desired_ram, desired_balloon
+        );
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         if let Some(ref mut vm) = self.vm {
@@ -1833,6 +1864,7 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_resize_zone(&mut self, id: String, desired_ram: u64) -> result::Result<(), VmError> {
+        info!("request to resize zone: {}, zone_id={id}, desired_ram={desired_ram}", self.vm_id());
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         if let Some(ref mut vm) = self.vm {
@@ -1861,6 +1893,10 @@ impl RequestHandler for Vmm {
         &mut self,
         device_cfg: DeviceConfig,
     ) -> result::Result<Option<Vec<u8>>, VmError> {
+        info!(
+            "request to add device: {}, device_id={:?}, path={:?}",
+            self.vm_id(), device_cfg.id, device_cfg.path
+        );
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         {
@@ -1889,6 +1925,10 @@ impl RequestHandler for Vmm {
         &mut self,
         device_cfg: UserDeviceConfig,
     ) -> result::Result<Option<Vec<u8>>, VmError> {
+        info!(
+            "request to add user device: {}, device_id={:?}, socket={:?}",
+            self.vm_id(), device_cfg.id, device_cfg.socket
+        );
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         {
@@ -1914,6 +1954,7 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_remove_device(&mut self, id: String) -> result::Result<(), VmError> {
+        info!("request to remove device: {}, device_id={id}", self.vm_id());
         if let Some(ref mut vm) = self.vm {
             vm.remove_device(id)
                 .inspect_err(|e| error!("Error when removing device from the VM: {e:?}"))?;
@@ -1931,6 +1972,10 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_add_disk(&mut self, disk_cfg: DiskConfig) -> result::Result<Option<Vec<u8>>, VmError> {
+        info!(
+            "request to add disk: {}, disk_id={:?}, path={:?}",
+            self.vm_id(), disk_cfg.id, disk_cfg.path
+        );
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         {
@@ -1957,6 +2002,10 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_add_fs(&mut self, fs_cfg: FsConfig) -> result::Result<Option<Vec<u8>>, VmError> {
+        info!(
+            "request to add fs: {}, fs_id={:?}, tag={}",
+            self.vm_id(), fs_cfg.id, fs_cfg.tag
+        );
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         {
@@ -1983,6 +2032,10 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_add_pmem(&mut self, pmem_cfg: PmemConfig) -> result::Result<Option<Vec<u8>>, VmError> {
+        info!(
+            "request to add pmem: {}, pmem_id={:?}, file={:?}",
+            self.vm_id(), pmem_cfg.id, pmem_cfg.file
+        );
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         {
@@ -2009,6 +2062,10 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_add_net(&mut self, net_cfg: NetConfig) -> result::Result<Option<Vec<u8>>, VmError> {
+        info!(
+            "request to add net: {}, net_id={:?}, tap={:?}",
+            self.vm_id(), net_cfg.id, net_cfg.tap
+        );
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         {
@@ -2035,6 +2092,10 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_add_vdpa(&mut self, vdpa_cfg: VdpaConfig) -> result::Result<Option<Vec<u8>>, VmError> {
+        info!(
+            "request to add vdpa: {}, vdpa_id={:?}, path={:?}",
+            self.vm_id(), vdpa_cfg.id, vdpa_cfg.path
+        );
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         {
@@ -2061,6 +2122,10 @@ impl RequestHandler for Vmm {
     }
 
     fn vm_add_vsock(&mut self, vsock_cfg: VsockConfig) -> result::Result<Option<Vec<u8>>, VmError> {
+        info!(
+            "request to add vsock: {}, vsock_id={:?}, cid={}",
+            self.vm_id(), vsock_cfg.id, vsock_cfg.cid
+        );
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         {

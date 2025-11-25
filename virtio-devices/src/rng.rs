@@ -286,6 +286,7 @@ impl VirtioDevice for Rng {
 
             self.common.epoll_threads = Some(epoll_threads);
 
+            info!("virtio-device activated: id={}", self.id);
             event!("virtio-device", "activated", "id", &self.id);
             return Ok(());
         }
@@ -293,6 +294,7 @@ impl VirtioDevice for Rng {
     }
 
     fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
+        info!("virtio-device reset: id={}", self.id);
         let result = self.common.reset();
         event!("virtio-device", "reset", "id", &self.id);
         result

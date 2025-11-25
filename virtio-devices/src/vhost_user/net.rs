@@ -396,6 +396,7 @@ impl VirtioDevice for Net {
             let _ = kill_evt.write(1);
         }
 
+        info!("virtio-device reset: id={}", self.id);
         event!("virtio-device", "reset", "id", &self.id);
 
         // Return the interrupt

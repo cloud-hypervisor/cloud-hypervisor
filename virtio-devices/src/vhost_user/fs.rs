@@ -299,11 +299,13 @@ impl VirtioDevice for Fs {
         )?;
         self.epoll_thread = Some(epoll_threads.remove(0));
 
+        info!("virtio-device activated: id={}", self.id);
         event!("virtio-device", "activated", "id", &self.id);
         Ok(())
     }
 
     fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
+        info!("virtio-device reset: id={}", self.id);
         // We first must resume the virtio thread if it was paused.
         if self.common.pause_evt.take().is_some() {
             self.common.resume().ok()?;

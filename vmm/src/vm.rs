@@ -1642,6 +1642,10 @@ impl Vm {
         desired_memory: Option<u64>,
         desired_balloon: Option<u64>,
     ) -> Result<()> {
+        info!(
+            "VM resizing: {}, desired_vcpus={:?}, desired_memory={:?}, desired_balloon={:?}",
+            self.vm_id(), desired_vcpus, desired_memory, desired_balloon
+        );
         event!("vm", "resizing");
 
         if let Some(desired_vcpus) = desired_vcpus {
@@ -1719,6 +1723,7 @@ impl Vm {
             }
         }
 
+        info!("VM resized: {}", self.vm_id());
         event!("vm", "resized");
 
         Ok(())
@@ -2492,6 +2497,7 @@ impl Vm {
     }
 
     pub fn restore(&mut self) -> Result<()> {
+        info!("VM restoring: {}", self.vm_id());
         event!("vm", "restoring");
 
         // We acquire all advisory disk image locks again.
@@ -2508,6 +2514,7 @@ impl Vm {
             .start_restored_vcpus()
             .map_err(Error::CpuManager)?;
 
+        info!("VM restored: {}", self.vm_id());
         event!("vm", "restored");
         Ok(())
     }
@@ -2523,6 +2530,17 @@ impl Vm {
             .try_read()
             .map_err(|_| Error::PoisonedState)
             .map(|state| *state)
+    }
+
+    /// Get VM identifier (UUID if available, otherwise process ID)
+    fn vm_id(&self) -> String {
+        let config = self.config.lock().unwrap();
+        if let Some(platform) = &config.platform {
+            if let Some(uuid) = &platform.uuid {
+                return format!("uuid={uuid}");
+            }
+        }
+        format!("pid={}", std::process::id())
     }
 
     /// Gets the actual size of the balloon.
@@ -2773,6 +2791,7 @@ impl Vm {
 
 impl Pausable for Vm {
     fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+        info!("VM pausing: {}", self.vm_id());
         event!("vm", "pausing");
         let mut state = self
             .state
@@ -2809,11 +2828,13 @@ impl Pausable for Vm {
 
         *state = new_state;
 
+        info!("VM paused: {}", self.vm_id());
         event!("vm", "paused");
         Ok(())
     }
 
     fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+        info!("VM resuming: {}", self.vm_id());
         event!("vm", "resuming");
         let current_state = self.get_state().unwrap();
         let mut state = self
@@ -2846,6 +2867,7 @@ impl Pausable for Vm {
 
         // And we're back to the Running state.
         *state = new_state;
+        info!("VM resumed: {}", self.vm_id());
         event!("vm", "resumed");
         Ok(())
     }
@@ -2866,6 +2888,7 @@ impl Snapshottable for Vm {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
+        info!("VM snapshotting: {}", self.vm_id());
         event!("vm", "snapshotting");
 
         #[cfg(feature = "tdx")]
@@ -2931,6 +2954,7 @@ impl Snapshottable for Vm {
         };
         vm_snapshot.add_snapshot(id, snapshot);
 
+        info!("VM snapshotted: {}", self.vm_id());
         event!("vm", "snapshotted");
         Ok(vm_snapshot)
     }
@@ -3118,6 +3142,7 @@ impl Elf64Writable for Vm {}
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 impl GuestDebuggable for Vm {
     fn coredump(&mut self, destination_url: &str) -> std::result::Result<(), GuestDebuggableError> {
+        info!("VM coredumping: {}, destination_url={}", self.vm_id(), destination_url);
         event!("vm", "coredumping");
 
         let mut resume = false;

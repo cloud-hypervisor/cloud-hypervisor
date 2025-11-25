@@ -440,11 +440,13 @@ impl VirtioDevice for Vdpa {
         // Store the virtio interrupt handler as we need to return it on reset
         self.common.interrupt_cb = Some(virtio_interrupt);
 
+        info!("vdpa activated: id={}", self.id);
         event!("vdpa", "activated", "id", &self.id);
         Ok(())
     }
 
     fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
+        info!("vdpa reset: id={}", self.id);
         if let Err(e) = self.reset_vdpa() {
             error!("Failed to reset vhost-vdpa: {e:?}");
             return None;
