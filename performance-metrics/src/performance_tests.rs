@@ -365,6 +365,7 @@ pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
 pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     let test_timeout = control.test_timeout;
     let num_queues = control.num_queues.unwrap();
+    let queue_size = control.queue_size.unwrap();
     let (fio_ops, bandwidth) = control.fio_control.as_ref().unwrap();
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
@@ -394,7 +395,8 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
                 guest.disk_config.disk(DiskType::CloudInit).unwrap()
             )
             .as_str(),
-            format!("path={BLK_IO_TEST_IMG}").as_str(),
+            format!("path={BLK_IO_TEST_IMG},queue_size={queue_size},num_queues={num_queues}")
+                .as_str(),
         ])
         .default_net()
         .args(["--api-socket", &api_socket])
@@ -409,7 +411,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
 
         let fio_command = format!(
             "sudo fio --filename=/dev/vdc --name=test --output-format=json \
-            --direct=1 --bs=4k --ioengine=io_uring --iodepth=64 \
+            --direct=1 --bs=4k --ioengine=io_uring --iodepth={queue_size} \
             --rw={fio_ops} --runtime={test_timeout} --numjobs={num_queues}"
         );
         let output = guest
