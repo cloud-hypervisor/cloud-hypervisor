@@ -13,7 +13,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
-use crate::{BatchRequest, DiskTopology, RequestType};
+use crate::{BLOCK_URING_CMD_DISCARD, BatchRequest, DiskTopology, RequestType};
 
 const ZERO_BUFFER_SIZE: usize = 64 * 1024;
 
@@ -57,6 +57,7 @@ impl DiskFile for RawFileDisk {
 
 pub struct RawFileAsync {
     fd: RawFd,
+    is_block_dev: bool,
     io_uring: IoUring,
     eventfd: EventFd,
 }
@@ -72,6 +73,7 @@ impl RawFileAsync {
 
         Ok(RawFileAsync {
             fd,
+            is_block_dev: DiskTopology::is_block_device(fd)?,
             io_uring,
             eventfd,
         })
@@ -248,17 +250,34 @@ impl AsyncIo for RawFileAsync {
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
         let (submitter, mut sq, _) = self.io_uring.split();
 
-        // SAFETY: we know the file descriptor is valid.
-        unsafe {
-            sq.push(
-                &opcode::Fallocate::new(types::Fd(self.fd), length)
-                    .offset(offset)
-                    .mode(libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE)
-                    .build()
-                    .user_data(user_data),
-            )
-            .map_err(|_| AsyncIoError::PunchHole(Error::other("Submission queue is full")))?;
-        };
+        if self.is_block_dev {
+            let mut cmd = [0u8; 16];
+            cmd[0..8].copy_from_slice(&offset.to_ne_bytes());
+            cmd[8..16].copy_from_slice(&length.to_ne_bytes());
+
+            // SAFETY: we know the file descriptor is valid and points to a block device.
+            unsafe {
+                sq.push(
+                    &opcode::UringCmd16::new(types::Fd(self.fd), BLOCK_URING_CMD_DISCARD() as _)
+                        .cmd(cmd)
+                        .build()
+                        .user_data(user_data),
+                )
+                .map_err(|_| AsyncIoError::PunchHole(Error::other("Submission queue is full")))?;
+            };
+        } else {
+            // SAFETY: we know the file descriptor is valid.
+            unsafe {
+                sq.push(
+                    &opcode::Fallocate::new(types::Fd(self.fd), length)
+                        .offset(offset)
+                        .mode(libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE)
+                        .build()
+                        .user_data(user_data),
+                )
+                .map_err(|_| AsyncIoError::PunchHole(Error::other("Submission queue is full")))?;
+            };
+        }
 
         // Update the submission queue and submit new operations to the
         // io_uring instance.

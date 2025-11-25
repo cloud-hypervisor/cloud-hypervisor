@@ -1005,6 +1005,8 @@ ioctl_io_nr!(BLKIOOPT, 0x12, 121);
 ioctl_io_nr!(BLKPBSZGET, 0x12, 123);
 ioctl_io_nr!(BLKZEROOUT, 0x12, 127);
 
+ioctl_io_nr!(BLOCK_URING_CMD_DISCARD, 0x12, 0);
+
 #[derive(Copy, Clone)]
 enum BlockSize {
     LogicalBlock,
