@@ -44,7 +44,7 @@ cargo build --all --release --target "$BUILD_TARGET"
 
 # Only run with 1 thread to avoid tests interfering with one another because
 # Windows has a static IP configured
-time cargo nextest run "windows::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
+time cargo nextest run --no-tests=pass "windows::$test_filter" --target "$BUILD_TARGET" -- ${test_binary_args[*]}
 RES=$?
 
 dmsetup remove_all -f
