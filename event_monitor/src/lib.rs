@@ -6,11 +6,12 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io;
 use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
+use std::{fmt, io};
 
+use log::info;
 use serde::Serialize;
 
 static MONITOR: OnceLock<MonitorHandle> = OnceLock::new();
@@ -88,12 +89,31 @@ pub fn set_monitor(file: Option<File>) -> io::Result<Monitor> {
     Ok(monitor)
 }
 
+struct PropertiesFormatter<'a>(&'a Option<&'a HashMap<Cow<'a, str>, Cow<'a, str>>>);
+impl<'a> fmt::Display for PropertiesFormatter<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(map) = self.0 {
+            for (i, (key, value)) in map.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{key} = {value}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 pub fn event_log(source: &str, event: &str, properties: Option<&HashMap<Cow<str>, Cow<str>>>) {
     // `MONITOR` is always in a valid state (None or Some), because it is set
     // only once before any threads are spawned, and it's not mutated
     // afterwards. This function only creates immutable references to `MONITOR`.
     // Because `MONITOR.tx` is `Sync`, it's safe to share `MONITOR` across
     // threads, making this function thread-safe.
+    info!(
+        "Event: source = {source} event = {event} {}",
+        PropertiesFormatter(&properties)
+    );
     if let Some(monitor_handle) = MONITOR.get().as_ref() {
         let event = Event {
             timestamp: monitor_handle.start.elapsed(),

@@ -710,6 +710,7 @@ version = "0.1.0"
 dependencies = [
  "flume",
  "libc",
+ "log",
  "serde",
  "serde_json",
 ]
