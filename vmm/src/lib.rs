@@ -444,10 +444,9 @@ pub fn start_event_monitor_thread(
             if !seccomp_filter.is_empty() {
                 apply_filter(&seccomp_filter)
                     .map_err(Error::ApplySeccompFilter)
-                    .map_err(|e| {
+                    .inspect_err(|e| {
                         error!("Error applying seccomp filter: {e:?}");
                         exit_event.write(1).ok();
-                        e
                     })?;
             }
             if landlock_enable {
@@ -455,10 +454,9 @@ pub fn start_event_monitor_thread(
                     .map_err(Error::CreateLandlock)?
                     .restrict_self()
                     .map_err(Error::ApplyLandlock)
-                    .map_err(|e| {
+                    .inspect_err(|e| {
                         error!("Error applying landlock to event monitor thread: {e:?}");
                         exit_event.write(1).ok();
-                        e
                     })?;
             }
 
@@ -1941,9 +1939,8 @@ impl RequestHandler for Vmm {
         }
 
         if let Some(ref mut vm) = self.vm {
-            let info = vm.add_disk(disk_cfg).map_err(|e| {
+            let info = vm.add_disk(disk_cfg).inspect_err(|e| {
                 error!("Error when adding new disk to the VM: {e:?}");
-                e
             })?;
             serde_json::to_vec(&info)
                 .map(Some)
@@ -1967,9 +1964,8 @@ impl RequestHandler for Vmm {
         }
 
         if let Some(ref mut vm) = self.vm {
-            let info = vm.add_fs(fs_cfg).map_err(|e| {
+            let info = vm.add_fs(fs_cfg).inspect_err(|e| {
                 error!("Error when adding new fs to the VM: {e:?}");
-                e
             })?;
             serde_json::to_vec(&info)
                 .map(Some)
@@ -1993,9 +1989,8 @@ impl RequestHandler for Vmm {
         }
 
         if let Some(ref mut vm) = self.vm {
-            let info = vm.add_pmem(pmem_cfg).map_err(|e| {
+            let info = vm.add_pmem(pmem_cfg).inspect_err(|e| {
                 error!("Error when adding new pmem device to the VM: {e:?}");
-                e
             })?;
             serde_json::to_vec(&info)
                 .map(Some)
@@ -2019,9 +2014,8 @@ impl RequestHandler for Vmm {
         }
 
         if let Some(ref mut vm) = self.vm {
-            let info = vm.add_net(net_cfg).map_err(|e| {
+            let info = vm.add_net(net_cfg).inspect_err(|e| {
                 error!("Error when adding new network device to the VM: {e:?}");
-                e
             })?;
             serde_json::to_vec(&info)
                 .map(Some)
@@ -2045,9 +2039,8 @@ impl RequestHandler for Vmm {
         }
 
         if let Some(ref mut vm) = self.vm {
-            let info = vm.add_vdpa(vdpa_cfg).map_err(|e| {
+            let info = vm.add_vdpa(vdpa_cfg).inspect_err(|e| {
                 error!("Error when adding new vDPA device to the VM: {e:?}");
-                e
             })?;
             serde_json::to_vec(&info)
                 .map(Some)
@@ -2076,9 +2069,8 @@ impl RequestHandler for Vmm {
         }
 
         if let Some(ref mut vm) = self.vm {
-            let info = vm.add_vsock(vsock_cfg).map_err(|e| {
+            let info = vm.add_vsock(vsock_cfg).inspect_err(|e| {
                 error!("Error when adding new vsock device to the VM: {e:?}");
-                e
             })?;
             serde_json::to_vec(&info)
                 .map(Some)
@@ -2093,9 +2085,8 @@ impl RequestHandler for Vmm {
 
     fn vm_counters(&mut self) -> result::Result<Option<Vec<u8>>, VmError> {
         if let Some(ref mut vm) = self.vm {
-            let info = vm.counters().map_err(|e| {
+            let info = vm.counters().inspect_err(|e| {
                 error!("Error when getting counters from the VM: {e:?}");
-                e
             })?;
             serde_json::to_vec(&info)
                 .map(Some)
