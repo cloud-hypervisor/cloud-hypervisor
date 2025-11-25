@@ -20,7 +20,7 @@ linux-loader = { workspace = true, features = [
   "pe",
 ], optional = true }
 log = { workspace = true }
-num_enum = "0.7.4"
+num_enum = "0.7.5"
 pci = { path = "../pci" }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
@@ -34,7 +34,7 @@ vm-memory = { workspace = true, features = [
 ] }
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = { workspace = true }
-zerocopy = { version = "0.8.27", features = [
+zerocopy = { version = "0.8.30", features = [
   "alloc",
   "derive",
 ], optional = true }
