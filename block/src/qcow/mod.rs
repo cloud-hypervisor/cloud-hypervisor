@@ -125,6 +125,7 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Copy, Clone)]
 pub enum ImageType {
     Raw,
     Qcow2,
@@ -683,7 +684,7 @@ impl QcowFile {
     /// Creates a new QcowFile at the given path.
     pub fn new(file: RawFile, version: u32, virtual_size: u64) -> Result<QcowFile> {
         let header = QcowHeader::create_for_size_and_path(version, virtual_size, None)?;
-        QcowFile::new_from_header(file, header)
+        QcowFile::new_from_header(file, &header)
     }
 
     /// Creates a new QcowFile at the given path.
@@ -705,12 +706,12 @@ impl QcowFile {
         .map_err(|e| Error::BackingFileOpen(Box::new(e)))?;
         let size = backing_file.virtual_size();
         let header = QcowHeader::create_for_size_and_path(version, size, Some(backing_file_name))?;
-        let mut result = QcowFile::new_from_header(file, header)?;
+        let mut result = QcowFile::new_from_header(file, &header)?;
         result.backing_file = Some(Box::new(backing_file));
         Ok(result)
     }
 
-    fn new_from_header(mut file: RawFile, header: QcowHeader) -> Result<QcowFile> {
+    fn new_from_header(mut file: RawFile, header: &QcowHeader) -> Result<QcowFile> {
         file.rewind().map_err(Error::SeekingFile)?;
         header.write_to(&mut file)?;
 
@@ -854,7 +855,7 @@ impl QcowFile {
         // Add references to the L1 table clusters.
         fn set_l1_refcounts(
             refcounts: &mut [u16],
-            header: QcowHeader,
+            header: &QcowHeader,
             cluster_size: u64,
         ) -> Result<()> {
             let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
@@ -869,7 +870,7 @@ impl QcowFile {
         // Traverse the L1 and L2 tables to find all reachable data clusters.
         fn set_data_refcounts(
             refcounts: &mut [u16],
-            header: QcowHeader,
+            header: &QcowHeader,
             cluster_size: u64,
             raw_file: &mut QcowRawFile,
         ) -> Result<()> {
@@ -908,7 +909,7 @@ impl QcowFile {
         // Add references to the top-level refcount table clusters.
         fn set_refcount_table_refcounts(
             refcounts: &mut [u16],
-            header: QcowHeader,
+            header: &QcowHeader,
             cluster_size: u64,
         ) -> Result<()> {
             let refcount_table_offset = header.refcount_table_offset;
@@ -1046,9 +1047,9 @@ impl QcowFile {
 
         // Find all references clusters and rebuild refcounts.
         set_header_refcount(&mut refcounts, cluster_size)?;
-        set_l1_refcounts(&mut refcounts, header.clone(), cluster_size)?;
-        set_data_refcounts(&mut refcounts, header.clone(), cluster_size, raw_file)?;
-        set_refcount_table_refcounts(&mut refcounts, header.clone(), cluster_size)?;
+        set_l1_refcounts(&mut refcounts, &header, cluster_size)?;
+        set_data_refcounts(&mut refcounts, &header, cluster_size, raw_file)?;
+        set_refcount_table_refcounts(&mut refcounts, &header, cluster_size)?;
 
         // Allocate clusters to store the new reference count blocks.
         let ref_table = alloc_refblocks(&mut refcounts, cluster_size, refblock_clusters)?;
@@ -1276,7 +1277,7 @@ impl QcowFile {
         // First use a pre allocated cluster if one is available.
         if let Some(free_cluster) = self.avail_clusters.pop() {
             if let Some(initial_data) = initial_data {
-                self.raw_file.write_cluster(free_cluster, initial_data)?;
+                self.raw_file.write_cluster(free_cluster, &initial_data)?;
             } else {
                 self.raw_file.zero_cluster(free_cluster)?;
             }
@@ -1286,7 +1287,7 @@ impl QcowFile {
         let max_valid_cluster_offset = self.refcounts.max_valid_cluster_offset();
         if let Some(new_cluster) = self.raw_file.add_cluster_end(max_valid_cluster_offset)? {
             if let Some(initial_data) = initial_data {
-                self.raw_file.write_cluster(new_cluster, initial_data)?;
+                self.raw_file.write_cluster(new_cluster, &initial_data)?;
             }
             Ok(new_cluster)
         } else {

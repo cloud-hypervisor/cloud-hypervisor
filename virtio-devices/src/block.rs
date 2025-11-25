@@ -800,8 +800,8 @@ impl Block {
             self.disk_path.display()
         );
         let fd = self.disk_image.fd();
-        fcntl::try_acquire_lock(fd, lock_type, granularity).map_err(|error| {
-            let current_lock = get_lock_state(fd, granularity);
+        fcntl::try_acquire_lock(&fd, lock_type, granularity).map_err(|error| {
+            let current_lock = get_lock_state(&fd, granularity);
             // Don't propagate the error to the outside, as it is not useful at all. Instead,
             // we try to log additional help to the user.
             if let Ok(current_lock) = current_lock {
@@ -830,7 +830,8 @@ impl Block {
         // It is very unlikely that this fails;
         // Should we remove the Result to simplify the error propagation on
         // higher levels?
-        fcntl::clear_lock(self.disk_image.fd(), granularity).map_err(|error| Error::LockDiskImage {
+        let fd = self.disk_image.fd();
+        fcntl::clear_lock(&fd, granularity).map_err(|error| Error::LockDiskImage {
             path: self.disk_path.clone(),
             error,
             lock_type: LockType::Unlock,

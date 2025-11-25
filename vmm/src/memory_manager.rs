@@ -1169,7 +1169,7 @@ impl MemoryManager {
                 start_of_platform_device_area,
                 PLATFORM_DEVICE_AREA_SIZE,
                 #[cfg(target_arch = "x86_64")]
-                vec![GsiApic::new(
+                &[GsiApic::new(
                     X86_64_IRQ_BASE,
                     ioapic::NUM_IOAPIC_PINS as u32 - X86_64_IRQ_BASE,
                 )],

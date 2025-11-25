@@ -86,7 +86,7 @@ impl Emulator {
     ///
     /// * `path` - A path to the Unix Domain Socket swtpm is listening on
     ///
-    pub fn new(path: String) -> Result<Self> {
+    pub fn new(path: &str) -> Result<Self> {
         if !Path::new(&path).exists() {
             return Err(Error::InitializeEmulator(anyhow!(
                 "The input TPM Socket path: {path:?} does not exist"

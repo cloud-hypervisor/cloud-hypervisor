@@ -203,7 +203,7 @@ struct VhostUserBlkBackend {
 
 impl VhostUserBlkBackend {
     fn new(
-        image_path: String,
+        image_path: &str,
         num_queues: usize,
         rdonly: bool,
         direct: bool,
@@ -217,7 +217,7 @@ impl VhostUserBlkBackend {
         if direct {
             options.custom_flags(libc::O_DIRECT);
         }
-        let image: File = options.open(&image_path).unwrap();
+        let image: File = options.open(image_path).unwrap();
         let mut raw_img: qcow::RawFile = qcow::RawFile::new(image, direct);
 
         let serial = build_serial(&PathBuf::from(&image_path));
@@ -510,7 +510,7 @@ pub fn start_block_backend(backend_command: &str) {
 
     let blk_backend = Arc::new(RwLock::new(
         VhostUserBlkBackend::new(
-            backend_config.path,
+            &backend_config.path,
             backend_config.num_queues,
             backend_config.readonly,
             backend_config.direct,

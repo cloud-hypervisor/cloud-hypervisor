@@ -19,7 +19,7 @@ use crate::page_size::get_page_size;
 ///
 /// # Example - Use the `SystemAddress` builder.
 ///
-/// ```
+/// ```rust
 /// # #[cfg(target_arch = "x86_64")]
 /// # use vm_allocator::{GsiApic, SystemAllocator};
 /// # #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
@@ -29,7 +29,7 @@ use crate::page_size::get_page_size;
 ///           GuestAddress(0x1000),
 ///           0x10000,
 ///           GuestAddress(0x10000000), 0x10000000,
-///           #[cfg(target_arch = "x86_64")] vec![GsiApic::new(5, 19)]).unwrap();
+///           #[cfg(target_arch = "x86_64")] &[GsiApic::new(5, 19)]).unwrap();
 ///   #[cfg(target_arch = "x86_64")]
 ///   assert_eq!(allocator.allocate_irq(), Some(5));
 ///   #[cfg(target_arch = "aarch64")]
@@ -59,14 +59,14 @@ impl SystemAllocator {
     /// * `io_size` - (X86) The size of IO memory.
     /// * `platform_mmio_base` - The starting address of platform MMIO memory.
     /// * `platform_mmio_size` - The size of platform MMIO memory.
-    /// * `apics` - (X86) Vector of APIC's.
+    /// * `apics` - (X86) slice of APIC's.
     ///
     pub fn new(
         io_base: GuestAddress,
         io_size: GuestUsize,
         platform_mmio_base: GuestAddress,
         platform_mmio_size: GuestUsize,
-        #[cfg(target_arch = "x86_64")] apics: Vec<GsiApic>,
+        #[cfg(target_arch = "x86_64")] apics: &[GsiApic],
     ) -> Option<Self> {
         Some(SystemAllocator {
             io_address_space: AddressAllocator::new(io_base, io_size)?,

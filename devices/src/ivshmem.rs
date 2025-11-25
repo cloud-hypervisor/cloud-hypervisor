@@ -114,14 +114,14 @@ impl IvshmemDevice {
         region_size: u64,
         backend_file: Option<PathBuf>,
         ivshmem_ops: Arc<Mutex<dyn IvshmemOps>>,
-        snapshot: Option<Snapshot>,
+        snapshot: Option<&Snapshot>,
     ) -> Result<Self, IvshmemError> {
-        let pci_configuration_state =
-            vm_migration::state_from_id(snapshot.as_ref(), PCI_CONFIGURATION_ID).map_err(|e| {
-                IvshmemError::RetrievePciConfigurationState(anyhow!(
-                    "Failed to get PciConfigurationState from Snapshot: {e}",
-                ))
-            })?;
+        let pci_configuration_state = vm_migration::state_from_id(snapshot, PCI_CONFIGURATION_ID)
+            .map_err(|e| {
+            IvshmemError::RetrievePciConfigurationState(anyhow!(
+                "Failed to get PciConfigurationState from Snapshot: {e}",
+            ))
+        })?;
 
         let state: Option<IvshmemDeviceState> = snapshot
             .as_ref()

@@ -58,8 +58,8 @@ impl SocketDev {
         }
     }
 
-    pub fn init(&mut self, path: String) -> Result<()> {
-        self.connect(&path)?;
+    pub fn init(&mut self, path: &str) -> Result<()> {
+        self.connect(path)?;
         Ok(())
     }
 

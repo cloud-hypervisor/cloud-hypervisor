@@ -79,7 +79,7 @@ impl VfioUserPciDevice {
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         bdf: PciBdf,
         memory_slot_allocator: MemorySlotAllocator,
-        snapshot: Option<Snapshot>,
+        snapshot: Option<&Snapshot>,
     ) -> Result<Self, VfioUserPciDeviceError> {
         let resettable = client.lock().unwrap().resettable();
         if resettable {
@@ -100,7 +100,7 @@ impl VfioUserPciDevice {
             Arc::new(vfio_wrapper) as Arc<dyn Vfio>,
             &PciVfioUserSubclass::VfioUserSubclass,
             bdf,
-            vm_migration::snapshot_from_id(snapshot.as_ref(), VFIO_COMMON_ID),
+            vm_migration::snapshot_from_id(snapshot, VFIO_COMMON_ID),
             None,
         )
         .map_err(VfioUserPciDeviceError::CreateVfioCommon)?;
@@ -396,8 +396,12 @@ impl PciDevice for VfioUserPciDevice {
         mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,
     ) -> Result<Vec<PciBarConfiguration>, PciDeviceError> {
-        self.common
-            .allocate_bars(allocator, mmio32_allocator, mmio64_allocator, resources)
+        self.common.allocate_bars(
+            allocator,
+            mmio32_allocator,
+            mmio64_allocator,
+            resources.as_deref(),
+        )
     }
 
     fn free_bars(

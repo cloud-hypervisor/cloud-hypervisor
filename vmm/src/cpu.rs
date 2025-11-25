@@ -901,7 +901,11 @@ impl CpuManager {
         Ok(())
     }
 
-    fn create_vcpu(&mut self, cpu_id: u32, snapshot: Option<Snapshot>) -> Result<Arc<Mutex<Vcpu>>> {
+    fn create_vcpu(
+        &mut self,
+        cpu_id: u32,
+        snapshot: Option<&Snapshot>,
+    ) -> Result<Arc<Mutex<Vcpu>>> {
         info!("Creating vCPU: cpu_id = {cpu_id}");
 
         #[cfg(target_arch = "x86_64")]
@@ -1006,7 +1010,7 @@ impl CpuManager {
     fn create_vcpus(
         &mut self,
         desired_vcpus: u32,
-        snapshot: Option<Snapshot>,
+        snapshot: Option<&Snapshot>,
     ) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
         let mut vcpus: Vec<Arc<Mutex<Vcpu>>> = vec![];
         info!(
@@ -1027,7 +1031,7 @@ impl CpuManager {
                 cpu_id,
                 // TODO: The special format of the CPU id can be removed once
                 // ready to break live upgrade.
-                snapshot_from_id(snapshot.as_ref(), cpu_id.to_string().as_str()),
+                snapshot_from_id(snapshot, cpu_id.to_string().as_str()),
             )?);
         }
 
@@ -1386,7 +1390,7 @@ impl CpuManager {
 
     pub fn create_boot_vcpus(
         &mut self,
-        snapshot: Option<Snapshot>,
+        snapshot: Option<&Snapshot>,
     ) -> Result<Vec<Arc<Mutex<Vcpu>>>> {
         trace_scoped!("create_boot_vcpus");
 
