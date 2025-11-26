@@ -6,6 +6,7 @@
 use std::io::Read;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::UnixStream;
+use std::path::Path;
 
 use anyhow::anyhow;
 use log::debug;
@@ -58,21 +59,23 @@ impl SocketDev {
         }
     }
 
-    pub fn init(&mut self, path: &str) -> Result<()> {
+    pub fn init(&mut self, path: impl AsRef<Path>) -> Result<()> {
         self.connect(path)?;
         Ok(())
     }
 
-    pub fn connect(&mut self, socket_path: &str) -> Result<()> {
+    pub fn connect(&mut self, socket_path: impl AsRef<Path>) -> Result<()> {
+        let socket_path = socket_path.as_ref();
         self.state = SocketDevState::Connecting;
 
+        let socket_path_s = socket_path.to_str().unwrap();
         let s = UnixStream::connect(socket_path).map_err(|e| {
             Error::ConnectToSocket(anyhow!("Failed to connect to tpm Socket. Error: {e:?}"))
         })?;
         self.control_fd = s.as_raw_fd();
         self.stream = Some(s);
         self.state = SocketDevState::Connected;
-        debug!("Connected to tpm socket path : {socket_path:?}");
+        debug!("Connected to tpm socket path : {socket_path_s:?}");
         Ok(())
     }
 

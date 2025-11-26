@@ -2491,7 +2491,7 @@ impl DeviceManager {
         tpm_path: &Path,
     ) -> DeviceManagerResult<Arc<Mutex<devices::tpm::Tpm>>> {
         // Create TPM Device
-        let tpm = devices::tpm::Tpm::new(tpm_path.to_str().unwrap()).map_err(|e| {
+        let tpm = devices::tpm::Tpm::new(tpm_path).map_err(|e| {
             DeviceManagerError::CreateTpmDevice(anyhow!("Failed to create TPM Device : {e:?}"))
         })?;
         let tpm = Arc::new(Mutex::new(tpm));
