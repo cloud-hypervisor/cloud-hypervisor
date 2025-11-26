@@ -82,7 +82,7 @@ pub fn setup_fpu(vcpu: &dyn hypervisor::Vcpu) -> Result<()> {
 ///
 /// * `vcpu` - Structure for the VCPU that holds the VCPU's fd.
 pub fn setup_msrs(vcpu: &dyn hypervisor::Vcpu) -> Result<()> {
-    vcpu.set_msrs(&vcpu.boot_msr_entries())
+    vcpu.set_msrs(vcpu.boot_msr_entries())
         .map_err(Error::SetModelSpecificRegisters)?;
 
     Ok(())

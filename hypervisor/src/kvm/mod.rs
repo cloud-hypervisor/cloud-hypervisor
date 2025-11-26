@@ -2732,10 +2732,10 @@ impl cpu::Vcpu for KvmVcpu {
     ///
     /// Return the list of initial MSR entries for a VCPU
     ///
-    fn boot_msr_entries(&self) -> Vec<MsrEntry> {
+    fn boot_msr_entries(&self) -> &'static [MsrEntry] {
         use crate::arch::x86::{MTRR_ENABLE, MTRR_MEM_TYPE_WB, msr_index};
 
-        [
+        &[
             msr!(msr_index::MSR_IA32_SYSENTER_CS),
             msr!(msr_index::MSR_IA32_SYSENTER_ESP),
             msr!(msr_index::MSR_IA32_SYSENTER_EIP),
@@ -2751,7 +2751,6 @@ impl cpu::Vcpu for KvmVcpu {
             ),
             msr_data!(msr_index::MSR_MTRRdefType, MTRR_ENABLE | MTRR_MEM_TYPE_WB),
         ]
-        .to_vec()
     }
 
     #[cfg(target_arch = "aarch64")]
