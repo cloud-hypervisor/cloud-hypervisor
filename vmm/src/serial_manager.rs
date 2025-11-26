@@ -294,7 +294,7 @@ impl SerialManager {
                             }
                         };
 
-                        if matches!(in_file, ConsoleOutput::Socket(_)) && num_events == 0 {
+                        if matches!(in_file, ConsoleOutput::Pty(_)) && num_events == 0 {
                             // This very specific case happens when the serial is connected
                             // to a PTY. We know EPOLLHUP is always present when there's nothing
                             // connected at the other end of the PTY. That's why getting no event
