@@ -558,7 +558,7 @@ pub trait Vcpu: Send + Sync {
     ///
     /// Return the list of initial MSR entries for a VCPU
     ///
-    fn boot_msr_entries(&self) -> Vec<MsrEntry>;
+    fn boot_msr_entries(&self) -> &'static [MsrEntry];
 
     #[cfg(target_arch = "x86_64")]
     ///

@@ -3087,7 +3087,7 @@ mod unit_tests {
         // tenth one (i.e the one with index msr_index::MSR_IA32_MISC_ENABLE has the data we
         // expect.
         let entry_vec = vcpu.boot_msr_entries();
-        assert_eq!(entry_vec.as_slice()[9], msrs.as_slice()[0]);
+        assert_eq!(entry_vec[9], msrs.as_slice()[0]);
     }
 
     #[test]
