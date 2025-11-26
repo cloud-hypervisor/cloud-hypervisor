@@ -2601,9 +2601,9 @@ impl cpu::Vcpu for KvmVcpu {
                 // Skip the first bad MSR
                 let start_pos = faulty_msr_index + 1;
 
-                let sub_msr_entries = state.msrs[start_pos..].to_vec();
+                let sub_msr_entries = &state.msrs[start_pos..];
 
-                let num_msrs = self.set_msrs(&sub_msr_entries)?;
+                let num_msrs = self.set_msrs(sub_msr_entries)?;
 
                 if num_msrs == sub_msr_entries.len() {
                     break;
