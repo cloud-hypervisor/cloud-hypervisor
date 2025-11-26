@@ -4,6 +4,7 @@
 //
 
 use std::cmp;
+use std::path::Path;
 use std::sync::{Arc, Barrier};
 
 use anyhow::anyhow;
@@ -227,7 +228,7 @@ pub struct Tpm {
 }
 
 impl Tpm {
-    pub fn new(path: &str) -> Result<Self> {
+    pub fn new(path: impl AsRef<Path>) -> Result<Self> {
         let emulator = Emulator::new(path)
             .map_err(|e| Error::Init(anyhow!("Failed while initializing tpm Emulator: {e:?}")))?;
         let mut tpm = Tpm {
