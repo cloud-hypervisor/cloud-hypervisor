@@ -156,7 +156,7 @@ impl VhostUserHandle {
     pub fn setup_vhost_user<S: VhostUserFrontendReqHandler>(
         &mut self,
         mem: &GuestMemoryMmap,
-        queues: Vec<(usize, Queue, EventFd)>,
+        queues: &[(usize, Queue, EventFd)],
         virtio_interrupt: &dyn VirtioInterrupt,
         acked_features: u64,
         backend_req_handler: &Option<FrontendReqHandler<S>>,
@@ -340,7 +340,7 @@ impl VhostUserHandle {
     pub fn reinitialize_vhost_user<S: VhostUserFrontendReqHandler>(
         &mut self,
         mem: &GuestMemoryMmap,
-        queues: Vec<(usize, Queue, EventFd)>,
+        queues: &[(usize, Queue, EventFd)],
         virtio_interrupt: &dyn VirtioInterrupt,
         acked_features: u64,
         acked_protocol_features: u64,

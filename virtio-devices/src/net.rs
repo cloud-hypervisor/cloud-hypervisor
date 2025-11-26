@@ -75,8 +75,8 @@ impl NetCtrlEpollHandler {
 
     pub fn run_ctrl(
         &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
+        paused: &AtomicBool,
+        paused_sync: &Barrier,
     ) -> std::result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt.as_raw_fd(), CTRL_QUEUE_EVENT)?;
@@ -266,8 +266,8 @@ impl NetEpollHandler {
 
     fn run(
         &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
+        paused: &AtomicBool,
+        paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt_pair.0.as_raw_fd(), RX_QUEUE_EVENT)?;
@@ -736,7 +736,7 @@ impl VirtioDevice for Net {
                 Thread::VirtioNetCtl,
                 &mut epoll_threads,
                 &self.exit_evt,
-                move || ctrl_handler.run_ctrl(paused, paused_sync.unwrap()),
+                move || ctrl_handler.run_ctrl(&paused, paused_sync.as_ref().unwrap()),
             )?;
             self.ctrl_queue_epoll_thread = Some(epoll_threads.remove(0));
         }
@@ -814,7 +814,7 @@ impl VirtioDevice for Net {
                 Thread::VirtioNet,
                 &mut epoll_threads,
                 &self.exit_evt,
-                move || handler.run(paused, paused_sync.unwrap()),
+                move || handler.run(&paused, paused_sync.as_ref().unwrap()),
             )?;
         }
 

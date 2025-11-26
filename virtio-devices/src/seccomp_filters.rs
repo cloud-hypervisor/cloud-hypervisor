@@ -11,6 +11,7 @@ use seccompiler::{
     SeccompFilter, SeccompRule,
 };
 
+#[derive(Clone, Copy)]
 pub enum Thread {
     VirtioBalloon,
     VirtioBlock,

@@ -721,7 +721,7 @@ impl MemoryManager {
     fn fill_saved_regions(
         &mut self,
         file_path: PathBuf,
-        saved_regions: MemoryRangeTable,
+        saved_regions: &MemoryRangeTable,
     ) -> Result<(), Error> {
         if saved_regions.is_empty() {
             return Ok(());
@@ -1268,7 +1268,7 @@ impl MemoryManager {
 
             mm.lock()
                 .unwrap()
-                .fill_saved_regions(memory_file_path, mem_snapshot.memory_ranges)?;
+                .fill_saved_regions(memory_file_path, &mem_snapshot.memory_ranges)?;
 
             Ok(mm)
         } else {
@@ -1291,7 +1291,7 @@ impl MemoryManager {
         addr: *mut u8,
         len: u64,
         mode: u32,
-        nodemask: Vec<u64>,
+        nodemask: &[u64],
         maxnode: u64,
         flags: u32,
     ) -> Result<(), io::Error> {
@@ -1438,7 +1438,7 @@ impl MemoryManager {
             // MPOL_BIND is the selected mode as it specifies a strict policy
             // that restricts memory allocation to the nodes specified in the
             // nodemask.
-            Self::mbind(addr, len, mode, nodemask, maxnode, flags)
+            Self::mbind(addr, len, mode, &nodemask, maxnode, flags)
                 .map_err(Error::ApplyNumaPolicy)?;
         }
 

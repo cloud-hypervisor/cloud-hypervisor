@@ -336,7 +336,7 @@ impl VirtioDevice for Net {
                 Thread::VirtioVhostNetCtl,
                 &mut epoll_threads,
                 &self.exit_evt,
-                move || ctrl_handler.run_ctrl(paused, paused_sync.unwrap()),
+                move || ctrl_handler.run_ctrl(&paused, paused_sync.as_ref().unwrap()),
             )?;
             self.ctrl_queue_epoll_thread = Some(epoll_threads.remove(0));
         }
@@ -353,7 +353,7 @@ impl VirtioDevice for Net {
 
         let mut handler = self.vu_common.activate(
             mem,
-            queues,
+            &queues,
             interrupt_cb,
             backend_acked_features,
             backend_req_handler,
@@ -371,7 +371,7 @@ impl VirtioDevice for Net {
             Thread::VirtioVhostNet,
             &mut epoll_threads,
             &self.exit_evt,
-            move || handler.run(paused, paused_sync.unwrap()),
+            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
         self.epoll_thread = Some(epoll_threads.remove(0));
 

@@ -318,9 +318,9 @@ pub trait Vm: Send + Sync + Any {
     /// Creates a new KVM vCPU file descriptor and maps the memory corresponding
     fn create_vcpu(&self, id: u32, vm_ops: Option<Arc<dyn VmOps>>) -> Result<Box<dyn Vcpu>>;
     #[cfg(target_arch = "aarch64")]
-    fn create_vgic(&self, config: VgicConfig) -> Result<Arc<Mutex<dyn Vgic>>>;
+    fn create_vgic(&self, config: &VgicConfig) -> Result<Arc<Mutex<dyn Vgic>>>;
     #[cfg(target_arch = "riscv64")]
-    fn create_vaia(&self, config: VaiaConfig) -> Result<Arc<Mutex<dyn Vaia>>>;
+    fn create_vaia(&self, config: &VaiaConfig) -> Result<Arc<Mutex<dyn Vaia>>>;
 
     /// Registers an event to be signaled whenever a certain address is written to.
     fn register_ioevent(

@@ -1137,6 +1137,7 @@ fn main() {
 
     if let Err(top_error) = target_api.do_command(&matches) {
         // Helper to join strings with a newline.
+        #[allow(clippy::needless_pass_by_value)]
         fn join_strs(mut acc: String, next: String) -> String {
             if !acc.is_empty() {
                 acc.push('\n');

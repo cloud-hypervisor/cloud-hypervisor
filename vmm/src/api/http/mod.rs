@@ -76,6 +76,7 @@ const HTTP_ROOT: &str = "/api/v1";
 /// The error message contained in the response is supposed to be user-facing,
 /// thus insightful and helpful while balancing technical accuracy and
 /// simplicity.
+#[allow(clippy::needless_pass_by_value)]
 pub fn error_response(error: HttpError, status: StatusCode) -> Response {
     let mut response = Response::new(Version::Http11, status);
 

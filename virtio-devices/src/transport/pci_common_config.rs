@@ -82,6 +82,8 @@ pub struct VirtioPciCommonConfigState {
 const VRING_DESC_ELEMENT_SIZE: usize = 16;
 const VRING_AVAIL_ELEMENT_SIZE: usize = 2;
 const VRING_USED_ELEMENT_SIZE: usize = 8;
+
+#[derive(Copy, Clone)]
 pub enum VringType {
     Desc,
     Avail,
@@ -191,6 +193,7 @@ impl VirtioPciCommonConfig {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub fn write(
         &mut self,
         offset: u64,
@@ -297,6 +300,7 @@ impl VirtioPciCommonConfig {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     fn read_common_config_dword(&self, offset: u64, device: Arc<Mutex<dyn VirtioDevice>>) -> u32 {
         debug!("read_common_config_dword: offset 0x{offset:x}");
         match offset {
@@ -319,6 +323,7 @@ impl VirtioPciCommonConfig {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     fn write_common_config_dword(
         &mut self,
         offset: u64,

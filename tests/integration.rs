@@ -15,7 +15,7 @@ use std::fs::OpenOptions;
 use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 use std::net::TcpListener;
 use std::os::unix::io::AsRawFd;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::string::String;
 use std::sync::mpsc::Receiver;
@@ -151,8 +151,8 @@ impl TargetApi {
 
 // Start cloud-hypervisor with no VM parameters, only the API server running.
 // From the API: Create a VM, boot it and check that it looks as expected.
-fn _test_api_create_boot(target_api: TargetApi, guest: Guest) {
-    let mut child = GuestCommand::new(&guest)
+fn _test_api_create_boot(target_api: &TargetApi, guest: &Guest) {
+    let mut child = GuestCommand::new(guest)
         .args(target_api.guest_args())
         .capture_output()
         .spawn()
@@ -196,8 +196,8 @@ fn _test_api_create_boot(target_api: TargetApi, guest: Guest) {
 // Start cloud-hypervisor with no VM parameters, only the API server running.
 // From the API: Create a VM, boot it and check it can be shutdown and then
 // booted again
-fn _test_api_shutdown(target_api: TargetApi, guest: Guest) {
-    let mut child = GuestCommand::new(&guest)
+fn _test_api_shutdown(target_api: &TargetApi, guest: &Guest) {
+    let mut child = GuestCommand::new(guest)
         .args(target_api.guest_args())
         .capture_output()
         .spawn()
@@ -262,8 +262,8 @@ fn _test_api_shutdown(target_api: TargetApi, guest: Guest) {
 // Start cloud-hypervisor with no VM parameters, only the API server running.
 // From the API: Create a VM, boot it and check it can be deleted and then recreated
 // booted again.
-fn _test_api_delete(target_api: TargetApi, guest: Guest) {
-    let mut child = GuestCommand::new(&guest)
+fn _test_api_delete(target_api: &TargetApi, guest: &Guest) {
+    let mut child = GuestCommand::new(guest)
         .args(target_api.guest_args())
         .capture_output()
         .spawn()
@@ -330,8 +330,8 @@ fn _test_api_delete(target_api: TargetApi, guest: Guest) {
 // From the API: Create a VM, boot it and check that it looks as expected.
 // Then we pause the VM, check that it's no longer available.
 // Finally we resume the VM and check that it's available.
-fn _test_api_pause_resume(target_api: TargetApi, guest: Guest) {
-    let mut child = GuestCommand::new(&guest)
+fn _test_api_pause_resume(target_api: &TargetApi, guest: &Guest) {
+    let mut child = GuestCommand::new(guest)
         .args(target_api.guest_args())
         .capture_output()
         .spawn()
@@ -749,10 +749,10 @@ fn setup_ovs_dpdk_guests(
 ) -> (Child, Child) {
     setup_ovs_dpdk();
 
-    let clh_path = if !release_binary {
-        clh_command("cloud-hypervisor")
-    } else {
+    let clh_path = if release_binary {
         cloud_hypervisor_release_path()
+    } else {
+        clh_command("cloud-hypervisor")
     };
 
     let mut child1 = GuestCommand::new_with_binary_path(guest1, &clh_path)
@@ -1125,7 +1125,7 @@ fn _test_guest_numa_nodes(acpi: bool) {
 
         guest.check_numa_common(
             Some(&[960_000, 1_920_000, 2_880_000]),
-            Some(&[vec![0, 1, 2], vec![3, 4], vec![5]]),
+            Some(&[&[0, 1, 2], &[3, 4], &[5]]),
             Some(&["10 15 20", "20 10 25", "25 30 10"]),
         );
 
@@ -1147,7 +1147,7 @@ fn _test_guest_numa_nodes(acpi: bool) {
 
             guest.check_numa_common(
                 Some(&[3_840_000, 3_840_000, 3_840_000]),
-                Some(&[vec![0, 1, 2, 9], vec![3, 4, 6, 7, 8], vec![5, 10, 11]]),
+                Some(&[&[0, 1, 2, 9], &[3, 4, 6, 7, 8], &[5, 10, 11]]),
                 None,
             );
         }
@@ -2371,20 +2371,21 @@ fn make_guest_panic(guest: &Guest) {
 // and write data to host(guest write data to ivshmem pci bar2 memory, host read it from
 // ivshmem backend file).
 // It also checks the size of the shared memory region.
-fn _test_ivshmem(guest: &Guest, ivshmem_file_path: String, file_size: &str) {
+fn _test_ivshmem(guest: &Guest, ivshmem_file_path: impl AsRef<Path>, file_size: &str) {
+    let ivshmem_file_path = ivshmem_file_path.as_ref();
     let test_message_read = String::from("ivshmem device test data read");
     // Modify backend file data before function test
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
-        .open(ivshmem_file_path.as_str())
+        .open(ivshmem_file_path)
         .unwrap();
     file.seek(SeekFrom::Start(0)).unwrap();
     file.write_all(test_message_read.as_bytes()).unwrap();
     file.write_all(b"\0").unwrap();
     file.flush().unwrap();
 
-    let output = fs::read_to_string(ivshmem_file_path.as_str()).unwrap();
+    let output = fs::read_to_string(ivshmem_file_path).unwrap();
     let nul_pos = output.as_bytes().iter().position(|&b| b == 0).unwrap();
     let c_str = CStr::from_bytes_until_nul(&output.as_bytes()[..=nul_pos]).unwrap();
     let file_message = c_str.to_string_lossy().to_string();
@@ -2498,7 +2499,7 @@ EOF
 
     let _ = guest.ssh_command("sudo python3 test_write.py").unwrap();
 
-    let output = fs::read_to_string(ivshmem_file_path.as_str()).unwrap();
+    let output = fs::read_to_string(ivshmem_file_path).unwrap();
     let nul_pos = output.as_bytes().iter().position(|&b| b == 0).unwrap();
     let c_str = CStr::from_bytes_until_nul(&output.as_bytes()[..=nul_pos]).unwrap();
     let file_message = c_str.to_string_lossy().to_string();
@@ -2515,17 +2516,19 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_focal_hypervisor_fw() {
-        test_simple_launch(fw_path(FwType::RustHypervisorFirmware), FOCAL_IMAGE_NAME);
+        let path = fw_path(FwType::RustHypervisorFirmware);
+        test_simple_launch(&path, FOCAL_IMAGE_NAME);
     }
 
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_focal_ovmf() {
-        test_simple_launch(fw_path(FwType::Ovmf), FOCAL_IMAGE_NAME);
+        let path = fw_path(FwType::Ovmf);
+        test_simple_launch(&path, FOCAL_IMAGE_NAME);
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn test_simple_launch(fw_path: String, disk_path: &str) {
+    fn test_simple_launch(fw_path: &str, disk_path: &str) {
         let disk_config = Box::new(UbuntuDiskConfig::new(disk_path.to_string()));
         let guest = Guest::new(disk_config);
         let event_path = temp_event_monitor_path(&guest.tmp_dir);
@@ -2533,7 +2536,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
-            .args(["--kernel", fw_path.as_str()])
+            .args(["--kernel", fw_path])
             .default_disks()
             .default_net()
             .args(["--serial", "tty", "--console", "off"])
@@ -4702,7 +4705,7 @@ mod common_parallel {
             // does not have this command line tag.
             assert!(check_matched_lines_count(
                 guest.ssh_command_l2_1("cat /proc/cmdline").unwrap().trim(),
-                vec!["VFIOTAG"],
+                &["VFIOTAG"],
                 1
             ));
 
@@ -4710,7 +4713,7 @@ mod common_parallel {
             // the L2 VM.
             assert!(check_matched_lines_count(
                 guest.ssh_command_l2_2("cat /proc/cmdline").unwrap().trim(),
-                vec!["VFIOTAG"],
+                &["VFIOTAG"],
                 1
             ));
 
@@ -4726,7 +4729,7 @@ mod common_parallel {
             // Check both if /dev/vdc exists and if the block size is 16M in L2 VM
             assert!(check_matched_lines_count(
                 guest.ssh_command_l2_1("lsblk").unwrap().trim(),
-                vec!["vdc", "16M"],
+                &["vdc", "16M"],
                 1
             ));
 
@@ -4748,7 +4751,7 @@ mod common_parallel {
                 .unwrap();
             assert!(check_matched_lines_count(
                 vfio_hotplug_output.trim(),
-                vec!["{\"id\":\"vfio123\",\"bdf\":\"0000:00:08.0\"}"],
+                &["{\"id\":\"vfio123\",\"bdf\":\"0000:00:08.0\"}"],
                 1
             ));
 
@@ -4759,7 +4762,7 @@ mod common_parallel {
             // VM, so this is our way to validate hotplug works for VFIO PCI.
             assert!(check_matched_lines_count(
                 guest.ssh_command_l2_3("cat /proc/cmdline").unwrap().trim(),
-                vec!["VFIOTAG"],
+                &["VFIOTAG"],
                 1
             ));
 
@@ -4873,7 +4876,8 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        _test_api_shutdown(TargetApi::new_http_api(&guest.tmp_dir), guest);
+        let target_api = TargetApi::new_http_api(&guest.tmp_dir);
+        _test_api_shutdown(&target_api, &guest);
     }
 
     #[test]
@@ -4881,7 +4885,8 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        _test_api_delete(TargetApi::new_http_api(&guest.tmp_dir), guest);
+        let target_api = TargetApi::new_http_api(&guest.tmp_dir);
+        _test_api_delete(&target_api, &guest);
     }
 
     #[test]
@@ -4889,7 +4894,8 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        _test_api_pause_resume(TargetApi::new_http_api(&guest.tmp_dir), guest);
+        let target_api = TargetApi::new_http_api(&guest.tmp_dir);
+        _test_api_pause_resume(&target_api, &guest);
     }
 
     #[test]
@@ -4897,7 +4903,8 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        _test_api_create_boot(TargetApi::new_http_api(&guest.tmp_dir), guest);
+        let target_api = TargetApi::new_http_api(&guest.tmp_dir);
+        _test_api_create_boot(&target_api, &guest);
     }
 
     #[test]
@@ -7541,7 +7548,8 @@ mod dbus_api {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        _test_api_create_boot(TargetApi::new_dbus_api(&guest.tmp_dir), guest);
+        let target_api = TargetApi::new_dbus_api(&guest.tmp_dir);
+        _test_api_create_boot(&target_api, &guest);
     }
 
     #[test]
@@ -7549,7 +7557,8 @@ mod dbus_api {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        _test_api_shutdown(TargetApi::new_dbus_api(&guest.tmp_dir), guest);
+        let target_api = TargetApi::new_dbus_api(&guest.tmp_dir);
+        _test_api_shutdown(&target_api, &guest);
     }
 
     #[test]
@@ -7557,7 +7566,8 @@ mod dbus_api {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        _test_api_delete(TargetApi::new_dbus_api(&guest.tmp_dir), guest);
+        let target_api = TargetApi::new_dbus_api(&guest.tmp_dir);
+        _test_api_delete(&target_api, &guest);
     }
 
     #[test]
@@ -7565,7 +7575,8 @@ mod dbus_api {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        _test_api_pause_resume(TargetApi::new_dbus_api(&guest.tmp_dir), guest);
+        let target_api = TargetApi::new_dbus_api(&guest.tmp_dir);
+        _test_api_pause_resume(&target_api, &guest);
     }
 }
 
@@ -7693,7 +7704,7 @@ mod ivshmem {
             }
 
             // Check ivshmem device in src guest.
-            _test_ivshmem(&guest, ivshmem_file_path.clone(), file_size);
+            _test_ivshmem(&guest, &ivshmem_file_path, file_size);
             // Allow some normal time to elapse to check we don't get spurious reboots
             thread::sleep(std::time::Duration::new(40, 0));
 
@@ -7748,7 +7759,7 @@ mod ivshmem {
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
 
             // Check ivshmem device
-            _test_ivshmem(&guest, ivshmem_file_path, file_size);
+            _test_ivshmem(&guest, &ivshmem_file_path, file_size);
         });
 
         // Clean-up the destination VM and make sure it terminated correctly
@@ -7810,7 +7821,7 @@ mod ivshmem {
 
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot(None).unwrap();
-            _test_ivshmem(&guest, ivshmem_file_path, file_size);
+            _test_ivshmem(&guest, &ivshmem_file_path, file_size);
         });
         kill_child(&mut child);
         let output = child.wait_with_output().unwrap();
@@ -7958,7 +7969,7 @@ mod ivshmem {
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
-            _test_ivshmem(&guest, ivshmem_file_path, file_size);
+            _test_ivshmem(&guest, &ivshmem_file_path, file_size);
         });
         // Shutdown the target VM and check console output
         kill_child(&mut child);
@@ -8278,9 +8289,7 @@ mod common_sequential {
             // Perform same checks to validate VM has been properly restored
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
             let total_memory = guest.get_total_memory().unwrap_or_default();
-            if !use_hotplug {
-                assert!(total_memory > 1_920_000);
-            } else {
+            if use_hotplug {
                 assert!(total_memory > 4_800_000);
                 assert!(total_memory < 5_760_000);
                 // Deflate balloon to restore entire RAM to the VM
@@ -8293,6 +8302,8 @@ mod common_sequential {
                 let total_memory = guest.get_total_memory().unwrap_or_default();
                 assert!(total_memory > 4_800_000);
                 assert!(total_memory < 5_760_000);
+            } else {
+                assert!(total_memory > 1_920_000);
             }
 
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
@@ -10050,10 +10061,10 @@ mod live_migration {
         let pmem_path = String::from("/dev/pmem0");
 
         // Start the source VM
-        let src_vm_path = if !upgrade_test {
-            clh_command("cloud-hypervisor")
-        } else {
+        let src_vm_path = if upgrade_test {
             cloud_hypervisor_release_path()
+        } else {
+            clh_command("cloud-hypervisor")
         };
         let src_api_socket = temp_api_path(&guest.tmp_dir);
         let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
@@ -10214,10 +10225,10 @@ mod live_migration {
         let pmem_path = String::from("/dev/pmem0");
 
         // Start the source VM
-        let src_vm_path = if !upgrade_test {
-            clh_command("cloud-hypervisor")
-        } else {
+        let src_vm_path = if upgrade_test {
             cloud_hypervisor_release_path()
+        } else {
+            clh_command("cloud-hypervisor")
         };
         let src_api_socket = temp_api_path(&guest.tmp_dir);
         let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
@@ -10415,10 +10426,10 @@ mod live_migration {
         let pmem_path = String::from("/dev/pmem0");
 
         // Start the source VM
-        let src_vm_path = if !upgrade_test {
-            clh_command("cloud-hypervisor")
-        } else {
+        let src_vm_path = if upgrade_test {
             cloud_hypervisor_release_path()
+        } else {
+            clh_command("cloud-hypervisor")
         };
         let src_api_socket = temp_api_path(&guest.tmp_dir);
         let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
@@ -10467,7 +10478,7 @@ mod live_migration {
             {
                 guest.check_numa_common(
                     Some(&[960_000, 960_000, 1_920_000]),
-                    Some(&[vec![0, 1, 2], vec![3, 4], vec![5]]),
+                    Some(&[&[0, 1, 2], &[3, 4], &[5]]),
                     Some(&["10 15 20", "20 10 25", "25 30 10"]),
                 );
 
@@ -10563,7 +10574,7 @@ mod live_migration {
                 {
                     guest.check_numa_common(
                         Some(&[960_000, 960_000, 1_920_000]),
-                        Some(&[vec![0, 1, 2], vec![3, 4], vec![5]]),
+                        Some(&[&[0, 1, 2], &[3, 4], &[5]]),
                         Some(&["10 15 20", "20 10 25", "25 30 10"]),
                     );
                 }
@@ -10574,7 +10585,7 @@ mod live_migration {
                 {
                     guest.check_numa_common(
                         Some(&[1_920_000, 1_920_000, 2_880_000]),
-                        Some(&[vec![0, 1, 2], vec![3, 4], vec![5]]),
+                        Some(&[&[0, 1, 2], &[3, 4], &[5]]),
                         Some(&["10 15 20", "20 10 25", "25 30 10"]),
                     );
 
@@ -10592,7 +10603,7 @@ mod live_migration {
 
                     guest.check_numa_common(
                         Some(&[3_840_000, 3_840_000, 3_840_000]),
-                        Some(&[vec![0, 1, 2, 9], vec![3, 4, 6, 7, 8], vec![5, 10, 11]]),
+                        Some(&[&[0, 1, 2, 9], &[3, 4, 6, 7, 8], &[5, 10, 11]]),
                         None,
                     );
                 }
@@ -10640,10 +10651,10 @@ mod live_migration {
         let pmem_path = String::from("/dev/pmem0");
 
         // Start the source VM
-        let src_vm_path = if !upgrade_test {
-            clh_command("cloud-hypervisor")
-        } else {
+        let src_vm_path = if upgrade_test {
             cloud_hypervisor_release_path()
+        } else {
+            clh_command("cloud-hypervisor")
         };
         let src_api_socket = temp_api_path(&guest.tmp_dir);
         let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);

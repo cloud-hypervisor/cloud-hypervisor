@@ -486,6 +486,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         .args(args)
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     let log_level = match cmd_arguments.get_count("v") {
         0 => LevelFilter::Warn,

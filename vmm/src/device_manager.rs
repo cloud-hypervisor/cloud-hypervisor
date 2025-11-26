@@ -15,7 +15,7 @@ use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::result;
 use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "riscv64"))]
@@ -1114,7 +1114,7 @@ fn create_mmio_allocators(
     start: u64,
     end: u64,
     num_pci_segments: u16,
-    weights: Vec<u32>,
+    weights: &[u32],
     alignment: u64,
 ) -> Vec<Arc<Mutex<AddressAllocator>>> {
     let total_weight: u32 = weights.iter().sum();
@@ -1193,7 +1193,7 @@ impl DeviceManager {
             start_of_mmio32_area,
             end_of_mmio32_area,
             num_pci_segments,
-            mmio32_aperture_weights,
+            &mmio32_aperture_weights,
             4 << 10,
         );
 
@@ -1213,7 +1213,7 @@ impl DeviceManager {
             start_of_mmio64_area,
             end_of_mmio64_area,
             num_pci_segments,
-            mmio64_aperture_weights,
+            &mmio64_aperture_weights,
             4 << 30,
         );
 
@@ -1400,6 +1400,7 @@ impl DeviceManager {
         self.add_interrupt_controller()
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub fn create_devices(
         &mut self,
         console_info: Option<ConsoleInfo>,
@@ -1470,7 +1471,7 @@ impl DeviceManager {
 
         #[cfg(not(target_arch = "riscv64"))]
         if let Some(tpm) = self.config.clone().lock().unwrap().tpm.as_ref() {
-            let tpm_dev = self.add_tpm_device(tpm.socket.clone())?;
+            let tpm_dev = self.add_tpm_device(&tpm.socket)?;
             self.bus_devices
                 .push(Arc::clone(&tpm_dev) as Arc<dyn BusDeviceSync>);
         }
@@ -1644,7 +1645,7 @@ impl DeviceManager {
                 let dev_id = self.add_virtio_pci_device(
                     handle.virtio_device,
                     &mapping,
-                    handle.id,
+                    &handle.id,
                     handle.pci_segment,
                     handle.dma_handler,
                 )?;
@@ -1675,7 +1676,7 @@ impl DeviceManager {
             }
 
             if let Some(iommu_device) = iommu_device {
-                let dev_id = self.add_virtio_pci_device(iommu_device, &None, iommu_id, 0, None)?;
+                let dev_id = self.add_virtio_pci_device(iommu_device, &None, &iommu_id, 0, None)?;
                 self.iommu_attached_devices = Some((dev_id, iommu_attached_devices));
             }
         }
@@ -1790,14 +1791,15 @@ impl DeviceManager {
     ) -> DeviceManagerResult<Arc<Mutex<dyn InterruptController>>> {
         let id = String::from(IOAPIC_DEVICE_NAME);
 
+        let state = state_from_id(self.snapshot.as_ref(), id.as_str())
+            .map_err(DeviceManagerError::RestoreGetState)?;
         // Create IOAPIC
         let interrupt_controller = Arc::new(Mutex::new(
             ioapic::Ioapic::new(
                 id.clone(),
                 APIC_START,
                 self.msi_interrupt_manager.as_ref(),
-                state_from_id(self.snapshot.as_ref(), id.as_str())
-                    .map_err(DeviceManagerError::RestoreGetState)?,
+                state.as_ref(),
             )
             .map_err(DeviceManagerError::CreateInterruptController)?,
         ));
@@ -2486,7 +2488,7 @@ impl DeviceManager {
     #[cfg(not(target_arch = "riscv64"))]
     fn add_tpm_device(
         &mut self,
-        tpm_path: PathBuf,
+        tpm_path: &Path,
     ) -> DeviceManagerResult<Arc<Mutex<devices::tpm::Tpm>>> {
         // Create TPM Device
         let tpm = devices::tpm::Tpm::new(tpm_path.to_str().unwrap()).map_err(|e| {
@@ -4057,7 +4059,7 @@ impl DeviceManager {
         &mut self,
         virtio_device: Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
         iommu_mapping: &Option<Arc<IommuMapping>>,
-        virtio_device_id: String,
+        virtio_device_id: &str,
         pci_segment_id: u16,
         dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
     ) -> DeviceManagerResult<PciBdf> {
@@ -4065,13 +4067,13 @@ impl DeviceManager {
 
         // Add the new virtio-pci node to the device tree.
         let mut node = device_node!(id);
-        node.children = vec![virtio_device_id.clone()];
+        node.children = vec![virtio_device_id.to_string()];
 
         let (pci_segment_id, pci_device_bdf, resources) =
             self.pci_resources(&id, pci_segment_id)?;
 
         // Update the existing virtio node by setting the parent.
-        if let Some(node) = self.device_tree.lock().unwrap().get_mut(&virtio_device_id) {
+        if let Some(node) = self.device_tree.lock().unwrap().get_mut(virtio_device_id) {
             node.parent = Some(id.clone());
         } else {
             return Err(DeviceManagerError::MissingNode);
@@ -4472,15 +4474,15 @@ impl DeviceManager {
         })
     }
 
-    pub fn remove_device(&mut self, id: String) -> DeviceManagerResult<()> {
+    pub fn remove_device(&mut self, id: &str) -> DeviceManagerResult<()> {
         // The node can be directly a PCI node in case the 'id' refers to a
         // VFIO device or a virtio-pci one.
         // In case the 'id' refers to a virtio device, we must find the PCI
         // node by looking at the parent.
         let device_tree = self.device_tree.lock().unwrap();
         let node = device_tree
-            .get(&id)
-            .ok_or(DeviceManagerError::UnknownDeviceId(id.clone()))?;
+            .get(id)
+            .ok_or_else(|| DeviceManagerError::UnknownDeviceId(id.to_string()))?;
 
         // Release advisory locks by dropping all references.
         // Linux automatically releases all locks of that file if the last open FD is closed.
@@ -4545,7 +4547,7 @@ impl DeviceManager {
                     let nets = config.net.as_deref_mut().unwrap();
                     let net_dev_cfg = nets
                         .iter_mut()
-                        .find(|net| net.id.as_ref() == Some(&id))
+                        .find(|net| net.id.as_deref() == Some(id))
                         // unwrap: the device could not have been removed without an ID
                         .unwrap();
                     let fds = net_dev_cfg.fds.take().unwrap_or(Vec::new());
@@ -4692,12 +4694,11 @@ impl DeviceManager {
 
         if remove_dma_handler {
             for virtio_mem_device in self.virtio_mem_devices.iter() {
+                let source = VirtioMemMappingSource::Device(pci_device_bdf.into());
                 virtio_mem_device
                     .lock()
                     .unwrap()
-                    .remove_dma_mapping_handler(VirtioMemMappingSource::Device(
-                        pci_device_bdf.into(),
-                    ))
+                    .remove_dma_mapping_handler(&source)
                     .map_err(DeviceManagerError::RemoveDmaMappingHandlerVirtioMem)?;
             }
         }
@@ -4804,7 +4805,7 @@ impl DeviceManager {
         let bdf = self.add_virtio_pci_device(
             handle.virtio_device,
             &mapping,
-            handle.id.clone(),
+            &handle.id,
             handle.pci_segment,
             handle.dma_handler,
         )?;
@@ -5532,7 +5533,7 @@ mod unit_tests {
 
     #[test]
     fn test_create_mmio_allocators() {
-        let res = create_mmio_allocators(0x100000, 0x400000, 1, vec![1], 4 << 10);
+        let res = create_mmio_allocators(0x100000, 0x400000, 1, &[1], 4 << 10);
         assert_eq!(res.len(), 1);
         assert_eq!(
             res[0].lock().unwrap().base(),
@@ -5543,7 +5544,7 @@ mod unit_tests {
             vm_memory::GuestAddress(0x3fffff)
         );
 
-        let res = create_mmio_allocators(0x100000, 0x400000, 2, vec![1, 1], 4 << 10);
+        let res = create_mmio_allocators(0x100000, 0x400000, 2, &[1, 1], 4 << 10);
         assert_eq!(res.len(), 2);
         assert_eq!(
             res[0].lock().unwrap().base(),
@@ -5562,7 +5563,7 @@ mod unit_tests {
             vm_memory::GuestAddress(0x3fffff)
         );
 
-        let res = create_mmio_allocators(0x100000, 0x400000, 2, vec![2, 1], 4 << 10);
+        let res = create_mmio_allocators(0x100000, 0x400000, 2, &[2, 1], 4 << 10);
         assert_eq!(res.len(), 2);
         assert_eq!(
             res[0].lock().unwrap().base(),

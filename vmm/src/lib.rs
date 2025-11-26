@@ -11,7 +11,6 @@ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "riscv64"))]
@@ -545,9 +544,9 @@ pub fn start_vmm_thread(
                 vmm.setup_signal_handler(landlock_enable)?;
 
                 vmm.control_loop(
-                    Rc::new(api_receiver),
+                    &api_receiver,
                     #[cfg(feature = "guest_debug")]
-                    Rc::new(gdb_receiver),
+                    &gdb_receiver,
                 )
             })
             .map_err(Error::VmmThreadSpawn)?
@@ -674,7 +673,7 @@ impl Vmm {
 
     fn signal_handler(
         mut signals: Signals,
-        original_termios_opt: Arc<Mutex<Option<termios>>>,
+        original_termios_opt: &Mutex<Option<termios>>,
         exit_evt: &EventFd,
     ) {
         for sig in &Self::HANDLED_SIGNALS {
@@ -747,7 +746,7 @@ impl Vmm {
                             }
 
                             std::panic::catch_unwind(AssertUnwindSafe(|| {
-                                Vmm::signal_handler(signals, original_termios_opt, &exit_evt);
+                                Vmm::signal_handler(signals, original_termios_opt.as_ref(), &exit_evt);
                             }))
                             .map_err(|_| {
                                 error!("vmm signal_handler thread panicked");
@@ -862,7 +861,7 @@ impl Vmm {
             .unwrap()
             .landlock_enable
         {
-            apply_landlock(self.vm_config.as_ref().unwrap().clone()).map_err(|e| {
+            apply_landlock(self.vm_config.as_ref().unwrap().as_ref()).map_err(|e| {
                 MigratableError::MigrateReceive(anyhow!("Error applying landlock: {e:?}"))
             })?;
         }
@@ -1097,12 +1096,13 @@ impl Vmm {
         Ok(true)
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     fn send_migration(
         vm: &mut Vm,
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))] hypervisor: Arc<
             dyn hypervisor::Hypervisor,
         >,
-        send_data_migration: VmSendMigrationData,
+        send_data_migration: &VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
         // Set up the socket connection
         let mut socket = Self::send_migration_socket(&send_data_migration.destination_url)?;
@@ -1348,7 +1348,7 @@ impl Vmm {
             .unwrap()
             .landlock_enable
         {
-            apply_landlock(self.vm_config.as_ref().unwrap().clone())
+            apply_landlock(self.vm_config.as_ref().unwrap().as_ref())
                 .map_err(VmError::ApplyLandlock)?;
         }
 
@@ -1362,8 +1362,8 @@ impl Vmm {
 
     fn control_loop(
         &mut self,
-        api_receiver: Rc<Receiver<ApiRequest>>,
-        #[cfg(feature = "guest_debug")] gdb_receiver: Rc<Receiver<gdb::GdbRequest>>,
+        api_receiver: &Receiver<ApiRequest>,
+        #[cfg(feature = "guest_debug")] gdb_receiver: &Receiver<gdb::GdbRequest>,
     ) -> Result<()> {
         const EPOLL_EVENTS_LEN: usize = 100;
 
@@ -1468,7 +1468,7 @@ impl Vmm {
     }
 }
 
-fn apply_landlock(vm_config: Arc<Mutex<VmConfig>>) -> result::Result<(), LandlockError> {
+fn apply_landlock(vm_config: &Mutex<VmConfig>) -> result::Result<(), LandlockError> {
     vm_config.lock().unwrap().apply_landlock()?;
     Ok(())
 }
@@ -1490,7 +1490,7 @@ impl RequestHandler for Vmm {
                 .unwrap()
                 .landlock_enable
             {
-                apply_landlock(self.vm_config.as_ref().unwrap().clone())
+                apply_landlock(self.vm_config.as_ref().unwrap().as_ref())
                     .map_err(VmError::ApplyLandlock)?;
             }
             Ok(())
@@ -1834,7 +1834,7 @@ impl RequestHandler for Vmm {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
         if let Some(ref mut vm) = self.vm {
-            vm.resize_zone(id, desired_ram)
+            vm.resize_zone(&id, desired_ram)
                 .inspect_err(|e| error!("Error when resizing zone: {e:?}"))?;
             Ok(())
         } else {
@@ -1913,7 +1913,7 @@ impl RequestHandler for Vmm {
 
     fn vm_remove_device(&mut self, id: String) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
-            vm.remove_device(id)
+            vm.remove_device(&id)
                 .inspect_err(|e| error!("Error when removing device from the VM: {e:?}"))?;
             Ok(())
         } else if let Some(ref config) = self.vm_config {
@@ -2271,7 +2271,7 @@ impl RequestHandler for Vmm {
                 vm,
                 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
                 self.hypervisor.clone(),
-                send_data_migration.clone(),
+                &send_data_migration,
             )
             .map_err(|migration_err| {
                 error!("Migration failed: {migration_err:?}");

@@ -19,7 +19,7 @@ use libc::{
     poll, pollfd, setsid, sigemptyset, siginfo_t, signal, sigprocmask, syscall, tcgetpgrp,
     tcsetpgrp,
 };
-use seccompiler::{BpfProgram, SeccompAction, apply_filter};
+use seccompiler::{BpfProgramRef, SeccompAction, apply_filter};
 use vmm_sys_util::signal::register_signal_handler;
 
 use crate::clone3::{CLONE_CLEAR_SIGHAND, clone_args, clone3};
@@ -162,7 +162,7 @@ fn set_foreground_process_group(tty: &File) -> io::Result<()> {
     Ok(())
 }
 
-fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, tty: File) -> ! {
+fn sigwinch_listener_main(seccomp_filter: BpfProgramRef, tx: File, tty: File) -> ! {
     // SAFETY: any references to these file descriptors are
     // unreachable, because this function never returns.
     unsafe {
@@ -174,7 +174,7 @@ fn sigwinch_listener_main(seccomp_filter: BpfProgram, tx: File, tty: File) -> ! 
     unblock_all_signals().unwrap();
 
     if !seccomp_filter.is_empty() {
-        apply_filter(&seccomp_filter).unwrap();
+        apply_filter(seccomp_filter).unwrap();
     }
 
     register_signal_handler(SIGWINCH, sigwinch_handler).unwrap();
@@ -242,7 +242,7 @@ unsafe fn clone_clear_sighand() -> io::Result<u64> {
     Ok(r.try_into().unwrap())
 }
 
-pub fn start_sigwinch_listener(seccomp_filter: BpfProgram, tty_sub: File) -> io::Result<File> {
+pub fn start_sigwinch_listener(seccomp_filter: BpfProgramRef, tty_sub: File) -> io::Result<File> {
     let mut pipe = [-1; 2];
     // SAFETY: FFI call with valid arguments
     if unsafe { pipe2(pipe.as_mut_ptr(), O_CLOEXEC) } == -1 {
@@ -275,7 +275,7 @@ pub fn listen_for_sigwinch_on_tty(
     let seccomp_filter =
         get_seccomp_filter(seccomp_action, Thread::PtyForeground, hypervisor_type).unwrap();
 
-    let console_resize_pipe = start_sigwinch_listener(seccomp_filter, pty_sub)?;
+    let console_resize_pipe = start_sigwinch_listener(&seccomp_filter, pty_sub)?;
 
     Ok(console_resize_pipe)
 }

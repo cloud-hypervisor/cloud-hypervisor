@@ -192,7 +192,7 @@ impl Ioapic {
         id: String,
         apic_address: GuestAddress,
         interrupt_manager: &dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>,
-        state: Option<IoapicState>,
+        state: Option<&IoapicState>,
     ) -> Result<Ioapic> {
         let interrupt_source_group = interrupt_manager
             .create_group(MsiIrqGroupConfig {
