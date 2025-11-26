@@ -740,6 +740,14 @@ impl cpu::Vcpu for MshvVcpu {
                     let mut gpas = Vec::new();
                     let ranges = info.ranges;
                     let (gfn_start, gfn_count) = snp::parse_gpa_range(ranges[0]).unwrap();
+
+                    // Update the bitmap(cache) to mark the pages as host inaccessible
+                    self.host_access_pages.rcu(|bitmap| {
+                        let bm = bitmap.clone();
+                        bm.reset_addr_range(gfn_start as usize, gfn_count as usize);
+                        bm
+                    });
+
                     debug!("Releasing pages: gfn_start: {gfn_start:x?}, gfn_count: {gfn_count:?}");
                     let gpa_start = gfn_start * HV_PAGE_SIZE as u64;
                     for i in 0..gfn_count {
