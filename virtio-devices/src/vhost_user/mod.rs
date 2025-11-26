@@ -183,8 +183,8 @@ pub struct VhostUserEpollHandler<S: VhostUserFrontendReqHandler> {
 impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
     pub fn run(
         &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
+        paused: &AtomicBool,
+        paused_sync: &Barrier,
     ) -> std::result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event_custom(
@@ -221,14 +221,16 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
             )))
         })?;
 
+        let queues = self
+            .queues
+            .iter()
+            .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
+            .collect::<Vec<_>>();
         // Initialize the backend
         vhost_user
             .reinitialize_vhost_user(
                 self.mem.memory().deref(),
-                self.queues
-                    .iter()
-                    .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
-                    .collect(),
+                &queues,
                 self.virtio_interrupt.as_ref(),
                 self.acked_features,
                 self.acked_protocol_features,
@@ -305,7 +307,7 @@ impl VhostUserCommon {
     pub fn activate<T: VhostUserFrontendReqHandler>(
         &mut self,
         mem: GuestMemoryAtomic<GuestMemoryMmap>,
-        queues: Vec<(usize, Queue, EventFd)>,
+        queues: &[(usize, Queue, EventFd)],
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         acked_features: u64,
         backend_req_handler: Option<FrontendReqHandler<T>>,
@@ -325,14 +327,15 @@ impl VhostUserCommon {
             return Err(ActivateError::BadActivate);
         }
         let vu = self.vu.as_ref().unwrap();
+        let queues = queues
+            .iter()
+            .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
+            .collect::<Vec<_>>();
         vu.lock()
             .unwrap()
             .setup_vhost_user(
                 &mem.memory(),
-                queues
-                    .iter()
-                    .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
-                    .collect(),
+                &queues,
                 interrupt_cb.as_ref(),
                 acked_features,
                 &backend_req_handler,

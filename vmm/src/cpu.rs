@@ -949,7 +949,7 @@ impl CpuManager {
 
     pub fn configure_vcpu(
         &self,
-        vcpu: Arc<Mutex<Vcpu>>,
+        vcpu: &Mutex<Vcpu>,
         boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
     ) -> Result<()> {
         let mut vcpu = vcpu.lock().unwrap();
@@ -1432,7 +1432,7 @@ impl CpuManager {
             cmp::Ordering::Greater => {
                 let vcpus = self.create_vcpus(desired_vcpus, None)?;
                 for vcpu in vcpus {
-                    self.configure_vcpu(vcpu, None)?;
+                    self.configure_vcpu(&vcpu, None)?;
                 }
                 self.activate_vcpus(desired_vcpus, true, None)?;
                 Ok(true)
@@ -1543,6 +1543,7 @@ impl CpuManager {
         })
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub fn create_madt(&self, #[cfg(target_arch = "aarch64")] vgic: Arc<Mutex<dyn Vgic>>) -> Sdt {
         use crate::acpi;
         // This is also checked in the commandline parsing.

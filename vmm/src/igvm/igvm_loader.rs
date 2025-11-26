@@ -131,7 +131,7 @@ fn import_parameter(
 /// Right now it only supports SNP based isolation.
 /// We can boot legacy VM with an igvm file without
 /// any isolation.
-///
+#[allow(clippy::needless_pass_by_value)]
 pub fn load_igvm(
     mut file: &std::fs::File,
     memory_manager: Arc<Mutex<MemoryManager>>,

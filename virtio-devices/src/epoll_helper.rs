@@ -10,8 +10,8 @@
 
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::sync::Barrier;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Barrier};
 use std::thread;
 
 use log::info;
@@ -153,8 +153,8 @@ impl EpollHelper {
 
     pub fn run(
         &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
+        paused: &AtomicBool,
+        paused_sync: &Barrier,
         handler: &mut dyn EpollHelperHandler,
     ) -> std::result::Result<(), EpollHelperError> {
         self.run_with_timeout(paused, paused_sync, handler, -1, false)
@@ -163,8 +163,8 @@ impl EpollHelper {
     #[cfg(not(fuzzing))]
     pub fn run_with_timeout(
         &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
+        paused: &AtomicBool,
+        paused_sync: &Barrier,
         handler: &mut dyn EpollHelperHandler,
         timeout: i32,
         enable_event_list: bool,
@@ -250,8 +250,8 @@ impl EpollHelper {
     // and return when no epoll events are active
     pub fn run_with_timeout(
         &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
+        paused: &AtomicBool,
+        paused_sync: &Barrier,
         handler: &mut dyn EpollHelperHandler,
         _timeout: i32,
         _enable_event_list: bool,

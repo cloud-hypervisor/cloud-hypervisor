@@ -369,6 +369,7 @@ pub trait RequestHandler {
 pub type ApiRequest =
     Box<dyn FnOnce(&mut dyn RequestHandler) -> Result<bool, VmmError> + Send + 'static>;
 
+#[allow(clippy::needless_pass_by_value)]
 fn get_response<Action: ApiAction>(
     action: &Action,
     api_evt: EventFd,

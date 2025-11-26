@@ -56,7 +56,7 @@ impl From<MshvGicV2MState> for GicState {
 
 impl MshvGicV2M {
     /// Create a new GICv2m device
-    pub fn new(_vm: &dyn Vm, config: VgicConfig) -> Result<MshvGicV2M> {
+    pub fn new(_vm: &dyn Vm, config: &VgicConfig) -> Result<MshvGicV2M> {
         let gic_device = MshvGicV2M {
             dist_addr: config.dist_addr,
             dist_size: config.dist_size,

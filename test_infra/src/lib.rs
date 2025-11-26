@@ -504,6 +504,7 @@ pub fn rate_limited_copy<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::
     Err(io::Error::last_os_error())
 }
 
+#[allow(clippy::needless_pass_by_value)]
 pub fn handle_child_output(
     r: Result<(), std::boxed::Box<dyn std::any::Any + std::marker::Send>>,
     output: &std::process::Output,
@@ -804,7 +805,7 @@ pub fn check_lines_count(input: &str, line_count: usize) -> bool {
     }
 }
 
-pub fn check_matched_lines_count(input: &str, keywords: Vec<&str>, line_count: usize) -> bool {
+pub fn check_matched_lines_count(input: &str, keywords: &[&str], line_count: usize) -> bool {
     let mut matches = String::new();
     for line in input.lines() {
         if keywords.iter().all(|k| line.contains(k)) {
@@ -1047,7 +1048,7 @@ impl Guest {
             .map_err(Error::WaitForBoot)
     }
 
-    pub fn check_numa_node_cpus(&self, node_id: usize, cpus: Vec<usize>) -> Result<(), Error> {
+    pub fn check_numa_node_cpus(&self, node_id: usize, cpus: &[usize]) -> Result<(), Error> {
         for cpu in cpus.iter() {
             let cmd = format!("[ -d \"/sys/devices/system/node/node{node_id}/cpu{cpu}\" ]");
             self.ssh_command(cmd.as_str())?;
@@ -1072,7 +1073,7 @@ impl Guest {
     pub fn check_numa_common(
         &self,
         mem_ref: Option<&[u32]>,
-        node_ref: Option<&[Vec<usize>]>,
+        node_ref: Option<&[&[usize]]>,
         distance_ref: Option<&[&str]>,
     ) {
         if let Some(mem_ref) = mem_ref {
@@ -1086,7 +1087,7 @@ impl Guest {
         if let Some(node_ref) = node_ref {
             // Check each NUMA node has been assigned the right CPUs set.
             for (i, n) in node_ref.iter().enumerate() {
-                self.check_numa_node_cpus(i, n.clone()).unwrap();
+                self.check_numa_node_cpus(i, n).unwrap();
             }
         }
 

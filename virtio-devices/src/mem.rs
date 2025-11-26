@@ -669,8 +669,8 @@ impl MemEpollHandler {
 
     fn run(
         &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
+        paused: &AtomicBool,
+        paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
@@ -879,13 +879,13 @@ impl Mem {
 
     pub fn remove_dma_mapping_handler(
         &mut self,
-        source: VirtioMemMappingSource,
+        source: &VirtioMemMappingSource,
     ) -> result::Result<(), Error> {
         let handler = self
             .dma_mapping_handlers
             .lock()
             .unwrap()
-            .remove(&source)
+            .remove(source)
             .ok_or(Error::InvalidDmaMappingHandler)?;
 
         let config = self.config.lock().unwrap();
@@ -1003,7 +1003,7 @@ impl VirtioDevice for Mem {
             Thread::VirtioMem,
             &mut epoll_threads,
             &self.exit_evt,
-            move || handler.run(paused, paused_sync.unwrap()),
+            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
         self.common.epoll_threads = Some(epoll_threads);
 

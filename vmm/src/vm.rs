@@ -528,6 +528,7 @@ pub struct Vm {
 impl Vm {
     pub const HANDLED_SIGNALS: [i32; 1] = [SIGWINCH];
 
+    #[allow(clippy::needless_pass_by_value)]
     #[allow(clippy::too_many_arguments)]
     pub fn new_from_memory_manager(
         config: Arc<Mutex<VmConfig>>,
@@ -557,7 +558,7 @@ impl Vm {
 
         // Create NUMA nodes based on NumaConfig.
         let numa_nodes =
-            Self::create_numa_nodes(config.lock().unwrap().numa.clone(), &memory_manager)?;
+            Self::create_numa_nodes(config.lock().unwrap().numa.as_deref(), &memory_manager)?;
 
         #[cfg(feature = "tdx")]
         let tdx_enabled = config.lock().unwrap().is_tdx_enabled();
@@ -915,7 +916,7 @@ impl Vm {
     }
 
     fn create_numa_nodes(
-        configs: Option<Vec<NumaConfig>>,
+        configs: Option<&[NumaConfig]>,
         memory_manager: &Arc<Mutex<MemoryManager>>,
     ) -> Result<NumaNodes> {
         let mm = memory_manager.lock().unwrap();
@@ -1148,6 +1149,7 @@ impl Vm {
         Ok(cmdline)
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     fn load_firmware(
         mut firmware: &File,
@@ -1162,6 +1164,7 @@ impl Vm {
         })
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     fn load_kernel(
         mut kernel: File,
@@ -1197,6 +1200,7 @@ impl Vm {
     }
 
     #[cfg(feature = "igvm")]
+    #[allow(clippy::needless_pass_by_value)]
     fn load_igvm(
         igvm: File,
         memory_manager: Arc<Mutex<MemoryManager>>,
@@ -1231,6 +1235,7 @@ impl Vm {
     ///
     /// For x86_64, the boot path is the same.
     #[cfg(target_arch = "x86_64")]
+    #[allow(clippy::needless_pass_by_value)]
     fn load_kernel(
         mut kernel: File,
         cmdline: Option<Cmdline>,
@@ -1324,6 +1329,7 @@ impl Vm {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     fn load_payload(
         payload: &PayloadConfig,
@@ -1521,7 +1527,7 @@ impl Vm {
         arch::configure_system(
             &mem,
             cmdline.as_cstring().unwrap().to_str().unwrap(),
-            vcpu_mpidrs,
+            &vcpu_mpidrs,
             vcpu_topology,
             device_info,
             &initramfs_config,
@@ -1722,7 +1728,7 @@ impl Vm {
         Ok(())
     }
 
-    pub fn resize_zone(&mut self, id: String, desired_memory: u64) -> Result<()> {
+    pub fn resize_zone(&mut self, id: &str, desired_memory: u64) -> Result<()> {
         let memory_config = &mut self.config.lock().unwrap().memory;
 
         if let Some(zones) = &mut memory_config.zones {
@@ -1733,7 +1739,7 @@ impl Vm {
                         self.memory_manager
                             .lock()
                             .unwrap()
-                            .resize_zone(&id, desired_memory - zone.size)
+                            .resize_zone(id, desired_memory - zone.size)
                             .map_err(Error::MemoryManager)?;
                         // We update the memory zone config regardless of the
                         // actual 'resize-zone' operation result (happened or
@@ -1805,16 +1811,16 @@ impl Vm {
         Ok(pci_device_info)
     }
 
-    pub fn remove_device(&mut self, id: String) -> Result<()> {
+    pub fn remove_device(&mut self, id: &str) -> Result<()> {
         self.device_manager
             .lock()
             .unwrap()
-            .remove_device(id.clone())
+            .remove_device(id)
             .map_err(Error::DeviceManager)?;
 
         // Update VmConfig by removing the device. This is important to
         // ensure the device would not be created in case of a reboot.
-        self.config.lock().unwrap().remove_device(&id);
+        self.config.lock().unwrap().remove_device(id);
 
         self.device_manager
             .lock()
@@ -2409,7 +2415,7 @@ impl Vm {
             self.cpu_manager
                 .lock()
                 .unwrap()
-                .configure_vcpu(vcpu.clone(), boot_setup)
+                .configure_vcpu(&vcpu, boot_setup)
                 .map_err(Error::CpuManager)?;
 
             #[cfg(target_arch = "aarch64")]
@@ -3562,13 +3568,12 @@ mod unit_tests {
 
         let hv = hypervisor::new().unwrap();
         let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
-        let gic = vm
-            .create_vgic(Gic::create_default_config(1))
-            .expect("Cannot create gic");
+        let vgic_config = Gic::create_default_config(1);
+        let gic = vm.create_vgic(&vgic_config).expect("Cannot create gic");
         create_fdt(
             &mem,
             "console=tty0",
-            vec![0],
+            &[0],
             Some((0, 0, 0, 0)),
             &dev_info,
             &gic,

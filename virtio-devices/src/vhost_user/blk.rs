@@ -297,7 +297,7 @@ impl VirtioDevice for Blk {
 
         let mut handler = self.vu_common.activate(
             mem,
-            queues,
+            &queues,
             interrupt_cb,
             self.common.acked_features,
             backend_req_handler,
@@ -316,7 +316,7 @@ impl VirtioDevice for Blk {
             Thread::VirtioVhostBlock,
             &mut epoll_threads,
             &self.exit_evt,
-            move || handler.run(paused, paused_sync.unwrap()),
+            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
         self.epoll_thread = Some(epoll_threads.remove(0));
 

@@ -531,8 +531,8 @@ impl BlockEpollHandler {
 
     fn run(
         &mut self,
-        paused: Arc<AtomicBool>,
-        paused_sync: Arc<Barrier>,
+        paused: &AtomicBool,
+        paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(self.queue_evt.as_raw_fd(), QUEUE_AVAIL_EVENT)?;
@@ -987,7 +987,7 @@ impl VirtioDevice for Block {
                 Thread::VirtioBlock,
                 &mut epoll_threads,
                 &self.exit_evt,
-                move || handler.run(paused, paused_sync.unwrap()),
+                move || handler.run(&paused, paused_sync.as_ref().unwrap()),
             )?;
         }
 

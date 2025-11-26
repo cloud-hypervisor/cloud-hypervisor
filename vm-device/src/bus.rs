@@ -147,6 +147,7 @@ impl Bus {
         None
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub fn insert(&self, device: Arc<dyn BusDeviceSync>, base: u64, len: u64) -> Result<()> {
         if len == 0 {
             return Err(Error::ZeroSizedRange);

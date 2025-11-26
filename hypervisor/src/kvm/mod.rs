@@ -579,7 +579,7 @@ impl vm::Vm for KvmVm {
     ///
     /// Creates a virtual GIC device.
     ///
-    fn create_vgic(&self, config: VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
+    fn create_vgic(&self, config: &VgicConfig) -> vm::Result<Arc<Mutex<dyn Vgic>>> {
         let gic_device = KvmGicV3Its::new(self, config)
             .map_err(|e| vm::HypervisorVmError::CreateVgic(anyhow!("Vgic error {e:?}")))?;
         Ok(Arc::new(Mutex::new(gic_device)))
@@ -589,7 +589,7 @@ impl vm::Vm for KvmVm {
     ///
     /// Creates a virtual AIA device.
     ///
-    fn create_vaia(&self, config: VaiaConfig) -> vm::Result<Arc<Mutex<dyn Vaia>>> {
+    fn create_vaia(&self, config: &VaiaConfig) -> vm::Result<Arc<Mutex<dyn Vaia>>> {
         let aia_device = KvmAiaImsics::new(self, config)
             .map_err(|e| vm::HypervisorVmError::CreateVaia(anyhow!("Vaia error {e:?}")))?;
         Ok(Arc::new(Mutex::new(aia_device)))

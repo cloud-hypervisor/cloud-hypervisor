@@ -811,6 +811,7 @@ impl PlatformConfig {
 }
 
 impl MemoryConfig {
+    #[allow(clippy::needless_pass_by_value)]
     pub fn parse(memory: &str, memory_zones: Option<Vec<&str>>) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser

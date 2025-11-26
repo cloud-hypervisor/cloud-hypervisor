@@ -38,6 +38,7 @@ pub struct Gic {
 }
 
 impl Gic {
+    #[allow(clippy::needless_pass_by_value)]
     pub fn new(
         vcpu_count: u32,
         interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
@@ -50,9 +51,8 @@ impl Gic {
             })
             .map_err(Error::CreateInterruptSourceGroup)?;
 
-        let vgic = vm
-            .create_vgic(Gic::create_default_config(vcpu_count as u64))
-            .map_err(Error::CreateGic)?;
+        let config = Gic::create_default_config(vcpu_count as u64);
+        let vgic = vm.create_vgic(&config).map_err(Error::CreateGic)?;
 
         let gic = Gic {
             interrupt_source_group,

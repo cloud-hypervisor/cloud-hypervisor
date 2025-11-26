@@ -88,6 +88,7 @@ pub enum Error {
 }
 type Result<T> = result::Result<T, Error>;
 
+#[derive(Copy, Clone)]
 pub enum CacheLevel {
     /// L1 data cache
     L1D = 0,
@@ -207,7 +208,7 @@ pub fn get_cache_shared(cache_level: CacheLevel) -> bool {
 pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHasher>(
     guest_mem: &GuestMemoryMmap,
     cmdline: &str,
-    vcpu_mpidr: Vec<u64>,
+    vcpu_mpidr: &[u64],
     vcpu_topology: Option<(u16, u16, u16, u16)>,
     device_info: &HashMap<(DeviceType, String), T, S>,
     gic_device: &Arc<Mutex<dyn Vgic>>,
@@ -234,7 +235,7 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     // This is not mandatory but we use it to point the root node to the node
     // containing description of the interrupt controller for this VM.
     fdt.property_u32("interrupt-parent", GIC_PHANDLE)?;
-    create_cpu_nodes(&mut fdt, &vcpu_mpidr, vcpu_topology, numa_nodes)?;
+    create_cpu_nodes(&mut fdt, vcpu_mpidr, vcpu_topology, numa_nodes)?;
     create_memory_node(&mut fdt, guest_mem, numa_nodes)?;
     create_chosen_node(&mut fdt, cmdline, initrd)?;
     create_gic_node(&mut fdt, gic_device)?;
@@ -258,10 +259,10 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     Ok(fdt_final)
 }
 
-pub fn write_fdt_to_memory(fdt_final: Vec<u8>, guest_mem: &GuestMemoryMmap) -> Result<()> {
+pub fn write_fdt_to_memory(fdt_final: &[u8], guest_mem: &GuestMemoryMmap) -> Result<()> {
     // Write FDT to memory.
     guest_mem
-        .write_slice(fdt_final.as_slice(), super::layout::FDT_START)
+        .write_slice(fdt_final, super::layout::FDT_START)
         .map_err(Error::WriteFdtToMemory)?;
     Ok(())
 }

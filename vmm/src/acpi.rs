@@ -105,6 +105,7 @@ struct ProcessorGiccAffinity {
 }
 
 bitflags! {
+    #[derive(Copy, Clone)]
     pub struct MemAffinityFlags: u32 {
         const NOFLAGS = 0;
         const ENABLE = 0b1;

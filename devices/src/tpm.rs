@@ -36,12 +36,14 @@ enum LocStateFields {
     TpmRegValidSts,
 }
 
+#[derive(Copy, Clone)]
 enum LocStsFields {
     Granted,
     BeenSeized,
 }
 
 #[allow(dead_code)]
+#[derive(Copy, Clone)]
 enum IntfIdFields {
     InterfaceType,
     InterfaceVersion,
@@ -59,6 +61,7 @@ enum IntfIdFields {
 }
 
 #[allow(dead_code)]
+#[derive(Copy, Clone)]
 enum IntfId2Fields {
     Vid,
     Did,
@@ -70,6 +73,7 @@ enum CtrlStsFields {
     TpmIdle,
 }
 
+#[derive(Copy, Clone)]
 enum CrbRegister {
     LocState(LocStateFields),
     LocSts(LocStsFields),
@@ -102,6 +106,7 @@ const CRB_LOC_CTRL_REQUEST_ACCESS: u32 = 1 << 0;
 const CRB_LOC_CTRL_RELINQUISH: u32 = 1 << 1;
 const CRB_LOC_CTRL_RESET_ESTABLISHMENT_BIT: u32 = 1 << 3;
 const CRB_LOC_STS: u32 = 0x0C;
+
 const fn get_crb_loc_sts_field(f: LocStsFields) -> (u32, u32, u32) {
     let (offset, len) = match f {
         LocStsFields::Granted => (0, 1),

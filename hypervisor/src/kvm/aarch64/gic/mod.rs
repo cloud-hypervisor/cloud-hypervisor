@@ -262,7 +262,7 @@ impl KvmGicV3Its {
     }
 
     /// Method to initialize the GIC device
-    pub fn new(vm: &dyn Vm, config: VgicConfig) -> Result<KvmGicV3Its> {
+    pub fn new(vm: &dyn Vm, config: &VgicConfig) -> Result<KvmGicV3Its> {
         // This is inside KVM module
         let vm = vm.as_any().downcast_ref::<KvmVm>().expect("Wrong VM type?");
 
@@ -509,7 +509,7 @@ mod unit_tests {
         let hv = crate::new().unwrap();
         let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
 
-        KvmGicV3Its::new(&*vm, create_test_vgic_config()).unwrap();
+        KvmGicV3Its::new(&*vm, &create_test_vgic_config()).unwrap();
     }
 
     #[test]
@@ -517,7 +517,7 @@ mod unit_tests {
         let hv = crate::new().unwrap();
         let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
         let _ = vm.create_vcpu(0, None).unwrap();
-        let gic = KvmGicV3Its::new(&*vm, create_test_vgic_config()).expect("Cannot create gic");
+        let gic = KvmGicV3Its::new(&*vm, &create_test_vgic_config()).expect("Cannot create gic");
 
         let state = get_dist_regs(&gic.device).unwrap();
         assert_eq!(state.len(), 568);
@@ -530,7 +530,7 @@ mod unit_tests {
         let hv = crate::new().unwrap();
         let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
         let _ = vm.create_vcpu(0, None).unwrap();
-        let gic = KvmGicV3Its::new(&*vm, create_test_vgic_config()).expect("Cannot create gic");
+        let gic = KvmGicV3Its::new(&*vm, &create_test_vgic_config()).expect("Cannot create gic");
 
         let gicr_typer = vec![123];
         let state = get_redist_regs(&gic.device, &gicr_typer).unwrap();
@@ -545,7 +545,7 @@ mod unit_tests {
         let hv = crate::new().unwrap();
         let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
         let _ = vm.create_vcpu(0, None).unwrap();
-        let gic = KvmGicV3Its::new(&*vm, create_test_vgic_config()).expect("Cannot create gic");
+        let gic = KvmGicV3Its::new(&*vm, &create_test_vgic_config()).expect("Cannot create gic");
 
         let gicr_typer = vec![123];
         let state = get_icc_regs(&gic.device, &gicr_typer).unwrap();
@@ -560,9 +560,8 @@ mod unit_tests {
         let hv = crate::new().unwrap();
         let vm = hv.create_vm(HypervisorVmConfig::default()).unwrap();
         let _ = vm.create_vcpu(0, None).unwrap();
-        let gic = vm
-            .create_vgic(create_test_vgic_config())
-            .expect("Cannot create gic");
+        let vgic_config = create_test_vgic_config();
+        let gic = vm.create_vgic(&vgic_config).expect("Cannot create gic");
 
         gic.lock().unwrap().save_data_tables().unwrap();
     }

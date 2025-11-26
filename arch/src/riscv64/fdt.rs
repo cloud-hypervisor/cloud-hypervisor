@@ -101,10 +101,10 @@ pub fn create_fdt<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::BuildHash
     Ok(fdt_final)
 }
 
-pub fn write_fdt_to_memory(fdt_final: Vec<u8>, guest_mem: &GuestMemoryMmap) -> Result<()> {
+pub fn write_fdt_to_memory(fdt_final: &[u8], guest_mem: &GuestMemoryMmap) -> Result<()> {
     // Write FDT to memory.
     guest_mem
-        .write_slice(fdt_final.as_slice(), super::layout::FDT_START)
+        .write_slice(fdt_final, super::layout::FDT_START)
         .map_err(Error::WriteFdtToMemory)?;
     Ok(())
 }

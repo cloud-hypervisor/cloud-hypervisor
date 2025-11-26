@@ -25,6 +25,7 @@ use vhost::vhost_kern::vhost_binding::{
     VHOST_VDPA_SET_STATUS, VHOST_VDPA_SET_VRING_ENABLE, VHOST_VDPA_SUSPEND,
 };
 
+#[derive(Copy, Clone)]
 pub enum Thread {
     HttpApi,
     #[cfg(feature = "dbus_api")]
