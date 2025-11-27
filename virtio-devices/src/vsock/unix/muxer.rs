@@ -871,6 +871,7 @@ impl VsockMuxer {
 #[cfg(test)]
 mod unit_tests {
     use std::cmp::min;
+    use std::fs;
     use std::io::Write;
     use std::path::{Path, PathBuf};
 
@@ -921,6 +922,8 @@ mod unit_tests {
             )
             .unwrap();
             let uds_path = format!("test_vsock_{name}.sock");
+            // Clear in case it is still there from a previous run
+            let _ = fs::remove_file(&uds_path);
             let muxer = VsockMuxer::new(PEER_CID, uds_path).unwrap();
 
             Self {
@@ -1049,6 +1052,9 @@ mod unit_tests {
     }
     impl LocalListener {
         fn new<P: AsRef<Path> + Clone>(path: P) -> Self {
+            // Clear in case it is still there from a previous run
+            let _ = fs::remove_file(path.as_ref());
+
             let path_buf = path.as_ref().to_path_buf();
             let sock = UnixListener::bind(path).unwrap();
             sock.set_nonblocking(true).unwrap();
