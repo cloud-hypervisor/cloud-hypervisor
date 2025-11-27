@@ -1,6 +1,5 @@
 [package]
 authors = ["The Cloud Hypervisor Authors"]
-build = "../build.rs"
 edition.workspace = true
 name = "vhost_user_net"
 version = "0.1.0"
