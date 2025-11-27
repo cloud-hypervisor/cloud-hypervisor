@@ -2,6 +2,17 @@
 #
 # The main crate producing the binaries is in `./cloud-hypervisor`.
 
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
+
+[profile.profiling]
+debug = true
+inherits = "release"
+strip = false
+
 [workspace]
 members = [
   "api_client",
