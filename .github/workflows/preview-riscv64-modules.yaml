@@ -27,7 +27,7 @@ jobs:
         run: /opt/scripts/exec-in-qemu.sh rustup default 1.89.0
 
       - name: Build ${{ matrix.module }} Module (kvm)
-        run: /opt/scripts/exec-in-qemu.sh cargo rustc --locked -p ${{ matrix.module }} --no-default-features --features "kvm" -- -D warnings
+        run: /opt/scripts/exec-in-qemu.sh cargo build --locked -p ${{ matrix.module }} --no-default-features --features "kvm"
 
       - name: Clippy ${{ matrix.module }} Module (kvm)
         run: /opt/scripts/exec-in-qemu.sh cargo clippy --locked -p ${{ matrix.module }} --no-default-features --features "kvm" -- -D warnings

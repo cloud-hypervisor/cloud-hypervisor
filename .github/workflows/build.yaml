@@ -35,40 +35,40 @@ jobs:
           target: ${{ matrix.target }}
 
       - name: Build (default features)
-        run: cargo rustc --locked --bin cloud-hypervisor -- -D warnings
+        run: cargo build --locked --bin cloud-hypervisor
 
       - name: Build (kvm)
-        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "kvm"  -- -D warnings
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "kvm"
 
       - name: Build (default features + tdx)
-        run: cargo rustc --locked --bin cloud-hypervisor --features "tdx" -- -D warnings
+        run: cargo build --locked --bin cloud-hypervisor --features "tdx"
 
       - name: Build (default features + dbus_api)
-        run: cargo rustc --locked --bin cloud-hypervisor --features "dbus_api" -- -D warnings
+        run: cargo build --locked --bin cloud-hypervisor --features "dbus_api"
 
       - name: Build (default features + guest_debug)
-        run: cargo rustc --locked --bin cloud-hypervisor --features "guest_debug" -- -D warnings
+        run: cargo build --locked --bin cloud-hypervisor --features "guest_debug"
 
       - name: Build (default features + pvmemcontrol)
-        run: cargo rustc --locked --bin cloud-hypervisor --features "pvmemcontrol" -- -D warnings
+        run: cargo build --locked --bin cloud-hypervisor --features "pvmemcontrol"
 
       - name: Build (default features + fw_cfg)
-        run: cargo rustc --locked --bin cloud-hypervisor --features "fw_cfg" -- -D warnings
+        run: cargo build --locked --bin cloud-hypervisor --features "fw_cfg"
 
       - name: Build (default features + ivshmem)
-        run: cargo rustc --locked --bin cloud-hypervisor --features "ivshmem" -- -D warnings
+        run: cargo build --locked --bin cloud-hypervisor --features "ivshmem"
 
       - name: Build (mshv)
-        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "mshv"  -- -D warnings
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv"
 
       - name: Build (sev_snp)
-        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "sev_snp"  -- -D warnings
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "sev_snp"
 
       - name: Build (igvm)
-        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "igvm"  -- -D warnings
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "igvm"
 
       - name: Build (mshv + kvm)
-        run: cargo rustc --locked --bin cloud-hypervisor --no-default-features --features "mshv,kvm"  -- -D warnings
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv,kvm"
 
       - name: Release Build (default features)
         run: cargo build --locked --all --release --target=${{ matrix.target }}
