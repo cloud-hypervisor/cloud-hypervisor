@@ -1518,7 +1518,9 @@ impl QcowFile {
                     refcount_set = true;
                 }
                 Ok(Some(freed_cluster)) => {
-                    unref_clusters.push(freed_cluster);
+                    // Recursively set the freed refcount block's refcount to 0
+                    let mut freed = self.set_cluster_refcount(freed_cluster, 0)?;
+                    unref_clusters.append(&mut freed);
                     refcount_set = true;
                 }
                 Err(refcount::Error::EvictingRefCounts(e)) => {
