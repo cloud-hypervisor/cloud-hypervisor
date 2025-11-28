@@ -164,7 +164,16 @@ impl BlockEpollHandler {
             // if the VIRTIO_BLK_F_RO feature if offered, and MUST NOT write any data."
             return Err(ExecuteError::ReadOnly);
         }
-        Ok(())
+
+        match request_type {
+            RequestType::Flush if !has_feature(features, VIRTIO_BLK_F_FLUSH.into()) => {
+                Err(ExecuteError::Unsupported(VIRTIO_BLK_T_FLUSH))
+            }
+            RequestType::Discard if !has_feature(features, VIRTIO_BLK_F_DISCARD.into()) => {
+                Err(ExecuteError::Unsupported(VIRTIO_BLK_T_DISCARD))
+            }
+            _ => Ok(()),
+        }
     }
 
     fn process_queue_submit(&mut self) -> Result<()> {
@@ -175,6 +184,7 @@ impl BlockEpollHandler {
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_deref())
                 .map_err(Error::RequestParsing)?;
+            debug!("virtio-blk request type: {:?}", request.request_type);
 
             // For virtio spec compliance
             // "A device MUST set the status byte to VIRTIO_BLK_S_IOERR for a write request
@@ -183,7 +193,7 @@ impl BlockEpollHandler {
                 warn!("Request check failed: {request:x?} {e:?}");
                 desc_chain
                     .memory()
-                    .write_obj(VIRTIO_BLK_S_IOERR, request.status_addr)
+                    .write_obj(e.status(), request.status_addr)
                     .map_err(Error::RequestStatus)?;
 
                 // If no asynchronous operation has been submitted, we can
@@ -230,12 +240,14 @@ impl BlockEpollHandler {
 
             request.set_writeback(self.writeback.load(Ordering::Acquire));
 
+            let write_zeroes_unmap = has_feature(self.acked_features, VIRTIO_BLK_F_DISCARD.into());
             let result = request.execute_async(
                 desc_chain.memory(),
                 self.disk_nsectors,
                 self.disk_image.as_mut(),
                 &self.serial,
                 desc_chain.head_index() as u64,
+                write_zeroes_unmap,
             );
 
             if let Ok(ExecuteAsync {
@@ -257,10 +269,10 @@ impl BlockEpollHandler {
                 batch_inflight_requests.push((desc_chain.head_index(), request));
             } else {
                 let status = match result {
-                    Ok(_) => VIRTIO_BLK_S_OK,
+                    Ok(_) => VIRTIO_BLK_S_OK as u8,
                     Err(e) => {
                         warn!("Request failed: {request:x?} {e:?}");
-                        VIRTIO_BLK_S_IOERR
+                        e.status()
                     }
                 };
 
@@ -652,6 +664,7 @@ impl Block {
         disk_path: PathBuf,
         read_only: bool,
         iommu: bool,
+        sparse: bool,
         num_queues: usize,
         queue_size: u16,
         serial: Option<String>,
@@ -689,13 +702,18 @@ impl Block {
                     | (1u64 << VIRTIO_BLK_F_TOPOLOGY)
                     | (1u64 << VIRTIO_BLK_F_SEG_MAX)
                     | (1u64 << VIRTIO_RING_F_EVENT_IDX)
-                    | (1u64 << VIRTIO_RING_F_INDIRECT_DESC);
+                    | (1u64 << VIRTIO_RING_F_INDIRECT_DESC)
+                    | (1u64 << VIRTIO_BLK_F_WRITE_ZEROES);
                 if iommu {
                     avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
                 }
 
                 if read_only {
                     avail_features |= 1u64 << VIRTIO_BLK_F_RO;
+                }
+
+                if sparse {
+                    avail_features |= 1u64 << VIRTIO_BLK_F_DISCARD;
                 }
 
                 let topology = disk_image.topology();
