@@ -80,13 +80,13 @@ if [ ! -f "$JAMMY_OS_QCOW_ZSTD_FILE_IMAGE" ]; then
     popd || exit
 fi
 
-JAMMY_OS_QCOW_BACKING_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-backing.qcow2"
-JAMMY_OS_QCOW_BACKING_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_FILE_IMAGE_NAME"
-if [ ! -f "$JAMMY_OS_QCOW_BACKING_FILE_IMAGE" ]; then
+JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME="jammy-server-cloudimg-amd64-custom-20241017-0-backing-zstd.qcow2"
+JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME"
+if [ ! -f "$JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE" ]; then
     pushd "$WORKLOADS_DIR" || exit
     time qemu-img create -f qcow2 \
         -b "$JAMMY_OS_QCOW_ZSTD_FILE_IMAGE" \
-        -F qcow2 $JAMMY_OS_QCOW_BACKING_FILE_IMAGE_NAME
+        -F qcow2 $JAMMY_OS_QCOW_BACKING_ZSTD_FILE_IMAGE_NAME
     popd || exit
 fi
 
