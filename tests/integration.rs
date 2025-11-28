@@ -3396,7 +3396,12 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
-    fn _test_virtio_block(image_name: &str, disable_io_uring: bool, disable_aio: bool) {
+    fn _test_virtio_block(
+        image_name: &str,
+        disable_io_uring: bool,
+        disable_aio: bool,
+        verify_os_disk: bool,
+    ) {
         let disk_config = UbuntuDiskConfig::new(image_name.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
@@ -3479,21 +3484,25 @@ mod common_parallel {
         let output = cloud_child.wait_with_output().unwrap();
 
         handle_child_output(r, &output);
+
+        if verify_os_disk {
+            disk_check_consistency(guest.disk_config.disk(DiskType::OperatingSystem).unwrap());
+        }
     }
 
     #[test]
     fn test_virtio_block_io_uring() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, false, true);
+        _test_virtio_block(FOCAL_IMAGE_NAME, false, true, false);
     }
 
     #[test]
     fn test_virtio_block_aio() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, true, false);
+        _test_virtio_block(FOCAL_IMAGE_NAME, true, false, false);
     }
 
     #[test]
     fn test_virtio_block_sync() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, true, true);
+        _test_virtio_block(FOCAL_IMAGE_NAME, true, true, false);
     }
 
     /// Uses `qemu-img check` to verify disk image consistency.
@@ -3529,32 +3538,32 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2, false, false);
-        disk_check_consistency(JAMMY_IMAGE_NAME_QCOW2);
+        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2, false, false, true);
     }
 
     #[test]
     fn test_virtio_block_qcow2_zlib() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_ZLIB, false, false);
-        disk_check_consistency(JAMMY_IMAGE_NAME_QCOW2_ZLIB);
+        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_ZLIB, false, false, true);
     }
 
     #[test]
     fn test_virtio_block_qcow2_zstd() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_ZSTD, false, false);
-        disk_check_consistency(JAMMY_IMAGE_NAME_QCOW2_ZSTD);
+        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_ZSTD, false, false, true);
     }
 
     #[test]
     fn test_virtio_block_qcow2_backing_zstd_file() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE, false, false);
-        disk_check_consistency(JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE);
+        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE, false, false, true);
     }
 
     #[test]
     fn test_virtio_block_qcow2_backing_uncompressed_file() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE, false, false);
-        disk_check_consistency(JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE);
+        _test_virtio_block(
+            JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE,
+            false,
+            false,
+            true,
+        );
     }
 
     #[test]
@@ -3579,7 +3588,7 @@ mod common_parallel {
             .output()
             .expect("Expect generating VHD image from RAW image");
 
-        _test_virtio_block(FOCAL_IMAGE_NAME_VHD, false, false);
+        _test_virtio_block(FOCAL_IMAGE_NAME_VHD, false, false, false);
     }
 
     #[test]
@@ -3603,8 +3612,7 @@ mod common_parallel {
             .output()
             .expect("Expect generating dynamic VHDx image from RAW image");
 
-        _test_virtio_block(FOCAL_IMAGE_NAME_VHDX, false, false);
-        disk_check_consistency(FOCAL_IMAGE_NAME_VHDX);
+        _test_virtio_block(FOCAL_IMAGE_NAME_VHDX, false, false, true);
     }
 
     #[test]
