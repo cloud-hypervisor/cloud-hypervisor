@@ -207,6 +207,11 @@ fn l2_entry_make_std(cluster_addr: u64) -> u64 {
     (cluster_addr & L2_TABLE_OFFSET_MASK) | CLUSTER_USED_FLAG
 }
 
+// Make L1 entry with optional flags
+fn l1_entry_make(cluster_addr: u64, refcount_is_one: bool) -> u64 {
+    (cluster_addr & L1_TABLE_OFFSET_MASK) | (refcount_is_one as u64 * CLUSTER_USED_FLAG)
+}
+
 /// Contains the information from the header of a qcow file.
 #[derive(Clone, Debug)]
 pub struct QcowHeader {
@@ -1571,11 +1576,25 @@ impl QcowFile {
         // Push L1 table and refcount table last as all the clusters they point to are now
         // guaranteed to be valid.
         let mut sync_required = if self.l1_table.dirty() {
-            self.raw_file.write_pointer_table(
-                self.header.l1_table_offset,
-                self.l1_table.get_values(),
-                0,
-            )?;
+            // Build L1 table with OFLAG_COPIED bits set correctly based on L2 cluster refcounts
+            let l1_active: Vec<u64> = self
+                .l1_table
+                .get_values()
+                .iter()
+                .map(|&l2_addr| {
+                    if l2_addr == 0 {
+                        Ok(0)
+                    } else {
+                        let refcount = self
+                            .refcounts
+                            .get_cluster_refcount(&mut self.raw_file, l2_addr)
+                            .map_err(|e| std::io::Error::other(Error::GettingRefcount(e)))?;
+                        Ok(l1_entry_make(l2_addr, refcount == 1))
+                    }
+                })
+                .collect::<io::Result<Vec<u64>>>()?;
+            self.raw_file
+                .write_pointer_table(self.header.l1_table_offset, &l1_active, 0)?;
             self.l1_table.mark_clean();
             true
         } else {
