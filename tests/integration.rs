@@ -45,8 +45,10 @@ mod x86_64 {
         "jammy-server-cloudimg-amd64-custom-20241017-0-zlib.qcow2";
     pub const JAMMY_IMAGE_NAME_QCOW2_ZSTD: &str =
         "jammy-server-cloudimg-amd64-custom-20241017-0-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_FILE: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-backing.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-zstd.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-uncompressed.qcow2";
     pub const WINDOWS_IMAGE_NAME: &str = "windows-server-2022-amd64-2.raw";
     pub const OVMF_NAME: &str = "CLOUDHV.fd";
     pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'IO-APIC.*ttyS0' /proc/interrupts || true";
@@ -68,8 +70,10 @@ mod aarch64 {
         "jammy-server-cloudimg-arm64-custom-20220329-0-zlib.qcow2";
     pub const JAMMY_IMAGE_NAME_QCOW2_ZSTD: &str =
         "jammy-server-cloudimg-arm64-custom-20220329-0-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_FILE: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-backing.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-zstd.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-uncompressed.qcow2";
     pub const WINDOWS_IMAGE_NAME: &str = "windows-11-iot-enterprise-aarch64.raw";
     pub const OVMF_NAME: &str = "CLOUDHV_EFI.fd";
     pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'GICv3.*uart-pl011' /proc/interrupts || true";
@@ -3392,7 +3396,12 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
-    fn _test_virtio_block(image_name: &str, disable_io_uring: bool, disable_aio: bool) {
+    fn _test_virtio_block(
+        image_name: &str,
+        disable_io_uring: bool,
+        disable_aio: bool,
+        verify_os_disk: bool,
+    ) {
         let disk_config = UbuntuDiskConfig::new(image_name.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
@@ -3475,21 +3484,25 @@ mod common_parallel {
         let output = cloud_child.wait_with_output().unwrap();
 
         handle_child_output(r, &output);
+
+        if verify_os_disk {
+            disk_check_consistency(guest.disk_config.disk(DiskType::OperatingSystem).unwrap());
+        }
     }
 
     #[test]
     fn test_virtio_block_io_uring() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, false, true);
+        _test_virtio_block(FOCAL_IMAGE_NAME, false, true, false);
     }
 
     #[test]
     fn test_virtio_block_aio() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, true, false);
+        _test_virtio_block(FOCAL_IMAGE_NAME, true, false, false);
     }
 
     #[test]
     fn test_virtio_block_sync() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, true, true);
+        _test_virtio_block(FOCAL_IMAGE_NAME, true, true, false);
     }
 
     /// Uses `qemu-img check` to verify disk image consistency.
@@ -3525,26 +3538,32 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2, false, false);
-        disk_check_consistency(JAMMY_IMAGE_NAME_QCOW2);
+        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2, false, false, true);
     }
 
     #[test]
     fn test_virtio_block_qcow2_zlib() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_ZLIB, false, false);
-        disk_check_consistency(JAMMY_IMAGE_NAME_QCOW2_ZLIB);
+        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_ZLIB, false, false, true);
     }
 
     #[test]
     fn test_virtio_block_qcow2_zstd() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_ZSTD, false, false);
-        disk_check_consistency(JAMMY_IMAGE_NAME_QCOW2_ZSTD);
+        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_ZSTD, false, false, true);
     }
 
     #[test]
-    fn test_virtio_block_qcow2_backing_file() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_BACKING_FILE, false, false);
-        disk_check_consistency(JAMMY_IMAGE_NAME_QCOW2_BACKING_FILE);
+    fn test_virtio_block_qcow2_backing_zstd_file() {
+        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE, false, false, true);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_backing_uncompressed_file() {
+        _test_virtio_block(
+            JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE,
+            false,
+            false,
+            true,
+        );
     }
 
     #[test]
@@ -3569,7 +3588,7 @@ mod common_parallel {
             .output()
             .expect("Expect generating VHD image from RAW image");
 
-        _test_virtio_block(FOCAL_IMAGE_NAME_VHD, false, false);
+        _test_virtio_block(FOCAL_IMAGE_NAME_VHD, false, false, false);
     }
 
     #[test]
@@ -3593,8 +3612,7 @@ mod common_parallel {
             .output()
             .expect("Expect generating dynamic VHDx image from RAW image");
 
-        _test_virtio_block(FOCAL_IMAGE_NAME_VHDX, false, false);
-        disk_check_consistency(FOCAL_IMAGE_NAME_VHDX);
+        _test_virtio_block(FOCAL_IMAGE_NAME_VHDX, false, false, true);
     }
 
     #[test]
@@ -3675,7 +3693,7 @@ mod common_parallel {
 
         handle_child_output(r, &output);
 
-        disk_check_consistency(vhdx_path);
+        disk_check_consistency(guest.disk_config.disk(DiskType::OperatingSystem).unwrap());
     }
 
     fn vhdx_image_size(disk_name: &str) -> u64 {
