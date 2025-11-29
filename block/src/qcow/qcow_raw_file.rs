@@ -80,6 +80,7 @@ impl QcowRawFile {
             };
             buffer.write_u64::<BigEndian>(val)?;
         }
+        buffer.flush()?;
         Ok(())
     }
 
