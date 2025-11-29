@@ -12,7 +12,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
 use std::time::Duration;
@@ -249,6 +249,39 @@ impl Drop for WindowsDiskConfig {
     }
 }
 
+/// Returns the workspace root directory.
+///
+/// As we don't have packages in the workspace root,
+/// we walk up until we found the main Cargo.toml file.
+fn workspace_root() -> PathBuf {
+    // The directory of the current crate (integration test).
+    let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    // Currently we have one level of nesting and we probably never change it.
+    let max_levels = 2;
+
+    eprintln!(
+        "Looking for workspace root: starting with dir={}",
+        dir.to_str().unwrap()
+    );
+
+    // walk up
+    for _ in 0..max_levels {
+        dir = dir.parent().unwrap().to_path_buf();
+        eprintln!("Checking parent dir: {}", dir.to_str().unwrap());
+        let maybe_manifest_file = dir.join("Cargo.toml");
+        if maybe_manifest_file.exists() {
+            let content = fs::read_to_string(&maybe_manifest_file).unwrap();
+            if content.contains("[workspace]") && content.contains("Cloud Hypervisor Workspace") {
+                eprintln!("INFO: Found workspace root: {}", dir.to_str().unwrap());
+                return dir;
+            }
+        }
+    }
+
+    panic!("Could not find workspace root");
+}
+
 impl DiskConfig for UbuntuDiskConfig {
     fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String {
         let cloudinit_file_path =
@@ -259,15 +292,16 @@ impl DiskConfig for UbuntuDiskConfig {
         fs::create_dir_all(&cloud_init_directory)
             .expect("Expect creating cloud-init directory to succeed");
 
-        let source_file_dir = std::env::current_dir()
-            .unwrap()
+        let source_file_dir = workspace_root()
             .join("test_data")
             .join("cloud-init")
             .join("ubuntu")
             .join("ci");
 
         ["meta-data"].iter().for_each(|x| {
-            rate_limited_copy(source_file_dir.join(x), cloud_init_directory.join(x))
+            let source_file = source_file_dir.join(x);
+            let cloud_init = cloud_init_directory.join(x);
+            rate_limited_copy(source_file, cloud_init)
                 .expect("Expect copying cloud-init meta-data to succeed");
         });
 
@@ -1429,11 +1463,19 @@ impl<'a> GuestCommand<'a> {
     }
 }
 
+/// Returns the absolute path into the workspaces target directory to locate the desired
+/// executable.
+///
+/// # Arguments
+/// - `cmd`: workspace binary, e.g. `ch-remote` or `cloud-hypervisor`
 pub fn clh_command(cmd: &str) -> String {
-    env::var("BUILD_TARGET").map_or(
-        format!("target/x86_64-unknown-linux-gnu/release/{cmd}"),
-        |target| format!("target/{target}/release/{cmd}"),
-    )
+    let workspace_root = workspace_root();
+    let rustc_target = env::var("BUILD_TARGET").unwrap_or("x86_64-unknown-linux-gnu".to_string());
+    let target_artifact_dir = format!("target/{rustc_target}/release");
+    let target_cmd_path = format!("{target_artifact_dir}/{cmd}");
+
+    let full_path = workspace_root.join(&target_cmd_path);
+    String::from(full_path.to_str().unwrap())
 }
 
 pub fn parse_iperf3_output(output: &[u8], sender: bool, bandwidth: bool) -> Result<f64, Error> {

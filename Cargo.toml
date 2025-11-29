@@ -1,21 +1,6 @@
-[package]
-authors = ["The Cloud Hypervisor Authors"]
-build = "build.rs"
-default-run = "cloud-hypervisor"
-description = "Open source Virtual Machine Monitor (VMM) that runs on top of KVM & MSHV"
-edition = "2024"
-homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
-license = "Apache-2.0 AND BSD-3-Clause"
-name = "cloud-hypervisor"
-version = "49.0.0"
-# Minimum buildable version:
-# Keep in sync with version in .github/workflows/build.yaml
-# Policy on MSRV (see #4318):
-# Can only be bumped if satisfying any of the following:
-# a.) A dependency requires it,
-# b.) If we want to use a new feature and that MSRV is at least 6 months old,
-# c.) There is a security issue that is addressed by the toolchain update.
-rust-version = "1.89.0"
+# Cloud Hypervisor Workspace
+#
+# The main crate producing the binaries is in `./cloud-hypervisor`.
 
 [profile.release]
 codegen-units = 1
@@ -28,62 +13,12 @@ debug = true
 inherits = "release"
 strip = false
 
-[dependencies]
-anyhow = { workspace = true }
-api_client = { path = "api_client" }
-clap = { workspace = true, features = ["string"] }
-dhat = { workspace = true, optional = true }
-env_logger = { workspace = true }
-epoll = { workspace = true }
-event_monitor = { path = "event_monitor" }
-hypervisor = { path = "hypervisor" }
-libc = { workspace = true }
-log = { workspace = true, features = ["std"] }
-option_parser = { path = "option_parser" }
-seccompiler = { workspace = true }
-serde_json = { workspace = true }
-signal-hook = { workspace = true }
-thiserror = { workspace = true }
-tpm = { path = "tpm" }
-tracer = { path = "tracer" }
-vm-memory = { workspace = true }
-vmm = { path = "vmm" }
-vmm-sys-util = { workspace = true }
-zbus = { version = "5.7.1", optional = true }
-
-[dev-dependencies]
-dirs = { workspace = true }
-net_util = { path = "net_util" }
-serde_json = { workspace = true }
-test_infra = { path = "test_infra" }
-wait-timeout = { workspace = true }
-
-# Please adjust `vmm::feature_list()` accordingly when changing the
-# feature list below
-[features]
-dbus_api = ["vmm/dbus_api", "zbus"]
-default = ["io_uring", "kvm"]
-dhat-heap = ["dhat", "vmm/dhat-heap"]       # For heap profiling
-fw_cfg = ["vmm/fw_cfg"]
-guest_debug = ["vmm/guest_debug"]
-igvm = ["mshv", "vmm/igvm"]
-io_uring = ["vmm/io_uring"]
-ivshmem = ["vmm/ivshmem"]
-kvm = ["vmm/kvm"]
-mshv = ["vmm/mshv"]
-pvmemcontrol = ["vmm/pvmemcontrol"]
-sev_snp = ["igvm", "mshv", "vmm/sev_snp"]
-tdx = ["vmm/tdx"]
-tracing = ["tracer/tracing", "vmm/tracing"]
-
-[lints]
-workspace = true
-
 [workspace]
 members = [
   "api_client",
   "arch",
   "block",
+  "cloud-hypervisor",
   "devices",
   "event_monitor",
   "hypervisor",
@@ -106,6 +41,7 @@ members = [
   "vmm",
 ]
 package.edition = "2024"
+resolver = "3"
 
 [workspace.dependencies]
 # rust-vmm crates
