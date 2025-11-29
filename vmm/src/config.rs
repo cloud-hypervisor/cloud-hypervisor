@@ -598,7 +598,8 @@ impl CpusConfig {
             .add("kvm_hyperv")
             .add("max_phys_bits")
             .add("affinity")
-            .add("features");
+            .add("features")
+            .add("nested");
         parser.parse(cpus).map_err(Error::ParseCpus)?;
 
         let boot_vcpus: u32 = parser
@@ -653,6 +654,19 @@ impl CpusConfig {
             }?;
         }
 
+        let nested = parser
+            .convert::<Toggle>("nested")
+            .map_err(Error::ParseCpus)?
+            .is_none_or(|toggle| toggle.0);
+
+        // Nested virtualization is always turned on for aarch64 and riscv64
+        // TODO: revisit this when nested support can be turned of on these architectures
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+        if !nested {
+            return Err(Error::ParseCpus(OptionParserError::InvalidValue(
+                "nested=off is not supported on aarch64 and riscv64 architectures".to_string(),
+            )));
+        }
         Ok(CpusConfig {
             boot_vcpus,
             max_vcpus,
@@ -661,6 +675,7 @@ impl CpusConfig {
             max_phys_bits,
             affinity,
             features,
+            nested,
         })
     }
 }

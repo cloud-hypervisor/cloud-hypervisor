@@ -213,7 +213,8 @@ fn get_cli_options_sorted(
                     topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,\
                     kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,\
                     affinity=<list_of_vcpus_with_their_associated_cpuset>,\
-                    features=<list_of_features_to_enable>",
+                    features=<list_of_features_to_enable>,\
+                    nested=on|off",
             )
             .default_value(default_vcpus)
             .group("vm-config"),
@@ -962,6 +963,7 @@ mod unit_tests {
                 max_phys_bits: 46,
                 affinity: None,
                 features: CpuFeatures::default(),
+                nested: true,
             },
             memory: MemoryConfig {
                 size: 536_870_912,

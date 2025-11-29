@@ -210,6 +210,21 @@ pub enum Error {
     #[error("Error applying landlock")]
     ApplyLandlock(#[source] LandlockError),
 }
+
+impl From<&VmConfig> for hypervisor::HypervisorVmConfig {
+    fn from(_value: &VmConfig) -> Self {
+        hypervisor::HypervisorVmConfig {
+            #[cfg(feature = "tdx")]
+            tdx_enabled: _value.platform.as_ref().is_some_and(|p| p.tdx),
+            #[cfg(feature = "sev_snp")]
+            sev_snp_enabled: _value.is_sev_snp_enabled(),
+            #[cfg(feature = "sev_snp")]
+            mem_size: _value.memory.total_size(),
+            nested: _value.cpus.nested,
+        }
+    }
+}
+
 pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1006,12 +1021,7 @@ impl Vmm {
 
         let vm = Vm::create_hypervisor_vm(
             self.hypervisor.as_ref(),
-            #[cfg(feature = "tdx")]
-            false,
-            #[cfg(feature = "sev_snp")]
-            false,
-            #[cfg(feature = "sev_snp")]
-            config.lock().unwrap().memory.total_size(),
+            (&*self.vm_config.as_ref().unwrap().lock().unwrap()).into(),
         )
         .map_err(|e| {
             MigratableError::MigrateReceive(anyhow!(
@@ -2388,6 +2398,7 @@ mod unit_tests {
                 max_phys_bits: 46,
                 affinity: None,
                 features: CpuFeatures::default(),
+                nested: true,
             },
             memory: MemoryConfig {
                 size: 536_870_912,
