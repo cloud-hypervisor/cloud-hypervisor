@@ -1204,6 +1204,10 @@ impl QcowFile {
         let l2_entry = self.l2_cache.get(l1_index).unwrap()[l2_index];
         let cluster_addr = if l2_entry_is_compressed(l2_entry) {
             // Writing to compressed cluster.
+
+            let (compressed_cluster_addr, compressed_cluster_size) =
+                l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
+
             // Allocate new cluster, decompress into new cluster, then use
             // offset of new cluster.
             let decompressed_cluster = self.decompress_l2_cluster(l2_entry)?;
@@ -1216,6 +1220,27 @@ impl QcowFile {
             if nwritten != decompressed_cluster.len() {
                 return Err(std::io::Error::from_raw_os_error(EIO));
             }
+
+            // Decrement refcount for each cluster spanned by the old compressed data
+            let compressed_clusters_end = self.raw_file.cluster_address(
+                compressed_cluster_addr             // Start of compressed data
+                + compressed_cluster_size as u64    // Add size to get end address
+                + self.raw_file.cluster_size()
+                    - 1, // Catch possibly partially used last cluster
+            );
+            let mut addr = self.raw_file.cluster_address(compressed_cluster_addr);
+            while addr < compressed_clusters_end {
+                let refcount = self
+                    .refcounts
+                    .get_cluster_refcount(&mut self.raw_file, addr)
+                    .map_err(|e| std::io::Error::other(Error::GettingRefcount(e)))?;
+                if refcount > 0 {
+                    let mut newly_unref = self.set_cluster_refcount(addr, refcount - 1)?;
+                    self.unref_clusters.append(&mut newly_unref);
+                }
+                addr += self.raw_file.cluster_size();
+            }
+
             cluster_addr
         } else if l2_entry_is_empty(l2_entry) {
             let initial_data = if let Some(backing) = self.backing_file.as_mut() {
