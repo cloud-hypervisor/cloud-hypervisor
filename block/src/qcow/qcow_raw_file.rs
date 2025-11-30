@@ -136,6 +136,11 @@ impl QcowRawFile {
         address & self.cluster_mask
     }
 
+    /// Returns the base address of the cluster containing `address`.
+    pub fn cluster_address(&self, address: u64) -> u64 {
+        address & !self.cluster_mask
+    }
+
     /// Zeros out a cluster in the file.
     pub fn zero_cluster(&mut self, address: u64) -> io::Result<()> {
         let cluster_size = self.cluster_size as usize;
