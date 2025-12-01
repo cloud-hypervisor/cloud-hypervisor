@@ -18,11 +18,12 @@ struct CpusConfig {
     max_phys_bits: u8,
     affinity: Option<Vec<CpuAffinity>>,
     features: CpuFeatures,
+    nested: bool,
 }
 ```
 
 ```
---cpus boot=<boot_vcpus>,max=<max_vcpus>,topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,affinity=<list_of_vcpus_with_their_associated_cpuset>,features=<list_of_features_to_enable>
+--cpus boot=<boot_vcpus>,max=<max_vcpus>,topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,affinity=<list_of_vcpus_with_their_associated_cpuset>,features=<list_of_features_to_enable>,nested=on|off
 ```
 
 ### `boot`
@@ -209,3 +210,14 @@ _Example_
 ```
 
 In this example the amx CPU feature will be enabled for the VMM.
+
+
+### `nested`
+
+Enable nested virtualization (default on). Nested virtualization is needed to access hardware virtualization by this guest. This option can only be changed on x86-64.
+
+_Example_
+
+```
+--cpus nested=on
+```
