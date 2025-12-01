@@ -130,7 +130,16 @@ where
             ) {
                 Ok(mut pkt) => {
                     if self.backend.write().unwrap().recv_pkt(&mut pkt).is_ok() {
-                        pkt.hdr().len() as u32 + pkt.len()
+                        match pkt.commit_hdr(&*self.mem.memory()) {
+                            Ok(()) => pkt.hdr().len() as u32 + pkt.len(),
+                            Err(err) => {
+                                warn!(
+                                    "vsock: Error writing packet header to guest memory: \
+                                     {err:?}. Discarding the package."
+                                );
+                                0
+                            }
+                        }
                     } else {
                         // We are using a consuming iterator over the virtio buffers, so, if we can't
                         // fill in this buffer, we'll need to undo the last iterator step.
