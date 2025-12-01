@@ -12,10 +12,12 @@
 //
 
 use core::fmt;
-
-use crate::{CpuVendor, Hypervisor};
+#[cfg(feature = "kvm")]
+use std::sync::OnceLock;
 
 use thiserror::Error;
+
+use crate::{CpuVendor, Hypervisor};
 
 #[cfg(all(feature = "mshv_emulator", target_arch = "x86_64"))]
 pub mod emulator;
@@ -330,18 +332,42 @@ pub enum AmxGuestSupportError {
     AmxGuestTileRequest { errno: i64 },
 }
 
-#[serde_with::serde_as]
+/// The length of the XSAVE flexible array member (FAM).
+/// This length increases when arch_prctl is utilized to dynamically add state components.
+///
+/// IMPORTANT: This static should only be updated via methods on [`XsaveState`].
+#[cfg(feature = "kvm")]
+static XSAVE_FAM_LENGTH: OnceLock<usize> = OnceLock::new();
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct XsaveState {
-    #[serde_as(as = "[_; 1024usize]")]
-    pub region: [u32; 1024usize],
-}
+pub struct XsaveState(#[cfg(feature = "kvm")] pub(crate) kvm_bindings::Xsave);
 
 impl XsaveState {
     const ARCH_GET_XCOMP_SUPP: usize = 0x1021;
     const ARCH_REQ_XCOMP_GUEST_PERM: usize = 0x1025;
     const ARCH_XCOMP_TILECFG: usize = 17;
     const ARCH_XCOMP_TILEDATA: usize = 18;
+
+    /// Construct an instance via the given initializer.
+    ///
+    /// As long as dynamically enabled state components have only been enabled
+    /// through static methods on this struct it is guaranteed that the
+    /// initialization routine is given an Xsave struct of the expected size.
+    #[cfg(feature = "kvm")]
+    pub(crate) fn with_initializer<F, E>(
+        mut init: F,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>>
+    where
+        F: FnMut(&mut kvm_bindings::Xsave) -> Result<(), E>,
+        E: Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    {
+        let fam_length = XSAVE_FAM_LENGTH.get().unwrap_or(&0);
+
+        let mut xsave = kvm_bindings::Xsave::new(*fam_length)?;
+
+        init(&mut xsave).map_err(Into::into)?;
+        Ok(Self(xsave))
+    }
 
     /// This function enables the AMX related TILECFG and TILEDATA state components for guests.
     ///
@@ -353,8 +379,27 @@ impl XsaveState {
         hypervisor: &dyn Hypervisor,
     ) -> Result<(), AmxGuestSupportError> {
         Self::amx_supported(hypervisor)?;
-
         Self::request_guest_amx_support()?;
+
+        // If we are using the KVM hypervisor we meed to query for the new xsave2 size and update
+        // `XSAVE_FAM_LENGTH` accordingly.
+        #[cfg(feature = "kvm")]
+        {
+            // Obtain the number of bytes the kvm_xsave struct requires.
+            // This number is documented to always be at least 4096 bytes, but
+            let size = hypervisor.check_extension_int(kvm_ioctls::Cap::Xsave2);
+            // Reality check: We should at least have this number of bytes and probably more as we have enabled
+            // AMX tiles. If this is not the case, it is probably best to panic.
+            assert!(size >= 4096);
+            let fam_length = {
+                // Computation is documented in `[kvm_bindings::kvm_xsave2::len]`
+                ((size as usize) - size_of::<kvm_bindings::kvm_xsave>())
+                    .div_ceil(size_of::<kvm_bindings::__u32>())
+            };
+            XSAVE_FAM_LENGTH
+                .set(fam_length)
+                .expect("This should only be set once");
+        }
 
         Ok(())
     }
@@ -418,12 +463,5 @@ impl XsaveState {
             // Unwrap is OK because we verified that `result` is not zero
             Err(AmxGuestSupportError::AmxGuestTileRequest { errno: result })
         }
-    }
-}
-
-impl Default for XsaveState {
-    fn default() -> Self {
-        // SAFETY: this is plain old data structure
-        unsafe { ::std::mem::zeroed() }
     }
 }

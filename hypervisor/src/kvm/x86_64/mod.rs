@@ -293,18 +293,3 @@ impl From<MsrEntry> for kvm_msr_entry {
         }
     }
 }
-
-impl From<kvm_xsave> for XsaveState {
-    fn from(s: kvm_xsave) -> Self {
-        Self { region: s.region }
-    }
-}
-
-impl From<XsaveState> for kvm_xsave {
-    fn from(s: XsaveState) -> Self {
-        Self {
-            region: s.region,
-            extra: Default::default(),
-        }
-    }
-}

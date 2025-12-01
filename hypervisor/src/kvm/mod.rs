@@ -2848,11 +2848,11 @@ impl KvmVcpu {
     /// X86 specific call that returns the vcpu's current "xsave struct".
     ///
     fn get_xsave(&self) -> cpu::Result<XsaveState> {
-        Ok(self
-            .fd
-            .get_xsave()
-            .map_err(|e| cpu::HypervisorCpuError::GetXsaveState(e.into()))?
-            .into())
+        XsaveState::with_initializer(|state|
+            // SAFETY: Any configured dynamically enabled state components are always enabled via
+            // static methods on `XsaveState` hence we know that `state` has the expected size.
+            unsafe { self.fd.get_xsave2(state) })
+        .map_err(|e| cpu::HypervisorCpuError::GetXsaveState(anyhow::Error::from_boxed(e)))
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -2860,14 +2860,11 @@ impl KvmVcpu {
     /// X86 specific call that sets the vcpu's current "xsave struct".
     ///
     fn set_xsave(&self, xsave: &XsaveState) -> cpu::Result<()> {
-        let xsave: kvm_bindings::kvm_xsave = (*xsave).clone().into();
-        // SAFETY: Here we trust the kernel not to read past the end of the kvm_xsave struct
-        // when calling the kvm-ioctl library function.
-        unsafe {
-            self.fd
-                .set_xsave(&xsave)
-                .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
-        }
+        // SAFETY: Any configured dynamically enabled state components are always enabled via
+        // static methods on `XsaveState` hence we know that the wrapped instance has the
+        // expected size.
+        unsafe { self.fd.set_xsave2(&xsave.0) }
+            .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
     }
 
     #[cfg(target_arch = "x86_64")]

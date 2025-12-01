@@ -21,7 +21,10 @@ cfg-if = { workspace = true }
 concat-idents = "1.1.5"
 igvm = { workspace = true, optional = true }
 igvm_defs = { workspace = true, optional = true }
-kvm-bindings = { workspace = true, optional = true, features = ["serde"] }
+kvm-bindings = { workspace = true, optional = true, features = [
+  "fam-wrappers",
+  "serde",
+] }
 kvm-ioctls = { workspace = true, optional = true }
 libc = { workspace = true }
 log = { workspace = true }
