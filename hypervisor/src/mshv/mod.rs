@@ -384,6 +384,12 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             }))
         }
     }
+
+    #[cfg(feature = "kvm")]
+    fn check_extension_int(&self, _capability: kvm_ioctls::Cap) -> i32 {
+        unimplemented!()
+    }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Get the supported CpuID

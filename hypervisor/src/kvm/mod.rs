@@ -1254,6 +1254,10 @@ impl hypervisor::Hypervisor for KvmHypervisor {
         }
     }
 
+    fn check_extension_int(&self, capability: kvm_ioctls::Cap) -> i32 {
+        self.kvm.check_extension_int(capability)
+    }
+
     fn check_required_extensions(&self) -> hypervisor::Result<()> {
         check_required_kvm_extensions(&self.kvm)
             .map_err(|e| hypervisor::HypervisorError::CheckExtensions(e.into()))
