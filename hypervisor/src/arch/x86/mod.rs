@@ -13,6 +13,8 @@
 
 use core::fmt;
 
+use thiserror::Error;
+
 #[cfg(all(feature = "mshv_emulator", target_arch = "x86_64"))]
 pub mod emulator;
 pub mod gdt;
@@ -304,6 +306,26 @@ impl LapicState {
 pub struct MsrEntry {
     pub index: u32,
     pub data: u64,
+}
+
+/// Error that may be returned when attempting to enable AMX state components for guests
+#[derive(Debug, Error)]
+pub enum AmxGuestSupportError {
+    /// Attempted to enable AMX on a CPU from a vendor that is not known to support AMX features.
+    #[error("The host CPU's vendor does not support AMX features. Only Intel provides such CPUs.")]
+    VendorDoesNotSupportAmx,
+    /// Unable to verify that the host supports AMX.
+    #[error("The host does not support AMX tile state components: errno={errno}")]
+    AmxNotSupported { errno: i64 },
+    /// The syscall to check for AMX tile state support succeeded, but the returned
+    /// features did not match our expectations.
+    #[error(
+        "Could not verify AMX support. These are the supported features that were reported: features={features}"
+    )]
+    InvalidAmxTileFeatureCheck { features: usize },
+    /// The request to enable AMX related state components for guests failed.
+    #[error("Failed to enable AMX tile state components for guests: errno={errno}")]
+    AmxGuestTileRequest { errno: i64 },
 }
 
 #[serde_with::serde_as]
