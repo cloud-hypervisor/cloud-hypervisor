@@ -1235,8 +1235,7 @@ impl QcowFile {
                     .get_cluster_refcount(&mut self.raw_file, addr)
                     .map_err(|e| std::io::Error::other(Error::GettingRefcount(e)))?;
                 if refcount > 0 {
-                    let mut newly_unref = self.set_cluster_refcount(addr, refcount - 1)?;
-                    self.unref_clusters.append(&mut newly_unref);
+                    self.set_cluster_refcount_track_freed(addr, refcount - 1)?;
                 }
                 addr += self.raw_file.cluster_size();
             }
@@ -1262,8 +1261,7 @@ impl QcowFile {
         };
 
         for (addr, count) in set_refcounts {
-            let mut newly_unref = self.set_cluster_refcount(addr, count)?;
-            self.unref_clusters.append(&mut newly_unref);
+            self.set_cluster_refcount_track_freed(addr, count)?;
         }
 
         Ok(cluster_addr + self.raw_file.cluster_offset(address))
@@ -1331,8 +1329,7 @@ impl QcowFile {
     fn append_data_cluster(&mut self, initial_data: Option<Vec<u8>>) -> std::io::Result<u64> {
         let new_addr: u64 = self.get_new_cluster(initial_data)?;
         // The cluster refcount starts at one indicating it is used but doesn't need COW.
-        let mut newly_unref = self.set_cluster_refcount(new_addr, 1)?;
-        self.unref_clusters.append(&mut newly_unref);
+        self.set_cluster_refcount_track_freed(new_addr, 1)?;
         Ok(new_addr)
     }
 
@@ -1437,8 +1434,7 @@ impl QcowFile {
         }
 
         let new_refcount = refcount - 1;
-        let mut newly_unref = self.set_cluster_refcount(cluster_addr, new_refcount)?;
-        self.unref_clusters.append(&mut newly_unref);
+        self.set_cluster_refcount_track_freed(cluster_addr, new_refcount)?;
 
         // Rewrite the L2 entry to remove the cluster mapping.
         // unwrap is safe as we just checked/inserted this entry.
@@ -1521,6 +1517,17 @@ impl QcowFile {
             })?;
         }
         Ok(new_cluster)
+    }
+
+    // Set the refcount for a cluster and add any unreferenced clusters to the unref list.
+    fn set_cluster_refcount_track_freed(
+        &mut self,
+        address: u64,
+        refcount: u16,
+    ) -> std::io::Result<()> {
+        let mut newly_unref = self.set_cluster_refcount(address, refcount)?;
+        self.unref_clusters.append(&mut newly_unref);
+        Ok(())
     }
 
     // Set the refcount for a cluster with the given address.
