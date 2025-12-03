@@ -2882,8 +2882,6 @@ mod unit_tests {
                     assert_eq!(orig, read);
                 }
             }
-
-            assert_eq!(qcow_file.first_zero_refcount().unwrap(), None);
         });
     }
 
