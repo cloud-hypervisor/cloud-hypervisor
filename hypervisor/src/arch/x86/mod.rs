@@ -315,12 +315,19 @@ pub struct MsrEntry {
 pub struct XsaveState {
     #[serde_as(as = "[_; 1024usize]")]
     pub region: [u32; 1024usize],
+
+    // extra data to support xsave2
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra: Vec<u32>,
 }
 
 impl Default for XsaveState {
     fn default() -> Self {
-        // SAFETY: this is plain old data structure
-        unsafe { ::std::mem::zeroed() }
+        Self {
+            // SAFETY: this is plain old data structure
+            region: unsafe { std::mem::zeroed() },
+            extra: Vec::new(),
+        }
     }
 }
 

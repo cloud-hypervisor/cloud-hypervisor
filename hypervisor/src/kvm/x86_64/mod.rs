@@ -8,14 +8,17 @@
 //
 //
 
+use log::error;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 ///
 /// Export generically-named wrappers of kvm-bindings for Unix-based platforms
 ///
 pub use {
     kvm_bindings::CpuId, kvm_bindings::KVM_CPUID_FLAG_SIGNIFCANT_INDEX, kvm_bindings::MsrList,
-    kvm_bindings::Msrs as MsrEntries, kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable,
-    kvm_bindings::kvm_fpu, kvm_bindings::kvm_lapic_state, kvm_bindings::kvm_mp_state as MpState,
+    kvm_bindings::Msrs as MsrEntries, kvm_bindings::Xsave as xsave2,
+    kvm_bindings::kvm_cpuid_entry2, kvm_bindings::kvm_dtable, kvm_bindings::kvm_fpu,
+    kvm_bindings::kvm_lapic_state, kvm_bindings::kvm_mp_state as MpState,
     kvm_bindings::kvm_msr_entry, kvm_bindings::kvm_regs, kvm_bindings::kvm_segment,
     kvm_bindings::kvm_sregs, kvm_bindings::kvm_vcpu_events as VcpuEvents,
     kvm_bindings::kvm_xcrs as ExtendedControlRegisters, kvm_bindings::kvm_xsave,
@@ -294,17 +297,65 @@ impl From<MsrEntry> for kvm_msr_entry {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum XsaveStateError {
+    #[error("kvm_xsave extra field is not empty")]
+    XsaveExtraFieldNotEmpty,
+}
+
 impl From<kvm_xsave> for XsaveState {
-    fn from(s: kvm_xsave) -> Self {
-        Self { region: s.region }
+    fn from(value: kvm_xsave) -> Self {
+        // Check if kvm_xsave struct size is larger than region size, indicating extra data exists
+        assert_eq!(
+            size_of_val(&value),
+            size_of_val(&value.region),
+            "kvm_xsave extra field is not empty"
+        );
+        Self {
+            region: value.region,
+            extra: Vec::new(),
+        }
     }
 }
 
-impl From<XsaveState> for kvm_xsave {
-    fn from(s: XsaveState) -> Self {
-        Self {
-            region: s.region,
-            extra: Default::default(),
+impl TryFrom<XsaveState> for kvm_xsave {
+    type Error = XsaveStateError;
+    fn try_from(value: XsaveState) -> Result<Self, Self::Error> {
+        if !value.extra.is_empty() {
+            error!("XsaveState extra field is not empty");
+            return Err(XsaveStateError::XsaveExtraFieldNotEmpty);
         }
+        Ok(Self {
+            region: value.region,
+            extra: Default::default(),
+        })
+    }
+}
+
+impl From<&xsave2> for XsaveState {
+    fn from(xsave: &xsave2) -> Self {
+        // SAFETY: `xsave` is a valid reference with properly initialized FAM structure.
+        let region = unsafe {
+            let ptr = xsave.as_fam_struct_ptr();
+            (*ptr).xsave.region
+        };
+        Self {
+            region,
+            extra: xsave.as_slice().to_vec(),
+        }
+    }
+}
+
+impl XsaveState {
+    pub fn to_xsave2(&self) -> Result<xsave2, vmm_sys_util::fam::Error> {
+        let mut xsave = xsave2::new(self.extra.len())?;
+        // SAFETY: `xsave` was just created via `Xsave::new()` with valid allocated memory.
+        unsafe {
+            let ptr = xsave.as_mut_fam_struct_ptr();
+            (*ptr).xsave.region = self.region;
+        }
+        let extra_slice = xsave.as_mut_slice();
+        extra_slice.copy_from_slice(&self.extra);
+        Ok(xsave)
     }
 }
