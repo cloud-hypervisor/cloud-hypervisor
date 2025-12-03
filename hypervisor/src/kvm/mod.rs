@@ -107,11 +107,13 @@ use kvm_bindings::{
 use kvm_bindings::{KVM_REG_RISCV_CORE, kvm_riscv_core};
 #[cfg(feature = "tdx")]
 use kvm_bindings::{KVM_X86_DEFAULT_VM, KVM_X86_SW_PROTECTED_VM, KVMIO, kvm_run__bindgen_ty_1};
+#[cfg(target_arch = "x86_64")]
+use kvm_bindings::{Xsave as xsave2, kvm_xsave2};
 pub use kvm_ioctls::{Cap, Kvm, VcpuExit};
 use thiserror::Error;
 use vfio_ioctls::VfioDeviceFd;
 #[cfg(target_arch = "x86_64")]
-use vmm_sys_util::ioctl_io_nr;
+use vmm_sys_util::{fam::FamStruct, ioctl_io_nr};
 #[cfg(feature = "tdx")]
 use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_iowr_nr};
 pub use {kvm_bindings, kvm_ioctls};
@@ -120,6 +122,9 @@ pub use {kvm_bindings, kvm_ioctls};
 use crate::RegList;
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::regs;
+#[cfg(target_arch = "x86_64")]
+use crate::kvm::x86_64::XsaveStateError;
+
 #[cfg(target_arch = "x86_64")]
 ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 
@@ -564,6 +569,17 @@ impl vm::Vm for KvmVm {
             .fd
             .create_vcpu(id as u64)
             .map_err(|e| vm::HypervisorVmError::CreateVcpu(e.into()))?;
+
+        #[cfg(target_arch = "x86_64")]
+        // Safety: `xsave_size` will not change after vcpu creation because:
+        // 1. `xsave_size` depends on cpuid
+        // 2. The only factor that affects cpuid is xsave permission, obtained via
+        // `ARCH_GET_XCOMP_GUEST_PERM`
+        // 3. This permission is already acquired before vcpu creation
+        // Therefore, cpuid remains unchanged after vcpu creation, and so does `xsave_size`.
+        //
+        // First vCPU allocation locks the permissions of  `ARCH_GET_XCOMP_GUEST_PERM`.
+        let xsave_size = self.fd.check_extension_int(Cap::Xsave2);
         let vcpu = KvmVcpu {
             fd,
             #[cfg(target_arch = "x86_64")]
@@ -571,6 +587,8 @@ impl vm::Vm for KvmVm {
             vm_ops,
             #[cfg(target_arch = "x86_64")]
             hyperv_synic: AtomicBool::new(false),
+            #[cfg(target_arch = "x86_64")]
+            xsave_size,
         };
         Ok(Box::new(vcpu))
     }
@@ -1332,6 +1350,8 @@ pub struct KvmVcpu {
     vm_ops: Option<Arc<dyn vm::VmOps>>,
     #[cfg(target_arch = "x86_64")]
     hyperv_synic: AtomicBool,
+    #[cfg(target_arch = "x86_64")]
+    xsave_size: i32,
 }
 
 /// Implementation of Vcpu trait for KVM
@@ -2329,7 +2349,11 @@ impl cpu::Vcpu for KvmVcpu {
         let mp_state = self.get_mp_state()?.into();
         let regs = self.get_regs()?;
         let sregs = self.get_sregs()?;
-        let xsave = self.get_xsave()?;
+        let xsave = if self.xsave_size > 0 {
+            self.get_xsave2()?
+        } else {
+            self.get_xsave()?
+        };
         let xcrs = self.get_xcrs()?;
         let lapic_state = self.get_lapic()?;
         let fpu = self.get_fpu()?;
@@ -2566,7 +2590,11 @@ impl cpu::Vcpu for KvmVcpu {
         self.set_mp_state(state.mp_state.into())?;
         self.set_regs(&state.regs.into())?;
         self.set_sregs(&state.sregs.into())?;
-        self.set_xsave(&state.xsave)?;
+        if self.xsave_size > 0 {
+            self.set_xsave2(&state.xsave)?;
+        } else {
+            self.set_xsave(&state.xsave)?;
+        }
         self.set_xcrs(&state.xcrs)?;
         self.set_lapic(&state.lapic_state)?;
         self.set_fpu(&state.fpu)?;
@@ -2856,12 +2884,62 @@ impl KvmVcpu {
     /// X86 specific call that sets the vcpu's current "xsave struct".
     ///
     fn set_xsave(&self, xsave: &XsaveState) -> cpu::Result<()> {
-        let xsave: kvm_bindings::kvm_xsave = (*xsave).clone().into();
+        let xsave: kvm_bindings::kvm_xsave = (*xsave)
+            .clone()
+            .try_into()
+            .map_err(|e: XsaveStateError| cpu::HypervisorCpuError::GetXsaveState(e.into()))?;
         // SAFETY: Here we trust the kernel not to read past the end of the kvm_xsave struct
         // when calling the kvm-ioctl library function.
         unsafe {
             self.fd
                 .set_xsave(&xsave)
+                .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    /// X86 specific call that returns the vcpu's current "xsave struct" using the extended
+    /// xsave2 interface which supports larger state buffers (>4KB) for features like Intel AMX.
+    ///
+    /// This method requires KVM_CAP_XSAVE2 capability and uses KVM_GET_XSAVE2 ioctl.
+    /// The xsave parameter must be allocated with sufficient size based on the value
+    /// returned by KVM_CHECK_EXTENSION(KVM_CAP_XSAVE2).
+    pub fn get_xsave2(&self) -> cpu::Result<XsaveState> {
+        assert!(
+            self.xsave_size > 0,
+            "'xsave_size' must be initialized via 'KVM_CAP_XSAVE2' first"
+        );
+        let fam_size = (self.xsave_size as usize - size_of::<kvm_bindings::kvm_xsave>())
+            .div_ceil(size_of::<<kvm_xsave2 as FamStruct>::Entry>());
+        let mut xsave =
+            xsave2::new(fam_size).map_err(|e| cpu::HypervisorCpuError::GetXsaveState(e.into()))?;
+        // SAFETY: The caller guarantees that xsave is allocated with enough space
+        unsafe {
+            self.fd
+                .get_xsave2(&mut xsave)
+                .map_err(|e| cpu::HypervisorCpuError::GetXsaveState(e.into()))?;
+        }
+        Ok((&xsave).into())
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    /// X86 specific call that sets the vcpu's current "xsave struct" using the extended
+    /// xsave2 interface which supports larger state buffers (>4KB) for features like Intel AMX.
+    ///
+    /// This method uses KVM_SET_XSAVE ioctl but with extended buffer support when
+    /// KVM_CAP_XSAVE2 is available.
+    pub fn set_xsave2(&self, xsave_state: &XsaveState) -> cpu::Result<()> {
+        assert!(
+            self.xsave_size > 0,
+            "'xsave_size' must be initialized via 'KVM_CAP_XSAVE2' first"
+        );
+        let xsave = xsave_state
+            .to_xsave2()
+            .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))?;
+        // SAFETY: The caller guarantees that xsave contains valid data
+        unsafe {
+            self.fd
+                .set_xsave2(&xsave)
                 .map_err(|e| cpu::HypervisorCpuError::SetXsaveState(e.into()))
         }
     }
