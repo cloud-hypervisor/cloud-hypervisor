@@ -7258,7 +7258,6 @@ mod common_parallel {
 
     #[test]
     #[cfg(target_arch = "x86_64")]
-    #[ignore = "See #5756"]
     fn test_vdpa_net() {
         // Before trying to run the test, verify the vdpa_sim_net module is correctly loaded.
         if !exec_host_command_status("lsmod | grep vdpa_sim_net").success() {
@@ -7277,7 +7276,7 @@ mod common_parallel {
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
             .default_net()
-            .args(["--vdpa", "path=/dev/vhost-vdpa-2,num_queues=2"])
+            .args(["--vdpa", "path=/dev/vhost-vdpa-2,num_queues=3"])
             .capture_output()
             .spawn()
             .unwrap();
@@ -7296,6 +7295,9 @@ mod common_parallel {
                 1
             );
 
+            guest
+                .ssh_command("sudo ip link set dev ens6 address 00:e8:ca:33:ba:06")
+                .unwrap();
             guest
                 .ssh_command("sudo ip addr add 172.16.1.2/24 dev ens6")
                 .unwrap();
