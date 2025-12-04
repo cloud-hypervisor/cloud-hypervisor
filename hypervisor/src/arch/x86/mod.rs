@@ -13,6 +13,10 @@
 
 use core::fmt;
 
+use thiserror::Error;
+
+use crate::CpuVendor;
+
 #[cfg(all(feature = "mshv_emulator", target_arch = "x86_64"))]
 pub mod emulator;
 pub mod gdt;
@@ -318,4 +322,82 @@ impl Default for XsaveState {
         // SAFETY: this is plain old data structure
         unsafe { ::std::mem::zeroed() }
     }
+}
+
+const ARCH_GET_XCOMP_SUPP: usize = 0x1021;
+const ARCH_REQ_XCOMP_GUEST_PERM: usize = 0x1025;
+const ARCH_XCOMP_TILECFG: usize = 17;
+const ARCH_XCOMP_TILEDATA: usize = 18;
+
+/// Checks whether the host supports AMX.
+///
+/// Returns `Ok` if AMX is supported on the host and `Err` otherwise.
+pub(crate) fn amx_supported(cpu_vendor: CpuVendor) -> Result<(), AmxGuestSupportError> {
+    if !matches!(cpu_vendor, CpuVendor::Intel) {
+        return Err(AmxGuestSupportError::VendorDoesNotSupportAmx);
+    }
+    // We make a syscall to get information about which dynamically enabled
+    // XSAVE state components are supported. The corresponding state
+    // component bits will get set in `features`
+    let mut features: usize = 0;
+    // SAFETY: Syscall with valid parameters
+    let result =
+        unsafe { libc::syscall(libc::SYS_arch_prctl, ARCH_GET_XCOMP_SUPP, &raw mut features) };
+    // Ensure that both the TILECFG and TILEDATA state components are supported
+    let mask = (1 << ARCH_XCOMP_TILECFG) | (1 << ARCH_XCOMP_TILEDATA);
+    if result != 0 {
+        return Err(AmxGuestSupportError::AmxNotSupported { errno: result });
+    }
+
+    if (features & mask) == mask {
+        Ok(())
+    } else {
+        Err(AmxGuestSupportError::InvalidAmxTileFeatureCheck { features })
+    }
+}
+
+/// Asks the kernel to provide AMX support for guests.
+pub(crate) fn request_guest_amx_support() -> Result<(), AmxGuestSupportError> {
+    // Make a syscall to request permission for guests to use the TILECFG
+    // and TILEDATA state components. Note that as per the kernel
+    // [documentation](https://docs.kernel.org/arch/x86/xstate.html#dynamic-features-for-virtual-machines)
+    // we need to pass in the number of the highest XSTATE component which is required for
+    // the facility to work which in this case is TILEDATA.
+    //
+    // This syscall will alter the size of `kvm_xsave` when KVM is used as the hypervisor.
+    //
+    // SAFETY: Syscall with valid parameters
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_arch_prctl,
+            ARCH_REQ_XCOMP_GUEST_PERM,
+            ARCH_XCOMP_TILEDATA,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        // Unwrap is OK because we verified that `result` is not zero
+        Err(AmxGuestSupportError::AmxGuestTileRequest { errno: result })
+    }
+}
+
+/// Error that may be returned when attempting to enable AMX state components for guests
+#[derive(Debug, Error)]
+pub enum AmxGuestSupportError {
+    /// Attempted to enable AMX on a CPU from a vendor that is not known to support AMX features.
+    #[error("The host CPU's vendor does not support AMX features. Only Intel provides such CPUs.")]
+    VendorDoesNotSupportAmx,
+    /// Unable to verify that the host supports AMX.
+    #[error("The host does not support AMX tile state components: errno={errno}")]
+    AmxNotSupported { errno: i64 },
+    /// The syscall to check for AMX tile state support succeeded, but the returned
+    /// features did not match our expectations.
+    #[error(
+        "Could not verify AMX support. These are the supported features that were reported: features={features}"
+    )]
+    InvalidAmxTileFeatureCheck { features: usize },
+    /// The request to enable AMX related state components for guests failed.
+    #[error("Failed to enable AMX tile state components for guests: errno={errno}")]
+    AmxGuestTileRequest { errno: i64 },
 }
