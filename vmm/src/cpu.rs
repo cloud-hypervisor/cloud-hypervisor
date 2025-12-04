@@ -791,38 +791,9 @@ impl CpuManager {
 
         #[cfg(target_arch = "x86_64")]
         if config.features.amx {
-            const ARCH_GET_XCOMP_GUEST_PERM: usize = 0x1024;
-            const ARCH_REQ_XCOMP_GUEST_PERM: usize = 0x1025;
-            const XFEATURE_XTILEDATA: usize = 18;
-            const XFEATURE_XTILEDATA_MASK: usize = 1 << XFEATURE_XTILEDATA;
-
-            // SAFETY: the syscall is only modifying kernel internal
-            // data structures that the kernel is itself expected to safeguard.
-            let amx_tile = unsafe {
-                libc::syscall(
-                    libc::SYS_arch_prctl,
-                    ARCH_REQ_XCOMP_GUEST_PERM,
-                    XFEATURE_XTILEDATA,
-                )
-            };
-
-            if amx_tile != 0 {
-                return Err(Error::AmxEnable(anyhow!("Guest AMX usage not supported")));
-            }
-            let mut mask: usize = 0;
-            // SAFETY: Syscall with valid parameters. We use a raw mutable pointer to
-            // the `mask` place in order to ensure that we do not violate Rust's
-            // aliasing rules.
-            let result = unsafe {
-                libc::syscall(
-                    libc::SYS_arch_prctl,
-                    ARCH_GET_XCOMP_GUEST_PERM,
-                    &raw mut mask,
-                )
-            };
-            if result != 0 || (mask & XFEATURE_XTILEDATA_MASK) != XFEATURE_XTILEDATA_MASK {
-                return Err(Error::AmxEnable(anyhow!("Guest AMX usage not supported")));
-            }
+            hypervisor
+                .enable_amx_state_components()
+                .map_err(|e| Error::AmxEnable(e.into()))?;
         }
 
         let proximity_domain_per_cpu: BTreeMap<u32, u32> = {
