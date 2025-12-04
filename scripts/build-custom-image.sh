@@ -7,13 +7,13 @@ set -ex
 
 mkdir -p custom-image
 pushd custom-image || exit
-wget -N https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
-export IMAGE_NAME_BASE=jammy-server-cloudimg-amd64
+wget -N https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+export IMAGE_NAME_BASE=noble-server-cloudimg-amd64
 qemu-img convert -p -f qcow2 -O raw $IMAGE_NAME_BASE.img $IMAGE_NAME_BASE.raw
 if [ -n "$VFIO_CUSTOM_IMAGE" ]; then
-    qemu-img resize -f raw "$IMAGE_NAME_BASE.raw" 5G
+    qemu-img resize -f raw "$IMAGE_NAME_BASE.raw" 10G
     sudo sgdisk -e "$IMAGE_NAME_BASE.raw"
-    sudo parted "$IMAGE_NAME_BASE.raw" resizepart 1 5369MB
+    sudo parted "$IMAGE_NAME_BASE.raw" resizepart 1 10737MB
 fi
 mkdir -p mnt
 export ROOTFS=/dev/mapper/$(sudo kpartx -v -a $IMAGE_NAME_BASE.raw | grep "p1 " | cut -f 3 -d " ")
@@ -28,7 +28,7 @@ touch extra_commands
 
 if [ -n "$VFIO_CUSTOM_IMAGE" ]; then
     cat >extra_commands <<EOF
-    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
     sudo dpkg -i cuda-keyring_1.1-1_all.deb
     sudo apt-get update
     sudo apt-get -y install cuda-drivers
