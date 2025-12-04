@@ -21,11 +21,11 @@ convention and enforce it through the Continuous Integration (CI) process callin
 
 ```sh
 # We currently rely on nightly-only formatting features
-cargo +nightly fmt --all
-cargo check --all --all-targets --tests 
-cargo clippy --all --all-targets --tests
+cargo +nightly fmt --all 
+cargo check --all-targets --tests
+cargo clippy --all-targets --tests
 # Please note that this will not execute integration tests.
-cargo test --all --all-targets --tests
+cargo test --all-targets --tests
 
 # To lint your last three commits
 gitlint --commits "HEAD~3..HEAD"
@@ -49,8 +49,8 @@ have specific features that you regularly develop against.
 #!/bin/sh
 
 cargo +nightly fmt --all -- --check || exit 1
-cargo check --locked --all --all-targets --tests || exit 1
-cargo clippy --locked --all --all-targets --tests -- -D warnings || exit 1
+cargo check --locked --all-targets --tests || exit 1
+cargo clippy --locked --all-targets --tests -- -D warnings || exit 1
 ```
 
 You will need to `chmod +x .git/hooks/pre-commit` to have it run on every
