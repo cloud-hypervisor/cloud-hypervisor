@@ -10,6 +10,10 @@ use std::num::NonZeroUsize;
 use std::sync::{Arc, RwLock};
 
 use anyhow::anyhow;
+#[cfg(target_arch = "x86_64")]
+use arc_swap::ArcSwap;
+#[cfg(feature = "sev_snp")]
+use log::info;
 use log::{debug, warn};
 use mshv_bindings::*;
 #[cfg(target_arch = "x86_64")]
@@ -22,8 +26,6 @@ use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
 #[cfg(feature = "sev_snp")]
 use vm_memory::bitmap::AtomicBitmap;
-#[cfg(feature = "sev_snp")]
-use {arc_swap::ArcSwap, log::info};
 
 #[cfg(target_arch = "aarch64")]
 use crate::arch::aarch64::regs::{
@@ -220,18 +222,6 @@ pub struct MshvHypervisor {
 }
 
 impl MshvHypervisor {
-    #[cfg(target_arch = "x86_64")]
-    ///
-    /// Retrieve the list of MSRs supported by MSHV.
-    ///
-    fn get_msr_list(&self) -> hypervisor::Result<Vec<u32>> {
-        self.mshv
-            .get_msr_index_list()
-            .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))
-    }
-}
-
-impl MshvHypervisor {
     /// Create a hypervisor based on Mshv
     #[allow(clippy::new_ret_no_self)]
     pub fn new() -> hypervisor::Result<Arc<dyn hypervisor::Hypervisor>> {
@@ -348,20 +338,9 @@ impl hypervisor::Hypervisor for MshvHypervisor {
 
         #[cfg(target_arch = "x86_64")]
         {
-            let msr_list = self.get_msr_list()?;
-            let mut msrs: Vec<MsrEntry> = vec![
-                MsrEntry {
-                    ..Default::default()
-                };
-                msr_list.len()
-            ];
-            for (pos, index) in msr_list.iter().enumerate() {
-                msrs[pos].index = *index;
-            }
-
             Ok(Arc::new(MshvVm {
                 fd: vm_fd,
-                msrs,
+                msrs: ArcSwap::new(Vec::<MsrEntry>::new().into()),
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
                 #[cfg(feature = "sev_snp")]
                 sev_snp_enabled: mshv_vm_type == VmType::Snp,
@@ -1713,7 +1692,7 @@ impl MshvVcpu {
 pub struct MshvVm {
     fd: Arc<VmFd>,
     #[cfg(target_arch = "x86_64")]
-    msrs: Vec<MsrEntry>,
+    msrs: ArcSwap<Vec<MsrEntry>>,
     dirty_log_slots: Arc<RwLock<HashMap<u64, MshvDirtyLogSlot>>>,
     #[cfg(feature = "sev_snp")]
     sev_snp_enabled: bool,
@@ -1845,7 +1824,7 @@ impl vm::Vm for MshvVm {
             #[cfg(target_arch = "x86_64")]
             cpuid: Vec::new(),
             #[cfg(target_arch = "x86_64")]
-            msrs: self.msrs.clone(),
+            msrs: self.msrs.load().as_ref().clone(),
             vm_ops,
             vm_fd: self.fd.clone(),
             #[cfg(feature = "sev_snp")]
@@ -2454,7 +2433,23 @@ impl vm::Vm for MshvVm {
                 1u64,
             )
             .map_err(|e| vm::HypervisorVmError::InitializeVm(e.into()))?;
-
+        #[cfg(target_arch = "x86_64")]
+        {
+            let msr_list = self
+                .fd
+                .get_msr_index_list()
+                .map_err(|e| vm::HypervisorVmError::GetMsrList(e.into()))?;
+            let mut msrs: Vec<MsrEntry> = vec![
+                MsrEntry {
+                    ..Default::default()
+                };
+                msr_list.len()
+            ];
+            for (pos, index) in msr_list.iter().enumerate() {
+                msrs[pos].index = *index;
+            }
+            self.msrs.store(Arc::new(msrs));
+        }
         Ok(())
     }
 }
