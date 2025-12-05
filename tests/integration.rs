@@ -11310,21 +11310,25 @@ mod live_migration {
         }
 
         #[test]
+        #[cfg_attr(feature = "mshv", ignore = "See #7542")]
         fn test_live_upgrade_basic() {
             _test_live_migration(true, false);
         }
 
         #[test]
+        #[cfg_attr(feature = "mshv", ignore = "See #7542")]
         fn test_live_upgrade_local() {
             _test_live_migration(true, true);
         }
 
         #[test]
+        #[cfg_attr(feature = "mshv", ignore = "See #7542")]
         fn test_live_upgrade_watchdog() {
             _test_live_migration_watchdog(true, false);
         }
 
         #[test]
+        #[cfg_attr(feature = "mshv", ignore = "See #7542")]
         fn test_live_upgrade_watchdog_local() {
             _test_live_migration_watchdog(true, true);
         }
@@ -11351,31 +11355,37 @@ mod live_migration {
         }
 
         #[test]
+        #[cfg_attr(feature = "mshv", ignore = "See #7542")]
         fn test_live_upgrade_balloon() {
             _test_live_migration_balloon(true, false);
         }
 
         #[test]
+        #[cfg_attr(feature = "mshv", ignore = "See #7542")]
         fn test_live_upgrade_balloon_local() {
             _test_live_migration_balloon(true, true);
         }
 
         #[test]
+        #[cfg_attr(feature = "mshv", ignore = "See #7542")]
         fn test_live_migration_numa() {
             _test_live_migration_numa(false, false);
         }
 
         #[test]
+        #[cfg_attr(feature = "mshv", ignore = "See #7542")]
         fn test_live_migration_numa_local() {
             _test_live_migration_numa(false, true);
         }
 
         #[test]
+        #[cfg_attr(feature = "mshv", ignore = "See #7542")]
         fn test_live_upgrade_numa() {
             _test_live_migration_numa(true, false);
         }
 
         #[test]
+        #[cfg_attr(feature = "mshv", ignore = "See #7542")]
         fn test_live_upgrade_numa_local() {
             _test_live_migration_numa(true, true);
         }
