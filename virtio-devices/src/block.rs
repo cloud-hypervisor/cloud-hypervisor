@@ -578,17 +578,14 @@ impl EpollHelperHandler for BlockEpollHandler {
                     ))
                 })?;
 
+                self.try_signal_used_queue()?;
+
                 let rate_limit_reached = self.rate_limiter.as_ref().is_some_and(|r| r.is_blocked());
 
                 // Process the queue only when the rate limit is not reached
                 if !rate_limit_reached {
-                    self.process_queue_submit().map_err(|e| {
-                        EpollHelperError::HandleEvent(anyhow!(
-                            "Failed to process queue (submit): {e:?}"
-                        ))
-                    })?;
+                    self.process_queue_submit_and_signal()?;
                 }
-                self.try_signal_used_queue()?;
             }
             RATE_LIMITER_EVENT => {
                 if let Some(rate_limiter) = &mut self.rate_limiter {
