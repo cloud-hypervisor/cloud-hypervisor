@@ -21,10 +21,10 @@ jobs:
         run: /opt/scripts/exec-in-qemu.sh rustup default 1.89.0
 
       - name: Build test (kvm)
-        run: /opt/scripts/exec-in-qemu.sh cargo rustc --locked --no-default-features --features "kvm"
+        run: /opt/scripts/exec-in-qemu.sh cargo build --locked --no-default-features --features "kvm" -p cloud-hypervisor
 
       - name: Clippy test (kvm)
-        run: /opt/scripts/exec-in-qemu.sh cargo clippy --locked --no-default-features --features "kvm"
+        run: /opt/scripts/exec-in-qemu.sh cargo clippy --locked --no-default-features --features "kvm" -p cloud-hypervisor
 
       - name: Check no files were modified
         run: test -z "$(git status --porcelain)"
