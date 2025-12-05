@@ -907,6 +907,7 @@ struct MetaVirtioDevice {
     iommu: bool,
     id: String,
     pci_segment: u16,
+    bdf_device: Option<u8>,
     dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
 }
 
@@ -1643,6 +1644,7 @@ impl DeviceManager {
                     &handle.id,
                     handle.pci_segment,
                     handle.dma_handler,
+                    handle.bdf_device,
                 )?;
 
                 if handle.iommu {
@@ -1671,7 +1673,8 @@ impl DeviceManager {
             }
 
             if let Some(iommu_device) = iommu_device {
-                let dev_id = self.add_virtio_pci_device(iommu_device, &None, &iommu_id, 0, None)?;
+                let dev_id =
+                    self.add_virtio_pci_device(iommu_device, &None, &iommu_id, 0, None, None)?;
                 self.iommu_attached_devices = Some((dev_id, iommu_attached_devices));
             }
         }
@@ -2380,6 +2383,7 @@ impl DeviceManager {
             id: id.clone(),
             pci_segment: 0,
             dma_handler: None,
+            bdf_device: None,
         });
 
         // Fill the device tree with a new node. In case of restore, we
@@ -2822,6 +2826,7 @@ impl DeviceManager {
             id,
             pci_segment: disk_cfg.pci_segment,
             dma_handler: None,
+            bdf_device: disk_cfg.bdf_device,
         })
     }
 
@@ -2992,6 +2997,7 @@ impl DeviceManager {
             id,
             pci_segment: net_cfg.pci_segment,
             dma_handler: None,
+            bdf_device: net_cfg.bdf_device,
         })
     }
 
@@ -3037,6 +3043,7 @@ impl DeviceManager {
                 id: id.clone(),
                 pci_segment: 0,
                 dma_handler: None,
+                bdf_device: None,
             });
 
             // Fill the device tree with a new node. In case of restore, we
@@ -3098,6 +3105,7 @@ impl DeviceManager {
                 id,
                 pci_segment: fs_cfg.pci_segment,
                 dma_handler: None,
+                bdf_device: fs_cfg.bdf_device,
             })
         } else {
             Err(DeviceManagerError::NoVirtioFsSock)
@@ -3287,6 +3295,7 @@ impl DeviceManager {
             id,
             pci_segment: pmem_cfg.pci_segment,
             dma_handler: None,
+            bdf_device: pmem_cfg.bdf_device,
         })
     }
 
@@ -3358,6 +3367,7 @@ impl DeviceManager {
             id,
             pci_segment: vsock_cfg.pci_segment,
             dma_handler: None,
+            bdf_device: vsock_cfg.bdf_device,
         })
     }
 
@@ -3414,6 +3424,7 @@ impl DeviceManager {
                     id: memory_zone_id.clone(),
                     pci_segment: 0,
                     dma_handler: None,
+                    bdf_device: None,
                 });
 
                 // Fill the device tree with a new node. In case of restore, we
@@ -3440,7 +3451,7 @@ impl DeviceManager {
         let pci_segment_id = 0x0_u16;
 
         let (pci_segment_id, pci_device_bdf, resources) =
-            self.pci_resources(&id, pci_segment_id)?;
+            self.pci_resources(&id, pci_segment_id, None)?;
 
         info!("Creating pvmemcontrol device: id = {id}");
         let (pvmemcontrol_pci_device, pvmemcontrol_bus_device) =
@@ -3501,6 +3512,7 @@ impl DeviceManager {
                 id: id.clone(),
                 pci_segment: 0,
                 dma_handler: None,
+                bdf_device: balloon_config.bdf_device,
             });
 
             self.device_tree
@@ -3540,6 +3552,7 @@ impl DeviceManager {
             id: id.clone(),
             pci_segment: 0,
             dma_handler: None,
+            bdf_device: None,
         });
 
         self.device_tree
@@ -3598,6 +3611,7 @@ impl DeviceManager {
             id,
             pci_segment: vdpa_cfg.pci_segment,
             dma_handler: Some(vdpa_mapping),
+            bdf_device: vdpa_cfg.bdf_device,
         })
     }
 
@@ -3684,7 +3698,7 @@ impl DeviceManager {
         };
 
         let (pci_segment_id, pci_device_bdf, resources) =
-            self.pci_resources(&vfio_name, device_cfg.pci_segment)?;
+            self.pci_resources(&vfio_name, device_cfg.pci_segment, None)?;
 
         let mut needs_dma_mapping = false;
 
@@ -3927,7 +3941,7 @@ impl DeviceManager {
         };
 
         let (pci_segment_id, pci_device_bdf, resources) =
-            self.pci_resources(&vfio_user_name, device_cfg.pci_segment)?;
+            self.pci_resources(&vfio_user_name, device_cfg.pci_segment, None)?;
 
         let legacy_interrupt_group =
             if let Some(legacy_interrupt_manager) = &self.legacy_interrupt_manager {
@@ -4039,6 +4053,7 @@ impl DeviceManager {
         virtio_device_id: &str,
         pci_segment_id: u16,
         dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
+        bdf_device: Option<u8>,
     ) -> DeviceManagerResult<PciBdf> {
         let id = format!("{VIRTIO_PCI_DEVICE_NAME_PREFIX}-{virtio_device_id}");
 
@@ -4047,7 +4062,7 @@ impl DeviceManager {
         node.children = vec![virtio_device_id.to_string()];
 
         let (pci_segment_id, pci_device_bdf, resources) =
-            self.pci_resources(&id, pci_segment_id)?;
+            self.pci_resources(&id, pci_segment_id, bdf_device)?;
 
         // Update the existing virtio node by setting the parent.
         if let Some(node) = self.device_tree.lock().unwrap().get_mut(virtio_device_id) {
@@ -4184,7 +4199,7 @@ impl DeviceManager {
         info!("Creating pvpanic device {id}");
 
         let (pci_segment_id, pci_device_bdf, resources) =
-            self.pci_resources(&id, pci_segment_id)?;
+            self.pci_resources(&id, pci_segment_id, None)?;
 
         let snapshot = snapshot_from_id(self.snapshot.as_ref(), id.as_str());
 
@@ -4222,7 +4237,7 @@ impl DeviceManager {
         info!("Creating ivshmem device {id}");
 
         let (pci_segment_id, pci_device_bdf, resources) =
-            self.pci_resources(&id, pci_segment_id)?;
+            self.pci_resources(&id, pci_segment_id, None)?;
         let snapshot = snapshot_from_id(self.snapshot.as_ref(), id.as_str());
 
         let ivshmem_ops = Arc::new(Mutex::new(IvshmemHandler {
@@ -4267,6 +4282,7 @@ impl DeviceManager {
         &self,
         id: &str,
         pci_segment_id: u16,
+        pci_device_id: Option<u8>,
     ) -> DeviceManagerResult<(u16, PciBdf, Option<Vec<Resource>>)> {
         // Look for the id in the device tree. If it can be found, that means
         // the device is being restored, otherwise it's created from scratch.
@@ -4294,7 +4310,7 @@ impl DeviceManager {
             (pci_segment_id, pci_device_bdf, resources)
         } else {
             let pci_device_bdf =
-                self.pci_segments[pci_segment_id as usize].allocate_device_bdf(None)?;
+                self.pci_segments[pci_segment_id as usize].allocate_device_bdf(pci_device_id)?;
 
             (pci_segment_id, pci_device_bdf, None)
         })
@@ -4786,6 +4802,7 @@ impl DeviceManager {
             &handle.id,
             handle.pci_segment,
             handle.dma_handler,
+            None,
         )?;
 
         // Update the PCIU bitmap
