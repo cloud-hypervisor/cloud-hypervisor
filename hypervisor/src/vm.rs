@@ -257,6 +257,12 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to initialize VM")]
     InitializeVm(#[source] anyhow::Error),
+    #[cfg(all(target_arch = "x86_64", feature = "mshv"))]
+    ///
+    /// Failed to retrieve list of MSRs.
+    ///
+    #[error("Failed to get the list of supported MSRs")]
+    GetMsrList(#[source] anyhow::Error),
 }
 ///
 /// Result type for returning from a function
