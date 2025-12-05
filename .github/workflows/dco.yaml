@@ -3,7 +3,7 @@ on: [pull_request, merge_group]
 
 jobs:
   check:
-    name: DCO Check ("Signed-Off-By")
+    name: DCO Check ("Signed-off-by")
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
