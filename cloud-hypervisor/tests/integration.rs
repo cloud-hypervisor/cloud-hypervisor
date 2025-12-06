@@ -49,6 +49,8 @@ mod x86_64 {
         "jammy-server-cloudimg-amd64-custom-20241017-0-backing-zstd.qcow2";
     pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
         "jammy-server-cloudimg-amd64-custom-20241017-0-backing-uncompressed.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-raw.qcow2";
     pub const WINDOWS_IMAGE_NAME: &str = "windows-server-2022-amd64-2.raw";
     pub const OVMF_NAME: &str = "CLOUDHV.fd";
     pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'IO-APIC.*ttyS0' /proc/interrupts || true";
@@ -74,6 +76,8 @@ mod aarch64 {
         "jammy-server-cloudimg-arm64-custom-20220329-0-backing-zstd.qcow2";
     pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
         "jammy-server-cloudimg-arm64-custom-20220329-0-backing-uncompressed.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-raw.qcow2";
     pub const WINDOWS_IMAGE_NAME: &str = "windows-11-iot-enterprise-aarch64.raw";
     pub const OVMF_NAME: &str = "CLOUDHV_EFI.fd";
     pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'GICv3.*uart-pl011' /proc/interrupts || true";
@@ -3572,6 +3576,11 @@ mod common_parallel {
             false,
             true,
         );
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_backing_raw_file() {
+        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE, false, false, true);
     }
 
     #[test]
