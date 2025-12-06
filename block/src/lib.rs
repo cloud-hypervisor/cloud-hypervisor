@@ -136,7 +136,7 @@ pub enum ExecuteError {
     Read(#[source] GuestMemoryError),
     #[error("Failed to read_exact")]
     ReadExact(#[source] io::Error),
-    #[error("Can't execute an operation other than `read` on a read-only device")]
+    #[error("Can't execute an operation other than `read` or `get_id` on a read-only device")]
     ReadOnly,
     #[error("Failed to seek")]
     Seek(#[source] io::Error),
