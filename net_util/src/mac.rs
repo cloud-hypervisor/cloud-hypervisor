@@ -39,13 +39,10 @@ impl MacAddr {
             if v[i].len() != 2 {
                 return common_err;
             }
-            bytes[i] = u8::from_str_radix(v[i], 16).map_err(|e| {
-                io::Error::other(format!(
-                    "parsing of {} into a MAC address failed: {}",
-                    s.as_ref(),
-                    e
-                ))
-            })?;
+            if !v[i].bytes().all(|a| a.is_ascii_hexdigit()) {
+                return common_err;
+            }
+            bytes[i] = u8::from_str_radix(v[i], 16).unwrap();
         }
 
         Ok(MacAddr { bytes })
@@ -186,6 +183,8 @@ mod unit_tests {
 
         let bytes = mac.get_bytes();
         assert_eq!(bytes, [0x12u8, 0x34, 0x56, 0x78, 0x9a, 0xbc]);
+
+        MacAddr::parse_str("12:34:56:78:9a:+c").unwrap_err();
 
         let s = serde_json::to_string(&mac).expect("MacAddr serialization failed.");
         assert_eq!(s, "\"12:34:56:78:9a:bc\"");
