@@ -99,6 +99,7 @@ fn virtio_balloon_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
 fn virtio_block_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![
         (libc::SYS_fallocate, vec![]),
+        (libc::SYS_fcntl, vec![]),
         (libc::SYS_fdatasync, vec![]),
         (libc::SYS_fsync, vec![]),
         (libc::SYS_ftruncate, vec![]),
