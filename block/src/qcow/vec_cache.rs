@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::collections::hash_map::IterMut;
 use std::io;
-use std::ops::{Index, IndexMut};
+use std::ops::{Deref, Index, IndexMut};
 use std::slice::SliceIndex;
 
 /// Trait that allows for checking if an implementor is dirty. Useful for types that are cached so
@@ -82,6 +82,14 @@ impl<T: 'static + Copy + Default> IndexMut<usize> for VecCache<T> {
     fn index_mut(&mut self, index: usize) -> &mut T {
         self.dirty = true;
         self.vec.index_mut(index)
+    }
+}
+
+impl<T: 'static + Copy + Default> Deref for VecCache<T> {
+    type Target = [T];
+
+    fn deref(&self) -> &[T] {
+        &self.vec
     }
 }
 
