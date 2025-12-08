@@ -135,7 +135,7 @@ igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main" }
 # serde crates
 serde = "1.0.228"
 serde_json = "1.0.145"
-serde_with = { version = "3.16.0", default-features = false }
+serde_with = { version = "3.16.1", default-features = false }
 
 # other crates
 anyhow = "1.0.99"
@@ -147,15 +147,15 @@ dhat = "0.3.3"
 dirs = "6.0.0"
 env_logger = "0.11.8"
 epoll = "4.4.0"
-flume = "0.11.1"
+flume = "0.12.0"
 itertools = "0.14.0"
-libc = "0.2.177"
-log = "0.4.28"
+libc = "0.2.178"
+log = "0.4.29"
 signal-hook = "0.3.18"
 thiserror = "2.0.17"
-uuid = { version = "1.18.1" }
+uuid = { version = "1.19.0" }
 wait-timeout = "0.2.1"
-zerocopy = { version = "0.8.30", default-features = false }
+zerocopy = { version = "0.8.31", default-features = false }
 
 [workspace.lints.clippy]
 # Any clippy lint (group) in alphabetical order:
