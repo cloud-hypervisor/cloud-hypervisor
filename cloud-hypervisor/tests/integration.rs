@@ -717,6 +717,18 @@ fn resize_zone_command(api_socket: &str, id: &str, desired_size: &str) -> bool {
     cmd.status().expect("Failed to launch ch-remote").success()
 }
 
+fn resize_disk_command(api_socket: &str, id: &str, desired_size: &str) -> bool {
+    let mut cmd = Command::new(clh_command("ch-remote"));
+    cmd.args([
+        &format!("--api-socket={api_socket}"),
+        "resize-disk",
+        &format!("--disk={id}"),
+        &format!("--size={desired_size}"),
+    ]);
+
+    cmd.status().expect("Failed to launch ch-remote").success()
+}
+
 // setup OVS-DPDK bridge and ports
 fn setup_ovs_dpdk() {
     // setup OVS-DPDK
@@ -5643,6 +5655,118 @@ mod common_parallel {
     #[cfg(target_arch = "x86_64")]
     fn test_disk_hotplug_with_landlock() {
         _test_disk_hotplug(true);
+    }
+
+    #[test]
+    fn test_disk_resize() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+
+        #[cfg(target_arch = "x86_64")]
+        let kernel_path = direct_kernel_boot_path();
+        #[cfg(target_arch = "aarch64")]
+        let kernel_path = edk2_path();
+
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        // Create a disk image that we can write to
+        assert!(
+            exec_host_command_output(&format!(
+                "sudo dd if=/dev/zero of=/tmp/resize.img bs=1M count=16"
+            ))
+            .status
+            .success()
+        );
+
+        let mut cmd = GuestCommand::new(&guest);
+
+        cmd.args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .default_net()
+            .capture_output();
+
+        let mut child = cmd.spawn().unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // Add the disk to the VM
+            let (cmd_success, cmd_output) = remote_command_w_output(
+                &api_socket,
+                "add-disk",
+                Some("path=/tmp/resize.img,id=test0"),
+            );
+
+            assert!(cmd_success);
+            assert!(
+                String::from_utf8_lossy(&cmd_output)
+                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
+            );
+
+            // Check that /dev/vdc exists and the block size is 16M.
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+            // And check the block device can be written to.
+            guest
+                .ssh_command("sudo dd if=/dev/zero of=/dev/vdc bs=1M count=16")
+                .unwrap();
+
+            // Resize disk to 32M
+            let resize_up_success =
+                resize_disk_command(&api_socket, "test0", "33554432" /* 32M */);
+            assert!(resize_up_success);
+
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 32M")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            // And check all blocks can be written to
+            guest
+                .ssh_command("sudo dd if=/dev/zero of=/dev/vdc bs=1M count=32")
+                .unwrap();
+
+            // Resize down to original size
+            let resize_down_success =
+                resize_disk_command(&api_socket, "test0", "16777216" /* 16M */);
+            assert!(resize_down_success);
+
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            // And check all blocks can be written to, again
+            guest
+                .ssh_command("sudo dd if=/dev/zero of=/dev/vdc bs=1M count=16")
+                .unwrap();
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
     }
 
     fn create_loop_device(backing_file_path: &str, block_size: u32, num_retries: usize) -> String {
