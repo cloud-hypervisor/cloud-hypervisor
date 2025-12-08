@@ -102,6 +102,7 @@ impl QcowRawFile {
         for count in table {
             buffer.write_u16::<BigEndian>(*count)?;
         }
+        buffer.flush()?;
         Ok(())
     }
 
