@@ -244,4 +244,4 @@ impl CpuidOutputRegisterAdjustments {
 
 #[derive(Debug, Error)]
 #[error("Required CPUID entries not found")]
-pub(in crate::x86_64) struct MissingCpuidEntriesError;
+pub struct MissingCpuidEntriesError;
