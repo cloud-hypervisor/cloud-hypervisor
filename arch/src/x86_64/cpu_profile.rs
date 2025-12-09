@@ -19,7 +19,9 @@ use crate::x86_64::cpuid_definitions::{Parameters, deserialize_from_hex, seriali
 pub enum CpuProfile {
     #[default]
     Host,
+    #[cfg(feature = "kvm")]
     Skylake,
+    #[cfg(feature = "kvm")]
     SapphireRapids,
 }
 
@@ -36,16 +38,26 @@ impl CpuProfile {
     pub(in crate::x86_64) fn data(&self, amx: bool) -> Option<CpuProfileData> {
         let mut data: CpuProfileData = match self {
             Self::Host => None,
-            Self::Skylake => todo!(),
-            Self::SapphireRapids => todo!(),
+            Self::Skylake => Some(
+                serde_json::from_slice(include_bytes!("cpu_profiles/skylake.json"))
+                    .inspect_err(|e| {
+                        error!("BUG: could not deserialize CPU profile. Got error: {:?}", e)
+                    })
+                    .expect("should be able to deserialize pre-generated data"),
+            ),
+            Self::SapphireRapids => Some(
+                serde_json::from_slice(include_bytes!("cpu_profiles/sapphire-rapids.json"))
+                    .inspect_err(|e| {
+                        error!("BUG: could not deserialize CPU profile. Got error: {:?}", e)
+                    })
+                    .expect("should be able to deserialize pre-generated data"),
+            ),
         }?;
 
         if !amx {
             // In this case we will need to wipe out the AMX tile state components (if they are included in the profile)
             for adj in data.adjustments.iter_mut() {
                 if adj.0.sub_leaf.start() != adj.0.sub_leaf.end() {
-                    // The generated profiles produce as many sub-leaf entries as possible, and only use ranges for
-                    // values not found.
                     continue;
                 }
                 let sub_leaf = *adj.0.sub_leaf.start();
@@ -74,7 +86,7 @@ impl CpuProfile {
         }
         // This will need to be addressed before upstreaming.
         // We will probably need one profile per hypervisor.
-        unimplemented!()
+        unreachable!()
     }
 }
 
