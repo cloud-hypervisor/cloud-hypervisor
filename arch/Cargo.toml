@@ -28,5 +28,10 @@ vmm-sys-util = { workspace = true, features = ["with-serde"] }
 fdt_parser = { version = "0.1.5", package = "fdt" }
 vm-fdt = { workspace = true }
 
+# Use this to test our custom serialization logic
+[dev-dependencies]
+proptest = "1.0.0"
+serde_json = { workspace = true }
+
 [lints]
 workspace = true
