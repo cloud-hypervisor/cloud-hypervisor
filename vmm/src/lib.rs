@@ -1615,26 +1615,23 @@ impl RequestHandler for Vmm {
     fn vm_create(&mut self, config: Box<VmConfig>) -> result::Result<(), VmError> {
         // We only store the passed VM config.
         // The VM will be created when being asked to boot it.
-        if self.vm_config.is_none() {
-            self.vm_config = Some(Arc::new(Mutex::new(*config)));
-            self.console_info =
-                Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
-
-            if self
-                .vm_config
-                .as_ref()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .landlock_enable
-            {
-                apply_landlock(self.vm_config.as_ref().unwrap().as_ref())
-                    .map_err(VmError::ApplyLandlock)?;
-            }
-            Ok(())
-        } else {
-            Err(VmError::VmAlreadyCreated)
+        if self.vm_config.is_some() {
+            return Err(VmError::VmAlreadyCreated);
         }
+
+        self.vm_config = Some(Arc::new(Mutex::new(*config)));
+        self.console_info =
+            Some(pre_create_console_devices(self).map_err(VmError::CreateConsoleDevices)?);
+
+        if self
+            .vm_config
+            .as_ref()
+            .is_some_and(|config| config.lock().unwrap().landlock_enable)
+        {
+            apply_landlock(self.vm_config.as_ref().unwrap().as_ref())
+                .map_err(VmError::ApplyLandlock)?;
+        }
+        Ok(())
     }
 
     fn vm_boot(&mut self) -> result::Result<(), VmError> {

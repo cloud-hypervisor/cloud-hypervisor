@@ -408,8 +408,10 @@ fn memory_zone_get_align_size(zone: &MemoryZoneConfig) -> Result<u64, Error> {
     }
 
     // The `hugepages` is enabled and the `hugepage_size` is specified, just use it directly.
-    if zone.hugepages && zone.hugepage_size.is_some() {
-        return Ok(zone.hugepage_size.unwrap());
+    if let Some(hugepage_size) = zone.hugepage_size
+        && zone.hugepages
+    {
+        return Ok(hugepage_size);
     }
 
     // There are two scenarios here:
