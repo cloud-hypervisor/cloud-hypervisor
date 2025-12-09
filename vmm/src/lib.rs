@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use std::{io, result, thread};
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
 use api::http::HttpApiHandle;
@@ -1402,8 +1402,17 @@ impl Vmm {
         let dest_cpuid = &{
             let vm_config = &src_vm_config.lock().unwrap();
 
+            if vm_config.cpus.features.amx {
+                // Need to enable AMX tile state components before generating common cpuid
+                // as this affects what Hypervisor::get_supported_cpuid returns.
+                self.hypervisor
+                    .enable_amx_state_components()
+                    .map_err(|e| MigratableError::MigrateReceive(e.into()))?;
+            }
+
             let phys_bits =
                 vm::physical_bits(self.hypervisor.as_ref(), vm_config.cpus.max_phys_bits);
+
             arch::generate_common_cpuid(
                 self.hypervisor.as_ref(),
                 &arch::CpuidConfig {
