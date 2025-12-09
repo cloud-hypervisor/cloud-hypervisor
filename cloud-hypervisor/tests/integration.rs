@@ -1955,9 +1955,8 @@ fn test_memory_mergeable(mergeable: bool) {
         "mergeable=off"
     };
 
-    // We are assuming the rest of the system in our CI is not using mergeable memory
+    // We assume the number of shared pages in the rest of the system to be constant
     let ksm_ps_init = get_ksm_pages_shared();
-    assert!(ksm_ps_init == 0);
 
     let disk_config1 = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest1 = Guest::new(Box::new(disk_config1));
@@ -2010,8 +2009,8 @@ fn test_memory_mergeable(mergeable: bool) {
             // We are expecting the number of shared pages to increase as the number of VM increases
             assert!(ksm_ps_guest1 < ksm_ps_guest2);
         } else {
-            assert!(ksm_ps_guest1 == 0);
-            assert!(ksm_ps_guest2 == 0);
+            assert!(ksm_ps_guest1 == ksm_ps_init);
+            assert!(ksm_ps_guest2 == ksm_ps_init);
         }
     });
 
