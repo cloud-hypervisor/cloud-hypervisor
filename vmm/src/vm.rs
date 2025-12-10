@@ -2390,16 +2390,15 @@ impl Vm {
         for vcpu in vcpus {
             let guest_memory = &self.memory_manager.lock().as_ref().unwrap().guest_memory();
             let boot_setup = entry_point.map(|e| (e, guest_memory));
+            let mut vcpu = vcpu.lock().unwrap();
             self.cpu_manager
                 .lock()
                 .unwrap()
-                .configure_vcpu(&vcpu, boot_setup)
+                .configure_vcpu(&mut vcpu, boot_setup)
                 .map_err(Error::CpuManager)?;
 
             #[cfg(target_arch = "aarch64")]
-            vcpu.lock()
-                .unwrap()
-                .set_gic_redistributor_addr(redist_addr[2], redist_addr[3])
+            vcpu.set_gic_redistributor_addr(redist_addr[2], redist_addr[3])
                 .map_err(Error::CpuManager)?;
         }
 
