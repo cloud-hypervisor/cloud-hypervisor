@@ -1235,12 +1235,10 @@ impl Vmm {
         Ok(true)
     }
 
-    #[allow(clippy::needless_pass_by_value)]
     fn send_migration(
         vm: &mut Vm,
-        #[cfg(all(feature = "kvm", target_arch = "x86_64"))] hypervisor: Arc<
-            dyn hypervisor::Hypervisor,
-        >,
+        #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+        hypervisor: &dyn hypervisor::Hypervisor,
         send_data_migration: &VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
         // Set up the socket connection
@@ -1265,12 +1263,10 @@ impl Vmm {
             }
 
             let amx = vm_config.lock().unwrap().cpus.features.amx;
-            let phys_bits = vm::physical_bits(
-                hypervisor.as_ref(),
-                vm_config.lock().unwrap().cpus.max_phys_bits,
-            );
+            let phys_bits =
+                vm::physical_bits(hypervisor, vm_config.lock().unwrap().cpus.max_phys_bits);
             arch::generate_common_cpuid(
-                hypervisor.as_ref(),
+                hypervisor,
                 &arch::CpuidConfig {
                     phys_bits,
                     kvm_hyperv: vm_config.lock().unwrap().cpus.kvm_hyperv,
@@ -2323,7 +2319,7 @@ impl RequestHandler for Vmm {
             Self::send_migration(
                 vm,
                 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-                self.hypervisor.clone(),
+                self.hypervisor.as_ref(),
                 &send_data_migration,
             )
             .map_err(|migration_err| {

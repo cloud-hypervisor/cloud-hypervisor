@@ -417,7 +417,6 @@ impl VsockPacket {
 }
 
 #[cfg(test)]
-#[allow(clippy::undocumented_unsafe_blocks)]
 mod unit_tests {
     use virtio_bindings::virtio_ring::VRING_DESC_F_WRITE;
     use virtio_queue::QueueOwnedT;
@@ -465,8 +464,9 @@ mod unit_tests {
         let hdr_gpa = guest_desc.addr.get();
         let hdr_ptr =
             get_host_address_range(mem, GuestAddress(hdr_gpa), VSOCK_PKT_HDR_SIZE).unwrap();
+        // SAFETY: The length is valid.
         let len_ptr = unsafe { hdr_ptr.add(HDROFF_LEN) };
-
+        // SAFETY: The length is valid.
         LittleEndian::write_u32(unsafe { std::slice::from_raw_parts_mut(len_ptr, 4) }, len);
     }
 
