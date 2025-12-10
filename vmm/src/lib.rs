@@ -1014,7 +1014,8 @@ impl Vmm {
             .unwrap()
             .landlock_enable
         {
-            apply_landlock(self.vm_config.as_ref().unwrap().as_ref()).map_err(|e| {
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
+            apply_landlock(&mut config).map_err(|e| {
                 MigratableError::MigrateReceive(anyhow!("Error applying landlock: {e:?}"))
             })?;
         }
@@ -1486,8 +1487,8 @@ impl Vmm {
             .unwrap()
             .landlock_enable
         {
-            apply_landlock(self.vm_config.as_ref().unwrap().as_ref())
-                .map_err(VmError::ApplyLandlock)?;
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
+            apply_landlock(&mut config).map_err(VmError::ApplyLandlock)?;
         }
 
         // Now we can restore the rest of the VM.
@@ -1606,8 +1607,8 @@ impl Vmm {
     }
 }
 
-fn apply_landlock(vm_config: &Mutex<VmConfig>) -> result::Result<(), LandlockError> {
-    vm_config.lock().unwrap().apply_landlock()?;
+fn apply_landlock(vm_config: &mut VmConfig) -> result::Result<(), LandlockError> {
+    vm_config.apply_landlock()?;
     Ok(())
 }
 
@@ -1628,8 +1629,8 @@ impl RequestHandler for Vmm {
             .as_ref()
             .is_some_and(|config| config.lock().unwrap().landlock_enable)
         {
-            apply_landlock(self.vm_config.as_ref().unwrap().as_ref())
-                .map_err(VmError::ApplyLandlock)?;
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
+            apply_landlock(&mut config).map_err(VmError::ApplyLandlock)?;
         }
         Ok(())
     }

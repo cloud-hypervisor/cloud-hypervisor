@@ -16,7 +16,7 @@ use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::{io, result};
 
 use libc::{TCSANOW, cfmakeraw, isatty, tcgetattr, tcsetattr, termios};
@@ -76,7 +76,7 @@ pub struct ConsoleInfo {
 fn modify_mode<F: FnOnce(&mut termios)>(
     fd: RawFd,
     f: F,
-    original_termios_opt: &Mutex<Option<termios>>,
+    original_termios_opt: &mut Option<termios>,
 ) -> vmm_sys_util::errno::Result<()> {
     // SAFETY: safe because we check the return value of isatty.
     if unsafe { isatty(fd) } != 1 {
@@ -91,7 +91,6 @@ fn modify_mode<F: FnOnce(&mut termios)>(
     if ret < 0 {
         return vmm_sys_util::errno::errno_result();
     }
-    let mut original_termios_opt = original_termios_opt.lock().unwrap();
     if original_termios_opt.is_none() {
         original_termios_opt.replace(termios);
     }
@@ -109,7 +108,7 @@ fn modify_mode<F: FnOnce(&mut termios)>(
 
 fn set_raw_mode(
     f: &dyn AsRawFd,
-    original_termios_opt: &Mutex<Option<termios>>,
+    original_termios_opt: &mut Option<termios>,
 ) -> ConsoleDeviceResult<()> {
     modify_mode(
         f.as_raw_fd(),
@@ -179,6 +178,7 @@ fn dup_stdout() -> vmm_sys_util::errno::Result<File> {
 pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<ConsoleInfo> {
     let vm_config = vmm.vm_config.as_mut().unwrap().clone();
     let mut vmconfig = vm_config.lock().unwrap();
+    let mut original_termios_opt = vmm.original_termios_opt.lock().unwrap();
 
     let console_info = ConsoleInfo {
         console_main_fd: match vmconfig.console.mode {
@@ -190,7 +190,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             ConsoleOutputMode::Pty => {
                 let (main_fd, sub_fd, path) =
                     create_pty().map_err(ConsoleDeviceError::CreateConsoleDevice)?;
-                set_raw_mode(&sub_fd.as_raw_fd(), &vmm.original_termios_opt)?;
+                set_raw_mode(&sub_fd.as_raw_fd(), &mut original_termios_opt)?;
                 vmconfig.console.file = Some(path.clone());
                 vmm.console_resize_pipe = Some(Arc::new(
                     listen_for_sigwinch_on_tty(
@@ -221,7 +221,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                 }
 
                 // Make sure stdout is in raw mode, if it's a terminal.
-                set_raw_mode(&stdout, &vmm.original_termios_opt)?;
+                set_raw_mode(&stdout, &mut original_termios_opt)?;
                 ConsoleOutput::Tty(Arc::new(stdout))
             }
             ConsoleOutputMode::Socket => {
@@ -239,7 +239,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             ConsoleOutputMode::Pty => {
                 let (main_fd, sub_fd, path) =
                     create_pty().map_err(ConsoleDeviceError::CreateConsoleDevice)?;
-                set_raw_mode(&sub_fd.as_raw_fd(), &vmm.original_termios_opt)?;
+                set_raw_mode(&sub_fd.as_raw_fd(), &mut original_termios_opt)?;
                 vmconfig.serial.file = Some(path.clone());
                 ConsoleOutput::Pty(Arc::new(main_fd))
             }
@@ -255,7 +255,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                 let stdout = dup_stdout().map_err(ConsoleDeviceError::DupFd)?;
 
                 // Make sure stdout is in raw mode, if it's a terminal.
-                set_raw_mode(&stdout, &vmm.original_termios_opt)?;
+                set_raw_mode(&stdout, &mut original_termios_opt)?;
 
                 ConsoleOutput::Tty(Arc::new(stdout))
             }
@@ -277,14 +277,14 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             ConsoleOutputMode::Pty => {
                 let (main_fd, sub_fd, path) =
                     create_pty().map_err(ConsoleDeviceError::CreateConsoleDevice)?;
-                set_raw_mode(&sub_fd.as_raw_fd(), &vmm.original_termios_opt)?;
+                set_raw_mode(&sub_fd.as_raw_fd(), &mut original_termios_opt)?;
                 vmconfig.debug_console.file = Some(path.clone());
                 ConsoleOutput::Pty(Arc::new(main_fd))
             }
             ConsoleOutputMode::Tty => {
                 let out =
                     dup_stdout().map_err(|e| ConsoleDeviceError::CreateConsoleDevice(e.into()))?;
-                set_raw_mode(&out, &vmm.original_termios_opt)?;
+                set_raw_mode(&out, &mut original_termios_opt)?;
                 ConsoleOutput::Tty(Arc::new(out))
             }
             ConsoleOutputMode::Socket => {

@@ -922,11 +922,9 @@ impl CpuManager {
 
     pub fn configure_vcpu(
         &self,
-        vcpu: &Mutex<Vcpu>,
+        vcpu: &mut Vcpu,
         boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
     ) -> Result<()> {
-        let mut vcpu = vcpu.lock().unwrap();
-
         #[cfg(feature = "sev_snp")]
         if self.sev_snp_enabled {
             if let Some((kernel_entry_point, _)) = boot_setup {
@@ -1406,7 +1404,8 @@ impl CpuManager {
             cmp::Ordering::Greater => {
                 let vcpus = self.create_vcpus(desired_vcpus, None)?;
                 for vcpu in vcpus {
-                    self.configure_vcpu(&vcpu, None)?;
+                    let mut vcpu = vcpu.lock().unwrap();
+                    self.configure_vcpu(&mut vcpu, None)?;
                 }
                 self.activate_vcpus(desired_vcpus, true, None)?;
                 Ok(true)
