@@ -7,6 +7,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 pub mod cpu_profile;
+#[cfg(feature = "cpu_profile_generation")]
+pub mod cpu_profile_generation;
 pub mod cpuid_definitions;
 pub mod interrupts;
 pub mod layout;
