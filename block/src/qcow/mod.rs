@@ -773,7 +773,7 @@ impl QcowFile {
             let raw_file = &mut self.raw_file;
             self.l2_cache
                 .insert(l1_index, table, |index, evicted| {
-                    raw_file.write_pointer_table(l1_table[index], evicted.get_values(), 0)
+                    raw_file.write_pointer_table_direct(l1_table[index], evicted.iter())
                 })
                 .map_err(Error::EvictingCache)?;
         }
@@ -998,7 +998,7 @@ impl QcowFile {
 
             // Rewrite the top-level refcount table.
             raw_file
-                .write_pointer_table(header.refcount_table_offset, ref_table, 0)
+                .write_pointer_table_direct(header.refcount_table_offset, ref_table.iter())
                 .map_err(Error::WritingHeader)?;
 
             // Rewrite the header again, now with lazy refcounts disabled.
@@ -1513,7 +1513,7 @@ impl QcowFile {
             let l1_table = &self.l1_table;
             let raw_file = &mut self.raw_file;
             self.l2_cache.insert(l1_index, l2_table, |index, evicted| {
-                raw_file.write_pointer_table(l1_table[index], evicted.get_values(), 0)
+                raw_file.write_pointer_table_direct(l1_table[index], evicted.iter())
             })?;
         }
         Ok(new_cluster)
@@ -1596,7 +1596,7 @@ impl QcowFile {
             let addr = self.l1_table[*l1_index];
             if addr != 0 {
                 self.raw_file
-                    .write_pointer_table(addr, l2_table.get_values(), 0)?;
+                    .write_pointer_table_direct(addr, l2_table.iter())?;
             } else {
                 return Err(std::io::Error::from_raw_os_error(EINVAL));
             }
@@ -1610,25 +1610,22 @@ impl QcowFile {
         // Push L1 table and refcount table last as all the clusters they point to are now
         // guaranteed to be valid.
         let mut sync_required = if self.l1_table.dirty() {
-            // Build L1 table with OFLAG_COPIED bits set correctly based on L2 cluster refcounts
-            let l1_active: Vec<u64> = self
-                .l1_table
-                .get_values()
-                .iter()
-                .map(|&l2_addr| {
+            // Write L1 table with OFLAG_COPIED bits
+            let refcounts = &mut self.refcounts;
+            self.raw_file.write_pointer_table(
+                self.header.l1_table_offset,
+                self.l1_table.iter(),
+                |raw_file, l2_addr| {
                     if l2_addr == 0 {
                         Ok(0)
                     } else {
-                        let refcount = self
-                            .refcounts
-                            .get_cluster_refcount(&mut self.raw_file, l2_addr)
+                        let refcount = refcounts
+                            .get_cluster_refcount(raw_file, l2_addr)
                             .map_err(|e| std::io::Error::other(Error::GettingRefcount(e)))?;
                         Ok(l1_entry_make(l2_addr, refcount == 1))
                     }
-                })
-                .collect::<io::Result<Vec<u64>>>()?;
-            self.raw_file
-                .write_pointer_table(self.header.l1_table_offset, &l1_active, 0)?;
+                },
+            )?;
             self.l1_table.mark_clean();
             true
         } else {

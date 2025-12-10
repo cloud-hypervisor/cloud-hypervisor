@@ -61,24 +61,47 @@ impl QcowRawFile {
         self.read_pointer_table(offset, count, mask)
     }
 
-    /// Writes `table` of u64 pointers to `offset` in the file.
-    /// `non_zero_flags` will be ORed with all non-zero values in `table`.
-    /// writing.
-    pub fn write_pointer_table(
+    /// Internal helper for creating a buffered writer for pointer tables.
+    #[inline]
+    fn setup_pointer_table_writer<T>(
         &mut self,
         offset: u64,
-        table: &[u64],
-        non_zero_flags: u64,
-    ) -> io::Result<()> {
+        entries: &impl Iterator<Item = T>,
+    ) -> io::Result<BufWriter<RawFile>> {
         self.file.seek(SeekFrom::Start(offset))?;
-        let mut buffer = BufWriter::with_capacity(std::mem::size_of_val(table), &mut self.file);
-        for addr in table {
-            let val = if *addr == 0 {
-                0
-            } else {
-                *addr | non_zero_flags
-            };
-            buffer.write_u64::<BigEndian>(val)?;
+        let my_file = self.file.try_clone()?;
+        let capacity = entries.size_hint().0 * size_of::<u64>();
+        Ok(BufWriter::with_capacity(capacity, my_file))
+    }
+
+    /// Writes a pointer table to `offset` in the file.
+    /// Entries are computed on-the-fly by the callback.
+    pub fn write_pointer_table<'a, T: Copy + 'a>(
+        &mut self,
+        offset: u64,
+        entries: impl Iterator<Item = &'a T>,
+        mut f: impl FnMut(&mut QcowRawFile, T) -> io::Result<u64>,
+    ) -> io::Result<()> {
+        let mut buffer = self.setup_pointer_table_writer(offset, &entries)?;
+
+        for addr in entries {
+            let entry = f(self, *addr)?;
+            buffer.write_u64::<BigEndian>(entry)?;
+        }
+        buffer.flush()?;
+        Ok(())
+    }
+
+    /// Writes a pointer table directly without transforming values.
+    pub fn write_pointer_table_direct<'a>(
+        &mut self,
+        offset: u64,
+        entries: impl Iterator<Item = &'a u64>,
+    ) -> io::Result<()> {
+        let mut buffer = self.setup_pointer_table_writer(offset, &entries)?;
+
+        for &entry in entries {
+            buffer.write_u64::<BigEndian>(entry)?;
         }
         buffer.flush()?;
         Ok(())

@@ -156,11 +156,8 @@ impl RefCount {
     /// Returns true if the table changed since the previous `flush_table()` call.
     pub fn flush_table(&mut self, raw_file: &mut QcowRawFile) -> io::Result<bool> {
         if self.ref_table.dirty() {
-            raw_file.write_pointer_table(
-                self.refcount_table_offset,
-                self.ref_table.get_values(),
-                0,
-            )?;
+            raw_file
+                .write_pointer_table_direct(self.refcount_table_offset, self.ref_table.iter())?;
             self.ref_table.mark_clean();
             Ok(true)
         } else {
