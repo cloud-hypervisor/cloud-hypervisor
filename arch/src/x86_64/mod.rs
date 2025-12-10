@@ -536,8 +536,60 @@ impl CpuidFeatureEntry {
         let src_vm_features = Self::get_features_from_cpuid(src_vm_cpuid, feature_entry_list);
         let dest_vm_features = Self::get_features_from_cpuid(dest_vm_cpuid, feature_entry_list);
 
-        // Loop on feature bit and check if the 'source vm' feature is a subset
-        // of those of the 'destination vm' feature
+        // If both processors are Intel then we can use the existing Intel CPUID definitions to log more
+        // precise information about potential errors
+        let both_intel = {
+            // Check if the vendor string is "GenuineIntel". This assumes that `leaf_0` is the entry
+            // corresponding to CPUID leaf 0.
+            let is_intel = |leaf_0: &CpuIdEntry| {
+                leaf_0.ebx == 0x756e_6547 && leaf_0.ecx == 0x6c65_746e && leaf_0.edx == 0x4965_6e69
+            };
+            let src_0 = src_vm_cpuid
+                .iter()
+                .find(|entry| (entry.function == 0x0) & (entry.index == 0x0));
+            let dest_0 = dest_vm_cpuid
+                .iter()
+                .find(|entry| (entry.function == 0x0) & (entry.index == 0x0));
+            src_0
+                .zip(dest_0)
+                .is_some_and(|(src, dest)| is_intel(src) & is_intel(dest))
+        };
+        let extra_reporting = |entry: &CpuidFeatureEntry, src_reg: u32, dest_reg: u32| {
+            if let Some((_, defs)) = cpuid_definitions::intel::INTEL_CPUID_DEFINITIONS
+                .as_slice()
+                .iter()
+                .find(|(param, _)| {
+                    (param.leaf == entry.function) && (param.sub_leaf.contains(&entry.index))
+                })
+            {
+                for def in defs.as_slice() {
+                    let mask = (def.bits_range.0..=def.bits_range.1)
+                        .fold(0, |acc, next| acc | (1 << next));
+
+                    let src_val = src_reg & mask;
+                    let dest_val = dest_reg & mask;
+
+                    let is_compatible = match entry.compatible_check {
+                        CpuidCompatibleCheck::BitwiseSubset => (src_val & (!dest_val)) == 0,
+                        CpuidCompatibleCheck::NumNotGreater => src_val <= dest_val,
+                        CpuidCompatibleCheck::Equal => src_val == dest_val,
+                    };
+                    if !is_compatible {
+                        info!(
+                            "CPUID incompatibility for value definition='{:?}' detected in leaf={:#02x}, sub-leaf={:#02x}, register={:?}, compatibility_check={:?}, source VM value='{:#04x}' destination VM value='{:#04x}'",
+                            def,
+                            entry.function,
+                            entry.index,
+                            entry.feature_reg,
+                            entry.compatible_check,
+                            src_val,
+                            dest_val
+                        );
+                    }
+                }
+            }
+        };
+
         let mut compatible = true;
         for (i, (src_vm_feature, dest_vm_feature)) in src_vm_features
             .iter()
@@ -565,7 +617,9 @@ impl CpuidFeatureEntry {
                     src_vm_feature,
                     dest_vm_feature
                 );
-
+                if both_intel {
+                    extra_reporting(entry, *src_vm_feature, *dest_vm_feature);
+                }
                 compatible = false;
             }
         }
