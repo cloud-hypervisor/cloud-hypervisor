@@ -8,6 +8,8 @@
 // found in the LICENSE-BSD-3-Clause file.
 use std::sync::Arc;
 pub mod cpu_profile;
+#[cfg(feature = "cpu_profile_generation")]
+pub mod cpu_profile_generation;
 pub mod cpuid_definitions;
 pub mod interrupts;
 pub mod layout;

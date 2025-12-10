@@ -4,16 +4,25 @@ edition.workspace = true
 name = "arch"
 version = "0.1.0"
 
+# TODO: Consider making this a binary of the main package instead
+[[bin]]
+name = "generate-cpu-profile"
+path = "src/bin/generate-cpu-profile.rs"
+required-features = ["cpu_profile_generation"]
+
 [features]
 default = []
 fw_cfg = []
 kvm = ["hypervisor/kvm"]
 sev_snp = []
 tdx = []
+# Currently cpu profiles can only be generated with KVM
+cpu_profile_generation = ["kvm", "dep:clap"]
 
 [dependencies]
 anyhow = { workspace = true }
 byteorder = { workspace = true }
+clap = { workspace = true, optional = true }
 hypervisor = { path = "../hypervisor" }
 libc = { workspace = true }
 linux-loader = { workspace = true, features = ["bzimage", "elf", "pe"] }
