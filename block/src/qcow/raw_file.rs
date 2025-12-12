@@ -354,7 +354,7 @@ impl SeekHole for RawFile {
 }
 
 impl BlockBackend for RawFile {
-    fn size(&self) -> std::result::Result<u64, crate::Error> {
+    fn logical_size(&self) -> std::result::Result<u64, crate::Error> {
         Ok(self.metadata().map_err(crate::Error::RawFileError)?.len())
     }
 }

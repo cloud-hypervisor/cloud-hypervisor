@@ -8,11 +8,11 @@ use std::os::fd::AsRawFd;
 
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::AsyncAdaptor;
 use crate::async_io::{
     AsyncIo, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::vhdx::{Result as VhdxResult, Vhdx};
+use crate::{AsyncAdaptor, BlockBackend, Error};
 
 pub struct VhdxDiskSync {
     vhdx_file: Vhdx,
@@ -27,7 +27,7 @@ impl VhdxDiskSync {
 }
 
 impl DiskFile for VhdxDiskSync {
-    fn size(&mut self) -> DiskFileResult<u64> {
+    fn logical_size(&mut self) -> DiskFileResult<u64> {
         Ok(self.vhdx_file.virtual_disk_size())
     }
 

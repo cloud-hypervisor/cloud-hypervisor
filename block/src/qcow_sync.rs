@@ -9,11 +9,11 @@ use std::os::fd::AsRawFd;
 
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::AsyncAdaptor;
 use crate::async_io::{
     AsyncIo, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::qcow::{QcowFile, RawFile, Result as QcowResult};
+use crate::{AsyncAdaptor, BlockBackend};
 
 pub struct QcowDiskSync {
     qcow_file: QcowFile,
@@ -28,7 +28,7 @@ impl QcowDiskSync {
 }
 
 impl DiskFile for QcowDiskSync {
-    fn size(&mut self) -> DiskFileResult<u64> {
+    fn logical_size(&mut self) -> DiskFileResult<u64> {
         self.qcow_file
             .seek(SeekFrom::End(0))
             .map_err(DiskFileError::Size)

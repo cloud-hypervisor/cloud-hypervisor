@@ -202,7 +202,7 @@ impl Seek for Vhdx {
 }
 
 impl BlockBackend for Vhdx {
-    fn size(&self) -> std::result::Result<u64, crate::Error> {
+    fn logical_size(&self) -> std::result::Result<u64, crate::Error> {
         Ok(self.virtual_disk_size())
     }
 }

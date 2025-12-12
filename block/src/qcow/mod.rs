@@ -1808,7 +1808,7 @@ impl SeekHole for QcowFile {
 }
 
 impl BlockBackend for QcowFile {
-    fn size(&self) -> std::result::Result<u64, crate::Error> {
+    fn logical_size(&self) -> std::result::Result<u64, crate::Error> {
         Ok(self.virtual_size())
     }
 }
