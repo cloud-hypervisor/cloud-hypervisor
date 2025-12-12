@@ -75,8 +75,16 @@ impl Seek for FixedVhd {
 }
 
 impl BlockBackend for FixedVhd {
-    fn size(&self) -> std::result::Result<u64, crate::Error> {
+    fn logical_size(&self) -> Result<u64, crate::Error> {
         Ok(self.size)
+    }
+
+    /// Returns the physical size of the underlying file.
+    fn physical_size(&self) -> Result<u64, crate::Error> {
+        self.file
+            .metadata()
+            .map(|m| m.len())
+            .map_err(crate::Error::GetFileMetadata)
     }
 }
 

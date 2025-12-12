@@ -26,9 +26,16 @@ impl RawFileDiskSync {
 }
 
 impl DiskFile for RawFileDiskSync {
-    fn size(&mut self) -> DiskFileResult<u64> {
+    fn logical_size(&mut self) -> DiskFileResult<u64> {
         self.file
             .seek(SeekFrom::End(0))
+            .map_err(DiskFileError::Size)
+    }
+
+    fn physical_size(&mut self) -> DiskFileResult<u64> {
+        self.file
+            .metadata()
+            .map(|m| m.len())
             .map_err(DiskFileError::Size)
     }
 
