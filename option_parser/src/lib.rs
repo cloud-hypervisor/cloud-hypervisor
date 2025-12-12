@@ -194,9 +194,9 @@ impl OptionParser {
             // Currently CHV only support single-function devices. Those are mapped to function ID 0 in all cases, so we
             // disallow the assignment of any other function ID.
             if function_id != 0 {
-                todo!(
-                    "Currently no multi function devices supported! Please use `0` as function ID."
-                );
+                return Err(OptionParserError::InvalidValue(format!(
+                    "multi-function devices currently not supported; expected 0 got {function_id}"
+                )));
             }
             Ok((Some(device_id), Some(function_id)))
         } else {
@@ -491,7 +491,8 @@ mod unit_tests {
             .add("hotplug_method")
             .add("hotplug_size")
             .add("topology")
-            .add("cmdline");
+            .add("cmdline")
+            .add("addr");
 
         assert_eq!(split_commas("\"\"").unwrap(), vec!["\"\""]);
         parser.parse("size=128M,hanging_param").unwrap_err();
@@ -543,6 +544,22 @@ mod unit_tests {
         );
         parser.parse("cmdline=\"").unwrap_err();
         parser.parse("cmdline=\"\"\"").unwrap_err();
+
+        parser.parse("addr=0A.0").unwrap();
+        assert_eq!(
+            (Some(0xa_u8), Some(0)),
+            parser.get_pci_device_function().expect("should be valid")
+        );
+        parser.parse("addr=0A.1").unwrap();
+        assert!(matches!(
+            parser.get_pci_device_function(),
+            Err(OptionParserError::InvalidValue(_))
+        ));
+        parser.parse("addr=1g.0").unwrap();
+        assert!(matches!(
+            parser.get_pci_device_function(),
+            Err(OptionParserError::NumberConversion(_, _))
+        ));
     }
 
     #[test]
