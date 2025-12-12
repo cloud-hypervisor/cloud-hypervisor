@@ -27,6 +27,10 @@ impl DiskFile for FixedVhdDiskAsync {
         Ok(self.0.logical_size().unwrap())
     }
 
+    fn physical_size(&mut self) -> DiskFileResult<u64> {
+        Ok(self.0.physical_size().unwrap())
+    }
+
     fn new_async_io(&self, ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
         Ok(Box::new(
             FixedVhdAsync::new(

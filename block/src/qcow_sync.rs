@@ -34,6 +34,16 @@ impl DiskFile for QcowDiskSync {
             .map_err(DiskFileError::Size)
     }
 
+    fn physical_size(&mut self) -> DiskFileResult<u64> {
+        self.qcow_file.physical_size().map_err(|e| {
+            let io_inner = match e {
+                crate::Error::GetFileMetadata(e) => e,
+                _ => unreachable!(),
+            };
+            DiskFileError::Size(io_inner)
+        })
+    }
+
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
         Ok(Box::new(QcowSync::new(self.qcow_file.clone())) as Box<dyn AsyncIo>)
     }

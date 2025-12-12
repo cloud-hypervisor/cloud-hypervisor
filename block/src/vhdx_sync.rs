@@ -31,6 +31,16 @@ impl DiskFile for VhdxDiskSync {
         Ok(self.vhdx_file.virtual_disk_size())
     }
 
+    fn physical_size(&mut self) -> DiskFileResult<u64> {
+        self.vhdx_file.physical_size().map_err(|e| {
+            let io_inner = match e {
+                Error::GetFileMetadata(e) => e,
+                _ => unreachable!(),
+            };
+            DiskFileError::Size(io_inner)
+        })
+    }
+
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
         Ok(
             Box::new(VhdxSync::new(self.vhdx_file.clone()).map_err(DiskFileError::NewAsyncIo)?)
