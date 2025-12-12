@@ -487,8 +487,7 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         .args(args)
 }
 
-#[allow(clippy::needless_pass_by_value)]
-fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
+fn start_vmm(cmd_arguments: &ArgMatches) -> Result<Option<String>, Error> {
     let log_level = match cmd_arguments.get_count("v") {
         0 => LevelFilter::Warn,
         1 => LevelFilter::Info,
@@ -724,7 +723,7 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
             cmd_arguments.contains_id("kernel") || cmd_arguments.contains_id("firmware");
 
         if payload_present {
-            let vm_params = VmParams::from_arg_matches(&cmd_arguments);
+            let vm_params = VmParams::from_arg_matches(cmd_arguments);
             let vm_config = VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
 
             // Create and boot the VM based off the VM config we just built.
@@ -886,7 +885,7 @@ fn main() {
         warn!("Error expanding FD table: {e}");
     }
 
-    let exit_code = match start_vmm(cmd_arguments) {
+    let exit_code = match start_vmm(&cmd_arguments) {
         Ok(path) => {
             path.map(|s| std::fs::remove_file(s).ok());
             info!("Cloud Hypervisor exited successfully");

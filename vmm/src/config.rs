@@ -635,23 +635,22 @@ impl CpusConfig {
             .convert::<StringList>("features")
             .map_err(Error::ParseCpus)?
             .unwrap_or_default();
-        // Some ugliness here as the features being checked might be disabled
-        // at compile time causing the below allow and the need to specify the
-        // ref type in the match.
-        // The issue will go away once kvm_hyperv is moved under the features
-        // list as it will always be checked for.
+
         #[allow(unused_mut)]
         let mut features = CpuFeatures::default();
-        #[allow(clippy::never_loop)]
-        for s in features_list.0 {
-            match <std::string::String as AsRef<str>>::as_ref(&s) {
-                #[cfg(target_arch = "x86_64")]
-                "amx" => {
-                    features.amx = true;
-                    Ok(())
+        {
+            #[cfg(target_arch = "x86_64")]
+            for feature in features_list.0 {
+                match feature.as_str() {
+                    "amx" => features.amx = true,
+                    _ => return Err(Error::InvalidCpuFeatures(feature)),
                 }
-                _ => Err(Error::InvalidCpuFeatures(s)),
-            }?;
+            }
+
+            #[cfg(not(target_arch = "x86_64"))]
+            if let Some(feature) = features_list.0.into_iter().next() {
+                return Err(Error::InvalidCpuFeatures(feature));
+            }
         }
 
         let nested = parser

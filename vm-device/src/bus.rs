@@ -304,7 +304,6 @@ mod unit_tests {
     }
 
     #[test]
-    #[allow(clippy::redundant_clone)]
     fn bus_read_write() {
         let bus = Bus::new();
         let dummy = Arc::new(DummyDevice);
@@ -322,7 +321,6 @@ mod unit_tests {
     }
 
     #[test]
-    #[allow(clippy::redundant_clone)]
     fn bus_read_write_values() {
         let bus = Bus::new();
         let dummy = Arc::new(ConstantDevice);
@@ -338,7 +336,6 @@ mod unit_tests {
     }
 
     #[test]
-    #[allow(clippy::redundant_clone)]
     fn busrange_cmp() {
         let range = BusRange { base: 0x10, len: 2 };
         assert_eq!(range, BusRange { base: 0x10, len: 3 });
