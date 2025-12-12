@@ -96,7 +96,10 @@ const HDROFF_FWD_CNT: usize = 40;
 /// - (an optional) data/buffer descriptor, only present for data packets (VSOCK_OP_RW).
 ///
 pub struct VsockPacket {
-    hdr: *mut u8,
+    // We still hold the header address in guest memory. We need to write back the modified
+    // header in RX buffers.
+    guest_hdr_ptr: *mut u8,
+    hdr: [u8; VSOCK_PKT_HDR_SIZE],
     buf: Option<*mut u8>,
     buf_size: usize,
 }
@@ -129,14 +132,30 @@ impl VsockPacket {
             return Err(VsockError::HdrDescTooSmall(head.len()));
         }
 
+        let hdr_ptr = get_host_address_range(
+            desc_chain.memory(),
+            head.addr()
+                .translate_gva(access_platform, VSOCK_PKT_HDR_SIZE),
+            VSOCK_PKT_HDR_SIZE,
+        )
+        .ok_or(VsockError::GuestMemory)?;
+
+        // To avoid TOCTOU issues when reading/writing the VSock packet header in guest memory,
+        // we need to copy the content of the header in the VMM's memory.
+        // After the copy, the hdr content can be trusted since the guest can't change its
+        // content anymore.
+
+        let mut hdr = [0u8; VSOCK_PKT_HDR_SIZE];
+
+        hdr.copy_from_slice(
+            // SAFETY: bound checks have already been performed when creating the packet
+            // from the virtq descriptor.
+            unsafe { std::slice::from_raw_parts(hdr_ptr, VSOCK_PKT_HDR_SIZE) },
+        );
+
         let mut pkt = Self {
-            hdr: get_host_address_range(
-                desc_chain.memory(),
-                head.addr()
-                    .translate_gva(access_platform, VSOCK_PKT_HDR_SIZE),
-                VSOCK_PKT_HDR_SIZE,
-            )
-            .ok_or(VsockError::GuestMemory)?,
+            guest_hdr_ptr: hdr_ptr,
+            hdr,
             buf: None,
             buf_size: 0,
         };
@@ -221,19 +240,35 @@ impl VsockPacket {
             return Err(VsockError::HdrDescTooSmall(head.len()));
         }
 
+        let hdr_ptr = get_host_address_range(
+            desc_chain.memory(),
+            head.addr()
+                .translate_gva(access_platform, VSOCK_PKT_HDR_SIZE),
+            VSOCK_PKT_HDR_SIZE,
+        )
+        .ok_or(VsockError::GuestMemory)?;
+
+        // To avoid TOCTOU issues when reading/writing the VSock packet header in guest memory,
+        // we need to copy the content of the header in the VMM's memory.
+        // After the copy, the hdr content can be trusted since the guest can't change its
+        // content anymore.
+
+        let mut hdr = [0u8; VSOCK_PKT_HDR_SIZE];
+
+        hdr.copy_from_slice(
+            // SAFETY: bound checks have already been performed when creating the packet
+            // from the virtq descriptor.
+            unsafe { std::slice::from_raw_parts(hdr_ptr, VSOCK_PKT_HDR_SIZE) },
+        );
+
         // Prior to Linux v6.3 there are two descriptors
         if head.has_next() {
             let buf_desc = desc_chain.next().ok_or(VsockError::BufDescMissing)?;
             let buf_size = buf_desc.len() as usize;
 
             Ok(Self {
-                hdr: get_host_address_range(
-                    desc_chain.memory(),
-                    head.addr()
-                        .translate_gva(access_platform, VSOCK_PKT_HDR_SIZE),
-                    VSOCK_PKT_HDR_SIZE,
-                )
-                .ok_or(VsockError::GuestMemory)?,
+                guest_hdr_ptr: hdr_ptr,
+                hdr,
                 buf: Some(
                     get_host_address_range(
                         desc_chain.memory(),
@@ -247,13 +282,8 @@ impl VsockPacket {
         } else {
             let buf_size: usize = head.len() as usize - VSOCK_PKT_HDR_SIZE;
             Ok(Self {
-                hdr: get_host_address_range(
-                    desc_chain.memory(),
-                    head.addr()
-                        .translate_gva(access_platform, VSOCK_PKT_HDR_SIZE),
-                    VSOCK_PKT_HDR_SIZE,
-                )
-                .ok_or(VsockError::GuestMemory)?,
+                guest_hdr_ptr: hdr_ptr,
+                hdr,
                 buf: Some(
                     get_host_address_range(
                         desc_chain.memory(),
@@ -273,17 +303,30 @@ impl VsockPacket {
     /// Provides in-place, byte-slice, access to the vsock packet header.
     ///
     pub fn hdr(&self) -> &[u8] {
-        // SAFETY: bound checks have already been performed when creating the packet
-        // from the virtq descriptor.
-        unsafe { std::slice::from_raw_parts(self.hdr as *const u8, VSOCK_PKT_HDR_SIZE) }
+        self.hdr.as_slice()
     }
 
     /// Provides in-place, byte-slice, mutable access to the vsock packet header.
     ///
     pub fn hdr_mut(&mut self) -> &mut [u8] {
+        self.hdr.as_mut_slice()
+    }
+
+    /// Writes the local copy of the packet header to the guest memory.
+    ///
+    pub fn commit_hdr(&mut self) -> Result<()> {
+        if self.len() as usize > defs::MAX_PKT_BUF_SIZE {
+            return Err(VsockError::InvalidPktLen(self.len()));
+        }
+
         // SAFETY: bound checks have already been performed when creating the packet
         // from the virtq descriptor.
-        unsafe { std::slice::from_raw_parts_mut(self.hdr, VSOCK_PKT_HDR_SIZE) }
+        let guest_slice: &mut [u8] =
+            unsafe { std::slice::from_raw_parts_mut(self.guest_hdr_ptr, VSOCK_PKT_HDR_SIZE) };
+
+        guest_slice.copy_from_slice(self.hdr());
+
+        Ok(())
     }
 
     /// Provides in-place, byte-slice access to the vsock packet data buffer.
