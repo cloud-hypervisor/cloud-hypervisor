@@ -80,8 +80,8 @@ pub enum Error {
     DetectImageType(#[source] std::io::Error),
     #[error("Failure in fixed vhd")]
     FixedVhdError(#[source] std::io::Error),
-    #[error("Getting a block's metadata fails for any reason")]
-    GetFileMetadata,
+    #[error("Getting a block's metadata failed")]
+    GetFileMetadata(#[source] std::io::Error),
     #[error("The requested operation would cause a seek beyond disk end")]
     InvalidOffset,
     #[error("Failure in qcow")]
@@ -96,7 +96,7 @@ pub enum Error {
 
 fn build_device_id(disk_path: &Path) -> result::Result<String, Error> {
     let blk_metadata = match disk_path.metadata() {
-        Err(_) => return Err(Error::GetFileMetadata),
+        Err(e) => return Err(Error::GetFileMetadata(e)),
         Ok(m) => m,
     };
     // This is how kvmtool does it.
@@ -834,7 +834,12 @@ pub fn detect_image_type(f: &mut File) -> std::io::Result<ImageType> {
 }
 
 pub trait BlockBackend: Read + Write + Seek + Send + Debug {
-    fn size(&self) -> Result<u64, Error>;
+    /// Returns the logical disk size a guest will see.
+    ///
+    /// For raw formats, this is equal to the physical_size. For file formats
+    /// that wrap disk images in a container (e.g. QCOW2), this refers to the
+    /// effective size that the guest will see.
+    fn logical_size(&self) -> Result<u64, Error>;
 }
 
 #[derive(Debug)]

@@ -75,7 +75,7 @@ impl Seek for FixedVhd {
 }
 
 impl BlockBackend for FixedVhd {
-    fn size(&self) -> std::result::Result<u64, crate::Error> {
+    fn logical_size(&self) -> Result<u64, crate::Error> {
         Ok(self.size)
     }
 }

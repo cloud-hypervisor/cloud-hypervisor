@@ -56,7 +56,12 @@ impl AsRawFd for BorrowedDiskFd<'_> {
 /// This allows abstracting over raw image formats as well as structured
 /// image formats.
 pub trait DiskFile: Send {
-    fn size(&mut self) -> DiskFileResult<u64>;
+    /// Returns the logical disk size a guest will see.
+    ///
+    /// For raw formats, this is equal to the physical size. For file formats
+    /// that wrap disk images in a container (e.g. QCOW2), this refers to the
+    /// effective size that the guest will see.
+    fn logical_size(&mut self) -> DiskFileResult<u64>;
     fn new_async_io(&self, ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>>;
     fn topology(&mut self) -> DiskTopology {
         DiskTopology::default()

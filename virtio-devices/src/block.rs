@@ -675,7 +675,7 @@ impl Block {
                 )
             } else {
                 let disk_size = disk_image
-                    .size()
+                    .logical_size()
                     .map_err(|e| io::Error::other(format!("Failed getting disk size: {e}")))?;
                 if disk_size % SECTOR_SIZE != 0 {
                     warn!(
@@ -773,7 +773,7 @@ impl Block {
     // TODO In future, we could add a `lock_granularity=` configuration to the CLI.
     // For now, we stick to QEMU behavior.
     fn lock_granularity(&mut self) -> LockGranularity {
-        self.disk_image.size().map_or_else(
+        self.disk_image.logical_size().map_or_else(
             // use a safe fallback
             |e| {
                 let fallback = LockGranularity::WholeFile;
