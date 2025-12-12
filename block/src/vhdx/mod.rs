@@ -205,6 +205,13 @@ impl BlockBackend for Vhdx {
     fn logical_size(&self) -> std::result::Result<u64, crate::Error> {
         Ok(self.virtual_disk_size())
     }
+
+    fn physical_size(&self) -> std::result::Result<u64, crate::Error> {
+        self.file
+            .metadata()
+            .map(|m| m.len())
+            .map_err(crate::Error::GetFileMetadata)
+    }
 }
 
 impl Clone for Vhdx {

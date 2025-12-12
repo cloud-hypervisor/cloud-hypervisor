@@ -836,10 +836,12 @@ pub fn detect_image_type(f: &mut File) -> std::io::Result<ImageType> {
 pub trait BlockBackend: Read + Write + Seek + Send + Debug {
     /// Returns the logical disk size a guest will see.
     ///
-    /// For raw formats, this is equal to the physical_size. For file formats
+    /// For raw formats, this is equal to [`Self::physical_size`]. For file formats
     /// that wrap disk images in a container (e.g. QCOW2), this refers to the
     /// effective size that the guest will see.
     fn logical_size(&self) -> Result<u64, Error>;
+    /// Returns the physical size of the underlying file.
+    fn physical_size(&self) -> Result<u64, Error>;
 }
 
 #[derive(Debug)]

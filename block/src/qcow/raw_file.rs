@@ -357,6 +357,10 @@ impl BlockBackend for RawFile {
     fn logical_size(&self) -> std::result::Result<u64, crate::Error> {
         Ok(self.metadata().map_err(crate::Error::RawFileError)?.len())
     }
+
+    fn physical_size(&self) -> std::result::Result<u64, crate::Error> {
+        Ok(self.metadata().map_err(crate::Error::RawFileError)?.len())
+    }
 }
 
 impl Clone for RawFile {

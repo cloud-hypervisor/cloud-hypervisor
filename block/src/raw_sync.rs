@@ -32,6 +32,13 @@ impl DiskFile for RawFileDiskSync {
             .map_err(DiskFileError::Size)
     }
 
+    fn physical_size(&mut self) -> DiskFileResult<u64> {
+        self.file
+            .metadata()
+            .map(|m| m.len())
+            .map_err(DiskFileError::Size)
+    }
+
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
         Ok(Box::new(RawFileSync::new(self.file.as_raw_fd())) as Box<dyn AsyncIo>)
     }

@@ -179,6 +179,10 @@ impl QcowRawFile {
         self.file.seek(SeekFrom::Start(address))?;
         self.file.write_all(&data[0..cluster_size])
     }
+
+    pub fn physical_size(&self) -> Result<u64, std::io::Error> {
+        self.file.metadata().map(|m| m.len())
+    }
 }
 
 impl Clone for QcowRawFile {
