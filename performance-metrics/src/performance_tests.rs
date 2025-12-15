@@ -33,6 +33,8 @@ enum Error {
 // The test image cannot be created on tmpfs (e.g. /tmp) filesystem,
 // as tmpfs does not support O_DIRECT
 pub const BLK_IO_TEST_IMG: &str = "/var/tmp/ch-blk-io-test.img";
+const QCOW2_BACKING_FILE: &str = "/var/tmp/ch-blk-io-test-qcow2-backing.qcow2";
+pub const OVERLAY_WITH_QCOW2_BACKING: &str = "/var/tmp/ch-blk-io-test-overlay-qcow2.qcow2";
 
 pub fn init_tests(overrides: &PerformanceTestOverrides) {
     let mut cmd = format!("dd if=/dev/zero of={BLK_IO_TEST_IMG} bs=1M count=4096");
@@ -54,11 +56,25 @@ pub fn init_tests(overrides: &PerformanceTestOverrides) {
     }
 
     assert!(exec_host_command_output(&cmd).status.success());
+
+    // QCOW2 backing file for backing file tests
+    cmd = format!("qemu-img create -f qcow2 -o preallocation=full {QCOW2_BACKING_FILE} 4G");
+    assert!(exec_host_command_output(&cmd).status.success());
+
+    // QCOW2 overlay with QCOW2 backing
+    cmd = format!(
+        "qemu-img create -f qcow2 -b {QCOW2_BACKING_FILE} -F qcow2 {OVERLAY_WITH_QCOW2_BACKING} 4G"
+    );
+    assert!(exec_host_command_output(&cmd).status.success());
 }
 
 pub fn cleanup_tests() {
     fs::remove_file(BLK_IO_TEST_IMG)
         .unwrap_or_else(|_| panic!("Failed to remove file '{BLK_IO_TEST_IMG}'."));
+    fs::remove_file(QCOW2_BACKING_FILE)
+        .unwrap_or_else(|_| panic!("Failed to remove file '{QCOW2_BACKING_FILE}'."));
+    fs::remove_file(OVERLAY_WITH_QCOW2_BACKING)
+        .unwrap_or_else(|_| panic!("Failed to remove file '{OVERLAY_WITH_QCOW2_BACKING}'."));
 }
 
 // Performance tests are expected to be executed sequentially, so we can
