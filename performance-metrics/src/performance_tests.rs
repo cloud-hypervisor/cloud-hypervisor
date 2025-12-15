@@ -35,6 +35,8 @@ enum Error {
 pub const BLK_IO_TEST_IMG: &str = "/var/tmp/ch-blk-io-test.img";
 const QCOW2_BACKING_FILE: &str = "/var/tmp/ch-blk-io-test-qcow2-backing.qcow2";
 pub const OVERLAY_WITH_QCOW2_BACKING: &str = "/var/tmp/ch-blk-io-test-overlay-qcow2.qcow2";
+const RAW_BACKING_FILE: &str = "/var/tmp/ch-blk-io-test-raw-backing.raw";
+pub const OVERLAY_WITH_RAW_BACKING: &str = "/var/tmp/ch-blk-io-test-overlay-raw.qcow2";
 
 pub fn init_tests(overrides: &PerformanceTestOverrides) {
     let mut cmd = format!("dd if=/dev/zero of={BLK_IO_TEST_IMG} bs=1M count=4096");
@@ -66,6 +68,16 @@ pub fn init_tests(overrides: &PerformanceTestOverrides) {
         "qemu-img create -f qcow2 -b {QCOW2_BACKING_FILE} -F qcow2 {OVERLAY_WITH_QCOW2_BACKING} 4G"
     );
     assert!(exec_host_command_output(&cmd).status.success());
+
+    // RAW backing file for backing file tests
+    cmd = format!("dd if=/dev/zero of={RAW_BACKING_FILE} bs=1M count=4096");
+    assert!(exec_host_command_output(&cmd).status.success());
+
+    // QCOW2 overlay with RAW backing
+    cmd = format!(
+        "qemu-img create -f qcow2 -b {RAW_BACKING_FILE} -F raw {OVERLAY_WITH_RAW_BACKING} 4G"
+    );
+    assert!(exec_host_command_output(&cmd).status.success());
 }
 
 pub fn cleanup_tests() {
@@ -75,6 +87,10 @@ pub fn cleanup_tests() {
         .unwrap_or_else(|_| panic!("Failed to remove file '{QCOW2_BACKING_FILE}'."));
     fs::remove_file(OVERLAY_WITH_QCOW2_BACKING)
         .unwrap_or_else(|_| panic!("Failed to remove file '{OVERLAY_WITH_QCOW2_BACKING}'."));
+    fs::remove_file(RAW_BACKING_FILE)
+        .unwrap_or_else(|_| panic!("Failed to remove file '{RAW_BACKING_FILE}'."));
+    fs::remove_file(OVERLAY_WITH_RAW_BACKING)
+        .unwrap_or_else(|_| panic!("Failed to remove file '{OVERLAY_WITH_RAW_BACKING}'."));
 }
 
 // Performance tests are expected to be executed sequentially, so we can
