@@ -32,7 +32,7 @@ enum Error {
 
 // The test image cannot be created on tmpfs (e.g. /tmp) filesystem,
 // as tmpfs does not support O_DIRECT
-const BLK_IO_TEST_IMG: &str = "/var/tmp/ch-blk-io-test.img";
+pub const BLK_IO_TEST_IMG: &str = "/var/tmp/ch-blk-io-test.img";
 
 pub fn init_tests(overrides: &PerformanceTestOverrides) {
     let mut cmd = format!("dd if=/dev/zero of={BLK_IO_TEST_IMG} bs=1M count=4096");
@@ -366,7 +366,10 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     let test_timeout = control.test_timeout;
     let num_queues = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
-    let (fio_ops, bandwidth) = control.fio_control.as_ref().unwrap();
+    let block_control = control.block_control.as_ref().unwrap();
+    let fio_ops = &block_control.fio_ops;
+    let bandwidth = block_control.bandwidth;
+    let test_file = block_control.test_file;
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
     let guest = performance_test_new_guest(Box::new(focal));
@@ -395,8 +398,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
                 guest.disk_config.disk(DiskType::CloudInit).unwrap()
             )
             .as_str(),
-            format!("path={BLK_IO_TEST_IMG},queue_size={queue_size},num_queues={num_queues}")
-                .as_str(),
+            format!("path={test_file},queue_size={queue_size},num_queues={num_queues}").as_str(),
         ])
         .default_net()
         .args(["--api-socket", &api_socket])
@@ -420,7 +422,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
             .unwrap();
 
         // Parse fio output
-        if *bandwidth {
+        if bandwidth {
             parse_fio_output(&output, fio_ops, num_queues).unwrap()
         } else {
             parse_fio_output_iops(&output, fio_ops, num_queues).unwrap()
