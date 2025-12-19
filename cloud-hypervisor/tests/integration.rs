@@ -2527,8 +2527,9 @@ EOF
 }
 
 mod common_parallel {
-    use std::fs::OpenOptions;
-    use std::io::SeekFrom;
+    use std::cmp;
+    use std::fs::{File, OpenOptions};
+    use std::io::{self, SeekFrom};
 
     use crate::*;
 
@@ -3425,6 +3426,12 @@ mod common_parallel {
 
         let kernel_path = direct_kernel_boot_path();
 
+        let initial_backing_checksum = if verify_os_disk {
+            compute_backing_checksum(guest.disk_config.disk(DiskType::OperatingSystem).unwrap())
+        } else {
+            None
+        };
+
         let mut cloud_child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
             .args(["--memory", "size=512M,shared=on"])
@@ -3498,7 +3505,10 @@ mod common_parallel {
         handle_child_output(r, &output);
 
         if verify_os_disk {
-            disk_check_consistency(guest.disk_config.disk(DiskType::OperatingSystem).unwrap());
+            disk_check_consistency(
+                guest.disk_config.disk(DiskType::OperatingSystem).unwrap(),
+                initial_backing_checksum,
+            );
         }
     }
 
@@ -3517,6 +3527,132 @@ mod common_parallel {
         _test_virtio_block(FOCAL_IMAGE_NAME, true, true, false);
     }
 
+    fn run_qemu_img(path: &std::path::Path, args: &[&str]) -> std::process::Output {
+        std::process::Command::new("qemu-img")
+            .arg(args[0])
+            .args(&args[1..])
+            .arg(path.to_str().unwrap())
+            .output()
+            .unwrap()
+    }
+
+    fn get_image_info(path: &std::path::Path) -> Option<serde_json::Value> {
+        let output = run_qemu_img(path, &["info", "--output=json"]);
+
+        output.status.success().then(|| ())?;
+        serde_json::from_slice(&output.stdout).ok()
+    }
+
+    fn resolve_disk_path(path_or_image_name: impl AsRef<std::path::Path>) -> std::path::PathBuf {
+        if path_or_image_name.as_ref().exists() {
+            // A full path is provided
+            path_or_image_name.as_ref().to_path_buf()
+        } else {
+            // An image name is provided
+            let mut workload_path = dirs::home_dir().unwrap();
+            workload_path.push("workloads");
+            workload_path.as_path().join(path_or_image_name.as_ref())
+        }
+    }
+
+    fn compute_file_checksum(reader: &mut dyn std::io::Read, size: u64) -> u32 {
+        // Read first 16MB or entire data if smaller
+        let read_size = cmp::min(size, 16 * 1024 * 1024) as usize;
+
+        let mut buffer = vec![0u8; read_size];
+        reader.read_exact(&mut buffer).unwrap();
+
+        // DJB2 hash
+        let mut hash: u32 = 5381;
+        for byte in buffer.iter() {
+            hash = hash.wrapping_mul(33).wrapping_add(*byte as u32);
+        }
+        hash
+    }
+
+    #[test]
+    fn test_compute_file_checksum_empty() {
+        let mut reader = io::Cursor::new(vec![]);
+        let checksum = compute_file_checksum(&mut reader, 0);
+        assert_eq!(checksum, 5381);
+    }
+
+    #[test]
+    fn test_compute_file_checksum_small() {
+        let data = b"hello world";
+        let mut reader = io::Cursor::new(data);
+        let checksum = compute_file_checksum(&mut reader, data.len() as u64);
+        assert_eq!(checksum, 894552257);
+    }
+
+    #[test]
+    fn test_compute_file_checksum_same_data() {
+        let data = b"test data 123";
+        let mut reader1 = io::Cursor::new(data);
+        let mut reader2 = io::Cursor::new(data);
+        let checksum1 = compute_file_checksum(&mut reader1, data.len() as u64);
+        let checksum2 = compute_file_checksum(&mut reader2, data.len() as u64);
+        assert_eq!(checksum1, checksum2);
+    }
+
+    #[test]
+    fn test_compute_file_checksum_different_data() {
+        let data1 = b"data1";
+        let data2 = b"data2";
+        let mut reader1 = io::Cursor::new(data1);
+        let mut reader2 = io::Cursor::new(data2);
+        let checksum1 = compute_file_checksum(&mut reader1, data1.len() as u64);
+        let checksum2 = compute_file_checksum(&mut reader2, data2.len() as u64);
+        assert_ne!(checksum1, checksum2);
+    }
+
+    #[test]
+    fn test_compute_file_checksum_large_data() {
+        let size = 20 * 1024 * 1024;
+        let data = vec![0xABu8; size];
+        let mut reader = io::Cursor::new(data);
+        let checksum = compute_file_checksum(&mut reader, size as u64);
+        // Should only read first 16MB
+        assert!(checksum != 5381);
+
+        // Verify only 16MB was read
+        let position = reader.position();
+        assert_eq!(position, 16 * 1024 * 1024);
+    }
+
+    fn compute_backing_checksum(
+        path_or_image_name: impl AsRef<std::path::Path>,
+    ) -> Option<(std::path::PathBuf, String, u32)> {
+        let path = resolve_disk_path(path_or_image_name);
+
+        let mut file = File::open(&path).ok()?;
+        if !matches!(
+            block::detect_image_type(&mut file).ok()?,
+            block::ImageType::Qcow2
+        ) {
+            return None;
+        }
+
+        let info = get_image_info(&path)?;
+
+        let backing_file = info["backing-filename"].as_str()?;
+        let backing_path = if std::path::Path::new(backing_file).is_absolute() {
+            std::path::PathBuf::from(backing_file)
+        } else {
+            path.parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join(backing_file)
+        };
+
+        let backing_info = get_image_info(&backing_path)?;
+        let backing_format = backing_info["format"].as_str()?.to_string();
+        let mut file = File::open(&backing_path).ok()?;
+        let file_size = file.metadata().ok()?.len();
+        let checksum = compute_file_checksum(&mut file, file_size);
+
+        Some((backing_path, backing_format, checksum))
+    }
+
     /// Uses `qemu-img check` to verify disk image consistency.
     ///
     /// Supported formats are `qcow2` (compressed and uncompressed),
@@ -3525,27 +3661,41 @@ mod common_parallel {
     ///
     /// It takes either a full path to the image or just the name of
     /// the image located in the `workloads` directory.
-    fn disk_check_consistency(path_or_image_name: impl AsRef<std::path::Path>) {
-        let path = if path_or_image_name.as_ref().exists() {
-            // A full path is provided
-            path_or_image_name.as_ref().to_path_buf()
-        } else {
-            // An image name is provided
-            let mut workload_path = dirs::home_dir().unwrap();
-            workload_path.push("workloads");
-            workload_path.as_path().join(path_or_image_name.as_ref())
-        };
-
-        let output = std::process::Command::new("qemu-img")
-            .args(["check", path.to_str().unwrap()])
-            .output()
-            .expect("should spawn and run command successfully");
+    ///
+    /// For qcow2 images with backing files, also verifies the backing file
+    /// integrity and checks that the backing file hasn't been modified
+    /// during the test.
+    fn disk_check_consistency(
+        path_or_image_name: impl AsRef<std::path::Path>,
+        initial_backing_checksum: Option<(std::path::PathBuf, String, u32)>,
+    ) {
+        let path = resolve_disk_path(path_or_image_name);
+        let output = run_qemu_img(&path, &["check"]);
 
         assert!(
             output.status.success(),
             "qemu-img check failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+
+        if let Some((backing_path, format, initial_checksum)) = initial_backing_checksum {
+            if format.parse::<block::qcow::ImageType>().ok() != Some(block::qcow::ImageType::Raw) {
+                let output = run_qemu_img(&backing_path, &["check"]);
+
+                assert!(
+                    output.status.success(),
+                    "qemu-img check of backing file failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+
+            let mut file = File::open(&backing_path).unwrap();
+            let file_size = file.metadata().unwrap().len();
+            assert_eq!(
+                initial_checksum,
+                compute_file_checksum(&mut file, file_size)
+            );
+        }
     }
 
     #[test]
@@ -3710,7 +3860,7 @@ mod common_parallel {
 
         handle_child_output(r, &output);
 
-        disk_check_consistency(vhdx_path);
+        disk_check_consistency(vhdx_path, None);
     }
 
     fn vhdx_image_size(disk_name: &str) -> u64 {
