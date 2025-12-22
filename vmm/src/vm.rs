@@ -2415,6 +2415,15 @@ impl Vm {
                 .map_err(Error::CpuManager)?;
         }
 
+        #[cfg(feature = "mshv")]
+        {
+            self.cpu_manager
+                .lock()
+                .unwrap()
+                .set_processors_per_socket_property()
+                .ok();
+        }
+
         #[cfg(feature = "tdx")]
         let (sections, guid_found) = if tdx_enabled {
             self.extract_tdvf_sections()?
