@@ -216,6 +216,10 @@ pub enum Error {
     #[cfg(target_arch = "x86_64")]
     #[error("Failed to inject NMI")]
     NmiError(#[source] hypervisor::HypervisorCpuError),
+
+    #[cfg(feature = "mshv")]
+    #[error("Failed to set partition property")]
+    SetPartitionProperty(#[source] anyhow::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -1372,6 +1376,27 @@ impl CpuManager {
     // Starts all the vCPUs that the VM is booting with. Blocks until all vCPUs are running.
     pub fn start_boot_vcpus(&mut self, paused: bool) -> Result<()> {
         self.activate_vcpus(self.boot_vcpus(), false, Some(paused))
+    }
+
+    #[cfg(feature = "mshv")]
+    pub fn set_processors_per_socket_property(&self) -> Result<()> {
+        const HV_PARTITION_PROPERTY_PROCESSORS_PER_SOCKET: u32 = 0x00050003;
+
+        let threads_per_core = if let Some(ref topology) = self.config.topology {
+            topology.threads_per_core as u64
+        } else {
+            1u64
+        };
+
+        if let Some(mshv_vm) = self.vm.as_any().downcast_ref::<hypervisor::mshv::MshvVm>() {
+            mshv_vm
+                .set_partition_property(
+                    HV_PARTITION_PROPERTY_PROCESSORS_PER_SOCKET,
+                    threads_per_core,
+                )
+                .map_err(Error::SetPartitionProperty)?;
+        }
+        Ok(())
     }
 
     pub fn start_restored_vcpus(&mut self) -> Result<()> {
