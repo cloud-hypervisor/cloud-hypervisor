@@ -155,7 +155,8 @@ pub trait Hypervisor: Send + Sync {
     /// Determine CPU vendor
     ///
     fn get_cpu_vendor(&self) -> CpuVendor {
-        // SAFETY: call cpuid with valid leaves
+        #[allow(unused_unsafe)]
+        // SAFETY: not actually unsafe, but considered unsafe by current stable
         unsafe {
             let leaf = x86_64::__cpuid(0x0);
 
