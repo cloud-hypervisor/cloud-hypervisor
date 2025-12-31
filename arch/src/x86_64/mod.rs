@@ -559,6 +559,7 @@ pub fn generate_common_cpuid(
     hypervisor: &dyn hypervisor::Hypervisor,
     config: &CpuidConfig,
 ) -> super::Result<Vec<CpuIdEntry>> {
+    #[allow(unused_unsafe)]
     // SAFETY: cpuid called with valid leaves
     if unsafe { x86_64::__cpuid(1) }.ecx & (1 << HYPERVISOR_ECX_BIT) == 1 << HYPERVISOR_ECX_BIT {
         // SAFETY: cpuid called with valid leaves
@@ -694,6 +695,7 @@ pub fn generate_common_cpuid(
             // Copy host L1 cache details if not populated by KVM
             0x8000_0005 => {
                 if entry.eax == 0 && entry.ebx == 0 && entry.ecx == 0 && entry.edx == 0 {
+                    #[allow(unused_unsafe)]
                     // SAFETY: cpuid called with valid leaves
                     if unsafe { std::arch::x86_64::__cpuid(0x8000_0000).eax } >= 0x8000_0005 {
                         // SAFETY: cpuid called with valid leaves
@@ -708,8 +710,10 @@ pub fn generate_common_cpuid(
             // Copy host L2 cache details if not populated by KVM
             0x8000_0006 => {
                 if entry.eax == 0 && entry.ebx == 0 && entry.ecx == 0 && entry.edx == 0 {
+                    #[allow(unused_unsafe)]
                     // SAFETY: cpuid called with valid leaves
                     if unsafe { std::arch::x86_64::__cpuid(0x8000_0000).eax } >= 0x8000_0006 {
+                        #[allow(unused_unsafe)]
                         // SAFETY: cpuid called with valid leaves
                         let leaf = unsafe { std::arch::x86_64::__cpuid(0x8000_0006) };
                         entry.eax = leaf.eax;
@@ -747,6 +751,7 @@ pub fn generate_common_cpuid(
     for i in 0x8000_0002..=0x8000_0004 {
         cpuid.retain(|c| c.function != i);
         // SAFETY: call cpuid with valid leaves
+        #[allow(unused_unsafe)]
         let leaf = unsafe { std::arch::x86_64::__cpuid(i) };
         cpuid.push(CpuIdEntry {
             function: i,
@@ -859,6 +864,7 @@ pub fn configure_vcpu(
     // The TSC frequency CPUID leaf should not be included when running with HyperV emulation
     if !kvm_hyperv && let Some(tsc_khz) = vcpu.tsc_khz().map_err(Error::GetTscFrequency)? {
         // Need to check that the TSC doesn't vary with dynamic frequency
+        #[allow(unused_unsafe)]
         // SAFETY: cpuid called with valid leaves
         if unsafe { std::arch::x86_64::__cpuid(0x8000_0007) }.edx & (1u32 << INVARIANT_TSC_EDX_BIT)
             > 0
@@ -1307,6 +1313,7 @@ pub fn initramfs_load_addr(
 
 pub fn get_host_cpu_phys_bits(hypervisor: &dyn hypervisor::Hypervisor) -> u8 {
     // SAFETY: call cpuid with valid leaves
+    #[allow(unused_unsafe)]
     unsafe {
         let leaf = x86_64::__cpuid(0x8000_0000);
 
