@@ -111,6 +111,8 @@ pub enum Error {
     TooManyL1Entries(u64),
     #[error("Ref count table too large: {0}")]
     TooManyRefcounts(u64),
+    #[error("Unsupported backing file format: {0}")]
+    UnsupportedBackingFileFormat(String),
     #[error("Unsupported compression type")]
     UnsupportedCompressionType,
     #[error("Unsupported refcount order")]
@@ -170,6 +172,11 @@ const COMPATIBLE_FEATURES_LAZY_REFCOUNTS: u64 = 1;
 // Compression types as defined in https://www.qemu.org/docs/master/interop/qcow2.html
 const COMPRESSION_TYPE_ZLIB: u64 = 0; // zlib/deflate <https://www.ietf.org/rfc/rfc1951.txt>
 const COMPRESSION_TYPE_ZSTD: u64 = 1; // zstd <http://github.com/facebook/zstd>
+
+// Header extension types
+const HEADER_EXT_END: u32 = 0x00000000;
+// Backing file format name (raw, qcow2)
+const HEADER_EXT_BACKING_FORMAT: u32 = 0xe2792aca;
 
 // The format supports a "header extension area", that crosvm does not use.
 const QCOW_EMPTY_HEADER_EXTENSION_SIZE: u32 = 8;
@@ -244,9 +251,49 @@ pub struct QcowHeader {
 
     // Post-header entries
     pub backing_file_path: Option<String>,
+    pub backing_file_format: Option<String>,
 }
 
 impl QcowHeader {
+    fn read_header_extensions(f: &mut RawFile, header: &mut QcowHeader) -> Result<()> {
+        // Extensions start directly after the header
+        f.seek(SeekFrom::Start(header.header_size as u64))
+            .map_err(Error::ReadingHeader)?;
+
+        loop {
+            let ext_type = f.read_u32::<BigEndian>().map_err(Error::ReadingHeader)?;
+            if ext_type == HEADER_EXT_END {
+                break;
+            }
+
+            let ext_length = f.read_u32::<BigEndian>().map_err(Error::ReadingHeader)?;
+
+            match ext_type {
+                HEADER_EXT_BACKING_FORMAT => {
+                    let mut format_bytes = vec![0u8; ext_length as usize];
+                    f.read_exact(&mut format_bytes)
+                        .map_err(Error::ReadingHeader)?;
+                    header.backing_file_format = Some(
+                        String::from_utf8(format_bytes)
+                            .map_err(|err| Error::InvalidBackingFileName(err.utf8_error()))?,
+                    );
+                }
+                _ => {
+                    // Skip unknown extension
+                    f.seek(SeekFrom::Current(ext_length as i64))
+                        .map_err(Error::ReadingHeader)?;
+                }
+            }
+
+            // Skip to the next 8 byte boundary
+            let padding = (8 - (ext_length % 8)) % 8;
+            f.seek(SeekFrom::Current(padding as i64))
+                .map_err(Error::ReadingHeader)?;
+        }
+
+        Ok(())
+    }
+
     /// Creates a QcowHeader from a reference to a file.
     pub fn new(f: &mut RawFile) -> Result<QcowHeader> {
         f.rewind().map_err(Error::ReadingHeader)?;
@@ -308,6 +355,7 @@ impl QcowHeader {
             },
             compression_type: CompressionType::Zlib,
             backing_file_path: None,
+            backing_file_format: None,
         };
         if version == 3 && header.header_size > V3_BARE_HEADER_SIZE {
             let raw_compression_type = read_u64_from_file(f)? >> (64 - 8);
@@ -333,6 +381,11 @@ impl QcowHeader {
                     .map_err(|err| Error::InvalidBackingFileName(err.utf8_error()))?,
             );
         }
+
+        if version == 3 && header.header_size > V3_BARE_HEADER_SIZE {
+            Self::read_header_extensions(f, &mut header)?;
+        }
+
         Ok(header)
     }
 
@@ -371,10 +424,13 @@ impl QcowHeader {
         Ok(QcowHeader {
             magic: QCOW_MAGIC,
             version,
-            backing_file_offset: (if backing_file.is_none() {
-                0
-            } else {
+            backing_file_offset: backing_file.map_or(0, |_| {
                 header_size
+                    + if version == 3 {
+                        QCOW_EMPTY_HEADER_EXTENSION_SIZE
+                    } else {
+                        0
+                    }
             }) as u64,
             backing_file_size: backing_file.map_or(0, |x| x.len()) as u32,
             cluster_bits: DEFAULT_CLUSTER_BITS,
@@ -408,6 +464,7 @@ impl QcowHeader {
             header_size,
             compression_type: CompressionType::Zlib,
             backing_file_path: backing_file.map(String::from),
+            backing_file_format: None,
         })
     }
 
@@ -445,11 +502,20 @@ impl QcowHeader {
             write_u64_to_file(file, self.autoclear_features)?;
             write_u32_to_file(file, self.refcount_order)?;
             write_u32_to_file(file, self.header_size)?;
+
+            if self.header_size > V3_BARE_HEADER_SIZE {
+                write_u64_to_file(file, 0)?; // no compression
+            }
+
             write_u32_to_file(file, 0)?; // header extension type: end of header extension area
             write_u32_to_file(file, 0)?; // length of header extension data: 0
         }
 
         if let Some(backing_file_path) = self.backing_file_path.as_ref() {
+            if self.backing_file_offset > 0 {
+                file.seek(SeekFrom::Start(self.backing_file_offset))
+                    .map_err(Error::WritingHeader)?;
+            }
             write!(file, "{backing_file_path}").map_err(Error::WritingHeader)?;
         }
 
@@ -477,6 +543,98 @@ fn max_refcount_clusters(refcount_order: u32, cluster_size: u32, num_clusters: u
     );
     let for_refcounts = div_round_up_u64(for_data * refcount_bytes, u64::from(cluster_size));
     for_data + for_refcounts
+}
+
+trait BackingFileOps: Send + Seek + Read {
+    fn read_at(&mut self, address: u64, buf: &mut [u8]) -> std::io::Result<()> {
+        self.seek(SeekFrom::Start(address))?;
+        self.read_exact(buf)
+    }
+    fn clone_box(&self) -> Box<dyn BackingFileOps>;
+}
+
+impl BackingFileOps for QcowFile {
+    fn clone_box(&self) -> Box<dyn BackingFileOps> {
+        Box::new(self.clone())
+    }
+}
+
+impl BackingFileOps for RawFile {
+    fn clone_box(&self) -> Box<dyn BackingFileOps> {
+        Box::new(self.clone())
+    }
+}
+
+/// Backing file wrapper
+struct BackingFile {
+    inner: Box<dyn BackingFileOps>,
+}
+
+impl BackingFile {
+    fn new(
+        backing_file_path: Option<&str>,
+        backing_file_format: Option<&str>,
+        direct_io: bool,
+        max_nesting_depth: u32,
+    ) -> Result<Option<Self>> {
+        let Some(path) = backing_file_path else {
+            return Ok(None);
+        };
+
+        // Check nesting depth - applies to any backing file
+        if max_nesting_depth == 0 {
+            return Err(Error::MaxNestingDepthExceeded);
+        }
+
+        let backing_raw_file = OpenOptions::new()
+            .read(true)
+            .open(path)
+            .map_err(Error::BackingFileIo)?;
+
+        let mut raw_file = RawFile::new(backing_raw_file, direct_io);
+
+        // Determine backing file format from header extension or auto-detect
+        let backing_format = match backing_file_format {
+            Some(format) => format,
+            None => get_image_type_str(&mut raw_file)?,
+        };
+
+        let inner: Box<dyn BackingFileOps> = match backing_format {
+            "raw" => Box::new(raw_file),
+            "qcow2" => {
+                let backing_qcow =
+                    QcowFile::from_with_nesting_depth(raw_file, max_nesting_depth - 1)
+                        .map_err(|e| Error::BackingFileOpen(Box::new(e)))?;
+                Box::new(backing_qcow)
+            }
+            _ => {
+                return Err(Error::UnsupportedBackingFileFormat(
+                    backing_format.to_string(),
+                ));
+            }
+        };
+
+        Ok(Some(Self { inner }))
+    }
+
+    #[inline]
+    fn read_at(&mut self, address: u64, buf: &mut [u8]) -> std::io::Result<()> {
+        self.inner.read_at(address, buf)
+    }
+}
+
+impl Clone for BackingFile {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone_box(),
+        }
+    }
+}
+
+impl std::fmt::Debug for BackingFile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BackingFile").finish()
+    }
 }
 
 /// Represents a qcow2 file. This is a sparse file format maintained by the qemu project.
@@ -509,7 +667,7 @@ pub struct QcowFile {
     // List of unreferenced clusters available to be used. unref clusters become available once the
     // removal of references to them have been synced to disk.
     avail_clusters: Vec<u64>,
-    backing_file: Option<Box<Self>>,
+    backing_file: Option<BackingFile>,
 }
 
 impl QcowFile {
@@ -548,24 +706,12 @@ impl QcowFile {
 
         let direct_io = file.is_direct();
 
-        let backing_file = if let Some(backing_file_path) = header.backing_file_path.as_ref() {
-            if max_nesting_depth == 0 {
-                return Err(Error::MaxNestingDepthExceeded);
-            }
-            let path = backing_file_path.clone();
-            let backing_raw_file = OpenOptions::new()
-                .read(true)
-                .open(path)
-                .map_err(Error::BackingFileIo)?;
-            let backing_file = Self::from_with_nesting_depth(
-                RawFile::new(backing_raw_file, direct_io),
-                max_nesting_depth - 1,
-            )
-            .map_err(|e| Error::BackingFileOpen(Box::new(e)))?;
-            Some(Box::new(backing_file))
-        } else {
-            None
-        };
+        let backing_file = BackingFile::new(
+            header.backing_file_path.as_deref(),
+            header.backing_file_format.as_deref(),
+            direct_io,
+            max_nesting_depth,
+        )?;
 
         // Only support two byte refcounts.
         let refcount_bits: u64 = 0x01u64
@@ -692,28 +838,22 @@ impl QcowFile {
         QcowFile::new_from_header(file, &header)
     }
 
-    /// Creates a new QcowFile at the given path.
+    /// Creates a new QcowFile at the given path with a backing file.
     pub fn new_from_backing(
         file: RawFile,
         version: u32,
         backing_file_name: &str,
-        backing_file_max_nesting_depth: u32,
+        backing_file_size: u64,
+        backing_format: &str,
     ) -> Result<QcowFile> {
-        let direct_io = file.is_direct();
-        let backing_raw_file = OpenOptions::new()
-            .read(true)
-            .open(backing_file_name)
-            .map_err(Error::BackingFileIo)?;
-        let backing_file = Self::from_with_nesting_depth(
-            RawFile::new(backing_raw_file, direct_io),
-            backing_file_max_nesting_depth,
-        )
-        .map_err(|e| Error::BackingFileOpen(Box::new(e)))?;
-        let size = backing_file.virtual_size();
-        let header = QcowHeader::create_for_size_and_path(version, size, Some(backing_file_name))?;
-        let mut result = QcowFile::new_from_header(file, &header)?;
-        result.backing_file = Some(Box::new(backing_file));
-        Ok(result)
+        let mut header = QcowHeader::create_for_size_and_path(
+            version,
+            backing_file_size,
+            Some(backing_file_name),
+        )?;
+        header.backing_file_format = Some(backing_format.to_string());
+        QcowFile::new_from_header(file, &header)
+        // backing_file is loaded by new_from_header -> Self::from() based on the header
     }
 
     fn new_from_header(mut file: RawFile, header: &QcowHeader) -> Result<QcowFile> {
@@ -741,7 +881,9 @@ impl QcowFile {
     }
 
     pub fn set_backing_file(&mut self, backing: Option<Box<Self>>) {
-        self.backing_file = backing;
+        self.backing_file = backing.map(|b| BackingFile {
+            inner: Box::new(*b),
+        });
     }
 
     /// Returns the `QcowHeader` for this file.
@@ -1246,8 +1388,7 @@ impl QcowFile {
                 let cluster_size = self.raw_file.cluster_size();
                 let cluster_begin = address - (address % cluster_size);
                 let mut cluster_data = vec![0u8; cluster_size as usize];
-                backing.seek(SeekFrom::Start(cluster_begin))?;
-                backing.read_exact(&mut cluster_data)?;
+                backing.read_at(cluster_begin, &mut cluster_data)?;
                 Some(cluster_data)
             } else {
                 None
@@ -1664,8 +1805,7 @@ impl Read for QcowFile {
             if (self.file_read(curr_addr, count, &mut buf[nread..(nread + count)])?).is_some() {
                 // Data is successfully read from the cluster
             } else if let Some(backing) = self.backing_file.as_mut() {
-                backing.seek(SeekFrom::Start(curr_addr))?;
-                backing.read_exact(&mut buf[nread..(nread + count)])?;
+                backing.read_at(curr_addr, &mut buf[nread..(nread + count)])?;
             } else {
                 // Previously unwritten region, return zeros
                 for b in &mut buf[nread..(nread + count)] {
@@ -1961,6 +2101,14 @@ pub fn detect_image_type(file: &mut RawFile) -> Result<ImageType> {
     file.seek(SeekFrom::Start(orig_seek))
         .map_err(Error::SeekingFile)?;
     Ok(image_type)
+}
+
+/// Get the image type as a string ("raw" or "qcow2")
+fn get_image_type_str(file: &mut RawFile) -> Result<&'static str> {
+    match detect_image_type(file)? {
+        ImageType::Qcow2 => Ok("qcow2"),
+        ImageType::Raw => Ok("raw"),
+    }
 }
 
 #[cfg(test)]
