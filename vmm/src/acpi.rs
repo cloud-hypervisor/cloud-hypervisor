@@ -582,7 +582,12 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
         // 1 (bus) x 32 (devices) x 8 (functions) = 256
         // Note: Currently only 1 bus is supported in a segment.
         iort.write(mapping_offset + 4, (255_u32).to_le());
-        // The lowest value in the output range
+        // Output base maps to ITS device IDs which must match the
+        // device ID encoding used in KVM MSI routing setup, which
+        // shares the same limitation - only 1 bus per segment and
+        // up to 256 segments.
+        // See: https://github.com/cloud-hypervisor/cloud-hypervisor/commit/c9374d87ac453d49185aa7b734df089444166484
+        assert!(segment.id < 256, "Up to 256 PCI segments are supported.");
         iort.write(mapping_offset + 8, ((256 * segment.id) as u32).to_le());
         // id_mapping_array_output_reference should be
         // the ITS group node (the first node) if no SMMU
