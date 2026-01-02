@@ -542,6 +542,8 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
     iort.write(51, (1u8).to_le());
     // ITS counts
     iort.write(64, (1u32).to_le());
+    // GIC ITS Identity Array
+    iort.write(68, (0u32).to_le()); // Value must match what's defined in MADT
 
     // Root Complex Nodes
     for (i, segment) in pci_segments.iter().enumerate() {
