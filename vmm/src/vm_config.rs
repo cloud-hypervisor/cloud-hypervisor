@@ -433,6 +433,20 @@ pub struct BalloonConfig {
 pub struct PvmemcontrolConfig {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct UserVhostDeviceConfig {
+    pub socket: PathBuf,
+    pub queue_sizes: Vec<u16>,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub pci_segment: u16,
+    pub device_type: u32,
+    pub min_queues: u16,
+    pub default_queues: u16,
+    pub avail_features: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct FsConfig {
     pub tag: String,
     pub socket: PathBuf,
@@ -912,6 +926,7 @@ pub struct VmConfig {
     #[serde(default)]
     pub rng: RngConfig,
     pub balloon: Option<BalloonConfig>,
+    pub user_vhost_device: Option<Vec<UserVhostDeviceConfig>>,
     pub fs: Option<Vec<FsConfig>>,
     pub pmem: Option<Vec<PmemConfig>>,
     #[serde(default = "default_serial")]

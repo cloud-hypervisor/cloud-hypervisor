@@ -155,22 +155,20 @@ pub trait Hypervisor: Send + Sync {
     /// Determine CPU vendor
     ///
     fn get_cpu_vendor(&self) -> CpuVendor {
+        #[allow(unused_unsafe)]
         // SAFETY: call cpuid with valid leaves
-        unsafe {
-            let leaf = x86_64::__cpuid(0x0);
+        let leaf = unsafe { x86_64::__cpuid(0x0) };
 
-            if leaf.ebx == 0x756e_6547 && leaf.ecx == 0x6c65_746e && leaf.edx == 0x4965_6e69 {
-                // Vendor string GenuineIntel
-                CpuVendor::Intel
-            } else if leaf.ebx == 0x6874_7541 && leaf.ecx == 0x444d_4163 && leaf.edx == 0x6974_6e65
-            {
-                // Vendor string AuthenticAMD
-                CpuVendor::AMD
-            } else {
-                // Not known yet, the corresponding manufacturer manual should contain the
-                // necessary info. See also https://wiki.osdev.org/CPUID#CPU_Vendor_ID_String
-                CpuVendor::default()
-            }
+        if leaf.ebx == 0x756e_6547 && leaf.ecx == 0x6c65_746e && leaf.edx == 0x4965_6e69 {
+            // Vendor string GenuineIntel
+            CpuVendor::Intel
+        } else if leaf.ebx == 0x6874_7541 && leaf.ecx == 0x444d_4163 && leaf.edx == 0x6974_6e65 {
+            // Vendor string AuthenticAMD
+            CpuVendor::AMD
+        } else {
+            // Not known yet, the corresponding manufacturer manual should contain the
+            // necessary info. See also https://wiki.osdev.org/CPUID#CPU_Vendor_ID_String
+            CpuVendor::default()
         }
     }
 
