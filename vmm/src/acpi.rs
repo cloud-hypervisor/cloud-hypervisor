@@ -515,85 +515,195 @@ fn create_dbg2_table(base_address: u64) -> Sdt {
 }
 
 #[cfg(target_arch = "aarch64")]
+#[allow(dead_code)]
+#[repr(C, packed)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
+struct IortBodyBase {
+    pub num_nodes: u32,
+    pub offset_first_node: u32,
+    _reserved: u32,
+}
+
+#[cfg(target_arch = "aarch64")]
+#[allow(dead_code)]
+#[repr(C, packed)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
+struct IortNodeCommon {
+    pub type_: u8,
+    pub length: u16,
+    pub revision: u8,
+    pub node_id: u32,
+    pub num_id_mappings: u32,
+    pub id_mappings_array_offset: u32,
+}
+
+#[cfg(target_arch = "aarch64")]
+#[allow(dead_code)]
+#[repr(C, packed)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
+struct IortIdMapping {
+    pub input_base: u32,
+    pub num_ids: u32,
+    pub output_base: u32,
+    pub output_reference: u32,
+    pub flags: u32,
+}
+
+#[cfg(target_arch = "aarch64")]
+#[allow(dead_code)]
+#[repr(C, packed)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
+struct IortMemoryAccessProperties {
+    pub cca: u32,
+    pub ah: u8,
+    _reserved: u16,
+    pub maf: u8,
+}
+
+#[cfg(target_arch = "aarch64")]
+#[allow(dead_code)]
+#[repr(C, packed)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
+struct IortItsGroupBase {
+    pub common: IortNodeCommon,
+    pub its_count: u32,
+    // GIC ITS identifiers follow: array of `u32`
+}
+
+#[cfg(target_arch = "aarch64")]
+#[allow(dead_code)]
+#[repr(C, packed)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
+struct IortPciRootComplexBase {
+    pub common: IortNodeCommon,
+    pub mem_access_props: IortMemoryAccessProperties,
+    pub ats_attribute: u32,
+    pub pci_segment_number: u32,
+    pub memory_address_size_limit: u8,
+    _reserved: [u8; 3],
+    // ID mappings follow: array of `struct IortIdMapping`
+}
+
+#[cfg(target_arch = "aarch64")]
+#[inline]
+fn align_to_8_bytes(len: usize) -> usize {
+    (8 - (len % 8)) % 8
+}
+
+#[cfg(target_arch = "aarch64")]
 // Generate IORT table based on Spec Revision E.b:
 // https://developer.arm.com/documentation/den0049/eb/?lang=en
 fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
+    const ACPI_IORT_HEADER_SIZE: u32 = 36;
+    const ACPI_IORT_REVISION: u8 = 3;
     const ACPI_IORT_NODE_ITS_GROUP: u8 = 0x00;
     const ACPI_IORT_NODE_PCI_ROOT_COMPLEX: u8 = 0x02;
-    const ACPI_IORT_NODE_ROOT_COMPLEX_OFFSET: usize = 72;
-    const ACPI_IORT_NODE_ROOT_COMPLEX_SIZE: usize = 60;
+
+    // IORT header
+    let mut iort = Sdt::new(
+        *b"IORT",
+        ACPI_IORT_HEADER_SIZE,
+        ACPI_IORT_REVISION,
+        *b"CLOUDH",
+        *b"CHIORT  ",
+        1,
+    );
+    assert_eq!(iort.len(), ACPI_IORT_HEADER_SIZE as usize);
 
     // The IORT table contains:
-    // - Header (size = 40)
-    // - 1 x ITS Group Node (size = 24)
-    // - N x Root Complex Node (N = number of pci segments, size = 60 x N)
-    let iort_table_size: u32 = (ACPI_IORT_NODE_ROOT_COMPLEX_OFFSET
-        + ACPI_IORT_NODE_ROOT_COMPLEX_SIZE * pci_segments.len())
-        as u32;
-    let mut iort = Sdt::new(*b"IORT", iort_table_size, 3, *b"CLOUDH", *b"CHIORT  ", 1);
-    iort.write(36, ((1 + pci_segments.len()) as u32).to_le());
-    iort.write(40, (48u32).to_le());
+    // - IortBodyBase
+    // - 1 x ITS Group Node
+    // - N x PCI Root Complex Node (N = number of pci segments)
+    let num_nodes = (1 + pci_segments.len()) as u32;
+    // First node is the ITS Group Node located right after the IORT Body Base
+    let offset_its_node = iort.len() + std::mem::size_of::<IortBodyBase>();
+    assert!(align_to_8_bytes(offset_its_node) == 0); // Ensure the ITS node is 8-byte aligned
+    iort.append(IortBodyBase {
+        num_nodes,
+        offset_first_node: offset_its_node as u32,
+        _reserved: 0,
+    });
+    assert!(iort.len() == offset_its_node);
 
-    // ITS group node
-    iort.write(48, ACPI_IORT_NODE_ITS_GROUP);
-    // Length of the ITS group node in bytes
-    iort.write(49, (24u16).to_le());
-    // Revision
-    iort.write(51, (1u8).to_le());
-    // ITS counts
-    iort.write(64, (1u32).to_le());
-    // GIC ITS Identity Array
-    iort.write(68, (0u32).to_le()); // Value must match what's defined in MADT
+    // ITS Group Node contains:
+    // - IortItsGroupBase
+    // - ITS Identifiers Array: Array of u32 ITS IDs
+    //   Currently contains a single ITS with ID 0, which matches the
+    //   `translation_id` field of the `GisIts`` structure in the MADT table.
+    let its_id_array = [0u32; 1];
+    let its_count = its_id_array.len();
+    let its_group_node_size =
+        std::mem::size_of::<IortItsGroupBase>() + its_count * std::mem::size_of::<u32>();
+    let padding = align_to_8_bytes(iort.len() + its_group_node_size);
+    iort.append(IortItsGroupBase {
+        common: IortNodeCommon {
+            type_: ACPI_IORT_NODE_ITS_GROUP,
+            length: (its_group_node_size + padding) as u16,
+            revision: 1,
+            node_id: 0, // todo
+            num_id_mappings: 0,
+            id_mappings_array_offset: 0,
+        },
+        its_count: its_count as u32,
+    });
+    iort.append(its_id_array);
+    iort.append_slice(&vec![0u8; padding]); // Add padding to align to 8 bytes
 
-    // Root Complex Nodes
-    for (i, segment) in pci_segments.iter().enumerate() {
-        let node_offset: usize =
-            ACPI_IORT_NODE_ROOT_COMPLEX_OFFSET + i * ACPI_IORT_NODE_ROOT_COMPLEX_SIZE;
-        iort.write(node_offset, ACPI_IORT_NODE_PCI_ROOT_COMPLEX);
-        // Length of the root complex node in bytes
-        iort.write(
-            node_offset + 1,
-            (ACPI_IORT_NODE_ROOT_COMPLEX_SIZE as u16).to_le(),
-        );
-        // Revision
-        iort.write(node_offset + 3, (3u8).to_le());
-        // Node ID
-        iort.write(node_offset + 4, (segment.id as u32).to_le());
-        // Mapping counts
-        iort.write(node_offset + 8, (1u32).to_le());
-        // Offset from the start of the RC node to the start of its Array of ID mappings
-        iort.write(node_offset + 12, (36u32).to_le());
-        // Fully coherent device
-        iort.write(node_offset + 16, (1u32).to_le());
-        // CCA = CPM = DCAS = 1
-        iort.write(node_offset + 23, 3u8);
-        // PCI segment number
-        iort.write(node_offset + 28, (segment.id as u32).to_le());
-        // Memory address size limit
-        iort.write(node_offset + 32, (64u8).to_le());
+    // Create PCI Root Complex Node for each PCI segment
+    for segment in pci_segments.iter() {
+        assert!(align_to_8_bytes(iort.len()) == 0); // Ensure each node is 8-byte aligned
 
-        // From offset 32 onward is the space for ID mappings Array.
-        // Now we have only one mapping.
-        let mapping_offset: usize = node_offset + 36;
-        // The lowest value in the input range
-        iort.write(mapping_offset, (0u32).to_le());
-        // The number of IDs in the range minus one:
-        // This should cover all the devices of a segment:
-        // 1 (bus) x 32 (devices) x 8 (functions) = 256
-        // Note: Currently only 1 bus is supported in a segment.
-        iort.write(mapping_offset + 4, (255_u32).to_le());
-        // Output base maps to ITS device IDs which must match the
-        // device ID encoding used in KVM MSI routing setup, which
-        // shares the same limitation - only 1 bus per segment and
-        // up to 256 segments.
-        // See: https://github.com/cloud-hypervisor/cloud-hypervisor/commit/c9374d87ac453d49185aa7b734df089444166484
+        // Each PCI Root Complex Node contains:
+        // - IortPciRootComplexBase
+        // - ID mapping Array: Array of IortIdMapping
+        //   Currently contains a single mapping that maps all device IDs
+        //   in the segment to the ITS Group Node.
+        let num_id_mappings = 1;
+        let node_size = std::mem::size_of::<IortPciRootComplexBase>()
+            + num_id_mappings * std::mem::size_of::<IortIdMapping>();
+        let padding = align_to_8_bytes(iort.len() + node_size);
+        iort.append(IortPciRootComplexBase {
+            common: IortNodeCommon {
+                type_: ACPI_IORT_NODE_PCI_ROOT_COMPLEX,
+                length: (node_size + padding) as u16,
+                revision: 3,
+                node_id: segment.id as u32, // todo to avoid conflict with ITS node IDs
+                num_id_mappings: num_id_mappings as u32,
+                // ID mapping array starts right after `IortPciRootComplexBase`
+                id_mappings_array_offset: std::mem::size_of::<IortPciRootComplexBase>() as u32,
+            },
+            mem_access_props: IortMemoryAccessProperties {
+                cca: 1, // Fully coherent device
+                ah: 0,
+                _reserved: 0,
+                maf: 3, // CPM = DCAS = 1
+            },
+            ats_attribute: 0,
+            pci_segment_number: segment.id as u32,
+            memory_address_size_limit: 64u8,
+            _reserved: [0; 3],
+        });
+        // ID Mapping for this Root Complex
+        // Maps 256 device IDs (1 bus × 32 devices × 8 functions)
         assert!(segment.id < 256, "Up to 256 PCI segments are supported.");
-        iort.write(mapping_offset + 8, ((256 * segment.id) as u32).to_le());
-        // id_mapping_array_output_reference should be
-        // the ITS group node (the first node) if no SMMU
-        iort.write(mapping_offset + 12, (48u32).to_le());
-        // Flags
-        iort.write(mapping_offset + 16, (0u32).to_le());
+        iort.append(IortIdMapping {
+            input_base: 0,
+            // The number of IDs in the range minus one:
+            // This should cover all the devices of a segment:
+            // 1 (bus) x 32 (devices) x 8 (functions) = 256
+            // Note: Currently only 1 bus is supported in a segment.
+            num_ids: 255,
+            // Output base maps to ITS device IDs which must match the
+            // device ID encoding used in KVM MSI routing setup, which
+            // shares the same limitation - only 1 bus per segment and
+            // up to 256 segments.
+            // See: https://github.com/cloud-hypervisor/cloud-hypervisor/commit/c9374d87ac453d49185aa7b734df089444166484
+            output_base: (256 * segment.id) as u32,
+            // Output reference node is the ITS group node as there is no SMMU node
+            output_reference: offset_its_node as u32,
+            flags: 0,
+        });
+        iort.append_slice(&vec![0u8; padding]); // Add padding to align to 8 bytes
     }
 
     iort.update_checksum();
