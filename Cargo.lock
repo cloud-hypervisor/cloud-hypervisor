@@ -324,6 +324,7 @@ version = "0.1.0"
 dependencies = [
  "byteorder",
  "crc-any",
+ "epoll",
  "flate2",
  "io-uring",
  "libc",
