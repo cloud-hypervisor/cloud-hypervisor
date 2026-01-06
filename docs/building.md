@@ -24,8 +24,8 @@ Hypervisor. Here, all the steps are based on Ubuntu, for other Linux
 distributions please replace the package manager and package name.
 
 ```shell
-# Install basic packages needed. For a package list targeting for more
-# functionalities for example the test, please see resources/Dockerfile.
+# Install basic dependencies. For a list of packages required for additional
+# features (e.g., testing), please refer to resources/Dockerfile.
 $ sudo apt-get update
 $ sudo apt install git build-essential m4 bison flex uuid-dev qemu-utils musl-tools
 # Install rust tool chain
