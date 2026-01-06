@@ -26,8 +26,8 @@ struct BalloonConfig {
 
 Size of the balloon device. It is subtracted from the VM's total size. For
 instance, if creating a VM with 4GiB of RAM, along with a balloon of 1GiB, the
-guest will be able to use 3GiB of accessible memory. The guest sees all the RAM
-and unless it is balloon enlightened is entitled to all of it.
+guest will be able to use 3GiB of accessible memory. The guest sees all the RAM,
+and unless it is balloon enlightened, it is entitled to all of it.
 
 This parameter is mandatory.
 
@@ -42,7 +42,7 @@ _Example_
 
 ### `deflate_on_oom`
 
-Allow the guest to deflate the balloon if running Out Of Memory (OOM). Assuming
+Allow the guest to deflate the balloon when running Out Of Memory (OOM). Assuming
 the balloon size is greater than 0, this means the guest is allowed to reduce
 the balloon size all the way down to 0 if this can help recover from the OOM
 event.

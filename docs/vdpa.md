@@ -29,6 +29,7 @@ parameters available for the vDPA device.
 struct VdpaConfig {
     path: PathBuf,
     num_queues: usize,
+    iommu: bool,
     id: Option<String>,
     pci_segment: u16,
 }
@@ -83,7 +84,7 @@ _Example_
 
 ### `pci_segment`
 
-PCI segment number to which the vDPA device should be attached to.
+PCI segment number to which the vDPA device should be attached.
 
 This parameter is optional.
 

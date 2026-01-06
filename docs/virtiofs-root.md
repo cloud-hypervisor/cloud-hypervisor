@@ -37,20 +37,20 @@ sudo sed -i '/vt100/a \n# paravirt console\nhvc0::respawn:/sbin/getty -L hvc0 11
 # any sort of production setup
 sudo sed -i 's/root:!::0:::::/root:::0:::::/' etc/shadow
 # set up init scripts
-for i in acpid crond
+for i in acpid crond; do
     sudo ln -sf /etc/init.d/$i etc/runlevels/default/$i
-end
-for i in bootmisc hostname hwclock loadkmap modules networking swap sysctl syslog urandom
+done
+for i in bootmisc hostname hwclock loadkmap modules networking swap sysctl syslog urandom; do
     sudo ln -sf /etc/init.d/$i etc/runlevels/boot/$i
-end
+done
 
-for i in killprocs mount-ro savecache
+for i in killprocs mount-ro savecache; do
     sudo ln -sf /etc/init.d/$i etc/runlevels/shutdown/$i
-end
+done
 
-for i in devfs dmesg hwdrivers mdev
+for i in devfs dmesg hwdrivers mdev; do
     sudo ln -sf /etc/init.d/$i etc/runlevels/sysinit/$i
-end
+done
 # setup network config
 echo 'auto lo
 iface lo inet loopback
