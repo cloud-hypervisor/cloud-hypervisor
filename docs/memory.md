@@ -20,7 +20,7 @@ struct MemoryConfig {
     hugepages: bool,
     hugepage_size: Option<u64>,
     prefault: bool,
-    thp: bool
+    thp: bool,
     zones: Option<Vec<MemoryZoneConfig>>,
 }
 ```
@@ -119,7 +119,7 @@ By default this option is turned off, which results in performing `mmap(2)`
 with `MAP_PRIVATE` flag.
 
 If `hugepages=on` then the value of this field is ignored as huge pages always
-requires `MAP_SHARED`.
+require `MAP_SHARED`.
 
 _Example_
 
@@ -135,8 +135,7 @@ If no huge page size is supplied the system's default huge page size is used.
 
 By using hugepages, one can improve the overall performance of the VM, assuming
 the guest will allocate hugepages as well. Another interesting use case is VFIO
-as it speeds up the VM's boot time since the amount of IOMMU mappings are
-reduced.
+as it speeds up the VM's boot time since the amount of IOMMU mappings is reduced.
 
 The user is responsible for ensuring there are sufficient huge pages of the
 specified size for the VMM to use. Failure to do so may result in strange VMM
@@ -185,7 +184,7 @@ backing file) should be labelled `MADV_HUGEPAGE` with `madvise(2)` indicating
 to the kernel that this memory may be backed with huge pages transparently.
 
 The use of transparent huge pages can improve the performance of the guest as
-there will fewer virtualisation related page faults. Unlike using
+there will be fewer virtualisation related page faults. Unlike using
 `hugepages=on` a specific number of huge pages do not need to be allocated by
 the kernel.
 
@@ -295,9 +294,9 @@ vhost-user devices as part of the VM device model, as they will be driven
 by standalone daemons needing access to the guest RAM content.
 
 If `hugepages=on` then the value of this field is ignored as huge pages always
-requires `MAP_SHARED`.
+require `MAP_SHARED`.
 
-By default this option is turned off, which result in performing `mmap(2)`
+By default this option is turned off, which results in performing `mmap(2)`
 with `MAP_PRIVATE` flag.
 
 _Example_
@@ -315,8 +314,7 @@ If no huge page size is supplied the system's default huge page size is used.
 
 By using hugepages, one can improve the overall performance of the VM, assuming
 the guest will allocate hugepages as well. Another interesting use case is VFIO
-as it speeds up the VM's boot time since the amount of IOMMU mappings are
-reduced.
+as it speeds up the VM's boot time since the amount of IOMMU mappings is reduced.
 
 The user is responsible for ensuring there are sufficient huge pages of the
 specified size for the VMM to use. Failure to do so may result in strange VMM
@@ -325,7 +323,7 @@ error with `hugepages` enabled, just disable it or check whether there are enoug
 huge pages.
 
 If `hugepages=on` then the value of `shared` is ignored as huge pages always
-requires `MAP_SHARED`.
+require `MAP_SHARED`.
 
 By default this option is turned off.
 
@@ -434,7 +432,7 @@ it allows for specifying the distance between each NUMA node.
 ```rust
 struct NumaConfig {
     guest_numa_id: u32,
-    cpus: Option<Vec<u8>>,
+    cpus: Option<Vec<u32>>,
     distances: Option<Vec<NumaDistance>>,
     memory_zones: Option<Vec<String>>,
 }
@@ -470,7 +468,7 @@ regarding the CPUs associated with it, which might help the guest run more
 efficiently.
 
 Multiple values can be provided to define the list. Each value is an unsigned
-integer of 8 bits.
+integer of 32 bits.
 
 For instance, if one needs to attach all CPUs from 0 to 4 to a specific node,
 the syntax using `-` will help define a contiguous range with `cpus=0-4`. The
@@ -493,7 +491,7 @@ _Example_
 ### `distances`
 
 List of distances between the current NUMA node referred by `guest_numa_id`
-and the destination NUMA nodes listed along with distances. This option let
+and the destination NUMA nodes listed along with distances. This option lets
 the user choose the distances between guest NUMA nodes. This is important to
 provide an accurate description of the way non uniform memory accesses will
 perform in the guest.
@@ -552,7 +550,7 @@ _Example_
 ### PCI bus
 
 Cloud Hypervisor supports guests with one or more PCI segments. The default PCI segment always
-has affinity to NUMA node 0. Be default, all other PCI segments have affinity to NUMA node 0.
+has affinity to NUMA node 0. By default, all other PCI segments have affinity to NUMA node 0.
 The user may configure the NUMA affinity for any additional PCI segments.
 
 _Example_

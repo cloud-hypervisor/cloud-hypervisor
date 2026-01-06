@@ -11,8 +11,8 @@ to set vCPUs options for Cloud Hypervisor.
 
 ```rust
 struct CpusConfig {
-    boot_vcpus: u8,
-    max_vcpus: u8,
+    boot_vcpus: u32,
+    max_vcpus: u32,
     topology: Option<CpuTopology>,
     kvm_hyperv: bool,
     max_phys_bits: u8,
@@ -30,12 +30,12 @@ struct CpusConfig {
 
 Number of vCPUs present at boot time.
 
-This option allows to define a specific number of vCPUs to be present at the
+This option allows defining a specific number of vCPUs to be present at the
 time the VM is started. This option is mandatory when using the `--cpus`
 parameter. If `--cpus` is not specified, this option takes the default value
 of `1`, starting the VM with a single vCPU.
 
-Value is an unsigned integer of 8 bits.
+Value is an unsigned integer of 32 bits.
 
 _Example_
 
@@ -48,14 +48,14 @@ _Example_
 Maximum number of vCPUs.
 
 This option defines the maximum number of vCPUs that can be assigned to the VM.
-In particular, this option is used when looking for CPU hotplug as it lets the
-provide an indication about how many vCPUs might be needed later during the
-runtime of the VM.
+In particular, this option is used when looking for CPU hotplug as it provides
+an indication about how many vCPUs might be needed later during the runtime of
+the VM.
 For instance, if booting the VM with 2 vCPUs and a maximum of 6 vCPUs, it means
 up to 4 vCPUs can be added later at runtime by resizing the VM.
 
 The value must be greater than or equal to the number of boot vCPUs.
-The value is an unsigned integer of 8 bits.
+The value is an unsigned integer of 32 bits.
 
 By default this option takes the value of `boot`, meaning vCPU hotplug is not
 expected and can't be performed.
@@ -73,16 +73,16 @@ Topology of the guest platform.
 This option gives the user a way to describe the exact topology that should be
 exposed to the guest. It can be useful to describe to the guest the same
 topology found on the host as it allows for proper usage of the resources and
-is a way to achieve better performances.
+is a way to achieve better performance.
 
 The topology is described through the following structure:
 
 ```rust
 struct CpuTopology {
-    threads_per_core: u8,
-    cores_per_die: u8,
-    dies_per_package: u8,
-    packages: u8,
+    threads_per_core: u16,
+    cores_per_die: u16,
+    dies_per_package: u16,
+    packages: u16,
 }
 ```
 
@@ -124,7 +124,7 @@ Maximum size for guest's addressable space.
 
 This option defines the maximum number of physical bits for all vCPUs, which
 sets a limit for the size of the guest's addressable space. This is mainly
-useful for debug purpose.
+useful for debugging purposes.
 
 The value is an unsigned integer of 8 bits.
 
@@ -141,16 +141,16 @@ Affinity of each vCPU.
 This option gives the user a way to provide the host CPU set associated with
 each vCPU. It is useful for achieving CPU pinning, ensuring multiple VMs won't
 affect the performance of each other. It might also be used in the context of
-NUMA as it is way of making sure the VM can run on a specific host NUMA node.
-In general, this option is used to increase the performances of a VM depending
+NUMA as it is a way of making sure the VM can run on a specific host NUMA node.
+In general, this option is used to increase the performance of a VM depending
 on the host platform and the type of workload running in the guest.
 
 The affinity is described through the following structure:
 
 ```rust
 struct CpuAffinity {
-    vcpu: u8,
-    host_cpus: Vec<u8>,
+    vcpu: u32,
+    host_cpus: Vec<usize>,
 }
 ```
 
@@ -164,8 +164,8 @@ The outer brackets define the list of vCPUs. And for each vCPU, the inner
 brackets attached to `@` define the list of host CPUs the vCPU is allowed to
 run onto.
 
-Multiple values can be provided to define each list. Each value is an unsigned
-integer of 8 bits.
+Multiple values can be provided to define each list. Each value is a
+platform-native unsigned integer (`usize`).
 
 For instance, if one needs to run vCPU 0 on host CPUs from 0 to 4, the syntax
 using `-` will help define a contiguous range with `affinity=0@[0-4]`. The
