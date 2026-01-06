@@ -8,14 +8,14 @@
       - [REST API Examples](#rest-api-examples)
         - [Create a Virtual Machine](#create-a-virtual-machine)
         - [Boot a Virtual Machine](#boot-a-virtual-machine)
-        - [Dump a Virtual Machine Information](#dump-a-virtual-machine-information)
+        - [Dump Virtual Machine Information](#dump-virtual-machine-information)
         - [Reboot a Virtual Machine](#reboot-a-virtual-machine)
         - [Shut a Virtual Machine Down](#shut-a-virtual-machine-down)
     - [D-Bus API](#d-bus-api)
       - [D-Bus API Location and availability](#d-bus-api-location-and-availability)
       - [D-Bus API Interface](#d-bus-api-interface)
     - [Command Line Interface](#command-line-interface)
-    - [REST API, D-Bus API and CLI Architectural Relationship](#rest-api-and-cli-architectural-relationship)
+    - [REST API, D-Bus API and CLI Architectural Relationship](#rest-api-d-bus-api-and-cli-architectural-relationship)
   - [Internal API](#internal-api)
     - [Goals and Design](#goals-and-design)
   - [End to End Example](#end-to-end-example)
@@ -31,7 +31,7 @@ The Cloud Hypervisor API is made of 2 distinct interfaces:
 
 1. **The internal API**, based on [rust's Multi-Producer, Single-Consumer (MPSC)](https://doc.rust-lang.org/std/sync/mpsc/)
    module. This API is used internally by the Cloud Hypervisor threads to
-   communicate between each others.
+   communicate with each other.
 
 The goal of this document is to describe the Cloud Hypervisor API as a whole,
 and to outline how the internal and external APIs are architecturally related.
@@ -81,7 +81,7 @@ The Cloud Hypervisor API exposes the following actions through its endpoints:
 | Trigger power button of the VM     | `/vm.power-button`      | N/A                             | N/A                      | The VM is booted                                       |
 | Pause the VM                       | `/vm.pause`             | N/A                             | N/A                      | The VM is booted                                       |
 | Resume the VM                      | `/vm.resume`            | N/A                             | N/A                      | The VM is paused                                       |
-| Task a snapshot of the VM          | `/vm.snapshot`          | `/schemas/VmSnapshotConfig`     | N/A                      | The VM is paused                                       |
+| Take a snapshot of the VM          | `/vm.snapshot`          | `/schemas/VmSnapshotConfig`     | N/A                      | The VM is paused                                       |
 | Perform a coredump of the VM*      | `/vm.coredump`          | `/schemas/VmCoredumpData`       | N/A                      | The VM is paused                                       |
 | Restore the VM from a snapshot     | `/vm.restore`           | `/schemas/RestoreConfig`        | N/A                      | The VM is created but not booted                       |
 | Add/remove CPUs to/from the VM     | `/vm.resize`            | `/schemas/VmResize`             | N/A                      | The VM is booted                                       |
@@ -155,9 +155,9 @@ Once the VM is created, we can boot it:
 curl --unix-socket /tmp/cloud-hypervisor.sock -i -X PUT 'http://localhost/api/v1/vm.boot'
 ```
 
-##### Dump a Virtual Machine Information
+##### Dump Virtual Machine Information
 
-We can fetch information about any VM, as soon as it's created:
+We can fetch information about any VM as soon as it's created:
 
 ```shell
 #!/usr/bin/env bash
@@ -201,7 +201,7 @@ see [D-Bus API Interface](#d-bus-api-interface).
 #### D-Bus API Location and availability
 
 This feature is not compiled into Cloud Hypervisor by default. Users who
-wish to use the D-Bus API, must explicitly enable it with the `dbus_api`
+wish to use the D-Bus API must explicitly enable it with the `dbus_api`
 feature flag when compiling Cloud Hypervisor.
 
 ```sh
@@ -278,7 +278,7 @@ From the CLI, one can:
 The REST API, D-Bus API and the CLI all rely on a common, [internal API](#internal-api).
 
 The CLI options are parsed by the
-[clap crate](https://docs.rs/clap/4.3.11/clap/) and then translated into
+[clap crate](https://docs.rs/clap/4.5.53/clap/) and then translated into
 [internal API](#internal-api) commands.
 
 The REST API is processed by an HTTP thread using the
@@ -288,7 +288,7 @@ crate. As with the CLI, the HTTP requests eventually get translated into
 
 The D-Bus API is implemented using the [zbus](https://github.com/dbus2/zbus)
 crate and runs in its own thread. Whenever it needs to call the [internal API](#internal-api),
-the [blocking](https://github.com/smol-rs/blocking) crate is used perform the call in zbus' async context.
+the [blocking](https://github.com/smol-rs/blocking) crate is used to perform the call in zbus' async context.
 
 As a summary, the REST API, the D-Bus API and the CLI are essentially frontends for the
 [internal API](#internal-api):
@@ -321,7 +321,7 @@ As a summary, the REST API, the D-Bus API and the CLI are essentially frontends 
 
 The Cloud Hypervisor internal API, as its name suggests, is used internally
 by the different Cloud Hypervisor threads (VMM, HTTP, D-Bus, control loop,
-etc) to send commands and responses to each others.
+etc) to send commands and responses to each other.
 
 It is based on [rust's Multi-Producer, Single-Consumer (MPSC)](https://doc.rust-lang.org/std/sync/mpsc/),
 and the single consumer (a.k.a. the API receiver) is the Cloud Hypervisor
@@ -365,9 +365,8 @@ APIs work together, let's look at a complete VM creation flow, from the
 [REST API](#rest-api) call, to the reply the external user will receive:
 
 1. A user or operator sends an HTTP request to the Cloud Hypervisor
-   [REST API](#rest-api) in order to creates a virtual machine:
-   ```
-   shell
+   [REST API](#rest-api) in order to create a virtual machine:
+   ```shell
    #!/usr/bin/env bash
 
 	curl --unix-socket /tmp/cloud-hypervisor.sock -i \
@@ -414,7 +413,7 @@ APIs work together, let's look at a complete VM creation flow, from the
    the `VmCreate` payload, and extracts both the `VmConfig` structure and the
    [Sender](https://doc.rust-lang.org/std/sync/mpsc/struct.Sender.html) from the
    command payload. It stores the `VmConfig` structure and replies back to the
-   sender ((The HTTP thread):
+   sender (The HTTP thread):
    ```Rust
    match api_request {
 	   ApiRequest::VmCreate(config, sender) => {
