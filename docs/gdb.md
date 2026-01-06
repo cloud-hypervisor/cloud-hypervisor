@@ -1,6 +1,6 @@
 # GDB Support
 
-This feature allows remote guest debugging using GDB. Note that this feature is only supported on x86_64/KVM.
+This feature allows remote guest debugging using GDB. Note that this feature is supported on x86_64 and aarch64 with KVM.
 
 To enable debugging with GDB, build with the `guest_debug` feature enabled:
 

@@ -13,7 +13,7 @@ be used simultaneously.
 
 ### `0x80` I/O port
 
-Whenever the guest write one byte between `0x0` and `0xF` on this particular
+Whenever the guest writes one byte between `0x0` and `0xF` on this particular
 I/O port, `cloud-hypervisor` will log and timestamp that event at the `debug`
 log level.
 
@@ -52,7 +52,7 @@ to easily grep for the tracing logs (e.g.
 
 ```
 ./target/debug/cloud-hypervisor \
-    --kernel ~/rust-hypervisor-firmware/target/target/release/hypervisor-fw \
+    --kernel ~/rust-hypervisor-firmware/target/release/hypervisor-fw \
     --disk path=~/hypervisor/images/focal-server-cloudimg-amd64.raw \
     --cpus 4 \
     --memory size=1024M \
@@ -94,4 +94,4 @@ The `0x80` debug port and the port of the firmware debug device are always
 available. The debug console must be activated via the command line, but
 provides more configuration options.
 
-You can use different ports for different aspect of your logging messages.
+You can use different ports for different aspects of your logging messages.
