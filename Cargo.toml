@@ -70,7 +70,7 @@ igvm_defs = { git = "https://github.com/microsoft/igvm", branch = "main" }
 
 # serde crates
 serde = "1.0.228"
-serde_json = "1.0.148"
+serde_json = "1.0.149"
 serde_with = { version = "3.16.1", default-features = false }
 
 # other crates
@@ -91,7 +91,7 @@ signal-hook = "0.4.1"
 thiserror = "2.0.17"
 uuid = { version = "1.19.0" }
 wait-timeout = "0.2.1"
-zerocopy = { version = "0.8.31", default-features = false }
+zerocopy = { version = "0.8.33", default-features = false }
 
 [workspace.lints.clippy]
 # Any clippy lint (group) in alphabetical order:
