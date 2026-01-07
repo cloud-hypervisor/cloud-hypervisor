@@ -6,7 +6,7 @@ in Cloud Hypervisor:
 1. local migration - migrating a VM from one Cloud Hypervisor instance to another on the same machine;
 1. remote migration - migrating a VM between two machines;
 
-> :warning: These examples place sockets /tmp. This is done for
+> :warning: These examples place sockets in /tmp. This is done for
 > simplicity and should not be done in production.
 
 ## Local Migration (Suitable for Live Upgrade of VMM)

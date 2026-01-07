@@ -16,11 +16,11 @@ permissions.
 
 ## Host Setup
 
-Landlock should be enabled in Host kernel to use it with cloud-hypervisor.
-Please following [Kernel-Support](https://docs.kernel.org/userspace-api/landlock.html#kernel-support) link to enable Landlock on Host kernel.
+Landlock should be enabled in host kernel to use it with cloud-hypervisor.
+Please follow [Kernel-Support](https://docs.kernel.org/userspace-api/landlock.html#kernel-support) link to enable Landlock on Host kernel.
 
 
-Landlock support can be checked with following command:
+Landlock support can be checked with the following command:
 ```
 $ sudo dmesg | grep -w  landlock
 [    0.000000] landlock: Up and running.
@@ -30,8 +30,8 @@ Linux kernel confirms Landlock support with above message in dmesg.
 ## Enable Landlock
 
 At the time of enabling Landlock, Cloud-Hypervisor process needs the complete
-list of files it accesses over its lifetime. So, Landlock is enabled `vm_create`
-stage of guest boot.
+list of files it accesses over its lifetime. So, Landlock is enabled at the
+`vm_create` stage of guest boot.
 
 ### Command Line
 Append `--landlock` to Cloud-Hypervisor's command line to enable Landlock

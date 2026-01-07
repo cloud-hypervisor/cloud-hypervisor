@@ -15,7 +15,7 @@ to increase the security regarding the memory accesses performed by the virtual
 devices (VIRTIO devices), on behalf of the guest drivers.
 
 With a virtual IOMMU, the VMM stands between the guest driver and its device
-counterpart, validating and translating every address before to try accessing
+counterpart, validating and translating every address before trying accessing
 the guest memory. This is standard interposition that is performed here by the
 VMM.
 
@@ -75,8 +75,8 @@ Not all devices support this extra option, and the default value will always
 be `off` since we want to avoid the performance impact for most users who don't
 need this.
 
-Refer to the command line `--help` to find out which device support to be
-attached to the virtual IOMMU.
+Refer to the command line `--help` to find out which devices can be supported
+to be attached to the virtual IOMMU.
 
 Below is a simple example exposing the `virtio-blk` device as attached to the
 virtual IOMMU:
@@ -128,7 +128,7 @@ When ACPI is disabled, virtual IOMMU is supported through Flattened Device Tree
 IOMMU-attached and which should not. No matter how many devices you attached to
 the virtual IOMMU by setting `iommu=on` option, all the devices on the PCI bus
 will be attached to the virtual IOMMU (except the IOMMU itself). Each of the
-devices will be added into a IOMMU group.
+devices will be added into an IOMMU group.
 
 As a result, the directory content of `/sys/kernel/iommu_groups` would be:
 
@@ -151,7 +151,7 @@ of requests need to be issued in order to create large mappings.
 One use case is even more impacted by the slowdown, the nested VFIO case. When
 passing a device through a L2 guest, the VFIO driver running in L1 will update
 the DMAR entries for the specific device. Because VFIO pins the entire guest
-memory, this means the entire mapping of the L2 guest need to be stored into
+memory, this means the entire mapping of the L2 guest needs to be stored into
 multiple 4k mappings. Obviously, the bigger the L2 guest RAM is, the longer the
 update of the mappings will last. There is an additional problem happening in
 this case, if the L2 guest RAM is quite large, it will require a large number
@@ -194,7 +194,7 @@ be consumed.
 ### Nested usage
 
 Let's now look at the specific example of nested virtualization. In order to
-reach optimized performances, the L2 guest also need to be mapped based on
+reach optimized performances, the L2 guest also needs to be mapped based on
 huge pages. Here is how to achieve this, assuming the physical device you are
 passing through is `0000:00:01.0`.
 

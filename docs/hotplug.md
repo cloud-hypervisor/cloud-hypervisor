@@ -110,7 +110,7 @@ Mem:          3.0Gi        71Mi       2.8Gi       0.0Ki        47Mi       2.8Gi
 Swap:          32Mi          0B        32Mi
 ```
 
-Due to guest OS limitations is is necessary to ensure that amount of memory added (between currently assigned RAM and that which is desired) is a multiple of 128MiB.
+Due to guest OS limitations it is necessary to ensure that amount of memory added (between currently assigned RAM and that which is desired) is a multiple of 128MiB.
 
 The same API can also be used to reduce the desired RAM for a VM but the change will not be applied until the VM is rebooted.
 
@@ -179,7 +179,7 @@ Notice the addition of `--api-socket=/tmp/ch-socket`.
 
 ### Add VFIO Device
 
-To ask the VMM to add additional VFIO device then use the `add-device` API.
+To ask the VMM to add additional VFIO device, use the `add-device` API.
 
 ```shell
 ./ch-remote --api-socket=/tmp/ch-socket add-device path=/sys/bus/pci/devices/0000:01:00.0/
@@ -187,7 +187,7 @@ To ask the VMM to add additional VFIO device then use the `add-device` API.
 
 ### Add Disk Device
 
-To ask the VMM to add additional disk device then use the `add-disk` API.
+To ask the VMM to add additional disk device, use the `add-disk` API.
 
 ```shell
 ./ch-remote --api-socket=/tmp/ch-socket add-disk path=/foo/bar/cloud.img
@@ -195,7 +195,7 @@ To ask the VMM to add additional disk device then use the `add-disk` API.
 
 ### Add Fs Device
 
-To ask the VMM to add additional fs device then use the `add-fs` API.
+To ask the VMM to add additional fs device, use the `add-fs` API.
 
 ```shell
 ./ch-remote --api-socket=/tmp/ch-socket add-fs tag=myfs,socket=/foo/bar/virtiofs.sock
@@ -203,7 +203,7 @@ To ask the VMM to add additional fs device then use the `add-fs` API.
 
 ### Add Net Device
 
-To ask the VMM to add additional network device then use the `add-net` API.
+To ask the VMM to add additional network device, use the `add-net` API.
 
 ```shell
 ./ch-remote --api-socket=/tmp/ch-socket add-net tap=chtap0
@@ -211,7 +211,7 @@ To ask the VMM to add additional network device then use the `add-net` API.
 
 ### Add Pmem Device
 
-To ask the VMM to add additional PMEM device then use the `add-pmem` API.
+To ask the VMM to add additional PMEM device, use the `add-pmem` API.
 
 ```shell
 ./ch-remote --api-socket=/tmp/ch-socket add-pmem file=/foo/bar.cloud.img
@@ -219,7 +219,7 @@ To ask the VMM to add additional PMEM device then use the `add-pmem` API.
 
 ### Add Vsock Device
 
-To ask the VMM to add additional vsock device then use the `add-vsock` API.
+To ask the VMM to add additional vsock device, use the `add-vsock` API.
 
 ```shell
 ./ch-remote --api-socket=/tmp/ch-socket add-vsock cid=3,socket=/foo/bar/vsock.sock
@@ -241,7 +241,7 @@ After a reboot the added PCI device will remain.
 
 ### Remove PCI device
 
-Removing a PCI device works the same way for all kind of PCI devices. The unique identifier related to the device must be provided. This identifier can be provided by the user when adding the new device, or by default Cloud Hypervisor will assign one.
+Removing a PCI device works the same way for all kinds of PCI devices. The unique identifier related to the device must be provided. This identifier can be provided by the user when adding the new device, or by default Cloud Hypervisor will assign one.
 
 ```shell
 ./ch-remote --api-socket=/tmp/ch-socket remove-device _disk0
