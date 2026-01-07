@@ -1,3 +1,5 @@
+pub mod intel;
+
 /// The register address of an MSR
 pub struct RegisterAddress(pub u32);
 
