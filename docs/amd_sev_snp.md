@@ -2,7 +2,7 @@
 
 ### WARNING
 
-This feature is only currently supported on MSHV.
+This feature is currently only supported on MSHV.
 
 AMD Secure Encrypted Virtualization & Secure Nested Paging (SEV-SNP) is an AMD
 technology designed to add strong memory integrity protection to help prevent
@@ -10,13 +10,12 @@ malicious hypervisor-based attacks like data replay, memory-remapping and more
 in order to create an isolated execution environment. Here are some useful
 links:
 
-- [SNP Homepage](https://www.amd.com/content/dam/amd/en/documents/epyc-business-docs/solution-briefs/amd-secure-encrypted-virtualization-solution-brief.pdf):
+- [SNP Homepage](https://docs.amd.com/v/u/en-US/amd-secure-encrypted-virtualization-solution-brief):
   more information about SEV-SNP technical aspects, design and specification.
 
 ## Cloud Hypervisor support
 
-It is required to use a machine which has enabled support for AMD SEV-SNP in
-the BIOS.
+A machine with AMD SEV-SNP support which is enabled in the BIOS is required.
 
 On the Cloud Hypervisor side, all you need is to build the project with the
 `sev_snp` feature enabled:
@@ -26,7 +25,7 @@ cargo build --no-default-features --features "sev_snp"
 ```
 
 **Note**
-Please note that `sev_snp` cannot be enabled in conjunction with `tdx` feature flag.
+Please note that `sev_snp` cannot be enabled in conjunction with the `tdx` feature flag.
 
 You can run a SEV-SNP VM using the following command:
 
@@ -38,4 +37,4 @@ You can run a SEV-SNP VM using the following command:
      --disk path=ubuntu.img
 ```
 
-For more information related to Microsoft Hypervisor please see [mshv.md](mshv.md)
+For more information related to Microsoft Hypervisor, please see [mshv.md](mshv.md)

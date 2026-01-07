@@ -75,7 +75,7 @@ meaning it will be printing guest kernel logs to the `virtio-console` device.
 
 ```bash
 ./cloud-hypervisor \
-    --platform tdx=on
+    --platform tdx=on \
     --firmware edk2/Build/IntelTdx/RELEASE_GCC5/FV/OVMF.fd \
     --cpus boot=1 \
     --memory size=1G \
@@ -87,7 +87,7 @@ firmware:
 
 ```bash
 ./cloud-hypervisor \
-    --platform tdx=on
+    --platform tdx=on \
     --firmware edk2/Build/IntelTdx/DEBUG_GCC5/FV/OVMF.fd \
     --cpus boot=1 \
     --memory size=1G \
@@ -105,7 +105,7 @@ This is a lightweight version of the TDVF, written in Rust and designed for
 direct kernel boot, which is useful for containers use cases.
 
 To build TDShim from source, it is required to install `Rust`, `NASM`,
-and `LLVM` first. The TDshim can be build as follows:
+and `LLVM` first. The TDshim can be built as follows:
 
 ```bash
 git clone https://github.com/confidential-containers/td-shim
@@ -136,10 +136,10 @@ option as well.
 
 ```bash
 ./cloud-hypervisor \
-    --platform tdx=on
+    --platform tdx=on \
     --firmware td-shim/target/release/final.bin \
     --kernel bzImage \
-    --cmdline "root=/dev/vda3 console=hvc0 rw"
+    --cmdline "root=/dev/vda3 console=hvc0 rw" \
     --cpus boot=1 \
     --memory size=1G \
     --disk path=tdx_guest_img
@@ -150,10 +150,10 @@ TDShim:
 
 ```bash
 ./cloud-hypervisor \
-    --platform tdx=on
+    --platform tdx=on \
     --firmware td-shim/target/debug/final.bin \
     --kernel bzImage \
-    --cmdline "root=/dev/vda3 console=hvc0 rw"
+    --cmdline "root=/dev/vda3 console=hvc0 rw" \
     --cpus boot=1 \
     --memory size=1G \
     --disk path=tdx_guest_img
