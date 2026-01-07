@@ -27,11 +27,11 @@ Hypervisor provides another three options for limiting I/O operations,
 i.e., `ops_size` (I/O operations), `ops_one_time_burst` (I/O operations),
 and `ops_refill_time` (ms).
 
-One caveat in the I/O throttling is that every-time the bucket gets
+One caveat in the I/O throttling is that every time the bucket gets
 empty, it will stop I/O operations for a fixed amount of time
 (`cool_down_time`). The `cool_down_time` now is fixed at `100 ms`, it
-can have big implications to the actual rate limit (which can be a lot
-different the expected "refill-rate" derived from user inputs). For
+can have big implications for the actual rate limit (which can be quite
+different from the expected "refill-rate" derived from user inputs). For
 example, to have a 1000 IOPS limit on a virtio-blk device, users should
 be able to provide either of the following two options:
 `ops_size=1000,ops_refill_time=1000` or
@@ -53,5 +53,5 @@ demonstrates how to throttle the aggregate bandwidth of two disks to 10 MiB/s.
 ```
 --disk path=disk0.raw,rate_limit_group=group0 \
        path=disk1.raw,rate_limit_group=group0 \
---rate-limit-group bw_size=1048576,bw_refill_time,bw_refill_time=100
+--rate-limit-group bw_size=1048576,bw_refill_time=100
 ```
