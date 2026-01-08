@@ -963,6 +963,7 @@ mod unit_tests {
                 affinity: None,
                 features: CpuFeatures::default(),
                 nested: true,
+                profile: Default::default(),
             },
             memory: MemoryConfig {
                 size: 536_870_912,

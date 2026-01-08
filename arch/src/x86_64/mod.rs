@@ -6,9 +6,13 @@
 // Portions Copyright 2017 The Chromium OS Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
-
+pub mod cpu_profile;
+#[cfg(feature = "cpu_profile_generation")]
+pub mod cpu_profile_generation;
+pub mod cpuid_definitions;
 pub mod interrupts;
 pub mod layout;
+pub mod msr_definitions;
 pub mod regs;
 
 #[cfg(feature = "tdx")]
@@ -28,13 +32,15 @@ use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
 };
 use log::{debug, error, info};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryRegion,
 };
 
-use crate::{GuestMemoryMmap, InitramfsConfig, RegionType};
+use crate::x86_64::cpu_profile::CpuidOutputRegisterAdjustments;
+use crate::{CpuProfile, GuestMemoryMmap, InitramfsConfig, RegionType};
 
 // While modern architectures support more than 255 CPUs via x2APIC,
 // legacy devices such as mptable support at most 254 CPUs.
@@ -93,6 +99,7 @@ pub struct CpuidConfig {
     #[cfg(feature = "tdx")]
     pub tdx: bool,
     pub amx: bool,
+    pub profile: CpuProfile,
 }
 
 #[derive(Debug, Error)]
@@ -133,6 +140,26 @@ pub enum Error {
     #[error("Error getting supported CPUID through the hypervisor API")]
     CpuidGetSupported(#[source] HypervisorError),
 
+    #[error(
+        "The selected CPU profile cannot be utilized because the host's CPUID entries are not compatible with the profile"
+    )]
+    CpuProfileCpuidIncompatibility,
+    /// Error because TDX cannot be enabled when a custom (non host) CPU profile has been selected
+    #[error("TDX cannot be enabled when a custom CPU profile has been selected")]
+    CpuProfileTdxIncompatibility,
+    #[error(
+        "The selected CPU profile cannot be utilized because a necessary CPUID entry was not found"
+    )]
+    /// Error when trying to apply a CPU profile because a necessary CPUID entry was not found
+    MissingExpectedCpuidEntry(#[source] cpu_profile::MissingCpuidEntriesError),
+    /// Error when trying to apply a CPU profile because the host has a CPU from a different vendor
+    #[error(
+        "The selected CPU profile cannot be utilized because the host has a CPU from a different vendor"
+    )]
+    CpuProfileVendorIncompatibility {
+        cpu_vendor_profile: CpuVendor,
+        cpu_vendor_host: CpuVendor,
+    },
     /// Error populating CPUID with KVM HyperV emulation details
     #[error("Error populating CPUID with KVM HyperV emulation details")]
     CpuidKvmHyperV(#[source] vmm_sys_util::fam::Error),
@@ -190,7 +217,7 @@ pub fn get_max_x2apic_id(topology: (u16, u16, u16, u16)) -> u32 {
     )
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CpuidReg {
     EAX,
     EBX,
@@ -512,8 +539,60 @@ impl CpuidFeatureEntry {
         let src_vm_features = Self::get_features_from_cpuid(src_vm_cpuid, feature_entry_list);
         let dest_vm_features = Self::get_features_from_cpuid(dest_vm_cpuid, feature_entry_list);
 
-        // Loop on feature bit and check if the 'source vm' feature is a subset
-        // of those of the 'destination vm' feature
+        // If both processors are Intel then we can use the existing Intel CPUID definitions to log more
+        // precise information about potential errors
+        let both_intel = {
+            // Check if the vendor string is "GenuineIntel". This assumes that `leaf_0` is the entry
+            // corresponding to CPUID leaf 0.
+            let is_intel = |leaf_0: &CpuIdEntry| {
+                leaf_0.ebx == 0x756e_6547 && leaf_0.ecx == 0x6c65_746e && leaf_0.edx == 0x4965_6e69
+            };
+            let src_0 = src_vm_cpuid
+                .iter()
+                .find(|entry| (entry.function == 0x0) & (entry.index == 0x0));
+            let dest_0 = dest_vm_cpuid
+                .iter()
+                .find(|entry| (entry.function == 0x0) & (entry.index == 0x0));
+            src_0
+                .zip(dest_0)
+                .is_some_and(|(src, dest)| is_intel(src) & is_intel(dest))
+        };
+        let extra_reporting = |entry: &CpuidFeatureEntry, src_reg: u32, dest_reg: u32| {
+            if let Some((_, defs)) = cpuid_definitions::intel::INTEL_CPUID_DEFINITIONS
+                .as_slice()
+                .iter()
+                .find(|(param, _)| {
+                    (param.leaf == entry.function) && (param.sub_leaf.contains(&entry.index))
+                })
+            {
+                for def in defs.as_slice() {
+                    let mask = (def.bits_range.0..=def.bits_range.1)
+                        .fold(0, |acc, next| acc | (1 << next));
+
+                    let src_val = src_reg & mask;
+                    let dest_val = dest_reg & mask;
+
+                    let is_compatible = match entry.compatible_check {
+                        CpuidCompatibleCheck::BitwiseSubset => (src_val & (!dest_val)) == 0,
+                        CpuidCompatibleCheck::NumNotGreater => src_val <= dest_val,
+                        CpuidCompatibleCheck::Equal => src_val == dest_val,
+                    };
+                    if !is_compatible {
+                        info!(
+                            "CPUID incompatibility for value definition='{:?}' detected in leaf={:#02x}, sub-leaf={:#02x}, register={:?}, compatibility_check={:?}, source VM value='{:#04x}' destination VM value='{:#04x}'",
+                            def,
+                            entry.function,
+                            entry.index,
+                            entry.feature_reg,
+                            entry.compatible_check,
+                            src_val,
+                            dest_val
+                        );
+                    }
+                }
+            }
+        };
+
         let mut compatible = true;
         for (i, (src_vm_feature, dest_vm_feature)) in src_vm_features
             .iter()
@@ -541,7 +620,9 @@ impl CpuidFeatureEntry {
                     src_vm_feature,
                     dest_vm_feature
                 );
-
+                if both_intel {
+                    extra_reporting(entry, *src_vm_feature, *dest_vm_feature);
+                }
                 compatible = false;
             }
         }
@@ -555,6 +636,10 @@ impl CpuidFeatureEntry {
     }
 }
 
+/// This function generates the CPUID entries to be set for all CPUs.
+///
+/// If the `config` has a CPU profile set (other than host) then the profile
+/// will be applied
 pub fn generate_common_cpuid(
     hypervisor: &dyn hypervisor::Hypervisor,
     config: &CpuidConfig,
@@ -621,139 +706,21 @@ pub fn generate_common_cpuid(
         });
     }
 
-    // Supported CPUID
-    let mut cpuid = hypervisor
+    // Supported CPUID according to the host and hypervisor
+    let mut host_cpuid = hypervisor
         .get_supported_cpuid()
         .map_err(Error::CpuidGetSupported)?;
 
-    CpuidPatch::patch_cpuid(&mut cpuid, &cpuid_patches);
-
-    #[cfg(feature = "tdx")]
-    let tdx_capabilities = if config.tdx {
-        let caps = hypervisor
-            .tdx_capabilities()
-            .map_err(Error::TdxCapabilities)?;
-        info!("TDX capabilities {caps:#?}");
-        Some(caps)
-    } else {
-        None
-    };
-
-    // Update some existing CPUID
-    for entry in cpuid.as_mut_slice().iter_mut() {
-        match entry.function {
-            // Clear AMX related bits if the AMX feature is not enabled
-            0x7 => {
-                if !config.amx {
-                    if entry.index == 0 {
-                        entry.edx &= !((1 << AMX_BF16) | (1 << AMX_TILE) | (1 << AMX_INT8));
-                    }
-                    if entry.index == 1 {
-                        entry.eax &= !(1 << AMX_FP16);
-                        entry.edx &= !(1 << AMX_COMPLEX);
-                    }
-                }
-            }
-            0xd =>
-            {
-                #[cfg(feature = "tdx")]
-                if let Some(caps) = &tdx_capabilities {
-                    let xcr0_mask: u64 = 0x82ff;
-                    let xss_mask: u64 = !xcr0_mask;
-                    if entry.index == 0 {
-                        entry.eax &= (caps.xfam_fixed0 as u32) & (xcr0_mask as u32);
-                        entry.eax |= (caps.xfam_fixed1 as u32) & (xcr0_mask as u32);
-                        entry.edx &= ((caps.xfam_fixed0 & xcr0_mask) >> 32) as u32;
-                        entry.edx |= ((caps.xfam_fixed1 & xcr0_mask) >> 32) as u32;
-                    } else if entry.index == 1 {
-                        entry.ecx &= (caps.xfam_fixed0 as u32) & (xss_mask as u32);
-                        entry.ecx |= (caps.xfam_fixed1 as u32) & (xss_mask as u32);
-                        entry.edx &= ((caps.xfam_fixed0 & xss_mask) >> 32) as u32;
-                        entry.edx |= ((caps.xfam_fixed1 & xss_mask) >> 32) as u32;
-                    }
-                }
-            }
-            0x1d => {
-                // Tile Information (purely AMX related).
-                if !config.amx {
-                    entry.eax = 0;
-                    entry.ebx = 0;
-                    entry.ecx = 0;
-                    entry.edx = 0;
-                }
-            }
-            0x1e => {
-                // TMUL information (purely AMX related)
-                if !config.amx {
-                    entry.eax = 0;
-                    entry.ebx = 0;
-                    entry.ecx = 0;
-                    entry.edx = 0;
-                }
-            }
-
-            // Copy host L1 cache details if not populated by KVM
-            0x8000_0005 => {
-                if entry.eax == 0 && entry.ebx == 0 && entry.ecx == 0 && entry.edx == 0 {
-                    #[allow(unused_unsafe)]
-                    // SAFETY: cpuid called with valid leaves
-                    if unsafe { std::arch::x86_64::__cpuid(0x8000_0000).eax } >= 0x8000_0005 {
-                        // SAFETY: cpuid called with valid leaves
-                        let leaf = unsafe { std::arch::x86_64::__cpuid(0x8000_0005) };
-                        entry.eax = leaf.eax;
-                        entry.ebx = leaf.ebx;
-                        entry.ecx = leaf.ecx;
-                        entry.edx = leaf.edx;
-                    }
-                }
-            }
-            // Copy host L2 cache details if not populated by KVM
-            0x8000_0006 => {
-                if entry.eax == 0 && entry.ebx == 0 && entry.ecx == 0 && entry.edx == 0 {
-                    #[allow(unused_unsafe)]
-                    // SAFETY: cpuid called with valid leaves
-                    if unsafe { std::arch::x86_64::__cpuid(0x8000_0000).eax } >= 0x8000_0006 {
-                        #[allow(unused_unsafe)]
-                        // SAFETY: cpuid called with valid leaves
-                        let leaf = unsafe { std::arch::x86_64::__cpuid(0x8000_0006) };
-                        entry.eax = leaf.eax;
-                        entry.ebx = leaf.ebx;
-                        entry.ecx = leaf.ecx;
-                        entry.edx = leaf.edx;
-                    }
-                }
-            }
-            // Set CPU physical bits
-            0x8000_0008 => {
-                entry.eax = (entry.eax & 0xffff_ff00) | (config.phys_bits as u32 & 0xff);
-            }
-            0x4000_0001 => {
-                // Enable KVM_FEATURE_MSI_EXT_DEST_ID. This allows the guest to target
-                // device interrupts to cpus with APIC IDs > 254 without interrupt remapping.
-                entry.eax |= 1 << KVM_FEATURE_MSI_EXT_DEST_ID;
-
-                // These features are not supported by TDX
-                #[cfg(feature = "tdx")]
-                if config.tdx {
-                    entry.eax &= !((1 << KVM_FEATURE_CLOCKSOURCE_BIT)
-                        | (1 << KVM_FEATURE_CLOCKSOURCE2_BIT)
-                        | (1 << KVM_FEATURE_CLOCKSOURCE_STABLE_BIT)
-                        | (1 << KVM_FEATURE_ASYNC_PF_BIT)
-                        | (1 << KVM_FEATURE_ASYNC_PF_VMEXIT_BIT)
-                        | (1 << KVM_FEATURE_STEAL_TIME_BIT));
-                }
-            }
-            _ => {}
-        }
-    }
-
     // Copy CPU identification string
+    //
+    // If a CPU profile has been applied then this will get
+    // overwritten as soon as the profile is applied
     for i in 0x8000_0002..=0x8000_0004 {
-        cpuid.retain(|c| c.function != i);
+        host_cpuid.retain(|c| c.function != i);
         // SAFETY: call cpuid with valid leaves
         #[allow(unused_unsafe)]
         let leaf = unsafe { std::arch::x86_64::__cpuid(i) };
-        cpuid.push(CpuIdEntry {
+        host_cpuid.push(CpuIdEntry {
             function: i,
             eax: leaf.eax,
             ebx: leaf.ebx,
@@ -763,54 +730,232 @@ pub fn generate_common_cpuid(
         });
     }
 
-    if config.kvm_hyperv {
-        // Remove conflicting entries
-        cpuid.retain(|c| c.function != 0x4000_0000);
-        cpuid.retain(|c| c.function != 0x4000_0001);
-        // See "Hypervisor Top Level Functional Specification" for details
-        // Compliance with "Hv#1" requires leaves up to 0x4000_000a
-        cpuid.push(CpuIdEntry {
-            function: 0x40000000,
-            eax: 0x4000000a, // Maximum cpuid leaf
-            ebx: 0x756e694c, // "Linu"
-            ecx: 0x564b2078, // "x KV"
-            edx: 0x7648204d, // "M Hv"
-            ..Default::default()
-        });
-        cpuid.push(CpuIdEntry {
-            function: 0x40000001,
-            eax: 0x31237648, // "Hv#1"
-            ..Default::default()
-        });
-        cpuid.push(CpuIdEntry {
-            function: 0x40000002,
-            eax: 0x3839,  // "Build number"
-            ebx: 0xa0000, // "Version"
-            ..Default::default()
-        });
-        cpuid.push(CpuIdEntry {
-            function: 0x4000_0003,
-            eax: (1 << 1) // AccessPartitionReferenceCounter
+    let use_custom_profile = config.profile != CpuProfile::Host;
+    // Obtain cpuid entries that are adjusted to the specified CPU profile and the cpuid entries of the compatibility target
+    // TODO: Try to write this in a clearer way
+    let (host_adjusted_to_profile, profile_cpu_vendor) = {
+        config
+            .profile
+            .data(config.amx)
+            .map(|profile_data| {
+                (
+                    CpuidOutputRegisterAdjustments::adjust_cpuid_entries(
+                        host_cpuid.clone(),
+                        &profile_data.adjustments,
+                    )
+                    .map(Some),
+                    Some(profile_data.cpu_vendor),
+                )
+            })
+            .unwrap_or((Ok(None), None))
+    };
+    let mut host_adjusted_to_profile =
+        host_adjusted_to_profile.map_err(Error::MissingExpectedCpuidEntry)?;
+
+    // There should be relatively few cases where live migration can succeed between hosts from different
+    // CPU vendors and making our checks account for that possibility would complicate things substantially.
+    // We thus require that the host's cpu vendor matches the one used to generate the CPU profile.
+    if let Some(cpu_vendor_profile) = profile_cpu_vendor
+        && let cpu_vendor_host = hypervisor.get_cpu_vendor()
+        && cpu_vendor_profile != cpu_vendor_host
+    {
+        return Err(Error::CpuProfileVendorIncompatibility {
+            cpu_vendor_profile,
+            cpu_vendor_host,
+        }
+        .into());
+    }
+    // We now make the modifications according to the config parameters to each of the cpuid entries
+    // declared above and then perform a compatibility check.
+    for cpuid_optiion in [Some(&mut host_cpuid), host_adjusted_to_profile.as_mut()] {
+        let Some(cpuid) = cpuid_optiion else {
+            break;
+        };
+        CpuidPatch::patch_cpuid(cpuid, &cpuid_patches);
+
+        #[cfg(feature = "tdx")]
+        let tdx_capabilities = if config.tdx {
+            if use_custom_profile {
+                return Err(Error::CpuProfileTdxIncompatibility.into());
+            }
+            let caps = hypervisor
+                .tdx_capabilities()
+                .map_err(Error::TdxCapabilities)?;
+            info!("TDX capabilities {:#?}", caps);
+            Some(caps)
+        } else {
+            None
+        };
+
+        // Update some existing CPUID
+        for entry in cpuid.as_mut_slice().iter_mut() {
+            match entry.function {
+                // Clear AMX related bits if the AMX feature is not enabled
+                0x7 => {
+                    if !config.amx {
+                        if entry.index == 0 {
+                            entry.edx &= !((1 << AMX_BF16) | (1 << AMX_TILE) | (1 << AMX_INT8));
+                        }
+                        if entry.index == 1 {
+                            entry.eax &= !(1 << AMX_FP16);
+                            entry.edx &= !(1 << AMX_COMPLEX);
+                        }
+                    }
+                }
+                0xd =>
+                {
+                    #[cfg(feature = "tdx")]
+                    if let Some(caps) = &tdx_capabilities {
+                        let xcr0_mask: u64 = 0x82ff;
+                        let xss_mask: u64 = !xcr0_mask;
+                        if entry.index == 0 {
+                            entry.eax &= (caps.xfam_fixed0 as u32) & (xcr0_mask as u32);
+                            entry.eax |= (caps.xfam_fixed1 as u32) & (xcr0_mask as u32);
+                            entry.edx &= ((caps.xfam_fixed0 & xcr0_mask) >> 32) as u32;
+                            entry.edx |= ((caps.xfam_fixed1 & xcr0_mask) >> 32) as u32;
+                        } else if entry.index == 1 {
+                            entry.ecx &= (caps.xfam_fixed0 as u32) & (xss_mask as u32);
+                            entry.ecx |= (caps.xfam_fixed1 as u32) & (xss_mask as u32);
+                            entry.edx &= ((caps.xfam_fixed0 & xss_mask) >> 32) as u32;
+                            entry.edx |= ((caps.xfam_fixed1 & xss_mask) >> 32) as u32;
+                        }
+                    }
+                }
+
+                0x1d => {
+                    // Tile Information (purely AMX related).
+                    if !config.amx {
+                        entry.eax = 0;
+                        entry.ebx = 0;
+                        entry.ecx = 0;
+                        entry.edx = 0;
+                    }
+                }
+                0x1e => {
+                    // TMUL information (purely AMX related)
+                    if !config.amx {
+                        entry.eax = 0;
+                        entry.ebx = 0;
+                        entry.ecx = 0;
+                        entry.edx = 0;
+                    }
+                }
+
+                // Copy host L1 cache details if not populated by KVM
+                0x8000_0005 => {
+                    if entry.eax == 0 && entry.ebx == 0 && entry.ecx == 0 && entry.edx == 0 {
+                        #[allow(unused_unsafe)]
+                        // SAFETY: cpuid called with valid leaves
+                        if unsafe { std::arch::x86_64::__cpuid(0x8000_0000).eax } >= 0x8000_0005 {
+                            #[allow(unused_unsafe)]
+                            // SAFETY: cpuid called with valid leaves
+                            let leaf = unsafe { std::arch::x86_64::__cpuid(0x8000_0005) };
+                            entry.eax = leaf.eax;
+                            entry.ebx = leaf.ebx;
+                            entry.ecx = leaf.ecx;
+                            entry.edx = leaf.edx;
+                        }
+                    }
+                }
+                // Copy host L2 cache details if not populated by KVM
+                0x8000_0006 => {
+                    if entry.eax == 0 && entry.ebx == 0 && entry.ecx == 0 && entry.edx == 0 {
+                        #[allow(unused_unsafe)]
+                        // SAFETY: cpuid called with valid leaves
+                        if unsafe { std::arch::x86_64::__cpuid(0x8000_0000).eax } >= 0x8000_0006 {
+                            #[allow(unused_unsafe)]
+                            // SAFETY: cpuid called with valid leaves
+                            let leaf = unsafe { std::arch::x86_64::__cpuid(0x8000_0006) };
+                            entry.eax = leaf.eax;
+                            entry.ebx = leaf.ebx;
+                            entry.ecx = leaf.ecx;
+                            entry.edx = leaf.edx;
+                        }
+                    }
+                }
+                // Set CPU physical bits
+                0x8000_0008 => {
+                    entry.eax = (entry.eax & 0xffff_ff00) | (config.phys_bits as u32 & 0xff);
+                }
+                0x4000_0001 => {
+                    // Enable KVM_FEATURE_MSI_EXT_DEST_ID. This allows the guest to target
+                    // device interrupts to cpus with APIC IDs > 254 without interrupt remapping.
+                    entry.eax |= 1 << KVM_FEATURE_MSI_EXT_DEST_ID;
+
+                    // These features are not supported by TDX
+                    #[cfg(feature = "tdx")]
+                    if config.tdx {
+                        entry.eax &= !((1 << KVM_FEATURE_CLOCKSOURCE_BIT)
+                            | (1 << KVM_FEATURE_CLOCKSOURCE2_BIT)
+                            | (1 << KVM_FEATURE_CLOCKSOURCE_STABLE_BIT)
+                            | (1 << KVM_FEATURE_ASYNC_PF_BIT)
+                            | (1 << KVM_FEATURE_ASYNC_PF_VMEXIT_BIT)
+                            | (1 << KVM_FEATURE_STEAL_TIME_BIT))
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if config.kvm_hyperv {
+            // Remove conflicting entries
+            cpuid.retain(|c| c.function != 0x4000_0000);
+            cpuid.retain(|c| c.function != 0x4000_0001);
+            // See "Hypervisor Top Level Functional Specification" for details
+            // Compliance with "Hv#1" requires leaves up to 0x4000_000a
+            cpuid.push(CpuIdEntry {
+                function: 0x40000000,
+                eax: 0x4000000a, // Maximum cpuid leaf
+                ebx: 0x756e694c, // "Linu"
+                ecx: 0x564b2078, // "x KV"
+                edx: 0x7648204d, // "M Hv"
+                ..Default::default()
+            });
+            cpuid.push(CpuIdEntry {
+                function: 0x40000001,
+                eax: 0x31237648, // "Hv#1"
+                ..Default::default()
+            });
+            cpuid.push(CpuIdEntry {
+                function: 0x40000002,
+                eax: 0x3839,  // "Build number"
+                ebx: 0xa0000, // "Version"
+                ..Default::default()
+            });
+            cpuid.push(CpuIdEntry {
+                function: 0x4000_0003,
+                eax: (1 << 1) // AccessPartitionReferenceCounter
                    | (1 << 2) // AccessSynicRegs
                    | (1 << 3) // AccessSyntheticTimerRegs
                    | (1 << 9), // AccessPartitionReferenceTsc
-            edx: 1 << 3, // CPU dynamic partitioning
-            ..Default::default()
-        });
-        cpuid.push(CpuIdEntry {
-            function: 0x4000_0004,
-            eax: 1 << 5, // Recommend relaxed timing
-            ..Default::default()
-        });
-        for i in 0x4000_0005..=0x4000_000a {
-            cpuid.push(CpuIdEntry {
-                function: i,
+                edx: 1 << 3, // CPU dynamic partitioning
                 ..Default::default()
             });
+            cpuid.push(CpuIdEntry {
+                function: 0x4000_0004,
+                eax: 1 << 5, // Recommend relaxed timing
+                ..Default::default()
+            });
+            for i in 0x4000_0005..=0x4000_000a {
+                cpuid.push(CpuIdEntry {
+                    function: i,
+                    ..Default::default()
+                });
+            }
         }
     }
+    if !use_custom_profile {
+        Ok(host_cpuid)
+    } else {
+        // Final compatibility checks to ensure that the CPUID values we return are compatible both with the CPU profile and the host we are currently running on.
+        let host_adjusted_to_profile = host_adjusted_to_profile.expect("The profile adjusted cpuid entries should exist as we checked that we have a custom CPU profile");
 
-    Ok(cpuid)
+        // Check that the host's cpuid is indeed compatible with the adjusted profile. This is not by construction.
+        info!("checking compatibility between host adjusted to profile and the host itself");
+        CpuidFeatureEntry::check_cpuid_compatibility(&host_adjusted_to_profile, &host_cpuid)
+            .map_err(|_| Error::CpuProfileCpuidIncompatibility)?;
+        Ok(host_adjusted_to_profile)
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
