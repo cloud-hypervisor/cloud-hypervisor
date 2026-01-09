@@ -293,6 +293,7 @@ fn virtio_thread_common() -> Vec<(i64, Vec<SeccompRule>)> {
         (libc::SYS_epoll_wait, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_futex, vec![]),
+        (libc::SYS_gettid, vec![]),
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
         (libc::SYS_mprotect, vec![]),
