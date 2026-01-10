@@ -100,6 +100,16 @@ update_workloads() {
         popd || exit
     fi
 
+    JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME="jammy-server-cloudimg-arm64-custom-20220329-0-backing-raw.qcow2"
+    JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE="$WORKLOADS_DIR/$JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME"
+    if [ ! -f "$JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE" ]; then
+        pushd "$WORKLOADS_DIR" || exit
+        time qemu-img create -f qcow2 \
+            -b "$JAMMY_OS_RAW_IMAGE" \
+            -F raw $JAMMY_OS_QCOW_BACKING_RAW_FILE_IMAGE_NAME
+        popd || exit
+    fi
+
     ALPINE_MINIROOTFS_URL="http://dl-cdn.alpinelinux.org/alpine/v3.11/releases/aarch64/alpine-minirootfs-3.11.3-aarch64.tar.gz"
     ALPINE_MINIROOTFS_TARBALL="$WORKLOADS_DIR/alpine-minirootfs-aarch64.tar.gz"
     if [ ! -f "$ALPINE_MINIROOTFS_TARBALL" ]; then
