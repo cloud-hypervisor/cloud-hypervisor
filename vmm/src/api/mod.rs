@@ -244,10 +244,24 @@ pub struct VmRemoveDeviceData {
     pub id: String,
 }
 
+/// Type of snapshot to create
+#[derive(Clone, Copy, Deserialize, Serialize, Default, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotType {
+    /// Full memory dump (default)
+    #[default]
+    Full,
+    /// Incremental snapshot - only dirty pages since last snapshot
+    Incremental,
+}
+
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
 pub struct VmSnapshotConfig {
     /// The snapshot destination URL
     pub destination_url: String,
+    /// Type of snapshot (full or incremental). Defaults to full.
+    #[serde(default)]
+    pub snapshot_type: SnapshotType,
 }
 
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
@@ -297,7 +311,7 @@ pub trait RequestHandler {
 
     fn vm_resume(&mut self) -> Result<(), VmError>;
 
-    fn vm_snapshot(&mut self, destination_url: &str) -> Result<(), VmError>;
+    fn vm_snapshot(&mut self, config: &VmSnapshotConfig) -> Result<(), VmError>;
 
     fn vm_restore(&mut self, restore_cfg: RestoreConfig) -> Result<(), VmError>;
 
@@ -1376,7 +1390,7 @@ impl ApiAction for VmSnapshot {
             info!("API request event: VmSnapshot {config:?}");
 
             let response = vmm
-                .vm_snapshot(&config.destination_url)
+                .vm_snapshot(&config)
                 .map_err(ApiError::VmSnapshot)
                 .map(|_| ApiResponsePayload::Empty);
 

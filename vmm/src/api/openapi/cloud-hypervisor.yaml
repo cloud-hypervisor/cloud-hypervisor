@@ -1251,6 +1251,11 @@ components:
       properties:
         destination_url:
           type: string
+        snapshot_type:
+          type: string
+          enum: [full, incremental]
+          default: full
+          description: Type of snapshot. 'full' dumps all memory, 'incremental' dumps only dirty pages since last snapshot.
 
     VmCoredumpData:
       type: object

@@ -45,8 +45,8 @@ use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 use crate::api::{
-    ApiRequest, ApiResponse, RequestHandler, VmInfoResponse, VmReceiveMigrationData,
-    VmSendMigrationData, VmmPingResponse,
+    ApiRequest, ApiResponse, RequestHandler, SnapshotType, VmInfoResponse, VmReceiveMigrationData,
+    VmSendMigrationData, VmSnapshotConfig, VmmPingResponse,
 };
 use crate::config::{RestoreConfig, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -1714,16 +1714,27 @@ impl RequestHandler for Vmm {
         }
     }
 
-    fn vm_snapshot(&mut self, destination_url: &str) -> result::Result<(), VmError> {
+    fn vm_snapshot(&mut self, config: &VmSnapshotConfig) -> result::Result<(), VmError> {
         if let Some(ref mut vm) = self.vm {
             // Drain console_info so that FDs are not reused
             let _ = self.console_info.take();
-            vm.snapshot()
-                .map_err(VmError::Snapshot)
-                .and_then(|snapshot| {
-                    vm.send(&snapshot, destination_url)
-                        .map_err(VmError::SnapshotSend)
-                })
+
+            match config.snapshot_type {
+                SnapshotType::Full => {
+                    // Standard full snapshot
+                    vm.snapshot()
+                        .map_err(VmError::Snapshot)
+                        .and_then(|snapshot| {
+                            vm.send(&snapshot, &config.destination_url)
+                                .map_err(VmError::SnapshotSend)
+                        })
+                }
+                SnapshotType::Incremental => {
+                    // Incremental snapshot - only dirty pages
+                    vm.snapshot_incremental(&config.destination_url)
+                        .map_err(VmError::Snapshot)
+                }
+            }
         } else {
             Err(VmError::VmNotRunning)
         }

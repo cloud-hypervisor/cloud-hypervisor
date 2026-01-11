@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{self};
+use std::io::{self, Seek, SeekFrom};
 use std::ops::{BitAnd, Not, Sub};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::os::fd::AsFd;
@@ -61,6 +61,7 @@ pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
 const DEFAULT_MEMORY_ZONE: &str = "mem0";
 
 const SNAPSHOT_FILENAME: &str = "memory-ranges";
+const SNAPSHOT_INCREMENTAL_FILENAME: &str = "memory-ranges-incremental";
 
 #[cfg(target_arch = "x86_64")]
 const X86_64_IRQ_BASE: u32 = 5;
@@ -2045,6 +2046,92 @@ impl MemoryManager {
             selected_slot: self.selected_slot,
             next_hotplug_slot: self.next_hotplug_slot,
         }
+    }
+
+    /// Send only dirty pages to the destination URL.
+    /// This creates a sparse file containing only modified pages since the last
+    /// snapshot or since dirty logging was started.
+    ///
+    /// The dirty page bitmap is obtained from KVM and combined with the VMM-side
+    /// tracking bitmap. Pages are written at their correct file offsets to maintain
+    /// the same layout as a full snapshot, but clean pages are skipped (creating
+    /// a sparse file on filesystems that support it).
+    ///
+    /// Returns the MemoryRangeTable of dirty ranges that were written.
+    pub fn send_incremental(
+        &mut self,
+        destination_url: &str,
+    ) -> result::Result<MemoryRangeTable, MigratableError> {
+        // Get dirty pages from KVM + VMM tracking
+        let dirty_ranges = self.dirty_log()?;
+
+        if dirty_ranges.is_empty() {
+            info!("No dirty pages to snapshot");
+            return Ok(dirty_ranges);
+        }
+
+        let mut memory_file_path = url_to_path(destination_url)?;
+        memory_file_path.push(String::from(SNAPSHOT_INCREMENTAL_FILENAME));
+
+        // Create sparse file for incremental snapshot
+        let mut memory_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&memory_file_path)
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+        let guest_memory = self.guest_memory.memory();
+
+        // Calculate total memory size for sparse file (needed for proper seeks)
+        let total_size: u64 = self
+            .snapshot_memory_ranges
+            .regions()
+            .iter()
+            .map(|r| r.gpa + r.length)
+            .max()
+            .unwrap_or(0);
+
+        // Pre-allocate sparse file to correct size
+        memory_file
+            .set_len(total_size)
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+        let mut total_dirty_bytes: u64 = 0;
+
+        // Write only dirty ranges, seeking past clean pages
+        for range in dirty_ranges.regions() {
+            // Seek to the correct position in the file
+            memory_file
+                .seek(SeekFrom::Start(range.gpa))
+                .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+            let mut offset: u64 = 0;
+            loop {
+                let bytes_written = guest_memory
+                    .write_volatile_to(
+                        GuestAddress(range.gpa + offset),
+                        &mut memory_file,
+                        (range.length - offset) as usize,
+                    )
+                    .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+                offset += bytes_written as u64;
+
+                if offset == range.length {
+                    break;
+                }
+            }
+            total_dirty_bytes += range.length;
+        }
+
+        info!(
+            "Incremental snapshot: wrote {} dirty bytes ({} ranges) to {:?}",
+            total_dirty_bytes,
+            dirty_ranges.regions().len(),
+            memory_file_path
+        );
+
+        Ok(dirty_ranges)
     }
 
     pub fn memory_slot_fds(&self) -> HashMap<u32, RawFd> {

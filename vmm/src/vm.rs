@@ -2770,6 +2770,69 @@ impl Vm {
             .nmi()
             .map_err(|_| Error::ErrorNmi);
     }
+
+    /// Create an incremental snapshot containing only dirty pages since last snapshot.
+    ///
+    /// This is much faster than a full snapshot for VMs with small working sets,
+    /// as only modified memory pages are written to disk.
+    ///
+    /// Note: Dirty logging must be started before the first incremental snapshot
+    /// (this is done automatically on first call).
+    pub fn snapshot_incremental(
+        &mut self,
+        destination_url: &str,
+    ) -> std::result::Result<(), MigratableError> {
+        // Take the state snapshot (vCPU, devices, etc.)
+        let snapshot = self.snapshot()?;
+
+        // Write config file
+        let mut snapshot_config_path = url_to_path(destination_url)?;
+        snapshot_config_path.push(SNAPSHOT_CONFIG_FILE);
+
+        let mut snapshot_config_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(snapshot_config_path)
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+        let vm_config = serde_json::to_string(self.config.lock().unwrap().deref())
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+        snapshot_config_file
+            .write(vm_config.as_bytes())
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+        // Write state file
+        let mut snapshot_state_path = url_to_path(destination_url)?;
+        snapshot_state_path.push(SNAPSHOT_STATE_FILE);
+
+        let mut snapshot_state_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(snapshot_state_path)
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+        let vm_state =
+            serde_json::to_vec(&snapshot).map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+        snapshot_state_file
+            .write(&vm_state)
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+        // Start dirty logging if not already active
+        // (this is idempotent - calling multiple times is safe)
+        self.start_dirty_log()?;
+
+        // Send only dirty memory pages
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .send_incremental(destination_url)?;
+
+        Ok(())
+    }
 }
 
 impl Pausable for Vm {
