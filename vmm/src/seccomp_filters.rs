@@ -489,6 +489,7 @@ fn signal_handler_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_close, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_exit_group, vec![]),
+        (libc::SYS_gettid, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_ioctl, create_signal_handler_ioctl_seccomp_rule()?),
         (libc::SYS_landlock_create_ruleset, vec![]),
@@ -585,6 +586,7 @@ fn vmm_thread_rules(
         (libc::SYS_faccessat, vec![]),
         #[cfg(target_arch = "aarch64")]
         (libc::SYS_newfstatat, vec![]),
+        (libc::SYS_gettid, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_getdents64, vec![]),
         (libc::SYS_getpgid, vec![]),
@@ -592,7 +594,6 @@ fn vmm_thread_rules(
         (libc::SYS_getpgrp, vec![]),
         (libc::SYS_getpid, vec![]),
         (libc::SYS_getrandom, vec![]),
-        (libc::SYS_gettid, vec![]),
         (libc::SYS_gettimeofday, vec![]),
         (libc::SYS_getuid, vec![]),
         (
