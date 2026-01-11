@@ -526,6 +526,8 @@ pub struct Vm {
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     stop_on_boot: bool,
     load_payload_handle: Option<thread::JoinHandle<Result<EntryPoint>>>,
+    /// Tracks whether dirty page logging is active for incremental snapshots
+    dirty_log_active: bool,
 }
 
 impl Vm {
@@ -831,6 +833,7 @@ impl Vm {
             hypervisor,
             stop_on_boot,
             load_payload_handle,
+            dirty_log_active: false,
         })
     }
 
@@ -2773,11 +2776,11 @@ impl Vm {
 
     /// Create an incremental snapshot containing only dirty pages since last snapshot.
     ///
-    /// This is much faster than a full snapshot for VMs with small working sets,
-    /// as only modified memory pages are written to disk.
+    /// On first call, this performs a full memory snapshot and starts dirty page
+    /// tracking. Subsequent calls only snapshot pages modified since the last call.
     ///
-    /// Note: Dirty logging must be started before the first incremental snapshot
-    /// (this is done automatically on first call).
+    /// This is much faster than full snapshots for VMs with small working sets,
+    /// as only modified memory pages are written to disk after the initial baseline.
     pub fn snapshot_incremental(
         &mut self,
         destination_url: &str,
@@ -2821,15 +2824,33 @@ impl Vm {
             .write(&vm_state)
             .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
-        // Start dirty logging if not already active
-        // (this is idempotent - calling multiple times is safe)
-        self.start_dirty_log()?;
+        if !self.dirty_log_active {
+            // First incremental snapshot: do full memory dump and start tracking
+            info!("First incremental snapshot: performing full memory dump and starting dirty page tracking");
 
-        // Send only dirty memory pages
-        self.memory_manager
-            .lock()
-            .unwrap()
-            .send_incremental(destination_url)?;
+            // Send full memory (same as regular snapshot)
+            if let Some(memory_manager_snapshot) = snapshot.snapshots.get(MEMORY_MANAGER_SNAPSHOT_ID) {
+                self.memory_manager
+                    .lock()
+                    .unwrap()
+                    .send(&memory_manager_snapshot.clone(), destination_url)?;
+            } else {
+                return Err(MigratableError::Snapshot(anyhow!(
+                    "Missing memory manager snapshot"
+                )));
+            }
+
+            // Start dirty logging for future incremental snapshots
+            self.start_dirty_log()?;
+            self.dirty_log_active = true;
+        } else {
+            // Subsequent incremental snapshot: only dirty pages
+            info!("Incremental snapshot: dumping only dirty pages");
+            self.memory_manager
+                .lock()
+                .unwrap()
+                .send_incremental(destination_url)?;
+        }
 
         Ok(())
     }
