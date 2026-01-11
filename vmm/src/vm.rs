@@ -2854,6 +2854,155 @@ impl Vm {
 
         Ok(())
     }
+
+    /// Create a snapshot using fork() for minimal VM pause time.
+    ///
+    /// This method forks the VMM process, allowing the parent to resume
+    /// VM execution immediately (~100μs pause) while the child process
+    /// writes the snapshot to disk in the background.
+    ///
+    /// The child process has a copy-on-write view of guest memory, so
+    /// any changes made by the parent after fork() are not included in
+    /// the snapshot (point-in-time consistency).
+    ///
+    /// Returns the child PID on success (0 in the child, >0 in parent).
+    /// The caller should NOT wait() on the child - it will exit on its own.
+    ///
+    /// # Safety
+    /// This method uses fork() which has complex interactions with threads.
+    /// Cloud Hypervisor must pause all vCPU threads before forking.
+    pub fn snapshot_fork(
+        &mut self,
+        destination_url: &str,
+    ) -> std::result::Result<libc::pid_t, MigratableError> {
+        info!("Starting fork-based snapshot to {}", destination_url);
+
+        // Ensure destination directory exists
+        let dest_path = url_to_path(destination_url)?;
+        std::fs::create_dir_all(&dest_path)
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+        // Pause the VM (very brief - just for fork consistency)
+        self.pause()?;
+
+        // Capture state BEFORE fork (while paused)
+        let snapshot = self.snapshot()?;
+        let vm_config = serde_json::to_vec(self.config.lock().unwrap().deref())
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+        let vm_state = serde_json::to_vec(&snapshot)
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+        // Get memory ranges to snapshot
+        let memory_ranges = self
+            .memory_manager
+            .lock()
+            .unwrap()
+            .memory_range_table(true)?;
+
+        // Clone the guest memory handle (safe to access after fork in child)
+        let guest_memory = self
+            .memory_manager
+            .lock()
+            .unwrap()
+            .guest_memory();
+
+        // Open the memory file BEFORE fork
+        let mut memory_file_path = dest_path.clone();
+        memory_file_path.push("memory-ranges");
+        let memory_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&memory_file_path)
+            .map_err(|e| MigratableError::MigrateSend(e.into()))?;
+
+        // FORK!
+        // SAFETY: We've paused all vCPUs, so no other threads are running.
+        // The child will only read from CoW memory and write to files.
+        let pid = unsafe { libc::fork() };
+
+        if pid < 0 {
+            // Fork failed - resume and return error
+            self.resume()?;
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "fork() failed: {}",
+                io::Error::last_os_error()
+            )));
+        }
+
+        if pid > 0 {
+            // PARENT: Resume VM immediately
+            drop(memory_file); // Close file handle in parent
+            self.resume()?;
+            info!(
+                "Fork snapshot: parent resumed, child pid {} writing snapshot",
+                pid
+            );
+            return Ok(pid);
+        }
+
+        // CHILD PROCESS: Write snapshot to disk
+        // NOTE: After fork(), we must be very careful:
+        // - Only the calling thread survives
+        // - Mutexes are in undefined state
+        // - We should not allocate memory or use complex Rust runtime features
+        // - We must call _exit() not exit() to avoid running destructors
+
+        // Write config file
+        let config_path = dest_path.join(SNAPSHOT_CONFIG_FILE);
+        if let Err(e) = std::fs::write(&config_path, &vm_config) {
+            eprintln!("Fork snapshot child: failed to write config: {}", e);
+            unsafe { libc::_exit(1) };
+        }
+
+        // Write state file
+        let state_path = dest_path.join(SNAPSHOT_STATE_FILE);
+        if let Err(e) = std::fs::write(&state_path, &vm_state) {
+            eprintln!("Fork snapshot child: failed to write state: {}", e);
+            unsafe { libc::_exit(1) };
+        }
+
+        // Write memory to file
+        // We access guest_memory directly - it's a CoW copy from the fork
+        let mut memory_file = memory_file; // Move into child's scope
+        let guest_mem = guest_memory.memory();
+
+        for range in memory_ranges.regions() {
+            let mut offset: u64 = 0;
+            loop {
+                match guest_mem.write_volatile_to(
+                    GuestAddress(range.gpa + offset),
+                    &mut memory_file,
+                    (range.length - offset) as usize,
+                ) {
+                    Ok(bytes_written) => {
+                        offset += bytes_written as u64;
+                        if offset >= range.length {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Fork snapshot child: failed to write memory at gpa {:#x}: {:?}",
+                            range.gpa + offset,
+                            e
+                        );
+                        unsafe { libc::_exit(1) };
+                    }
+                }
+            }
+        }
+
+        // Sync to disk
+        if let Err(e) = memory_file.sync_all() {
+            eprintln!("Fork snapshot child: failed to sync memory file: {}", e);
+            unsafe { libc::_exit(1) };
+        }
+
+        // Success! Exit without running destructors
+        unsafe { libc::_exit(0) };
+    }
 }
 
 impl Pausable for Vm {

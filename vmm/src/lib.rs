@@ -1734,6 +1734,13 @@ impl RequestHandler for Vmm {
                     vm.snapshot_incremental(&config.destination_url)
                         .map_err(VmError::Snapshot)
                 }
+                SnapshotType::Fork => {
+                    // Fork-based snapshot - minimal pause (~100μs), memory dump in background
+                    // VM resumes immediately, child process writes snapshot asynchronously
+                    vm.snapshot_fork(&config.destination_url)
+                        .map_err(VmError::Snapshot)
+                        .map(|_pid| ()) // Discard child PID, caller doesn't need to wait
+                }
             }
         } else {
             Err(VmError::VmNotRunning)

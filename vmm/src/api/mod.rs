@@ -253,6 +253,9 @@ pub enum SnapshotType {
     Full,
     /// Incremental snapshot - only dirty pages since last snapshot
     Incremental,
+    /// Fork-based snapshot - minimal VM pause (~100μs), memory dump in background
+    /// Uses fork() + CoW for point-in-time consistency while VM keeps running
+    Fork,
 }
 
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]
