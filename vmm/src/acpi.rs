@@ -515,6 +515,8 @@ fn create_dbg2_table(base_address: u64) -> Sdt {
 }
 
 #[cfg(target_arch = "aarch64")]
+// Generate IORT table based on Spec Revision E.b:
+// https://developer.arm.com/documentation/den0049/eb/?lang=en
 fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
     const ACPI_IORT_NODE_ITS_GROUP: u8 = 0x00;
     const ACPI_IORT_NODE_PCI_ROOT_COMPLEX: u8 = 0x02;
@@ -528,7 +530,7 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
     let iort_table_size: u32 = (ACPI_IORT_NODE_ROOT_COMPLEX_OFFSET
         + ACPI_IORT_NODE_ROOT_COMPLEX_SIZE * pci_segments.len())
         as u32;
-    let mut iort = Sdt::new(*b"IORT", iort_table_size, 2, *b"CLOUDH", *b"CHIORT  ", 1);
+    let mut iort = Sdt::new(*b"IORT", iort_table_size, 3, *b"CLOUDH", *b"CHIORT  ", 1);
     iort.write(36, ((1 + pci_segments.len()) as u32).to_le());
     iort.write(40, (48u32).to_le());
 
@@ -536,8 +538,12 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
     iort.write(48, ACPI_IORT_NODE_ITS_GROUP);
     // Length of the ITS group node in bytes
     iort.write(49, (24u16).to_le());
+    // Revision
+    iort.write(51, (1u8).to_le());
     // ITS counts
     iort.write(64, (1u32).to_le());
+    // GIC ITS Identity Array
+    iort.write(68, (0u32).to_le()); // Value must match what's defined in MADT
 
     // Root Complex Nodes
     for (i, segment) in pci_segments.iter().enumerate() {
@@ -560,7 +566,7 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
         // Fully coherent device
         iort.write(node_offset + 16, (1u32).to_le());
         // CCA = CPM = DCAS = 1
-        iort.write(node_offset + 24, 3u8);
+        iort.write(node_offset + 23, 3u8);
         // PCI segment number
         iort.write(node_offset + 28, (segment.id as u32).to_le());
         // Memory address size limit
@@ -576,7 +582,12 @@ fn create_iort_table(pci_segments: &[PciSegment]) -> Sdt {
         // 1 (bus) x 32 (devices) x 8 (functions) = 256
         // Note: Currently only 1 bus is supported in a segment.
         iort.write(mapping_offset + 4, (255_u32).to_le());
-        // The lowest value in the output range
+        // Output base maps to ITS device IDs which must match the
+        // device ID encoding used in KVM MSI routing setup, which
+        // shares the same limitation - only 1 bus per segment and
+        // up to 256 segments.
+        // See: https://github.com/cloud-hypervisor/cloud-hypervisor/commit/c9374d87ac453d49185aa7b734df089444166484
+        assert!(segment.id < 256, "Up to 256 PCI segments are supported.");
         iort.write(mapping_offset + 8, ((256 * segment.id) as u32).to_le());
         // id_mapping_array_output_reference should be
         // the ITS group node (the first node) if no SMMU
