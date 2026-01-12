@@ -451,10 +451,13 @@ impl QcowHeader {
         Ok(QcowHeader {
             magic: QCOW_MAGIC,
             version,
-            backing_file_offset: (if backing_file.is_none() {
-                0
-            } else {
+            backing_file_offset: backing_file.map_or(0, |_| {
                 header_size
+                    + if version == 3 {
+                        QCOW_EMPTY_HEADER_EXTENSION_SIZE
+                    } else {
+                        0
+                    }
             }) as u64,
             backing_file_size: backing_file.map_or(0, |x| x.len()) as u32,
             cluster_bits: DEFAULT_CLUSTER_BITS,
@@ -528,11 +531,20 @@ impl QcowHeader {
             write_u64_to_file(file, self.autoclear_features)?;
             write_u32_to_file(file, self.refcount_order)?;
             write_u32_to_file(file, self.header_size)?;
+
+            if self.header_size > V3_BARE_HEADER_SIZE {
+                write_u64_to_file(file, 0)?; // no compression
+            }
+
             write_u32_to_file(file, 0)?; // header extension type: end of header extension area
             write_u32_to_file(file, 0)?; // length of header extension data: 0
         }
 
         if let Some(backing_file_path) = self.backing_file.as_ref().map(|bf| &bf.path) {
+            if self.backing_file_offset > 0 {
+                file.seek(SeekFrom::Start(self.backing_file_offset))
+                    .map_err(Error::WritingHeader)?;
+            }
             write!(file, "{backing_file_path}").map_err(Error::WritingHeader)?;
         }
 
@@ -2322,6 +2334,120 @@ mod unit_tests {
             read_header.backing_file.as_ref().map(|bf| &bf.path),
             header.backing_file.as_ref().map(|bf| &bf.path)
         );
+    }
+
+    /// Helper to create a test file with header extensions
+    fn create_header_with_extension(ext_type: u32, ext_data: &[u8]) -> (RawFile, QcowHeader) {
+        let header = QcowHeader::create_for_size_and_path(3, 0x10_0000, None)
+            .expect("Failed to create header.");
+
+        let mut disk_file: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
+        header.write_to(&mut disk_file).unwrap();
+
+        // Write extension
+        disk_file
+            .seek(SeekFrom::Start(header.header_size as u64))
+            .unwrap();
+        disk_file.write_u32::<BigEndian>(ext_type).unwrap();
+        disk_file
+            .write_u32::<BigEndian>(ext_data.len() as u32)
+            .unwrap();
+        disk_file.write_all(ext_data).unwrap();
+
+        // Add padding to 8-byte boundary
+        let padding = (8 - (ext_data.len() % 8)) % 8;
+        if padding > 0 {
+            disk_file.write_all(&vec![0u8; padding]).unwrap();
+        }
+
+        disk_file.write_u32::<BigEndian>(HEADER_EXT_END).unwrap();
+
+        disk_file.rewind().unwrap();
+
+        (disk_file, header)
+    }
+
+    #[test]
+    fn read_header_extensions_unknown_extension() {
+        let (mut disk_file, mut header) = create_header_with_extension(
+            0x12345678, // unknown type
+            "test".as_bytes(),
+        );
+
+        // Extension parsing needs a backing file to set format on
+        header.backing_file = Some(BackingFileConfig {
+            path: "/test/backing".to_string(),
+            format: None,
+        });
+
+        QcowHeader::read_header_extensions(&mut disk_file, &mut header).unwrap();
+        assert_eq!(header.backing_file.as_ref().and_then(|bf| bf.format), None);
+    }
+
+    #[test]
+    fn read_header_extensions_raw_format() {
+        let (mut disk_file, mut header) =
+            create_header_with_extension(HEADER_EXT_BACKING_FORMAT, "raw".as_bytes());
+
+        header.backing_file = Some(BackingFileConfig {
+            path: "/test/backing".to_string(),
+            format: None,
+        });
+
+        QcowHeader::read_header_extensions(&mut disk_file, &mut header).unwrap();
+        assert_eq!(
+            header.backing_file.as_ref().and_then(|bf| bf.format),
+            Some(ImageType::Raw)
+        );
+    }
+
+    #[test]
+    fn read_header_extensions_qcow2_format() {
+        let (mut disk_file, mut header) =
+            create_header_with_extension(HEADER_EXT_BACKING_FORMAT, "qcow2".as_bytes());
+
+        header.backing_file = Some(BackingFileConfig {
+            path: "/test/backing".to_string(),
+            format: None,
+        });
+
+        QcowHeader::read_header_extensions(&mut disk_file, &mut header).unwrap();
+        assert_eq!(
+            header.backing_file.as_ref().and_then(|bf| bf.format),
+            Some(ImageType::Qcow2)
+        );
+    }
+
+    #[test]
+    fn read_header_extensions_invalid_format() {
+        let (mut disk_file, mut header) =
+            create_header_with_extension(HEADER_EXT_BACKING_FORMAT, "vmdk".as_bytes());
+
+        header.backing_file = Some(BackingFileConfig {
+            path: "/test/backing".to_string(),
+            format: None,
+        });
+
+        let result = QcowHeader::read_header_extensions(&mut disk_file, &mut header);
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::UnsupportedBackingFileFormat(_)
+        ));
+    }
+
+    #[test]
+    fn read_header_extensions_invalid_utf8() {
+        let (mut disk_file, mut header) = create_header_with_extension(
+            HEADER_EXT_BACKING_FORMAT,
+            &[0xFF, 0xFE, 0xFD], // invalid UTF-8
+        );
+
+        let result = QcowHeader::read_header_extensions(&mut disk_file, &mut header);
+        // Should fail with InvalidBackingFileName error
+        assert!(matches!(
+            result.unwrap_err(),
+            Error::InvalidBackingFileName(_)
+        ));
     }
 
     #[test]
