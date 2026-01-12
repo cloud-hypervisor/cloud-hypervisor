@@ -202,6 +202,11 @@ const COMPATIBLE_FEATURES_LAZY_REFCOUNTS: u64 = 1;
 const COMPRESSION_TYPE_ZLIB: u64 = 0; // zlib/deflate <https://www.ietf.org/rfc/rfc1951.txt>
 const COMPRESSION_TYPE_ZSTD: u64 = 1; // zstd <http://github.com/facebook/zstd>
 
+// Header extension types
+const HEADER_EXT_END: u32 = 0x00000000;
+// Backing file format name (raw, qcow2)
+const HEADER_EXT_BACKING_FORMAT: u32 = 0xe2792aca;
+
 // The format supports a "header extension area", that crosvm does not use.
 const QCOW_EMPTY_HEADER_EXTENSION_SIZE: u32 = 8;
 
@@ -278,6 +283,46 @@ pub struct QcowHeader {
 }
 
 impl QcowHeader {
+    fn read_header_extensions(f: &mut RawFile, header: &mut QcowHeader) -> Result<()> {
+        // Extensions start directly after the header
+        f.seek(SeekFrom::Start(header.header_size as u64))
+            .map_err(Error::ReadingHeader)?;
+
+        loop {
+            let ext_type = f.read_u32::<BigEndian>().map_err(Error::ReadingHeader)?;
+            if ext_type == HEADER_EXT_END {
+                break;
+            }
+
+            let ext_length = f.read_u32::<BigEndian>().map_err(Error::ReadingHeader)?;
+
+            match ext_type {
+                HEADER_EXT_BACKING_FORMAT => {
+                    let mut format_bytes = vec![0u8; ext_length as usize];
+                    f.read_exact(&mut format_bytes)
+                        .map_err(Error::ReadingHeader)?;
+                    let format_str = String::from_utf8(format_bytes)
+                        .map_err(|err| Error::InvalidBackingFileName(err.utf8_error()))?;
+                    if let Some(backing_file) = &mut header.backing_file {
+                        backing_file.format = Some(format_str.parse()?);
+                    }
+                }
+                _ => {
+                    // Skip unknown extension
+                    f.seek(SeekFrom::Current(ext_length as i64))
+                        .map_err(Error::ReadingHeader)?;
+                }
+            }
+
+            // Skip to the next 8 byte boundary
+            let padding = (8 - (ext_length % 8)) % 8;
+            f.seek(SeekFrom::Current(padding as i64))
+                .map_err(Error::ReadingHeader)?;
+        }
+
+        Ok(())
+    }
+
     /// Creates a QcowHeader from a reference to a file.
     pub fn new(f: &mut RawFile) -> Result<QcowHeader> {
         f.rewind().map_err(Error::ReadingHeader)?;
@@ -363,6 +408,11 @@ impl QcowHeader {
                 .map_err(|err| Error::InvalidBackingFileName(err.utf8_error()))?;
             header.backing_file = Some(BackingFileConfig { path, format: None });
         }
+
+        if version == 3 && header.header_size > V3_BARE_HEADER_SIZE {
+            Self::read_header_extensions(f, &mut header)?;
+        }
+
         Ok(header)
     }
 
