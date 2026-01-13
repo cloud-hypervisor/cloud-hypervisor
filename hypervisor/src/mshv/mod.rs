@@ -715,14 +715,19 @@ impl cpu::Vcpu for MshvVcpu {
                         map: (gva, gpa),
                     };
 
+                    let old_state = context
+                        .cpu_state(self.vp_index as usize)
+                        .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
+
                     // Create a new emulator.
                     let mut emul = Emulator::new(&mut context);
 
                     // Emulate the trapped instruction, and only the first one.
                     let new_state = emul
-                        .emulate_first_insn(
-                            self.vp_index as usize,
+                        .emulate_insn_stream(
+                            &old_state,
                             &info.instruction_bytes[..insn_len],
+                            Some(1),
                         )
                         .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))?;
 
