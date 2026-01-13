@@ -106,6 +106,38 @@ impl MshvEmulatorContext<'_> {
 
         Ok(())
     }
+
+    pub fn update_cpu_state(
+        &self,
+        cpu_id: usize,
+        old_state: <Self as PlatformEmulator>::CpuState,
+        new_state: <Self as PlatformEmulator>::CpuState,
+    ) -> Result<(), PlatformError> {
+        if cpu_id != self.vcpu.vp_index as usize {
+            return Err(PlatformError::SetCpuStateFailure(anyhow!(
+                "CPU id mismatch {:?} {:?}",
+                cpu_id,
+                self.vcpu.vp_index
+            )));
+        }
+
+        debug!("mshv emulator: Updating CPU state");
+        debug!("mshv emulator: {:#x?}", new_state.regs);
+
+        self.vcpu
+            .set_regs(&new_state.regs)
+            .map_err(|e| PlatformError::SetCpuStateFailure(e.into()))?;
+
+        if old_state.sregs != new_state.sregs {
+            debug!("mshv emulator: Updating CPU special registers");
+            debug!("mshv emulator: {:#x?}", new_state.sregs);
+            self.vcpu
+                .set_sregs(&new_state.sregs)
+                .map_err(|e| PlatformError::SetCpuStateFailure(e.into()))?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Platform emulation for Hyper-V

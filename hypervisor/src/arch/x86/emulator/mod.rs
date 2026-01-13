@@ -711,7 +711,7 @@ mod mock_vmm {
             insn: &[u8],
             num_insn: Option<usize>,
         ) -> MockResult {
-            let mut state = self
+            let state = self
                 .cpu_state(cpu_id)
                 .map_err(EmulationError::PlatformEmulationError)?;
             let ip = state.ip();
