@@ -684,6 +684,8 @@ pub struct NumaConfig {
     pub memory_zones: Option<Vec<String>>,
     #[serde(default)]
     pub pci_segments: Option<Vec<u16>>,
+    #[serde(default)]
+    pub device_id: Option<String>,
 }
 
 /// Errors describing a misconfigured payload, i.e., a configuration that
