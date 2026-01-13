@@ -120,6 +120,7 @@ pub struct NumaNode {
     pub pci_segments: Vec<u16>,
     pub distances: BTreeMap<u32, u8>,
     pub memory_zones: Vec<String>,
+    pub device_id: Option<String>,
 }
 
 pub type NumaNodes = BTreeMap<u32, NumaNode>;
