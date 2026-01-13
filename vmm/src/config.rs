@@ -362,6 +362,9 @@ pub enum ValidationError {
     MaskProvidedWithoutIp,
     #[error("IP provided without a mask")]
     IpProvidedWithoutMask,
+    /// Invalid NUMA Configuration
+    #[error("NUMA Configuration is invalid")]
+    InvalidNumaConfig(String),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -2183,7 +2186,11 @@ impl NumaConfig {
         let guest_numa_id = parser
             .convert::<u32>("guest_numa_id")
             .map_err(Error::ParseNuma)?
-            .unwrap_or(0);
+            .ok_or_else(|| {
+                Error::ParseNuma(OptionParserError::InvalidValue(
+                    "guest_numa_id is required for all NUMA nodes".to_string(),
+                ))
+            })?;
         let cpus = parser
             .convert::<IntegerList>("cpus")
             .map_err(Error::ParseNuma)?
@@ -2208,6 +2215,11 @@ impl NumaConfig {
             .convert::<IntegerList>("pci_segments")
             .map_err(Error::ParseNuma)?
             .map(|v| v.0.iter().map(|e| *e as u16).collect());
+        if device_id.is_some() && (cpus.is_some() || memory_zones.is_some()) {
+            return Err(Error::ParseNuma(OptionParserError::InvalidValue(
+                "device_id in numa config cannot be used with cpus or memory zones".to_string()
+            )));
+        }
         Ok(NumaConfig {
             guest_numa_id,
             cpus,
@@ -2216,6 +2228,47 @@ impl NumaConfig {
             memory_zones,
             pci_segments,
         })
+    }
+
+    pub fn is_generic_initiator(&self) -> bool {
+        self.device_id.is_some()
+    }
+
+    /// Validates NumaConfig
+    pub fn validate(&self) -> result::Result<(), ValidationError> {
+        match (&self.device_id, &self.cpus, &self.memory_zones) {
+            (Some(device_id), None, None) => {
+                if device_id.is_empty() {
+                    return Err(ValidationError::InvalidNumaConfig(
+                        "device_id in numa config cannot be empty".to_string(),
+                    ));
+                }
+                Ok(())
+            }
+            (None, cpus, memory_zones) => {
+                if cpus.is_none() && memory_zones.is_none() {
+                    return Err(ValidationError::InvalidNumaConfig(
+                        "numa config must specify either device_id or cpus/memory_zones".to_string(),
+                    ))
+                }
+                if let Some(cpu_list) = cpus
+                    && cpu_list.is_empty() {
+                        return Err(ValidationError::InvalidNumaConfig(
+                        "cpus list in numa config cannot be empty".to_string(),
+                        ));
+                    }
+                if let Some(mem_zones) = memory_zones
+                    && mem_zones.is_empty() {
+                        return Err(ValidationError::InvalidNumaConfig(
+                            "memory_zones in numa config cannot be empty".to_string(),
+                        ));
+                    }
+                Ok(())
+            }
+            (Some(_), _, _) => Err(ValidationError::InvalidNumaConfig(
+                "device_id in numa config is mutually exclusive with cpus and memory_zones".to_string(),
+            )),
+        }
     }
 }
 
@@ -2750,6 +2803,7 @@ impl VmConfig {
             let mut used_numa_node_memory_zones = HashMap::new();
             let mut used_pci_segments = HashMap::new();
             for numa_node in numa.iter() {
+                numa_node.validate()?;
                 if let Some(memory_zones) = numa_node.memory_zones.clone() {
                     for memory_zone in memory_zones.iter() {
                         if used_numa_node_memory_zones.contains_key(memory_zone) {
@@ -3890,6 +3944,121 @@ mod unit_tests {
             }
         );
         Ok(())
+    }
+
+    #[test]
+    fn test_numa_config_parsing() -> Result<()> {
+        // Error when device_id and cpu/memory are present
+        let invalid_input = "guest_numa_id=0,cpus=[0,1],distances=[0@25,1@20],\
+                                device_id=vfio0,memory_zones=[mem1],pci_segments=[0]";
+        NumaConfig::parse(invalid_input).unwrap_err();
+        // Successful numa config parsing
+        let standard_input = "guest_numa_id=1,cpus=[2,3],distances=[0@20],\
+                                memory_zones=[mem0],pci_segments=[0]";
+        let expected_standard  = NumaConfig {
+            guest_numa_id: 1,
+            cpus: Some(vec![2, 3]),
+            distances: Some(vec![NumaDistance {
+                destination: 0,
+                distance: 20,
+            }]),
+            device_id: None,
+            memory_zones: Some(vec!["mem0".to_string()]),
+            pci_segments: Some(vec![0]),
+        };
+        assert_eq!(NumaConfig::parse(standard_input)?, expected_standard);
+        // Successful generic initiator config parse
+        let gi_input = "guest_numa_id=2,device_id=vfio1,distances=[0@30],pci_segments=[1]";
+        let expected_gi = NumaConfig {
+            guest_numa_id: 2,
+            cpus: None,
+            distances: Some(vec![NumaDistance {
+                destination: 0,
+                distance: 30,
+            }]),
+            device_id: Some("vfio1".to_string()),
+            memory_zones: None,
+            pci_segments: Some(vec![1]),
+        };
+        assert_eq!(NumaConfig::parse(gi_input)?, expected_gi);
+        Ok(())
+    }
+
+    #[test]
+    fn test_numa_config_generic_initiator_valid() {
+        // device_id specified, no cpus/memory_zones
+        let config = NumaConfig {
+            guest_numa_id: 0,
+            cpus: None,
+            distances: Some(vec![NumaDistance {
+                destination: 1,
+                distance: 20,
+            }]),
+            memory_zones: None,
+            device_id: Some("vfio0".to_string()),
+            pci_segments:None,
+        };
+        assert!(config.validate().is_ok());
+        assert!(config.is_generic_initiator());
+    }
+
+    #[test]
+    fn test_numa_config_invalid_device_id() {
+        // empty device_id
+        let config = NumaConfig {
+            guest_numa_id: 0,
+            cpus: None,
+            distances: None,
+            memory_zones: None,
+            device_id: Some("".to_string()),
+            pci_segments: None,
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_numa_config_invalid_both_device_cpus() {
+        // device_id and cpus specified
+        let config = NumaConfig {
+            guest_numa_id: 0,
+            cpus: Some(vec![0, 1]),
+            distances: None,
+            device_id: Some("vfio0".to_string()),
+            memory_zones: None,
+            pci_segments: None,
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_numa_config_invalid_both_device_memory() {
+        // device_id and memory zones specified
+        let config = NumaConfig {
+            guest_numa_id: 0,
+            cpus: None,
+            distances: None,
+            device_id: Some("vfio0".to_string()),
+            memory_zones: Some(vec!["mem0".to_string()]),
+            pci_segments: None,
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn test_numa_config_standard_valid() {
+        // No device_id
+        let config = NumaConfig {
+            guest_numa_id: 0,
+            cpus: Some(vec![0, 1]),
+            distances: Some(vec![NumaDistance {
+                destination: 1,
+                distance: 20,
+            }]),
+            device_id: None,
+            memory_zones: Some(vec!["mem0".to_string()]),
+            pci_segments: None,
+        };
+        assert!(config.validate().is_ok());
     }
 
     #[test]
