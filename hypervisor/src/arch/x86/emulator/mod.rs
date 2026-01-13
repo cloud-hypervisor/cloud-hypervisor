@@ -538,16 +538,13 @@ impl<T: CpuStateManager> Emulator<'_, T> {
         handler
     }
 
-    fn emulate_insn_stream(
+    pub fn emulate_insn_stream(
         &mut self,
-        cpu_id: usize,
+        old_state: &T,
         insn_stream: &[u8],
         num_insn: Option<usize>,
     ) -> EmulationResult<T, Exception> {
-        let mut state = self
-            .platform
-            .cpu_state(cpu_id)
-            .map_err(EmulationError::PlatformEmulationError)?;
+        let mut state = old_state.clone();
         let mut decoder = Decoder::new(64, insn_stream, DecoderOptions::NONE);
         let mut insn = Instruction::default();
         let mut num_insn_emulated: usize = 0;
@@ -627,7 +624,11 @@ impl<T: CpuStateManager> Emulator<'_, T> {
 
     /// Emulate all instructions from the instructions stream.
     pub fn emulate(&mut self, cpu_id: usize, insn_stream: &[u8]) -> EmulationResult<T, Exception> {
-        self.emulate_insn_stream(cpu_id, insn_stream, None)
+        let state = self
+            .platform
+            .cpu_state(cpu_id)
+            .map_err(EmulationError::PlatformEmulationError)?;
+        self.emulate_insn_stream(&state, insn_stream, None)
     }
 
     /// Only emulate the first instruction from the stream.
@@ -640,7 +641,11 @@ impl<T: CpuStateManager> Emulator<'_, T> {
         cpu_id: usize,
         insn_stream: &[u8],
     ) -> EmulationResult<T, Exception> {
-        self.emulate_insn_stream(cpu_id, insn_stream, Some(1))
+        let state = self
+            .platform
+            .cpu_state(cpu_id)
+            .map_err(EmulationError::PlatformEmulationError)?;
+        self.emulate_insn_stream(&state, insn_stream, Some(1))
     }
 }
 
@@ -706,10 +711,13 @@ mod mock_vmm {
             insn: &[u8],
             num_insn: Option<usize>,
         ) -> MockResult {
-            let ip = self.cpu_state(cpu_id).unwrap().ip();
+            let mut state = self
+                .cpu_state(cpu_id)
+                .map_err(EmulationError::PlatformEmulationError)?;
+            let ip = state.ip();
             let mut emulator = Emulator::new(self);
 
-            let new_state = emulator.emulate_insn_stream(cpu_id, insn, num_insn)?;
+            let new_state = emulator.emulate_insn_stream(&state, insn, num_insn)?;
             if num_insn.is_none() {
                 assert_eq!(ip + insn.len() as u64, new_state.ip());
             }
