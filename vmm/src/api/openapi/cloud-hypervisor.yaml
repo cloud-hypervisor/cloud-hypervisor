@@ -1203,6 +1203,8 @@ components:
           items:
             type: integer
             format: int32
+        device_id:
+          type: string
 
     VmResize:
       type: object

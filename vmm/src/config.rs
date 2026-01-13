@@ -2185,6 +2185,7 @@ impl VsockConfig {
 impl NumaConfig {
     pub const SYNTAX: &'static str = "Settings related to a given NUMA node \
         \"guest_numa_id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>,\
+        device_id=<device_id>,\
         memory_zones=<list_of_memory_zones>,\
         pci_segments=<list_of_pci_segments>\"";
 
@@ -2194,6 +2195,7 @@ impl NumaConfig {
             .add("guest_numa_id")
             .add("cpus")
             .add("distances")
+            .add("device_id")
             .add("memory_zones")
             .add("pci_segments");
 
@@ -2222,6 +2224,7 @@ impl NumaConfig {
                     })
                     .collect()
             });
+        let device_id = parser.get("device_id");
         let memory_zones = parser
             .convert::<StringList>("memory_zones")
             .map_err(Error::ParseNuma)?
@@ -2234,6 +2237,7 @@ impl NumaConfig {
             guest_numa_id,
             cpus,
             distances,
+            device_id,
             memory_zones,
             pci_segments,
         })
@@ -4118,6 +4122,7 @@ mod unit_tests {
             guest_numa_id: 0,
             cpus: None,
             distances: None,
+            device_id: None,
             memory_zones: None,
             pci_segments: None,
         }
