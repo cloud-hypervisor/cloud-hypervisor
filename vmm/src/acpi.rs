@@ -16,7 +16,7 @@ use arch::NumaNodes;
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::DeviceInfoForFdt;
 use bitflags::bitflags;
-use log::info;
+use log::{info, warn};
 use pci::PciBdf;
 use tracer::trace_scoped;
 use vm_memory::{Address, Bytes, GuestAddress, GuestMemoryRegion};
@@ -102,6 +102,82 @@ struct ProcessorGiccAffinity {
     pub acpi_processor_uid: u32,
     pub flags: u32,
     pub clock_domain: u32,
+}
+
+// ACPI 6.6 Section 5.2.16.6 - Generic Initiator Affinity Structure
+// Associates devices (e.g., GPUs, NVMe, accelerators) with NUMA proximity domains
+//
+// Device Handle Type values per ACPI 6.6 spec:
+//   0 = ACPI device handle (uses HID and UID)
+//   1 = PCI device handle (uses Segment and BDF)
+//
+// Note: Some older Linux kernel versions may incorrectly expect
+// device_handle_type=0 for PCI devices.
+#[allow(dead_code)]
+#[repr(C, packed)]
+#[derive(Default, IntoBytes, Immutable, FromBytes)]
+struct GenericInitiatorAffinity {
+    pub type_: u8,
+    pub length: u8,
+    _reserved1: u8,
+    pub device_handle_type: u8,
+    pub proximity_domain: u32,
+    pub device_handle: [u8; 16],
+    pub flags: u32,
+    _reserved2: u32,
+}
+
+impl GenericInitiatorAffinity {
+    #[allow(dead_code)]
+    fn from_acpi_device(hid: u64, uid: u32, proximity_domain: u32) -> Self {
+        let mut device_handle = [0u8; 16];
+        // ACPI 6.6 Table 5-66: ACPI device handle
+        // Bytes 0-7: Hardware ID (HID) as 64-bit value
+        // Bytes 8-11: Unique ID (UID) as 32-bit value
+        device_handle[0..8].copy_from_slice(&hid.to_le_bytes());
+        device_handle[8..12].copy_from_slice(&uid.to_le_bytes());
+        // Bytes 12-15: Reserved
+        GenericInitiatorAffinity {
+            type_: 5,
+            length: 32,
+            _reserved1: 0,
+            device_handle_type: 0, // 0 = ACPI
+            proximity_domain,
+            device_handle,
+            flags: 1,
+            _reserved2: 0,
+        }
+    }
+
+    fn from_pci_bdf(bdf: PciBdf, proximity_domain: u32) -> Self {
+        let mut device_handle = [0u8; 16];
+        let segment = bdf.segment();
+        let bus = bdf.bus();
+        let device = bdf.device();
+        let function = bdf.function();
+
+        // ACPI 6.6 Table 5-66: PCI Device Handle
+        device_handle[0] = (segment & 0xff) as u8;
+        device_handle[1] = ((segment >> 8) & 0xff) as u8;
+        device_handle[2] = bus;
+        device_handle[3] = bus;
+        device_handle[4] = device;
+        device_handle[5] = device;
+        device_handle[6] = function;
+        device_handle[7] = function;
+        // Bytes 8-15 remain 0 (Reserved)
+
+        GenericInitiatorAffinity {
+            type_: 5,
+            length: 32,
+            _reserved1: 0,
+            device_handle_type: 1, // 1 = PCI
+            proximity_domain,
+            device_handle,
+            flags: 1,
+            _reserved2: 0,
+        }
+    }
 }
 
 bitflags! {
@@ -293,6 +369,7 @@ fn create_tpm2_table() -> Sdt {
 
 fn create_srat_table(
     numa_nodes: &NumaNodes,
+    device_manager: &Arc<Mutex<DeviceManager>>,
     #[cfg(target_arch = "x86_64")] topology: Option<(u16, u16, u16, u16)>,
 ) -> Sdt {
     let mut srat = Sdt::new(*b"SRAT", 36, 3, *b"CLOUDH", *b"CHSRAT  ", 1);
@@ -302,7 +379,9 @@ fn create_srat_table(
     // Check the MemoryAffinity structure is the right size as expected by
     // the ACPI specification.
     assert_eq!(std::mem::size_of::<MemoryAffinity>(), 40);
-
+    // Confirm struct size matches ACPI 6.6 spec
+    assert_eq!(std::mem::size_of::<GenericInitiatorAffinity>(), 32);
+    let dm = device_manager.lock().unwrap();
     for (node_id, node) in numa_nodes.iter() {
         let proximity_domain = *node_id;
 
@@ -353,6 +432,19 @@ fn create_srat_table(
                 clock_domain: 0,
             });
         }
+
+        // Add Generic Initiator Affinity structures for device-only NUMA nodes
+        if let Some(device_id) = &node.device_id {
+            // Resolve device_id to guest BDF
+            if let Some(bdf) = dm.get_device_bdf(device_id) {
+                srat.append(GenericInitiatorAffinity::from_pci_bdf(
+                    bdf,
+                    proximity_domain,
+                ));
+            } else {
+                warn!("Generic Initiator: device_id '{device_id}' not found in device manager");
+            }
+        }
     }
     srat
 }
@@ -370,6 +462,10 @@ fn create_slit_table(numa_nodes: &NumaNodes) -> Sdt {
                 10
             } else if let Some(distance) = distances.get(i) {
                 *distance
+            // When forward distance config is missing
+            // we can derive it using distance symmetry
+            } else if let Some(destination) = numa_nodes.get(i) {
+                destination.distances.get(node_id).copied().unwrap_or(20)
             } else {
                 20
             };
@@ -887,6 +983,7 @@ fn create_acpi_tables_internal(
         // SRAT
         let srat = create_srat_table(
             numa_nodes,
+            device_manager,
             #[cfg(target_arch = "x86_64")]
             topology,
         );
@@ -1074,6 +1171,7 @@ pub fn create_acpi_tables_tdx(
         // SRAT
         tables.push(create_srat_table(
             numa_nodes,
+            device_manager,
             #[cfg(target_arch = "x86_64")]
             topology,
         ));
@@ -1089,4 +1187,175 @@ pub fn create_acpi_tables_tdx(
     }
 
     tables
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generic_initiator_affinity_size() {
+        // ACPI spec requires Generic Initiator Affinity Structure to be exactly 32 bytes
+        assert_eq!(
+            std::mem::size_of::<GenericInitiatorAffinity>(),
+            32,
+            "GenericInitiatorAffinity must be exactly 32 bytes per ACPI 6.6 spec"
+        );
+    }
+
+    #[test]
+    fn test_generic_initiator_from_pci_bdf() {
+        // Test creating Generic Initiator from PCI BDF
+        // segment:bus:device:function = 0000:00:05.0
+        let bdf = PciBdf::new(0, 0, 5, 0);
+        let proximity_domain = 1;
+
+        let gi = GenericInitiatorAffinity::from_pci_bdf(bdf, proximity_domain);
+
+        // Verify structure fields
+        assert_eq!(gi.type_, 5, "Type must be 5 for Generic Initiator");
+        assert_eq!(gi.length, 32, "Length must be 32 bytes");
+        assert_eq!(gi._reserved1, 0, "Reserved field must be 0");
+        assert_eq!(
+            gi.device_handle_type, 1,
+            "Device handle type must be 1 for PCI per ACPI 6.6 spec"
+        );
+        // Copy packed fields to local variables to avoid unaligned references
+        let gi_proximity_domain = gi.proximity_domain;
+        let gi_flags = gi.flags;
+        let gi_reserved2 = gi._reserved2;
+        assert_eq!(
+            gi_proximity_domain, proximity_domain,
+            "Proximity domain must match input"
+        );
+        assert_eq!(gi_flags, 1, "Flags must be 1 (enabled)");
+        assert_eq!(gi_reserved2, 0, "Reserved field must be 0");
+
+        // Verify PCI BDF encoding in device_handle
+        // ACPI 6.6 Table 5-66 format:
+        // Bytes 0-1: PCI Segment (little-endian)
+        // Byte 2: Start Bus Number
+        // Byte 3: End Bus Number
+        // Byte 4: Start Device Number
+        // Byte 5: End Device Number
+        // Byte 6: Start Function
+        // Byte 7: End Function
+        // Bytes 8-15: Reserved
+        let expected_handle: [u8; 16] = [
+            0, 0, 0, 0, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // Reserved
+        ];
+        assert_eq!(
+            gi.device_handle, expected_handle,
+            "Device handle must encode PCI BDF correctly per ACPI 6.6 Table 5-66"
+        );
+    }
+
+    #[test]
+    fn test_generic_initiator_multiple_numa_nodes() {
+        // Test Generic Initiators assigned to different NUMA nodes
+        let bdf0 = PciBdf::new(0, 0, 4, 0);
+        let bdf1 = PciBdf::new(0, 0, 5, 0);
+
+        let gi0 = GenericInitiatorAffinity::from_pci_bdf(bdf0, 0);
+        let gi1 = GenericInitiatorAffinity::from_pci_bdf(bdf1, 1);
+
+        // Copy packed fields to local variables to avoid unaligned references
+        let gi0_proximity_domain = gi0.proximity_domain;
+        let gi1_proximity_domain = gi1.proximity_domain;
+        assert_eq!(gi0_proximity_domain, 0);
+        assert_eq!(gi1_proximity_domain, 1);
+
+        // Verify both have correct type and length
+        assert_eq!(gi0.type_, 5);
+        assert_eq!(gi0.length, 32);
+        assert_eq!(gi1.type_, 5);
+        assert_eq!(gi1.length, 32);
+    }
+
+    #[test]
+    fn test_generic_initiator_repr_c_layout() {
+        // Verify the struct has correct C representation for ACPI table
+        // This ensures field offsets match ACPI spec
+        let gi = GenericInitiatorAffinity {
+            type_: 5,
+            length: 32,
+            _reserved1: 0,
+            device_handle_type: 1,
+            proximity_domain: 1,
+            device_handle: [0u8; 16],
+            flags: 1,
+            _reserved2: 0,
+        };
+
+        // Convert to bytes and verify layout
+        // SAFETY: `gi` is a local, initialized struct. Because it is `repr(packed)`,
+        // there is no internal padding, making every byte within it
+        // safe to read. Casting to `u8` satisfies alignment requirements.
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                &gi as *const GenericInitiatorAffinity as *const u8,
+                std::mem::size_of::<GenericInitiatorAffinity>(),
+            )
+        };
+
+        // Verify field positions per ACPI 6.6 spec
+        assert_eq!(bytes[0], 5, "Offset 0: Type");
+        assert_eq!(bytes[1], 32, "Offset 1: Length");
+        assert_eq!(bytes[2], 0, "Offset 2: Reserved");
+        assert_eq!(bytes[3], 1, "Offset 3: Device Handle Type (1=PCI per spec)");
+        // Proximity domain at offset 4-7 (u32 little-endian)
+        assert_eq!(bytes[4], 1);
+        assert_eq!(bytes[5], 0);
+        assert_eq!(bytes[6], 0);
+        assert_eq!(bytes[7], 0);
+        // Device handle at offset 8-23 (16 bytes)
+        // Flags at offset 24-27 (u32 little-endian)
+        assert_eq!(bytes[24], 1);
+        // Reserved at offset 28-31
+    }
+
+    #[test]
+    fn test_generic_initiator_acpi_device_handle() {
+        // Test ACPI device handle (device_handle_type=0) for completeness
+        // This validates HID and UID encoding per ACPI 6.6 spec (Table 5.65)
+        let hid: u64 = 0x0123456789ABCDEF;
+        let uid: u32 = 0x12345678;
+        let proximity_domain = 2;
+
+        let gi = GenericInitiatorAffinity::from_acpi_device(hid, uid, proximity_domain);
+
+        // Verify structure fields
+        assert_eq!(gi.type_, 5, "Type must be 5 for Generic Initiator");
+        assert_eq!(gi.length, 32, "Length must be 32 bytes");
+        assert_eq!(gi._reserved1, 0, "Reserved field must be 0");
+        assert_eq!(
+            gi.device_handle_type, 0,
+            "Device handle type must be 0 for ACPI per ACPI 6.6 spec"
+        );
+        // Copy packed fields to local variables to avoid unaligned references
+        let gi_proximity_domain = gi.proximity_domain;
+        let gi_flags = gi.flags;
+        let gi_reserved2 = gi._reserved2;
+        assert_eq!(
+            gi_proximity_domain, proximity_domain,
+            "Proximity domain must match input"
+        );
+        assert_eq!(gi_flags, 1, "Flags must be 1 (enabled)");
+        assert_eq!(gi_reserved2, 0, "Reserved field must be 0");
+
+        // Verify ACPI device handle encoding
+        // Expected format per ACPI 6.6 Table 5.65:
+        // Bytes 0-7: HID (64-bit, little-endian)
+        // Bytes 8-11: UID (32-bit, little-endian)
+        // Bytes 12-15: Reserved
+        let expected_handle: [u8; 16] = [
+            0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01, // HID
+            0x78, 0x56, 0x34, 0x12, // UID
+            0, 0, 0, 0, // Reserved
+        ];
+        assert_eq!(
+            gi.device_handle, expected_handle,
+            "Device handle must encode HID and UID correctly"
+        );
+    }
 }
