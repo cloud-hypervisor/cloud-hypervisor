@@ -1051,6 +1051,10 @@ pub struct DeviceManager {
     // List of guest NUMA nodes.
     numa_nodes: NumaNodes,
 
+    // Mapping from device ID (e.g., "vfio0") to guest PCI BDF.
+    // Used for Generic Initiator NUMA nodes to resolve device_id to BDF.
+    device_id_to_bdf: HashMap<String, PciBdf>,
+
     // Possible handle to the virtio-balloon device
     balloon: Option<Arc<Mutex<virtio_devices::Balloon>>>,
 
@@ -1348,6 +1352,7 @@ impl DeviceManager {
             id_to_dev_info: HashMap::new(),
             seccomp_action,
             numa_nodes,
+            device_id_to_bdf: HashMap::new(),
             balloon: None,
             activate_evt: activate_evt
                 .try_clone()
@@ -1644,6 +1649,9 @@ impl DeviceManager {
                     handle.pci_segment,
                     handle.dma_handler,
                 )?;
+
+                // Track device BDF for Generic Initiator support
+                self.device_id_to_bdf.insert(handle.id.clone(), dev_id);
 
                 if handle.iommu {
                     iommu_attached_devices.push(dev_id);
@@ -3837,6 +3845,10 @@ impl DeviceManager {
             .unwrap()
             .insert(vfio_name.clone(), node);
 
+        // Track device ID → guest BDF mapping for Generic Initiator resolution
+        self.device_id_to_bdf
+            .insert(vfio_name.clone(), pci_device_bdf);
+
         Ok((pci_device_bdf, vfio_name))
     }
 
@@ -4017,6 +4029,10 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .insert(vfio_user_name.clone(), node);
+
+        // Track device ID → guest BDF mapping for Generic Initiator resolution
+        self.device_id_to_bdf
+            .insert(vfio_user_name.clone(), pci_device_bdf);
 
         Ok((pci_device_bdf, vfio_user_name))
     }
@@ -4329,6 +4345,13 @@ impl DeviceManager {
 
     pub(crate) fn pci_segments(&self) -> &Vec<PciSegment> {
         &self.pci_segments
+    }
+
+    // Get the guest PCI BDF for a device ID.
+    // Returns None if the device ID is not found.
+    // Used for resolving Generic Initiator device_id to BDF in ACPI generation.
+    pub fn get_device_bdf(&self, device_id: &str) -> Option<PciBdf> {
+        self.device_id_to_bdf.get(device_id).copied()
     }
 
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
