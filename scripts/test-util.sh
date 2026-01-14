@@ -212,7 +212,7 @@ mount_and_exec() {
     local COMMAND_STATUS=0
 
     # Cleanup function to unmount and detach loop device
-    # shellcheck disable=SC2317
+    # shellcheck disable=SC2317,SC2329
     cleanup() {
         if [ -n "$MOUNT_DIR" ]; then
             echo "Cleanup: Unmounting $MOUNT_DIR..." >&2
