@@ -19,7 +19,7 @@ use hypervisor::arch::aarch64::regs::{
     AARCH64_ARCH_TIMER_HYP_IRQ, AARCH64_ARCH_TIMER_PHYS_NONSECURE_IRQ,
     AARCH64_ARCH_TIMER_PHYS_SECURE_IRQ, AARCH64_ARCH_TIMER_VIRT_IRQ, AARCH64_PMU_IRQ,
 };
-use log::{debug, warn};
+use log::{debug, info, warn};
 use thiserror::Error;
 use vm_fdt::{FdtWriter, FdtWriterResult};
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError, GuestMemoryRegion};
@@ -345,6 +345,17 @@ fn create_cpu_nodes(
         warn!("cache sysfs system does not exist.");
     }
 
+    // Arm boot protocol requires a minimal Device Tree
+    // https://docs.kernel.org/arch/arm64/booting.html
+    // As Generic initiators are supported only in ACPI
+    // When a guest kernel does not boot under "acpi=force" mode it can
+    // hang due to conflicting numa information present in FDT which
+    // does not support Generic Initiators
+    let has_generic_initiator = numa_nodes.values().any(|node| node.device_id.is_some());
+    if has_generic_initiator {
+        info!("Skipping NUMA CPU node encoding in FDT with Generic Initiator devices");
+    }
+
     for (cpu_id, mpidr) in vcpu_mpidr.iter().enumerate().take(num_cpus) {
         let cpu_name = format!("cpu@{cpu_id:x}");
         let cpu_node = fdt.begin_node(&cpu_name)?;
@@ -359,8 +370,10 @@ fn create_cpu_nodes(
         fdt.property_u32("reg", (mpidr & 0x7FFFFF) as u32)?;
         fdt.property_u32("phandle", cpu_id as u32 + FIRST_VCPU_PHANDLE)?;
 
-        // Add `numa-node-id` property if there is any numa config.
-        if numa_nodes.len() > 1 {
+        // Skipping NUMA encoding in FDT when Generic Initiator devices
+        // are present allowed such guest kernels to boot properly and
+        // rely solely on ACPI tables to setup NUMA
+        if numa_nodes.len() > 1 && !has_generic_initiator {
             for numa_node_idx in 0..numa_nodes.len() {
                 let numa_node = numa_nodes.get(&(numa_node_idx as u32));
                 if numa_node.unwrap().cpus.contains(&(cpu_id as u32)) {
@@ -501,7 +514,14 @@ fn create_memory_node(
 ) -> FdtWriterResult<()> {
     // See https://github.com/torvalds/linux/blob/58ae0b51506802713aa0e9956d1853ba4c722c98/Documentation/devicetree/bindings/numa.txt
     // for NUMA setting in memory node.
-    if numa_nodes.len() > 1 {
+    let has_generic_initiator = numa_nodes.values().any(|node| node.device_id.is_some());
+    if has_generic_initiator {
+        info!("Skipping NUMA memory node encoding in FDT with Generic Initiator devices");
+    }
+    // Skipping NUMA encoding in FDT when Generic Initiator devices
+    // are present allowed guest kernels to boot and
+    // rely solely on ACPI tables to setup NUMA
+    if numa_nodes.len() > 1 && !has_generic_initiator {
         for numa_node_idx in 0..numa_nodes.len() {
             let numa_node = numa_nodes.get(&(numa_node_idx as u32));
             let mut mem_reg_prop: Vec<u64> = Vec::new();
@@ -518,12 +538,15 @@ fn create_memory_node(
                     node_memory_addr = memory_region_start_addr;
                 }
             }
-            let memory_node_name = format!("memory@{node_memory_addr:x}");
-            let memory_node = fdt.begin_node(&memory_node_name)?;
-            fdt.property_string("device_type", "memory")?;
-            fdt.property_array_u64("reg", &mem_reg_prop)?;
-            fdt.property_u32("numa-node-id", numa_node_idx as u32)?;
-            fdt.end_node(memory_node)?;
+            // Only create a memory node if this NUMA node has memory regions
+            if !mem_reg_prop.is_empty() {
+                let memory_node_name = format!("memory@{node_memory_addr:x}");
+                let memory_node = fdt.begin_node(&memory_node_name)?;
+                fdt.property_string("device_type", "memory")?;
+                fdt.property_array_u64("reg", &mem_reg_prop)?;
+                fdt.property_u32("numa-node-id", numa_node_idx as u32)?;
+                fdt.end_node(memory_node)?;
+            }
         }
     } else {
         // Note: memory regions from "GuestMemory" are sorted and non-zero sized.
@@ -1044,6 +1067,22 @@ fn create_pci_nodes(
 }
 
 fn create_distance_map_node(fdt: &mut FdtWriter, numa_nodes: &NumaNodes) -> FdtWriterResult<()> {
+    // When Generic Initiator nodes are present, skip ALL FDT NUMA information.
+    // Let ACPI (which supports Generic Initiator via SRAT Type 5) handle the entire NUMA topology.
+    // FDT cannot represent Generic Initiator nodes, and mixing FDT + ACPI NUMA info causes conflicts.
+    let has_generic_initiator = numa_nodes.values().any(|node| node.device_id.is_some());
+    if has_generic_initiator {
+        info!("Skipping NUMA distance map encoding in FDT with Generic Initiator devices");
+        return Ok(());
+    }
+    // At this point, we know there are no Generic Initiator nodes
+    let mut numa_ids: Vec<u32> = numa_nodes.keys().cloned().collect();
+
+    // If we only have one node, no distance map is needed
+    if numa_ids.len() <= 1 {
+        return Ok(());
+    }
+
     let distance_map_node = fdt.begin_node("distance-map")?;
     fdt.property_string("compatible", "numa-distance-map-v1")?;
     // Construct the distance matrix.
@@ -1056,26 +1095,33 @@ fn create_distance_map_node(fdt: &mut FdtWriter, numa_nodes: &NumaNodes) -> FdtW
     // a value greater than 10.
     // 4. distance-matrix should have entries in lexicographical ascending
     // order of nodes.
+    numa_ids.sort_unstable(); // lexicographical order
     let mut distance_matrix = Vec::new();
-    for numa_node_idx in 0..numa_nodes.len() {
-        let numa_node = numa_nodes.get(&(numa_node_idx as u32));
-        for dest_numa_node in 0..numa_node.unwrap().distances.len() + 1 {
-            if numa_node_idx == dest_numa_node {
-                distance_matrix.push(numa_node_idx as u32);
-                distance_matrix.push(dest_numa_node as u32);
+    // Iterate over actual numa IDs instead of 0..len()
+    for numa_id in numa_ids.iter() {
+        let numa_node = &numa_nodes[numa_id];
+        for dest_numa_id in numa_ids.iter() {
+            if *numa_id == *dest_numa_id {
+                distance_matrix.push(*numa_id);
+                distance_matrix.push(*dest_numa_id);
                 distance_matrix.push(10_u32);
                 continue;
             }
 
-            distance_matrix.push(numa_node_idx as u32);
-            distance_matrix.push(dest_numa_node as u32);
-            distance_matrix.push(
-                *numa_node
-                    .unwrap()
-                    .distances
-                    .get(&(dest_numa_node as u32))
-                    .unwrap() as u32,
-            );
+            distance_matrix.push(*numa_id);
+            distance_matrix.push(*dest_numa_id);
+            // Use user-specified distance, checking both directions for symmetry
+            let distance = if let Some(&dist) = numa_node.distances.get(dest_numa_id) {
+                // Forward direction: current node -> dest node
+                dist
+            } else if let Some(dest_node) = numa_nodes.get(dest_numa_id) {
+                // Reverse direction for symmetry: dest node -> current node
+                dest_node.distances.get(numa_id).copied().unwrap_or(20)
+            } else {
+                // Default distance when neither direction is specified
+                20
+            };
+            distance_matrix.push(distance as u32);
         }
     }
     fdt.property_array_u32("distance-matrix", distance_matrix.as_ref())?;
@@ -1158,5 +1204,120 @@ fn print_node(node: fdt_parser::node::FdtNode<'_, '_>, n_spaces: usize) {
     // Print children nodes if there is any
     for child in node.children() {
         print_node(child, n_spaces + 2);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::NumaNode;
+
+    // Helper function to create a simple NumaNode for testing
+    fn create_test_numa_node(cpus: Vec<u32>, device_id: Option<String>) -> NumaNode {
+        NumaNode {
+            memory_regions: Vec::new(),
+            hotplug_regions: Vec::new(),
+            cpus,
+            pci_segments: Vec::new(),
+            distances: BTreeMap::new(),
+            memory_zones: Vec::new(),
+            device_id,
+        }
+    }
+
+    #[test]
+    fn test_fdt_generic_initiator_detection_and_skip() {
+        // No Generic Initiator - should not skip FDT NUMA
+        let mut numa_nodes = BTreeMap::new();
+        numa_nodes.insert(0, create_test_numa_node(vec![0, 1], None));
+        numa_nodes.insert(1, create_test_numa_node(vec![2, 3], None));
+
+        let has_gi = numa_nodes.values().any(|node| node.device_id.is_some());
+        assert!(
+            !has_gi,
+            "Should not detect Generic Initiator when none present"
+        );
+
+        // One Generic Initiator - should skip FDT NUMA
+        let mut numa_nodes = BTreeMap::new();
+        numa_nodes.insert(0, create_test_numa_node(vec![0, 1], None));
+        numa_nodes.insert(1, create_test_numa_node(vec![], Some("vfio0".to_string())));
+
+        let has_gi = numa_nodes.values().any(|node| node.device_id.is_some());
+        assert!(has_gi, "Should detect Generic Initiator when present");
+
+        let mut fdt = FdtWriter::new().unwrap();
+        let result = create_distance_map_node(&mut fdt, &numa_nodes);
+        assert!(result.is_ok(), "Should skip distance map when GI present");
+
+        // Multiple Generic Initiators - should skip FDT NUMA
+        let mut numa_nodes = BTreeMap::new();
+        numa_nodes.insert(0, create_test_numa_node(vec![0, 1], None));
+        numa_nodes.insert(1, create_test_numa_node(vec![], Some("vfio0".to_string())));
+        numa_nodes.insert(2, create_test_numa_node(vec![], Some("vfio1".to_string())));
+
+        let has_gi = numa_nodes.values().any(|node| node.device_id.is_some());
+        assert!(has_gi, "Should detect multiple Generic Initiators");
+    }
+
+    #[test]
+    fn test_fdt_distance_map() {
+        // Single NUMA node - should skip distance map
+        let mut numa_nodes = BTreeMap::new();
+        numa_nodes.insert(0, create_test_numa_node(vec![0, 1], None));
+
+        let mut fdt = FdtWriter::new().unwrap();
+        let result = create_distance_map_node(&mut fdt, &numa_nodes);
+        assert!(result.is_ok(), "Should skip distance map for single node");
+
+        // Empty NUMA nodes - should handle gracefully
+        let numa_nodes = BTreeMap::new();
+        let mut fdt = FdtWriter::new().unwrap();
+        let result = create_distance_map_node(&mut fdt, &numa_nodes);
+        assert!(result.is_ok(), "Should handle empty NUMA nodes");
+
+        // Non-contiguous NUMA IDs (0, 2, 5) with distance symmetry
+        let mut numa_nodes = BTreeMap::new();
+
+        let mut node0 = create_test_numa_node(vec![0], None);
+        node0.distances.insert(2, 20);
+        // node0 has no explicit distance to node5
+
+        let mut node2 = create_test_numa_node(vec![1], None);
+        node2.distances.insert(0, 20);
+        node2.distances.insert(5, 25);
+
+        let mut node5 = create_test_numa_node(vec![2], None);
+        node5.distances.insert(0, 30);
+        node5.distances.insert(2, 25);
+        // node5->node0 (should be used for node0->node5)
+
+        numa_nodes.insert(0, node0);
+        numa_nodes.insert(2, node2);
+        numa_nodes.insert(5, node5);
+
+        // Verify IDs are sorted lexicographically
+        let mut numa_ids: Vec<u32> = numa_nodes.keys().cloned().collect();
+        numa_ids.sort_unstable();
+        assert_eq!(numa_ids, vec![0, 2, 5]);
+
+        let mut fdt = FdtWriter::new().unwrap();
+        let result = create_distance_map_node(&mut fdt, &numa_nodes);
+        assert!(
+            result.is_ok(),
+            "Should handle non-contiguous IDs and symmetry"
+        );
+
+        // Default distance (20) when no distance specified in either direction
+        let mut numa_nodes = BTreeMap::new();
+        numa_nodes.insert(0, create_test_numa_node(vec![0], None));
+        numa_nodes.insert(1, create_test_numa_node(vec![1], None));
+        // Neither node has distance to the other
+
+        let mut fdt = FdtWriter::new().unwrap();
+        let result = create_distance_map_node(&mut fdt, &numa_nodes);
+        assert!(result.is_ok(), "Should default to 20 for missing distances");
     }
 }
