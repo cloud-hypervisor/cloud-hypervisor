@@ -11063,6 +11063,120 @@ mod vfio {
 
         handle_child_output(r, &output);
     }
+
+    fn test_guest_numa_generic_initiator() {
+        // Skip test if VFIO device is not available or not ready
+        if !std::path::Path::new(NVIDIA_VFIO_DEVICE).exists() {
+            println!("SKIPPED: VFIO device {} not found", NVIDIA_VFIO_DEVICE);
+            return;
+        }
+
+        // Check if device is bound to vfio-pci driver
+        let driver_path = format!("{}/driver", NVIDIA_VFIO_DEVICE);
+        if let Ok(driver) = std::fs::read_link(&driver_path) {
+            let driver_name = driver.file_name().unwrap_or_default().to_string_lossy();
+            if driver_name != "vfio-pci" {
+                println!(
+                    "SKIPPED: VFIO device {} bound to {}, not vfio-pci",
+                    NVIDIA_VFIO_DEVICE, driver_name
+                );
+                return;
+            }
+        } else {
+            println!(
+                "SKIPPED: VFIO device {} not bound to any driver",
+                NVIDIA_VFIO_DEVICE
+            );
+            return;
+        }
+
+        let disk_config = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        // x86_64: Direct kernel boot
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=0"])
+            .args(["--memory-zone", "id=mem0,size=1G", "id=mem1,size=1G"])
+            .args([
+                "--numa",
+                "guest_numa_id=0,cpus=[0-1],distances=[1@20,2@25],memory_zones=mem0",
+                "guest_numa_id=1,cpus=[2-3],distances=[0@20,2@30],memory_zones=mem1",
+                "guest_numa_id=2,device_id=vfio0,distances=[0@25,1@30]",
+            ])
+            .args([
+                "--device",
+                &format!("id=vfio0,path={},iommu=on", NVIDIA_VFIO_DEVICE),
+            ])
+            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--api-socket", &api_socket])
+            .capture_output()
+            .default_disks()
+            .default_net()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // Verify NUMA topology is correct
+            guest.check_numa_common(
+                Some(&[960_000, 960_000]),
+                Some(&[&[0, 1], &[2, 3]]),
+                Some(&["10 20 25", "20 10 30", "25 30 10"]),
+            );
+
+            // Verify Generic Initiator support is present
+            // Linux kernel sets has_generic_initiator when it parses Type 5 SRAT entries
+            let has_gi = guest
+                .ssh_command(
+                    "cat /sys/devices/system/node/has_generic_initiator 2>/dev/null || echo 0",
+                )
+                .unwrap()
+                .trim()
+                .to_string();
+
+            assert_eq!(
+                has_gi, "2",
+                "Generic Initiator support should be detected by kernel"
+            );
+
+            // Verify SRAT table contains Generic Initiator entry (Type 5)
+            // We'll check that /sys/firmware/acpi/tables/SRAT exists and contains our entry
+            let srat_check = guest
+                .ssh_command(
+                    "[ -f /sys/firmware/acpi/tables/SRAT ] && echo 'exists' || echo 'missing'",
+                )
+                .unwrap()
+                .trim()
+                .to_string();
+
+            assert_eq!(
+                srat_check, "exists",
+                "SRAT table should exist in guest firmware"
+            );
+
+            // Use hexdump to verify Type 5 entry is present
+            // Type 5 (0x05) should appear in the SRAT table
+            let srat_has_type5 = guest
+                .ssh_command("sudo hexdump -C /sys/firmware/acpi/tables/SRAT | grep -q '05 20' && echo 'found' || echo 'not_found'")
+                .unwrap()
+                .trim()
+                .to_string();
+
+            assert_eq!(
+                srat_has_type5, "found",
+                "SRAT table should contain Generic Initiator Affinity Structure (Type 5, Length 0x20/32)"
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
 }
 
 mod live_migration {
