@@ -11,8 +11,7 @@ use log::{error, info};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use vhost::vhost_user::message::{
-    VHOST_USER_CONFIG_OFFSET, VhostUserConfigFlags, VhostUserProtocolFeatures,
-    VhostUserVirtioFeatures,
+    VhostUserConfigFlags, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
 use virtio_bindings::virtio_blk::{
@@ -147,7 +146,7 @@ impl Blk {
             let (_, config_space) = vu
                 .socket_handle()
                 .get_config(
-                    VHOST_USER_CONFIG_OFFSET,
+                    0,
                     config_len as u32,
                     VhostUserConfigFlags::WRITABLE,
                     config_space.as_slice(),
