@@ -429,17 +429,20 @@ introduced to define a guest NUMA topology. It allows for a fine description
 about the CPUs and memory ranges associated with each NUMA node. Additionally
 it allows for specifying the distance between each NUMA node.
 
+Furthermore, it supports ACPI Generic Initiator Affinity (SRAT Type 5), which allows VFIO-PCI devices (such as GPUs) to be associated with NUMA nodes that are {memory,cpu}-less. Detailed configuration for this feature can be found under the device_id parameter.
+
 ```rust
 struct NumaConfig {
     guest_numa_id: u32,
     cpus: Option<Vec<u32>>,
     distances: Option<Vec<NumaDistance>>,
     memory_zones: Option<Vec<String>>,
+    device_id: Option<String>,
 }
 ```
 
 ```
---numa <numa>	Settings related to a given NUMA node "guest_numa_id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>,memory_zones=<list_of_memory_zones>
+--numa <numa>	Settings related to a given NUMA node "guest_numa_id=<node_id>,cpus=<cpus_id>,distances=<list_of_distances_to_destination_nodes>,memory_zones=<list_of_memory_zones>,device_id=<device_identifier>"
 ```
 
 ### `guest_numa_id`
@@ -454,7 +457,7 @@ Value is an unsigned integer of 32 bits.
 _Example_
 
 ```
---numa guest_numa_id=0
+--numa guest_numa_id=0,cpus=[0-1],memory_zones=mem0
 ```
 
 ### `cpus`
@@ -480,6 +483,9 @@ simply be described with `cpus=[0-99,255]`.
 
 As soon as one tries to describe a list of values, `[` and `]` must be used to
 demarcate the list.
+
+**Note:** When creating a Generic Initiator node via the `device_id` parameter,
+the `cpus` option must not be specified.
 
 _Example_
 
@@ -507,13 +513,34 @@ from the others with `,` separator.
 As soon as one tries to describe a list of values, `[` and `]` must be used to
 demarcate the list.
 
+**Default distances:**
+- If distances are not specified for a NUMA node, default values are applied:
+  - Distance to self: 10
+  - Distance to all other nodes: 20
+- Partial distance specifications are allowed; unspecified distances use the defaults above
+
+**Distance symmetry:**
+- Cloud Hypervisor automatically ensures distance symmetry in ACPI SLIT (System Locality Information Table) and FDT
+- If node A specifies distance to node B, the reverse distance (B to A) is automatically set to the same value
+
 For instance, if one wants to define 3 NUMA nodes, with each node located at
 different distances, it can be described with the following example.
 
 _Example_
 
 ```
+# Explicit bidirectional distances
 --numa guest_numa_id=0,distances=[1@15,2@25] guest_numa_id=1,distances=[0@15,2@20] guest_numa_id=2,distances=[0@25,1@20]
+
+# Simplified with symmetry - only specify in one direction
+--numa guest_numa_id=0,distances=[1@15,2@25] guest_numa_id=1,distances=[2@20]
+# Results in the same topology: 0↔1=15, 0↔2=25, 1↔2=20
+
+# Using defaults - only specify non-default distances
+--numa guest_numa_id=0,cpus=[0-1],memory_zones=mem0,distances=[1@15]
+--numa guest_numa_id=1,cpus=[2-3],memory_zones=mem1
+# Node 0: self=10, to node 1=15
+# Node 1: self=10, to node 0=15 (symmetric)
 ```
 
 ### `memory_zones`
@@ -539,6 +566,9 @@ Note that a memory zone must belong to a single NUMA node. The following
 configuration is incorrect, therefore not allowed:
 `--numa guest_numa_id=0,memory_zones=mem0 guest_numa_id=1,memory_zones=mem0`
 
+**Note:** When creating a Generic Initiator node via the `device_id` parameter,
+the `memory_zones` option must not be specified.
+
 _Example_
 
 ```
@@ -546,6 +576,44 @@ _Example_
 --memory-zone id=mem0,size=1G id=mem1,size=1G id=mem2,size=1G
 --numa guest_numa_id=0,memory_zones=[mem0,mem2] guest_numa_id=1,memory_zones=mem1
 ```
+
+### `device_id` (Generic Initiator)
+
+Device identifier for creating a Generic Initiator NUMA node that is
+{CPU,memory}-less and associated with a specific VFIO-PCI device.
+
+Generic Initiator nodes are defined by ACPI SRAT (System Resource Affinity
+Table) Type 5 entries and allow the guest OS to understand device-to-memory
+proximity relationships. Without Generic Initiator support, the guest OS has
+no way to know which NUMA node a passthrough device is closest to.
+
+By exposing these proximity relationships, the guest OS can perform
+NUMA-aware scheduling and optimize memory placement for workloads
+utilizing those specific devices.
+
+When `device_id` is specified, `cpus` and `memory_zones` must NOT be provided.
+
+Value is a string referring to an existing device identifier defined via
+`--device id=<device_identifier>`.
+
+_Example_
+
+```bash
+# Create two standard NUMA nodes with CPUs and memory, plus one Generic
+# Initiator node for a VFIO GPU
+--cpus boot=4
+--memory size=0
+--memory-zone id=mem0,size=2G id=mem1,size=2G
+--numa guest_numa_id=0,cpus=[0-1],memory_zones=mem0,distances=[1@20,2@25]
+--numa guest_numa_id=1,cpus=[2-3],memory_zones=mem1,distances=[0@20,2@30]
+--numa guest_numa_id=2,device_id=gpu0,distances=[0@25,1@30]
+--device id=gpu0,path=/sys/bus/pci/devices/0000:01:00.0,iommu=on
+```
+
+In this configuration:
+- Node 0: CPUs 0-1, 2GB memory
+- Node 1: CPUs 2-3, 2GB memory
+- Node 2 (auto-assigned): GPU device, closer to node 0 (distance=25) than node 1 (distance=30)
 
 ### PCI bus
 
