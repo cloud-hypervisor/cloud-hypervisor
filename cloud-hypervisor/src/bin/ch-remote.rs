@@ -106,6 +106,7 @@ trait DBusApi1 {
     fn vm_resume(&self) -> zbus::Result<()>;
     fn vm_shutdown(&self) -> zbus::Result<()>;
     fn vm_snapshot(&self, vm_snapshot_config: &str) -> zbus::Result<()>;
+    fn vm_dump_config(&self, vm_dump_config: &str) -> zbus::Result<()>;
 }
 
 #[cfg(feature = "dbus_api")]
@@ -253,6 +254,11 @@ impl<'a> DBusApi1ProxyBlocking<'a> {
 
     fn api_vm_snapshot(&self, vm_snapshot_config: &str) -> ApiResult {
         self.vm_snapshot(vm_snapshot_config)
+            .map_err(Error::DBusApiClient)
+    }
+
+    fn api_vm_dump_config(&self, vm_dump_config: &str) -> ApiResult {
+        self.vm_dump_config(vm_dump_config)
             .map_err(Error::DBusApiClient)
     }
 }
@@ -462,6 +468,17 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                     .unwrap(),
             );
             simple_api_command(socket, "PUT", "snapshot", Some(&snapshot_config))
+                .map_err(Error::HttpApiClient)
+        }
+        Some("dump-vm-config") => {
+            let dump_vm_config = dump_vm_config(
+                matches
+                    .subcommand_matches("dump-vm-config")
+                    .unwrap()
+                    .get_one::<String>("dump_vm_config")
+                    .unwrap(),
+            );
+            simple_api_command(socket, "PUT", "dump-vm-config", Some(&dump_vm_config))
                 .map_err(Error::HttpApiClient)
         }
         Some("restore") => {
@@ -680,6 +697,16 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
             );
             proxy.api_vm_snapshot(&snapshot_config)
         }
+        Some("dump-vm-config") => {
+            let dump_vm_config = dump_vm_config(
+                matches
+                    .subcommand_matches("dump-vm-config")
+                    .unwrap()
+                    .get_one::<String>("dump_vm_config")
+                    .unwrap(),
+            );
+            proxy.api_vm_dump_config(&dump_vm_config)
+        }
         Some("restore") => {
             let (restore_config, _fds) = restore_config(
                 matches
@@ -877,6 +904,14 @@ fn snapshot_config(url: &str) -> String {
     serde_json::to_string(&snapshot_config).unwrap()
 }
 
+fn dump_vm_config(url: &str) -> String {
+    let dump_vm_config = vmm::api::VmDumpConfig {
+        destination_url: String::from(url),
+    };
+
+    serde_json::to_string(&dump_vm_config).unwrap()
+}
+
 fn restore_config(config: &str) -> Result<(String, Vec<i32>), Error> {
     let mut restore_config = RestoreConfig::parse(config).map_err(Error::Restore)?;
     // RestoreConfig is modified on purpose to take out the file descriptors.
@@ -1013,6 +1048,13 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .about("Create VM from a JSON configuration")
             .arg(Arg::new("path").index(1).default_value("-")),
         Command::new("delete").about("Delete a VM"),
+        Command::new("dump-vm-config")
+            .about("Dump VM configuration")
+            .arg(
+                Arg::new("dump_vm_config")
+                    .index(1)
+                    .help("<destination_url>"),
+            ),
         Command::new("info").about("Info on the VM"),
         Command::new("nmi").about("Trigger NMI"),
         Command::new("pause").about("Pause the VM"),

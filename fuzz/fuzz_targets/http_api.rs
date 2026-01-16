@@ -108,6 +108,10 @@ impl RequestHandler for StubApiRequestHandler {
         Ok(())
     }
 
+    fn vm_dump_config(&mut self, _: &str) -> Result<(), VmError> {
+        Ok(())
+    }
+
     fn vm_resize_disk(&mut self, _: String, _: u64) -> Result<(), VmError> {
         Ok(())
     }

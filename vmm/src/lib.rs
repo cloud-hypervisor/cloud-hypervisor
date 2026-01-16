@@ -1729,6 +1729,14 @@ impl RequestHandler for Vmm {
         }
     }
 
+    fn vm_dump_config(&mut self, destination_url: &str) -> result::Result<(), VmError> {
+        if let Some(ref mut vm) = self.vm {
+            vm.vm_dump_config(destination_url)
+        } else {
+            Err(VmError::VmNotRunning)
+        }
+    }
+
     fn vm_restore(&mut self, restore_cfg: RestoreConfig) -> result::Result<(), VmError> {
         if self.vm.is_some() || self.vm_config.is_some() {
             return Err(VmError::VmAlreadyCreated);

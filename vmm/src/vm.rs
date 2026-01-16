@@ -19,6 +19,7 @@ use std::mem::size_of;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
@@ -215,6 +216,12 @@ pub enum Error {
 
     #[error("Cannot snapshot VM")]
     Snapshot(#[source] MigratableError),
+
+    #[error("Cannot dump VM config")]
+    VmConfigDump(#[source] anyhow::Error),
+
+    #[error("Invalid dump URL: {0}")]
+    InvalidDumpUrl(String),
 
     #[error("Cannot restore VM")]
     Restore(#[source] MigratableError),
@@ -2838,6 +2845,27 @@ impl Vm {
             .unwrap()
             .nmi()
             .map_err(|_| Error::ErrorNmi);
+    }
+
+    pub fn vm_dump_config(&self, destination_url: &str) -> Result<()> {
+        let vm_dump_file_path: PathBuf = destination_url
+            .strip_prefix("file://")
+            .ok_or_else(|| Error::InvalidDumpUrl(destination_url.to_string()))?
+            .into();
+        let mut vm_dump_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(vm_dump_file_path)
+            .map_err(|e| Error::VmConfigDump(anyhow!(e)))?;
+        let config = self.config.lock().unwrap();
+        let config_data =
+            serde_json::to_string(&*config).map_err(|e| Error::VmConfigDump(anyhow!(e)))?;
+
+        vm_dump_file
+            .write(config_data.as_bytes())
+            .map_err(|e| Error::VmConfigDump(anyhow!(e)))?;
+        Ok(())
     }
 }
 

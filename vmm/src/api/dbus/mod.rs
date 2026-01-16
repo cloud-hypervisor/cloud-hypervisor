@@ -23,9 +23,9 @@ use super::{ApiAction, ApiRequest};
 use crate::api::VmCoredump;
 use crate::api::{
     AddDisk, Body, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem, VmAddUserDevice, VmAddVdpa,
-    VmAddVsock, VmBoot, VmCounters, VmCreate, VmDelete, VmInfo, VmPause, VmPowerButton, VmReboot,
-    VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume,
-    VmSendMigration, VmShutdown, VmSnapshot, VmmPing, VmmShutdown,
+    VmAddVsock, VmBoot, VmConfigDump, VmCounters, VmCreate, VmDelete, VmInfo, VmPause,
+    VmPowerButton, VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore,
+    VmResume, VmSendMigration, VmShutdown, VmSnapshot, VmmPing, VmmShutdown,
 };
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::{Error as VmmError, NetConfig, Result as VmmResult, VmConfig};
@@ -302,6 +302,12 @@ impl DBusApi {
             .map(|_| ())
     }
 
+    async fn vm_dump_config(&self, dump_vm_config: String) -> Result<()> {
+        let dump_vm_config = serde_json::from_str(&dump_vm_config).map_err(api_error)?;
+        self.vm_action(&VmConfigDump, dump_vm_config)
+            .await
+            .map(|_| ())
+    }
     // implementation of this function is provided by the `#[zbus(signal)]` macro call
     #[zbus(signal)]
     async fn event(
