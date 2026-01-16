@@ -173,6 +173,7 @@ pub struct BlockControl {
 pub struct PerformanceTestControl {
     test_timeout: u32,
     test_iterations: u32,
+    warmup_iterations: u32,
     num_queues: Option<u32>,
     queue_size: Option<u32>,
     net_control: Option<(bool, bool)>, // First bool is for RX(true)/TX(false), second bool is for bandwidth or PPS
@@ -183,8 +184,8 @@ pub struct PerformanceTestControl {
 impl fmt::Display for PerformanceTestControl {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut output = format!(
-            "test_timeout = {}s, test_iterations = {}",
-            self.test_timeout, self.test_iterations
+            "test_timeout = {}s, test_iterations = {}, warmup_iterations = {}",
+            self.test_timeout, self.test_iterations, self.warmup_iterations
         );
         if let Some(o) = self.num_queues {
             output = format!("{output}, num_queues = {o}");
@@ -212,6 +213,7 @@ impl PerformanceTestControl {
         Self {
             test_timeout: 10,
             test_iterations: 5,
+            warmup_iterations: 0,
             num_queues: None,
             queue_size: None,
             net_control: None,
@@ -233,6 +235,17 @@ struct PerformanceTest {
 
 impl PerformanceTest {
     pub fn run(&self, overrides: &PerformanceTestOverrides) -> PerformanceTestResult {
+        // Run warmup iterations if configured (results discarded)
+        for _ in 0..self.control.warmup_iterations {
+            if let Some(test_timeout) = overrides.test_timeout {
+                let mut control: PerformanceTestControl = self.control.clone();
+                control.test_timeout = test_timeout;
+                let _ = (self.func_ptr)(&control);
+            } else {
+                let _ = (self.func_ptr)(&self.control);
+            }
+        }
+
         let mut metrics = Vec::new();
         for _ in 0..overrides
             .test_iterations
@@ -265,8 +278,9 @@ impl PerformanceTest {
     // Calculate the timeout for each test
     // Note: To cover the setup/cleanup time, 20s is added for each iteration of the test
     pub fn calc_timeout(&self, test_iterations: &Option<u32>, test_timeout: &Option<u32>) -> u64 {
-        ((test_timeout.unwrap_or(self.control.test_timeout) + 20)
-            * test_iterations.unwrap_or(self.control.test_iterations)) as u64
+        let total_iterations = test_iterations.unwrap_or(self.control.test_iterations)
+            + self.control.warmup_iterations;
+        ((test_timeout.unwrap_or(self.control.test_timeout) + 20) * total_iterations) as u64
     }
 }
 
@@ -319,7 +333,7 @@ mod adjuster {
     }
 }
 
-const TEST_LIST: [PerformanceTest; 34] = [
+const TEST_LIST: [PerformanceTest; 36] = [
     PerformanceTest {
         name: "boot_time_ms",
         func_ptr: performance_boot_time,
@@ -763,6 +777,38 @@ const TEST_LIST: [PerformanceTest; 34] = [
             queue_size: Some(128),
             block_control: Some(BlockControl {
                 fio_ops: FioOps::RandomRead,
+                bandwidth: true,
+                test_file: OVERLAY_WITH_RAW_BACKING,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_backing_qcow2_read_warm_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(1),
+            queue_size: Some(128),
+            warmup_iterations: 2,
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::Read,
+                bandwidth: true,
+                test_file: OVERLAY_WITH_QCOW2_BACKING,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_backing_raw_read_warm_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(1),
+            queue_size: Some(128),
+            warmup_iterations: 2,
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::Read,
                 bandwidth: true,
                 test_file: OVERLAY_WITH_RAW_BACKING,
             }),
