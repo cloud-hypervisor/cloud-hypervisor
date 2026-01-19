@@ -9,6 +9,7 @@ default = []
 io_uring = ["dep:io-uring"]
 
 [dependencies]
+bitflags = { workspace = true }
 byteorder = { workspace = true }
 crc-any = "2.5.0"
 flate2 = "1.1"

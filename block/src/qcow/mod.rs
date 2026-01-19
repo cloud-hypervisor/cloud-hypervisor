@@ -18,6 +18,7 @@ use std::mem::size_of;
 use std::os::fd::{AsRawFd, RawFd};
 use std::str::{self, FromStr};
 
+use bitflags::bitflags;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use libc::{EINVAL, EIO, ENOSPC};
 use log::error;
@@ -116,6 +117,8 @@ pub enum Error {
     UnsupportedBackingFileFormat(String),
     #[error("Unsupported compression type")]
     UnsupportedCompressionType,
+    #[error("Unsupported qcow2 feature(s)")]
+    UnsupportedFeature(#[source] MissingFeatureError),
     #[error("Unsupported refcount order")]
     UnsupportedRefcountOrder,
     #[error("Unsupported version: {0}")]
@@ -206,6 +209,76 @@ const COMPRESSION_TYPE_ZSTD: u64 = 1; // zstd <http://github.com/facebook/zstd>
 const HEADER_EXT_END: u32 = 0x00000000;
 // Backing file format name (raw, qcow2)
 const HEADER_EXT_BACKING_FORMAT: u32 = 0xe2792aca;
+// Feature name table
+const HEADER_EXT_FEATURE_NAME_TABLE: u32 = 0x6803f857;
+
+// Feature name table entry type incompatible
+const FEAT_TYPE_INCOMPATIBLE: u8 = 0;
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct IncompatFeatures: u64 {
+        const DIRTY = 1 << 0;
+        const CORRUPT = 1 << 1;
+        const DATA_FILE = 1 << 2;
+        const COMPRESSION = 1 << 3;
+        const EXTENDED_L2 = 1 << 4;
+    }
+}
+
+impl IncompatFeatures {
+    /// Features supported by this implementation.
+    const SUPPORTED: IncompatFeatures = IncompatFeatures::COMPRESSION;
+
+    /// Get the fallback name for a known feature bit.
+    fn flag_name(bit: u8) -> Option<&'static str> {
+        Some(match Self::from_bits_truncate(1u64 << bit) {
+            Self::DIRTY => "dirty bit",
+            Self::CORRUPT => "corrupt bit",
+            Self::DATA_FILE => "external data file",
+            Self::EXTENDED_L2 => "extended L2 entries",
+            _ => return None,
+        })
+    }
+}
+
+/// Error type for unsupported incompatible features.
+#[derive(Debug, Clone, Error)]
+pub struct MissingFeatureError {
+    /// Unsupported feature bits.
+    features: IncompatFeatures,
+    /// Feature name table from the qcow2 image.
+    feature_names: Vec<(u8, String)>,
+}
+
+impl MissingFeatureError {
+    fn new(features: IncompatFeatures, feature_names: Vec<(u8, String)>) -> Self {
+        Self {
+            features,
+            feature_names,
+        }
+    }
+}
+
+impl Display for MissingFeatureError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        let names: Vec<String> = (0u8..64)
+            .filter(|&bit| self.features.bits() & (1u64 << bit) != 0)
+            .map(|bit| {
+                // First try the image's feature name table
+                self.feature_names
+                    .iter()
+                    .find(|(b, _)| *b == bit)
+                    .map(|(_, name)| name.clone())
+                    // Then try hardcoded fallback names
+                    .or_else(|| IncompatFeatures::flag_name(bit).map(|s| s.to_string()))
+                    // Finally, use generic description
+                    .unwrap_or_else(|| format!("unknown feature bit {bit}"))
+            })
+            .collect();
+        write!(f, "Missing features: {}", names.join(", "))
+    }
+}
 
 // The format supports a "header extension area", that crosvm does not use.
 const QCOW_EMPTY_HEADER_EXTENSION_SIZE: u32 = 8;
@@ -283,7 +356,12 @@ pub struct QcowHeader {
 }
 
 impl QcowHeader {
-    fn read_header_extensions(f: &mut RawFile, header: &mut QcowHeader) -> Result<()> {
+    /// Read header extensions, optionally collecting feature names for error reporting.
+    fn read_header_extensions(
+        f: &mut RawFile,
+        header: &mut QcowHeader,
+        mut feature_table: Option<&mut Vec<(u8, String)>>,
+    ) -> Result<()> {
         // Extensions start directly after the header
         f.seek(SeekFrom::Start(header.header_size as u64))
             .map_err(Error::ReadingHeader)?;
@@ -305,6 +383,21 @@ impl QcowHeader {
                         .map_err(|err| Error::InvalidBackingFileName(err.utf8_error()))?;
                     if let Some(backing_file) = &mut header.backing_file {
                         backing_file.format = Some(format_str.parse()?);
+                    }
+                }
+                HEADER_EXT_FEATURE_NAME_TABLE if feature_table.is_some() => {
+                    const FEATURE_NAME_ENTRY_SIZE: usize = 1 + 1 + 46; // type + bit + name
+                    let mut data = vec![0u8; ext_length as usize];
+                    f.read_exact(&mut data).map_err(Error::ReadingHeader)?;
+                    let table = feature_table.as_mut().unwrap();
+                    for entry in data.chunks_exact(FEATURE_NAME_ENTRY_SIZE) {
+                        if entry[0] == FEAT_TYPE_INCOMPATIBLE {
+                            let bit_number = entry[1];
+                            let name_bytes = &entry[2..];
+                            let name_len = name_bytes.iter().position(|&b| b == 0).unwrap_or(46);
+                            let name = String::from_utf8_lossy(&name_bytes[..name_len]).to_string();
+                            table.push((bit_number, name));
+                        }
                     }
                 }
                 _ => {
@@ -409,8 +502,26 @@ impl QcowHeader {
             header.backing_file = Some(BackingFileConfig { path, format: None });
         }
 
-        if version == 3 && header.header_size > V3_BARE_HEADER_SIZE {
-            Self::read_header_extensions(f, &mut header)?;
+        if version == 3 {
+            // Check for unsupported incompatible features first
+            let features = IncompatFeatures::from_bits_retain(header.incompatible_features);
+            let unsupported = features - IncompatFeatures::SUPPORTED;
+            if !unsupported.is_empty() {
+                // Read extensions only to get feature names for error reporting
+                let mut feature_table = Vec::new();
+                if header.header_size > V3_BARE_HEADER_SIZE {
+                    let _ = Self::read_header_extensions(f, &mut header, Some(&mut feature_table));
+                }
+                return Err(Error::UnsupportedFeature(MissingFeatureError::new(
+                    unsupported,
+                    feature_table,
+                )));
+            }
+
+            // Features OK, now read extensions normally
+            if header.header_size > V3_BARE_HEADER_SIZE {
+                Self::read_header_extensions(f, &mut header, None)?;
+            }
         }
 
         Ok(header)
@@ -2380,7 +2491,7 @@ mod unit_tests {
             format: None,
         });
 
-        QcowHeader::read_header_extensions(&mut disk_file, &mut header).unwrap();
+        QcowHeader::read_header_extensions(&mut disk_file, &mut header, None).unwrap();
         assert_eq!(header.backing_file.as_ref().and_then(|bf| bf.format), None);
     }
 
@@ -2394,7 +2505,7 @@ mod unit_tests {
             format: None,
         });
 
-        QcowHeader::read_header_extensions(&mut disk_file, &mut header).unwrap();
+        QcowHeader::read_header_extensions(&mut disk_file, &mut header, None).unwrap();
         assert_eq!(
             header.backing_file.as_ref().and_then(|bf| bf.format),
             Some(ImageType::Raw)
@@ -2411,7 +2522,7 @@ mod unit_tests {
             format: None,
         });
 
-        QcowHeader::read_header_extensions(&mut disk_file, &mut header).unwrap();
+        QcowHeader::read_header_extensions(&mut disk_file, &mut header, None).unwrap();
         assert_eq!(
             header.backing_file.as_ref().and_then(|bf| bf.format),
             Some(ImageType::Qcow2)
@@ -2428,7 +2539,7 @@ mod unit_tests {
             format: None,
         });
 
-        let result = QcowHeader::read_header_extensions(&mut disk_file, &mut header);
+        let result = QcowHeader::read_header_extensions(&mut disk_file, &mut header, None);
         assert!(matches!(
             result.unwrap_err(),
             Error::UnsupportedBackingFileFormat(_)
@@ -2442,7 +2553,7 @@ mod unit_tests {
             &[0xFF, 0xFE, 0xFD], // invalid UTF-8
         );
 
-        let result = QcowHeader::read_header_extensions(&mut disk_file, &mut header);
+        let result = QcowHeader::read_header_extensions(&mut disk_file, &mut header, None);
         // Should fail with InvalidBackingFileName error
         assert!(matches!(
             result.unwrap_err(),
