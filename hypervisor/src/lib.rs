@@ -171,6 +171,7 @@ pub struct HypervisorVmConfig {
     #[cfg(feature = "sev_snp")]
     pub mem_size: u64,
     pub nested: bool,
+    pub smt_enabled: bool,
 }
 
 #[derive(Copy, Clone)]

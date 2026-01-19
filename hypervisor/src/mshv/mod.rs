@@ -307,6 +307,10 @@ impl hypervisor::Hypervisor for MshvHypervisor {
                         .__bindgen_anon_1
                         .set_nested_virt_support(1u64);
                 }
+
+                if _config.smt_enabled {
+                    create_args.pt_flags |= 1 << MSHV_PT_BIT_SMT_ENABLED_GUEST;
+                }
             }
             // Modified feature bit fields are written back to create_args
             for i in 0..create_args.pt_num_cpu_fbanks {

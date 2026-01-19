@@ -221,6 +221,11 @@ impl From<&VmConfig> for hypervisor::HypervisorVmConfig {
             #[cfg(feature = "sev_snp")]
             mem_size: _value.memory.total_size(),
             nested: _value.cpus.nested,
+            smt_enabled: _value
+                .cpus
+                .topology
+                .as_ref()
+                .is_some_and(|t| t.threads_per_core > 1),
         }
     }
 }
