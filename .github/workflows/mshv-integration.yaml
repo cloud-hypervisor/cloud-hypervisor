@@ -23,7 +23,6 @@ jobs:
     needs: infra-setup
     if: ${{ always() && needs.infra-setup.result == 'success' }}
     runs-on: mshv
-    continue-on-error: true
     steps:
       - name: Run integration tests
         timeout-minutes: 60
