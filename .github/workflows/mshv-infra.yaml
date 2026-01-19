@@ -50,7 +50,6 @@ jobs:
   infra-setup:
     name: ${{ inputs.ARCH }} VM Provision
     runs-on: mshv
-    continue-on-error: true
     outputs:
       RG_NAME: ${{ steps.rg-setup.outputs.RG_NAME }}
       VM_NAME: ${{ steps.vm-setup.outputs.VM_NAME }}
