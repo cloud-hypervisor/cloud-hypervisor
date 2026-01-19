@@ -3426,4 +3426,98 @@ mod unit_tests {
                 .expect("Failed to rebuild recounts.");
         });
     }
+
+    // Helper to create a v3 header with specific incompatible feature bits set
+    fn header_v3_with_incompat_features(features: u64) -> Vec<u8> {
+        let mut header = valid_header_v3();
+        // incompatible_features is at offset 72, big-endian u64
+        header[72..80].copy_from_slice(&features.to_be_bytes());
+        header
+    }
+
+    #[test]
+    fn reject_unsupported_incompat_dirty_bit() {
+        // Bit 0: dirty - image not closed cleanly
+        let header = header_v3_with_incompat_features(1 << 0);
+        with_basic_file(&header, |disk_file: RawFile| {
+            let result = QcowFile::from(disk_file);
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(
+                matches!(err, Error::UnsupportedFeature(ref v) if v.to_string().contains("dirty")),
+                "Expected UnsupportedFeature error mentioning dirty, got: {err:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn reject_unsupported_incompat_corrupt_bit() {
+        // Bit 1: corrupt - image metadata is corrupted
+        let header = header_v3_with_incompat_features(1 << 1);
+        with_basic_file(&header, |disk_file: RawFile| {
+            let result = QcowFile::from(disk_file);
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(
+                matches!(err, Error::UnsupportedFeature(ref v) if v.to_string().contains("corrupt")),
+                "Expected UnsupportedFeature error mentioning corrupt, got: {err:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn reject_unsupported_incompat_external_data_bit() {
+        // Bit 2: external data file
+        let header = header_v3_with_incompat_features(1 << 2);
+        with_basic_file(&header, |disk_file: RawFile| {
+            let result = QcowFile::from(disk_file);
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(
+                matches!(err, Error::UnsupportedFeature(ref v) if v.to_string().contains("external")),
+                "Expected UnsupportedFeature error mentioning external, got: {err:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn reject_unsupported_incompat_extended_l2_bit() {
+        // Bit 4: extended L2 entries
+        let header = header_v3_with_incompat_features(1 << 4);
+        with_basic_file(&header, |disk_file: RawFile| {
+            let result = QcowFile::from(disk_file);
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(
+                matches!(err, Error::UnsupportedFeature(ref v) if v.to_string().contains("extended")),
+                "Expected UnsupportedFeature error mentioning extended, got: {err:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn reject_multiple_unsupported_incompat_bits() {
+        // Multiple unsupported bits: dirty (0) + corrupt (1)
+        let header = header_v3_with_incompat_features((1 << 0) | (1 << 1));
+        with_basic_file(&header, |disk_file: RawFile| {
+            let result = QcowFile::from(disk_file);
+            assert!(result.is_err());
+            assert!(matches!(result.unwrap_err(), Error::UnsupportedFeature(_)));
+        });
+    }
+
+    #[test]
+    fn reject_unknown_incompat_bit() {
+        // Unknown bit 5 (not defined in spec)
+        let header = header_v3_with_incompat_features(1 << 5);
+        with_basic_file(&header, |disk_file: RawFile| {
+            let result = QcowFile::from(disk_file);
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(
+                matches!(err, Error::UnsupportedFeature(ref v) if v.to_string().contains("unknown")),
+                "Expected UnsupportedFeature error mentioning unknown, got: {err:?}"
+            );
+        });
+    }
 }
