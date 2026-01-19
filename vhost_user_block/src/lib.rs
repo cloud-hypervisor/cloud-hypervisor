@@ -21,7 +21,7 @@ use std::{convert, io, process, result};
 use block::qcow::{self, ImageType, QcowFile};
 use block::{Request, VirtioBlockConfig, build_serial};
 use libc::EFD_NONBLOCK;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use option_parser::{OptionParser, OptionParserError, Toggle};
 use thiserror::Error;
 use vhost::vhost_user::Listener;
@@ -395,8 +395,18 @@ impl VhostUserBackendMut for VhostUserBlkBackend {
         }
     }
 
-    fn get_config(&self, _offset: u32, _size: u32) -> Vec<u8> {
-        self.config.as_slice().to_vec()
+    fn get_config(&self, offset: u32, size: u32) -> Vec<u8> {
+        let subset = self
+            .config
+            .as_slice()
+            .get(offset as usize..(offset + size) as usize);
+
+        if let Some(subset) = subset {
+            subset.to_vec()
+        } else {
+            warn!("Invalid config offset {offset} or size {size}");
+            vec![]
+        }
     }
 
     fn set_config(&mut self, offset: u32, data: &[u8]) -> result::Result<(), io::Error> {
