@@ -99,7 +99,7 @@ dependencies = [
  "linux-loader",
  "log",
  "serde",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "uuid",
  "vm-fdt",
  "vm-memory",
@@ -147,7 +147,7 @@ dependencies = [
  "remain",
  "serde",
  "smallvec",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "uuid",
  "virtio-bindings",
  "virtio-queue",
@@ -171,9 +171,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "cc"
-version = "1.2.52"
+version = "1.2.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd4932aefd12402b36c60956a4fe0035421f544799057659ff86f923657aada3"
+checksum = "755d2fce177175ffca841e9a06afdb2c4ab0f593d53b4dee48147dfaade85932"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -331,7 +331,7 @@ dependencies = [
  "num_enum",
  "pci",
  "serde",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tpm",
  "vm-allocator",
  "vm-device",
@@ -420,9 +420,9 @@ checksum = "784a4df722dc6267a04af36895398f59d21d07dce47232adf31ec0ff2fa45e67"
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f449e6c6c08c865631d4890cfacf252b3d396c9bcc83adb6623cdb02a8336c41"
+checksum = "8591b0bcc8a98a64310a2fae1bb3e9b8564dd10e381e6e28010fde8e8e8568db"
 
 [[package]]
 name = "flate2"
@@ -539,7 +539,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vfio-ioctls",
  "vm-memory",
  "vmm-sys-util",
@@ -643,7 +643,7 @@ checksum = "49fefd6652c57d68aaa32544a4c0e642929725bdc1fd929367cdeb673ab81088"
 dependencies = [
  "enumflags2",
  "libc",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -725,9 +725,9 @@ dependencies = [
 
 [[package]]
 name = "mshv-bindings"
-version = "0.6.5"
+version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66f415da68542aca92b33f55ac3e93031dc30a2941952b99679258f7e0527353"
+checksum = "7752a74e9b4f95f20c5eec69ee7cf25aee5da6d87d18574254b44f22940151fb"
 dependencies = [
  "libc",
  "num_enum",
@@ -755,7 +755,7 @@ dependencies = [
  "net_gen",
  "rate_limiter",
  "serde",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -830,7 +830,7 @@ dependencies = [
 name = "option_parser"
 version = "0.1.0"
 dependencies = [
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -849,7 +849,7 @@ dependencies = [
  "libc",
  "log",
  "serde",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vfio-bindings",
  "vfio-ioctls",
  "vfio_user",
@@ -930,9 +930,9 @@ dependencies = [
 
 [[package]]
 name = "rand_core"
-version = "0.9.4"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f1b3bc831f92381018fd9c6350b917c7b21f1eed35a65a51900e0e55a3d7afa"
+checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom 0.3.4",
 ]
@@ -944,7 +944,7 @@ dependencies = [
  "epoll",
  "libc",
  "log",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vmm-sys-util",
 ]
 
@@ -1124,11 +1124,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.17"
+version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f63587ca0f12b72a0600bcba1d40081f830876000bb46dd2337a3051618f4fc8"
+checksum = "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4"
 dependencies = [
- "thiserror-impl 2.0.17",
+ "thiserror-impl 2.0.18",
 ]
 
 [[package]]
@@ -1144,9 +1144,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.17"
+version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ff15c8ecd7de3849db632e14d18d2571fa09dfc5ed93479bc4485c7a517c913"
+checksum = "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1191,7 +1191,7 @@ dependencies = [
  "libc",
  "log",
  "net_gen",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vmm-sys-util",
 ]
 
@@ -1249,7 +1249,7 @@ dependencies = [
  "kvm-ioctls",
  "libc",
  "log",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vfio-bindings",
  "vm-memory",
  "vmm-sys-util",
@@ -1267,7 +1267,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vfio-bindings",
  "vm-memory",
  "vmm-sys-util",
@@ -1310,7 +1310,7 @@ dependencies = [
  "serde",
  "serde_with",
  "serial_buffer",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vhost",
  "virtio-bindings",
  "virtio-queue",
@@ -1349,7 +1349,7 @@ version = "0.1.0"
 dependencies = [
  "hypervisor",
  "serde",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vfio-ioctls",
  "vm-memory",
  "vmm-sys-util",
@@ -1381,7 +1381,7 @@ dependencies = [
  "itertools",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vm-memory",
 ]
 
@@ -1425,7 +1425,7 @@ dependencies = [
  "serde_json",
  "serial_buffer",
  "signal-hook",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tracer",
  "uuid",
  "vfio-ioctls",
@@ -1462,9 +1462,9 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "wasip2"
-version = "1.0.1+wasi-0.2.4"
+version = "1.0.2+wasi-0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0562428422c63773dad2c345a1882263bbf4d65cf3f42e90921f787ef5ad58e7"
+checksum = "9517f9239f02c069db75e65f174b3da828fe5f5b945c4dd26bd25d89c03ebcf5"
 dependencies = [
  "wit-bindgen",
 ]
@@ -1575,9 +1575,9 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen"
-version = "0.46.0"
+version = "0.51.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+checksum = "d7249219f66ced02969388cf2bb044a09756a083d0fab1e566056b04d9fbcaa5"
 
 [[package]]
 name = "zerocopy"
@@ -1601,9 +1601,9 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.13"
+version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac93432f5b761b22864c774aac244fa5c0fd877678a4c37ebf6cf42208f9c9ec"
+checksum = "94f63c051f4fe3c1509da62131a678643c5b6fbdc9273b2b79d4378ebda003d2"
 
 [[package]]
 name = "zstd"

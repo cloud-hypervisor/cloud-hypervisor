@@ -94,7 +94,7 @@ checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 name = "api_client"
 version = "0.1.0"
 dependencies = [
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vmm-sys-util",
 ]
 
@@ -119,7 +119,7 @@ dependencies = [
  "linux-loader",
  "log",
  "serde",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "uuid",
  "vm-fdt",
  "vm-memory",
@@ -331,7 +331,7 @@ dependencies = [
  "remain",
  "serde",
  "smallvec",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "uuid",
  "virtio-bindings",
  "virtio-queue",
@@ -368,9 +368,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "cc"
-version = "1.2.52"
+version = "1.2.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd4932aefd12402b36c60956a4fe0035421f544799057659ff86f923657aada3"
+checksum = "755d2fce177175ffca841e9a06afdb2c4ab0f593d53b4dee48147dfaade85932"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -434,7 +434,7 @@ dependencies = [
  "serde_json",
  "signal-hook",
  "test_infra",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tpm",
  "tracer",
  "vm-memory",
@@ -552,7 +552,7 @@ dependencies = [
  "num_enum",
  "pci",
  "serde",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tpm",
  "vm-allocator",
  "vm-device",
@@ -730,9 +730,9 @@ checksum = "784a4df722dc6267a04af36895398f59d21d07dce47232adf31ec0ff2fa45e67"
 
 [[package]]
 name = "find-msvc-tools"
-version = "0.1.7"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f449e6c6c08c865631d4890cfacf252b3d396c9bcc83adb6623cdb02a8336c41"
+checksum = "8591b0bcc8a98a64310a2fae1bb3e9b8564dd10e381e6e28010fde8e8e8568db"
 
 [[package]]
 name = "flate2"
@@ -967,7 +967,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vfio-ioctls",
  "vm-memory",
  "vmm-sys-util",
@@ -992,7 +992,7 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 [[package]]
 name = "igvm"
 version = "0.4.0"
-source = "git+https://github.com/microsoft/igvm?branch=main#81dd0e49cd3caf9e894e376969e33f2584e6f8ba"
+source = "git+https://github.com/microsoft/igvm?branch=main#9848d1f2a8a44931395a30debeae287b6d01505d"
 dependencies = [
  "bitfield-struct 0.10.1",
  "crc32fast",
@@ -1001,7 +1001,7 @@ dependencies = [
  "open-enum",
  "range_map_vec",
  "static_assertions",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tracing",
  "zerocopy",
 ]
@@ -1009,7 +1009,7 @@ dependencies = [
 [[package]]
 name = "igvm_defs"
 version = "0.4.0"
-source = "git+https://github.com/microsoft/igvm?branch=main#81dd0e49cd3caf9e894e376969e33f2584e6f8ba"
+source = "git+https://github.com/microsoft/igvm?branch=main#9848d1f2a8a44931395a30debeae287b6d01505d"
 dependencies = [
  "bitfield-struct 0.10.1",
  "open-enum",
@@ -1143,7 +1143,7 @@ checksum = "49fefd6652c57d68aaa32544a4c0e642929725bdc1fd929367cdeb673ab81088"
 dependencies = [
  "enumflags2",
  "libc",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1292,7 +1292,7 @@ checksum = "77e058608d09f2f8b106b06e6c58a09aa44915dd6a36cd4142d3a7d32e59c1fb"
 dependencies = [
  "libc",
  "mshv-bindings",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vmm-sys-util",
 ]
 
@@ -1317,7 +1317,7 @@ dependencies = [
  "rate_limiter",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -1435,7 +1435,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 name = "option_parser"
 version = "0.1.0"
 dependencies = [
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1493,7 +1493,7 @@ dependencies = [
  "libc",
  "log",
  "serde",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vfio-bindings",
  "vfio-ioctls",
  "vfio_user",
@@ -1513,7 +1513,7 @@ dependencies = [
  "serde",
  "serde_json",
  "test_infra",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1729,9 +1729,9 @@ dependencies = [
 
 [[package]]
 name = "rand_core"
-version = "0.9.4"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f1b3bc831f92381018fd9c6350b917c7b21f1eed35a65a51900e0e55a3d7afa"
+checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom 0.3.4",
 ]
@@ -1749,7 +1749,7 @@ dependencies = [
  "epoll",
  "libc",
  "log",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vmm-sys-util",
 ]
 
@@ -1770,7 +1770,7 @@ checksum = "a4e608c6638b9c18977b00b475ac1f28d14e84b27d8d42f70e0bf1e3dec127ac"
 dependencies = [
  "getrandom 0.2.15",
  "libredox",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1815,9 +1815,9 @@ dependencies = [
 
 [[package]]
 name = "rustc-demangle"
-version = "0.1.26"
+version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56f7d92ca342cea22a06f2121d944b4fd82af56988c270852495420f961d4ace"
+checksum = "b50b8869d9fc858ce7266cce0194bd74df58b9d0e3f6df3a9fc8eb470d95c09d"
 
 [[package]]
 name = "rustc-hash"
@@ -2059,7 +2059,7 @@ dependencies = [
  "libc",
  "serde_json",
  "ssh2",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vmm-sys-util",
  "wait-timeout",
 ]
@@ -2075,11 +2075,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.17"
+version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f63587ca0f12b72a0600bcba1d40081f830876000bb46dd2337a3051618f4fc8"
+checksum = "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4"
 dependencies = [
- "thiserror-impl 2.0.17",
+ "thiserror-impl 2.0.18",
 ]
 
 [[package]]
@@ -2095,9 +2095,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.17"
+version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ff15c8ecd7de3849db632e14d18d2571fa09dfc5ed93479bc4485c7a517c913"
+checksum = "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2148,7 +2148,7 @@ dependencies = [
  "libc",
  "log",
  "net_gen",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vmm-sys-util",
 ]
 
@@ -2257,7 +2257,7 @@ dependencies = [
  "log",
  "mshv-bindings",
  "mshv-ioctls",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vfio-bindings",
  "vm-memory",
  "vmm-sys-util",
@@ -2275,7 +2275,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vfio-bindings",
  "vm-memory",
  "vmm-sys-util",
@@ -2319,7 +2319,7 @@ dependencies = [
  "libc",
  "log",
  "option_parser",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -2339,7 +2339,7 @@ dependencies = [
  "log",
  "net_util",
  "option_parser",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -2372,7 +2372,7 @@ dependencies = [
  "serde",
  "serde_with",
  "serial_buffer",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vhost",
  "virtio-bindings",
  "virtio-queue",
@@ -2411,7 +2411,7 @@ version = "0.1.0"
 dependencies = [
  "hypervisor",
  "serde",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vfio-ioctls",
  "vm-memory",
  "vmm-sys-util",
@@ -2443,7 +2443,7 @@ dependencies = [
  "itertools",
  "serde",
  "serde_json",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "vm-memory",
 ]
 
@@ -2495,7 +2495,7 @@ dependencies = [
  "serde_json",
  "serial_buffer",
  "signal-hook",
- "thiserror 2.0.17",
+ "thiserror 2.0.18",
  "tracer",
  "uuid",
  "vfio-ioctls",
@@ -2542,9 +2542,9 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "wasip2"
-version = "1.0.1+wasi-0.2.4"
+version = "1.0.2+wasi-0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0562428422c63773dad2c345a1882263bbf4d65cf3f42e90921f787ef5ad58e7"
+checksum = "9517f9239f02c069db75e65f174b3da828fe5f5b945c4dd26bd25d89c03ebcf5"
 dependencies = [
  "wit-bindgen",
 ]
@@ -2729,15 +2729,15 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen"
-version = "0.46.0"
+version = "0.51.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+checksum = "d7249219f66ced02969388cf2bb044a09756a083d0fab1e566056b04d9fbcaa5"
 
 [[package]]
 name = "zbus"
-version = "5.13.1"
+version = "5.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17f79257df967b6779afa536788657777a0001f5b42524fcaf5038d4344df40b"
+checksum = "1bfeff997a0aaa3eb20c4652baf788d2dfa6d2839a0ead0b3ff69ce2f9c4bdd1"
 dependencies = [
  "async-broadcast",
  "async-executor",
@@ -2770,9 +2770,9 @@ dependencies = [
 
 [[package]]
 name = "zbus_macros"
-version = "5.13.1"
+version = "5.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aad23e2d2f91cae771c7af7a630a49e755f1eb74f8a46e9f6d5f7a146edf5a37"
+checksum = "0bbd5a90dbe8feee5b13def448427ae314ccd26a49cac47905cafefb9ff846f1"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2816,9 +2816,9 @@ dependencies = [
 
 [[package]]
 name = "zmij"
-version = "1.0.13"
+version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac93432f5b761b22864c774aac244fa5c0fd877678a4c37ebf6cf42208f9c9ec"
+checksum = "94f63c051f4fe3c1509da62131a678643c5b6fbdc9273b2b79d4378ebda003d2"
 
 [[package]]
 name = "zstd"
@@ -2850,9 +2850,9 @@ dependencies = [
 
 [[package]]
 name = "zvariant"
-version = "5.9.1"
+version = "5.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "326aaed414f04fe839777b4c443d4e94c74e7b3621093bd9c5e649ac8aa96543"
+checksum = "68b64ef4f40c7951337ddc7023dd03528a57a3ce3408ee9da5e948bd29b232c4"
 dependencies = [
  "endi",
  "enumflags2",
@@ -2864,9 +2864,9 @@ dependencies = [
 
 [[package]]
 name = "zvariant_derive"
-version = "5.9.1"
+version = "5.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba44e1f8f4da9e6e2d25d2a60b116ef8b9d0be174a7685e55bb12a99866279a7"
+checksum = "484d5d975eb7afb52cc6b929c13d3719a20ad650fea4120e6310de3fc55e415c"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
