@@ -38,10 +38,14 @@ build_edk2() {
         source edk2/edksetup.sh
         make -C edk2/BaseTools -j "$(nproc)"
         build -a AARCH64 -t GCC5 -p ArmVirtPkg/ArmVirtCloudHv.dsc -b RELEASE -n 0
-        cp Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd "$WORKLOADS_DIR"
-        touch "$EDK2_DIR"/.built
-        touch "$EDK2_PLAT_DIR"/.built
-        touch "$ACPICA_DIR"/.built
+        if cp Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd "$WORKLOADS_DIR"; then
+            touch "$EDK2_DIR"/.built
+            touch "$EDK2_PLAT_DIR"/.built
+            touch "$ACPICA_DIR"/.built
+        else
+            echo "Failed to produce aarch64 UEFI firmware. Built markers not created."
+            exit 1
+        fi
         popd || exit
     fi
 }
