@@ -193,6 +193,7 @@ const V3_BARE_HEADER_SIZE: u32 = 104;
 const L1_TABLE_OFFSET_MASK: u64 = 0x00ff_ffff_ffff_fe00;
 const L2_TABLE_OFFSET_MASK: u64 = 0x00ff_ffff_ffff_fe00;
 // Flags
+const ZERO_FLAG: u64 = 1 << 0;
 const COMPRESSED_FLAG: u64 = 1 << 62;
 const COMPRESSED_SECTOR_SIZE: u64 = 512;
 const CLUSTER_USED_FLAG: u64 = 1 << 63;
@@ -215,6 +216,11 @@ const MAX_BACKING_FILE_SIZE: u32 = 1023;
 
 fn l2_entry_is_empty(l2_entry: u64) -> bool {
     l2_entry == 0
+}
+
+// Check bit 0 - only valid for standard clusters.
+fn l2_entry_is_zero(l2_entry: u64) -> bool {
+    l2_entry & ZERO_FLAG != 0
 }
 
 fn l2_entry_is_compressed(l2_entry: u64) -> bool {
@@ -1333,6 +1339,9 @@ impl QcowFile {
                 return Err(err_inval);
             }
             buf[..count].copy_from_slice(&decompressed_cluster[start..end.unwrap()]);
+        } else if l2_entry_is_zero(l2_entry) {
+            // Cluster with zero flag reads as zeros without accessing disk.
+            return Ok(None);
         } else {
             let start = l2_entry_std_cluster_addr(l2_entry) + self.raw_file.cluster_offset(address);
             let raw_file = self.raw_file.file_mut();
