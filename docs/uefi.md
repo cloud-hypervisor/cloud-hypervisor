@@ -35,13 +35,31 @@ After the successful build, the resulting firmware binaries are available under 
 # On an AArch64 machine:
 $ sudo apt-get update
 $ sudo apt-get install uuid-dev nasm iasl build-essential python3-distutils git
-$ git clone --depth 1 https://github.com/tianocore/edk2.git -b master
-$ cd edk2
-$ git submodule update --init
-$ cd ..
-$ git clone --depth 1 https://github.com/tianocore/edk2-platforms.git -b master
-$ git clone --depth 1 https://github.com/acpica/acpica.git -b master
-
+# Master branches for these repos can be unstable, and newer GCC versions
+# enforce strict warning-as-error policies that break builds
+# These specific commit # are verified to compile cleanly with GCC 13.3.0
+# Shallow clone edk2 repo
+$ mkdir -p edk2 && cd edk2 && \
+git init -q && \
+git remote add origin https://github.com/tianocore/edk2.git && \
+git fetch -q --depth 1 origin 22130dcd98b4d4b76ac8d922adb4a2dbc86fa52c && \
+git checkout -q FETCH_HEAD && \
+git submodule update --init --recursive --depth 1 && \
+cd ..
+# Shallow clone edk2-platforms repo
+$ mkdir -p edk2-platforms && cd edk2-platforms && \
+git init -q && \
+git remote add origin https://github.com/tianocore/edk2-platforms.git && \
+git fetch -q --depth 1 origin 8227e9e9f6a8aefbd772b40138f835121ccb2307 && \
+git checkout -q FETCH_HEAD && \
+cd ..
+# Shallow clone acpica repo
+$ mkdir -p acpica && cd acpica && \
+git init -q && \
+git remote add origin https://github.com/acpica/acpica.git && \
+git fetch -q --depth 1 origin e80cbd7b52de20aa8c75bfba9845e9cb61f2e681 && \
+git checkout -q FETCH_HEAD && \
+cd ..
 # Build tools
 $ export PACKAGES_PATH="$PWD/edk2:$PWD/edk2-platforms"
 $ export IASL_PREFIX="$PWD/acpica/generate/unix/bin/"
@@ -53,10 +71,19 @@ $ make -C edk2/BaseTools
 
 # Build EDK2
 $ build -a AARCH64 -t GCC5 -p ArmVirtPkg/ArmVirtCloudHv.dsc -b RELEASE
+
+# Alternate method
+# Launch developer container from AArch64 machine
+$ ./scripts/dev_cli.sh shell
+# Inside the container
+$ source scripts/test-util.sh
+$ source scripts/common-aarch64.sh
+$ build_edk2
 ```
 
 If the build goes well, the EDK2 binary is available at
-`edk2/Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd`.
+`edk2/Build/ArmVirtCloudHv-AARCH64/RELEASE_GCC5/FV/CLOUDHV_EFI.fd` or `workloads/CLOUDHV_EFI.fd`
+when using developer container to produce firmware.
 
 ## Using OVMF Binaries
 
