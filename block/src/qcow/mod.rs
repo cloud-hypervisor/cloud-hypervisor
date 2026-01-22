@@ -2598,6 +2598,26 @@ mod unit_tests {
     }
 
     #[test]
+    fn test_l2_entry_zero_flag() {
+        let empty_entry: u64 = 0;
+        let standard_entry: u64 = 0x1000;
+        let zero_flag_entry: u64 = 0x1000 | ZERO_FLAG;
+        let compressed_entry: u64 = COMPRESSED_FLAG;
+
+        assert!(l2_entry_is_empty(empty_entry));
+        assert!(!l2_entry_is_empty(standard_entry));
+
+        assert!(!l2_entry_is_compressed(standard_entry));
+        assert!(l2_entry_is_compressed(compressed_entry));
+
+        assert!(!l2_entry_is_zero(standard_entry));
+        assert!(l2_entry_is_zero(zero_flag_entry));
+
+        // Note: l2_entry_is_zero() only checks bit 0, so compressed entries
+        // must be checked first as the code does in file_read.
+    }
+
+    #[test]
     fn test_header_1_tb_file() {
         let mut header = test_huge_header();
         // reset to 1 TB size.
