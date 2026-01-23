@@ -1027,6 +1027,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .arg(
                 Arg::new("receive_migration_config")
                     .index(1)
+                    // Live migration with net_fds not supported in ch-remote.
                     .help("<receiver_url>"),
             ),
         Command::new("remove-device")
