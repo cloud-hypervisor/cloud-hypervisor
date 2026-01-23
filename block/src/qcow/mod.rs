@@ -2744,6 +2744,220 @@ mod unit_tests {
         });
     }
 
+    /// Test all valid refcount orders (0-6) can be opened.
+    #[test]
+    fn refcount_all_orders() {
+        for order in 0..=6u8 {
+            let mut header = valid_header_v3();
+            header[99] = order;
+            with_basic_file(&header, |disk_file: RawFile| {
+                QcowFile::from(disk_file).expect("refcount order should work");
+            });
+        }
+    }
+
+    /// Test write/read roundtrip for all refcount orders.
+    #[test]
+    fn refcount_all_orders_write_read() {
+        for order in 0..=6u8 {
+            let mut header = valid_header_v3();
+            header[99] = order;
+            with_basic_file(&header, |disk_file: RawFile| {
+                let mut q = QcowFile::from(disk_file).unwrap();
+                let test_data = b"test data for refcount";
+
+                // Write and read back
+                q.write_all(test_data).unwrap();
+                q.rewind().unwrap();
+                let mut buf = vec![0u8; test_data.len()];
+                q.read_exact(&mut buf).unwrap();
+                assert_eq!(&buf, test_data);
+
+                // Write to another cluster
+                q.seek(SeekFrom::Start(0x10000)).unwrap();
+                q.write_all(test_data).unwrap();
+                q.seek(SeekFrom::Start(0x10000)).unwrap();
+                q.read_exact(&mut buf).unwrap();
+                assert_eq!(&buf, test_data);
+            });
+        }
+    }
+
+    /// Test overwrite and multi-cluster allocation for all refcount orders.
+    #[test]
+    fn refcount_all_orders_overwrite() {
+        for order in 0..=6u8 {
+            let mut header = valid_header_v3();
+            header[99] = order;
+            with_basic_file(&header, |disk_file: RawFile| {
+                let mut q = QcowFile::from(disk_file).unwrap();
+
+                // Write then overwrite
+                q.write_all(b"initial data here!!!").unwrap();
+                q.rewind().unwrap();
+                let new_data = b"overwritten data!!!!";
+                q.write_all(new_data).unwrap();
+                q.rewind().unwrap();
+                let mut buf = vec![0u8; new_data.len()];
+                q.read_exact(&mut buf).unwrap();
+                assert_eq!(&buf, new_data);
+
+                // Allocate multiple clusters
+                let cluster_size = 0x10000u64;
+                for i in 1..4u64 {
+                    q.seek(SeekFrom::Start(i * cluster_size)).unwrap();
+                    q.write_all(b"cluster data").unwrap();
+                }
+                for i in 1..4u64 {
+                    let mut cluster_buf = vec![0u8; 12];
+                    q.seek(SeekFrom::Start(i * cluster_size)).unwrap();
+                    q.read_exact(&mut cluster_buf).unwrap();
+                    assert_eq!(&cluster_buf, b"cluster data");
+                }
+            });
+        }
+    }
+
+    /// Test L2 cache eviction for all refcount orders.
+    #[test]
+    fn refcount_all_orders_l2_eviction() {
+        for order in 0..=6u8 {
+            let mut header = valid_header_v3();
+            header[99] = order;
+            with_basic_file(&header, |disk_file: RawFile| {
+                let mut q = QcowFile::from(disk_file).unwrap();
+
+                // L2 cache has 100 entries. Write to >100 regions to force eviction.
+                let cluster_size = 0x10000u64;
+                let l2_coverage = cluster_size * (cluster_size / 8);
+
+                for i in 0..110u64 {
+                    q.seek(SeekFrom::Start(i * l2_coverage)).unwrap();
+                    q.write_all(b"eviction test").unwrap();
+                }
+
+                // Verify evicted regions can be re-read
+                for i in [0u64, 1, 50, 100, 109] {
+                    let mut buf = vec![0u8; 13];
+                    q.seek(SeekFrom::Start(i * l2_coverage)).unwrap();
+                    q.read_exact(&mut buf).unwrap();
+                    assert_eq!(&buf, b"eviction test");
+                }
+            });
+        }
+    }
+
+    /// Test sub-byte refcount read/write roundtrip with max values.
+    #[test]
+    fn refcount_subbyte_max_values() {
+        for (bits, max_val) in [(1u64, 1u64), (2, 3), (4, 15)] {
+            let file = vmm_sys_util::tempfile::TempFile::new().unwrap().into_file();
+            let cluster_size = 0x10000u64;
+            file.set_len(cluster_size * 2).unwrap();
+            let raw = RawFile::new(file, false);
+            let mut qcow_raw = QcowRawFile::from(raw, cluster_size, bits).unwrap();
+
+            let entries = (cluster_size * 8 / bits) as usize;
+            let mut table: Vec<u64> = (0..entries as u64).map(|i| i % (max_val + 1)).collect();
+            table[0] = max_val;
+            table[entries - 1] = max_val;
+
+            qcow_raw.write_refcount_block(cluster_size, &table).unwrap();
+            let read_table = qcow_raw.read_refcount_block(cluster_size).unwrap();
+
+            assert_eq!(read_table.len(), entries);
+            for (i, (&written, &read)) in table.iter().zip(read_table.iter()).enumerate() {
+                assert_eq!(read, written & max_val, "{bits}-bit entry {i} mismatch");
+            }
+        }
+    }
+
+    /// Test byte-aligned refcounts with max values.
+    #[test]
+    fn refcount_byte_aligned_large_values() {
+        for (bits, test_val) in [
+            (8u64, 0xFFu64),
+            (16, 0xFFFFu64),
+            (32, 0xFFFF_FFFFu64),
+            (64, u64::MAX),
+        ] {
+            let file = vmm_sys_util::tempfile::TempFile::new().unwrap().into_file();
+            let cluster_size = 0x10000u64;
+            file.set_len(cluster_size * 2).unwrap();
+            let raw = RawFile::new(file, false);
+            let mut qcow_raw = QcowRawFile::from(raw, cluster_size, bits).unwrap();
+
+            let entries = (cluster_size * 8 / bits) as usize;
+            let mut table: Vec<u64> = vec![0; entries];
+            table[0] = test_val;
+            table[1] = 1;
+            table[entries - 1] = test_val;
+
+            qcow_raw.write_refcount_block(cluster_size, &table).unwrap();
+            let read_table = qcow_raw.read_refcount_block(cluster_size).unwrap();
+
+            assert_eq!(read_table[0], test_val);
+            assert_eq!(read_table[1], 1);
+            assert_eq!(read_table[entries - 1], test_val);
+        }
+    }
+
+    /// Test RefcountOverflow error when exceeding max refcount value.
+    #[test]
+    fn refcount_overflow_returns_error() {
+        use super::refcount::Error as RefcountError;
+
+        for (refcount_bits, max_val) in [(1u64, 1u64), (2, 3), (4, 15)] {
+            let file = vmm_sys_util::tempfile::TempFile::new().unwrap().into_file();
+            let cluster_size = 0x10000u64;
+            let refcount_block_entries = cluster_size * 8 / refcount_bits;
+            file.set_len(cluster_size * 3).unwrap();
+
+            let raw = RawFile::new(file, false);
+            let mut qcow_raw = QcowRawFile::from(raw, cluster_size, refcount_bits).unwrap();
+
+            // Set up refcount table pointing to refcount block
+            let refcount_table_offset = cluster_size;
+            qcow_raw
+                .file_mut()
+                .seek(SeekFrom::Start(refcount_table_offset))
+                .unwrap();
+            qcow_raw
+                .file_mut()
+                .write_all(&(cluster_size * 2).to_be_bytes())
+                .unwrap();
+
+            let zeros = vec![0u64; refcount_block_entries as usize];
+            qcow_raw
+                .write_refcount_block(cluster_size * 2, &zeros)
+                .unwrap();
+
+            let mut refcount = RefCount::new(
+                &mut qcow_raw,
+                refcount_table_offset,
+                1,
+                refcount_block_entries,
+                cluster_size,
+                refcount_bits,
+            )
+            .unwrap();
+
+            // Overflow should fail
+            let result = refcount.set_cluster_refcount(&mut qcow_raw, 0, max_val + 1, None);
+            assert!(
+                matches!(result, Err(RefcountError::RefcountOverflow { .. })),
+                "{refcount_bits}-bit: expected overflow error"
+            );
+
+            // Max value should not overflow
+            let result = refcount.set_cluster_refcount(&mut qcow_raw, 0, max_val, None);
+            assert!(
+                !matches!(result, Err(RefcountError::RefcountOverflow { .. })),
+                "{refcount_bits}-bit: max value should not overflow"
+            );
+        }
+    }
+
     #[test]
     fn invalid_cluster_bits() {
         let mut header = valid_header_v3();
