@@ -186,7 +186,7 @@ const MAX_CLUSTER_BITS: u32 = 21;
 // This easily covers 1 TB files. When support for bigger files is needed the assumptions made to
 // keep these tables in RAM needs to be thrown out.
 const MAX_RAM_POINTER_TABLE_SIZE: u64 = 35_000_000;
-// Only support 2 byte refcounts, 2^refcount_order bits.
+// 16-bit refcounts.
 const DEFAULT_REFCOUNT_ORDER: u32 = 4;
 
 const V2_BARE_HEADER_SIZE: u32 = 72;
@@ -682,12 +682,10 @@ impl QcowHeader {
 
 fn max_refcount_clusters(refcount_order: u32, cluster_size: u32, num_clusters: u32) -> u64 {
     // Use u64 as the product of the u32 inputs can overflow.
-    let refcount_bytes = (0x01 << u64::from(refcount_order)) / 8;
-    let for_data = div_round_up_u64(
-        u64::from(num_clusters) * refcount_bytes,
-        u64::from(cluster_size),
-    );
-    let for_refcounts = div_round_up_u64(for_data * refcount_bytes, u64::from(cluster_size));
+    let refcount_bits = 0x01u64 << u64::from(refcount_order);
+    let cluster_bits = u64::from(cluster_size) * 8;
+    let for_data = div_round_up_u64(u64::from(num_clusters) * refcount_bits, cluster_bits);
+    let for_refcounts = div_round_up_u64(for_data * refcount_bits, cluster_bits);
     for_data + for_refcounts
 }
 
@@ -849,14 +847,13 @@ impl QcowFile {
         let backing_file =
             BackingFile::new(header.backing_file.as_ref(), direct_io, max_nesting_depth)?;
 
-        // Only support two byte refcounts.
+        // Validate refcount order to be 0..6
         let refcount_bits: u64 = 0x01u64
             .checked_shl(header.refcount_order)
             .ok_or(Error::UnsupportedRefcountOrder)?;
-        if refcount_bits != 16 {
+        if refcount_bits > 64 {
             return Err(Error::UnsupportedRefcountOrder);
         }
-        let refcount_bytes = refcount_bits.div_ceil(8);
 
         // Need at least one refcount cluster
         if header.refcount_table_clusters == 0 {
@@ -891,8 +888,8 @@ impl QcowFile {
             refcount_rebuild_required = true;
         }
 
-        let mut raw_file =
-            QcowRawFile::from(file, cluster_size).ok_or(Error::InvalidClusterSize)?;
+        let mut raw_file = QcowRawFile::from(file, cluster_size, refcount_bits)
+            .ok_or(Error::InvalidClusterSize)?;
         if refcount_rebuild_required {
             QcowFile::rebuild_refcounts(&mut raw_file, header.clone())?;
         }
@@ -928,7 +925,7 @@ impl QcowFile {
         if l1_clusters + refcount_clusters > MAX_RAM_POINTER_TABLE_SIZE {
             return Err(Error::TooManyRefcounts(refcount_clusters));
         }
-        let refcount_block_entries = cluster_size / refcount_bytes;
+        let refcount_block_entries = cluster_size * 8 / refcount_bits;
         let refcounts = RefCount::new(
             &mut raw_file,
             header.refcount_table_offset,
@@ -1067,7 +1064,7 @@ impl QcowFile {
     }
 
     /// Returns the `index`th refcount block from the file.
-    pub fn refcount_block(&mut self, index: usize) -> Result<Option<&[u16]>> {
+    pub fn refcount_block(&mut self, index: usize) -> Result<Option<&[u64]>> {
         self.refcounts
             .refcount_block(&mut self.raw_file, index)
             .map_err(Error::ReadingRefCountBlock)
@@ -1122,7 +1119,7 @@ impl QcowFile {
 
     /// Rebuild the reference count tables.
     fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> Result<()> {
-        fn add_ref(refcounts: &mut [u16], cluster_size: u64, cluster_address: u64) -> Result<()> {
+        fn add_ref(refcounts: &mut [u64], cluster_size: u64, cluster_address: u64) -> Result<()> {
             let idx = (cluster_address / cluster_size) as usize;
             if idx >= refcounts.len() {
                 return Err(Error::InvalidClusterIndex);
@@ -1132,13 +1129,13 @@ impl QcowFile {
         }
 
         // Add a reference to the first cluster (header plus extensions).
-        fn set_header_refcount(refcounts: &mut [u16], cluster_size: u64) -> Result<()> {
+        fn set_header_refcount(refcounts: &mut [u64], cluster_size: u64) -> Result<()> {
             add_ref(refcounts, cluster_size, 0)
         }
 
         // Add references to the L1 table clusters.
         fn set_l1_refcounts(
-            refcounts: &mut [u16],
+            refcounts: &mut [u64],
             header: &QcowHeader,
             cluster_size: u64,
         ) -> Result<()> {
@@ -1153,7 +1150,7 @@ impl QcowFile {
 
         // Traverse the L1 and L2 tables to find all reachable data clusters.
         fn set_data_refcounts(
-            refcounts: &mut [u16],
+            refcounts: &mut [u64],
             header: &QcowHeader,
             cluster_size: u64,
             raw_file: &mut QcowRawFile,
@@ -1192,7 +1189,7 @@ impl QcowFile {
 
         // Add references to the top-level refcount table clusters.
         fn set_refcount_table_refcounts(
-            refcounts: &mut [u16],
+            refcounts: &mut [u64],
             header: &QcowHeader,
             cluster_size: u64,
         ) -> Result<()> {
@@ -1211,7 +1208,7 @@ impl QcowFile {
         // This needs to be done last so that we have the correct refcounts for all other
         // clusters.
         fn alloc_refblocks(
-            refcounts: &mut [u16],
+            refcounts: &mut [u64],
             cluster_size: u64,
             refblock_clusters: u64,
         ) -> Result<Vec<u64>> {
@@ -1239,7 +1236,7 @@ impl QcowFile {
 
         // Write the updated reference count blocks and reftable.
         fn write_refblocks(
-            refcounts: &[u16],
+            refcounts: &[u64],
             mut header: QcowHeader,
             ref_table: &[u64],
             raw_file: &mut QcowRawFile,
@@ -1265,12 +1262,11 @@ impl QcowFile {
                 // If this is the last (partial) cluster, pad it out to a full refblock cluster.
                 if refblock.len() < refcount_block_entries as usize {
                     let refblock_padding =
-                        vec![0u16; refcount_block_entries as usize - refblock.len()];
+                        vec![0u64; refcount_block_entries as usize - refblock.len()];
+                    let byte_offset =
+                        refblock.len() as u64 * raw_file.cluster_size() / refcount_block_entries;
                     raw_file
-                        .write_refcount_block(
-                            *refblock_addr + refblock.len() as u64 * 2,
-                            &refblock_padding,
-                        )
+                        .write_refcount_block(*refblock_addr + byte_offset, &refblock_padding)
                         .map_err(Error::WritingHeader)?;
                 }
             }
@@ -1297,8 +1293,7 @@ impl QcowFile {
             .len();
 
         let refcount_bits = 1u64 << header.refcount_order;
-        let refcount_bytes = div_round_up_u64(refcount_bits, 8);
-        let refcount_block_entries = cluster_size / refcount_bytes;
+        let refcount_block_entries = cluster_size * 8 / refcount_bits;
         let pointers_per_cluster = cluster_size / size_of::<u64>() as u64;
         let data_clusters = div_round_up_u64(header.size, cluster_size);
         let l2_clusters = div_round_up_u64(data_clusters, pointers_per_cluster);
@@ -1554,7 +1549,7 @@ impl QcowFile {
         l1_index: usize,
         l2_index: usize,
         cluster_addr: u64,
-        set_refcounts: &mut Vec<(u64, u16)>,
+        set_refcounts: &mut Vec<(u64, u64)>,
     ) -> io::Result<()> {
         if !self.l2_cache.get(l1_index).unwrap().dirty() {
             // Free the previously used cluster if one exists. Modified tables are always
@@ -1804,7 +1799,7 @@ impl QcowFile {
     fn set_cluster_refcount_track_freed(
         &mut self,
         address: u64,
-        refcount: u16,
+        refcount: u64,
     ) -> std::io::Result<()> {
         let mut newly_unref = self.set_cluster_refcount(address, refcount)?;
         self.unref_clusters.append(&mut newly_unref);
@@ -1814,7 +1809,7 @@ impl QcowFile {
     // Set the refcount for a cluster with the given address.
     // Returns a list of any refblocks that can be reused, this happens when a refblock is moved,
     // the old location can be reused.
-    fn set_cluster_refcount(&mut self, address: u64, refcount: u16) -> std::io::Result<Vec<u64>> {
+    fn set_cluster_refcount(&mut self, address: u64, refcount: u64) -> std::io::Result<Vec<u64>> {
         let mut added_clusters = Vec::new();
         let mut unref_clusters = Vec::new();
         let mut refcount_set = false;
@@ -2655,7 +2650,7 @@ mod unit_tests {
     #[test]
     fn invalid_refcount_order() {
         let mut header = valid_header_v3();
-        header[99] = 2;
+        header[99] = 7;
         with_basic_file(&header, |disk_file: RawFile| {
             QcowFile::from(disk_file).expect_err("Invalid refcount order worked.");
         });
@@ -3449,8 +3444,9 @@ mod unit_tests {
         with_basic_file(&valid_header_v3(), |mut disk_file: RawFile| {
             let header = QcowHeader::new(&mut disk_file).expect("Failed to create Header.");
             let cluster_size = 65536;
-            let mut raw_file =
-                QcowRawFile::from(disk_file, cluster_size).expect("Failed to create QcowRawFile.");
+            let refcount_bits = 1u64 << header.refcount_order;
+            let mut raw_file = QcowRawFile::from(disk_file, cluster_size, refcount_bits)
+                .expect("Failed to create QcowRawFile.");
             QcowFile::rebuild_refcounts(&mut raw_file, header)
                 .expect("Failed to rebuild recounts.");
         });

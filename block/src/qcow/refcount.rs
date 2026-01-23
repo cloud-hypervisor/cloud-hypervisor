@@ -38,7 +38,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct RefCount {
     ref_table: VecCache<u64>,
     refcount_table_offset: u64,
-    refblock_cache: CacheMap<VecCache<u16>>,
+    refblock_cache: CacheMap<VecCache<u64>>,
     refcount_block_entries: u64, // number of refcounts in a cluster.
     cluster_size: u64,
     max_valid_cluster_offset: u64,
@@ -92,8 +92,8 @@ impl RefCount {
         &mut self,
         raw_file: &mut QcowRawFile,
         cluster_address: u64,
-        refcount: u16,
-        mut new_cluster: Option<(u64, VecCache<u16>)>,
+        refcount: u64,
+        mut new_cluster: Option<(u64, VecCache<u64>)>,
     ) -> Result<Option<u64>> {
         let (table_index, block_index) = self.get_refcount_index(cluster_address);
 
@@ -170,7 +170,7 @@ impl RefCount {
         &mut self,
         raw_file: &mut QcowRawFile,
         address: u64,
-    ) -> Result<u16> {
+    ) -> Result<u64> {
         let (table_index, block_index) = self.get_refcount_index(address);
         let block_addr_disk = *self.ref_table.get(table_index).ok_or(Error::InvalidIndex)?;
         if block_addr_disk == 0 {
@@ -202,7 +202,7 @@ impl RefCount {
         &mut self,
         raw_file: &mut QcowRawFile,
         table_index: usize,
-    ) -> Result<Option<&[u16]>> {
+    ) -> Result<Option<&[u64]>> {
         let block_addr_disk = *self.ref_table.get(table_index).ok_or(Error::InvalidIndex)?;
         if block_addr_disk == 0 {
             return Ok(None);
