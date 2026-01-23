@@ -29,6 +29,13 @@ pub enum Error {
     /// `ReadingRefCounts` - Error reading the file into the refcount cache.
     #[error("Failed to read the file into the refcount cache")]
     ReadingRefCounts(#[source] io::Error),
+    /// `RefcountOverflow` - Refcount value exceeds maximum for the refcount width.
+    #[error("Refcount value {value} exceeds {refcount_bits}-bit max ({max})")]
+    RefcountOverflow {
+        value: u64,
+        max: u64,
+        refcount_bits: u64,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -42,12 +49,15 @@ pub struct RefCount {
     refcount_block_entries: u64, // number of refcounts in a cluster.
     cluster_size: u64,
     max_valid_cluster_offset: u64,
+    max_refcount: u64,  // maximum refcount value for this image's refcount_order
+    refcount_bits: u64, // number of bits per refcount entry
 }
 
 impl RefCount {
     /// Creates a `RefCount` from `file`, reading the refcount table from `refcount_table_offset`.
     /// `refcount_table_entries` specifies the number of refcount blocks used by this image.
     /// `refcount_block_entries` indicates the number of refcounts in each refcount block.
+    /// `refcount_bits` is the number of bits per refcount (1, 2, 4, 8, 16, 32, or 64).
     /// Each refcount table entry points to a refcount block.
     pub fn new(
         raw_file: &mut QcowRawFile,
@@ -55,6 +65,7 @@ impl RefCount {
         refcount_table_entries: u64,
         refcount_block_entries: u64,
         cluster_size: u64,
+        refcount_bits: u64,
     ) -> io::Result<RefCount> {
         let ref_table = VecCache::from_vec(raw_file.read_pointer_table(
             refcount_table_offset,
@@ -63,6 +74,11 @@ impl RefCount {
         )?);
         let max_valid_cluster_index = (ref_table.len() as u64) * refcount_block_entries - 1;
         let max_valid_cluster_offset = max_valid_cluster_index * cluster_size;
+        let max_refcount = if refcount_bits >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << refcount_bits) - 1
+        };
         Ok(RefCount {
             ref_table,
             refcount_table_offset,
@@ -70,6 +86,8 @@ impl RefCount {
             refcount_block_entries,
             cluster_size,
             max_valid_cluster_offset,
+            max_refcount,
+            refcount_bits,
         })
     }
 
@@ -95,6 +113,14 @@ impl RefCount {
         refcount: u64,
         mut new_cluster: Option<(u64, VecCache<u64>)>,
     ) -> Result<Option<u64>> {
+        if refcount > self.max_refcount {
+            return Err(Error::RefcountOverflow {
+                value: refcount,
+                max: self.max_refcount,
+                refcount_bits: self.refcount_bits,
+            });
+        }
+
         let (table_index, block_index) = self.get_refcount_index(cluster_address);
 
         let block_addr_disk = *self.ref_table.get(table_index).ok_or(Error::InvalidIndex)?;
