@@ -3819,16 +3819,13 @@ mod unit_tests {
     }
 
     #[test]
-    fn reject_unsupported_incompat_dirty_bit() {
-        // Bit 0: dirty - image not closed cleanly
+    fn accept_incompat_dirty_bit() {
         let header = header_v3_with_incompat_features(1 << 0);
         with_basic_file(&header, |disk_file: RawFile| {
             let result = QcowFile::from(disk_file);
-            assert!(result.is_err());
-            let err = result.unwrap_err();
             assert!(
-                matches!(err, Error::UnsupportedFeature(ref v) if v.to_string().contains("dirty")),
-                "Expected UnsupportedFeature error mentioning dirty, got: {err:?}"
+                result.is_ok(),
+                "Expected dirty bit to be accepted, got: {result:?}"
             );
         });
     }
@@ -3880,8 +3877,8 @@ mod unit_tests {
 
     #[test]
     fn reject_multiple_unsupported_incompat_bits() {
-        // Multiple unsupported bits: dirty (0) + corrupt (1)
-        let header = header_v3_with_incompat_features((1 << 0) | (1 << 1));
+        // Multiple unsupported bits: corrupt (1) + external data (2)
+        let header = header_v3_with_incompat_features((1 << 1) | (1 << 2));
         with_basic_file(&header, |disk_file: RawFile| {
             let result = QcowFile::from(disk_file);
             assert!(result.is_err());
@@ -3902,5 +3899,115 @@ mod unit_tests {
                 "Expected UnsupportedFeature error mentioning unknown, got: {err:?}"
             );
         });
+    }
+
+    #[test]
+    fn dirty_bit_set_on_open_cleared_on_close_v3() {
+        // Test that the dirty bit is set when a v3 image is opened and cleared when it's closed
+        let header = valid_header_v3();
+        with_basic_file(&header, |mut disk_file: RawFile| {
+            // Verify dirty bit is not set initially
+            disk_file
+                .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
+                .unwrap();
+            let features_before = disk_file.read_u64::<BigEndian>().unwrap();
+            assert_eq!(
+                features_before & IncompatFeatures::DIRTY.bits(),
+                0,
+                "Dirty bit should not be set initially"
+            );
+
+            // Open the file - this should set the dirty bit
+            disk_file.rewind().unwrap();
+            {
+                let qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
+
+                // Verify dirty bit is set while file is open
+                disk_file
+                    .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
+                    .unwrap();
+                let features_during = disk_file.read_u64::<BigEndian>().unwrap();
+                assert_ne!(
+                    features_during & IncompatFeatures::DIRTY.bits(),
+                    0,
+                    "Dirty bit should be set while file is open"
+                );
+
+                drop(qcow); // Close the file
+            }
+
+            // Verify dirty bit is cleared after close
+            disk_file
+                .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
+                .unwrap();
+            let features_after = disk_file.read_u64::<BigEndian>().unwrap();
+            assert_eq!(
+                features_after & IncompatFeatures::DIRTY.bits(),
+                0,
+                "Dirty bit should be cleared after close"
+            );
+        });
+    }
+
+    #[test]
+    fn dirty_bit_not_used_for_v2() {
+        // Test that v2 images don't use the dirty bit (no incompatible_features field)
+        let header = valid_header_v2();
+        with_basic_file(&header, |mut disk_file: RawFile| {
+            // Open and close v2 file - should work without touching offset 72
+            disk_file.rewind().unwrap();
+            let qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
+            assert_eq!(qcow.header.version, 2, "Should be a v2 file");
+            drop(qcow);
+        });
+    }
+
+    #[test]
+    fn dirty_bit_not_set_for_readonly_v3() {
+        // Test that read-only v3 files don't set the dirty bit (e.g., backing files)
+        let header = valid_header_v3();
+
+        // Create a temp file with a valid v3 qcow header
+        let temp_file = TempFile::new().unwrap();
+        let temp_path = temp_file.as_path().to_owned();
+        {
+            let mut file = temp_file.as_file().try_clone().unwrap();
+            file.write_all(&header).unwrap();
+            file.set_len(0x1_0000_0000).unwrap();
+        }
+
+        // Open the file read-only
+        let readonly_file = OpenOptions::new()
+            .read(true)
+            .write(false)
+            .open(&temp_path)
+            .unwrap();
+        let raw_file = RawFile::new(readonly_file, false);
+
+        // Verify the file is detected as read-only
+        assert!(
+            !raw_file.is_writable(),
+            "File should be detected as read-only"
+        );
+
+        // Open as QcowFile - should not set dirty bit for read-only files
+        let qcow = QcowFile::from(raw_file).unwrap();
+        assert!(
+            !qcow.raw_file.file().is_writable(),
+            "File should be read-only"
+        );
+
+        // Verify dirty bit was not written to disk
+        let verify_file = OpenOptions::new().read(true).open(&temp_path).unwrap();
+        let mut verify_raw = RawFile::new(verify_file, false);
+        verify_raw
+            .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
+            .unwrap();
+        let features = verify_raw.read_u64::<BigEndian>().unwrap();
+        assert_eq!(
+            features & IncompatFeatures::DIRTY.bits(),
+            0,
+            "Dirty bit should not be written for read-only files"
+        );
     }
 }
