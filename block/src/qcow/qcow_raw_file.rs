@@ -276,6 +276,11 @@ impl QcowRawFile {
         Ok(Some(new_cluster_address))
     }
 
+    /// Returns a reference to the underlying file.
+    pub fn file(&self) -> &RawFile {
+        &self.file
+    }
+
     /// Returns a mutable reference to the underlying file.
     pub fn file_mut(&mut self) -> &mut RawFile {
         &mut self.file

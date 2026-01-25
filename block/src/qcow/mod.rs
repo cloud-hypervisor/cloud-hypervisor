@@ -231,7 +231,8 @@ bitflags! {
 
 impl IncompatFeatures {
     /// Features supported by this implementation.
-    const SUPPORTED: IncompatFeatures = IncompatFeatures::COMPRESSION;
+    const SUPPORTED: IncompatFeatures =
+        IncompatFeatures::DIRTY.union(IncompatFeatures::COMPRESSION);
 
     /// Get the fallback name for a known feature bit.
     fn flag_name(bit: u8) -> Option<&'static str> {
@@ -680,6 +681,39 @@ impl QcowHeader {
 
         Ok(())
     }
+
+    /// Write only the incompatible_features field to the file at its fixed offset.
+    fn write_incompatible_features<F: Seek + Write>(&self, file: &mut F) -> Result<()> {
+        if self.version != 3 {
+            return Ok(());
+        }
+        file.seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
+            .map_err(Error::WritingHeader)?;
+        file.write_u64::<BigEndian>(self.incompatible_features)
+            .map_err(Error::WritingHeader)?;
+        Ok(())
+    }
+
+    /// Set or clear the dirty bit for QCOW2 v3 images.
+    ///
+    /// When `dirty` is true, sets the bit to indicate the image is in use.
+    /// When `dirty` is false, clears the bit to indicate a clean shutdown.
+    pub fn set_dirty_bit<F: Seek + Write + FileSync>(
+        &mut self,
+        file: &mut F,
+        dirty: bool,
+    ) -> Result<()> {
+        if self.version == 3 {
+            if dirty {
+                self.incompatible_features |= IncompatFeatures::DIRTY.bits();
+            } else {
+                self.incompatible_features &= !IncompatFeatures::DIRTY.bits();
+            }
+            self.write_incompatible_features(file)?;
+            file.fsync().map_err(Error::WritingHeader)?;
+        }
+        Ok(())
+    }
 }
 
 fn max_refcount_clusters(refcount_order: u32, cluster_size: u32, num_clusters: u32) -> u64 {
@@ -892,7 +926,18 @@ impl QcowFile {
 
         let mut raw_file = QcowRawFile::from(file, cluster_size, refcount_bits)
             .ok_or(Error::InvalidClusterSize)?;
-        if refcount_rebuild_required {
+        let is_writable = raw_file.file().is_writable();
+
+        // Image already has dirty bit set. Refcounts may be invalid.
+        if IncompatFeatures::from_bits_truncate(header.incompatible_features)
+            .contains(IncompatFeatures::DIRTY)
+        {
+            log::warn!("QCOW2 image not cleanly closed, rebuilding refcounts");
+            refcount_rebuild_required = true;
+        }
+
+        // Skip refcount rebuilding for readonly files.
+        if refcount_rebuild_required && is_writable {
             QcowFile::rebuild_refcounts(&mut raw_file, header.clone())?;
         }
 
@@ -964,6 +1009,13 @@ impl QcowFile {
             .ok_or(Error::InvalidRefcountTableOffset)?;
 
         qcow.find_avail_clusters()?;
+
+        if !IncompatFeatures::from_bits_truncate(qcow.header.incompatible_features)
+            .contains(IncompatFeatures::DIRTY)
+            && is_writable
+        {
+            qcow.header.set_dirty_bit(qcow.raw_file.file_mut(), true)?;
+        }
 
         Ok(qcow)
     }
@@ -1999,6 +2051,7 @@ impl QcowFile {
         if sync_required {
             self.raw_file.file_mut().sync_data()?;
         }
+
         Ok(())
     }
 }
@@ -2012,6 +2065,9 @@ impl AsRawFd for QcowFile {
 impl Drop for QcowFile {
     fn drop(&mut self) {
         let _ = self.sync_caches();
+        if self.raw_file.file().is_writable() {
+            let _ = self.header.set_dirty_bit(self.raw_file.file_mut(), false);
+        }
     }
 }
 
