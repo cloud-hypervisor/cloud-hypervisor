@@ -294,12 +294,13 @@ impl<S: VhostUserFrontendReqHandler> EpollHelperHandler for VhostUserEpollHandle
 
 #[derive(Default)]
 pub struct VhostUserCommon {
-    pub vu: Option<Arc<Mutex<VhostUserHandle>>>,
-    pub acked_protocol_features: u64,
-    pub socket_path: String,
-    pub vu_num_queues: usize,
-    pub migration_started: bool,
-    pub server: bool,
+    vu: Option<Arc<Mutex<VhostUserHandle>>>,
+    acked_protocol_features: u64,
+    socket_path: String,
+    vu_num_queues: usize,
+    migration_started: bool,
+    server: bool,
+    shutdown: bool,
 }
 
 impl VhostUserCommon {
@@ -314,6 +315,7 @@ impl VhostUserCommon {
         kill_evt: EventFd,
         pause_evt: EventFd,
     ) -> std::result::Result<VhostUserEpollHandler<T>, ActivateError> {
+        assert!(!self.shutdown, "used after shutdown");
         let mut inflight: Option<Inflight> =
             if self.acked_protocol_features & VhostUserProtocolFeatures::INFLIGHT_SHMFD.bits() != 0
             {
@@ -360,6 +362,8 @@ impl VhostUserCommon {
     }
 
     pub fn restore_backend_connection(&mut self, acked_features: u64) -> Result<()> {
+        assert!(!self.shutdown, "used after shutdown");
+
         let mut vu = VhostUserHandle::connect_vhost_user(
             self.server,
             &self.socket_path,
@@ -375,15 +379,17 @@ impl VhostUserCommon {
     }
 
     pub fn shutdown(&mut self) {
-        if let Some(vu) = &self.vu {
-            // SAFETY: trivially safe
-            let _ = unsafe { libc::close(vu.lock().unwrap().socket_handle().as_raw_fd()) };
-        }
+        assert!(!self.shutdown, "double shutdown");
 
         // Remove socket path if needed
         if self.server {
             let _ = std::fs::remove_file(&self.socket_path);
         }
+
+        if let Some(vu) = self.vu.as_mut() {
+            vu.lock().unwrap().shutdown();
+        }
+        self.shutdown = true;
     }
 
     pub fn add_memory_region(
@@ -391,6 +397,8 @@ impl VhostUserCommon {
         guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
         region: &Arc<GuestRegionMmap>,
     ) -> std::result::Result<(), crate::Error> {
+        assert!(!self.shutdown, "used after shutdown");
+
         if let Some(vu) = &self.vu {
             if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits()
                 != 0
@@ -412,6 +420,8 @@ impl VhostUserCommon {
     }
 
     pub fn pause(&mut self) -> std::result::Result<(), MigratableError> {
+        assert!(!self.shutdown, "used after shutdown");
+
         if let Some(vu) = &self.vu {
             vu.lock().unwrap().pause_vhost_user().map_err(|e| {
                 MigratableError::Pause(anyhow!("Error pausing vhost-user backend: {e:?}"))
@@ -422,6 +432,8 @@ impl VhostUserCommon {
     }
 
     pub fn resume(&mut self) -> std::result::Result<(), MigratableError> {
+        assert!(!self.shutdown, "used after shutdown");
+
         if let Some(vu) = &self.vu {
             vu.lock().unwrap().resume_vhost_user().map_err(|e| {
                 MigratableError::Resume(anyhow!("Error resuming vhost-user backend: {e:?}"))
@@ -435,6 +447,8 @@ impl VhostUserCommon {
     where
         T: Serialize + Deserialize<'a>,
     {
+        assert!(!self.shutdown, "used after shutdown");
+
         let snapshot = Snapshot::new_from_state(state)?;
 
         if self.migration_started {
@@ -448,6 +462,8 @@ impl VhostUserCommon {
         &mut self,
         guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     ) -> std::result::Result<(), MigratableError> {
+        assert!(!self.shutdown, "used after shutdown");
+
         if let Some(vu) = &self.vu {
             if let Some(guest_memory) = guest_memory {
                 let last_ram_addr = guest_memory.memory().last_addr().raw_value();
@@ -470,6 +486,8 @@ impl VhostUserCommon {
     }
 
     pub fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
+        assert!(!self.shutdown, "used after shutdown");
+
         if let Some(vu) = &self.vu {
             vu.lock().unwrap().stop_dirty_log().map_err(|e| {
                 MigratableError::StopDirtyLog(anyhow!(
@@ -485,6 +503,8 @@ impl VhostUserCommon {
         &mut self,
         guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     ) -> std::result::Result<MemoryRangeTable, MigratableError> {
+        assert!(!self.shutdown, "used after shutdown");
+
         if let Some(vu) = &self.vu {
             if let Some(guest_memory) = guest_memory {
                 let last_ram_addr = guest_memory.memory().last_addr().raw_value();
@@ -502,6 +522,8 @@ impl VhostUserCommon {
     }
 
     pub fn start_migration(&mut self) -> std::result::Result<(), MigratableError> {
+        assert!(!self.shutdown, "used after shutdown");
+
         self.migration_started = true;
         Ok(())
     }
@@ -525,6 +547,9 @@ impl VhostUserCommon {
         // Drop the vhost-user handler to avoid further calls to fail because
         // the connection with the backend has been closed.
         self.vu = None;
+
+        // Avoid panics on future calls.
+        self.shutdown = false;
 
         Ok(())
     }
