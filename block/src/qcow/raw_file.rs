@@ -15,6 +15,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::slice;
 
 use libc::c_void;
+use vmm_sys_util::file_traits::FileSync;
 use vmm_sys_util::seek_hole::SeekHole;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
@@ -121,6 +122,17 @@ impl RawFile {
 
     pub fn is_direct(&self) -> bool {
         self.direct_io
+    }
+
+    /// Returns true if the file was opened with write access.
+    pub fn is_writable(&self) -> bool {
+        // SAFETY: fcntl with F_GETFL is safe and doesn't modify the file descriptor
+        let flags = unsafe { libc::fcntl(self.file.as_raw_fd(), libc::F_GETFL) };
+        if flags < 0 {
+            return false;
+        }
+        let access_mode = flags & libc::O_ACCMODE;
+        access_mode == libc::O_WRONLY || access_mode == libc::O_RDWR
     }
 }
 
@@ -324,6 +336,12 @@ impl WriteZeroesAt for RawFile {
 impl PunchHole for RawFile {
     fn punch_hole(&mut self, offset: u64, length: u64) -> std::io::Result<()> {
         self.file.punch_hole(offset, length)
+    }
+}
+
+impl FileSync for RawFile {
+    fn fsync(&mut self) -> std::io::Result<()> {
+        self.file.fsync()
     }
 }
 
