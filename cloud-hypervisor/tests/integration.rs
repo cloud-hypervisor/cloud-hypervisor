@@ -2528,7 +2528,7 @@ EOF
 
 mod common_parallel {
     use std::cmp;
-    use std::fs::{File, OpenOptions};
+    use std::fs::{File, OpenOptions, copy};
     use std::io::{self, SeekFrom};
 
     use crate::*;
@@ -3499,7 +3499,13 @@ mod common_parallel {
             );
         });
 
-        let _ = cloud_child.kill();
+        if verify_os_disk {
+            // Use clean shutdown to allow cloud-hypervisor to clear
+            // the dirty bit in the QCOW2 v3 image.
+            kill_child(&mut cloud_child);
+        } else {
+            let _ = cloud_child.kill();
+        }
         let output = cloud_child.wait_with_output().unwrap();
 
         handle_child_output(r, &output);
@@ -3537,10 +3543,23 @@ mod common_parallel {
     }
 
     fn get_image_info(path: &std::path::Path) -> Option<serde_json::Value> {
-        let output = run_qemu_img(path, &["info", "--output=json"]);
+        let output = run_qemu_img(path, &["info", "-U", "--output=json"]);
 
         output.status.success().then(|| ())?;
         serde_json::from_slice(&output.stdout).ok()
+    }
+
+    fn check_dirty_flag(path: &std::path::Path) -> Result<Option<bool>, String> {
+        let info = get_image_info(path)
+            .ok_or_else(|| format!("qemu-img info failed for {}", path.display()))?;
+        if info["format"].as_str() != Some("qcow2") {
+            return Ok(None);
+        }
+        // QCOW2 v3 has compat "1.1", v2 has "0.10" and doesn't support dirty flag
+        if info["format-specific"]["data"]["compat"].as_str() != Some("1.1") {
+            return Ok(None);
+        }
+        Ok(info["dirty-flag"].as_bool())
     }
 
     fn resolve_disk_path(path_or_image_name: impl AsRef<std::path::Path>) -> std::path::PathBuf {
@@ -3662,9 +3681,11 @@ mod common_parallel {
     /// It takes either a full path to the image or just the name of
     /// the image located in the `workloads` directory.
     ///
-    /// For qcow2 images with backing files, also verifies the backing file
+    /// For QCOW2 images with backing files, also verifies the backing file
     /// integrity and checks that the backing file hasn't been modified
     /// during the test.
+    ///
+    /// For QCOW2 v3 images, also verifies the dirty bit is cleared.
     fn disk_check_consistency(
         path_or_image_name: impl AsRef<std::path::Path>,
         initial_backing_checksum: Option<(std::path::PathBuf, String, u32)>,
@@ -3677,6 +3698,14 @@ mod common_parallel {
             "qemu-img check failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+
+        match check_dirty_flag(&path) {
+            Ok(Some(dirty)) => {
+                assert!(!dirty, "QCOW2 image shutdown unclean");
+            }
+            Ok(None) => {} // Not a QCOW2 v3 image, skip dirty flag check
+            Err(e) => panic!("Failed to check dirty flag: {e}"),
+        }
 
         if let Some((backing_path, format, initial_checksum)) = initial_backing_checksum {
             if format.parse::<block::qcow::ImageType>().ok() != Some(block::qcow::ImageType::Raw) {
@@ -3731,6 +3760,128 @@ mod common_parallel {
     #[test]
     fn test_virtio_block_qcow2_backing_raw_file() {
         _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE, false, false, true);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_dirty_bit_unclean_shutdown() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let test_image_path = guest.tmp_dir.as_path().join("test-dirty.qcow2");
+        let original_image = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
+
+        copy(original_image, &test_image_path).expect("Failed to copy qcow2 image");
+
+        assert_eq!(
+            check_dirty_flag(&test_image_path).expect("Failed to check dirty flag"),
+            Some(false),
+            "Image should start with dirty bit cleared"
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                &format!("path={}", test_image_path.to_str().unwrap()),
+                &format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                ),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            assert_eq!(
+                check_dirty_flag(&test_image_path).expect("Failed to check dirty flag"),
+                Some(true),
+                "Dirty bit should be set while VM is running"
+            );
+        });
+
+        if r.is_err() {
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+            handle_child_output(r, &output);
+            return;
+        }
+
+        // Simulate unclean shutdown with SIGKILL
+        let _ = unsafe { libc::kill(child.id() as i32, libc::SIGKILL) };
+        let _ = child.wait();
+
+        assert_eq!(
+            check_dirty_flag(&test_image_path).expect("Failed to check dirty flag"),
+            Some(true),
+            "Dirty bit should remain set after unclean shutdown"
+        );
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_dirty_bit_clean_shutdown() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let test_image_path = guest.tmp_dir.as_path().join("test-dirty.qcow2");
+        let original_image = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
+
+        copy(original_image, &test_image_path).expect("Failed to copy qcow2 image");
+
+        assert_eq!(
+            check_dirty_flag(&test_image_path).expect("Failed to check dirty flag"),
+            Some(false),
+            "Image should start with dirty bit cleared"
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                &format!("path={}", test_image_path.to_str().unwrap()),
+                &format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                ),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            assert_eq!(
+                check_dirty_flag(&test_image_path).expect("Failed to check dirty flag"),
+                Some(true),
+                "Dirty bit should be set while VM is running"
+            );
+        });
+
+        // Clean shutdown using SIGTERM
+        kill_child(&mut child);
+
+        if r.is_err() {
+            let output = child.wait_with_output().unwrap();
+            handle_child_output(r, &output);
+            return;
+        }
+
+        let _ = child.wait();
+
+        disk_check_consistency(&test_image_path, None);
     }
 
     #[test]
