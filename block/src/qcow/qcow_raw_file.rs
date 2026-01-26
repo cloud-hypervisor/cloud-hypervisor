@@ -4,6 +4,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::fmt::Debug;
 use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::os::fd::{AsRawFd, RawFd};
@@ -18,53 +19,70 @@ type RefcountReader = fn(&mut RawFile, usize) -> io::Result<Vec<u64>>;
 type RefcountWriter = fn(&mut RawFile, &[u64]) -> io::Result<()>;
 
 /// Big-endian file access trait.
-trait BeUint: Sized + Copy {
-    fn from_slice(bytes: &[u8]) -> u64;
-    fn write<W: Write>(w: &mut W, val: u64) -> io::Result<()>;
+pub(super) trait BeUint: Sized + Copy {
+    fn from_be_slice(bytes: &[u8]) -> u64;
+    fn read_be<R: Read>(r: &mut R) -> io::Result<Self>;
+    fn write_be<W: Write>(w: &mut W, val: Self) -> io::Result<()>;
 }
 
 impl BeUint for u8 {
     #[inline(always)]
-    fn from_slice(bytes: &[u8]) -> u64 {
+    fn from_be_slice(bytes: &[u8]) -> u64 {
         bytes[0] as u64
     }
     #[inline(always)]
-    fn write<W: Write>(w: &mut W, val: u64) -> io::Result<()> {
-        w.write_u8(val as u8)
+    fn read_be<R: Read>(r: &mut R) -> io::Result<Self> {
+        r.read_u8()
+    }
+    #[inline(always)]
+    fn write_be<W: Write>(w: &mut W, val: Self) -> io::Result<()> {
+        w.write_u8(val)
     }
 }
 
 impl BeUint for u16 {
     #[inline(always)]
-    fn from_slice(bytes: &[u8]) -> u64 {
+    fn from_be_slice(bytes: &[u8]) -> u64 {
         u16::from_be_bytes([bytes[0], bytes[1]]) as u64
     }
     #[inline(always)]
-    fn write<W: Write>(w: &mut W, val: u64) -> io::Result<()> {
-        w.write_u16::<BigEndian>(val as u16)
+    fn read_be<R: Read>(r: &mut R) -> io::Result<Self> {
+        r.read_u16::<BigEndian>()
+    }
+    #[inline(always)]
+    fn write_be<W: Write>(w: &mut W, val: Self) -> io::Result<()> {
+        w.write_u16::<BigEndian>(val)
     }
 }
 
 impl BeUint for u32 {
     #[inline(always)]
-    fn from_slice(bytes: &[u8]) -> u64 {
+    fn from_be_slice(bytes: &[u8]) -> u64 {
         u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64
     }
     #[inline(always)]
-    fn write<W: Write>(w: &mut W, val: u64) -> io::Result<()> {
-        w.write_u32::<BigEndian>(val as u32)
+    fn read_be<R: Read>(r: &mut R) -> io::Result<Self> {
+        r.read_u32::<BigEndian>()
+    }
+    #[inline(always)]
+    fn write_be<W: Write>(w: &mut W, val: Self) -> io::Result<()> {
+        w.write_u32::<BigEndian>(val)
     }
 }
 
 impl BeUint for u64 {
     #[inline(always)]
-    fn from_slice(bytes: &[u8]) -> u64 {
+    fn from_be_slice(bytes: &[u8]) -> u64 {
         u64::from_be_bytes([
             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
         ])
     }
     #[inline(always)]
-    fn write<W: Write>(w: &mut W, val: u64) -> io::Result<()> {
+    fn read_be<R: Read>(r: &mut R) -> io::Result<Self> {
+        r.read_u64::<BigEndian>()
+    }
+    #[inline(always)]
+    fn write_be<W: Write>(w: &mut W, val: Self) -> io::Result<()> {
         w.write_u64::<BigEndian>(val)
     }
 }
@@ -76,16 +94,20 @@ fn read_refcount<T: BeUint>(file: &mut RawFile, count: usize) -> io::Result<Vec<
     file.read_exact(&mut data)?;
     Ok(data
         .chunks_exact(bytes_per_entry)
-        .map(T::from_slice)
+        .map(T::from_be_slice)
         .collect())
 }
 
 /// Write byte-aligned refcounts.
-fn write_refcount<T: BeUint>(file: &mut RawFile, table: &[u64]) -> io::Result<()> {
+fn write_refcount<T: BeUint + TryFrom<u64>>(file: &mut RawFile, table: &[u64]) -> io::Result<()>
+where
+    <T as TryFrom<u64>>::Error: Debug,
+{
     let bytes_per_entry = size_of::<T>();
     let mut buffer = BufWriter::with_capacity(table.len() * bytes_per_entry, file);
     for &val in table {
-        T::write(&mut buffer, val)?;
+        let converted = T::try_from(val).expect("refcount values are validated on increment");
+        T::write_be(&mut buffer, converted)?;
     }
     buffer.flush()
 }
@@ -224,7 +246,7 @@ impl QcowRawFile {
 
         for addr in entries {
             let entry = f(self, *addr)?;
-            buffer.write_u64::<BigEndian>(entry)?;
+            u64::write_be(&mut buffer, entry)?;
         }
         buffer.flush()?;
         Ok(())
@@ -239,7 +261,7 @@ impl QcowRawFile {
         let mut buffer = self.setup_pointer_table_writer(offset, &entries)?;
 
         for &entry in entries {
-            buffer.write_u64::<BigEndian>(entry)?;
+            u64::write_be(&mut buffer, entry)?;
         }
         buffer.flush()?;
         Ok(())
