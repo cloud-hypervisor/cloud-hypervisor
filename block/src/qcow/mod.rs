@@ -1529,6 +1529,19 @@ impl QcowFile {
         (address / self.raw_file.cluster_size()) % self.l2_entries
     }
 
+    /// Attempts to set the corrupt bit, logging failures without propagating them.
+    ///
+    /// This is "best effort" because the write may fail due to various reasons like
+    /// disk full, readonly storage, etc. This method is called just before returning
+    /// EIO to the caller. The error is not propagated because the original corruption
+    /// error is more important to return to the call site than a secondary I/O
+    /// failure from marking the image.
+    fn set_corrupt_bit_best_effort(&mut self) {
+        if let Err(e) = self.header.set_corrupt_bit(self.raw_file.file_mut()) {
+            warn!("Failed to persist corrupt bit: {e}");
+        }
+    }
+
     // Decompress the cluster, return EIO on failure
     fn decompress_l2_cluster(&mut self, l2_entry: u64) -> std::io::Result<Vec<u8>> {
         let (compressed_cluster_addr, compressed_cluster_size) =
@@ -1547,8 +1560,12 @@ impl QcowFile {
         let mut decompressed_cluster = vec![0; cluster_size];
         let decompressed_size = decoder
             .decode(&compressed_cluster, &mut decompressed_cluster)
-            .map_err(|_| std::io::Error::from_raw_os_error(EIO))?;
+            .map_err(|_| {
+                self.set_corrupt_bit_best_effort();
+                io::Error::from_raw_os_error(EIO)
+            })?;
         if decompressed_size as u64 != self.raw_file.cluster_size() {
+            self.set_corrupt_bit_best_effort();
             return Err(std::io::Error::from_raw_os_error(EIO));
         }
         Ok(decompressed_cluster)
@@ -1645,6 +1662,7 @@ impl QcowFile {
                 .seek(SeekFrom::Start(cluster_addr))?;
             let nwritten = self.raw_file.file_mut().write(&decompressed_cluster)?;
             if nwritten != decompressed_cluster.len() {
+                self.set_corrupt_bit_best_effort();
                 return Err(std::io::Error::from_raw_os_error(EIO));
             }
 
@@ -1985,6 +2003,7 @@ impl QcowFile {
                     return Err(e);
                 }
                 Err(refcount::Error::InvalidIndex) => {
+                    self.set_corrupt_bit_best_effort();
                     return Err(std::io::Error::from_raw_os_error(EINVAL));
                 }
                 Err(refcount::Error::NeedCluster(addr)) => {
@@ -2027,6 +2046,7 @@ impl QcowFile {
                 self.raw_file
                     .write_pointer_table_direct(addr, l2_table.iter())?;
             } else {
+                self.set_corrupt_bit_best_effort();
                 return Err(std::io::Error::from_raw_os_error(EINVAL));
             }
             l2_table.mark_clean();
