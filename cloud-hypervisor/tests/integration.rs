@@ -3549,17 +3549,48 @@ mod common_parallel {
         serde_json::from_slice(&output.stdout).ok()
     }
 
-    fn check_dirty_flag(path: &std::path::Path) -> Result<Option<bool>, String> {
+    fn get_qcow2_v3_info(path: &Path) -> Result<Option<serde_json::Value>, String> {
         let info = get_image_info(path)
             .ok_or_else(|| format!("qemu-img info failed for {}", path.display()))?;
         if info["format"].as_str() != Some("qcow2") {
             return Ok(None);
         }
-        // QCOW2 v3 has compat "1.1", v2 has "0.10" and doesn't support dirty flag
+        // QCOW2 v3 has compat "1.1", v2 has "0.10"
         if info["format-specific"]["data"]["compat"].as_str() != Some("1.1") {
             return Ok(None);
         }
-        Ok(info["dirty-flag"].as_bool())
+        Ok(Some(info))
+    }
+
+    fn check_dirty_flag(path: &Path) -> Result<Option<bool>, String> {
+        Ok(get_qcow2_v3_info(path)?.and_then(|info| info["dirty-flag"].as_bool()))
+    }
+
+    fn check_corrupt_flag(path: &Path) -> Result<Option<bool>, String> {
+        Ok(get_qcow2_v3_info(path)?
+            .and_then(|info| info["format-specific"]["data"]["corrupt"].as_bool()))
+    }
+
+    const QCOW2_INCOMPATIBLE_FEATURES_OFFSET: u64 = 72;
+
+    fn set_corrupt_flag(path: &Path, corrupt: bool) -> io::Result<()> {
+        let mut file = OpenOptions::new().read(true).write(true).open(path)?;
+
+        file.seek(SeekFrom::Start(QCOW2_INCOMPATIBLE_FEATURES_OFFSET))?;
+        let mut buf = [0u8; 8];
+        file.read_exact(&mut buf)?;
+        let mut features = u64::from_be_bytes(buf);
+
+        if corrupt {
+            features |= 0x02;
+        } else {
+            features &= !0x02;
+        }
+
+        file.seek(SeekFrom::Start(QCOW2_INCOMPATIBLE_FEATURES_OFFSET))?;
+        file.write_all(&features.to_be_bytes())?;
+        file.sync_all()?;
+        Ok(())
     }
 
     fn resolve_disk_path(path_or_image_name: impl AsRef<std::path::Path>) -> std::path::PathBuf {
@@ -3882,6 +3913,135 @@ mod common_parallel {
         let _ = child.wait();
 
         disk_check_consistency(&test_image_path, None);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_corrupt_bit_rejected_for_write() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let test_image_path = guest.tmp_dir.as_path().join("test-corrupt.qcow2");
+        let original_image = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
+
+        copy(original_image, &test_image_path).expect("Failed to copy qcow2 image");
+
+        assert_eq!(
+            check_corrupt_flag(&test_image_path).expect("Failed to check corrupt flag"),
+            Some(false),
+            "Image should start with corrupt bit cleared"
+        );
+
+        set_corrupt_flag(&test_image_path, true).expect("Failed to set corrupt flag");
+
+        assert_eq!(
+            check_corrupt_flag(&test_image_path).expect("Failed to check corrupt flag"),
+            Some(true),
+            "Corrupt bit should be set"
+        );
+
+        let child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                &format!("path={}", test_image_path.to_str().unwrap()),
+                &format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                ),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let output = child.wait_with_output().unwrap();
+        assert!(
+            !output.status.success(),
+            "VM should fail to start with corrupt disk image"
+        );
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("corrupt") || stderr.contains("Corrupt"),
+            "Error message should mention corruption: {stderr}"
+        );
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_corrupt_bit_allowed_readonly() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let test_image_path = guest.tmp_dir.as_path().join("test-corrupt-ro.qcow2");
+        let original_image = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
+
+        copy(original_image, &test_image_path).expect("Failed to copy qcow2 image");
+
+        set_corrupt_flag(&test_image_path, true).expect("Failed to set corrupt flag");
+
+        assert_eq!(
+            check_corrupt_flag(&test_image_path).expect("Failed to check corrupt flag"),
+            Some(true),
+            "Corrupt bit should be set"
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                &format!("path={},readonly=on", test_image_path.to_str().unwrap()),
+                &format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                ),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        thread::sleep(Duration::from_secs(5));
+
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let output = child.wait_with_output().unwrap();
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                panic!(
+                    "VM should not have exited when opening corrupt image as readonly. Exit status: {}, stderr: {}",
+                    status, stderr
+                );
+            }
+            Ok(None) => {
+                // VM is still running as expected
+            }
+            Err(e) => {
+                panic!("Error checking process status: {}", e);
+            }
+        }
+
+        let _ = unsafe { libc::kill(child.id() as i32, libc::SIGKILL) };
+        let output = child.wait_with_output().unwrap();
+
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("QCOW2 image is marked corrupt, opening read-only"),
+            "Expected warning about corrupt image being opened read-only. stderr: {}",
+            stderr
+        );
+
+        assert_eq!(
+            check_corrupt_flag(&test_image_path).expect("Failed to check corrupt flag"),
+            Some(true),
+            "Corrupt bit should remain set for read-only access"
+        );
     }
 
     #[test]
