@@ -3842,7 +3842,7 @@ mod unit_tests {
     }
 
     #[test]
-    fn reject_unsupported_incompat_corrupt_bit() {
+    fn reject_corrupt_bit_for_writable_open() {
         // Bit 1: corrupt - image metadata is corrupted
         let header = header_v3_with_incompat_features(1 << 1);
         with_basic_file(&header, |disk_file: RawFile| {
@@ -3850,8 +3850,8 @@ mod unit_tests {
             assert!(result.is_err());
             let err = result.unwrap_err();
             assert!(
-                matches!(err, Error::UnsupportedFeature(ref v) if v.to_string().contains("corrupt")),
-                "Expected UnsupportedFeature error mentioning corrupt, got: {err:?}"
+                matches!(err, Error::CorruptImage),
+                "Expected CorruptImage error, got: {err:?}"
             );
         });
     }
@@ -3888,8 +3888,8 @@ mod unit_tests {
 
     #[test]
     fn reject_multiple_unsupported_incompat_bits() {
-        // Multiple unsupported bits: corrupt (1) + external data (2)
-        let header = header_v3_with_incompat_features((1 << 1) | (1 << 2));
+        // Multiple unsupported bits: external data (2) + extended L2 (4)
+        let header = header_v3_with_incompat_features((1 << 2) | (1 << 4));
         with_basic_file(&header, |disk_file: RawFile| {
             let result = QcowFile::from(disk_file);
             assert!(result.is_err());
@@ -4019,6 +4019,120 @@ mod unit_tests {
             features & IncompatFeatures::DIRTY.bits(),
             0,
             "Dirty bit should not be written for read-only files"
+        );
+    }
+
+    #[test]
+    fn corrupt_image_rejected_for_write() {
+        // Test that a corrupt image cannot be opened for writing
+        let header = header_v3_with_incompat_features(IncompatFeatures::CORRUPT.bits());
+        with_basic_file(&header, |disk_file: RawFile| {
+            assert!(disk_file.is_writable(), "File should be writable");
+
+            let result = QcowFile::from(disk_file);
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(
+                matches!(err, Error::CorruptImage),
+                "Expected CorruptImage error, got: {err:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn corrupt_image_allowed_readonly() {
+        // Test that a corrupt image can be opened read-only
+        let header = header_v3_with_incompat_features(IncompatFeatures::CORRUPT.bits());
+
+        // Create a temp file with the corrupt header
+        let temp_file = TempFile::new().unwrap();
+        let temp_path = temp_file.as_path().to_owned();
+        {
+            let mut file = temp_file.as_file().try_clone().unwrap();
+            file.write_all(&header).unwrap();
+            file.set_len(0x1_0000_0000).unwrap();
+        }
+
+        let readonly_file = OpenOptions::new()
+            .read(true)
+            .write(false)
+            .open(&temp_path)
+            .unwrap();
+        let raw_file = RawFile::new(readonly_file, false);
+        assert!(!raw_file.is_writable(), "File should be read-only");
+
+        let result = QcowFile::from(raw_file);
+        assert!(
+            result.is_ok(),
+            "Corrupt image should be openable read-only, got: {:?}",
+            result.err()
+        );
+
+        let qcow = result.unwrap();
+        assert!(qcow.header.is_corrupt(), "Corrupt bit should be set");
+    }
+
+    #[test]
+    fn set_corrupt_bit() {
+        // Test that set_corrupt_bit correctly sets the corrupt bit
+        let header = valid_header_v3();
+        with_basic_file(&header, |mut disk_file: RawFile| {
+            let mut qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
+
+            assert!(!qcow.header.is_corrupt(), "Should not be corrupt initially");
+
+            qcow.header
+                .set_corrupt_bit(qcow.raw_file.file_mut())
+                .unwrap();
+
+            // Verify in memory
+            assert!(qcow.header.is_corrupt(), "Should be corrupt after set");
+
+            // Verify on disk
+            disk_file
+                .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
+                .unwrap();
+            let features = u64::read_be(&mut disk_file).unwrap();
+            assert!(
+                IncompatFeatures::from_bits_retain(features).contains(IncompatFeatures::CORRUPT),
+                "Corrupt bit should be set on disk"
+            );
+        });
+    }
+
+    #[test]
+    fn corrupt_bit_persists_with_dirty() {
+        // Test that both corrupt and dirty bits can coexist
+        let header = header_v3_with_incompat_features(
+            IncompatFeatures::CORRUPT.bits() | IncompatFeatures::DIRTY.bits(),
+        );
+
+        let temp_file = TempFile::new().unwrap();
+        let temp_path = temp_file.as_path().to_owned();
+        {
+            let mut file = temp_file.as_file().try_clone().unwrap();
+            file.write_all(&header).unwrap();
+            file.set_len(0x1_0000_0000).unwrap();
+        }
+
+        // Writable would be rejected due to corrupt bit
+        let readonly_file = OpenOptions::new()
+            .read(true)
+            .write(false)
+            .open(&temp_path)
+            .unwrap();
+        let raw_file = RawFile::new(readonly_file, false);
+
+        let qcow = QcowFile::from(raw_file).unwrap();
+
+        let features = IncompatFeatures::from_bits_truncate(qcow.header.incompatible_features);
+        assert!(
+            features.contains(IncompatFeatures::CORRUPT),
+            "Corrupt bit should be set"
+        );
+        assert!(
+            features.contains(IncompatFeatures::DIRTY),
+            "Dirty bit should also be set"
         );
     }
 }
