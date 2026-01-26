@@ -19,7 +19,6 @@ use std::os::fd::{AsRawFd, RawFd};
 use std::str::{self, FromStr};
 
 use bitflags::bitflags;
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use libc::{EINVAL, EIO, ENOSPC};
 use log::error;
 use remain::sorted;
@@ -30,7 +29,7 @@ use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
 use crate::BlockBackend;
 use crate::qcow::decoder::{Decoder, ZlibDecoder, ZstdDecoder};
-use crate::qcow::qcow_raw_file::QcowRawFile;
+use crate::qcow::qcow_raw_file::{BeUint, QcowRawFile};
 pub use crate::qcow::raw_file::RawFile;
 use crate::qcow::refcount::RefCount;
 use crate::qcow::vec_cache::{CacheMap, Cacheable, VecCache};
@@ -376,12 +375,12 @@ impl QcowHeader {
             .map_err(Error::ReadingHeader)?;
 
         loop {
-            let ext_type = f.read_u32::<BigEndian>().map_err(Error::ReadingHeader)?;
+            let ext_type = u32::read_be(f).map_err(Error::ReadingHeader)?;
             if ext_type == HEADER_EXT_END {
                 break;
             }
 
-            let ext_length = f.read_u32::<BigEndian>().map_err(Error::ReadingHeader)?;
+            let ext_length = u32::read_be(f).map_err(Error::ReadingHeader)?;
 
             match ext_type {
                 HEADER_EXT_BACKING_FORMAT => {
@@ -428,67 +427,55 @@ impl QcowHeader {
     /// Creates a QcowHeader from a reference to a file.
     pub fn new(f: &mut RawFile) -> Result<QcowHeader> {
         f.rewind().map_err(Error::ReadingHeader)?;
-        let magic = f.read_u32::<BigEndian>().map_err(Error::ReadingHeader)?;
+        let magic = u32::read_be(f).map_err(Error::ReadingHeader)?;
         if magic != QCOW_MAGIC {
             return Err(Error::InvalidMagic);
         }
 
         // Reads the next u32 from the file.
-        fn read_u32_from_file(f: &mut RawFile) -> Result<u32> {
-            f.read_u32::<BigEndian>().map_err(Error::ReadingHeader)
+        fn read_u32_be(f: &mut RawFile) -> Result<u32> {
+            u32::read_be(f).map_err(Error::ReadingHeader)
         }
 
         // Reads the next u64 from the file.
-        fn read_u64_from_file(f: &mut RawFile) -> Result<u64> {
-            f.read_u64::<BigEndian>().map_err(Error::ReadingHeader)
+        fn read_u64_be(f: &mut RawFile) -> Result<u64> {
+            u64::read_be(f).map_err(Error::ReadingHeader)
         }
 
-        let version = read_u32_from_file(f)?;
+        let version = read_u32_be(f)?;
 
         let mut header = QcowHeader {
             magic,
             version,
-            backing_file_offset: read_u64_from_file(f)?,
-            backing_file_size: read_u32_from_file(f)?,
-            cluster_bits: read_u32_from_file(f)?,
-            size: read_u64_from_file(f)?,
-            crypt_method: read_u32_from_file(f)?,
-            l1_size: read_u32_from_file(f)?,
-            l1_table_offset: read_u64_from_file(f)?,
-            refcount_table_offset: read_u64_from_file(f)?,
-            refcount_table_clusters: read_u32_from_file(f)?,
-            nb_snapshots: read_u32_from_file(f)?,
-            snapshots_offset: read_u64_from_file(f)?,
-            incompatible_features: if version == 2 {
-                0
-            } else {
-                read_u64_from_file(f)?
-            },
-            compatible_features: if version == 2 {
-                0
-            } else {
-                read_u64_from_file(f)?
-            },
-            autoclear_features: if version == 2 {
-                0
-            } else {
-                read_u64_from_file(f)?
-            },
+            backing_file_offset: read_u64_be(f)?,
+            backing_file_size: read_u32_be(f)?,
+            cluster_bits: read_u32_be(f)?,
+            size: read_u64_be(f)?,
+            crypt_method: read_u32_be(f)?,
+            l1_size: read_u32_be(f)?,
+            l1_table_offset: read_u64_be(f)?,
+            refcount_table_offset: read_u64_be(f)?,
+            refcount_table_clusters: read_u32_be(f)?,
+            nb_snapshots: read_u32_be(f)?,
+            snapshots_offset: read_u64_be(f)?,
+            incompatible_features: if version == 2 { 0 } else { read_u64_be(f)? },
+            compatible_features: if version == 2 { 0 } else { read_u64_be(f)? },
+            autoclear_features: if version == 2 { 0 } else { read_u64_be(f)? },
             refcount_order: if version == 2 {
                 DEFAULT_REFCOUNT_ORDER
             } else {
-                read_u32_from_file(f)?
+                read_u32_be(f)?
             },
             header_size: if version == 2 {
                 V2_BARE_HEADER_SIZE
             } else {
-                read_u32_from_file(f)?
+                read_u32_be(f)?
             },
             compression_type: CompressionType::Zlib,
             backing_file: None,
         };
         if version == 3 && header.header_size > V3_BARE_HEADER_SIZE {
-            let raw_compression_type = read_u64_from_file(f)? >> (64 - 8);
+            let raw_compression_type = read_u64_be(f)? >> (64 - 8);
             header.compression_type = if raw_compression_type == COMPRESSION_TYPE_ZLIB {
                 Ok(CompressionType::Zlib)
             } else if raw_compression_type == COMPRESSION_TYPE_ZSTD {
@@ -620,44 +607,42 @@ impl QcowHeader {
     /// Write the header to `file`.
     pub fn write_to<F: Write + Seek>(&self, file: &mut F) -> Result<()> {
         // Writes the next u32 to the file.
-        fn write_u32_to_file<F: Write>(f: &mut F, value: u32) -> Result<()> {
-            f.write_u32::<BigEndian>(value)
-                .map_err(Error::WritingHeader)
+        fn write_u32_be<F: Write>(f: &mut F, value: u32) -> Result<()> {
+            u32::write_be(f, value).map_err(Error::WritingHeader)
         }
 
         // Writes the next u64 to the file.
-        fn write_u64_to_file<F: Write>(f: &mut F, value: u64) -> Result<()> {
-            f.write_u64::<BigEndian>(value)
-                .map_err(Error::WritingHeader)
+        fn write_u64_be<F: Write>(f: &mut F, value: u64) -> Result<()> {
+            u64::write_be(f, value).map_err(Error::WritingHeader)
         }
 
-        write_u32_to_file(file, self.magic)?;
-        write_u32_to_file(file, self.version)?;
-        write_u64_to_file(file, self.backing_file_offset)?;
-        write_u32_to_file(file, self.backing_file_size)?;
-        write_u32_to_file(file, self.cluster_bits)?;
-        write_u64_to_file(file, self.size)?;
-        write_u32_to_file(file, self.crypt_method)?;
-        write_u32_to_file(file, self.l1_size)?;
-        write_u64_to_file(file, self.l1_table_offset)?;
-        write_u64_to_file(file, self.refcount_table_offset)?;
-        write_u32_to_file(file, self.refcount_table_clusters)?;
-        write_u32_to_file(file, self.nb_snapshots)?;
-        write_u64_to_file(file, self.snapshots_offset)?;
+        write_u32_be(file, self.magic)?;
+        write_u32_be(file, self.version)?;
+        write_u64_be(file, self.backing_file_offset)?;
+        write_u32_be(file, self.backing_file_size)?;
+        write_u32_be(file, self.cluster_bits)?;
+        write_u64_be(file, self.size)?;
+        write_u32_be(file, self.crypt_method)?;
+        write_u32_be(file, self.l1_size)?;
+        write_u64_be(file, self.l1_table_offset)?;
+        write_u64_be(file, self.refcount_table_offset)?;
+        write_u32_be(file, self.refcount_table_clusters)?;
+        write_u32_be(file, self.nb_snapshots)?;
+        write_u64_be(file, self.snapshots_offset)?;
 
         if self.version == 3 {
-            write_u64_to_file(file, self.incompatible_features)?;
-            write_u64_to_file(file, self.compatible_features)?;
-            write_u64_to_file(file, self.autoclear_features)?;
-            write_u32_to_file(file, self.refcount_order)?;
-            write_u32_to_file(file, self.header_size)?;
+            write_u64_be(file, self.incompatible_features)?;
+            write_u64_be(file, self.compatible_features)?;
+            write_u64_be(file, self.autoclear_features)?;
+            write_u32_be(file, self.refcount_order)?;
+            write_u32_be(file, self.header_size)?;
 
             if self.header_size > V3_BARE_HEADER_SIZE {
-                write_u64_to_file(file, 0)?; // no compression
+                write_u64_be(file, 0)?; // no compression
             }
 
-            write_u32_to_file(file, 0)?; // header extension type: end of header extension area
-            write_u32_to_file(file, 0)?; // length of header extension data: 0
+            write_u32_be(file, 0)?; // header extension type: end of header extension area
+            write_u32_be(file, 0)?; // length of header extension data: 0
         }
 
         if let Some(backing_file_path) = self.backing_file.as_ref().map(|bf| &bf.path) {
@@ -689,8 +674,7 @@ impl QcowHeader {
         }
         file.seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
             .map_err(Error::WritingHeader)?;
-        file.write_u64::<BigEndian>(self.incompatible_features)
-            .map_err(Error::WritingHeader)?;
+        u64::write_be(file, self.incompatible_features).map_err(Error::WritingHeader)?;
         Ok(())
     }
 
@@ -909,12 +893,11 @@ impl QcowFile {
         let mut refcount_rebuild_required = true;
         file.seek(SeekFrom::Start(header.refcount_table_offset))
             .map_err(Error::SeekingFile)?;
-        let first_refblock_addr = file.read_u64::<BigEndian>().map_err(Error::ReadingHeader)?;
+        let first_refblock_addr = u64::read_be(&mut file).map_err(Error::ReadingHeader)?;
         if first_refblock_addr != 0 {
             file.seek(SeekFrom::Start(first_refblock_addr))
                 .map_err(Error::SeekingFile)?;
-            let first_cluster_refcount =
-                file.read_u16::<BigEndian>().map_err(Error::ReadingHeader)?;
+            let first_cluster_refcount = u16::read_be(&mut file).map_err(Error::ReadingHeader)?;
             if first_cluster_refcount != 0 {
                 refcount_rebuild_required = false;
             }
@@ -2371,7 +2354,7 @@ pub fn convert(
 pub fn detect_image_type(file: &mut RawFile) -> Result<ImageType> {
     let orig_seek = file.stream_position().map_err(Error::SeekingFile)?;
     file.rewind().map_err(Error::SeekingFile)?;
-    let magic = file.read_u32::<BigEndian>().map_err(Error::ReadingHeader)?;
+    let magic = u32::read_be(file).map_err(Error::ReadingHeader)?;
     let image_type = if magic == QCOW_MAGIC {
         ImageType::Qcow2
     } else {
@@ -2607,10 +2590,8 @@ mod unit_tests {
         disk_file
             .seek(SeekFrom::Start(header.header_size as u64))
             .unwrap();
-        disk_file.write_u32::<BigEndian>(ext_type).unwrap();
-        disk_file
-            .write_u32::<BigEndian>(ext_data.len() as u32)
-            .unwrap();
+        u32::write_be(&mut disk_file, ext_type).unwrap();
+        u32::write_be(&mut disk_file, ext_data.len() as u32).unwrap();
         disk_file.write_all(ext_data).unwrap();
 
         // Add padding to 8-byte boundary
@@ -2619,7 +2600,7 @@ mod unit_tests {
             disk_file.write_all(&vec![0u8; padding]).unwrap();
         }
 
-        disk_file.write_u32::<BigEndian>(HEADER_EXT_END).unwrap();
+        u32::write_be(&mut disk_file, HEADER_EXT_END).unwrap();
 
         disk_file.rewind().unwrap();
 
@@ -3910,7 +3891,7 @@ mod unit_tests {
             disk_file
                 .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
                 .unwrap();
-            let features_before = disk_file.read_u64::<BigEndian>().unwrap();
+            let features_before = u64::read_be(&mut disk_file).unwrap();
             assert_eq!(
                 features_before & IncompatFeatures::DIRTY.bits(),
                 0,
@@ -3926,7 +3907,7 @@ mod unit_tests {
                 disk_file
                     .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
                     .unwrap();
-                let features_during = disk_file.read_u64::<BigEndian>().unwrap();
+                let features_during = u64::read_be(&mut disk_file).unwrap();
                 assert_ne!(
                     features_during & IncompatFeatures::DIRTY.bits(),
                     0,
@@ -3940,7 +3921,7 @@ mod unit_tests {
             disk_file
                 .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
                 .unwrap();
-            let features_after = disk_file.read_u64::<BigEndian>().unwrap();
+            let features_after = u64::read_be(&mut disk_file).unwrap();
             assert_eq!(
                 features_after & IncompatFeatures::DIRTY.bits(),
                 0,
@@ -4003,7 +3984,7 @@ mod unit_tests {
         verify_raw
             .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
             .unwrap();
-        let features = verify_raw.read_u64::<BigEndian>().unwrap();
+        let features = u64::read_be(&mut verify_raw).unwrap();
         assert_eq!(
             features & IncompatFeatures::DIRTY.bits(),
             0,
