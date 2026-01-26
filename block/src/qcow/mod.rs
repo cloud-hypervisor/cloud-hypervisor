@@ -1616,7 +1616,12 @@ impl QcowFile {
             // Cluster with zero flag reads as zeros without accessing disk.
             return Ok(None);
         } else {
-            let start = l2_entry_std_cluster_addr(l2_entry) + self.raw_file.cluster_offset(address);
+            let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
+            if cluster_addr & (self.raw_file.cluster_size() - 1) != 0 {
+                self.set_corrupt_bit_best_effort();
+                return Err(io::Error::from_raw_os_error(EIO));
+            }
+            let start = cluster_addr + self.raw_file.cluster_offset(address);
             let raw_file = self.raw_file.file_mut();
             raw_file.seek(SeekFrom::Start(start))?;
             raw_file.read_exact(buf)?;
@@ -1678,7 +1683,12 @@ impl QcowFile {
                 let refcount = self
                     .refcounts
                     .get_cluster_refcount(&mut self.raw_file, addr)
-                    .map_err(|e| std::io::Error::other(Error::GettingRefcount(e)))?;
+                    .map_err(|e| {
+                        if matches!(e, refcount::Error::RefblockUnaligned(_)) {
+                            self.set_corrupt_bit_best_effort();
+                        }
+                        io::Error::other(Error::GettingRefcount(e))
+                    })?;
                 if refcount > 0 {
                     self.set_cluster_refcount_track_freed(addr, refcount - 1)?;
                 }
@@ -1701,7 +1711,12 @@ impl QcowFile {
             self.update_cluster_addr(l1_index, l2_index, cluster_addr, &mut set_refcounts)?;
             cluster_addr
         } else {
-            l2_entry_std_cluster_addr(l2_entry)
+            let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
+            if cluster_addr & (self.raw_file.cluster_size() - 1) != 0 {
+                self.set_corrupt_bit_best_effort();
+                return Err(io::Error::from_raw_os_error(EIO));
+            }
+            cluster_addr
         };
 
         for (addr, count) in set_refcounts {
@@ -1748,6 +1763,10 @@ impl QcowFile {
     fn get_new_cluster(&mut self, initial_data: Option<Vec<u8>>) -> std::io::Result<u64> {
         // First use a pre allocated cluster if one is available.
         if let Some(free_cluster) = self.avail_clusters.pop() {
+            if free_cluster == 0 {
+                self.set_corrupt_bit_best_effort();
+                return Err(io::Error::from_raw_os_error(EIO));
+            }
             if let Some(initial_data) = initial_data {
                 self.raw_file.write_cluster(free_cluster, &initial_data)?;
             } else {
@@ -1758,6 +1777,10 @@ impl QcowFile {
 
         let max_valid_cluster_offset = self.refcounts.max_valid_cluster_offset();
         if let Some(new_cluster) = self.raw_file.add_cluster_end(max_valid_cluster_offset)? {
+            if new_cluster == 0 {
+                self.set_corrupt_bit_best_effort();
+                return Err(io::Error::from_raw_os_error(EIO));
+            }
             if let Some(initial_data) = initial_data {
                 self.raw_file.write_cluster(new_cluster, &initial_data)?;
             }
@@ -1868,6 +1891,9 @@ impl QcowFile {
             .refcounts
             .get_cluster_refcount(&mut self.raw_file, cluster_addr)
             .map_err(|e| {
+                if matches!(e, refcount::Error::RefblockUnaligned(_)) {
+                    self.set_corrupt_bit_best_effort();
+                }
                 io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("failed to get cluster refcount: {e}"),
@@ -1952,6 +1978,11 @@ impl QcowFile {
                 self.l1_table[l1_index] = new_addr;
                 VecCache::new(self.l2_entries as usize)
             } else {
+                let cluster_size = self.raw_file.cluster_size();
+                if l2_addr_disk & (cluster_size - 1) != 0 {
+                    self.set_corrupt_bit_best_effort();
+                    return Err(io::Error::from_raw_os_error(EIO));
+                }
                 VecCache::from_vec(Self::read_l2_cluster(&mut self.raw_file, l2_addr_disk)?)
             };
             let l1_table = &self.l1_table;
@@ -2027,6 +2058,10 @@ impl QcowFile {
                 }
                 Err(refcount::Error::RefcountOverflow { .. }) => {
                     return Err(std::io::Error::from_raw_os_error(EINVAL));
+                }
+                Err(refcount::Error::RefblockUnaligned(_)) => {
+                    self.set_corrupt_bit_best_effort();
+                    return Err(io::Error::from_raw_os_error(EIO));
                 }
             }
         }
