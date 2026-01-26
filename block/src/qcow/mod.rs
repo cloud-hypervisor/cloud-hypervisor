@@ -12,7 +12,7 @@ mod vec_cache;
 
 use std::cmp::{max, min};
 use std::fmt::{Debug, Display, Formatter, Result as FmtResult};
-use std::fs::OpenOptions;
+use std::fs::{OpenOptions, read_link};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::os::fd::{AsRawFd, RawFd};
@@ -20,7 +20,7 @@ use std::str::{self, FromStr};
 
 use bitflags::bitflags;
 use libc::{EINVAL, EIO, ENOSPC};
-use log::error;
+use log::{error, warn};
 use remain::sorted;
 use thiserror::Error;
 use vmm_sys_util::file_traits::{FileSetLen, FileSync};
@@ -46,6 +46,8 @@ pub enum Error {
     BackingFileOpen(#[source] Box<Error>),
     #[error("Backing file name is too long: {0} bytes over")]
     BackingFileTooLong(usize),
+    #[error("Image is marked corrupt and cannot be opened for writing")]
+    CorruptImage,
     #[error("Failed to evict cache")]
     EvictingCache(#[source] io::Error),
     #[error("File larger than max of {MAX_QCOW_FILE_SIZE}: {0}")]
@@ -230,8 +232,9 @@ bitflags! {
 
 impl IncompatFeatures {
     /// Features supported by this implementation.
-    const SUPPORTED: IncompatFeatures =
-        IncompatFeatures::DIRTY.union(IncompatFeatures::COMPRESSION);
+    const SUPPORTED: IncompatFeatures = IncompatFeatures::DIRTY
+        .union(IncompatFeatures::CORRUPT)
+        .union(IncompatFeatures::COMPRESSION);
 
     /// Get the fallback name for a known feature bit.
     fn flag_name(bit: u8) -> Option<&'static str> {
@@ -698,6 +701,24 @@ impl QcowHeader {
         }
         Ok(())
     }
+
+    /// Set the corrupt bit for QCOW2 v3 images.
+    ///
+    /// This marks the image as corrupted. Once set, the image can only be
+    /// opened read-only until repaired.
+    pub fn set_corrupt_bit<F: Seek + Write + FileSync>(&mut self, file: &mut F) -> Result<()> {
+        if self.version == 3 {
+            self.incompatible_features |= IncompatFeatures::CORRUPT.bits();
+            self.write_incompatible_features(file)?;
+            file.fsync().map_err(Error::WritingHeader)?;
+        }
+        Ok(())
+    }
+
+    pub fn is_corrupt(&self) -> bool {
+        IncompatFeatures::from_bits_truncate(self.incompatible_features)
+            .contains(IncompatFeatures::CORRUPT)
+    }
 }
 
 fn max_refcount_clusters(refcount_order: u32, cluster_size: u32, num_clusters: u32) -> u64 {
@@ -910,6 +931,15 @@ impl QcowFile {
         let mut raw_file = QcowRawFile::from(file, cluster_size, refcount_bits)
             .ok_or(Error::InvalidClusterSize)?;
         let is_writable = raw_file.file().is_writable();
+
+        if header.is_corrupt() {
+            if is_writable {
+                return Err(Error::CorruptImage);
+            }
+            let path = read_link(format!("/proc/self/fd/{}", raw_file.file().as_raw_fd()))
+                .map_or_else(|_| "<unknown>".to_string(), |p| p.display().to_string());
+            warn!("QCOW2 image is marked corrupt, opening read-only: {path}");
+        }
 
         // Image already has dirty bit set. Refcounts may be invalid.
         if IncompatFeatures::from_bits_truncate(header.incompatible_features)
