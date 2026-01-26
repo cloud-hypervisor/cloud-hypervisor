@@ -20,6 +20,9 @@ pub enum Error {
     /// `InvalidIndex` - Address requested isn't within the range of the disk.
     #[error("Address requested is not within the range of the disk")]
     InvalidIndex,
+    /// `RefblockUnaligned` - Refcount block offset is not cluster aligned.
+    #[error("Refcount block offset {0:#x} is not cluster aligned")]
+    RefblockUnaligned(u64),
     /// `NeedCluster` - Handle this error by reading the cluster and calling the function again.
     #[error("Cluster with addr={0} needs to be read")]
     NeedCluster(u64),
@@ -201,6 +204,9 @@ impl RefCount {
         let block_addr_disk = *self.ref_table.get(table_index).ok_or(Error::InvalidIndex)?;
         if block_addr_disk == 0 {
             return Ok(0);
+        }
+        if block_addr_disk & (self.cluster_size - 1) != 0 {
+            return Err(Error::RefblockUnaligned(block_addr_disk));
         }
         if !self.refblock_cache.contains_key(table_index) {
             let table = VecCache::from_vec(
