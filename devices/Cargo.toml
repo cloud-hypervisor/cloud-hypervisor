@@ -34,7 +34,7 @@ vm-memory = { workspace = true, features = [
 ] }
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = { workspace = true }
-zerocopy = { version = "0.8.33", features = [
+zerocopy = { version = "0.8.34", features = [
   "alloc",
   "derive",
 ], optional = true }
