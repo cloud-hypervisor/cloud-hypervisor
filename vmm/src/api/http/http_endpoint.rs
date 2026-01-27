@@ -563,7 +563,7 @@ impl EndpointHandler for VmInfo {
             {
                 Ok(info) => {
                     let mut response = Response::new(Version::Http11, StatusCode::OK);
-                    let info_serialized = serde_json::to_string(&info).unwrap();
+                    let info_serialized = serde_json::to_string_pretty(&info).unwrap();
 
                     response.set_body(Body::new(info_serialized));
                     response
