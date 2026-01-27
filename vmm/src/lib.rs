@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{
     Receiver, RecvError, SendError, Sender, SyncSender, TrySendError, channel, sync_channel,
 };
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
 #[cfg(not(target_arch = "riscv64"))]
@@ -67,6 +67,7 @@ use crate::memory_manager::MemoryManager;
 use crate::migration::get_vm_snapshot;
 use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
+use crate::sync_utils::Gate;
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
@@ -95,6 +96,7 @@ mod pci_segment;
 pub mod seccomp_filters;
 mod serial_manager;
 mod sigwinch_listener;
+mod sync_utils;
 pub mod vm;
 pub mod vm_config;
 
@@ -1116,7 +1118,7 @@ enum SendMemoryThreadMessage {
     Memory(MemoryRangeTable),
     /// A synchronization point after each iteration of sending memory. That way the
     /// main thread knows when all memory is sent and acknowledged.
-    Barrier(Arc<Barrier>),
+    Gate(Arc<Gate>),
     /// Sending memory is done and the threads are not needed anymore.
     Disconnect,
 }
@@ -1125,9 +1127,9 @@ enum SendMemoryThreadMessage {
 /// sending thread.
 #[derive(Debug)]
 enum SendMemoryThreadNotify {
-    /// A sending thread arrived at the barrier. The main thread does not wait at the
-    /// barrier, otherwise we could miss error messages.
-    Barrier,
+    /// A sending thread arrived at the gate. The main thread does not wait at the
+    /// gate, otherwise we could miss error messages.
+    Gate,
     /// A sending thread encountered an error while sending memory.
     Error(MigratableError),
 }
@@ -1143,7 +1145,7 @@ struct SendAdditionalConnections {
     cancel: Arc<AtomicBool>,
     // After the main thread sent all memory chunks to the sender threads, it waits
     // until one of the workers notifies it. Either because an error occurred, or
-    // because they arrived at the barrier.
+    // because they arrived at the gate.
     notify_rx: Receiver<SendMemoryThreadNotify>,
 }
 
@@ -1261,12 +1263,12 @@ impl SendAdditionalConnections {
                                     }
                                 }
                             }
-                            SendMemoryThreadMessage::Barrier(barrier) => {
-                                if let Err(e) = notify_tx.send(SendMemoryThreadNotify::Barrier) {
+                            SendMemoryThreadMessage::Gate(gate) => {
+                                if let Err(e) = notify_tx.send(SendMemoryThreadNotify::Gate) {
                                     error!("Could not send barrier notify to main thread: {e}");
                                     break;
                                 }
-                                barrier.wait();
+                                gate.wait();
                             }
                             SendMemoryThreadMessage::Disconnect => {
                                 break;
@@ -1290,26 +1292,29 @@ impl SendAdditionalConnections {
 
     /// Wait until all data that is in-flight has actually been send and acknowledged.
     fn wait_for_pending_data(&self) -> std::result::Result<(), MigratableError> {
-        let barrier = Arc::new(Barrier::new(self.threads.len()));
+        let gate = Arc::new(Gate::new());
         for _ in 0..self.threads.len() {
             self.sender
-                .send(SendMemoryThreadMessage::Barrier(barrier.clone()))
+                .send(SendMemoryThreadMessage::Gate(gate.clone()))
                 .unwrap();
         }
 
-        // We cannot simply wait for the barrier, otherwise we might miss it when a sender
+        // We cannot simply wait for the gate, otherwise we might miss it when a sender
         // thread encounters an error. Thus we wait for the workers to notify us that they
-        // arrived at the barrier using notify_rx.
+        // arrived at the gate using notify_rx.
         let mut seen_threads = 0;
         loop {
             match self.notify_rx.recv().unwrap() {
                 SendMemoryThreadNotify::Error(e) => {
-                    // If an error occurred in one of the worker threads, we return the error.
+                    // If an error occurred in one of the worker threads, we open the gate to make
+                    // sure that no thread hangs. After that we return the error.
+                    gate.open();
                     return Err(e);
                 }
-                SendMemoryThreadNotify::Barrier => {
+                SendMemoryThreadNotify::Gate => {
                     seen_threads += 1;
                     if seen_threads == self.threads.len() {
+                        gate.open();
                         return Ok(());
                     }
                 }
@@ -1348,7 +1353,7 @@ impl SendAdditionalConnections {
                 if self.cancel.load(Ordering::Relaxed) {
                     loop {
                         match self.notify_rx.recv().unwrap() {
-                            SendMemoryThreadNotify::Barrier => continue,
+                            SendMemoryThreadNotify::Gate => continue,
                             SendMemoryThreadNotify::Error(e) => return Err(e),
                         }
                     }
