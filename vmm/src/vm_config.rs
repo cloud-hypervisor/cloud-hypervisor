@@ -674,7 +674,6 @@ pub struct NumaDistance {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct NumaConfig {
-    #[serde(default)]
     pub guest_numa_id: u32,
     #[serde(default)]
     pub cpus: Option<Vec<u32>>,
@@ -684,6 +683,8 @@ pub struct NumaConfig {
     pub memory_zones: Option<Vec<String>>,
     #[serde(default)]
     pub pci_segments: Option<Vec<u16>>,
+    #[serde(default)]
+    pub device_id: Option<String>,
 }
 
 /// Errors describing a misconfigured payload, i.e., a configuration that

@@ -11,6 +11,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
+use log::warn;
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
@@ -1031,6 +1032,13 @@ impl Vm {
                     for distance in distances.iter() {
                         let dest = distance.destination;
                         let dist = distance.distance;
+
+                        if dest == config.guest_numa_id
+                            && dist != 10 {
+                            warn!(
+                                "Ignoring self-distance {dest}@{dist} (must be 10 per ACPI spec)"
+                            );
+                        }
 
                         if !configs.iter().any(|cfg| cfg.guest_numa_id == dest) {
                             error!("Unknown destination NUMA node {dest}");
