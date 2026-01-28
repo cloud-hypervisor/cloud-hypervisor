@@ -1384,6 +1384,7 @@ impl MemoryManager {
         thp: bool,
     ) -> Result<MmapRegion<AtomicBitmap>, Error> {
         let mut mmap_flags = libc::MAP_NORESERVE;
+        let mut is_anonymous_shared_memory = false;
 
         // The duplication of mmap_flags ORing here is unfortunate but it also makes
         // the complexity of the handling clear.
@@ -1403,6 +1404,7 @@ impl MemoryManager {
             // because the MAP_PRIVATE will trigger CoW against the backing file with
             // the VFIO pinning
             mmap_flags |= libc::MAP_SHARED;
+            is_anonymous_shared_memory = true;
             Some(Self::create_anonymous_file(size, hugepages, hugepage_size)?)
         } else {
             mmap_flags |= libc::MAP_PRIVATE | libc::MAP_ANONYMOUS;
@@ -1486,7 +1488,7 @@ impl MemoryManager {
             });
         }
 
-        if region.file_offset().is_none() && thp {
+        if thp && (region.file_offset().is_none() || is_anonymous_shared_memory) {
             info!(
                 "Anonymous mapping at 0x{:x} (size = 0x{:x})",
                 region.as_ptr() as u64,
