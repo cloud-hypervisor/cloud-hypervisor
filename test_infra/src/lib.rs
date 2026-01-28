@@ -18,6 +18,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use std::{env, fmt, fs, io, thread};
 
+use rand::{Rng, rng};
 use serde_json::Value;
 use ssh2::Session;
 use thiserror::Error;
@@ -75,6 +76,7 @@ pub struct GuestNetworkConfig {
 pub const DEFAULT_TCP_LISTENER_MESSAGE: &str = "booted";
 pub const DEFAULT_TCP_LISTENER_PORT: u16 = 8000;
 pub const DEFAULT_TCP_LISTENER_TIMEOUT: i32 = 120;
+pub const DEFAULT_CVM_TCP_LISTENER_TIMEOUT: i32 = 120;
 
 #[derive(Error, Debug)]
 pub enum WaitForBootError {
@@ -91,16 +93,12 @@ pub enum WaitForBootError {
 }
 
 impl GuestNetworkConfig {
-    pub fn wait_vm_boot(&self, custom_timeout: Option<i32>) -> Result<(), WaitForBootError> {
+    pub fn wait_vm_boot(&self, custom_timeout: i32) -> Result<(), WaitForBootError> {
         let start = std::time::Instant::now();
         // The 'port' is unique per 'GUEST' and listening to wild-card ip avoids retrying on 'TcpListener::bind()'
         let listen_addr = format!("0.0.0.0:{}", self.tcp_listener_port);
         let expected_guest_addr = self.guest_ip0.as_str();
         let mut s = String::new();
-        let timeout = match custom_timeout {
-            Some(t) => t,
-            None => DEFAULT_TCP_LISTENER_TIMEOUT,
-        };
 
         let mut closure = || -> Result<(), WaitForBootError> {
             let listener =
@@ -122,14 +120,15 @@ impl GuestNetworkConfig {
             .expect("Cannot add 'tcp_listener' event to epoll");
             let mut events = [epoll::Event::new(epoll::Events::empty(), 0); 1];
             loop {
-                let num_events = match epoll::wait(epoll_fd, timeout * 1000_i32, &mut events[..]) {
-                    Ok(num_events) => Ok(num_events),
-                    Err(e) => match e.raw_os_error() {
-                        Some(libc::EAGAIN) | Some(libc::EINTR) => continue,
-                        _ => Err(e),
-                    },
-                }
-                .map_err(WaitForBootError::EpollWait)?;
+                let num_events =
+                    match epoll::wait(epoll_fd, custom_timeout * 1000_i32, &mut events[..]) {
+                        Ok(num_events) => Ok(num_events),
+                        Err(e) => match e.raw_os_error() {
+                            Some(libc::EAGAIN) | Some(libc::EINTR) => continue,
+                            _ => Err(e),
+                        },
+                    }
+                    .map_err(WaitForBootError::EpollWait)?;
                 if num_events == 0 {
                     return Err(WaitForBootError::EpollWaitTimeout);
                 }
@@ -162,7 +161,7 @@ impl GuestNetworkConfig {
                 let duration = start.elapsed();
                 eprintln!(
                     "\n\n==== Start 'wait_vm_boot' (FAILED) ==== \
-                    \n\nduration =\"{duration:?}, timeout = {timeout}s\" \
+                    \n\nduration =\"{duration:?}, timeout = {custom_timeout}s\" \
                     \nlisten_addr=\"{listen_addr}\" \
                     \nexpected_guest_addr=\"{expected_guest_addr}\" \
                     \nmessage=\"{s}\" \
@@ -887,6 +886,11 @@ pub struct Guest {
     pub tmp_dir: TempDir,
     pub disk_config: Box<dyn DiskConfig>,
     pub network: GuestNetworkConfig,
+    pub vm_type: GuestVmType,
+    pub boot_timeout: i32,
+    pub kernel_path: Option<String>,
+    pub kernel_cmdline: Option<String>,
+    pub console_type: Option<String>,
 }
 
 // Return the next id that can be used for this guest. This is stored in a
@@ -951,6 +955,11 @@ impl Guest {
             tmp_dir,
             disk_config,
             network,
+            vm_type: GuestVmType::Regular,
+            boot_timeout: DEFAULT_TCP_LISTENER_TIMEOUT,
+            kernel_path: None,
+            kernel_cmdline: None,
+            console_type: None,
         }
     }
 
@@ -1076,7 +1085,17 @@ impl Guest {
         .map_err(Error::Parsing)
     }
 
-    pub fn wait_vm_boot(&self, custom_timeout: Option<i32>) -> Result<(), Error> {
+    fn default_boot_timeout(&self) -> i32 {
+        self.boot_timeout
+    }
+
+    pub fn wait_vm_boot(&self) -> Result<(), Error> {
+        self.network
+            .wait_vm_boot(self.default_boot_timeout())
+            .map_err(Error::WaitForBoot)
+    }
+
+    pub fn wait_vm_boot_custom_timeout(&self, custom_timeout: i32) -> Result<(), Error> {
         self.network
             .wait_vm_boot(custom_timeout)
             .map_err(Error::WaitForBoot)
@@ -1214,7 +1233,7 @@ impl Guest {
         );
     }
 
-    pub fn reboot_linux(&self, current_reboot_count: u32, custom_timeout: Option<i32>) {
+    pub fn reboot_linux(&self, current_reboot_count: u32) {
         let list_boots_cmd = "sudo last | grep -c reboot";
         let boot_count = self
             .ssh_command(list_boots_cmd)
@@ -1226,7 +1245,7 @@ impl Guest {
         assert_eq!(boot_count, current_reboot_count + 1);
         self.ssh_command("sudo reboot").unwrap();
 
-        self.wait_vm_boot(custom_timeout).unwrap();
+        self.wait_vm_boot().unwrap();
         let boot_count = self
             .ssh_command(list_boots_cmd)
             .unwrap()
@@ -1460,6 +1479,28 @@ impl<'a> GuestCommand<'a> {
 
     pub fn default_net(&mut self) -> &mut Self {
         self.args(["--net", self.guest.default_net_string().as_str()])
+    }
+
+    pub fn default_kernel_cmdline(&mut self) -> &mut Self {
+        if self.guest.vm_type == GuestVmType::Confidential {
+            let console_str = if let Some(c) = &self.guest.console_type {
+                c.as_str()
+            } else {
+                "hvc0"
+            };
+            let igvm = direct_igvm_boot_path(Some(console_str));
+            self.command.args(["--igvm", igvm.to_str().unwrap()]);
+            self.command
+                .args(["--host-data", generate_host_data().as_str()]);
+            self.command.args(["--platform", "sev_snp=on"]);
+        } else if let Some(kernel) = &self.guest.kernel_path {
+            self.command.args(["--kernel", kernel.as_str()]);
+            if let Some(cmdline) = &self.guest.kernel_cmdline {
+                self.command.args(["--cmdline", cmdline]);
+            }
+        }
+
+        self
     }
 }
 
@@ -1857,4 +1898,43 @@ pub fn extract_bar_address(output: &str, device_desc: &str, bar_index: usize) ->
         }
     }
     None
+}
+
+#[derive(PartialEq, Clone, Copy)]
+pub enum GuestVmType {
+    Regular,
+    Confidential,
+}
+
+// Get the direct igvm boot file path based on the console type
+fn direct_igvm_boot_path(console: Option<&str>) -> PathBuf {
+    // get the default hvc0 igvm file if console string is not passed
+    let console_str = console.unwrap_or("hvc0");
+
+    if console_str != "hvc0" && console_str != "ttyS0" {
+        panic!(
+            "{}",
+            format!("IGVM console should be hvc0 or ttyS0, got: {console_str}")
+        );
+    }
+
+    let igvm_filepath = format!("/igvm_files/linux-{console_str}.bin");
+    let igvm_path_exist = Path::new(&igvm_filepath);
+    if igvm_path_exist.exists() {
+        PathBuf::from(igvm_filepath)
+    } else {
+        PathBuf::from("")
+    }
+}
+
+// Generate a random 64-character hex string for host data
+fn generate_host_data() -> String {
+    let mut rng = rng();
+    #[allow(clippy::format_collect)]
+    let hex_string: String = (0..64)
+        .map(|_| rng.random_range(0..=15))
+        .map(|num| format!("{num:x}"))
+        .collect();
+
+    hex_string
 }
