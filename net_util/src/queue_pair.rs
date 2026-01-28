@@ -51,7 +51,11 @@ impl TxVirtio {
         let mut retry_write = false;
         let mut rate_limit_reached = false;
 
-        while let Some(mut desc_chain) = queue.pop_descriptor_chain(mem) {
+        while let Some(mut desc_chain) = queue
+            .iter(mem)
+            .map_err(NetQueuePairError::QueueIteratorFailed)?
+            .next()
+        {
             if rate_limit_reached {
                 queue.go_to_previous_position();
                 break;
@@ -180,7 +184,11 @@ impl RxVirtio {
         let mut exhausted_descs = true;
         let mut rate_limit_reached = false;
 
-        while let Some(mut desc_chain) = queue.pop_descriptor_chain(mem) {
+        while let Some(mut desc_chain) = queue
+            .iter(mem)
+            .map_err(NetQueuePairError::QueueIteratorFailed)?
+            .next()
+        {
             if rate_limit_reached {
                 exhausted_descs = false;
                 queue.go_to_previous_position();
