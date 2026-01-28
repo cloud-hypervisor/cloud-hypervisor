@@ -18,7 +18,7 @@
 //!
 //! - x86_64
 //! - arm64
-//! - riscv64 (experimental)
+//! - riscv64 (Generic)
 //!
 
 /// Architecture specific definitions
