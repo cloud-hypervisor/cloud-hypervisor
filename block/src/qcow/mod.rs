@@ -194,6 +194,7 @@ const DEFAULT_REFCOUNT_ORDER: u32 = 4;
 
 const V2_BARE_HEADER_SIZE: u32 = 72;
 const V3_BARE_HEADER_SIZE: u32 = 104;
+const AUTOCLEAR_FEATURES_OFFSET: u64 = 88;
 
 // bits 0-8 and 56-63 are reserved.
 const L1_TABLE_OFFSET_MASK: u64 = 0x00ff_ffff_ffff_fe00;
@@ -719,6 +720,24 @@ impl QcowHeader {
         IncompatFeatures::from_bits_truncate(self.incompatible_features)
             .contains(IncompatFeatures::CORRUPT)
     }
+
+    /// Clear all autoclear feature bits for QCOW2 v3 images.
+    ///
+    /// These bits indicate features that can be safely disabled when modified
+    /// by software that doesn't understand them.
+    pub fn clear_autoclear_features<F: Seek + Write + FileSync>(
+        &mut self,
+        file: &mut F,
+    ) -> Result<()> {
+        if self.version == 3 && self.autoclear_features != 0 {
+            self.autoclear_features = 0;
+            file.seek(SeekFrom::Start(AUTOCLEAR_FEATURES_OFFSET))
+                .map_err(Error::WritingHeader)?;
+            u64::write_be(file, 0).map_err(Error::WritingHeader)?;
+            file.fsync().map_err(Error::WritingHeader)?;
+        }
+        Ok(())
+    }
 }
 
 fn max_refcount_clusters(refcount_order: u32, cluster_size: u32, num_clusters: u32) -> u64 {
@@ -1023,11 +1042,15 @@ impl QcowFile {
 
         qcow.find_avail_clusters()?;
 
-        if !IncompatFeatures::from_bits_truncate(qcow.header.incompatible_features)
-            .contains(IncompatFeatures::DIRTY)
-            && is_writable
-        {
-            qcow.header.set_dirty_bit(qcow.raw_file.file_mut(), true)?;
+        if is_writable {
+            if !IncompatFeatures::from_bits_truncate(qcow.header.incompatible_features)
+                .contains(IncompatFeatures::DIRTY)
+            {
+                qcow.header.set_dirty_bit(qcow.raw_file.file_mut(), true)?;
+            }
+
+            qcow.header
+                .clear_autoclear_features(qcow.raw_file.file_mut())?;
         }
 
         Ok(qcow)
