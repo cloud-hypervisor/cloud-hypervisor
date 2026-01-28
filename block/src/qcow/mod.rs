@@ -4190,4 +4190,207 @@ mod unit_tests {
             "Dirty bit should also be set"
         );
     }
+
+    /// Helper to check if corrupt bit is set on disk by re-reading the header
+    fn is_corrupt_on_disk(disk_file: &mut RawFile) -> bool {
+        disk_file.rewind().unwrap();
+        QcowHeader::new(disk_file).unwrap().is_corrupt()
+    }
+
+    /// Helper to clear the corrupt bit on disk while preserving other bits
+    fn clear_corrupt_bit_on_disk(disk_file: &mut RawFile) {
+        disk_file
+            .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
+            .unwrap();
+        let features = u64::read_be(disk_file).unwrap();
+        let mut flags = IncompatFeatures::from_bits_retain(features);
+        flags.remove(IncompatFeatures::CORRUPT);
+        disk_file
+            .seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
+            .unwrap();
+        u64::write_be(disk_file, flags.bits()).unwrap();
+        assert!(
+            !is_corrupt_on_disk(disk_file),
+            "Corrupt bit should be cleared"
+        );
+    }
+
+    /// Helper to corrupt L1 entry by making L2 table address unaligned.
+    ///
+    /// Returns true if corruption was applied, i.e. the L1 entry was allocated.
+    fn corrupt_l1_entry(disk_file: &mut RawFile) -> bool {
+        let l1_table_offset = 0x0004_0000u64;
+        disk_file.seek(SeekFrom::Start(l1_table_offset)).unwrap();
+        let l1_entry = u64::read_be(disk_file).unwrap();
+        if l1_entry != 0 {
+            let unaligned = l1_entry | 0x200; // Make unaligned
+            disk_file.seek(SeekFrom::Start(l1_table_offset)).unwrap();
+            u64::write_be(disk_file, unaligned).unwrap();
+            disk_file.sync_all().unwrap();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Helper to corrupt L2 entry by making cluster address unaligned.
+    ///
+    /// Returns true if corruption was applied, i.e. an allocated non-compressed
+    /// L2 entry was found.
+    fn corrupt_l2_entry(disk_file: &mut RawFile) -> bool {
+        let l1_table_offset = 0x0004_0000u64;
+        disk_file.seek(SeekFrom::Start(l1_table_offset)).unwrap();
+        let l1_entry = u64::read_be(disk_file).unwrap();
+        if l1_entry == 0 {
+            return false;
+        }
+        let l2_table_addr = l1_entry & L1_TABLE_OFFSET_MASK;
+        disk_file.seek(SeekFrom::Start(l2_table_addr)).unwrap();
+        let l2_entry = u64::read_be(disk_file).unwrap();
+        if l2_entry != 0 && !l2_entry_is_compressed(l2_entry) {
+            let unaligned = l2_entry | 0x200;
+            disk_file.seek(SeekFrom::Start(l2_table_addr)).unwrap();
+            u64::write_be(disk_file, unaligned).unwrap();
+            disk_file.sync_all().unwrap();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Asserts that read on corrupted disk sets the corrupt bit
+    fn assert_corruption_on_read(disk_file: &mut RawFile) {
+        clear_corrupt_bit_on_disk(disk_file);
+
+        disk_file.rewind().unwrap();
+        let mut qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
+        let mut buf = [0u8; 16];
+        let result = qcow.read(&mut buf);
+
+        assert_eq!(
+            result.map_err(|e| e.raw_os_error()),
+            Err(Some(libc::EIO)),
+            "read should fail with EIO on corrupted image"
+        );
+        assert!(
+            is_corrupt_on_disk(disk_file),
+            "Corrupt bit should be set after read"
+        );
+    }
+
+    /// Asserts that write on corrupted disk sets the corrupt bit
+    fn assert_corruption_on_write(disk_file: &mut RawFile) {
+        clear_corrupt_bit_on_disk(disk_file);
+
+        disk_file.rewind().unwrap();
+        let mut qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
+        let result = qcow.write_all(b"overwrite");
+
+        assert_eq!(
+            result.map_err(|e| e.raw_os_error()),
+            Err(Some(libc::EIO)),
+            "write should fail with EIO on corrupted image"
+        );
+        assert!(
+            is_corrupt_on_disk(disk_file),
+            "Corrupt bit should be set after write"
+        );
+    }
+
+    #[test]
+    fn corrupt_bit_on_unaligned_l2_address() {
+        let header = valid_header_v3();
+        with_basic_file(&header, |mut disk_file: RawFile| {
+            {
+                let mut qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
+                qcow.write_all(b"test data").unwrap();
+            }
+
+            assert!(
+                corrupt_l1_entry(&mut disk_file),
+                "Failed to corrupt L1 entry - was data written?"
+            );
+            assert_corruption_on_read(&mut disk_file);
+        });
+    }
+
+    #[test]
+    fn corrupt_bit_on_unaligned_cluster_address_read() {
+        let header = valid_header_v3();
+        with_basic_file(&header, |mut disk_file: RawFile| {
+            {
+                let mut qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
+                qcow.write_all(b"test data to allocate cluster").unwrap();
+            }
+
+            assert!(
+                corrupt_l2_entry(&mut disk_file),
+                "Failed to corrupt L2 entry - was cluster allocated?"
+            );
+            assert_corruption_on_read(&mut disk_file);
+        });
+    }
+
+    #[test]
+    fn corrupt_bit_on_unaligned_cluster_address_write() {
+        let header = valid_header_v3();
+        with_basic_file(&header, |mut disk_file: RawFile| {
+            {
+                let mut qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
+                qcow.write_all(b"test data to allocate cluster").unwrap();
+            }
+
+            assert!(
+                corrupt_l2_entry(&mut disk_file),
+                "Failed to corrupt L2 entry - was cluster allocated?"
+            );
+            assert_corruption_on_write(&mut disk_file);
+        });
+    }
+
+    #[test]
+    fn corrupt_bit_not_set_on_normal_operations() {
+        let header = valid_header_v3();
+        with_basic_file(&header, |mut disk_file: RawFile| {
+            {
+                let mut qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
+
+                qcow.write_all(b"test data 1234567890").unwrap();
+                qcow.seek(SeekFrom::Start(0)).unwrap();
+
+                let mut buf = [0u8; 20];
+                qcow.read_exact(&mut buf).unwrap();
+                assert_eq!(&buf, b"test data 1234567890");
+
+                qcow.seek(SeekFrom::Start(0x10000)).unwrap();
+                qcow.write_all(b"more data").unwrap();
+
+                qcow.flush().unwrap();
+            }
+
+            assert!(
+                !is_corrupt_on_disk(&mut disk_file),
+                "Corrupt bit should NOT be set after normal operations"
+            );
+        });
+    }
+
+    #[test]
+    fn corrupt_bit_v2_image_not_affected() {
+        let header = valid_header_v2();
+        with_basic_file(&header, |mut disk_file: RawFile| {
+            {
+                let mut qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
+                qcow.write_all(b"test data").unwrap();
+                qcow.seek(SeekFrom::Start(0)).unwrap();
+                let mut buf = [0u8; 9];
+                qcow.read_exact(&mut buf).unwrap();
+                assert_eq!(&buf, b"test data");
+            }
+
+            disk_file.rewind().unwrap();
+            let qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
+            assert_eq!(qcow.header.version, 2);
+        });
+    }
 }
