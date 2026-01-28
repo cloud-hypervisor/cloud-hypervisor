@@ -325,6 +325,7 @@ dependencies = [
  "bitflags 2.10.0",
  "byteorder",
  "crc-any",
+ "epoll",
  "flate2",
  "io-uring",
  "libc",
