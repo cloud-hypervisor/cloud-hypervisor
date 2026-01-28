@@ -3907,6 +3907,14 @@ mod unit_tests {
         header
     }
 
+    // Helper to create a v3 header with specific autoclear feature bits set
+    fn header_v3_with_autoclear_features(features: u64) -> Vec<u8> {
+        let mut header = valid_header_v3();
+        let offset = AUTOCLEAR_FEATURES_OFFSET as usize;
+        header[offset..offset + 8].copy_from_slice(&features.to_be_bytes());
+        header
+    }
+
     #[test]
     fn accept_incompat_dirty_bit() {
         let header = header_v3_with_incompat_features(1 << 0);
@@ -4098,6 +4106,79 @@ mod unit_tests {
             0,
             "Dirty bit should not be written for read-only files"
         );
+    }
+
+    #[test]
+    fn autoclear_features_cleared_on_open() {
+        let header = header_v3_with_autoclear_features(0xFFFF_FFFF_FFFF_FFFF);
+        with_basic_file(&header, |mut disk_file: RawFile| {
+            disk_file
+                .seek(SeekFrom::Start(AUTOCLEAR_FEATURES_OFFSET))
+                .unwrap();
+            let features_before = u64::read_be(&mut disk_file).unwrap();
+            assert_eq!(
+                features_before, 0xFFFF_FFFF_FFFF_FFFF,
+                "Autoclear features should be set initially"
+            );
+
+            disk_file.rewind().unwrap();
+            {
+                let _qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
+            }
+
+            disk_file
+                .seek(SeekFrom::Start(AUTOCLEAR_FEATURES_OFFSET))
+                .unwrap();
+            let features_after = u64::read_be(&mut disk_file).unwrap();
+            assert_eq!(
+                features_after, 0,
+                "Autoclear features should be cleared after open for write"
+            );
+        });
+    }
+
+    #[test]
+    fn autoclear_features_not_cleared_for_readonly() {
+        let header = header_v3_with_autoclear_features(0xFFFF_FFFF_FFFF_FFFF);
+
+        let temp_file = TempFile::new().unwrap();
+        let temp_path = temp_file.as_path().to_owned();
+        {
+            let mut file = temp_file.as_file().try_clone().unwrap();
+            file.write_all(&header).unwrap();
+            file.set_len(0x1_0000_0000).unwrap();
+        }
+
+        let readonly_file = OpenOptions::new()
+            .read(true)
+            .write(false)
+            .open(&temp_path)
+            .unwrap();
+        let raw_file = RawFile::new(readonly_file, false);
+        let _qcow = QcowFile::from(raw_file).unwrap();
+        drop(_qcow);
+
+        let verify_file = OpenOptions::new().read(true).open(&temp_path).unwrap();
+        let mut verify_raw = RawFile::new(verify_file, false);
+        verify_raw
+            .seek(SeekFrom::Start(AUTOCLEAR_FEATURES_OFFSET))
+            .unwrap();
+        let features = u64::read_be(&mut verify_raw).unwrap();
+        assert_eq!(
+            features, 0xFFFF_FFFF_FFFF_FFFF,
+            "Autoclear features should NOT be cleared for read-only files"
+        );
+    }
+
+    #[test]
+    fn autoclear_features_v2_ignored() {
+        let header = valid_header_v2();
+        with_basic_file(&header, |mut disk_file: RawFile| {
+            disk_file.rewind().unwrap();
+            let qcow = QcowFile::from(disk_file).unwrap();
+            assert_eq!(qcow.header.version, 2);
+            assert_eq!(qcow.header.autoclear_features, 0);
+        });
     }
 
     #[test]
