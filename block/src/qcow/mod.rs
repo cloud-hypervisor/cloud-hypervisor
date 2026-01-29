@@ -336,6 +336,11 @@ fn l2_entry_make_std(cluster_addr: u64) -> u64 {
     (cluster_addr & L2_TABLE_OFFSET_MASK) | CLUSTER_USED_FLAG
 }
 
+// Make L2 entry for preallocated zero cluster
+fn l2_entry_make_zero(cluster_addr: u64) -> u64 {
+    (cluster_addr & L2_TABLE_OFFSET_MASK) | CLUSTER_USED_FLAG | ZERO_FLAG
+}
+
 // Make L1 entry with optional flags
 fn l1_entry_make(cluster_addr: u64, refcount_is_one: bool) -> u64 {
     (cluster_addr & L1_TABLE_OFFSET_MASK) | (refcount_is_one as u64 * CLUSTER_USED_FLAG)
@@ -903,7 +908,6 @@ pub struct QcowFile {
     // removal of references to them have been synced to disk.
     avail_clusters: Vec<u64>,
     backing_file: Option<BackingFile>,
-    #[allow(dead_code)] // Used in later commits for sparse-aware deallocation
     sparse: bool,
 }
 
@@ -1868,9 +1872,6 @@ impl QcowFile {
         let cluster_addr = if l2_entry_is_compressed(l2_entry) {
             // Writing to compressed cluster.
 
-            let (compressed_cluster_addr, compressed_cluster_size) =
-                l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
-
             // Allocate new cluster, decompress into new cluster, then use
             // offset of new cluster.
             let decompressed_cluster = self.decompress_l2_cluster(l2_entry)?;
@@ -1886,31 +1887,10 @@ impl QcowFile {
             }
 
             // Decrement refcount for each cluster spanned by the old compressed data
-            let compressed_clusters_end = self.raw_file.cluster_address(
-                compressed_cluster_addr             // Start of compressed data
-                + compressed_cluster_size as u64    // Add size to get end address
-                + self.raw_file.cluster_size()
-                    - 1, // Catch possibly partially used last cluster
-            );
-            let mut addr = self.raw_file.cluster_address(compressed_cluster_addr);
-            while addr < compressed_clusters_end {
-                let refcount = self
-                    .refcounts
-                    .get_cluster_refcount(&mut self.raw_file, addr)
-                    .map_err(|e| {
-                        if matches!(e, refcount::Error::RefblockUnaligned(_)) {
-                            self.set_corrupt_bit_best_effort();
-                        }
-                        io::Error::other(Error::GettingRefcount(e))
-                    })?;
-                if refcount > 0 {
-                    self.set_cluster_refcount_track_freed(addr, refcount - 1)?;
-                }
-                addr += self.raw_file.cluster_size();
-            }
+            self.deallocate_compressed_cluster(l2_entry)?;
 
             cluster_addr
-        } else if l2_entry_is_empty(l2_entry) {
+        } else if l2_entry_is_empty(l2_entry) || l2_entry_is_zero(l2_entry) {
             let initial_data = if let Some(backing) = self.backing_file.as_mut() {
                 let cluster_size = self.raw_file.cluster_size();
                 let cluster_begin = address - (address % cluster_size);
@@ -2072,6 +2052,43 @@ impl QcowFile {
         Ok(None)
     }
 
+    // Deallocate compressed cluster and all related clusters spanned by compressed data.
+    fn deallocate_compressed_cluster(&mut self, l2_entry: u64) -> std::io::Result<()> {
+        let (compressed_cluster_addr, compressed_cluster_size) =
+            l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
+
+        // Calculate the end of the compressed data region
+        let compressed_clusters_end = self.raw_file.cluster_address(
+            compressed_cluster_addr             // Start of compressed data
+            + compressed_cluster_size as u64    // Add size to get end address
+            + self.raw_file.cluster_size()
+                - 1, // Catch possibly partially used last cluster
+        );
+
+        // Decrement refcount for each cluster spanned by the compressed data
+        let mut addr = self.raw_file.cluster_address(compressed_cluster_addr);
+        while addr < compressed_clusters_end {
+            let refcount = self
+                .refcounts
+                .get_cluster_refcount(&mut self.raw_file, addr)
+                .map_err(|e| {
+                    if matches!(e, refcount::Error::RefblockUnaligned(_)) {
+                        self.set_corrupt_bit_best_effort();
+                    }
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("failed to get cluster refcount: {e}"),
+                    )
+                })?;
+            if refcount > 0 {
+                self.set_cluster_refcount_track_freed(addr, refcount - 1)?;
+            }
+            addr += self.raw_file.cluster_size();
+        }
+
+        Ok(())
+    }
+
     // Deallocate the storage for the cluster starting at `address`.
     // Any future reads of this cluster will return all zeroes.
     fn deallocate_cluster(&mut self, address: u64) -> std::io::Result<()> {
@@ -2094,11 +2111,20 @@ impl QcowFile {
 
         self.cache_l2_cluster(l1_index, l2_addr_disk, false)?;
 
-        let cluster_addr = self.l2_cache.get(l1_index).unwrap()[l2_index];
-        if cluster_addr == 0 {
-            // This cluster is already unallocated; nothing to do.
+        let l2_entry = self.l2_cache.get(l1_index).unwrap()[l2_index];
+        if l2_entry_is_empty(l2_entry) || l2_entry_is_zero(l2_entry) {
+            // Already unallocated or zero.
             return Ok(());
         }
+
+        // Compressed clusters cannot use the zero flag optimization, thus fully deallocate instead.
+        if l2_entry_is_compressed(l2_entry) {
+            self.deallocate_compressed_cluster(l2_entry)?;
+            self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = 0;
+            return Ok(());
+        }
+
+        let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
 
         // Decrement the refcount.
         let refcount = self
@@ -2117,23 +2143,38 @@ impl QcowFile {
             return Err(std::io::Error::from_raw_os_error(EINVAL));
         }
 
-        let new_refcount = refcount - 1;
-        self.set_cluster_refcount_track_freed(cluster_addr, new_refcount)?;
+        if self.sparse {
+            // Fully deallocate to reclaim storage space.
+            let new_refcount = refcount - 1;
+            self.set_cluster_refcount_track_freed(cluster_addr, new_refcount)?;
 
-        // Rewrite the L2 entry to remove the cluster mapping.
-        // unwrap is safe as we just checked/inserted this entry.
-        self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = 0;
+            // Rewrite the L2 entry to remove the cluster mapping (full deallocation).
+            self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = 0;
 
-        if new_refcount == 0 {
-            let cluster_size = self.raw_file.cluster_size();
-            // This cluster is no longer in use; deallocate the storage.
-            // The underlying FS may not support FALLOC_FL_PUNCH_HOLE,
-            // so don't treat an error as fatal.  Future reads will return zeros anyways.
-            let _ = self
-                .raw_file
-                .file_mut()
-                .punch_hole(cluster_addr, cluster_size);
-            self.unref_clusters.push(cluster_addr);
+            if new_refcount == 0 {
+                let cluster_size = self.raw_file.cluster_size();
+                // This cluster is no longer in use; deallocate the storage.
+                // The underlying FS may not support FALLOC_FL_PUNCH_HOLE,
+                // so don't treat an error as fatal. Future reads will return zeros anyways.
+                let _ = self
+                    .raw_file
+                    .file_mut()
+                    .punch_hole(cluster_addr, cluster_size);
+                self.unref_clusters.push(cluster_addr);
+            }
+        } else {
+            // Zero flag optimization - mark cluster as reading zeros without deallocating.
+            // Only safe if refcount == 1 (no other references to this cluster).
+            if refcount == 1 {
+                // Single reference - safe to use zero flag optimization
+                self.l2_cache.get_mut(l1_index).unwrap()[l2_index] =
+                    l2_entry_make_zero(cluster_addr);
+            } else {
+                // Multiple references - must decrement refcount and unmap this entry.
+                // Cannot use zero flag because other L2 entries still need the real data.
+                self.set_cluster_refcount_track_freed(cluster_addr, refcount - 1)?;
+                self.l2_cache.get_mut(l1_index).unwrap()[l2_index] = 0;
+            }
         }
         Ok(())
     }
@@ -2369,9 +2410,7 @@ impl Read for QcowFile {
                 backing.read_at(curr_addr, &mut buf[nread..(nread + count)])?;
             } else {
                 // Previously unwritten region, return zeros
-                for b in &mut buf[nread..(nread + count)] {
-                    *b = 0;
-                }
+                buf[nread..(nread + count)].fill(0);
             }
 
             nread += count;
