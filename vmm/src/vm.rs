@@ -2516,7 +2516,7 @@ impl Vm {
 
         #[cfg(not(target_arch = "riscv64"))]
         {
-            #[cfg(not(feature = "sev_snp"))]
+            #[cfg(not(any(feature = "sev_snp", feature = "tdx")))]
             assert!(rsdp_addr.is_some());
             // Configure shared state based on loaded kernel
             if let Some(rsdp_adr) = rsdp_addr {
