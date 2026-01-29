@@ -3687,6 +3687,48 @@ mod unit_tests {
     }
 
     #[test]
+    fn discard_sets_zero_flag() {
+        with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
+            let mut q = QcowFile::from(disk_file).unwrap();
+
+            // Write some test data to allocate a cluster
+            let test_data = [0x42u8; 4096];
+            q.seek(SeekFrom::Start(0x10000)).expect("Failed to seek.");
+            q.write_all(&test_data).expect("Failed to write test data.");
+
+            // Verify data was written
+            let mut buf = [0u8; 4096];
+            q.seek(SeekFrom::Start(0x10000)).expect("Failed to seek.");
+            q.read_exact(&mut buf).expect("Failed to read.");
+            assert_eq!(buf[0], 0x42);
+            assert_eq!(buf[4095], 0x42);
+
+            // DISCARD the full cluster (via write_zeroes which calls punch_hole)
+            q.seek(SeekFrom::Start(0x10000)).expect("Failed to seek.");
+            let nwritten = q.write_zeroes(4096).expect("Failed to discard cluster.");
+            assert_eq!(nwritten, 4096);
+
+            // Verify reads now return zeros (due to zero flag)
+            q.seek(SeekFrom::Start(0x10000)).expect("Failed to seek.");
+            q.read_exact(&mut buf).expect("Failed to read.");
+            assert_eq!(buf[0], 0);
+            assert_eq!(buf[4095], 0);
+
+            // Write new data to the trimmed cluster
+            let new_data = [0x99u8; 4096];
+            q.seek(SeekFrom::Start(0x10000)).expect("Failed to seek.");
+            q.write_all(&new_data)
+                .expect("Failed to write to trimmed cluster.");
+
+            // Verify new data can be read (cluster was reallocated)
+            q.seek(SeekFrom::Start(0x10000)).expect("Failed to seek.");
+            q.read_exact(&mut buf).expect("Failed to read.");
+            assert_eq!(buf[0], 0x99);
+            assert_eq!(buf[4095], 0x99);
+        });
+    }
+
+    #[test]
     fn test_header() {
         with_basic_file(&valid_header_v2(), |disk_file: RawFile| {
             let q = QcowFile::from(disk_file).unwrap();

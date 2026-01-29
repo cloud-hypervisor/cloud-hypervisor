@@ -216,3 +216,265 @@ impl AsyncIo for QcowSync {
         }
     }
 }
+
+#[cfg(test)]
+mod unit_tests {
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+    use crate::qcow::{QcowFile, RawFile};
+
+    #[test]
+    fn test_qcow_async_punch_hole_completion() {
+        // Create a QCOW2 image with valid header
+        let temp_file = TempFile::new().unwrap();
+        let raw_file = RawFile::new(temp_file.into_file(), false);
+        let file_size = 1024 * 1024 * 100; // 100MB
+        let mut qcow_file = QcowFile::new(raw_file, 3, file_size, true).unwrap();
+
+        // Write some data
+        let data = vec![0xDD; 128 * 1024]; // 128KB
+        let offset = 0;
+        qcow_file.seek(SeekFrom::Start(offset)).unwrap();
+        qcow_file.write_all(&data).unwrap();
+        qcow_file.flush().unwrap();
+
+        // Create async wrapper
+        let qcow_file = Arc::new(Mutex::new(qcow_file));
+        let mut async_qcow = QcowSync::new(qcow_file.clone());
+
+        // Punch hole
+        async_qcow
+            .punch_hole(offset, data.len() as u64, 100)
+            .unwrap();
+
+        // Verify completion event was generated
+        let (user_data, result) = async_qcow.next_completed_request().unwrap();
+        assert_eq!(user_data, 100);
+        assert_eq!(result, 0, "punch_hole should succeed");
+
+        // Verify data reads as zeros
+        let mut read_buf = vec![0; data.len()];
+        qcow_file
+            .lock()
+            .unwrap()
+            .seek(SeekFrom::Start(offset))
+            .unwrap();
+        qcow_file.lock().unwrap().read_exact(&mut read_buf).unwrap();
+        assert!(
+            read_buf.iter().all(|&b| b == 0),
+            "Punched hole should read as zeros"
+        );
+    }
+
+    #[test]
+    fn test_qcow_async_write_zeroes_completion() {
+        // Create a QCOW2 image with valid header
+        let temp_file = TempFile::new().unwrap();
+        let raw_file = RawFile::new(temp_file.into_file(), false);
+        let file_size = 1024 * 1024 * 100; // 100MB
+        let mut qcow_file = QcowFile::new(raw_file, 3, file_size, true).unwrap();
+
+        // Write some data
+        let data = vec![0xEE; 256 * 1024]; // 256KB
+        let offset = 64 * 1024; // Start at 64KB offset
+        qcow_file.seek(SeekFrom::Start(offset)).unwrap();
+        qcow_file.write_all(&data).unwrap();
+        qcow_file.flush().unwrap();
+
+        // Create async wrapper
+        let qcow_file = Arc::new(Mutex::new(qcow_file));
+        let mut async_qcow = QcowSync::new(qcow_file.clone());
+
+        // Write zeros
+        async_qcow
+            .write_zeroes(offset, data.len() as u64, 200)
+            .unwrap();
+
+        // Verify completion event was generated
+        let (user_data, result) = async_qcow.next_completed_request().unwrap();
+        assert_eq!(user_data, 200);
+        assert_eq!(result, 0, "write_zeroes should succeed");
+
+        // Verify data reads as zeros
+        let mut read_buf = vec![0; data.len()];
+        qcow_file
+            .lock()
+            .unwrap()
+            .seek(SeekFrom::Start(offset))
+            .unwrap();
+        qcow_file.lock().unwrap().read_exact(&mut read_buf).unwrap();
+        assert!(
+            read_buf.iter().all(|&b| b == 0),
+            "Zeroed region should read as zeros"
+        );
+    }
+
+    #[test]
+    fn test_qcow_async_multiple_operations() {
+        // Create a QCOW2 image with valid header
+        let temp_file = TempFile::new().unwrap();
+        let raw_file = RawFile::new(temp_file.into_file(), false);
+        let file_size = 1024 * 1024 * 100; // 100MB
+        let mut qcow_file = QcowFile::new(raw_file, 3, file_size, true).unwrap();
+
+        // Write data at multiple offsets
+        let data = vec![0xFF; 64 * 1024]; // 64KB chunks
+        for i in 0..4 {
+            let offset = i * 128 * 1024; // 128KB spacing
+            qcow_file.seek(SeekFrom::Start(offset)).unwrap();
+            qcow_file.write_all(&data).unwrap();
+        }
+        qcow_file.flush().unwrap();
+
+        // Create async wrapper
+        let qcow_file = Arc::new(Mutex::new(qcow_file));
+        let mut async_qcow = QcowSync::new(qcow_file.clone());
+
+        // Queue multiple punch_hole operations
+        async_qcow.punch_hole(0, 64 * 1024, 1).unwrap();
+        async_qcow.punch_hole(128 * 1024, 64 * 1024, 2).unwrap();
+        async_qcow.punch_hole(256 * 1024, 64 * 1024, 3).unwrap();
+
+        // Verify all completions
+        let (user_data, result) = async_qcow.next_completed_request().unwrap();
+        assert_eq!(user_data, 1);
+        assert_eq!(result, 0);
+
+        let (user_data, result) = async_qcow.next_completed_request().unwrap();
+        assert_eq!(user_data, 2);
+        assert_eq!(result, 0);
+
+        let (user_data, result) = async_qcow.next_completed_request().unwrap();
+        assert_eq!(user_data, 3);
+        assert_eq!(result, 0);
+
+        // Verify no more completions
+        assert!(async_qcow.next_completed_request().is_none());
+    }
+
+    #[test]
+    fn test_qcow_punch_hole_with_shared_instance() {
+        // This test verifies that with Arc<Mutex<>>, multiple async I/O operations
+        // share the same QcowFile instance and see each other's changes.
+
+        // Create a QCOW2 image
+        let temp_file = TempFile::new().unwrap();
+        let raw_file = RawFile::new(temp_file.into_file(), false);
+        let file_size = 1024 * 1024 * 100; // 100MB
+        let mut qcow_file = QcowFile::new(raw_file, 3, file_size, true).unwrap();
+
+        // Write some data at offset 0
+        let data = vec![0xAB; 128 * 1024]; // 128KB of 0xAB pattern
+        let offset = 0;
+        qcow_file.seek(SeekFrom::Start(offset)).unwrap();
+        qcow_file.write_all(&data).unwrap();
+        qcow_file.flush().unwrap();
+
+        let qcow_shared = Arc::new(Mutex::new(qcow_file));
+
+        // First async I/O: punch hole
+        let mut async_qcow1 = QcowSync::new(qcow_shared.clone());
+        async_qcow1
+            .punch_hole(offset, data.len() as u64, 100)
+            .unwrap();
+
+        // Verify punch_hole completed
+        let (user_data, result) = async_qcow1.next_completed_request().unwrap();
+        assert_eq!(user_data, 100);
+        assert_eq!(result, 0, "punch_hole should succeed");
+
+        // Second async I/O: read from same shared instance
+        // This should see the deallocated cluster because they share the same QcowFile
+        let mut read_buf = vec![0xFF; data.len()];
+        qcow_shared
+            .lock()
+            .unwrap()
+            .seek(SeekFrom::Start(offset))
+            .unwrap();
+        qcow_shared
+            .lock()
+            .unwrap()
+            .read_exact(&mut read_buf)
+            .unwrap();
+
+        // The read should return zeros because the cluster was deallocated
+        assert!(
+            read_buf.iter().all(|&b| b == 0),
+            "After punch_hole, shared QcowFile instance should read zeros from deallocated cluster"
+        );
+    }
+
+    #[test]
+    fn test_qcow_disk_sync_punch_hole_with_new_async_io() {
+        // This test simulates the EXACT real usage pattern: QcowDiskSync.new_async_io()
+        // creates a new QcowSync with a cloned QcowFile for each I/O operation.
+
+        use std::io::Write;
+
+        use crate::async_io::DiskFile;
+
+        // Create a QCOW2 image
+        let temp_file = TempFile::new().unwrap();
+        let file_size = 1024 * 1024 * 100; // 100MB
+
+        {
+            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
+            let mut qcow_file = QcowFile::new(raw_file, 3, file_size, true).unwrap();
+
+            // Write data at offset 1MB - use single cluster (64KB) to simplify test
+            let data = vec![0xCD; 64 * 1024]; // 64KB (one cluster)
+            let offset = 1024 * 1024u64;
+            qcow_file.seek(SeekFrom::Start(offset)).unwrap();
+            qcow_file.write_all(&data).unwrap();
+            qcow_file.flush().unwrap();
+        }
+
+        // Open with QcowDiskSync (like real code does)
+        let disk =
+            QcowDiskSync::new(temp_file.as_file().try_clone().unwrap(), false, true, true).unwrap();
+
+        // First async I/O: punch hole (simulates DISCARD command)
+        let mut async_io1 = disk.new_async_io(1).unwrap();
+        let offset = 1024 * 1024u64;
+        let length = 64 * 1024u64; // Single cluster
+        async_io1.punch_hole(offset, length, 1).unwrap();
+        let (user_data, result) = async_io1.next_completed_request().unwrap();
+        assert_eq!(user_data, 1);
+        assert_eq!(result, 0, "punch_hole should succeed");
+        drop(async_io1);
+
+        // Second async I/O: read from the same location (simulates READ command)
+        let mut async_io2 = disk.new_async_io(1).unwrap();
+        let mut read_buf = vec![0xFF; length as usize];
+        let iovec = libc::iovec {
+            iov_base: read_buf.as_mut_ptr() as *mut libc::c_void,
+            iov_len: read_buf.len(),
+        };
+
+        // These assertions are critical to prevent compiler optimization bugs
+        // that can reorder operations. Without them, the test can fail even
+        // though the QCOW2 implementation is correct.
+        assert_eq!(iovec.iov_base as *const u8, read_buf.as_ptr());
+        assert_eq!(iovec.iov_len, read_buf.len());
+
+        async_io2
+            .read_vectored(offset as libc::off_t, &[iovec], 2)
+            .unwrap();
+
+        let (user_data, result) = async_io2.next_completed_request().unwrap();
+        assert_eq!(user_data, 2);
+        assert_eq!(
+            result as usize, length as usize,
+            "read should complete successfully"
+        );
+
+        // Verify the data is all zeros
+        assert!(
+            read_buf.iter().all(|&b| b == 0),
+            "After punch_hole via new_async_io, read should return zeros"
+        );
+    }
+}
