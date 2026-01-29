@@ -258,15 +258,57 @@ impl AsyncIo for RawFileAsync {
         Ok(())
     }
 
-    fn punch_hole(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
-        Err(AsyncIoError::PunchHole(std::io::Error::other(
-            "punch_hole not supported for raw async backend",
-        )))
+    fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
+        let (submitter, mut sq, _) = self.io_uring.split();
+
+        const FALLOC_FL_PUNCH_HOLE: i32 = 0x02;
+        const FALLOC_FL_KEEP_SIZE: i32 = 0x01;
+        let mode = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
+
+        // SAFETY: The file descriptor is known to be valid.
+        unsafe {
+            sq.push(
+                &opcode::Fallocate::new(types::Fd(self.fd), length)
+                    .offset(offset)
+                    .mode(mode)
+                    .build()
+                    .user_data(user_data),
+            )
+            .map_err(|e| {
+                AsyncIoError::PunchHole(Error::other(format!("Submission queue is full: {e:?}")))
+            })?;
+        };
+
+        sq.sync();
+        submitter.submit().map_err(AsyncIoError::PunchHole)?;
+
+        Ok(())
     }
 
-    fn write_zeroes(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
-        Err(AsyncIoError::WriteZeroes(std::io::Error::other(
-            "write_zeroes not supported for raw async backend",
-        )))
+    fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
+        let (submitter, mut sq, _) = self.io_uring.split();
+
+        const FALLOC_FL_ZERO_RANGE: i32 = 0x10;
+        const FALLOC_FL_KEEP_SIZE: i32 = 0x01;
+        let mode = FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE;
+
+        // SAFETY: The file descriptor is known to be valid.
+        unsafe {
+            sq.push(
+                &opcode::Fallocate::new(types::Fd(self.fd), length)
+                    .offset(offset)
+                    .mode(mode)
+                    .build()
+                    .user_data(user_data),
+            )
+            .map_err(|e| {
+                AsyncIoError::WriteZeroes(Error::other(format!("Submission queue is full: {e:?}")))
+            })?;
+        };
+
+        sq.sync();
+        submitter.submit().map_err(AsyncIoError::WriteZeroes)?;
+
+        Ok(())
     }
 }

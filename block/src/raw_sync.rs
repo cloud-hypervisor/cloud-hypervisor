@@ -151,15 +151,51 @@ impl AsyncIo for RawFileSync {
         self.completion_list.pop_front()
     }
 
-    fn punch_hole(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
-        Err(AsyncIoError::PunchHole(std::io::Error::other(
-            "punch_hole not supported for raw sync backend",
-        )))
+    fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
+        const FALLOC_FL_PUNCH_HOLE: i32 = 0x02;
+        const FALLOC_FL_KEEP_SIZE: i32 = 0x01;
+        let mode = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
+
+        // SAFETY: FFI call with valid arguments
+        let result = unsafe {
+            libc::fallocate(
+                self.fd as libc::c_int,
+                mode,
+                offset as libc::off_t,
+                length as libc::off_t,
+            )
+        };
+        if result < 0 {
+            return Err(AsyncIoError::PunchHole(std::io::Error::last_os_error()));
+        }
+
+        self.completion_list.push_back((user_data, result));
+        self.eventfd.write(1).unwrap();
+
+        Ok(())
     }
 
-    fn write_zeroes(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
-        Err(AsyncIoError::WriteZeroes(std::io::Error::other(
-            "write_zeroes not supported for raw sync backend",
-        )))
+    fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
+        const FALLOC_FL_ZERO_RANGE: i32 = 0x10;
+        const FALLOC_FL_KEEP_SIZE: i32 = 0x01;
+        let mode = FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE;
+
+        // SAFETY: FFI call with valid arguments
+        let result = unsafe {
+            libc::fallocate(
+                self.fd as libc::c_int,
+                mode,
+                offset as libc::off_t,
+                length as libc::off_t,
+            )
+        };
+        if result < 0 {
+            return Err(AsyncIoError::WriteZeroes(std::io::Error::last_os_error()));
+        }
+
+        self.completion_list.push_back((user_data, result));
+        self.eventfd.write(1).unwrap();
+
+        Ok(())
     }
 }
