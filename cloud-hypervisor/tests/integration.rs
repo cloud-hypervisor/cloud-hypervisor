@@ -4242,6 +4242,188 @@ mod common_parallel {
     }
 
     #[test]
+    fn test_virtio_block_qcow2_multiqueue_discard_mount() {
+        run_multiqueue_qcow2_test(QcowTestImageConfig::Simple("256M"), |guest| {
+            guest
+                .ssh_command("sudo mkfs.ext4 -F /dev/vdc")
+                .expect("Failed to format disk");
+
+            // Mount with discard option to enable automatic TRIM/DISCARD
+            guest
+                .ssh_command("sudo mkdir -p /mnt/test && sudo mount -o discard /dev/vdc /mnt/test")
+                .expect("Failed to mount disk with discard option");
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 4); do \n\
+                        sudo dd if=/dev/urandom of=/mnt/test/file$i bs=1M count=32 conv=fsync & \n\
+                    done; wait",
+                )
+                .expect("Failed to write files in parallel");
+
+            assert_eq!(
+                guest
+                    .ssh_command("ls /mnt/test/file* | wc -l")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                4,
+                "Expected 4 files to be created"
+            );
+
+            guest
+                .ssh_command("sudo rm -f /mnt/test/file*")
+                .expect("Failed to remove files");
+
+            guest
+                .ssh_command("sudo fstrim -v /mnt/test")
+                .expect("fstrim failed - DISCARD not working");
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 8); do \n\
+                        sudo dd if=/dev/urandom of=/mnt/test/file$i bs=1M count=16 conv=fsync & \n\
+                    done; wait",
+                )
+                .expect("Failed to write files in second round");
+
+            assert_eq!(
+                guest
+                    .ssh_command("ls /mnt/test/file* | wc -l")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                8,
+                "Expected 8 files after second round"
+            );
+
+            guest
+                .ssh_command("sudo umount /mnt/test")
+                .expect("Failed to unmount");
+        });
+    }
+    #[test]
+    fn test_virtio_block_qcow2_multiqueue_wide_writes() {
+        run_multiqueue_qcow2_test(QcowTestImageConfig::Simple("1G"), |guest| {
+            // Scattered write pattern - write to widely separated offsets in parallel.
+            // This should initiate many L2 table allocations simultaneously across different queues.
+            guest
+            .ssh_command(
+                "for i in $(seq 0 7); do \n\
+                    offset=$((i * 128)) \n\
+                    sudo dd if=/dev/urandom of=/dev/vdc bs=1M count=16 seek=$offset conv=notrunc,fsync & \n\
+                done; wait",
+            )
+            .expect("Failed to write sparse pattern in parallel");
+
+            // Write known patterns to the same sparse locations
+            guest
+            .ssh_command(
+                "for i in $(seq 0 7); do \n\
+                    offset=$((i * 128)) \n\
+                    sudo dd if=/dev/zero of=/dev/vdc bs=1M count=8 seek=$offset conv=notrunc,fsync & \n\
+                done; wait",
+            )
+            .expect("Failed second sparse write pattern");
+
+            // Even more aggressive sparse writes with smaller chunks but more of them
+            guest
+            .ssh_command(
+                "for i in $(seq 0 15); do \n\
+                    offset=$((i * 64)) \n\
+                    sudo dd if=/dev/urandom of=/dev/vdc bs=1M count=2 seek=$offset conv=notrunc,fsync & \n\
+                done; wait",
+            )
+            .expect("Failed third sparse write pattern");
+
+            guest
+                .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M count=64")
+                .expect("Failed to read back data after sparse writes");
+        });
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_multiqueue_discard_stress() {
+        run_multiqueue_qcow2_test(QcowTestImageConfig::Simple("512M"), |guest| {
+            guest
+                .ssh_command("sudo mkfs.ext4 -F /dev/vdc")
+                .expect("Failed to format disk");
+            guest
+                .ssh_command("sudo mkdir -p /mnt/test && sudo mount -o discard /dev/vdc /mnt/test")
+                .expect("Failed to mount disk with discard option");
+
+            // Round 1: Start background writes while simultaneously doing DISCARD operations
+            // This stresses refcount table locking - writes increment refs, discard decrements
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 4); do \n\
+                        sudo dd if=/dev/urandom of=/mnt/test/file$i bs=1M count=32 & \n\
+                    done",
+                )
+                .expect("Failed to start background writes");
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 5 8); do \n\
+                        sudo dd if=/dev/urandom of=/mnt/test/temp$i bs=1M count=16 conv=fsync \n\
+                        sudo rm -f /mnt/test/temp$i & \n\
+                    done; \n\
+                    wait; \n\
+                    sudo fstrim -v /mnt/test",
+                )
+                .expect("Failed to do parallel write-delete-discard");
+
+            guest
+                .ssh_command("wait")
+                .expect("Failed to wait for background writes");
+
+            assert_eq!(
+                guest
+                    .ssh_command("ls /mnt/test/file* 2>/dev/null | wc -l")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                4,
+                "Expected 4 files after round 1"
+            );
+
+            // Round 2: More aggressive - 8 parallel writes with simultaneous blkdiscard on raw device
+            guest
+                .ssh_command("sudo umount /mnt/test")
+                .expect("Failed to unmount");
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 0 7); do \n\
+                        offset=$((i * 64)) \n\
+                        sudo dd if=/dev/urandom of=/dev/vdc bs=1M count=4 seek=$offset conv=notrunc,fsync & \n\
+                    done; wait",
+                )
+                .expect("Failed sparse writes");
+
+            // Now discard half the regions while writing to the other half
+            guest
+                .ssh_command(
+                    "for i in $(seq 0 3); do \n\
+                        offset=$((i * 64 * 1024 * 1024)) \n\
+                        sudo blkdiscard -o $offset -l $((4 * 1024 * 1024)) /dev/vdc & \n\
+                    done; \n\
+                    for i in $(seq 4 7); do \n\
+                        offset=$((i * 64)) \n\
+                        sudo dd if=/dev/zero of=/dev/vdc bs=1M count=4 seek=$offset conv=notrunc,fsync & \n\
+                    done; wait",
+                )
+                .expect("Failed parallel discard and write stress test");
+
+            guest
+                .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M count=128")
+                .expect("Failed to read back data after discard stress");
+        });
+    }
+    #[test]
     fn test_virtio_block_qcow2_dirty_bit_unclean_shutdown() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -7021,6 +7203,790 @@ mod common_parallel {
             .args(["-d", &loop_dev])
             .output()
             .expect("loop device not found");
+    }
+
+    // Helper function to verify sparse file
+    fn verify_sparse_file(test_disk_path: &str, expected_ratio: f64) {
+        let res = exec_host_command_output(&format!("ls -s --block-size=1 {}", test_disk_path));
+        assert!(res.status.success(), "ls -s command failed");
+        let out = String::from_utf8_lossy(&res.stdout);
+        let actual_bytes: u64 = out
+            .split_whitespace()
+            .next()
+            .and_then(|s| s.parse().ok())
+            .expect("Failed to parse ls -s output");
+
+        let res = exec_host_command_output(&format!("ls -l {}", test_disk_path));
+        assert!(res.status.success(), "ls -l command failed");
+        let out = String::from_utf8_lossy(&res.stdout);
+        let apparent_size: u64 = out
+            .split_whitespace()
+            .nth(4)
+            .and_then(|s| s.parse().ok())
+            .expect("Failed to parse ls -l output");
+
+        let threshold = (apparent_size as f64 * expected_ratio) as u64;
+        assert!(
+            actual_bytes < threshold,
+            "Expected file to be sparse: apparent_size={} bytes, actual_disk_usage={} bytes (threshold={})",
+            apparent_size,
+            actual_bytes,
+            threshold
+        );
+    }
+
+    // Helper function to count zero flagged regions in QCOW2 image
+    fn count_qcow2_zero_regions(test_disk_path: &str) -> Option<usize> {
+        let res =
+            exec_host_command_output(&format!("qemu-img map --output=json -U {}", test_disk_path));
+        if !res.status.success() {
+            return None;
+        }
+
+        let out = String::from_utf8_lossy(&res.stdout);
+        let map_json = serde_json::from_str::<serde_json::Value>(&out).ok()?;
+        let regions = map_json.as_array()?;
+
+        Some(
+            regions
+                .iter()
+                .filter(|r| {
+                    let data = r["data"].as_bool().unwrap_or(true);
+                    let zero = r["zero"].as_bool().unwrap_or(false);
+                    // holes - data: false
+                    // zero flagged regions - data: true, zero: true
+                    !data || zero
+                })
+                .count(),
+        )
+    }
+
+    // Helper function to verify file extents using FIEMAP after DISCARD
+    // TODO: Make verification more format-specific:
+    //   - QCOW2: Check for fragmentation patterns showing deallocated clusters
+    //   - RAW: Verify actual holes (unallocated extents) exist in sparse regions
+    //   - Could parse extent output to count holes vs allocated regions
+    fn verify_fiemap_extents(test_disk_path: &str, format_type: &str) {
+        let blocksize_output =
+            exec_host_command_output(&format!("stat -f -c %S {}", test_disk_path));
+        let blocksize = if blocksize_output.status.success() {
+            String::from_utf8_lossy(&blocksize_output.stdout)
+                .trim()
+                .parse::<u64>()
+                .unwrap_or(4096)
+        } else {
+            4096
+        };
+
+        let fiemap_output =
+            exec_host_command_output(&format!("filefrag -b {} -v {}", blocksize, test_disk_path));
+        if fiemap_output.status.success() {
+            let fiemap_str = String::from_utf8_lossy(&fiemap_output.stdout);
+
+            // Verify we have extent information indicating sparse regions
+            let has_extents = fiemap_str.contains("extent") || fiemap_str.contains("extents");
+            let has_holes = fiemap_str.contains("hole");
+
+            assert!(
+                has_extents || has_holes,
+                "FIEMAP should show extent information or holes for {} file",
+                format_type
+            );
+        }
+    }
+
+    /// Helper function to verify a disk region reads as all zeros from within the guest
+    fn assert_guest_disk_region_is_zero(guest: &Guest, device: &str, offset: u64, length: u64) {
+        let result = guest
+            .ssh_command(&format!(
+                "sudo hexdump -v -s {} -n {} -e '1/1 \"%02x\"' {} | grep -qv '^00*$' && echo 'NONZERO' || echo 'ZEROS'",
+                offset, length, device
+            ))
+            .unwrap();
+
+        assert!(
+            result.trim() == "ZEROS",
+            "Expected {} region at offset {} length {} to read as zeros, but got: {}",
+            device,
+            offset,
+            length,
+            result.trim()
+        );
+    }
+
+    // Common test sizes for discard/fstrim tests (all formats): 9 small (≤256KB), then one 4MB
+    const BLOCK_DISCARD_TEST_SIZES_KB: &[u64] = &[64, 128, 256, 64, 128, 256, 64, 128, 256, 4096];
+
+    fn _test_virtio_block_discard(
+        format_name: &str,
+        qemu_img_format: &str,
+        extra_create_args: &[&str],
+        expect_discard_success: bool,
+        verify_disk: bool,
+    ) {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let test_disk_path = guest
+            .tmp_dir
+            .as_path()
+            .join(format!("discard_test.{}", format_name.to_lowercase()));
+
+        let mut cmd = format!("qemu-img create -f {} ", qemu_img_format);
+        if !extra_create_args.is_empty() {
+            cmd.push_str(&extra_create_args.join(" "));
+            cmd.push(' ');
+        }
+        cmd.push_str(&format!("{} 2G", test_disk_path.to_str().unwrap()));
+
+        let res = exec_host_command_output(&cmd);
+        assert!(
+            res.status.success(),
+            "Failed to create {} test image",
+            format_name
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                format!("path={},num_queues=4", test_disk_path.to_str().unwrap()).as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        const CLUSTER_SIZE_BYTES: u64 = 64 * 1024; // One QCOW2 cluster
+        const WRITE_SIZE_MB: u64 = 4;
+        const WRITE_OFFSET_MB: u64 = 1;
+
+        // Build discard operations within the written region
+        let write_start = WRITE_OFFSET_MB * 1024 * 1024;
+        let mut discard_operations: Vec<(u64, u64)> = Vec::new();
+        let mut current_offset = write_start;
+
+        for &size_kb in BLOCK_DISCARD_TEST_SIZES_KB {
+            let size = size_kb * 1024;
+            discard_operations.push((current_offset, size));
+            current_offset += size + CLUSTER_SIZE_BYTES; // Add gap between operations
+        }
+
+        let size_after_write = std::cell::Cell::new(0u64);
+
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vdc")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            // Write one 4MB block at offset 1MB
+            guest
+                .ssh_command(&format!(
+                    "sudo dd if=/dev/zero of=/dev/vdc bs=1M count={} seek={} oflag=direct",
+                    WRITE_SIZE_MB, WRITE_OFFSET_MB
+                ))
+                .unwrap();
+            guest.ssh_command("sync").unwrap();
+
+            // For QCOW2, measure file size after write to verify deallocation later
+            let write_size = if qemu_img_format == "qcow2" {
+                let res = exec_host_command_output(&format!(
+                    "ls -s --block-size=1 {}",
+                    test_disk_path.to_str().unwrap()
+                ));
+                assert!(res.status.success());
+                String::from_utf8_lossy(&res.stdout)
+                    .split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .expect("Failed to parse file size after write")
+            } else {
+                0
+            };
+            size_after_write.set(write_size);
+
+            if expect_discard_success {
+                for (i, (offset, length)) in discard_operations.iter().enumerate() {
+                    let result = guest
+                        .ssh_command(&format!(
+                            "sudo blkdiscard -v -o {} -l {} /dev/vdc 2>&1 || true",
+                            offset, length
+                        ))
+                        .unwrap();
+
+                    assert!(
+                        !result.contains("Operation not supported")
+                            && !result.contains("BLKDISCARD"),
+                        "blkdiscard #{} at offset {} length {} failed: {}",
+                        i,
+                        offset,
+                        length,
+                        result
+                    );
+                }
+
+                // Force sync to ensure async DISCARD operations complete
+                guest.ssh_command("sync").unwrap();
+
+                // Verify VM sees zeros in discarded regions
+                for (_i, (offset, length)) in discard_operations.iter().enumerate() {
+                    assert_guest_disk_region_is_zero(&guest, "/dev/vdc", *offset, *length);
+                }
+
+                guest.ssh_command("echo test").unwrap();
+            } else {
+                // For unsupported formats, blkdiscard should fail with "not supported"
+                use test_infra::ssh_command_ip;
+                let result = ssh_command_ip(
+                    "sudo blkdiscard -o 0 -l 4096 /dev/vdc 2>&1",
+                    &guest.network.guest_ip0,
+                    0,
+                    5,
+                );
+                assert!(
+                    result.is_err(),
+                    "blkdiscard should fail on unsupported format"
+                );
+                guest.ssh_command("echo test").unwrap();
+            }
+
+            if expect_discard_success {
+                if qemu_img_format == "qcow2" {
+                    let res = exec_host_command_output(&format!(
+                        "ls -s --block-size=1 {}",
+                        test_disk_path.to_str().unwrap()
+                    ));
+                    assert!(res.status.success());
+                    let size_after_discard: u64 = String::from_utf8_lossy(&res.stdout)
+                        .split_whitespace()
+                        .next()
+                        .and_then(|s| s.parse().ok())
+                        .expect("Failed to parse file size after discard");
+
+                    assert!(
+                        size_after_discard < size_after_write.get(),
+                        "QCOW2 file should shrink after DISCARD with sparse=true: after_write={} bytes, after_discard={} bytes",
+                        size_after_write.get(),
+                        size_after_discard
+                    );
+
+                    verify_fiemap_extents(test_disk_path.to_str().unwrap(), "QCOW2");
+                } else if qemu_img_format == "raw" {
+                    let mut file = File::open(&test_disk_path)
+                        .expect("Failed to open test disk for verification");
+
+                    // Verify each discarded region contains all zeros
+                    for (offset, length) in &discard_operations {
+                        file.seek(SeekFrom::Start(*offset))
+                            .expect("Failed to seek to discarded region");
+
+                        let mut buffer = vec![0u8; *length as usize];
+                        file.read_exact(&mut buffer)
+                            .expect("Failed to read discarded region");
+
+                        let all_zeros = buffer.iter().all(|&b| b == 0);
+                        assert!(
+                            all_zeros,
+                            "Expected discarded region at offset {} length {} to contain all zeros",
+                            offset, length
+                        );
+                    }
+
+                    verify_sparse_file(test_disk_path.to_str().unwrap(), 1.0);
+
+                    verify_fiemap_extents(test_disk_path.to_str().unwrap(), "RAW");
+                }
+            }
+        }));
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        if verify_disk {
+            disk_check_consistency(&test_disk_path, None);
+        }
+    }
+
+    #[test]
+    fn test_virtio_block_discard_qcow2() {
+        _test_virtio_block_discard("qcow2", "qcow2", &[], true, true);
+    }
+
+    #[test]
+    fn test_virtio_block_discard_raw() {
+        _test_virtio_block_discard("raw", "raw", &[], true, false);
+    }
+
+    #[test]
+    fn test_virtio_block_discard_unsupported_vhd() {
+        _test_virtio_block_discard("vhd", "vpc", &["-o", "subformat=fixed"], false, false);
+    }
+
+    #[test]
+    fn test_virtio_block_discard_unsupported_vhdx() {
+        _test_virtio_block_discard("vhdx", "vhdx", &[], false, false);
+    }
+
+    fn _test_virtio_block_fstrim(
+        format_name: &str,
+        qemu_img_format: &str,
+        extra_create_args: &[&str],
+        expect_fstrim_success: bool,
+        verify_disk: bool,
+    ) {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let test_disk_path = guest
+            .tmp_dir
+            .as_path()
+            .join(format!("fstrim_test.{}", format_name.to_lowercase()));
+
+        let mut cmd = format!("qemu-img create -f {} ", qemu_img_format);
+        if !extra_create_args.is_empty() {
+            cmd.push_str(&extra_create_args.join(" "));
+            cmd.push(' ');
+        }
+        cmd.push_str(&format!("{} 2G", test_disk_path.to_str().unwrap()));
+
+        let res = exec_host_command_output(&cmd);
+        assert!(
+            res.status.success(),
+            "Failed to create {} test image",
+            format_name
+        );
+
+        const WRITE_SIZE_MB: u64 = 4;
+        const CLUSTER_SIZE_BYTES: u64 = 64 * 1024;
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                format!("path={},num_queues=4", test_disk_path.to_str().unwrap()).as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let max_size_during_writes = std::cell::Cell::new(0u64);
+
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vdc")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            guest.ssh_command("sudo mkfs.ext4 -F /dev/vdc").unwrap();
+
+            guest
+                .ssh_command("sudo mkdir -p /mnt/test && sudo mount /dev/vdc /mnt/test")
+                .unwrap();
+
+            for (iteration, &write_size_kb) in BLOCK_DISCARD_TEST_SIZES_KB.iter().enumerate() {
+                guest
+                    .ssh_command(&format!(
+                        "sudo dd if=/dev/zero of=/mnt/test/testfile{} bs=1K count={}",
+                        iteration, write_size_kb
+                    ))
+                    .unwrap();
+
+                guest.ssh_command("sync").unwrap();
+
+                // Measure QCOW2 file size after writing
+                if qemu_img_format == "qcow2" {
+                    let res = exec_host_command_output(&format!(
+                        "ls -s --block-size=1 {}",
+                        test_disk_path.to_str().unwrap()
+                    ));
+                    if res.status.success() {
+                        if let Some(size) = String::from_utf8_lossy(&res.stdout)
+                            .split_whitespace()
+                            .next()
+                            .and_then(|s| s.parse::<u64>().ok())
+                        {
+                            max_size_during_writes.set(max_size_during_writes.get().max(size));
+                        }
+                    }
+                }
+
+                // Make blocks available for discard
+                guest
+                    .ssh_command(&format!("sudo rm /mnt/test/testfile{}", iteration))
+                    .unwrap();
+
+                guest.ssh_command("sync").unwrap();
+
+                if expect_fstrim_success {
+                    let fstrim_result = guest.ssh_command("sudo fstrim -v /mnt/test 2>&1").unwrap();
+
+                    // Would output like "/mnt/test: X bytes (Y MB) trimmed"
+                    assert!(
+                        fstrim_result.contains("trimmed") || fstrim_result.contains("bytes"),
+                        "fstrim iteration {} ({}KB) should report trimmed bytes: {}",
+                        iteration,
+                        write_size_kb,
+                        fstrim_result
+                    );
+                } else {
+                    // For unsupported formats, expect fstrim to fail
+                    use test_infra::ssh_command_ip;
+                    let result = ssh_command_ip(
+                        "sudo fstrim -v /mnt/test 2>&1",
+                        &guest.network.guest_ip0,
+                        0,
+                        5,
+                    );
+                    assert!(result.is_err(), "fstrim should fail on unsupported format");
+                    guest.ssh_command("echo 'VM responsive'").unwrap();
+                }
+            }
+
+            guest.ssh_command("sudo umount /mnt/test").unwrap();
+
+            guest.ssh_command("echo test").unwrap();
+        }));
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        if expect_fstrim_success {
+            if qemu_img_format == "qcow2" {
+                // Verify QCOW2 file shrank after fstrim (sparse=true deallocates clusters)
+                let res = exec_host_command_output(&format!(
+                    "ls -s --block-size=1 {}",
+                    test_disk_path.to_str().unwrap()
+                ));
+                assert!(res.status.success());
+                let size_after_fstrim: u64 = String::from_utf8_lossy(&res.stdout)
+                    .split_whitespace()
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .expect("Failed to parse file size after fstrim");
+
+                assert!(
+                    size_after_fstrim < max_size_during_writes.get(),
+                    "QCOW2 file should shrink after fstrim with sparse=true: max_during_writes={} bytes, after_fstrim={} bytes",
+                    max_size_during_writes.get(),
+                    size_after_fstrim
+                );
+            } else if qemu_img_format == "raw" {
+                verify_sparse_file(test_disk_path.to_str().unwrap(), 0.5);
+            }
+        }
+
+        handle_child_output(r, &output);
+
+        if verify_disk {
+            disk_check_consistency(&test_disk_path, None);
+        }
+    }
+
+    #[test]
+    fn test_virtio_block_fstrim_qcow2() {
+        _test_virtio_block_fstrim("qcow2", "qcow2", &[], true, true);
+    }
+
+    #[test]
+    fn test_virtio_block_fstrim_raw() {
+        _test_virtio_block_fstrim("raw", "raw", &[], true, false);
+    }
+
+    #[test]
+    fn test_virtio_block_fstrim_unsupported_vhd() {
+        _test_virtio_block_fstrim("vhd", "vpc", &["-o", "subformat=fixed"], false, false);
+    }
+
+    // VHDX backend has a multiqueue bug causing filesystem corruption.
+    // The _test_virtio_block_fstrim helper uses num_queues>1 which triggers the bug.
+    // Ref: #7665
+    #[test]
+    #[ignore]
+    fn test_virtio_block_fstrim_unsupported_vhdx() {
+        _test_virtio_block_fstrim("vhdx", "vhdx", &[], false, false);
+    }
+
+    #[test]
+    #[ignore = "fallocate() preallocation requires native filesystem support (fails on overlay/tmpfs in CI)"]
+    fn test_virtio_block_sparse_off_raw() {
+        const TEST_DISK_SIZE: &str = "2G";
+        const TEST_DISK_SIZE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+        const INITIAL_ALLOCATION_THRESHOLD: u64 = 1024 * 1024;
+
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let test_disk_path = guest.tmp_dir.as_path().join("sparse_off_test.raw");
+        let test_disk_path = test_disk_path.to_str().unwrap();
+
+        let res = exec_host_command_output(&format!(
+            "truncate -s {} {}",
+            TEST_DISK_SIZE, test_disk_path
+        ));
+        assert!(res.status.success(), "Failed to create sparse test file");
+
+        let res = exec_host_command_output(&format!("ls -s --block-size=1 {}", test_disk_path));
+        assert!(res.status.success());
+        let initial_bytes: u64 = String::from_utf8_lossy(&res.stdout)
+            .split_whitespace()
+            .next()
+            .and_then(|s| s.parse().ok())
+            .expect("Failed to parse initial disk usage");
+        assert!(
+            initial_bytes < INITIAL_ALLOCATION_THRESHOLD,
+            "File should be initially sparse: {} bytes allocated",
+            initial_bytes
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                format!("path={},sparse=off", test_disk_path).as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vdc")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        // After VM starts with sparse=off, verify file is fully allocated.
+        // Strategy is to compare compare physical vs logical bytes
+        // - physical >= logical is fully allocated, modulo block alignment
+        // - physical < logical is still sparse
+
+        let res = exec_host_command_output(&format!("ls -l {}", test_disk_path));
+        assert!(res.status.success());
+        let logical_size: u64 = String::from_utf8_lossy(&res.stdout)
+            .split_whitespace()
+            .nth(4)
+            .and_then(|s| s.parse().ok())
+            .expect("Failed to parse logical size");
+
+        let res = exec_host_command_output(&format!("ls -s --block-size=1 {}", test_disk_path));
+        assert!(res.status.success());
+        let physical_size: u64 = String::from_utf8_lossy(&res.stdout)
+            .split_whitespace()
+            .next()
+            .and_then(|s| s.parse().ok())
+            .expect("Failed to parse physical size");
+
+        assert_eq!(
+            logical_size, TEST_DISK_SIZE_BYTES,
+            "Logical size should be exactly {} bytes, got {}",
+            TEST_DISK_SIZE_BYTES, logical_size
+        );
+
+        let res = exec_host_command_output(&format!("stat -c '%o' {}", test_disk_path));
+        assert!(res.status.success());
+        let block_size: u64 = String::from_utf8_lossy(&res.stdout)
+            .trim()
+            .parse()
+            .expect("Failed to parse block size from stat");
+
+        let expected_max = ((logical_size + block_size - 1) / block_size) * block_size;
+
+        assert!(
+            physical_size >= logical_size,
+            "File should be fully allocated with sparse=off: logical={} bytes, physical={} bytes (physical < logical means still sparse)",
+            logical_size,
+            physical_size
+        );
+
+        assert!(
+            physical_size <= expected_max,
+            "Physical size seems too large: logical={} bytes, physical={} bytes, expected_max={} bytes (block_size={})",
+            logical_size,
+            physical_size,
+            expected_max,
+            block_size
+        );
+    }
+
+    #[test]
+    fn test_virtio_block_sparse_off_qcow2() {
+        const TEST_DISK_SIZE: &str = "2G";
+        const CLUSTER_SIZE_BYTES: u64 = 64 * 1024;
+
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let test_disk_path = guest.tmp_dir.as_path().join("sparse_off_test.qcow2");
+        let test_disk_path = test_disk_path.to_str().unwrap();
+
+        let res = exec_host_command_output(&format!(
+            "qemu-img create -f qcow2 {} {}",
+            test_disk_path, TEST_DISK_SIZE
+        ));
+        assert!(res.status.success(), "Failed to create QCOW2 test image");
+
+        let zero_regions_before = count_qcow2_zero_regions(test_disk_path)
+            .expect("Failed to get initial zero regions count");
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                format!("path={},sparse=off,num_queues=4", test_disk_path).as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vdc")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            let mut current_offset_kb = 1024;
+
+            for (_iteration, &size_kb) in BLOCK_DISCARD_TEST_SIZES_KB.iter().enumerate() {
+                guest
+                    .ssh_command(&format!(
+                        "sudo dd if=/dev/urandom of=/dev/vdc bs=1K count={} seek={} oflag=direct",
+                        size_kb, current_offset_kb
+                    ))
+                    .unwrap();
+
+                guest.ssh_command("sync").unwrap();
+
+                guest
+                    .ssh_command(&format!(
+                        "sudo blkdiscard -o {} -l {} /dev/vdc",
+                        current_offset_kb * 1024,
+                        size_kb * 1024
+                    ))
+                    .unwrap();
+
+                guest.ssh_command("sync").unwrap();
+
+                // Verify VM sees zeros in discarded region
+                assert_guest_disk_region_is_zero(
+                    &guest,
+                    "/dev/vdc",
+                    current_offset_kb * 1024,
+                    size_kb * 1024,
+                );
+
+                current_offset_kb += size_kb + 64;
+            }
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        let zero_regions_after = count_qcow2_zero_regions(test_disk_path)
+            .expect("Failed to get final zero regions count");
+
+        handle_child_output(r, &output);
+
+        assert!(
+            zero_regions_after > zero_regions_before,
+            "Expected zero-flagged regions to increase with sparse=off: before={}, after={}",
+            zero_regions_before,
+            zero_regions_after
+        );
+
+        disk_check_consistency(&test_disk_path, None);
     }
 
     #[test]
