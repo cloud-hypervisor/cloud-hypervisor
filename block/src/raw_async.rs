@@ -13,7 +13,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
-use crate::{BatchRequest, DiskTopology, RequestType};
+use crate::{BatchRequest, DiskTopology, RequestType, probe_sparse_support};
 
 pub struct RawFileDisk {
     file: File,
@@ -57,6 +57,10 @@ impl DiskFile for RawFileDisk {
 
     fn resize(&mut self, size: u64) -> DiskFileResult<()> {
         self.file.set_len(size).map_err(DiskFileError::ResizeError)
+    }
+
+    fn supports_sparse_operations(&self) -> bool {
+        probe_sparse_support(&self.file)
     }
 
     fn fd(&mut self) -> BorrowedDiskFd<'_> {

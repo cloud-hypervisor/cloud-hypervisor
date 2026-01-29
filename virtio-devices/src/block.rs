@@ -702,6 +702,13 @@ impl Block {
                     | (1u64 << VIRTIO_BLK_F_SEG_MAX)
                     | (1u64 << VIRTIO_RING_F_EVENT_IDX)
                     | (1u64 << VIRTIO_RING_F_INDIRECT_DESC);
+
+                // Only advertise discard/write zeroes if the backend supports sparse operations
+                if disk_image.supports_sparse_operations() {
+                    avail_features |=
+                        (1u64 << VIRTIO_BLK_F_DISCARD) | (1u64 << VIRTIO_BLK_F_WRITE_ZEROES);
+                }
+
                 if iommu {
                     avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
                 }

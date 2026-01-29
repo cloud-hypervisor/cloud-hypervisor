@@ -76,6 +76,10 @@ impl DiskFile for QcowDiskSync {
             .map_err(|e| DiskFileError::ResizeError(io::Error::other(e)))
     }
 
+    fn supports_sparse_operations(&self) -> bool {
+        true
+    }
+
     fn fd(&mut self) -> BorrowedDiskFd<'_> {
         BorrowedDiskFd::new(self.qcow_file.lock().unwrap().as_raw_fd())
     }
