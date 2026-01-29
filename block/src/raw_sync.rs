@@ -10,10 +10,10 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use log::warn;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::DiskTopology;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
+use crate::{DiskTopology, probe_sparse_support};
 
 pub struct RawFileDiskSync {
     file: File,
@@ -50,6 +50,10 @@ impl DiskFile for RawFileDiskSync {
             warn!("Unable to get device topology. Using default topology");
             DiskTopology::default()
         }
+    }
+
+    fn supports_sparse_operations(&self) -> bool {
+        probe_sparse_support(&self.file)
     }
 
     fn fd(&mut self) -> BorrowedDiskFd<'_> {

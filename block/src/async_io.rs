@@ -78,6 +78,12 @@ pub trait DiskFile: Send {
         Err(DiskFileError::Unsupported)
     }
 
+    /// Indicates support for sparse operations (punch hole, write zeroes, discard).
+    /// Override to return true when supported.
+    fn supports_sparse_operations(&self) -> bool {
+        false
+    }
+
     /// Returns the file descriptor of the underlying disk image file.
     ///
     /// The file descriptor is supposed to be used for `fcntl()` calls but no
