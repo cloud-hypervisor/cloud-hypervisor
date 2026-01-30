@@ -508,6 +508,11 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                     .unwrap()
                     .get_one::<String>("receive_migration_config")
                     .unwrap(),
+                matches
+                    .subcommand_matches("receive-migration")
+                    .unwrap()
+                    .get_one::<String>("config")
+                    .map(|s| s.to_owned()),
             );
             simple_api_command(
                 socket,
@@ -721,6 +726,11 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
                     .unwrap()
                     .get_one::<String>("receive_migration_config")
                     .unwrap(),
+                matches
+                    .subcommand_matches("receive-migration")
+                    .unwrap()
+                    .get_one::<String>("config")
+                    .map(|s| s.to_owned()),
             );
             proxy.api_vm_receive_migration(&receive_migration_data)
         }
@@ -901,9 +911,10 @@ fn coredump_config(destination_url: &str) -> String {
     serde_json::to_string(&coredump_config).unwrap()
 }
 
-fn receive_migration_data(url: &str) -> String {
+fn receive_migration_data(url: &str, config_url: Option<String>) -> String {
     let receive_migration_data = vmm::api::VmReceiveMigrationData {
         receiver_url: url.to_owned(),
+        config_url,
     };
 
     serde_json::to_string(&receive_migration_data).unwrap()
@@ -1025,6 +1036,12 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
                 Arg::new("receive_migration_config")
                     .index(1)
                     .help("<receiver_url>"),
+            )
+            .arg(
+                Arg::new("config")
+                    .long("config")
+                    .help("Optional configuration URL")
+                    .num_args(1),
             ),
         Command::new("remove-device")
             .about("Remove VFIO and PCI device")

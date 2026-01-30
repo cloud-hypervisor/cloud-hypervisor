@@ -260,6 +260,8 @@ pub struct VmCoredumpData {
 pub struct VmReceiveMigrationData {
     /// URL for the reception of migration state
     pub receiver_url: String,
+    /// URL to the VM configuration
+    pub config_url: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize, Default, Debug)]

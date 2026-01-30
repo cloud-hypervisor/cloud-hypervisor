@@ -896,7 +896,7 @@ impl Vmm {
         socket: &mut SocketStream,
         state: ReceiveMigrationState,
         req: &Request,
-        _receive_data_migration: &VmReceiveMigrationData,
+        receive_data_migration: &VmReceiveMigrationData,
     ) -> std::result::Result<ReceiveMigrationState, MigratableError> {
         use ReceiveMigrationState::*;
 
@@ -910,7 +910,8 @@ impl Vmm {
             |socket: &mut SocketStream,
              memory_files: HashMap<u32, File>|
              -> std::result::Result<Arc<Mutex<MemoryManager>>, MigratableError> {
-                let memory_manager = self.vm_receive_config(req, socket, memory_files)?;
+                let memory_manager =
+                    self.vm_receive_config(req, socket, memory_files, receive_data_migration)?;
 
                 Ok(memory_manager)
             };
@@ -978,10 +979,12 @@ impl Vmm {
         req: &Request,
         socket: &mut T,
         existing_memory_files: HashMap<u32, File>,
+        receive_data_migration: &VmReceiveMigrationData,
     ) -> std::result::Result<Arc<Mutex<MemoryManager>>, MigratableError>
     where
         T: Read,
     {
+        info!("Receiving VM configuration: {receive_data_migration:?}");
         // Read in config data along with memory manager data
         let mut data: Vec<u8> = Vec::new();
         data.resize_with(req.length() as usize, Default::default);
