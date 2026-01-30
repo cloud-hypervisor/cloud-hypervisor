@@ -286,6 +286,8 @@ pub struct DiskConfig {
     pub queue_affinity: Option<Vec<VirtQueueAffinity>>,
     #[serde(default)]
     pub backing_files: bool,
+    #[serde(default = "default_diskconfig_sparse")]
+    pub sparse: bool,
 }
 
 impl ApplyLandlock for DiskConfig {
@@ -307,6 +309,10 @@ pub const DEFAULT_DISK_QUEUE_SIZE: u16 = 128;
 
 pub fn default_diskconfig_queue_size() -> u16 {
     DEFAULT_DISK_QUEUE_SIZE
+}
+
+pub fn default_diskconfig_sparse() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
