@@ -3012,7 +3012,7 @@ impl Transportable for Vm {
         snapshot: &Snapshot,
         destination_url: &str,
     ) -> std::result::Result<(), MigratableError> {
-        let mut snapshot_config_path = url_to_path(destination_url)?;
+        let mut snapshot_config_path = url_to_path(destination_url, true)?;
         snapshot_config_path.push(SNAPSHOT_CONFIG_FILE);
 
         // Create the snapshot config file
@@ -3031,7 +3031,7 @@ impl Transportable for Vm {
             .write(vm_config.as_bytes())
             .map_err(|e| MigratableError::MigrateSend(e.into()))?;
 
-        let mut snapshot_state_path = url_to_path(destination_url)?;
+        let mut snapshot_state_path = url_to_path(destination_url, true)?;
         snapshot_state_path.push(SNAPSHOT_STATE_FILE);
 
         // Create the snapshot state file
