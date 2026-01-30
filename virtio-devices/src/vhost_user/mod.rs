@@ -3,6 +3,7 @@
 
 use std::io;
 use std::ops::Deref;
+use std::os::fd::FromRawFd;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
@@ -300,6 +301,7 @@ pub struct VhostUserCommon {
     pub vu_num_queues: usize,
     pub migration_started: bool,
     pub server: bool,
+    pub shutdown: bool,
 }
 
 impl VhostUserCommon {
@@ -376,8 +378,26 @@ impl VhostUserCommon {
 
     pub fn shutdown(&mut self) {
         if let Some(vu) = &self.vu {
-            // SAFETY: trivially safe
-            let _ = unsafe { libc::close(vu.lock().unwrap().socket_handle().as_raw_fd()) };
+            assert!(!self.shutdown, "used after shutdown");
+            let fd_to_close = vu.lock().unwrap().socket_handle().as_raw_fd();
+            // SAFETY: FFI call with correct arguments
+            let null_fd = unsafe {
+                libc::open(
+                    c"/dev/null".as_ptr(),
+                    libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NOCTTY,
+                )
+            };
+            assert!(null_fd != -1, "cannot open /dev/null");
+            // SAFETY: null_fd was checked to not be -1 above
+            let null_fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(null_fd) };
+            assert_eq!(
+                // SAFETY: FFI call with correct arguments
+                unsafe { libc::dup3(null_fd.as_raw_fd(), fd_to_close, libc::O_CLOEXEC) },
+                fd_to_close,
+                "dup3() failed"
+            );
+            // OwnedFd will close the FD on drop.
+            self.shutdown = true;
         }
 
         // Remove socket path if needed
@@ -392,6 +412,7 @@ impl VhostUserCommon {
         region: &Arc<GuestRegionMmap>,
     ) -> std::result::Result<(), crate::Error> {
         if let Some(vu) = &self.vu {
+            assert!(!self.shutdown, "used after shutdown");
             if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits()
                 != 0
             {
@@ -413,6 +434,7 @@ impl VhostUserCommon {
 
     pub fn pause(&mut self) -> std::result::Result<(), MigratableError> {
         if let Some(vu) = &self.vu {
+            assert!(!self.shutdown, "used after shutdown");
             vu.lock().unwrap().pause_vhost_user().map_err(|e| {
                 MigratableError::Pause(anyhow!("Error pausing vhost-user backend: {e:?}"))
             })
@@ -423,6 +445,7 @@ impl VhostUserCommon {
 
     pub fn resume(&mut self) -> std::result::Result<(), MigratableError> {
         if let Some(vu) = &self.vu {
+            assert!(!self.shutdown, "used after shutdown");
             vu.lock().unwrap().resume_vhost_user().map_err(|e| {
                 MigratableError::Resume(anyhow!("Error resuming vhost-user backend: {e:?}"))
             })
@@ -449,6 +472,7 @@ impl VhostUserCommon {
         guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     ) -> std::result::Result<(), MigratableError> {
         if let Some(vu) = &self.vu {
+            assert!(!self.shutdown, "used after shutdown");
             if let Some(guest_memory) = guest_memory {
                 let last_ram_addr = guest_memory.memory().last_addr().raw_value();
                 vu.lock()
@@ -471,6 +495,7 @@ impl VhostUserCommon {
 
     pub fn stop_dirty_log(&mut self) -> std::result::Result<(), MigratableError> {
         if let Some(vu) = &self.vu {
+            assert!(!self.shutdown, "used after shutdown");
             vu.lock().unwrap().stop_dirty_log().map_err(|e| {
                 MigratableError::StopDirtyLog(anyhow!(
                     "Error stopping migration for vhost-user backend: {e:?}"
@@ -486,6 +511,7 @@ impl VhostUserCommon {
         guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     ) -> std::result::Result<MemoryRangeTable, MigratableError> {
         if let Some(vu) = &self.vu {
+            assert!(!self.shutdown, "used after shutdown");
             if let Some(guest_memory) = guest_memory {
                 let last_ram_addr = guest_memory.memory().last_addr().raw_value();
                 vu.lock().unwrap().dirty_log(last_ram_addr).map_err(|e| {
