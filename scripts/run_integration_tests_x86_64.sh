@@ -156,7 +156,7 @@ if [ ! -f "$VIRTIOFSD" ]; then
     pushd "$WORKLOADS_DIR" || exit
     git clone "https://gitlab.com/virtio-fs/virtiofsd.git" $VIRTIOFSD_DIR
     pushd $VIRTIOFSD_DIR || exit
-    git checkout v1.8.0
+    git checkout v1.13.3
     time cargo build --release
     cp target/release/virtiofsd "$VIRTIOFSD" || exit 1
     popd || exit
