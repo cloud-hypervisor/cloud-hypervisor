@@ -672,6 +672,7 @@ impl Block {
         exit_evt: EventFd,
         state: Option<BlockState>,
         queue_affinity: BTreeMap<u16, Vec<usize>>,
+        _sparse: bool,
     ) -> io::Result<Self> {
         let (disk_nsectors, avail_features, acked_features, config, paused) =
             if let Some(state) = state {

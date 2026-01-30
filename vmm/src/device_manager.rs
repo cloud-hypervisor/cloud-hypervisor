@@ -2799,6 +2799,7 @@ impl DeviceManager {
                 state_from_id(self.snapshot.as_ref(), id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
                 queue_affinity,
+                disk_cfg.sparse,
             )
             .map_err(DeviceManagerError::CreateVirtioBlock)?;
 
