@@ -1062,4 +1062,42 @@ impl VmConfig {
             self.cpus.max_vcpus
         }
     }
+
+    // Only update those fields that have some default function to set them.
+    pub(crate) fn update_from_user_config(
+        &mut self,
+        user_vm_config: &VmConfig,
+    ) -> LandlockResult<()> {
+        // If both configs are identical, no need to update anything.
+        if self == user_vm_config {
+            debug!("VM config unchanged, no need to update.");
+            return Ok(());
+        }
+        debug!("Updating VM config from user config.");
+        if let (Some(self_disks), Some(user_disks)) = (&mut self.disks, &user_vm_config.disks) {
+            for self_disk in self_disks.iter_mut() {
+                if let Some(user_disk) = user_disks.iter().find(|d| d.id == self_disk.id) {
+                    if self_disk.num_queues != user_disk.num_queues {
+                        self_disk.num_queues = user_disk.num_queues;
+                    }
+                    if self_disk.queue_size != user_disk.queue_size {
+                        self_disk.queue_size = user_disk.queue_size;
+                    }
+                }
+            }
+        }
+        if let (Some(self_nets), Some(user_nets)) = (&mut self.net, &user_vm_config.net) {
+            for self_net in self_nets.iter_mut() {
+                if let Some(user_net) = user_nets.iter().find(|d| d.id == self_net.id) {
+                    if self_net.num_queues != user_net.num_queues {
+                        self_net.num_queues = user_net.num_queues;
+                    }
+                    if self_net.queue_size != user_net.queue_size {
+                        self_net.queue_size = user_net.queue_size;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }

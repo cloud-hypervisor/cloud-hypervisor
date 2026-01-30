@@ -55,7 +55,7 @@ use crate::landlock::Landlock;
 use crate::memory_manager::MemoryManager;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
-use crate::migration::{recv_vm_config, recv_vm_state};
+use crate::migration::{file_to_vm_config, recv_vm_config, recv_vm_state, url_to_path};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
@@ -1004,7 +1004,27 @@ impl Vmm {
         )?;
 
         let config = vm_migration_config.vm_config.clone();
+
         self.vm_config = Some(vm_migration_config.vm_config);
+        // VM config from User provided JSON file if any updates to the received config
+        if let Some(user_vm_config) = &receive_data_migration.config_url {
+            let user_vm_config_path = url_to_path(user_vm_config, false)?;
+
+            let user_vm_config: VmConfig = file_to_vm_config(&user_vm_config_path)?;
+            self.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .update_from_user_config(&user_vm_config)
+                .map_err(|e| {
+                    MigratableError::MigrateReceive(anyhow!(
+                        "Error updating VM config from user config file {:?}: {e:?}",
+                        &user_vm_config_path
+                    ))
+                })?;
+        }
+
         self.console_info = Some(pre_create_console_devices(self).map_err(|e| {
             MigratableError::MigrateReceive(anyhow!("Error creating console devices: {e:?}"))
         })?);
