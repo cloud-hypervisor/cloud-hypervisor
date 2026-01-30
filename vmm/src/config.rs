@@ -2231,6 +2231,27 @@ pub struct RestoredNetConfig {
     pub fds: Option<Vec<i32>>,
 }
 
+impl RestoredNetConfig {
+    // Ensure all net devices from 'VmConfig' backed by FDs have a
+    // corresponding 'RestoreNetConfig' with a matched 'id' and expected
+    // number of FDs.
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        let found = vm_config
+            .net
+            .iter()
+            .flatten()
+            .any(|net| net.id.as_ref() == Some(&self.id));
+
+        if found {
+            Ok(())
+        } else {
+            Err(ValidationError::RestoreMissingRequiredNetId(
+                self.id.clone(),
+            ))
+        }
+    }
+}
+
 fn deserialize_restorednetconfig_fds<'de, D>(
     d: D,
 ) -> std::result::Result<Option<Vec<i32>>, D::Error>
