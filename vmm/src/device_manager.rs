@@ -39,7 +39,8 @@ use block::raw_async_aio::RawFileDiskAio;
 use block::raw_sync::RawFileDiskSync;
 use block::vhdx_sync::VhdxDiskSync;
 use block::{
-    ImageType, block_aio_is_supported, block_io_uring_is_supported, detect_image_type, qcow, vhdx,
+    ImageType, block_aio_is_supported, block_io_uring_is_supported, detect_image_type,
+    preallocate_disk, qcow, vhdx,
 };
 #[cfg(feature = "io_uring")]
 use block::{fixed_vhd_async::FixedVhdDiskAsync, raw_async::RawFileDisk};
@@ -2699,6 +2700,14 @@ impl DeviceManager {
                     }
                 }
                 ImageType::Raw => {
+                    // For non-sparse RAW disks, preallocate disk space
+                    if !disk_cfg.readonly
+                        && !disk_cfg.sparse
+                        && let Some(path) = &disk_cfg.path
+                    {
+                        preallocate_disk(&file, path);
+                    }
+
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
                     if cfg!(feature = "io_uring")

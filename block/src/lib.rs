@@ -787,6 +787,42 @@ fn probe_block_device_sparse_support(fd: libc::c_int) -> bool {
     supported
 }
 
+/// Preallocate disk space for a disk image file.
+///
+/// Uses `fallocate()` to allocate all disk space upfront, ensuring storage
+/// availability and reducing fragmentation. Allocating all blocks upfront is
+/// more likely to place them contiguously than allocating on demand during
+/// random writes.
+pub fn preallocate_disk<P: AsRef<Path>>(file: &File, path: P) {
+    let size = match file.metadata() {
+        Ok(m) => m.len(),
+        Err(e) => {
+            warn!("Failed to get metadata for {:?}: {}", path.as_ref(), e);
+            return;
+        }
+    };
+
+    if size == 0 {
+        return;
+    }
+
+    // SAFETY: FFI call with valid file descriptor and size
+    let ret = unsafe { libc::fallocate(file.as_raw_fd(), 0, 0, size as libc::off_t) };
+
+    if ret != 0 {
+        warn!(
+            "Failed to preallocate disk space for {:?}: {}",
+            path.as_ref(),
+            io::Error::last_os_error()
+        );
+    } else {
+        debug!(
+            "Preallocated {size} bytes for disk image {:?}",
+            path.as_ref()
+        );
+    }
+}
+
 pub trait AsyncAdaptor {
     fn read_vectored_sync(
         &mut self,
