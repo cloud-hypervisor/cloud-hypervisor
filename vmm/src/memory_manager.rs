@@ -1251,7 +1251,7 @@ impl MemoryManager {
         phys_bits: u8,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         if let Some(source_url) = source_url {
-            let mut memory_file_path = url_to_path(source_url).map_err(Error::Restore)?;
+            let mut memory_file_path = url_to_path(source_url, true).map_err(Error::Restore)?;
             memory_file_path.push(String::from(SNAPSHOT_FILENAME));
 
             let mem_snapshot: MemoryManagerSnapshotData =
@@ -2573,7 +2573,7 @@ impl Transportable for MemoryManager {
             return Ok(());
         }
 
-        let mut memory_file_path = url_to_path(destination_url)?;
+        let mut memory_file_path = url_to_path(destination_url, true)?;
         memory_file_path.push(String::from(SNAPSHOT_FILENAME));
 
         // Create the snapshot file for the entire memory

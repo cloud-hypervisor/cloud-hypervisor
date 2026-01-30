@@ -17,7 +17,7 @@ use crate::vm_config::VmConfig;
 pub const SNAPSHOT_STATE_FILE: &str = "state.json";
 pub const SNAPSHOT_CONFIG_FILE: &str = "config.json";
 
-pub fn url_to_path(url: &str) -> std::result::Result<PathBuf, MigratableError> {
+pub fn url_to_path(url: &str, check_dir: bool) -> std::result::Result<PathBuf, MigratableError> {
     let path: PathBuf = url
         .strip_prefix("file://")
         .ok_or_else(|| {
@@ -25,7 +25,7 @@ pub fn url_to_path(url: &str) -> std::result::Result<PathBuf, MigratableError> {
         })
         .map(|s| s.into())?;
 
-    if !path.is_dir() {
+    if check_dir && !path.is_dir() {
         return Err(MigratableError::MigrateSend(anyhow!(
             "Destination is not a directory: {path:?}"
         )));
@@ -46,14 +46,10 @@ pub fn url_to_file(url: &str) -> std::result::Result<PathBuf, GuestDebuggableErr
     Ok(file)
 }
 
-pub fn recv_vm_config(source_url: &str) -> std::result::Result<VmConfig, MigratableError> {
-    let mut vm_config_path = url_to_path(source_url)?;
-
-    vm_config_path.push(SNAPSHOT_CONFIG_FILE);
-
-    // Try opening the snapshot file
+pub fn file_to_vm_config(file_path: &PathBuf) -> std::result::Result<VmConfig, MigratableError> {
+    // Try opening the config file
     let mut vm_config_file =
-        File::open(vm_config_path).map_err(|e| MigratableError::MigrateReceive(e.into()))?;
+        File::open(file_path).map_err(|e| MigratableError::MigrateReceive(e.into()))?;
     let mut bytes = Vec::new();
     vm_config_file
         .read_to_end(&mut bytes)
@@ -62,8 +58,16 @@ pub fn recv_vm_config(source_url: &str) -> std::result::Result<VmConfig, Migrata
     serde_json::from_slice(&bytes).map_err(|e| MigratableError::MigrateReceive(e.into()))
 }
 
+pub fn recv_vm_config(source_url: &str) -> std::result::Result<VmConfig, MigratableError> {
+    let mut vm_config_path = url_to_path(source_url, true)?;
+
+    vm_config_path.push(SNAPSHOT_CONFIG_FILE);
+
+    file_to_vm_config(&vm_config_path)
+}
+
 pub fn recv_vm_state(source_url: &str) -> std::result::Result<Snapshot, MigratableError> {
-    let mut vm_state_path = url_to_path(source_url)?;
+    let mut vm_state_path = url_to_path(source_url, true)?;
 
     vm_state_path.push(SNAPSHOT_STATE_FILE);
 
