@@ -27,7 +27,7 @@ use hypervisor::HypervisorVmError;
 use libc::_SC_NPROCESSORS_ONLN;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use log::debug;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracer::trace_scoped;
@@ -1384,6 +1384,7 @@ impl MemoryManager {
         thp: bool,
     ) -> Result<MmapRegion<AtomicBitmap>, Error> {
         let mut mmap_flags = libc::MAP_NORESERVE;
+        let mut enable_thp = false;
 
         // The duplication of mmap_flags ORing here is unfortunate but it also makes
         // the complexity of the handling clear.
@@ -1403,6 +1404,7 @@ impl MemoryManager {
             // because the MAP_PRIVATE will trigger CoW against the backing file with
             // the VFIO pinning
             mmap_flags |= libc::MAP_SHARED;
+            enable_thp = !hugepages;
             Some(Self::create_anonymous_file(size, hugepages, hugepage_size)?)
         } else {
             mmap_flags |= libc::MAP_PRIVATE | libc::MAP_ANONYMOUS;
@@ -1486,7 +1488,7 @@ impl MemoryManager {
             });
         }
 
-        if region.file_offset().is_none() && thp {
+        if thp && (region.file_offset().is_none() || enable_thp) {
             info!(
                 "Anonymous mapping at 0x{:x} (size = 0x{:x})",
                 region.as_ptr() as u64,
@@ -1497,6 +1499,8 @@ impl MemoryManager {
             if ret != 0 {
                 let e = io::Error::last_os_error();
                 warn!("Failed to mark pages as THP eligible: {e}");
+            } else {
+                debug!("Successfully marked pages as THP eligible");
             }
         }
 
