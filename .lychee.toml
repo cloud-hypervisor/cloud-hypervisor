@@ -1,5 +1,7 @@
 verbose = "info"
 
+exclude_path = [".lychee.toml"]
+
 exclude = [
     # Availability of links below should be manually verified.
     # Page for intel TDX support, returns 403 while querying.
@@ -16,6 +18,13 @@ exclude = [
     "\\$.*",
     # Exclude local files
     "file://.*",
+
+    # ARM documentation returns 403 Forbidden for automated CI checks.
+    '^http://infocenter\.arm\.com',
+    '^https://developer\.arm\.com',
+
+    # Ignore internal/unsupported protocols seen in logs
+    '^tcp://192\.168\.1\.10',
 ]
 
 # Exclude loopback addresses
