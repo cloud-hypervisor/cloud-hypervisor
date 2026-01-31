@@ -58,7 +58,7 @@ use linux_loader::loader::bzimage::BzImage;
 use linux_loader::loader::elf::PvhBootCapability::PvhEntryPresent;
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use linux_loader::loader::pe::Error::InvalidImageMagicNumber;
-use log::{error, info};
+use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -1031,6 +1031,12 @@ impl Vm {
                     for distance in distances.iter() {
                         let dest = distance.destination;
                         let dist = distance.distance;
+
+                        if dest == config.guest_numa_id && dist != 10 {
+                            warn!(
+                                "Ignoring self-distance {dest}@{dist} (must be 10 per ACPI spec)"
+                            );
+                        }
 
                         if !configs.iter().any(|cfg| cfg.guest_numa_id == dest) {
                             error!("Unknown destination NUMA node {dest}");
