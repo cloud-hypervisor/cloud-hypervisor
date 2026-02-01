@@ -35,7 +35,7 @@ use crate::qcow::refcount::RefCount;
 use crate::qcow::vec_cache::{CacheMap, Cacheable, VecCache};
 
 /// Nesting depth limit for disk formats that can open other disk files.
-const MAX_NESTING_DEPTH: u32 = 10;
+pub(super) const MAX_NESTING_DEPTH: u32 = 10;
 
 #[sorted]
 #[derive(Debug, Error)]
@@ -788,6 +788,7 @@ impl BackingFile {
         backing_file_config: Option<&BackingFileConfig>,
         direct_io: bool,
         max_nesting_depth: u32,
+        sparse: bool,
     ) -> Result<Option<Self>> {
         let Some(config) = backing_file_config else {
             return Ok(None);
@@ -821,7 +822,7 @@ impl BackingFile {
             }
             ImageType::Qcow2 => {
                 let backing_qcow =
-                    QcowFile::from_with_nesting_depth(raw_file, max_nesting_depth - 1)
+                    QcowFile::from_with_nesting_depth(raw_file, max_nesting_depth - 1, sparse)
                         .map_err(|e| Error::BackingFileOpen(Box::new(e)))?;
                 let size = backing_qcow.virtual_size();
                 (Box::new(backing_qcow), size)
@@ -902,6 +903,8 @@ pub struct QcowFile {
     // removal of references to them have been synced to disk.
     avail_clusters: Vec<u64>,
     backing_file: Option<BackingFile>,
+    #[allow(dead_code)] // Used in later commits for sparse-aware deallocation
+    sparse: bool,
 }
 
 impl QcowFile {
@@ -909,12 +912,16 @@ impl QcowFile {
     ///
     /// Additionally, max nesting depth of this qcow2 image will be set to default value 10.
     pub fn from(file: RawFile) -> Result<QcowFile> {
-        Self::from_with_nesting_depth(file, MAX_NESTING_DEPTH)
+        Self::from_with_nesting_depth(file, MAX_NESTING_DEPTH, true)
     }
 
     /// Creates a QcowFile from `file` and with a max nesting depth. File must be a valid qcow2
     /// image.
-    pub fn from_with_nesting_depth(mut file: RawFile, max_nesting_depth: u32) -> Result<QcowFile> {
+    pub fn from_with_nesting_depth(
+        mut file: RawFile,
+        max_nesting_depth: u32,
+        sparse: bool,
+    ) -> Result<QcowFile> {
         let header = QcowHeader::new(&mut file)?;
 
         // Only v2 and v3 files are supported.
@@ -940,8 +947,12 @@ impl QcowFile {
 
         let direct_io = file.is_direct();
 
-        let backing_file =
-            BackingFile::new(header.backing_file.as_ref(), direct_io, max_nesting_depth)?;
+        let backing_file = BackingFile::new(
+            header.backing_file.as_ref(),
+            direct_io,
+            max_nesting_depth,
+            sparse,
+        )?;
 
         // Validate refcount order to be 0..6
         let refcount_bits: u64 = 0x01u64
@@ -1064,6 +1075,7 @@ impl QcowFile {
             unref_clusters: Vec::new(),
             avail_clusters: Vec::new(),
             backing_file,
+            sparse,
         };
 
         // Check that the L1 and refcount tables fit in a 64bit address space.
@@ -1093,9 +1105,9 @@ impl QcowFile {
     }
 
     /// Creates a new QcowFile at the given path.
-    pub fn new(file: RawFile, version: u32, virtual_size: u64) -> Result<QcowFile> {
+    pub fn new(file: RawFile, version: u32, virtual_size: u64, sparse: bool) -> Result<QcowFile> {
         let header = QcowHeader::create_for_size_and_path(version, virtual_size, None)?;
-        QcowFile::new_from_header(file, &header)
+        QcowFile::new_from_header(file, &header, sparse)
     }
 
     /// Creates a new QcowFile at the given path with a backing file.
@@ -1104,6 +1116,7 @@ impl QcowFile {
         version: u32,
         backing_file_size: u64,
         backing_config: &BackingFileConfig,
+        sparse: bool,
     ) -> Result<QcowFile> {
         let mut header = QcowHeader::create_for_size_and_path(
             version,
@@ -1113,15 +1126,15 @@ impl QcowFile {
         if let Some(backing_file) = &mut header.backing_file {
             backing_file.format = backing_config.format;
         }
-        QcowFile::new_from_header(file, &header)
+        QcowFile::new_from_header(file, &header, sparse)
         // backing_file is loaded by new_from_header -> Self::from() based on the header
     }
 
-    fn new_from_header(mut file: RawFile, header: &QcowHeader) -> Result<QcowFile> {
+    fn new_from_header(mut file: RawFile, header: &QcowHeader, sparse: bool) -> Result<QcowFile> {
         file.rewind().map_err(Error::SeekingFile)?;
         header.write_to(&mut file)?;
 
-        let mut qcow = Self::from(file)?;
+        let mut qcow = Self::from_with_nesting_depth(file, MAX_NESTING_DEPTH, sparse)?;
 
         // Set the refcount for each refcount table cluster.
         let cluster_size = 0x01u64 << qcow.header.cluster_bits;
@@ -2597,7 +2610,7 @@ where
 
     match dst_type {
         ImageType::Qcow2 => {
-            let mut dst_writer = QcowFile::new(dst_file, 3, src_size)?;
+            let mut dst_writer = QcowFile::new(dst_file, 3, src_size, true)?;
             convert_reader_writer(reader, &mut dst_writer, src_size)
         }
         ImageType::Raw => {
@@ -2625,7 +2638,7 @@ pub fn convert(
     match src_type {
         ImageType::Qcow2 => {
             let mut src_reader =
-                QcowFile::from_with_nesting_depth(src_file, src_max_nesting_depth)?;
+                QcowFile::from_with_nesting_depth(src_file, src_max_nesting_depth, true)?;
             convert_reader(&mut src_reader, dst_file, dst_type)
         }
         ImageType::Raw => {
@@ -2747,7 +2760,7 @@ mod unit_tests {
         F: FnMut(QcowFile),
     {
         let tmp: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), direct);
-        let qcow_file = QcowFile::new(tmp, 3, file_size).unwrap();
+        let qcow_file = QcowFile::new(tmp, 3, file_size, true).unwrap();
 
         testfn(qcow_file); // File closed when the function exits.
     }
@@ -2987,7 +3000,7 @@ mod unit_tests {
             .expect("Failed to write header to shm.");
         disk_file.rewind().unwrap();
         // The maximum nesting depth is 0, which means backing file is not allowed.
-        QcowFile::from_with_nesting_depth(disk_file, 0).unwrap();
+        QcowFile::from_with_nesting_depth(disk_file, 0, true).unwrap();
     }
 
     #[test]
@@ -3002,7 +3015,7 @@ mod unit_tests {
             .expect("Failed to write header to shm.");
         disk_file.rewind().unwrap();
         // The maximum nesting depth is 0, which means backing file is not allowed.
-        let res = QcowFile::from_with_nesting_depth(disk_file, 0);
+        let res = QcowFile::from_with_nesting_depth(disk_file, 0, true);
         assert!(matches!(res.unwrap_err(), Error::MaxNestingDepthExceeded));
     }
 
@@ -3033,6 +3046,7 @@ mod unit_tests {
                 false,
             ),
             MAX_NESTING_DEPTH,
+            true,
         )
         .expect_err("Opening qcow file with itself as backing file should fail.");
 
@@ -3450,7 +3464,7 @@ mod unit_tests {
         let new_size = 600 * 1024 * 1024; // 600 MB
 
         let tmp: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
-        let mut q = QcowFile::new(tmp, 3, initial_size).unwrap();
+        let mut q = QcowFile::new(tmp, 3, initial_size, true).unwrap();
 
         let original_l1_size = q.header().l1_size;
         assert_eq!(q.virtual_size(), initial_size);
@@ -3503,7 +3517,7 @@ mod unit_tests {
 
         {
             let backing_raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
-            let _backing_qcow = QcowFile::new(backing_raw, 3, backing_size).unwrap();
+            let _backing_qcow = QcowFile::new(backing_raw, 3, backing_size, true).unwrap();
         }
 
         let overlay_file = TempFile::new().unwrap();
@@ -3513,7 +3527,8 @@ mod unit_tests {
             format: Some(ImageType::Qcow2),
         };
         let mut overlay =
-            QcowFile::new_from_backing(overlay_raw, 3, backing_size, &backing_config).unwrap();
+            QcowFile::new_from_backing(overlay_raw, 3, backing_size, &backing_config, true)
+                .unwrap();
 
         assert_eq!(overlay.virtual_size(), backing_size);
 
@@ -3532,7 +3547,7 @@ mod unit_tests {
 
         {
             let backing_raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
-            let mut backing_qcow = QcowFile::new(backing_raw, 3, backing_size).unwrap();
+            let mut backing_qcow = QcowFile::new(backing_raw, 3, backing_size, true).unwrap();
             let data = b"BACKING_DATA";
             backing_qcow.rewind().unwrap();
             backing_qcow.write_all(data).unwrap();
@@ -3552,7 +3567,8 @@ mod unit_tests {
         };
         let overlay_size = backing_size * 2; // 2x the backing size
         let mut overlay =
-            QcowFile::new_from_backing(overlay_raw, 3, overlay_size, &backing_config).unwrap();
+            QcowFile::new_from_backing(overlay_raw, 3, overlay_size, &backing_config, true)
+                .unwrap();
 
         assert_eq!(overlay.virtual_size(), overlay_size);
 

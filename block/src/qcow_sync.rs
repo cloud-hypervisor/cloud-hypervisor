@@ -13,7 +13,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
-use crate::qcow::{QcowFile, RawFile, Result as QcowResult};
+use crate::qcow::{MAX_NESTING_DEPTH, QcowFile, RawFile, Result as QcowResult};
 use crate::{AsyncAdaptor, BlockBackend};
 
 pub struct QcowDiskSync {
@@ -29,19 +29,15 @@ pub struct QcowDiskSync {
 }
 
 impl QcowDiskSync {
-    pub fn new(file: File, direct_io: bool, backing_files: bool) -> QcowResult<Self> {
-        if backing_files {
-            Ok(QcowDiskSync {
-                qcow_file: Arc::new(Mutex::new(QcowFile::from(RawFile::new(file, direct_io))?)),
-            })
-        } else {
-            Ok(QcowDiskSync {
-                qcow_file: Arc::new(Mutex::new(QcowFile::from_with_nesting_depth(
-                    RawFile::new(file, direct_io),
-                    0,
-                )?)),
-            })
-        }
+    pub fn new(file: File, direct_io: bool, backing_files: bool, sparse: bool) -> QcowResult<Self> {
+        let max_nesting_depth = if backing_files { MAX_NESTING_DEPTH } else { 0 };
+        Ok(QcowDiskSync {
+            qcow_file: Arc::new(Mutex::new(QcowFile::from_with_nesting_depth(
+                RawFile::new(file, direct_io),
+                max_nesting_depth,
+                sparse,
+            )?)),
+        })
     }
 }
 
