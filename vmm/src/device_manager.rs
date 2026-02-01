@@ -2724,8 +2724,13 @@ impl DeviceManager {
                 ImageType::Qcow2 => {
                     info!("Using synchronous QCOW2 disk file");
                     Box::new(
-                        QcowDiskSync::new(file, disk_cfg.direct, disk_cfg.backing_files)
-                            .map_err(DeviceManagerError::CreateQcowDiskSync)?,
+                        QcowDiskSync::new(
+                            file,
+                            disk_cfg.direct,
+                            disk_cfg.backing_files,
+                            disk_cfg.sparse,
+                        )
+                        .map_err(DeviceManagerError::CreateQcowDiskSync)?,
                     ) as Box<dyn DiskFile>
                 }
                 ImageType::Vhdx => {
