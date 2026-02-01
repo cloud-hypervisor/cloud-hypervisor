@@ -84,6 +84,12 @@ pub trait DiskFile: Send {
         false
     }
 
+    /// Indicates support for zero flag optimization in WRITE_ZEROES. Override
+    /// to return true when supported.
+    fn supports_zero_flag(&self) -> bool {
+        false
+    }
+
     /// Returns the file descriptor of the underlying disk image file.
     ///
     /// The file descriptor is supposed to be used for `fcntl()` calls but no
