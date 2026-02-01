@@ -80,6 +80,10 @@ impl DiskFile for QcowDiskSync {
         true
     }
 
+    fn supports_zero_flag(&self) -> bool {
+        true
+    }
+
     fn fd(&mut self) -> BorrowedDiskFd<'_> {
         BorrowedDiskFd::new(self.qcow_file.lock().unwrap().as_raw_fd())
     }
