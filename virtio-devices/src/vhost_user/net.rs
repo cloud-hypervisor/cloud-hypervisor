@@ -28,11 +28,10 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
-use crate::vhost_user::{Error, Result, VhostUserCommon};
+use crate::vhost_user::{DEFAULT_VIRTIO_FEATURES, Error, Result, VhostUserCommon};
 use crate::{
     ActivateResult, GuestMemoryMmap, GuestRegionMmap, NetCtrlEpollHandler, VIRTIO_F_IOMMU_PLATFORM,
-    VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice, VirtioDeviceType,
-    VirtioInterrupt,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
 };
 
 const DEFAULT_QUEUE_NUMBER: usize = 2;
@@ -122,9 +121,7 @@ impl Net {
             // Filling device and vring features VMM supports.
             let mut avail_features = (1 << VIRTIO_NET_F_MRG_RXBUF)
                 | (1 << VIRTIO_NET_F_CTRL_VQ)
-                | (1 << VIRTIO_F_RING_EVENT_IDX)
-                | (1 << VIRTIO_F_VERSION_1)
-                | VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits();
+                | DEFAULT_VIRTIO_FEATURES;
 
             if mtu.is_some() {
                 avail_features |= 1u64 << VIRTIO_NET_F_MTU;
