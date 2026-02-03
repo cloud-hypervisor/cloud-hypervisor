@@ -78,7 +78,7 @@ anyhow = "1.0.99"
 bitflags = "2.10.0"
 byteorder = "1.5.0"
 cfg-if = "1.0.4"
-clap = "4.5.54"
+clap = "4.5.56"
 dhat = "0.3.3"
 dirs = "6.0.0"
 env_logger = "0.11.8"
@@ -91,7 +91,7 @@ signal-hook = "0.4.3"
 thiserror = "2.0.18"
 uuid = { version = "1.20.0" }
 wait-timeout = "0.2.1"
-zerocopy = { version = "0.8.34", default-features = false }
+zerocopy = { version = "0.8.37", default-features = false }
 
 [workspace.lints.clippy]
 # Any clippy lint (group) in alphabetical order:
