@@ -35,6 +35,9 @@ pub enum MigratableError {
     #[error("Socket error")]
     MigrateSocket(#[source] std::io::Error),
 
+    #[error("Send memory thread error")]
+    SendMemoryThread(#[source] std::io::Error),
+
     #[error("Failed to start migration for migratable component")]
     StartDirtyLog(#[source] anyhow::Error),
 
