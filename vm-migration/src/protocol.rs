@@ -346,6 +346,10 @@ impl Iterator for MemoryRangeTableIterator {
 }
 
 impl MemoryRangeTable {
+    pub fn ranges(&self) -> &[MemoryRange] {
+        &self.data
+    }
+
     /// Partitions the table into chunks of at most `chunk_size` bytes.
     pub fn partition(&self, chunk_size: u64) -> impl Iterator<Item = MemoryRangeTable> {
         MemoryRangeTableIterator::new(self, chunk_size)
