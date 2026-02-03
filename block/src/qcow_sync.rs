@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
 use std::os::fd::AsRawFd;
+use std::sync::{Arc, Mutex};
 
 use vmm_sys_util::eventfd::EventFd;
 
@@ -16,13 +17,21 @@ use crate::qcow::{QcowFile, RawFile, Result as QcowResult};
 use crate::{AsyncAdaptor, BlockBackend};
 
 pub struct QcowDiskSync {
-    qcow_file: QcowFile,
+    // FIXME: The Mutex serializes all QCOW2 I/O operations across queues, which
+    // is necessary for correctness but eliminates any parallelism benefit from
+    // multiqueue. QcowFile has internal mutable state (L2 cache, refcounts, file
+    // position) that is not safe to share across threads via Clone.
+    //
+    // A proper fix would require restructuring QcowFile to separate metadata
+    // operations (which need synchronization) from data I/O (which could be
+    // parallelized with per queue file descriptors). See #7560 for details.
+    qcow_file: Arc<Mutex<QcowFile>>,
 }
 
 impl QcowDiskSync {
     pub fn new(file: File, direct_io: bool) -> QcowResult<Self> {
         Ok(QcowDiskSync {
-            qcow_file: QcowFile::from(RawFile::new(file, direct_io))?,
+            qcow_file: Arc::new(Mutex::new(QcowFile::from(RawFile::new(file, direct_io))?)),
         })
     }
 }
@@ -30,12 +39,14 @@ impl QcowDiskSync {
 impl DiskFile for QcowDiskSync {
     fn logical_size(&mut self) -> DiskFileResult<u64> {
         self.qcow_file
+            .lock()
+            .unwrap()
             .seek(SeekFrom::End(0))
             .map_err(DiskFileError::Size)
     }
 
     fn physical_size(&mut self) -> DiskFileResult<u64> {
-        self.qcow_file.physical_size().map_err(|e| {
+        self.qcow_file.lock().unwrap().physical_size().map_err(|e| {
             let io_inner = match e {
                 crate::Error::GetFileMetadata(e) => e,
                 _ => unreachable!(),
@@ -45,22 +56,22 @@ impl DiskFile for QcowDiskSync {
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
-        Ok(Box::new(QcowSync::new(self.qcow_file.clone())) as Box<dyn AsyncIo>)
+        Ok(Box::new(QcowSync::new(Arc::clone(&self.qcow_file))) as Box<dyn AsyncIo>)
     }
 
     fn fd(&mut self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.qcow_file.as_raw_fd())
+        BorrowedDiskFd::new(self.qcow_file.lock().unwrap().as_raw_fd())
     }
 }
 
 pub struct QcowSync {
-    qcow_file: QcowFile,
+    qcow_file: Arc<Mutex<QcowFile>>,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
 }
 
 impl QcowSync {
-    pub fn new(qcow_file: QcowFile) -> Self {
+    pub fn new(qcow_file: Arc<Mutex<QcowFile>>) -> Self {
         QcowSync {
             qcow_file,
             eventfd: EventFd::new(libc::EFD_NONBLOCK)
@@ -83,7 +94,7 @@ impl AsyncIo for QcowSync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        self.qcow_file.read_vectored_sync(
+        self.qcow_file.lock().unwrap().read_vectored_sync(
             offset,
             iovecs,
             user_data,
@@ -98,7 +109,7 @@ impl AsyncIo for QcowSync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        self.qcow_file.write_vectored_sync(
+        self.qcow_file.lock().unwrap().write_vectored_sync(
             offset,
             iovecs,
             user_data,
@@ -108,8 +119,11 @@ impl AsyncIo for QcowSync {
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
-        self.qcow_file
-            .fsync_sync(user_data, &self.eventfd, &mut self.completion_list)
+        self.qcow_file.lock().unwrap().fsync_sync(
+            user_data,
+            &self.eventfd,
+            &mut self.completion_list,
+        )
     }
 
     fn next_completed_request(&mut self) -> Option<(u64, i32)> {
