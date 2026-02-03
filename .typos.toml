@@ -21,5 +21,8 @@ liness = "liness"
 outout = "outout"
 
 [default.extend-identifiers]
+consts = "consts"
 fo = "fo"
 fpr = "fpr"
+# Public Linux API
+msg_controllen = "msg_controllen"
