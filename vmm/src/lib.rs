@@ -932,6 +932,67 @@ fn receive_migration_listener(
     }
 }
 
+fn send_memory_regions(
+    guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    ranges: &MemoryRangeTable,
+    fd: &mut SocketStream,
+) -> std::result::Result<(), MigratableError> {
+    let mem = guest_memory.memory();
+
+    for range in ranges.regions() {
+        let mut offset: u64 = 0;
+        // Here we are manually handling the retry in case we can't the
+        // whole region at once because we can't use the implementation
+        // from vm-memory::GuestMemory of write_all_to() as it is not
+        // following the correct behavior. For more info about this issue
+        // see: https://github.com/rust-vmm/vm-memory/issues/174
+        loop {
+            let bytes_written = mem
+                .write_volatile_to(
+                    GuestAddress(range.gpa + offset),
+                    fd,
+                    (range.length - offset) as usize,
+                )
+                .map_err(|e| {
+                    MigratableError::MigrateSend(anyhow!(
+                        "Error transferring memory to socket: {e}"
+                    ))
+                })?;
+            offset += bytes_written as u64;
+
+            if offset == range.length {
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+// Send memory from the given table.
+// Returns true if there were dirty pages to send
+fn vm_send_memory(
+    guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    socket: &mut SocketStream,
+    table: &MemoryRangeTable,
+) -> result::Result<bool, MigratableError> {
+    // But if there are no regions go straight to pause
+    if table.regions().is_empty() {
+        return Ok(false);
+    }
+
+    Request::memory(table.length()).write_to(socket).unwrap();
+    table.write_to(socket)?;
+    // And then the memory itself
+    send_memory_regions(guest_memory, table, socket)?;
+    Response::read_from(socket)?.ok_or_abandon(
+        socket,
+        MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
+    )?;
+
+    Ok(true)
+}
+
 impl Vmm {
     pub const HANDLED_SIGNALS: [i32; 2] = [SIGTERM, SIGINT];
 
@@ -1368,30 +1429,6 @@ impl Vmm {
         Ok(())
     }
 
-    // Send memory from the given table.
-    // Returns true if there were dirty pages to send
-    fn vm_send_memory(
-        vm: &mut Vm,
-        socket: &mut SocketStream,
-        table: &MemoryRangeTable,
-    ) -> result::Result<bool, MigratableError> {
-        // But if there are no regions go straight to pause
-        if table.regions().is_empty() {
-            return Ok(false);
-        }
-
-        Request::memory(table.length()).write_to(socket).unwrap();
-        table.write_to(socket)?;
-        // And then the memory itself
-        vm.send_memory_regions(table, socket)?;
-        Response::read_from(socket)?.ok_or_abandon(
-            socket,
-            MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
-        )?;
-
-        Ok(true)
-    }
-
     fn send_migration(
         vm: &mut Vm,
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -1479,14 +1516,14 @@ impl Vmm {
 
             // Send memory table
             let table = vm.memory_range_table()?;
-            Self::vm_send_memory(vm, &mut socket, &table)?;
+            vm_send_memory(&vm.guest_memory(), &mut socket, &table)?;
 
             // Try at most 5 passes of dirty memory sending
             const MAX_DIRTY_MIGRATIONS: usize = 5;
             for i in 0..MAX_DIRTY_MIGRATIONS {
                 info!("Dirty memory migration {i} of {MAX_DIRTY_MIGRATIONS}");
                 let table = vm.dirty_log()?;
-                if !Self::vm_send_memory(vm, &mut socket, &table)? {
+                if !vm_send_memory(&vm.guest_memory(), &mut socket, &table)? {
                     break;
                 }
             }
@@ -1496,7 +1533,7 @@ impl Vmm {
 
             // Send last batch of dirty pages
             let table = vm.dirty_log()?;
-            Self::vm_send_memory(vm, &mut socket, &table)?;
+            vm_send_memory(&vm.guest_memory(), &mut socket, &table)?;
         }
 
         // We release the locks early to enable locking them on the destination host.
