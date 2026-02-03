@@ -112,6 +112,8 @@ pub enum Error {
     SettingRefcountRefcount(#[source] io::Error),
     #[error("Size too small for number of clusters")]
     SizeTooSmallForNumberOfClusters,
+    #[error("Failed to sync header")]
+    SyncingHeader(#[source] io::Error),
     #[error("L1 entry table too large: {0}")]
     TooManyL1Entries(u64),
     #[error("Ref count table too large: {0}")]
@@ -698,7 +700,7 @@ impl QcowHeader {
                 self.incompatible_features &= !IncompatFeatures::DIRTY.bits();
             }
             self.write_incompatible_features(file)?;
-            file.fsync().map_err(Error::WritingHeader)?;
+            file.fsync().map_err(Error::SyncingHeader)?;
         }
         Ok(())
     }
@@ -711,7 +713,7 @@ impl QcowHeader {
         if self.version == 3 {
             self.incompatible_features |= IncompatFeatures::CORRUPT.bits();
             self.write_incompatible_features(file)?;
-            file.fsync().map_err(Error::WritingHeader)?;
+            file.fsync().map_err(Error::SyncingHeader)?;
         }
         Ok(())
     }
@@ -734,7 +736,7 @@ impl QcowHeader {
             file.seek(SeekFrom::Start(AUTOCLEAR_FEATURES_OFFSET))
                 .map_err(Error::WritingHeader)?;
             u64::write_be(file, 0).map_err(Error::WritingHeader)?;
-            file.fsync().map_err(Error::WritingHeader)?;
+            file.fsync().map_err(Error::SyncingHeader)?;
         }
         Ok(())
     }
