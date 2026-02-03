@@ -2543,6 +2543,7 @@ mod common_parallel {
     use std::cmp;
     use std::fs::{File, OpenOptions, copy};
     use std::io::{self, SeekFrom};
+    use std::process::Command;
 
     use crate::*;
 
@@ -3797,6 +3798,423 @@ mod common_parallel {
     #[test]
     fn test_virtio_block_qcow2_backing_raw_file() {
         _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE, false, false, true);
+    }
+
+    /// Configuration for QCOW2 multiqueue test image setup
+    enum QcowTestImageConfig {
+        /// Simple QCOW2 image with given size (e.g., "256M")
+        Simple(&'static str),
+        /// QCOW2 overlay with backing file
+        WithBacking,
+    }
+
+    /// Helper to run QCOW2 multiqueue stress tests with shared setup/teardown.
+    ///
+    /// Creates a VM with multiple virtio queues on the test disk, then runs the
+    /// provided test closure. Handles VM lifecycle and consistency checks.
+    fn run_multiqueue_qcow2_test<F>(image_config: QcowTestImageConfig, test_fn: F)
+    where
+        F: FnOnce(&Guest) + std::panic::UnwindSafe,
+    {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let test_image_path = guest.tmp_dir.as_path().join("test.qcow2");
+
+        // Create test image based on configuration and capture backing checksum if applicable
+        let initial_backing_checksum = match image_config {
+            QcowTestImageConfig::Simple(size) => {
+                Command::new("qemu-img")
+                    .arg("create")
+                    .args(["-f", "qcow2"])
+                    .arg(test_image_path.to_str().unwrap())
+                    .arg(size)
+                    .output()
+                    .expect("Failed to create QCOW2 test image");
+                None
+            }
+            QcowTestImageConfig::WithBacking => {
+                let backing_path = guest.tmp_dir.as_path().join("backing.qcow2");
+                Command::new("qemu-img")
+                    .arg("create")
+                    .args(["-f", "qcow2"])
+                    .arg(backing_path.to_str().unwrap())
+                    .arg("256M")
+                    .output()
+                    .expect("Failed to create backing QCOW2");
+
+                Command::new("qemu-img")
+                    .arg("create")
+                    .args(["-f", "qcow2"])
+                    .args(["-b", backing_path.to_str().unwrap()])
+                    .args(["-F", "qcow2"])
+                    .arg(test_image_path.to_str().unwrap())
+                    .output()
+                    .expect("Failed to create overlay QCOW2");
+
+                compute_backing_checksum(&test_image_path)
+            }
+        };
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=8"])
+            .args(["--memory", "size=1024M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                &format!(
+                    "path={},num_queues=8",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                ),
+                &format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                ),
+                &format!("path={},num_queues=8", test_image_path.to_str().unwrap()),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+            test_fn(&guest);
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+
+        disk_check_consistency(
+            guest.disk_config.disk(DiskType::OperatingSystem).unwrap(),
+            None,
+        );
+        disk_check_consistency(&test_image_path, initial_backing_checksum);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_multiqueue_writes() {
+        run_multiqueue_qcow2_test(QcowTestImageConfig::Simple("256M"), |guest| {
+            assert_eq!(
+                guest
+                    .ssh_command("ls -ll /sys/block/vdc/mq | grep ^d | wc -l")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                8,
+                "Expected 8 queues on vdc"
+            );
+
+            guest
+                .ssh_command("sudo mkfs.ext4 -F /dev/vdc")
+                .expect("Failed to format disk");
+            guest
+                .ssh_command("sudo mkdir -p /mnt/test && sudo mount /dev/vdc /mnt/test")
+                .expect("Failed to mount disk");
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 8); do \
+                        sudo dd if=/dev/urandom of=/mnt/test/file$i bs=1M count=32 conv=fsync & \
+                    done; wait",
+                )
+                .expect("Failed to write files in parallel");
+
+            assert_eq!(
+                guest
+                    .ssh_command("ls /mnt/test/file* | wc -l")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                8,
+                "Expected 8 files to be created"
+            );
+
+            guest
+                .ssh_command("sudo rm -f /mnt/test/file*")
+                .expect("Failed to remove files");
+
+            // Do another round of heavy parallel I/O
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 16); do \
+                        sudo dd if=/dev/urandom of=/mnt/test/file$i bs=1M count=16 conv=fsync & \
+                    done; wait",
+                )
+                .expect("Failed to write files in second round");
+
+            assert_eq!(
+                guest
+                    .ssh_command("ls /mnt/test/file* | wc -l")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                16,
+                "Expected 16 files after second round"
+            );
+
+            guest
+                .ssh_command("sudo umount /mnt/test")
+                .expect("Failed to unmount");
+        });
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_multiqueue_mixed_rw() {
+        run_multiqueue_qcow2_test(QcowTestImageConfig::Simple("512M"), |guest| {
+            guest
+                .ssh_command("sudo mkfs.ext4 -F /dev/vdc")
+                .expect("Failed to format disk");
+            guest
+                .ssh_command("sudo mkdir -p /mnt/test && sudo mount /dev/vdc /mnt/test")
+                .expect("Failed to mount disk");
+
+            guest
+                .ssh_command(
+                    "sudo dd if=/dev/urandom of=/mnt/test/readfile bs=1M count=64 conv=fsync",
+                )
+                .expect("Failed to create initial file");
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 4); do \
+                        sudo dd if=/mnt/test/readfile of=/dev/null bs=64K & \
+                        sudo dd if=/dev/urandom of=/mnt/test/writefile$i bs=1M count=32 conv=fsync & \
+                    done; wait",
+                )
+                .expect("Failed mixed read/write workload");
+
+            assert_eq!(
+                guest
+                    .ssh_command("ls /mnt/test/writefile* | wc -l")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                4,
+                "Expected 4 write files"
+            );
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 4); do \
+                        sudo dd if=/mnt/test/writefile$i of=/dev/null bs=64K & \
+                        sudo dd if=/dev/urandom of=/mnt/test/newfile$i bs=1M count=16 conv=fsync & \
+                    done; wait",
+                )
+                .expect("Failed second mixed workload");
+
+            guest
+                .ssh_command("sudo umount /mnt/test")
+                .expect("Failed to unmount");
+        });
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_multiqueue_backing() {
+        run_multiqueue_qcow2_test(QcowTestImageConfig::WithBacking, |guest| {
+            guest
+                .ssh_command("sudo mkfs.ext4 -F /dev/vdc")
+                .expect("Failed to format disk");
+            guest
+                .ssh_command("sudo mkdir -p /mnt/test && sudo mount /dev/vdc /mnt/test")
+                .expect("Failed to mount disk");
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 8); do \
+                        sudo dd if=/dev/urandom of=/mnt/test/file$i bs=1M count=16 conv=fsync & \
+                    done; wait",
+                )
+                .expect("Failed to write files");
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 8); do \
+                        sudo dd if=/mnt/test/file$i of=/dev/null bs=64K & \
+                        sudo dd if=/dev/urandom of=/mnt/test/new$i bs=1M count=8 conv=fsync & \
+                    done; wait",
+                )
+                .expect("Failed mixed backing/overlay workload");
+
+            assert_eq!(
+                guest
+                    .ssh_command("ls /mnt/test/new* | wc -l")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                8,
+                "Expected 8 new files"
+            );
+
+            guest
+                .ssh_command("sudo umount /mnt/test")
+                .expect("Failed to unmount");
+        });
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_multiqueue_random_4k() {
+        run_multiqueue_qcow2_test(QcowTestImageConfig::Simple("256M"), |guest| {
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 8); do \
+                        sudo dd if=/dev/urandom of=/dev/vdc bs=4K count=1000 seek=$((RANDOM % 60000)) conv=notrunc & \
+                    done; wait",
+                )
+                .expect("Failed random 4K writes round 1");
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 8); do \
+                        sudo dd if=/dev/urandom of=/dev/vdc bs=4K count=1000 seek=$((RANDOM % 60000)) conv=notrunc & \
+                    done; wait",
+                )
+                .expect("Failed random 4K writes round 2");
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 4); do \
+                        sudo dd if=/dev/vdc of=/dev/null bs=4K count=500 skip=$((RANDOM % 60000)) & \
+                        sudo dd if=/dev/urandom of=/dev/vdc bs=4K count=500 seek=$((RANDOM % 60000)) conv=notrunc & \
+                    done; wait",
+                )
+                .expect("Failed mixed random I/O");
+        });
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_multiqueue_fsync() {
+        run_multiqueue_qcow2_test(QcowTestImageConfig::Simple("256M"), |guest| {
+            guest
+                .ssh_command("sudo mkfs.ext4 -F /dev/vdc")
+                .expect("Failed to format disk");
+            guest
+                .ssh_command("sudo mkdir -p /mnt/test && sudo mount /dev/vdc /mnt/test")
+                .expect("Failed to mount disk");
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 8); do \
+                        (for j in $(seq 1 100); do \
+                            echo \"data$j\" | sudo tee /mnt/test/file${i}_$j > /dev/null && sudo sync; \
+                        done) & \
+                    done; wait",
+                )
+                .expect("Failed fsync storm round 1");
+
+            assert_eq!(
+                guest
+                    .ssh_command("ls /mnt/test/file* | wc -l")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                800,
+                "Expected 800 files (8 processes x 100 files)"
+            );
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 8); do \
+                        (for j in $(seq 1 50); do \
+                            sudo dd if=/dev/urandom of=/mnt/test/dd${i}_$j bs=4K count=1 conv=fsync 2>/dev/null; \
+                        done) & \
+                    done; wait",
+                )
+                .expect("Failed fsync storm round 2");
+
+            guest
+                .ssh_command("sudo umount /mnt/test")
+                .expect("Failed to unmount");
+        });
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_multiqueue_metadata() {
+        run_multiqueue_qcow2_test(QcowTestImageConfig::Simple("256M"), |guest| {
+            guest
+                .ssh_command("sudo mkfs.ext4 -F /dev/vdc")
+                .expect("Failed to format disk");
+            guest
+                .ssh_command("sudo mkdir -p /mnt/test && sudo mount /dev/vdc /mnt/test")
+                .expect("Failed to mount disk");
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 8); do \
+                        (for j in $(seq 1 50); do \
+                            sudo mkdir -p /mnt/test/dir$i/subdir$j; \
+                        done) & \
+                    done; wait",
+                )
+                .expect("Failed parallel mkdir");
+
+            let dir_count: u32 = guest
+                .ssh_command("find /mnt/test -type d | wc -l")
+                .expect("Failed to count directories")
+                .trim()
+                .parse()
+                .unwrap_or(0);
+            assert!(
+                dir_count >= 400,
+                "Expected at least 400 directories, got {dir_count}"
+            );
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 8); do \
+                        (for j in $(seq 1 100); do \
+                            sudo touch /mnt/test/dir$i/file$j; \
+                        done) & \
+                    done; wait",
+                )
+                .expect("Failed parallel touch");
+
+            let file_count: u32 = guest
+                .ssh_command("find /mnt/test -type f | wc -l")
+                .expect("Failed to count files")
+                .trim()
+                .parse()
+                .unwrap_or(0);
+            assert!(
+                file_count >= 400,
+                "Expected at least 400 files, got {file_count}"
+            );
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 1 4); do \
+                        sudo rm -rf /mnt/test/dir$i & \
+                        (for j in $(seq 1 50); do \
+                            sudo touch /mnt/test/newfile${i}_$j; \
+                        done) & \
+                    done; wait",
+                )
+                .expect("Failed parallel rm + touch");
+
+            guest
+                .ssh_command(
+                    "for i in $(seq 5 8); do \
+                        (for j in $(seq 1 25); do \
+                            sudo mv /mnt/test/dir$i/file$j /mnt/test/dir$i/renamed$j 2>/dev/null || true; \
+                        done) & \
+                    done; wait",
+                )
+                .expect("Failed parallel rename");
+
+            guest
+                .ssh_command("sync && sudo umount /mnt/test")
+                .expect("Failed to unmount");
+        });
     }
 
     #[test]
