@@ -969,28 +969,44 @@ fn send_memory_regions(
     Ok(())
 }
 
-// Send memory from the given table.
-// Returns true if there were dirty pages to send
-fn vm_send_memory(
-    guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
-    socket: &mut SocketStream,
-    table: &MemoryRangeTable,
-) -> result::Result<bool, MigratableError> {
-    // But if there are no regions go straight to pause
-    if table.regions().is_empty() {
-        return Ok(false);
+/// This struct keeps track of additional threads we use to send VM memory.
+struct SendAdditionalConnections {
+    guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+}
+
+impl SendAdditionalConnections {
+    fn new(
+        guest_mem: &GuestMemoryAtomic<GuestMemoryMmap>,
+    ) -> std::result::Result<Self, MigratableError> {
+        Ok(Self {
+            guest_memory: guest_mem.clone(),
+        })
     }
 
-    Request::memory(table.length()).write_to(socket).unwrap();
-    table.write_to(socket)?;
-    // And then the memory itself
-    send_memory_regions(guest_memory, table, socket)?;
-    Response::read_from(socket)?.ok_or_abandon(
-        socket,
-        MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
-    )?;
+    /// Send memory via all connections that we have. This may be just one.
+    /// `socket` is the original socket that was used to connect to the
+    /// destination.
+    fn send_memory(
+        &self,
+        table: &MemoryRangeTable,
+        socket: &mut SocketStream,
+    ) -> std::result::Result<bool, MigratableError> {
+        warn!("Not sending via multiple connections yet");
+        if table.regions().is_empty() {
+            return Ok(false);
+        }
 
-    Ok(true)
+        Request::memory(table.length()).write_to(socket).unwrap();
+        table.write_to(socket)?;
+        // And then the memory itself
+        send_memory_regions(&self.guest_memory, table, socket)?;
+        Response::read_from(socket)?.ok_or_abandon(
+            socket,
+            MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
+        )?;
+
+        Ok(true)
+    }
 }
 
 impl Vmm {
@@ -1429,6 +1445,35 @@ impl Vmm {
         Ok(())
     }
 
+    fn do_memory_migration(
+        vm: &mut Vm,
+        socket: &mut SocketStream,
+    ) -> result::Result<(), MigratableError> {
+        let mem_send = SendAdditionalConnections::new(&vm.guest_memory())?;
+
+        // Start logging dirty pages
+        vm.start_dirty_log()?;
+
+        // Send memory table
+        mem_send.send_memory(&vm.memory_range_table()?, socket)?;
+
+        // Try at most 5 passes of dirty memory sending
+        const MAX_DIRTY_MIGRATIONS: usize = 5;
+        for i in 0..MAX_DIRTY_MIGRATIONS {
+            info!("Dirty memory migration {i} of {MAX_DIRTY_MIGRATIONS}");
+            if !mem_send.send_memory(&vm.dirty_log()?, socket)? {
+                break;
+            }
+        }
+
+        // Now pause VM
+        vm.pause()?;
+
+        // Send last batch of dirty pages
+        mem_send.send_memory(&vm.dirty_log()?, socket)?;
+        Ok(())
+    }
+
     fn send_migration(
         vm: &mut Vm,
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -1511,29 +1556,7 @@ impl Vmm {
             // Now pause VM
             vm.pause()?;
         } else {
-            // Start logging dirty pages
-            vm.start_dirty_log()?;
-
-            // Send memory table
-            let table = vm.memory_range_table()?;
-            vm_send_memory(&vm.guest_memory(), &mut socket, &table)?;
-
-            // Try at most 5 passes of dirty memory sending
-            const MAX_DIRTY_MIGRATIONS: usize = 5;
-            for i in 0..MAX_DIRTY_MIGRATIONS {
-                info!("Dirty memory migration {i} of {MAX_DIRTY_MIGRATIONS}");
-                let table = vm.dirty_log()?;
-                if !vm_send_memory(&vm.guest_memory(), &mut socket, &table)? {
-                    break;
-                }
-            }
-
-            // Now pause VM
-            vm.pause()?;
-
-            // Send last batch of dirty pages
-            let table = vm.dirty_log()?;
-            vm_send_memory(&vm.guest_memory(), &mut socket, &table)?;
+            Self::do_memory_migration(vm, &mut socket)?;
         }
 
         // We release the locks early to enable locking them on the destination host.
