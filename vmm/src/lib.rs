@@ -1368,14 +1368,13 @@ impl Vmm {
         }
     }
 
+    // Send memory from the given table.
     // Returns true if there were dirty pages to send
-    fn vm_maybe_send_dirty_pages(
+    fn vm_send_memory(
         vm: &mut Vm,
         socket: &mut SocketStream,
+        table: &MemoryRangeTable,
     ) -> result::Result<bool, MigratableError> {
-        // Send (dirty) memory table
-        let table = vm.dirty_log()?;
-
         // But if there are no regions go straight to pause
         if table.regions().is_empty() {
             return Ok(false);
@@ -1384,7 +1383,7 @@ impl Vmm {
         Request::memory(table.length()).write_to(socket).unwrap();
         table.write_to(socket)?;
         // And then the memory itself
-        vm.send_memory_regions(&table, socket)?;
+        vm.send_memory_regions(table, socket)?;
         Response::read_from(socket)?.ok_or_abandon(
             socket,
             MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
@@ -1480,22 +1479,14 @@ impl Vmm {
 
             // Send memory table
             let table = vm.memory_range_table()?;
-            Request::memory(table.length())
-                .write_to(&mut socket)
-                .unwrap();
-            table.write_to(&mut socket)?;
-            // And then the memory itself
-            vm.send_memory_regions(&table, &mut socket)?;
-            Response::read_from(&mut socket)?.ok_or_abandon(
-                &mut socket,
-                MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
-            )?;
+            Self::vm_send_memory(vm, &mut socket, &table)?;
 
             // Try at most 5 passes of dirty memory sending
             const MAX_DIRTY_MIGRATIONS: usize = 5;
             for i in 0..MAX_DIRTY_MIGRATIONS {
                 info!("Dirty memory migration {i} of {MAX_DIRTY_MIGRATIONS}");
-                if !Self::vm_maybe_send_dirty_pages(vm, &mut socket)? {
+                let table = vm.dirty_log()?;
+                if !Self::vm_send_memory(vm, &mut socket, &table)? {
                     break;
                 }
             }
@@ -1504,7 +1495,8 @@ impl Vmm {
             vm.pause()?;
 
             // Send last batch of dirty pages
-            Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
+            let table = vm.dirty_log()?;
+            Self::vm_send_memory(vm, &mut socket, &table)?;
         }
 
         // We release the locks early to enable locking them on the destination host.
