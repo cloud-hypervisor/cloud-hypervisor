@@ -1,5 +1,5 @@
 name: MSHV Infra Setup
-on: 
+on:
   workflow_call:
     inputs:
       ARCH:
@@ -44,7 +44,7 @@ on:
         description: 'Private IP of the VM'
         value: ${{ jobs.infra-setup.outputs.PRIVATE_IP }}
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 jobs:
   infra-setup:
