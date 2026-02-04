@@ -22,10 +22,10 @@ use super::{ApiAction, ApiRequest};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::api::VmCoredump;
 use crate::api::{
-    AddDisk, Body, VmAddDevice, VmAddFs, VmAddNet, VmAddPmem, VmAddUserDevice, VmAddVdpa,
-    VmAddVsock, VmBoot, VmCounters, VmCreate, VmDelete, VmInfo, VmPause, VmPowerButton, VmReboot,
-    VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume,
-    VmSendMigration, VmShutdown, VmSnapshot, VmmPing, VmmShutdown,
+    AddDisk, Body, VmAddDevice, VmAddFs, VmAddGenericVhostUser, VmAddNet, VmAddPmem,
+    VmAddUserDevice, VmAddVdpa, VmAddVsock, VmBoot, VmCounters, VmCreate, VmDelete, VmInfo,
+    VmPause, VmPowerButton, VmReboot, VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone,
+    VmRestore, VmResume, VmSendMigration, VmShutdown, VmSnapshot, VmmPing, VmmShutdown,
 };
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::{Error as VmmError, NetConfig, Result as VmmResult, VmConfig};
@@ -142,6 +142,16 @@ impl DBusApi {
     async fn vm_add_fs(&self, fs_config: String) -> Result<Optional<String>> {
         let fs_config = serde_json::from_str(&fs_config).map_err(api_error)?;
         self.vm_action(&VmAddFs, fs_config).await
+    }
+
+    async fn vm_add_generic_vhost_user(
+        &self,
+        generic_vhost_user_config: String,
+    ) -> Result<Optional<String>> {
+        let generic_vhost_user_config =
+            serde_json::from_str(&generic_vhost_user_config).map_err(api_error)?;
+        self.vm_action(&VmAddGenericVhostUser, generic_vhost_user_config)
+            .await
     }
 
     async fn vm_add_net(&self, net_config: String) -> Result<Optional<String>> {
