@@ -9,6 +9,7 @@ use std::os::fd::AsRawFd;
 use std::sync::{Arc, Mutex};
 
 use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::write_zeroes::PunchHole;
 
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
@@ -151,15 +152,67 @@ impl AsyncIo for QcowSync {
         self.completion_list.pop_front()
     }
 
-    fn punch_hole(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
-        Err(AsyncIoError::PunchHole(std::io::Error::other(
-            "punch_hole not supported for QCOW sync backend",
-        )))
+    fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
+        // For QCOW2, punch_hole calls deallocate_cluster
+        let result = self
+            .qcow_file
+            .lock()
+            .unwrap()
+            .punch_hole(offset, length)
+            .map(|_| 0i32)
+            .map_err(AsyncIoError::PunchHole);
+
+        match result {
+            Ok(res) => {
+                self.completion_list.push_back((user_data, res));
+                self.eventfd.write(1).unwrap();
+                Ok(())
+            }
+            Err(e) => {
+                // CRITICAL: Always signal completion even on error to avoid hangs
+                let errno = if let AsyncIoError::PunchHole(io_err) = &e {
+                    let err = io_err.raw_os_error().unwrap_or(libc::EIO);
+                    -err
+                } else {
+                    -libc::EIO
+                };
+                self.completion_list.push_back((user_data, errno));
+                self.eventfd.write(1).unwrap();
+                Ok(())
+            }
+        }
     }
 
-    fn write_zeroes(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
-        Err(AsyncIoError::WriteZeroes(std::io::Error::other(
-            "write_zeroes not supported for QCOW sync backend",
-        )))
+    fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
+        // For QCOW2, write_zeroes is implemented by deallocating clusters via punch_hole.
+        // This is more efficient than writing actual zeros and reduces disk usage.
+        // Unallocated clusters inherently read as zero in the QCOW2 format.
+        let result = self
+            .qcow_file
+            .lock()
+            .unwrap()
+            .punch_hole(offset, length)
+            .map(|_| 0i32)
+            .map_err(AsyncIoError::WriteZeroes);
+
+        match result {
+            Ok(res) => {
+                self.completion_list.push_back((user_data, res));
+                self.eventfd.write(1).unwrap();
+                Ok(())
+            }
+            Err(e) => {
+                // Always signal completion even on error to avoid hangs
+                let errno = if let AsyncIoError::WriteZeroes(io_err) = &e {
+                    let err = io_err.raw_os_error().unwrap_or(libc::EIO);
+                    -err
+                } else {
+                    -libc::EIO
+                };
+                self.completion_list.push_back((user_data, errno));
+                self.eventfd.write(1).unwrap();
+                Ok(())
+            }
+        }
     }
 }
