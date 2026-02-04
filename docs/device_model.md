@@ -201,6 +201,24 @@ networking device (e.g. DPDK) into the VMM as their virtio network backend.
 This device is always built-in, and it is enabled when `vhost_user=true` and
 `socket` are provided to the `--net` parameter.
 
+### vhost-user-generic
+
+This is a generic vhost-user device. The main use case is to provide a
+vhost-user device that Cloud Hypervisor doesn't support natively. However,
+there is nothing preventing its use for devices that Cloud Hypervisor does
+support. For instance, the tag of a virtio-fs device can be set on the
+virtiofsd command line, whereas the built-in virtio-fs support
+requires the tag to be set in Cloud Hypervisor's command line.
+
+If the backend negotiates the `VHOST_USER_PROTOCOL_F_CONFIG` feature,
+all configuration space access will be handled by it.  Otherwise,
+writes will be ignored and reads will return 0xFF. Cloud Hypervisor
+warns if this happens.
+
+This device is always built-in, and it is enabled when the
+`--generic-vhost-user` flag is passed.
+See [the generic vhost-user documentation](generic-vhost-user.md) for more details.
+
 ## VFIO
 
 VFIO (Virtual Function I/O) is a kernel framework that exposes direct device
