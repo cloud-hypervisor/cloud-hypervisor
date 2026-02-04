@@ -50,7 +50,7 @@ use virtio_bindings::virtio_blk::*;
 use virtio_queue::DescriptorChain;
 use vm_memory::bitmap::Bitmap;
 use vm_memory::{
-    ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryLoadGuard,
+    Address, ByteValued, Bytes, GuestAddress, GuestMemory, GuestMemoryError, GuestMemoryLoadGuard,
 };
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
@@ -156,6 +156,10 @@ pub enum ExecuteError {
     AsyncWrite(#[source] AsyncIoError),
     #[error("failed to async flush")]
     AsyncFlush(#[source] AsyncIoError),
+    #[error("Failed to async punch hole")]
+    AsyncPunchHole(#[source] AsyncIoError),
+    #[error("Failed to async write zeroes")]
+    AsyncWriteZeroes(#[source] AsyncIoError),
     #[error("Failed allocating a temporary buffer")]
     TemporaryBufferAllocation(#[source] io::Error),
 }
@@ -177,6 +181,8 @@ impl ExecuteError {
             ExecuteError::AsyncRead(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::AsyncWrite(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::AsyncFlush(_) => VIRTIO_BLK_S_IOERR,
+            ExecuteError::AsyncPunchHole(_) => VIRTIO_BLK_S_IOERR,
+            ExecuteError::AsyncWriteZeroes(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::TemporaryBufferAllocation(_) => VIRTIO_BLK_S_IOERR,
         };
         status as u8
@@ -189,6 +195,8 @@ pub enum RequestType {
     Out,
     Flush,
     GetDeviceId,
+    Discard,
+    WriteZeroes,
     Unsupported(u32),
 }
 
@@ -202,6 +210,8 @@ pub fn request_type<B: Bitmap + 'static>(
         VIRTIO_BLK_T_OUT => Ok(RequestType::Out),
         VIRTIO_BLK_T_FLUSH => Ok(RequestType::Flush),
         VIRTIO_BLK_T_GET_ID => Ok(RequestType::GetDeviceId),
+        VIRTIO_BLK_T_DISCARD => Ok(RequestType::Discard),
+        VIRTIO_BLK_T_WRITE_ZEROES => Ok(RequestType::WriteZeroes),
         t => Ok(RequestType::Unsupported(t)),
     }
 }
@@ -299,6 +309,12 @@ impl Request {
                 if desc.is_write_only() && req.request_type == RequestType::Out {
                     return Err(Error::UnexpectedWriteOnlyDescriptor);
                 }
+                if desc.is_write_only() && req.request_type == RequestType::Discard {
+                    return Err(Error::UnexpectedWriteOnlyDescriptor);
+                }
+                if desc.is_write_only() && req.request_type == RequestType::WriteZeroes {
+                    return Err(Error::UnexpectedWriteOnlyDescriptor);
+                }
                 if !desc.is_write_only() && req.request_type == RequestType::In {
                     return Err(Error::UnexpectedReadOnlyDescriptor);
                 }
@@ -394,6 +410,12 @@ impl Request {
                     }
                     mem.write_slice(serial, *data_addr)
                         .map_err(ExecuteError::Write)?;
+                }
+                RequestType::Discard => {
+                    return Err(ExecuteError::Unsupported(VIRTIO_BLK_T_DISCARD));
+                }
+                RequestType::WriteZeroes => {
+                    return Err(ExecuteError::Unsupported(VIRTIO_BLK_T_WRITE_ZEROES));
                 }
                 RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
             }
@@ -543,6 +565,62 @@ impl Request {
                     .map_err(ExecuteError::Write)?;
                 ret.async_complete = false;
                 return Ok(ret);
+            }
+            RequestType::Discard => {
+                let (data_addr, data_len) = if self.data_descriptors.len() == 1 {
+                    (self.data_descriptors[0].0, self.data_descriptors[0].1)
+                } else {
+                    return Err(ExecuteError::BadRequest(Error::TooManyDescriptors));
+                };
+
+                if data_len < 16 {
+                    return Err(ExecuteError::BadRequest(Error::DescriptorLengthTooSmall));
+                }
+
+                let mut discard_sector = [0u8; 8];
+                let mut discard_num_sectors = [0u8; 4];
+                mem.read_slice(&mut discard_sector, data_addr)
+                    .map_err(ExecuteError::Read)?;
+                mem.read_slice(&mut discard_num_sectors, data_addr.checked_add(8).unwrap())
+                    .map_err(ExecuteError::Read)?;
+
+                let discard_sector = u64::from_le_bytes(discard_sector);
+                let discard_num_sectors = u32::from_le_bytes(discard_num_sectors);
+
+                let discard_offset = discard_sector * SECTOR_SIZE;
+                let discard_length = (discard_num_sectors as u64) * SECTOR_SIZE;
+
+                disk_image
+                    .punch_hole(discard_offset, discard_length, user_data)
+                    .map_err(ExecuteError::AsyncPunchHole)?;
+            }
+            RequestType::WriteZeroes => {
+                let (data_addr, data_len) = if self.data_descriptors.len() == 1 {
+                    (self.data_descriptors[0].0, self.data_descriptors[0].1)
+                } else {
+                    return Err(ExecuteError::BadRequest(Error::TooManyDescriptors));
+                };
+
+                if data_len < 16 {
+                    return Err(ExecuteError::BadRequest(Error::DescriptorLengthTooSmall));
+                }
+
+                let mut wz_sector = [0u8; 8];
+                let mut wz_num_sectors = [0u8; 4];
+                mem.read_slice(&mut wz_sector, data_addr)
+                    .map_err(ExecuteError::Read)?;
+                mem.read_slice(&mut wz_num_sectors, data_addr.checked_add(8).unwrap())
+                    .map_err(ExecuteError::Read)?;
+
+                let wz_sector = u64::from_le_bytes(wz_sector);
+                let wz_num_sectors = u32::from_le_bytes(wz_num_sectors);
+
+                let wz_offset = wz_sector * SECTOR_SIZE;
+                let wz_length = (wz_num_sectors as u64) * SECTOR_SIZE;
+
+                disk_image
+                    .write_zeroes(wz_offset, wz_length, user_data)
+                    .map_err(ExecuteError::AsyncWriteZeroes)?;
             }
             RequestType::Unsupported(t) => return Err(ExecuteError::Unsupported(t)),
         }
