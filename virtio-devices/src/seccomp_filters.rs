@@ -24,6 +24,7 @@ pub enum Thread {
     VirtioRng,
     VirtioVhostBlock,
     VirtioVhostFs,
+    VirtioGenericVhostUser,
     VirtioVhostNet,
     VirtioVhostNetCtl,
     VirtioVsock,
@@ -192,6 +193,20 @@ fn virtio_vhost_fs_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     ]
 }
 
+fn virtio_generic_vhost_user_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
+    vec![
+        (libc::SYS_clock_nanosleep, vec![]),
+        (libc::SYS_connect, vec![]),
+        (libc::SYS_nanosleep, vec![]),
+        (libc::SYS_pread64, vec![]),
+        (libc::SYS_pwrite64, vec![]),
+        (libc::SYS_recvmsg, vec![]),
+        (libc::SYS_sendmsg, vec![]),
+        (libc::SYS_sendto, vec![]),
+        (libc::SYS_socket, vec![]),
+    ]
+}
+
 fn virtio_vhost_net_ctl_thread_rules() -> Vec<(i64, Vec<SeccompRule>)> {
     vec![]
 }
@@ -271,6 +286,7 @@ fn get_seccomp_rules(thread_type: Thread) -> Vec<(i64, Vec<SeccompRule>)> {
         Thread::VirtioRng => virtio_rng_thread_rules(),
         Thread::VirtioVhostBlock => virtio_vhost_block_thread_rules(),
         Thread::VirtioVhostFs => virtio_vhost_fs_thread_rules(),
+        Thread::VirtioGenericVhostUser => virtio_generic_vhost_user_thread_rules(),
         Thread::VirtioVhostNet => virtio_vhost_net_thread_rules(),
         Thread::VirtioVhostNetCtl => virtio_vhost_net_ctl_thread_rules(),
         Thread::VirtioVsock => virtio_vsock_thread_rules(),
