@@ -46,6 +46,24 @@ pub enum Error {
     /// Filesystem socket is missing
     #[error("Error parsing --fs: socket missing")]
     ParseFsSockMissing,
+    /// Generic vhost-user socket is missing
+    #[error("Error parsing --generic-vhost-user: socket missing")]
+    ParseGenericVhostUserSockMissing,
+    /// Generic vhost-user number of queues is missing
+    #[error("Error parsing --generic-vhost-user: number of queues missing")]
+    ParseGenericVhostUserNumResponseQueuesMissing,
+    /// Generic vhost-user virtio ID is missing
+    #[error("Error parsing --generic-vhost-user: virtio ID missing")]
+    ParseGenericVhostUserVirtioIdMissing,
+    /// Generic vhost-user available features is missing
+    #[error("Error parsing --generic-vhost-user: available features missing")]
+    ParseGenericVhostUserAvailFeaturesMissing,
+    /// Generic vhost-user queue size is too large
+    #[error("Error parsing --generic-vhost-user: queue size {0} is {1}, but limit is 65535")]
+    ParseGenericVhostUserQueueSizeTooLarge(usize, u64),
+    /// Generic vhost-user queue size missing
+    #[error("Error parsing --generic-vhost-user: queue size missing")]
+    ParseGenericVhostUserQueueSizeMissing,
     /// Missing persistent memory file parameter.
     #[error("Error parsing --pmem: file missing")]
     ParsePmemFileMissing,
@@ -94,6 +112,9 @@ pub enum Error {
     /// Error parsing persistent memory parameters
     #[error("Error parsing --pmem")]
     ParsePersistentMemory(#[source] OptionParserError),
+    /// Error parsing generic vhost-user parameters
+    #[error("Error parsing --generic-vhost-user")]
+    ParseGenericVhostUser(#[source] OptionParserError),
     /// Failed parsing console
     #[error("Error parsing --console")]
     ParseConsole(#[source] OptionParserError),
@@ -394,6 +415,7 @@ pub struct VmParams<'a> {
     pub rng: &'a str,
     pub balloon: Option<&'a str>,
     pub fs: Option<Vec<&'a str>>,
+    pub generic_vhost_user: Option<Vec<&'a str>>,
     pub pmem: Option<Vec<&'a str>>,
     pub serial: &'a str,
     pub console: &'a str,
@@ -455,6 +477,9 @@ impl<'a> VmParams<'a> {
         let fs: Option<Vec<&str>> = args
             .get_many::<String>("fs")
             .map(|x| x.map(|y| y as &str).collect());
+        let generic_vhost_user: Option<Vec<&str>> = args
+            .get_many::<String>("generic-vhost-user")
+            .map(|x| x.map(|y| y as &str).collect());
         let pmem: Option<Vec<&str>> = args
             .get_many::<String>("pmem")
             .map(|x| x.map(|y| y as &str).collect());
@@ -509,6 +534,7 @@ impl<'a> VmParams<'a> {
             rng,
             balloon,
             fs,
+            generic_vhost_user,
             pmem,
             serial,
             console,
@@ -1642,6 +1668,82 @@ impl BalloonConfig {
     }
 }
 
+impl GenericVhostUserConfig {
+    pub const SYNTAX: &'static str = "generic vhost-user parameters \
+    \"virtio_id=<ID number for virtio device type (FS, block, net, etc)>,\
+    socket=<socket_path>,\
+    queue_sizes=<list of queue sizes>,\
+    id=<device_id>,pci_segment=<segment_id>\"";
+
+    pub fn parse(vhost_user: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser
+            .add("virtio_id")
+            .add("queue_sizes")
+            .add("socket")
+            .add("id")
+            .add("pci_segment");
+        parser
+            .parse(vhost_user)
+            .map_err(Error::ParseGenericVhostUser)?;
+
+        let socket = parser
+            .get("socket")
+            .ok_or(Error::ParseGenericVhostUserSockMissing)?;
+
+        let IntegerList(queue_sizes) = parser
+            .convert("queue_sizes")
+            .map_err(Error::ParseGenericVhostUser)?
+            .ok_or(Error::ParseGenericVhostUserQueueSizeMissing)?;
+        let device_type = parser
+            .convert("virtio_id")
+            .map_err(Error::ParseGenericVhostUser)?
+            .ok_or(Error::ParseGenericVhostUserVirtioIdMissing)?;
+        let id = parser.get("id");
+        let pci_segment = parser
+            .convert("pci_segment")
+            .map_err(Error::ParseGenericVhostUser)?
+            .unwrap_or_default();
+        let mut converted_queue_sizes: Vec<u16> = Vec::new();
+        for (offset, &queue_size) in queue_sizes.iter().enumerate() {
+            match queue_size.try_into() {
+                Err(_) => {
+                    return Err(Error::ParseGenericVhostUserQueueSizeTooLarge(
+                        offset, queue_size,
+                    ));
+                }
+                Ok(queue_size) => converted_queue_sizes.push(queue_size),
+            }
+        }
+
+        Ok(GenericVhostUserConfig {
+            socket: socket.into(),
+            device_type,
+            id,
+            pci_segment,
+            queue_sizes: converted_queue_sizes,
+        })
+    }
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if let Some(platform_config) = vm_config.platform.as_ref() {
+            if self.pci_segment >= platform_config.num_pci_segments {
+                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+            }
+
+            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
+                && iommu_segments.contains(&self.pci_segment)
+            {
+                return Err(ValidationError::IommuNotSupportedOnSegment(
+                    self.pci_segment,
+                ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl FsConfig {
     pub const SYNTAX: &'static str = "virtio-fs parameters \
     \"tag=<tag_name>,socket=<socket_path>,num_queues=<number_of_queues>,\
@@ -2738,6 +2840,17 @@ impl VmConfig {
             }
         }
 
+        if let Some(generic_vhost_user_devices) = &self.generic_vhost_user {
+            if !generic_vhost_user_devices.is_empty() && !self.backed_by_shared_memory() {
+                return Err(ValidationError::VhostUserRequiresSharedMemory);
+            }
+            for generic_vhost_user_device in generic_vhost_user_devices {
+                generic_vhost_user_device.validate(self)?;
+
+                Self::validate_identifier(&mut id_list, &generic_vhost_user_device.id)?;
+            }
+        }
+
         if let Some(pmems) = &self.pmem {
             for pmem in pmems {
                 pmem.validate(self)?;
@@ -2991,6 +3104,15 @@ impl VmConfig {
             fs = Some(fs_config_list);
         }
 
+        let mut generic_vhost_user: Option<Vec<GenericVhostUserConfig>> = None;
+        if let Some(generic_vhost_user_list) = &vm_params.generic_vhost_user {
+            let mut generic_vhost_user_config_list = Vec::new();
+            for item in generic_vhost_user_list.iter() {
+                generic_vhost_user_config_list.push(GenericVhostUserConfig::parse(item)?);
+            }
+            generic_vhost_user = Some(generic_vhost_user_config_list);
+        }
+
         let mut pmem: Option<Vec<PmemConfig>> = None;
         if let Some(pmem_list) = &vm_params.pmem {
             let mut pmem_config_list = Vec::new();
@@ -3126,6 +3248,7 @@ impl VmConfig {
             net,
             rng,
             balloon,
+            generic_vhost_user,
             fs,
             pmem,
             serial,
@@ -3186,6 +3309,13 @@ impl VmConfig {
             let len = fs.len();
             fs.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= fs.len() != len;
+        }
+
+        // Remove if generic vhost-user device
+        if let Some(generic_vhost_user) = self.generic_vhost_user.as_mut() {
+            let len = generic_vhost_user.len();
+            generic_vhost_user.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            removed |= generic_vhost_user.len() != len;
         }
 
         // Remove if net device
@@ -3260,6 +3390,7 @@ impl Clone for VmConfig {
             #[cfg(feature = "pvmemcontrol")]
             pvmemcontrol: self.pvmemcontrol.clone(),
             fs: self.fs.clone(),
+            generic_vhost_user: self.generic_vhost_user.clone(),
             pmem: self.pmem.clone(),
             serial: self.serial.clone(),
             console: self.console.clone(),
@@ -3784,6 +3915,90 @@ mod unit_tests {
         Ok(())
     }
 
+    #[track_caller]
+    #[allow(clippy::too_many_arguments)]
+    fn make_vhost_user_config(
+        socket: &str,
+        virtio_id: u64,
+        id: &str,
+        pci_segment: u64,
+        queue_sizes: &IntegerList,
+    ) {
+        assert!(!socket.contains(",[]\n\r\0\""));
+        assert!(!id.contains(",[]\n\r\0\""));
+        let config = GenericVhostUserConfig::parse(&format!(
+            "virtio_id={virtio_id},socket=\"{socket}\",\
+id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
+        ));
+        if pci_segment <= u16::MAX.into()
+            && virtio_id <= u32::MAX.into()
+            && queue_sizes.0.iter().all(|&f| f <= u16::MAX.into())
+        {
+            assert_eq!(
+                config.unwrap(),
+                GenericVhostUserConfig {
+                    socket: socket.into(),
+                    id: Some(id.to_owned()),
+                    device_type: u32::try_from(virtio_id).unwrap(),
+                    pci_segment: u16::try_from(pci_segment).unwrap(),
+                    queue_sizes: queue_sizes
+                        .0
+                        .iter()
+                        .map(|&f| u16::try_from(f).unwrap())
+                        .collect(),
+                }
+            );
+        } else {
+            config.unwrap_err();
+        }
+    }
+
+    #[test]
+    fn test_parse_vhost_user() -> Result<()> {
+        // all parameters must be supplied, except pci_segment
+        GenericVhostUserConfig::parse("").unwrap_err();
+        GenericVhostUserConfig::parse("virtio_id=1").unwrap_err();
+        GenericVhostUserConfig::parse("queue_size=1").unwrap_err();
+        GenericVhostUserConfig::parse("socket=/tmp/sock").unwrap_err();
+        GenericVhostUserConfig::parse("id=1").unwrap_err();
+        make_vhost_user_config(
+            "/dev/null/doesnotexist",
+            100,
+            "Something",
+            10,
+            &IntegerList(vec![u16::MAX.into(), 20u16.into()]),
+        );
+        make_vhost_user_config(
+            "/dev/null/doesnotexist",
+            100,
+            "Something",
+            10,
+            &IntegerList(vec![u16::MAX.into()]),
+        );
+        make_vhost_user_config(
+            "/dev/null/doesnotexist",
+            u64::from(u32::MAX) + 1,
+            "Something",
+            10,
+            &IntegerList(vec![20u64]),
+        );
+        make_vhost_user_config(
+            "/dev/null/doesnotexist",
+            u64::from(u32::MAX) + 1,
+            "Something",
+            10,
+            &IntegerList(vec![20u64]),
+        );
+        make_vhost_user_config(
+            "/dev/null/doesnotexist",
+            u64::from(u32::MAX) + 1,
+            "Something",
+            10,
+            &IntegerList(vec![20u64]),
+        );
+        Ok(())
+    }
+
     fn pmem_fixture() -> PmemConfig {
         PmemConfig {
             file: PathBuf::from("/tmp/pmem"),
@@ -4168,6 +4383,7 @@ mod unit_tests {
             rate_limit_groups: None,
             disks: None,
             rng: RngConfig::default(),
+            generic_vhost_user: None,
             balloon: None,
             fs: None,
             pmem: None,
@@ -4373,6 +4589,7 @@ mod unit_tests {
             },
             balloon: None,
             fs: None,
+            generic_vhost_user: None,
             pmem: None,
             serial: ConsoleConfig {
                 file: None,

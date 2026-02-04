@@ -4,6 +4,7 @@
 //
 
 use std::collections::HashMap;
+use std::fmt::{Display, Write};
 use std::num::ParseIntError;
 use std::str::FromStr;
 
@@ -239,6 +240,21 @@ impl FromStr for ByteSized {
 }
 
 pub struct IntegerList(pub Vec<u64>);
+
+impl Display for IntegerList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_char('[')?;
+        let mut iter = self.0.iter();
+        if let Some(first) = iter.next() {
+            first.fmt(f)?;
+            for i in iter {
+                f.write_char(',')?;
+                i.fmt(f)?;
+            }
+        }
+        f.write_char(']')
+    }
+}
 
 #[derive(Error, Debug)]
 pub enum IntegerListParseError {
