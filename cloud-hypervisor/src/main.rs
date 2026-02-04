@@ -32,9 +32,9 @@ use vmm::vm_config::FwCfgConfig;
 #[cfg(feature = "ivshmem")]
 use vmm::vm_config::IvshmemConfig;
 use vmm::vm_config::{
-    BalloonConfig, DeviceConfig, DiskConfig, FsConfig, LandlockConfig, NetConfig, NumaConfig,
-    PciSegmentConfig, PmemConfig, RateLimiterGroupConfig, TpmConfig, UserDeviceConfig, VdpaConfig,
-    VmConfig, VsockConfig,
+    BalloonConfig, DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, LandlockConfig,
+    NetConfig, NumaConfig, PciSegmentConfig, PmemConfig, RateLimiterGroupConfig, TpmConfig,
+    UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
@@ -280,6 +280,11 @@ fn get_cli_options_sorted(
             .help("GDB socket (UNIX domain socket): path=</path/to/a/file>")
             .num_args(1)
             .group("vmm-config"),
+        Arg::new("generic-vhost-user")
+            .long("generic-vhost-user")
+            .help(GenericVhostUserConfig::SYNTAX)
+            .num_args(1..)
+            .group("vm-config"),
         #[cfg(feature = "igvm")]
         Arg::new("igvm")
             .long("igvm")
