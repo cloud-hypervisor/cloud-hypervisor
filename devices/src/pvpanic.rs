@@ -174,7 +174,7 @@ impl PciDevice for PvPanicDevice {
 
     fn allocate_bars(
         &mut self,
-        _allocator: &Arc<Mutex<SystemAllocator>>,
+        _allocator: &Mutex<SystemAllocator>,
         mmio32_allocator: &mut AddressAllocator,
         _mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,

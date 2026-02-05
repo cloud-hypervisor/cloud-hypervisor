@@ -768,7 +768,7 @@ impl Vm {
                         #[cfg(feature = "igvm")]
                         &cpu_manager,
                         #[cfg(feature = "sev_snp")]
-                        sev_snp_enabled,
+                        false,
                     )?
                 } else {
                     None
@@ -906,8 +906,8 @@ impl Vm {
     #[cfg(feature = "fw_cfg")]
     fn populate_fw_cfg(
         fw_cfg_config: &FwCfgConfig,
-        device_manager: &Arc<Mutex<DeviceManager>>,
-        config: &Arc<Mutex<VmConfig>>,
+        device_manager: &Mutex<DeviceManager>,
+        config: &Mutex<VmConfig>,
     ) -> Result<()> {
         let mut e820_option: Option<usize> = None;
         if fw_cfg_config.e820 {
@@ -1183,8 +1183,8 @@ impl Vm {
 
     pub fn generate_cmdline(
         payload: &PayloadConfig,
-        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))] device_manager: &Arc<
-            Mutex<DeviceManager>,
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))] device_manager: &Mutex<
+            DeviceManager,
         >,
     ) -> Result<Cmdline> {
         let mut cmdline = Cmdline::new(arch::CMDLINE_MAX_SIZE).map_err(Error::CmdLineCreate)?;

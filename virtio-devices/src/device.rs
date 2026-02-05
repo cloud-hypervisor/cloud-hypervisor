@@ -126,10 +126,7 @@ pub trait VirtioDevice: Send {
     /// after a shutdown() can lead to unpredictable results.
     fn shutdown(&mut self) {}
 
-    fn add_memory_region(
-        &mut self,
-        _region: &Arc<GuestRegionMmap>,
-    ) -> std::result::Result<(), Error> {
+    fn add_memory_region(&mut self, _region: &GuestRegionMmap) -> std::result::Result<(), Error> {
         Ok(())
     }
 

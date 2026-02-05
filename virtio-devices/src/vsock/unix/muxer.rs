@@ -409,7 +409,7 @@ impl VsockMuxer {
                     // If we're already maxed-out on connections, we'll just accept and
                     // immediately discard this potentially new one.
                     warn!("vsock: connection limit reached; refusing new host connection");
-                    self.host_sock.accept().map(|_| 0).unwrap_or(0);
+                    let _ = self.host_sock.accept().map_or(0, |_| 0);
                     return;
                 }
                 self.host_sock

@@ -593,7 +593,7 @@ impl VfioCommon {
     #[allow(unused_variables)]
     pub(crate) fn allocate_bars(
         &mut self,
-        allocator: &Arc<Mutex<SystemAllocator>>,
+        allocator: &Mutex<SystemAllocator>,
         mmio32_allocator: &mut AddressAllocator,
         mmio64_allocator: &mut AddressAllocator,
         resources: Option<&[Resource]>,
@@ -1825,7 +1825,7 @@ const PCI_ROM_EXP_BAR_INDEX: usize = 12;
 impl PciDevice for VfioPciDevice {
     fn allocate_bars(
         &mut self,
-        allocator: &Arc<Mutex<SystemAllocator>>,
+        allocator: &Mutex<SystemAllocator>,
         mmio32_allocator: &mut AddressAllocator,
         mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,
