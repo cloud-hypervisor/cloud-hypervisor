@@ -1739,7 +1739,7 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "aarch64")]
-    pub fn get_interrupt_controller(&mut self) -> Option<&Arc<Mutex<gic::Gic>>> {
+    pub fn get_interrupt_controller(&self) -> Option<&Arc<Mutex<gic::Gic>>> {
         self.interrupt_controller.as_ref()
     }
 
@@ -1776,7 +1776,7 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "riscv64")]
-    pub fn get_interrupt_controller(&mut self) -> Option<&Arc<Mutex<aia::Aia>>> {
+    pub fn get_interrupt_controller(&self) -> Option<&Arc<Mutex<aia::Aia>>> {
         self.interrupt_controller.as_ref()
     }
 
@@ -4310,7 +4310,7 @@ impl DeviceManager {
 
     #[cfg(feature = "fw_cfg")]
     pub fn fw_cfg(&self) -> Option<&Mutex<FwCfg>> {
-        self.fw_cfg.as_ref()
+        self.fw_cfg.as_deref()
     }
 
     pub fn allocator(&self) -> Arc<Mutex<SystemAllocator>> {

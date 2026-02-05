@@ -182,7 +182,7 @@ struct ViotPciRangeNode {
 }
 
 pub fn create_dsdt_table(
-    device_manager: &Mutex<DeviceManager>,
+    device_manager: &DeviceManager,
     cpu_manager: &Mutex<CpuManager>,
     memory_manager: &Mutex<MemoryManager>,
 ) -> Sdt {
@@ -192,7 +192,7 @@ pub fn create_dsdt_table(
 
     let mut bytes = Vec::new();
 
-    device_manager.lock().unwrap().to_aml_bytes(&mut bytes);
+    device_manager.to_aml_bytes(&mut bytes);
     cpu_manager.lock().unwrap().to_aml_bytes(&mut bytes);
     memory_manager.lock().unwrap().to_aml_bytes(&mut bytes);
     dsdt.append_slice(&bytes);
@@ -202,14 +202,13 @@ pub fn create_dsdt_table(
 
 const FACP_DSDT_OFFSET: usize = 140;
 
-fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Mutex<DeviceManager>) -> Sdt {
+fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &DeviceManager) -> Sdt {
     trace_scoped!("create_facp_table");
 
     // Revision 6 of the ACPI FADT table is 276 bytes long
     let mut facp = Sdt::new(*b"FACP", 276, 6, *b"CLOUDH", *b"CHFACP  ", 1);
 
     {
-        let device_manager = device_manager.lock().unwrap();
         if let Some(address) = device_manager.acpi_platform_addresses().reset_reg_address {
             // RESET_REG
             facp.write(116, address);
@@ -756,7 +755,7 @@ fn create_viot_table(iommu_bdf: &PciBdf, devices_bdf: &[PciBdf]) -> Sdt {
 // * `Vec<u64>` contains a list of table pointers stored in XSDT.
 fn create_acpi_tables_internal(
     dsdt_addr: GuestAddress,
-    device_manager: &Mutex<DeviceManager>,
+    device_manager: &DeviceManager,
     cpu_manager: &Mutex<CpuManager>,
     memory_manager: &Mutex<MemoryManager>,
     numa_nodes: &NumaNodes,
@@ -780,8 +779,6 @@ fn create_acpi_tables_internal(
     // MADT
     #[cfg(target_arch = "aarch64")]
     let vgic = device_manager
-        .lock()
-        .unwrap()
         .get_interrupt_controller()
         .unwrap()
         .lock()
@@ -821,7 +818,7 @@ fn create_acpi_tables_internal(
     }
 
     // MCFG
-    let mcfg = create_mcfg_table(device_manager.lock().unwrap().pci_segments());
+    let mcfg = create_mcfg_table(device_manager.pci_segments());
     let mcfg_addr = prev_tbl_addr.checked_add(prev_tbl_len).unwrap();
     tables_bytes.extend_from_slice(mcfg.as_slice());
     xsdt_table_pointers.push(mcfg_addr.0);
@@ -832,16 +829,12 @@ fn create_acpi_tables_internal(
     #[cfg(target_arch = "aarch64")]
     {
         let is_serial_on = device_manager
-            .lock()
-            .unwrap()
             .get_device_info()
             .clone()
             .contains_key(&(DeviceType::Serial, DeviceType::Serial.to_string()));
         let serial_device_addr = arch::layout::LEGACY_SERIAL_MAPPED_IO_START.raw_value();
         let serial_device_irq = if is_serial_on {
             device_manager
-                .lock()
-                .unwrap()
                 .get_device_info()
                 .clone()
                 .get(&(DeviceType::Serial, DeviceType::Serial.to_string()))
@@ -906,7 +899,7 @@ fn create_acpi_tables_internal(
 
     #[cfg(target_arch = "aarch64")]
     {
-        let iort = create_iort_table(device_manager.lock().unwrap().pci_segments());
+        let iort = create_iort_table(device_manager.pci_segments());
         let iort_addr = prev_tbl_addr.checked_add(prev_tbl_len).unwrap();
         tables_bytes.extend_from_slice(iort.as_slice());
         xsdt_table_pointers.push(iort_addr.0);
@@ -915,7 +908,7 @@ fn create_acpi_tables_internal(
     }
 
     // VIOT
-    if let Some((iommu_bdf, devices_bdf)) = device_manager.lock().unwrap().iommu_attached_devices()
+    if let Some((iommu_bdf, devices_bdf)) = device_manager.iommu_attached_devices()
     {
         let viot = create_viot_table(iommu_bdf, devices_bdf);
 
@@ -943,7 +936,7 @@ fn create_acpi_tables_internal(
 
 #[cfg(feature = "fw_cfg")]
 pub fn create_acpi_tables_for_fw_cfg(
-    device_manager: &Mutex<DeviceManager>,
+    device_manager: &DeviceManager,
     cpu_manager: &Mutex<CpuManager>,
     memory_manager: &Mutex<MemoryManager>,
     numa_nodes: &NumaNodes,
@@ -990,8 +983,6 @@ pub fn create_acpi_tables_for_fw_cfg(
     checksums.push(xsdt_checksum);
 
     device_manager
-        .lock()
-        .unwrap()
         .fw_cfg()
         .expect("fw_cfg must be present")
         .lock()
@@ -1002,7 +993,7 @@ pub fn create_acpi_tables_for_fw_cfg(
 
 pub fn create_acpi_tables(
     guest_mem: &GuestMemoryMmap,
-    device_manager: &Mutex<DeviceManager>,
+    device_manager: &DeviceManager,
     cpu_manager: &Mutex<CpuManager>,
     memory_manager: &Mutex<MemoryManager>,
     numa_nodes: &NumaNodes,
@@ -1042,7 +1033,7 @@ pub fn create_acpi_tables(
 
 #[cfg(feature = "tdx")]
 pub fn create_acpi_tables_tdx(
-    device_manager: &Mutex<DeviceManager>,
+    device_manager: &DeviceManager,
     cpu_manager: &Mutex<CpuManager>,
     memory_manager: &Mutex<MemoryManager>,
     numa_nodes: &NumaNodes,
@@ -1062,7 +1053,7 @@ pub fn create_acpi_tables_tdx(
 
     // MCFG
     tables.push(create_mcfg_table(
-        device_manager.lock().unwrap().pci_segments(),
+        device_manager.pci_segments(),
     ));
 
     // SRAT and SLIT
@@ -1083,7 +1074,7 @@ pub fn create_acpi_tables_tdx(
     }
 
     // VIOT
-    if let Some((iommu_bdf, devices_bdf)) = device_manager.lock().unwrap().iommu_attached_devices()
+    if let Some((iommu_bdf, devices_bdf)) = device_manager.iommu_attached_devices()
     {
         tables.push(create_viot_table(iommu_bdf, devices_bdf));
     }
