@@ -46,6 +46,8 @@ pub enum OptionParserError {
     Conversion(String /* field */, String /* value */),
     #[error("invalid value: {0}")]
     InvalidValue(String),
+    #[error("failed to convert {1}")]
+    NumberConversion(#[source] ParseIntError, String),
 }
 type OptionParserResult<T> = std::result::Result<T, OptionParserError>;
 
@@ -165,6 +167,41 @@ impl OptionParser {
             .get(option)
             .and_then(|v| v.value.as_ref())
             .is_some()
+    }
+
+    /// Parses the `addr` option of PCI devices and returns the PCI device as well as the function ID
+    ///
+    /// Returns a tuple consisting of the parsed IDs for device and function in this order. Returns an error if the
+    /// supplied `addr` values cannot be parsed to [`u8`]. The tuple might consist of two times [`None`] if `addr` was
+    /// not provided.
+    pub fn get_pci_device_function(
+        &self,
+    ) -> OptionParserResult<(Option<u8 /* Device ID */>, Option<u8 /* Function ID */>)> {
+        if let Some(addr_str) = self.get("addr") {
+            let (device_str, function_str) = addr_str
+                .split_once('.')
+                .ok_or(OptionParserError::InvalidValue(addr_str.to_owned()))?;
+
+            // We also accept hex number with `0x` prefix, but need to strip it before conversion in case it's present.
+            let device_str = device_str.strip_prefix("0x").unwrap_or(device_str);
+            let device_id = u8::from_str_radix(device_str, 16)
+                .map_err(|e| OptionParserError::NumberConversion(e, addr_str.to_owned()))?;
+
+            let function_str = function_str.strip_prefix("0x").unwrap_or(function_str);
+            let function_id = u8::from_str_radix(function_str, 16)
+                .map_err(|e| OptionParserError::NumberConversion(e, addr_str.to_owned()))?;
+
+            // Currently CHV only support single-function devices. Those are mapped to function ID 0 in all cases, so we
+            // disallow the assignment of any other function ID.
+            if function_id != 0 {
+                todo!(
+                    "Currently no multi function devices supported! Please use `0` as function ID."
+                );
+            }
+            Ok((Some(device_id), Some(function_id)))
+        } else {
+            Ok((None, None))
+        }
     }
 
     pub fn convert<T: Parseable>(&self, option: &str) -> OptionParserResult<Option<T>> {

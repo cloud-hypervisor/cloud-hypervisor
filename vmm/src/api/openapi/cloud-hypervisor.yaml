@@ -938,6 +938,9 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/VirtQueueAffinity"
+        bdf_device:
+          type: int8
+          description: Device PCI bus ID
 
     NetConfig:
       type: object
@@ -991,6 +994,9 @@ components:
         offload_csum:
           type: boolean
           default: true
+        bdf_device:
+          type: int8
+          description: Device PCI bus ID
 
     RngConfig:
       required:
@@ -1002,6 +1008,9 @@ components:
         iommu:
           type: boolean
           default: false
+        bdf_device:
+          type: int8
+          description: Device PCI bus ID
 
     BalloonConfig:
       required:
@@ -1019,6 +1028,9 @@ components:
           type: boolean
           default: false
           description: Enable guest to report free pages.
+        bdf_device:
+          type: int8
+          description: Device PCI bus ID
 
     FsConfig:
       required:
@@ -1043,6 +1055,9 @@ components:
           format: int16
         id:
           type: string
+        bdf_device:
+          type: int8
+          description: Device PCI bus ID
 
     PmemConfig:
       required:
@@ -1065,6 +1080,9 @@ components:
           format: int16
         id:
           type: string
+        bdf_device:
+          type: int8
+          description: Device PCI bus ID
 
     ConsoleConfig:
       required:
@@ -1081,6 +1099,9 @@ components:
         iommu:
           type: boolean
           default: false
+        bdf_device:
+          type: int8
+          description: Device PCI bus ID
 
     DebugConsoleConfig:
       required:
@@ -1140,6 +1161,9 @@ components:
           format: int16
         id:
           type: string
+        bdf_device:
+          type: int8
+          description: Device PCI bus ID
 
     VsockConfig:
       required:
@@ -1163,6 +1187,9 @@ components:
           format: int16
         id:
           type: string
+        bdf_device:
+          type: int8
+          description: Device PCI bus ID
 
     NumaDistance:
       required:
