@@ -774,6 +774,7 @@ impl BackingFileOps for RawFile {
 /// Backing file wrapper
 struct BackingFile {
     inner: Box<dyn BackingFileOps>,
+    virtual_size: u64,
 }
 
 impl BackingFile {
@@ -804,22 +805,48 @@ impl BackingFile {
             None => detect_image_type(&mut raw_file)?,
         };
 
-        let inner: Box<dyn BackingFileOps> = match backing_format {
-            ImageType::Raw => Box::new(raw_file),
+        let (inner, virtual_size): (Box<dyn BackingFileOps>, u64) = match backing_format {
+            ImageType::Raw => {
+                let size = raw_file
+                    .seek(SeekFrom::End(0))
+                    .map_err(Error::BackingFileIo)?;
+                raw_file.rewind().map_err(Error::BackingFileIo)?;
+                (Box::new(raw_file), size)
+            }
             ImageType::Qcow2 => {
                 let backing_qcow =
                     QcowFile::from_with_nesting_depth(raw_file, max_nesting_depth - 1)
                         .map_err(|e| Error::BackingFileOpen(Box::new(e)))?;
-                Box::new(backing_qcow)
+                let size = backing_qcow.virtual_size();
+                (Box::new(backing_qcow), size)
             }
         };
 
-        Ok(Some(Self { inner }))
+        Ok(Some(Self {
+            inner,
+            virtual_size,
+        }))
     }
 
+    /// Read from backing file, returning zeros for any portion beyond backing file size.
     #[inline]
     fn read_at(&mut self, address: u64, buf: &mut [u8]) -> std::io::Result<()> {
-        self.inner.read_at(address, buf)
+        if address >= self.virtual_size {
+            // Entire read is beyond backing file
+            buf.fill(0);
+            return Ok(());
+        }
+
+        let available = (self.virtual_size - address) as usize;
+        if available >= buf.len() {
+            // Entire read is within backing file
+            self.inner.read_at(address, buf)
+        } else {
+            // Partial read, fill the rest with zeroes
+            self.inner.read_at(address, &mut buf[..available])?;
+            buf[available..].fill(0);
+            Ok(())
+        }
     }
 }
 
@@ -827,6 +854,7 @@ impl Clone for BackingFile {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone_box(),
+            virtual_size: self.virtual_size,
         }
     }
 }
@@ -1108,8 +1136,12 @@ impl QcowFile {
     }
 
     pub fn set_backing_file(&mut self, backing: Option<Box<Self>>) {
-        self.backing_file = backing.map(|b| BackingFile {
-            inner: Box::new(*b),
+        self.backing_file = backing.map(|b| {
+            let virtual_size = b.virtual_size();
+            BackingFile {
+                inner: Box::new(*b),
+                virtual_size,
+            }
         });
     }
 
