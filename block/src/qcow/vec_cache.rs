@@ -62,6 +62,21 @@ impl<T: 'static + Copy + Default> VecCache<T> {
     pub fn len(&self) -> usize {
         self.vec.len()
     }
+
+    /// Extends the cache capacity to `new_len` elements.
+    ///
+    /// No-op if `new_len <= self.len()`. Allocates a new buffer, copies
+    /// existing data, and fills new elements with default values.
+    /// Marks the cache as dirty.
+    pub fn extend(&mut self, new_len: usize) {
+        if new_len <= self.vec.len() {
+            return;
+        }
+        let mut new_vec = vec![Default::default(); new_len];
+        new_vec[..self.vec.len()].copy_from_slice(&self.vec);
+        self.vec = new_vec.into_boxed_slice();
+        self.dirty = true;
+    }
 }
 
 impl<T: 'static + Copy + Default> Cacheable for VecCache<T> {
