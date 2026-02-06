@@ -1356,13 +1356,17 @@ impl MemoryManager {
         Ok(FileOffset::new(f, 0))
     }
 
-    fn open_backing_file(backing_file: &PathBuf, file_offset: u64) -> Result<FileOffset, Error> {
+    fn open_backing_file(
+        backing_file: &PathBuf,
+        file_offset: u64,
+        shared: bool,
+    ) -> Result<FileOffset, Error> {
         if backing_file.is_dir() {
             Err(Error::DirectoryAsBackingFileForMemory)
         } else {
             let f = OpenOptions::new()
                 .read(true)
-                .write(true)
+                .write(shared)
                 .open(backing_file)
                 .map_err(Error::SharedFileCreate)?;
 
@@ -1397,7 +1401,7 @@ impl MemoryManager {
             } else {
                 mmap_flags |= libc::MAP_PRIVATE;
             }
-            Some(Self::open_backing_file(backing_file, file_offset)?)
+            Some(Self::open_backing_file(backing_file, file_offset, shared)?)
         } else if shared || hugepages {
             // For hugepages we must also MAP_SHARED otherwise we will trigger #4805
             // because the MAP_PRIVATE will trigger CoW against the backing file with
