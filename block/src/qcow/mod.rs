@@ -3433,6 +3433,98 @@ mod unit_tests {
     }
 
     #[test]
+    fn resize_grow_within_l1() {
+        with_default_file(0x10_0000, false, |mut q| {
+            let original_size = q.virtual_size();
+            assert_eq!(original_size, 0x10_0000);
+
+            q.resize(original_size)
+                .expect("Resize to same size should succeed");
+            assert_eq!(q.virtual_size(), original_size);
+        });
+    }
+
+    #[test]
+    fn resize_grow_with_l1_growth() {
+        let initial_size = 1024 * 1024; // 1 MB
+        let new_size = 600 * 1024 * 1024; // 600 MB
+
+        let tmp: RawFile = RawFile::new(TempFile::new().unwrap().into_file(), false);
+        let mut q = QcowFile::new(tmp, 3, initial_size).unwrap();
+
+        let original_l1_size = q.header().l1_size;
+        assert_eq!(q.virtual_size(), initial_size);
+
+        let test_data = b"Hello, QCOW resize test!";
+        q.rewind().unwrap();
+        q.write_all(test_data).unwrap();
+
+        q.resize(new_size).expect("Resize should succeed");
+        assert_eq!(q.virtual_size(), new_size);
+
+        assert!(q.header().l1_size > original_l1_size);
+
+        // Verify original data is still intact
+        let mut buf = vec![0u8; test_data.len()];
+        q.rewind().unwrap();
+        q.read_exact(&mut buf).unwrap();
+        assert_eq!(&buf, test_data);
+
+        let new_offset = new_size - 0x10000; // 64KB before end
+        q.seek(SeekFrom::Start(new_offset)).unwrap();
+        let new_data = b"Data at new end!";
+        q.write_all(new_data).unwrap();
+
+        let mut buf2 = vec![0u8; new_data.len()];
+        q.seek(SeekFrom::Start(new_offset)).unwrap();
+        q.read_exact(&mut buf2).unwrap();
+        assert_eq!(&buf2, new_data);
+    }
+
+    #[test]
+    fn resize_shrink_fails() {
+        with_default_file(0x10_0000, false, |mut q| {
+            let original_size = q.virtual_size();
+            let smaller_size = original_size / 2;
+
+            let result = q.resize(smaller_size);
+            assert!(result.is_err());
+            assert!(matches!(result.unwrap_err(), Error::ShrinkNotSupported));
+
+            assert_eq!(q.virtual_size(), original_size);
+        });
+    }
+
+    #[test]
+    fn resize_with_backing_file_fails() {
+        let backing_temp = TempFile::new().unwrap();
+        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
+        let backing_size = 1024 * 1024; // 1 MB
+
+        {
+            let backing_raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
+            let _backing_qcow = QcowFile::new(backing_raw, 3, backing_size).unwrap();
+        }
+
+        let overlay_file = TempFile::new().unwrap();
+        let overlay_raw = RawFile::new(overlay_file.into_file(), false);
+        let backing_config = BackingFileConfig {
+            path: backing_path,
+            format: Some(ImageType::Qcow2),
+        };
+        let mut overlay =
+            QcowFile::new_from_backing(overlay_raw, 3, backing_size, &backing_config).unwrap();
+
+        assert_eq!(overlay.virtual_size(), backing_size);
+
+        let result = overlay.resize(backing_size * 2);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::ResizeWithBackingFile));
+
+        assert_eq!(overlay.virtual_size(), backing_size);
+    }
+
+    #[test]
     fn read_beyond_backing_file_returns_zeros() {
         let backing_temp = TempFile::new().unwrap();
         let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
