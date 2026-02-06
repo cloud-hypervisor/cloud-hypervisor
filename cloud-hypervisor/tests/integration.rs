@@ -6684,6 +6684,127 @@ mod common_parallel {
         handle_child_output(r, &output);
     }
 
+    #[test]
+    fn test_disk_resize_qcow2() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+
+        #[cfg(target_arch = "x86_64")]
+        let kernel_path = direct_kernel_boot_path();
+        #[cfg(target_arch = "aarch64")]
+        let kernel_path = edk2_path();
+
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let test_disk_path = guest.tmp_dir.as_path().join("resize-test.qcow2");
+
+        // Create a 16MB QCOW2 disk image
+        assert!(
+            exec_host_command_output(&format!(
+                "qemu-img create -f qcow2 {} 16M",
+                test_disk_path.to_str().unwrap()
+            ))
+            .status
+            .success()
+        );
+
+        let mut cmd = GuestCommand::new(&guest);
+
+        cmd.args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .default_net()
+            .capture_output();
+
+        let mut child = cmd.spawn().unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // Add the QCOW2 disk to the VM
+            let (cmd_success, cmd_output) = remote_command_w_output(
+                &api_socket,
+                "add-disk",
+                Some(&format!(
+                    "path={},id=test0",
+                    test_disk_path.to_str().unwrap()
+                )),
+            );
+
+            assert!(cmd_success);
+            assert!(String::from_utf8_lossy(&cmd_output).contains("\"id\":\"test0\""));
+
+            // Check that /dev/vdc exists and the block size is 16M
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            // Write some data to verify it persists after resize
+            guest
+                .ssh_command("sudo dd if=/dev/urandom of=/dev/vdc bs=1M count=8")
+                .unwrap();
+
+            // Resize disk up to 32M
+            let resize_up_success =
+                resize_disk_command(&api_socket, "test0", "33554432" /* 32M */);
+            assert!(resize_up_success);
+
+            // Check new size is visible
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 32M")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            // Write to the expanded area to verify it works
+            guest
+                .ssh_command("sudo dd if=/dev/zero of=/dev/vdc bs=1M count=32")
+                .unwrap();
+
+            // Resize to 64M to exercise L1 table growth
+            let resize_up_again_success =
+                resize_disk_command(&api_socket, "test0", "67108864" /* 64M */);
+            assert!(resize_up_again_success);
+
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 64M")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            // Write to the full disk
+            guest
+                .ssh_command("sudo dd if=/dev/zero of=/dev/vdc bs=1M count=64")
+                .unwrap();
+
+            // QCOW2 does not support shrinking, no resize down test here.
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        disk_check_consistency(&test_disk_path, None);
+
+        handle_child_output(r, &output);
+    }
+
     fn create_loop_device(backing_file_path: &str, block_size: u32, num_retries: usize) -> String {
         const LOOP_CONFIGURE: u64 = 0x4c0a;
         const LOOP_CTL_GET_FREE: u64 = 0x4c82;
