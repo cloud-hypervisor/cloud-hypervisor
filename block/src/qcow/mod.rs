@@ -3289,6 +3289,66 @@ mod unit_tests {
     }
 
     #[test]
+    fn read_beyond_backing_file_returns_zeros() {
+        let backing_temp = TempFile::new().unwrap();
+        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
+        let backing_size = 1024 * 1024;
+
+        {
+            let backing_raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
+            let mut backing_qcow = QcowFile::new(backing_raw, 3, backing_size).unwrap();
+            let data = b"BACKING_DATA";
+            backing_qcow.rewind().unwrap();
+            backing_qcow.write_all(data).unwrap();
+            let boundary_data = [0xAAu8; 512];
+            backing_qcow
+                .seek(SeekFrom::Start(backing_size - 512))
+                .unwrap();
+            backing_qcow.write_all(&boundary_data).unwrap();
+            backing_qcow.flush().unwrap();
+        }
+
+        let overlay_file = TempFile::new().unwrap();
+        let overlay_raw = RawFile::new(overlay_file.into_file(), false);
+        let backing_config = BackingFileConfig {
+            path: backing_path,
+            format: Some(ImageType::Qcow2),
+        };
+        let overlay_size = backing_size * 2; // 2x the backing size
+        let mut overlay =
+            QcowFile::new_from_backing(overlay_raw, 3, overlay_size, &backing_config).unwrap();
+
+        assert_eq!(overlay.virtual_size(), overlay_size);
+
+        let mut buf = vec![0u8; 12];
+        overlay.rewind().unwrap();
+        overlay.read_exact(&mut buf).unwrap();
+        assert_eq!(&buf, b"BACKING_DATA");
+
+        let offset_beyond = backing_size + 4096;
+        let mut beyond_buf = vec![0xFFu8; 4096];
+        overlay.seek(SeekFrom::Start(offset_beyond)).unwrap();
+        overlay.read_exact(&mut beyond_buf).unwrap();
+        assert!(
+            beyond_buf.iter().all(|&b| b == 0),
+            "Read beyond backing file should return zeros"
+        );
+
+        let offset_at_boundary = backing_size - 512;
+        let mut boundary_buf = vec![0xFFu8; 1024]; // 512 in backing, 512 beyond
+        overlay.seek(SeekFrom::Start(offset_at_boundary)).unwrap();
+        overlay.read_exact(&mut boundary_buf).unwrap();
+        assert!(
+            boundary_buf[..512].iter().all(|&b| b == 0xAA),
+            "Portion within backing file should contain backing data"
+        );
+        assert!(
+            boundary_buf[512..].iter().all(|&b| b == 0),
+            "Portion beyond backing file should be zeros"
+        );
+    }
+
+    #[test]
     fn write_zeroes_read() {
         with_basic_file(&valid_header_v3(), |disk_file: RawFile| {
             let mut q = QcowFile::from(disk_file).unwrap();
