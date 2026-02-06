@@ -4,7 +4,7 @@
 
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{Seek, SeekFrom};
+use std::io::{self, Seek, SeekFrom};
 use std::os::fd::AsRawFd;
 use std::sync::{Arc, Mutex};
 
@@ -66,6 +66,14 @@ impl DiskFile for QcowDiskSync {
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
         Ok(Box::new(QcowSync::new(Arc::clone(&self.qcow_file))) as Box<dyn AsyncIo>)
+    }
+
+    fn resize(&mut self, size: u64) -> DiskFileResult<()> {
+        self.qcow_file
+            .lock()
+            .unwrap()
+            .resize(size)
+            .map_err(|e| DiskFileError::ResizeError(io::Error::other(e)))
     }
 
     fn fd(&mut self) -> BorrowedDiskFd<'_> {

@@ -104,12 +104,18 @@ pub enum Error {
     RefcountTableOffEnd,
     #[error("Too many clusters specified for refcount")]
     RefcountTableTooLarge,
+    #[error("Failed to resize")]
+    ResizeIo(#[source] io::Error),
+    #[error("Resize not supported with backing file")]
+    ResizeWithBackingFile,
     #[error("Failed to seek file")]
     SeekingFile(#[source] io::Error),
     #[error("Failed to set file size")]
     SettingFileSize(#[source] io::Error),
     #[error("Failed to set refcount refcount")]
     SettingRefcountRefcount(#[source] io::Error),
+    #[error("Shrinking QCOW images is not supported")]
+    ShrinkNotSupported,
     #[error("Size too small for number of clusters")]
     SizeTooSmallForNumberOfClusters,
     #[error("Failed to sync header")]
@@ -1217,6 +1223,144 @@ impl QcowFile {
             cluster_addr += cluster_size;
         }
         Ok(None)
+    }
+
+    /// Resize the virtual size of the QCOW2 image.
+    ///
+    /// This supports growing the image, including growing the L1 table
+    /// if needed. Shrinking is not supported, as it could lead to data
+    /// loss. Not supported when a backing file is present in that case
+    /// an error is returned.
+    pub fn resize(&mut self, new_size: u64) -> Result<()> {
+        let current_size = self.virtual_size();
+
+        if new_size == current_size {
+            return Ok(());
+        }
+
+        if new_size < current_size {
+            return Err(Error::ShrinkNotSupported);
+        }
+
+        if self.backing_file.is_some() {
+            return Err(Error::ResizeWithBackingFile);
+        }
+
+        // Grow the L1 table if needed
+        let cluster_size = self.raw_file.cluster_size();
+        let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
+        let new_clusters = div_round_up_u64(new_size, cluster_size);
+        let needed_l1_entries = div_round_up_u64(new_clusters, entries_per_cluster) as u32;
+
+        if needed_l1_entries > self.header.l1_size {
+            self.grow_l1_table(needed_l1_entries)?;
+        }
+
+        self.header.size = new_size;
+
+        self.raw_file
+            .file_mut()
+            .rewind()
+            .map_err(Error::SeekingFile)?;
+        self.header
+            .write_to(self.raw_file.file_mut())
+            .map_err(|e| match e {
+                Error::WritingHeader(io_err) => Error::ResizeIo(io_err),
+                other => other,
+            })?;
+
+        self.raw_file
+            .file_mut()
+            .sync_all()
+            .map_err(Error::SyncingHeader)?;
+
+        Ok(())
+    }
+
+    /// Grow the L1 table to accommodate at least `new_l1_size` entries.
+    ///
+    /// This allocates a new L1 table at file end (guaranteeing contiguity),
+    /// copies existing entries, updates refcounts, and atomically switches
+    /// to the new table.
+    fn grow_l1_table(&mut self, new_l1_size: u32) -> Result<()> {
+        let old_l1_size = self.header.l1_size;
+        let old_l1_offset = self.header.l1_table_offset;
+        let cluster_size = self.raw_file.cluster_size();
+
+        let new_l1_bytes = new_l1_size as u64 * size_of::<u64>() as u64;
+        let new_l1_clusters = div_round_up_u64(new_l1_bytes, cluster_size);
+
+        // Allocate contiguous clusters at file end for new L1 table
+        let file_size = self
+            .raw_file
+            .file_mut()
+            .seek(SeekFrom::End(0))
+            .map_err(Error::ResizeIo)?;
+        let new_l1_offset = self.raw_file.cluster_address(file_size + cluster_size - 1);
+
+        // Extend file to fit all L1 clusters
+        let new_file_end = new_l1_offset + new_l1_clusters * cluster_size;
+        self.raw_file
+            .file_mut()
+            .set_len(new_file_end)
+            .map_err(Error::SettingFileSize)?;
+
+        // Set refcounts for the contiguous range
+        for i in 0..new_l1_clusters {
+            self.set_cluster_refcount(new_l1_offset + i * cluster_size, 1)
+                .map_err(Error::ResizeIo)?;
+        }
+
+        let mut new_l1_data = vec![0u64; new_l1_size as usize];
+        let old_entries = self.l1_table.get_values();
+        new_l1_data[..old_entries.len()].copy_from_slice(old_entries);
+
+        for (i, l2_addr) in new_l1_data.iter_mut().enumerate() {
+            if *l2_addr != 0 && i < old_entries.len() {
+                let refcount = self
+                    .refcounts
+                    .get_cluster_refcount(&mut self.raw_file, *l2_addr)
+                    .map_err(Error::GettingRefcount)?;
+                *l2_addr = l1_entry_make(*l2_addr, refcount == 1);
+            }
+        }
+
+        // Write the new L1 table to the file.
+        self.raw_file
+            .write_pointer_table_direct(new_l1_offset, new_l1_data.iter())
+            .map_err(Error::ResizeIo)?;
+
+        self.raw_file
+            .file_mut()
+            .sync_all()
+            .map_err(Error::SyncingHeader)?;
+
+        self.header.l1_size = new_l1_size;
+        self.header.l1_table_offset = new_l1_offset;
+
+        self.raw_file
+            .file_mut()
+            .rewind()
+            .map_err(Error::SeekingFile)?;
+        self.header.write_to(self.raw_file.file_mut())?;
+
+        self.raw_file
+            .file_mut()
+            .sync_all()
+            .map_err(Error::SyncingHeader)?;
+
+        // Free old L1 table clusters
+        let old_l1_bytes = old_l1_size as u64 * size_of::<u64>() as u64;
+        let old_l1_clusters = div_round_up_u64(old_l1_bytes, cluster_size);
+        for i in 0..old_l1_clusters {
+            let cluster_addr = old_l1_offset + i * cluster_size;
+            let _ = self.set_cluster_refcount(cluster_addr, 0);
+        }
+
+        // Update L1 table cache
+        self.l1_table.extend(new_l1_size as usize);
+
+        Ok(())
     }
 
     fn find_avail_clusters(&mut self) -> Result<()> {
