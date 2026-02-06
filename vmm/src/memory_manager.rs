@@ -25,9 +25,7 @@ use devices::ioapic;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::HypervisorVmError;
 use libc::_SC_NPROCESSORS_ONLN;
-#[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
-use log::debug;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracer::trace_scoped;
@@ -1490,17 +1488,20 @@ impl MemoryManager {
             });
         }
 
-        if region.file_offset().is_none() && thp {
-            info!(
-                "Anonymous mapping at 0x{:x} (size = 0x{:x})",
-                region.as_ptr() as u64,
-                size
-            );
+        info!(
+            "RAM region mapping at 0x{:x} (size = 0x{:x})",
+            region.as_ptr() as u64,
+            size
+        );
+
+        if thp && !hugepages {
             // SAFETY: FFI call with correct arguments
             let ret = unsafe { libc::madvise(region.as_ptr() as _, size, libc::MADV_HUGEPAGE) };
             if ret != 0 {
                 let e = io::Error::last_os_error();
                 warn!("Failed to mark pages as THP eligible: {e}");
+            } else {
+                debug!("Successfully marked pages as THP eligible");
             }
         }
 
