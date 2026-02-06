@@ -15,6 +15,7 @@ struct BalloonConfig {
     pub size: u64,
     pub deflate_on_oom: bool,
     pub free_page_reporting: bool,
+    pub bdf_device: Option<u8>,
 }
 ```
 
@@ -73,4 +74,26 @@ _Example_
 
 ```
 --balloon size=0,free_page_reporting=on
+```
+
+### `bdf_device`
+
+Allows the configuration of the PCI bus address at which the guest will
+see the device. The VMM is not allowed to configure another address for
+the device if it is already in use. PCI bus addresses are specified in
+the format `DD.F`, where `DD` denotes a hexadecimal value for the bus
+device address and `F` the function ID part of the device address. If no
+value is supplied, the VMM is allowed to hand out any free bus device
+address.
+
+Currently, the only support function ID is `0`.
+
+This parameter is optional.
+
+Value is an Option set to `None` by default.
+
+_Example_
+
+```
+--balloon size=0,addr=15.0
 ```
