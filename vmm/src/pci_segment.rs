@@ -55,23 +55,23 @@ impl PciSegment {
     pub(crate) fn new(
         id: u16,
         numa_node: u32,
-        address_manager: &Arc<AddressManager>,
+        address_manager: Arc<AddressManager>,
         mem32_allocator: Arc<Mutex<AddressAllocator>>,
         mem64_allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
     ) -> DeviceManagerResult<PciSegment> {
+        let mmio_bus = address_manager.mmio_bus.clone();
         let pci_root = PciRoot::new(None);
         let pci_bus = Arc::new(Mutex::new(PciBus::new(
             pci_root,
-            Arc::clone(address_manager) as Arc<dyn DeviceRelocation>,
+            address_manager as Arc<dyn DeviceRelocation>,
         )));
 
         let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(Arc::clone(&pci_bus))));
         let mmio_config_address =
             layout::PCI_MMCONFIG_START.0 + layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT * id as u64;
 
-        address_manager
-            .mmio_bus
+        mmio_bus
             .insert(
                 Arc::clone(&pci_config_mmio) as Arc<dyn BusDeviceSync>,
                 mmio_config_address,
@@ -118,11 +118,12 @@ impl PciSegment {
 
     #[cfg(target_arch = "x86_64")]
     pub(crate) fn new_default_segment(
-        address_manager: &Arc<AddressManager>,
+        address_manager: Arc<AddressManager>,
         mem32_allocator: Arc<Mutex<AddressAllocator>>,
         mem64_allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
     ) -> DeviceManagerResult<PciSegment> {
+        let io_bus = address_manager.io_bus.clone();
         let mut segment = Self::new(
             0,
             0,
@@ -133,8 +134,7 @@ impl PciSegment {
         )?;
         let pci_config_io = Arc::new(Mutex::new(PciConfigIo::new(Arc::clone(&segment.pci_bus))));
 
-        address_manager
-            .io_bus
+        io_bus
             .insert(
                 pci_config_io.clone(),
                 PCI_CONFIG_IO_PORT,
@@ -149,7 +149,7 @@ impl PciSegment {
 
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     pub(crate) fn new_default_segment(
-        address_manager: &Arc<AddressManager>,
+        address_manager: Arc<AddressManager>,
         mem32_allocator: Arc<Mutex<AddressAllocator>>,
         mem64_allocator: Arc<Mutex<AddressAllocator>>,
         pci_irq_slots: &[u8; 32],
@@ -178,7 +178,7 @@ impl PciSegment {
     }
 
     pub fn reserve_legacy_interrupts_for_pci_devices(
-        address_manager: &Arc<AddressManager>,
+        address_manager: &AddressManager,
         pci_irq_slots: &mut [u8; 32],
     ) -> DeviceManagerResult<()> {
         // Reserve 8 IRQs which will be shared across all PCI devices.

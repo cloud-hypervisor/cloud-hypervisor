@@ -1257,7 +1257,7 @@ impl DeviceManager {
         )?;
 
         let mut pci_segments = vec![PciSegment::new_default_segment(
-            &address_manager,
+            address_manager.clone(),
             Arc::clone(&address_manager.pci_mmio32_allocators[0]),
             Arc::clone(&address_manager.pci_mmio64_allocators[0]),
             &pci_irq_slots,
@@ -1267,7 +1267,7 @@ impl DeviceManager {
             pci_segments.push(PciSegment::new(
                 i as u16,
                 numa_node_id_from_pci_segment_id(&numa_nodes, i as u16),
-                &address_manager,
+                address_manager.clone(),
                 Arc::clone(&address_manager.pci_mmio32_allocators[i]),
                 Arc::clone(&address_manager.pci_mmio64_allocators[i]),
                 &pci_irq_slots,
@@ -1739,7 +1739,7 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "aarch64")]
-    pub fn get_interrupt_controller(&mut self) -> Option<&Arc<Mutex<gic::Gic>>> {
+    pub fn get_interrupt_controller(&self) -> Option<&Arc<Mutex<gic::Gic>>> {
         self.interrupt_controller.as_ref()
     }
 
@@ -1776,7 +1776,7 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "riscv64")]
-    pub fn get_interrupt_controller(&mut self) -> Option<&Arc<Mutex<aia::Aia>>> {
+    pub fn get_interrupt_controller(&self) -> Option<&Arc<Mutex<aia::Aia>>> {
         self.interrupt_controller.as_ref()
     }
 
@@ -4300,21 +4300,21 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn io_bus(&self) -> &Arc<Bus> {
-        &self.address_manager.io_bus
+    pub fn io_bus(&self) -> Arc<Bus> {
+        self.address_manager.io_bus.clone()
     }
 
-    pub fn mmio_bus(&self) -> &Arc<Bus> {
-        &self.address_manager.mmio_bus
+    pub fn mmio_bus(&self) -> Arc<Bus> {
+        self.address_manager.mmio_bus.clone()
     }
 
     #[cfg(feature = "fw_cfg")]
-    pub fn fw_cfg(&self) -> Option<&Arc<Mutex<FwCfg>>> {
-        self.fw_cfg.as_ref()
+    pub fn fw_cfg(&self) -> Option<&Mutex<FwCfg>> {
+        self.fw_cfg.as_deref()
     }
 
-    pub fn allocator(&self) -> &Arc<Mutex<SystemAllocator>> {
-        &self.address_manager.allocator
+    pub fn allocator(&self) -> Arc<Mutex<SystemAllocator>> {
+        self.address_manager.allocator.clone()
     }
 
     pub fn interrupt_controller(&self) -> Option<Arc<Mutex<dyn InterruptController>>> {
@@ -4332,7 +4332,7 @@ impl DeviceManager {
         self.cmdline_additions.as_slice()
     }
 
-    pub fn update_memory(&self, new_region: &Arc<GuestRegionMmap>) -> DeviceManagerResult<()> {
+    pub fn update_memory(&self, new_region: &GuestRegionMmap) -> DeviceManagerResult<()> {
         for handle in self.virtio_devices.iter() {
             handle
                 .virtio_device
