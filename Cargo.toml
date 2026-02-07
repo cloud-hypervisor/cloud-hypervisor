@@ -46,22 +46,22 @@ resolver = "3"
 [workspace.dependencies]
 # rust-vmm crates
 acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main" }
-kvm-bindings = "0.12.1"
-kvm-ioctls = "0.22.1"
-linux-loader = "0.13.1"
+kvm-bindings = "0.14.0"
+kvm-ioctls = "0.24.0"
+linux-loader = "0.13.2"
 mshv-bindings = "0.6.7"
 mshv-ioctls = "0.6.7"
 seccompiler = "0.5.0"
 vfio-bindings = { version = "0.6.0", default-features = false }
 vfio-ioctls = { version = "0.5.1", default-features = false }
 vfio_user = { version = "0.1.1", default-features = false }
-vhost = { version = "0.14.0", default-features = false }
+vhost = { version = "0.15.0", default-features = false }
 vhost-user-backend = { version = "0.20.0", default-features = false }
-virtio-bindings = "0.2.6"
-virtio-queue = "0.16.0"
+virtio-bindings = "0.2.7"
+virtio-queue = "0.17.0"
 vm-fdt = "0.3.0"
-vm-memory = "0.16.1"
-vmm-sys-util = "0.14.0"
+vm-memory = "0.18.0"
+vmm-sys-util = "0.15.0"
 
 # igvm crates
 # TODO: bump to 0.3.5 release
