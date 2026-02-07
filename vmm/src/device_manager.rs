@@ -2657,6 +2657,34 @@ impl DeviceManager {
             let image_type =
                 detect_image_type(&mut file).map_err(DeviceManagerError::DetectImageType)?;
 
+            // For non sparse RAW disks, preallocate disk space to ensure availability and
+            // reduce fragmentation. Allocating all blocks upfront is more likely to place
+            // them contiguously than allocating on demand during random writes.
+            // Not relevant for QCOW2/VHD/VHDX formats that manage allocation internally.
+            if !disk_cfg.sparse
+                && !disk_cfg.readonly
+                && let ImageType::Raw = image_type
+            {
+                let metadata = file.metadata().map_err(DeviceManagerError::Disk)?;
+                let size = metadata.len();
+
+                // SAFETY: FFI call with valid file descriptor and size
+                let ret = unsafe { libc::fallocate(file.as_raw_fd(), 0, 0, size as libc::off_t) };
+
+                if ret != 0 {
+                    warn!(
+                        "Failed to preallocate disk space for {:?}: {}",
+                        disk_cfg.path,
+                        io::Error::last_os_error()
+                    );
+                } else {
+                    debug!(
+                        "Preallocated {size} bytes for disk image {:?}",
+                        disk_cfg.path
+                    );
+                }
+            }
+
             let image = match image_type {
                 ImageType::FixedVhd => {
                     // Use asynchronous backend relying on io_uring if the
@@ -2710,7 +2738,7 @@ impl DeviceManager {
                 ImageType::Qcow2 => {
                     info!("Using synchronous QCOW2 disk file");
                     Box::new(
-                        QcowDiskSync::new(file, disk_cfg.direct)
+                        QcowDiskSync::new(file, disk_cfg.direct, disk_cfg.sparse)
                             .map_err(DeviceManagerError::CreateQcowDiskSync)?,
                     ) as Box<dyn DiskFile>
                 }
@@ -2785,6 +2813,7 @@ impl DeviceManager {
                 state_from_id(self.snapshot.as_ref(), id.as_str())
                     .map_err(DeviceManagerError::RestoreGetState)?,
                 queue_affinity,
+                disk_cfg.sparse,
             )
             .map_err(DeviceManagerError::CreateVirtioBlock)?;
 

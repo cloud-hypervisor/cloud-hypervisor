@@ -9,7 +9,7 @@ use std::os::fd::AsRawFd;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
-    AsyncIo, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
+    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::vhdx::{Result as VhdxResult, Vhdx};
 use crate::{AsyncAdaptor, BlockBackend, Error};
@@ -113,5 +113,17 @@ impl AsyncIo for VhdxSync {
 
     fn next_completed_request(&mut self) -> Option<(u64, i32)> {
         self.completion_list.pop_front()
+    }
+
+    fn punch_hole(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
+        Err(AsyncIoError::PunchHole(std::io::Error::other(
+            "punch_hole not supported for VHDX",
+        )))
+    }
+
+    fn write_zeroes(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
+        Err(AsyncIoError::WriteZeroes(std::io::Error::other(
+            "write_zeroes not supported for VHDX",
+        )))
     }
 }

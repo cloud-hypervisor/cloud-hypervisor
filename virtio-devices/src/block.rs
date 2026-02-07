@@ -672,6 +672,7 @@ impl Block {
         exit_evt: EventFd,
         state: Option<BlockState>,
         queue_affinity: BTreeMap<u16, Vec<usize>>,
+        sparse: bool,
     ) -> io::Result<Self> {
         let (disk_nsectors, avail_features, acked_features, config, paused) =
             if let Some(state) = state {
@@ -702,6 +703,20 @@ impl Block {
                     | (1u64 << VIRTIO_BLK_F_SEG_MAX)
                     | (1u64 << VIRTIO_RING_F_EVENT_IDX)
                     | (1u64 << VIRTIO_RING_F_INDIRECT_DESC);
+
+                // When backend supports sparse operations:
+                // - Always advertise WRITE_ZEROES
+                // - Advertise DISCARD only if sparse=true OR format supports marking
+                //   clusters as zero without deallocating
+                if disk_image.supports_sparse_operations() {
+                    avail_features |= 1u64 << VIRTIO_BLK_F_WRITE_ZEROES;
+                    if sparse || disk_image.supports_zero_flag() {
+                        avail_features |= 1u64 << VIRTIO_BLK_F_DISCARD;
+                    }
+                } else if sparse {
+                    warn!("sparse=on requested but backend does not support sparse operations");
+                }
+
                 if iommu {
                     avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
                 }

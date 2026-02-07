@@ -113,4 +113,16 @@ impl AsyncIo for FixedVhdSync {
     fn next_completed_request(&mut self) -> Option<(u64, i32)> {
         self.raw_file_sync.next_completed_request()
     }
+
+    fn punch_hole(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
+        Err(AsyncIoError::PunchHole(std::io::Error::other(
+            "punch_hole not supported for fixed VHD",
+        )))
+    }
+
+    fn write_zeroes(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
+        Err(AsyncIoError::WriteZeroes(std::io::Error::other(
+            "write_zeroes not supported for fixed VHD",
+        )))
+    }
 }

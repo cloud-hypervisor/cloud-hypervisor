@@ -58,6 +58,10 @@ impl DiskFile for RawFileDiskAio {
         }
     }
 
+    fn supports_sparse_operations(&self) -> bool {
+        true
+    }
+
     fn fd(&mut self) -> BorrowedDiskFd<'_> {
         BorrowedDiskFd::new(self.file.as_raw_fd())
     }
@@ -160,5 +164,17 @@ impl AsyncIo for RawFileAsyncAio {
         } else {
             Some((events[0].data, events[0].res as i32))
         }
+    }
+
+    fn punch_hole(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
+        Err(AsyncIoError::PunchHole(std::io::Error::other(
+            "punch_hole not supported with AIO backend",
+        )))
+    }
+
+    fn write_zeroes(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
+        Err(AsyncIoError::WriteZeroes(std::io::Error::other(
+            "write_zeroes not supported with AIO backend",
+        )))
     }
 }
