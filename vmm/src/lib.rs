@@ -896,7 +896,7 @@ impl Vmm {
         socket: &mut SocketStream,
         state: ReceiveMigrationState,
         req: &Request,
-        _receive_data_migration: &VmReceiveMigrationData,
+        receive_data_migration: &VmReceiveMigrationData,
     ) -> std::result::Result<ReceiveMigrationState, MigratableError> {
         use ReceiveMigrationState::*;
 
@@ -906,11 +906,27 @@ impl Vmm {
             )))
         };
 
+        // Here, we override parts of the configuration as specified by the management software.
         let mut configure_vm =
             |socket: &mut SocketStream,
              memory_files: HashMap<u32, File>|
              -> std::result::Result<Arc<Mutex<MemoryManager>>, MigratableError> {
                 let memory_manager = self.vm_receive_config(req, socket, memory_files)?;
+
+                // Apply external FDs to virtio-net devices.
+                if !receive_data_migration.net_fds.is_empty() {
+                    let mut vm_config = self.vm_config.as_mut().unwrap().lock().unwrap();
+                    for restore_net_cfg in &receive_data_migration.net_fds {
+                        for net_cfg in vm_config.net.iter_mut().flatten() {
+                            // update only if the net dev is backed by FDs
+                            if net_cfg.id.as_ref() == Some(&restore_net_cfg.id)
+                                && net_cfg.fds.is_some()
+                            {
+                                net_cfg.fds.clone_from(&restore_net_cfg.fds);
+                            }
+                        }
+                    }
+                }
 
                 Ok(memory_manager)
             };
@@ -2259,8 +2275,8 @@ impl RequestHandler for Vmm {
         receive_data_migration: VmReceiveMigrationData,
     ) -> result::Result<(), MigratableError> {
         info!(
-            "Receiving migration: receiver_url = {}",
-            receive_data_migration.receiver_url
+            "Receiving migration: receiver_url = {}, net_fds={:?}",
+            receive_data_migration.receiver_url, &receive_data_migration.net_fds
         );
 
         // Accept the connection and get the socket
