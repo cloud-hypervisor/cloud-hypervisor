@@ -52,7 +52,7 @@ struct VringInfo {
 
 #[derive(Clone)]
 pub struct VhostUserHandle {
-    vu: Frontend,
+    vu: Option<Frontend>,
     ready: bool,
     supports_migration: bool,
     shm_log: Option<Arc<MmapRegion>>,
@@ -82,6 +82,8 @@ impl VhostUserHandle {
         }
 
         self.vu
+            .as_mut()
+            .expect("Used after shutdown")
             .set_mem_table(regions.as_slice())
             .map_err(Error::VhostUserSetMemTable)?;
 
@@ -103,6 +105,8 @@ impl VhostUserHandle {
         };
 
         self.vu
+            .as_mut()
+            .expect("Used after shutdown")
             .add_mem_region(&region)
             .map_err(Error::VhostUserAddMemReg)
     }
@@ -113,12 +117,18 @@ impl VhostUserHandle {
         avail_protocol_features: VhostUserProtocolFeatures,
     ) -> Result<(u64, u64)> {
         // Set vhost-user owner.
-        self.vu.set_owner().map_err(Error::VhostUserSetOwner)?;
+        self.vu
+            .as_mut()
+            .expect("Used after shutdown")
+            .set_owner()
+            .map_err(Error::VhostUserSetOwner)?;
 
         // Get features from backend, do negotiation to get a feature collection which
         // both VMM and backend support.
         let backend_features = self
             .vu
+            .as_mut()
+            .expect("Used after shutdown")
             .get_features()
             .map_err(Error::VhostUserGetFeatures)?;
         let acked_features = avail_features & backend_features;
@@ -127,12 +137,16 @@ impl VhostUserHandle {
             if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0 {
                 let backend_protocol_features = self
                     .vu
+                    .as_mut()
+                    .expect("Used after shutdown")
                     .get_protocol_features()
                     .map_err(Error::VhostUserGetProtocolFeatures)?;
 
                 let acked_protocol_features = avail_protocol_features & backend_protocol_features;
 
                 self.vu
+                    .as_mut()
+                    .expect("Used after shutdown")
                     .set_protocol_features(acked_protocol_features)
                     .map_err(Error::VhostUserSetProtocolFeatures)?;
 
@@ -144,7 +158,10 @@ impl VhostUserHandle {
         if avail_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK)
             && acked_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK)
         {
-            self.vu.set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
+            self.vu
+                .as_mut()
+                .expect("Used after shutdown")
+                .set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
         }
 
         self.update_supports_migration(acked_features, acked_protocol_features.bits());
@@ -162,8 +179,8 @@ impl VhostUserHandle {
         backend_req_handler: &Option<FrontendReqHandler<S>>,
         inflight: Option<&mut Inflight>,
     ) -> Result<()> {
-        self.vu
-            .set_features(acked_features)
+        let vu = self.vu.as_mut().expect("Used after shutdown");
+        vu.set_features(acked_features)
             .map_err(Error::VhostUserSetFeatures)?;
 
         // Update internal value after it's been sent to the backend.
@@ -171,13 +188,13 @@ impl VhostUserHandle {
 
         // Let's first provide the memory table to the backend.
         self.update_mem_table(mem)?;
+        let vu = self.vu.as_mut().expect("Used after shutdown");
 
         // Send set_vring_num here, since it could tell backends, like SPDK,
         // how many virt queues to be handled, which backend required to know
         // at early stage.
         for (queue_index, queue, _) in queues.iter() {
-            self.vu
-                .set_vring_num(*queue_index, queue.size())
+            vu.set_vring_num(*queue_index, queue.size())
                 .map_err(Error::VhostUserSetVringNum)?;
         }
 
@@ -190,16 +207,14 @@ impl VhostUserHandle {
                     num_queues: queues.len() as u16,
                     queue_size: queues[0].1.size(),
                 };
-                let (info, fd) = self
-                    .vu
+                let (info, fd) = vu
                     .get_inflight_fd(&inflight_req_info)
                     .map_err(Error::VhostUserGetInflight)?;
                 inflight.info = info;
                 inflight.fd = Some(fd);
             }
             // Unwrapping the inflight fd is safe here since we know it can't be None.
-            self.vu
-                .set_inflight_fd(&inflight.info, inflight.fd.as_ref().unwrap().as_raw_fd())
+            vu.set_inflight_fd(&inflight.info, inflight.fd.as_ref().unwrap().as_raw_fd())
                 .map_err(Error::VhostUserSetInflight)?;
         }
 
@@ -240,30 +255,25 @@ impl VhostUserHandle {
                 config_data,
                 used_guest_addr: queue.used_ring(),
             });
-
-            self.vu
-                .set_vring_addr(*queue_index, &config_data)
+            vu.set_vring_addr(*queue_index, &config_data)
                 .map_err(Error::VhostUserSetVringAddr)?;
-            self.vu
-                .set_vring_base(
-                    *queue_index,
-                    queue
-                        .avail_idx(mem, Ordering::Acquire)
-                        .map_err(Error::GetAvailableIndex)?
-                        .0,
-                )
-                .map_err(Error::VhostUserSetVringBase)?;
+            vu.set_vring_base(
+                *queue_index,
+                queue
+                    .avail_idx(mem, Ordering::Acquire)
+                    .map_err(Error::GetAvailableIndex)?
+                    .0,
+            )
+            .map_err(Error::VhostUserSetVringBase)?;
 
             if let Some(eventfd) =
                 virtio_interrupt.notifier(VirtioInterruptType::Queue(*queue_index as u16))
             {
-                self.vu
-                    .set_vring_call(*queue_index, &eventfd)
+                vu.set_vring_call(*queue_index, &eventfd)
                     .map_err(Error::VhostUserSetVringCall)?;
             }
 
-            self.vu
-                .set_vring_kick(*queue_index, queue_evt)
+            vu.set_vring_kick(*queue_index, queue_evt)
                 .map_err(Error::VhostUserSetVringKick)?;
 
             self.queue_indexes.push(*queue_index);
@@ -272,8 +282,8 @@ impl VhostUserHandle {
         self.enable_vhost_user_vrings(self.queue_indexes.clone(), true)?;
 
         if let Some(backend_req_handler) = backend_req_handler {
-            self.vu
-                .set_backend_request_fd(&backend_req_handler.get_tx_raw_fd())
+            let vu = self.vu.as_mut().expect("Used after shutdown");
+            vu.set_backend_request_fd(&backend_req_handler.get_tx_raw_fd())
                 .map_err(Error::VhostUserSetBackendRequestFd)?;
         }
 
@@ -284,9 +294,9 @@ impl VhostUserHandle {
     }
 
     fn enable_vhost_user_vrings(&mut self, queue_indexes: Vec<usize>, enable: bool) -> Result<()> {
+        let vu = self.vu.as_mut().expect("Used after shutdown");
         for queue_index in queue_indexes {
-            self.vu
-                .set_vring_enable(queue_index, enable)
+            vu.set_vring_enable(queue_index, enable)
                 .map_err(Error::VhostUserSetVringEnable)?;
         }
 
@@ -294,13 +304,13 @@ impl VhostUserHandle {
     }
 
     pub fn reset_vhost_user(&mut self) -> Result<()> {
+        let vu = self.vu.as_mut().expect("Used after shutdown");
+
         for queue_index in self.queue_indexes.drain(..) {
-            self.vu
-                .set_vring_enable(queue_index, false)
+            vu.set_vring_enable(queue_index, false)
                 .map_err(Error::VhostUserSetVringEnable)?;
 
-            let _ = self
-                .vu
+            let _ = vu
                 .get_vring_base(queue_index)
                 .map_err(Error::VhostUserGetVringBase)?;
         }
@@ -313,21 +323,19 @@ impl VhostUserHandle {
         acked_features: u64,
         acked_protocol_features: u64,
     ) -> Result<()> {
-        self.vu.set_owner().map_err(Error::VhostUserSetOwner)?;
-        self.vu
-            .get_features()
-            .map_err(Error::VhostUserGetFeatures)?;
+        let vu = self.vu.as_mut().expect("Used after shutdown");
+        vu.set_owner().map_err(Error::VhostUserSetOwner)?;
+        vu.get_features().map_err(Error::VhostUserGetFeatures)?;
 
         if acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits() != 0
             && let Some(acked_protocol_features) =
                 VhostUserProtocolFeatures::from_bits(acked_protocol_features)
         {
-            self.vu
-                .set_protocol_features(acked_protocol_features)
+            vu.set_protocol_features(acked_protocol_features)
                 .map_err(Error::VhostUserSetProtocolFeatures)?;
 
             if acked_protocol_features.contains(VhostUserProtocolFeatures::REPLY_ACK) {
-                self.vu.set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
+                vu.set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
             }
         }
 
@@ -359,6 +367,11 @@ impl VhostUserHandle {
         )
     }
 
+    pub fn shutdown(&mut self) {
+        assert!(self.vu.is_some(), "Double shutdown");
+        self.vu = None;
+    }
+
     pub fn connect_vhost_user(
         server: bool,
         socket_path: &str,
@@ -376,7 +389,7 @@ impl VhostUserHandle {
             let (stream, _) = listener.accept().map_err(Error::AcceptConnection)?;
 
             Ok(VhostUserHandle {
-                vu: Frontend::from_stream(stream, num_queues),
+                vu: Some(Frontend::from_stream(stream, num_queues)),
                 ready: false,
                 supports_migration: false,
                 shm_log: None,
@@ -392,7 +405,7 @@ impl VhostUserHandle {
                 let err = match Frontend::connect(socket_path, num_queues) {
                     Ok(m) => {
                         return Ok(VhostUserHandle {
-                            vu: m,
+                            vu: Some(m),
                             ready: false,
                             supports_migration: false,
                             shm_log: None,
@@ -416,7 +429,7 @@ impl VhostUserHandle {
     }
 
     pub fn socket_handle(&mut self) -> &mut Frontend {
-        &mut self.vu
+        self.vu.as_mut().expect("Use after shutdown")
     }
 
     pub fn pause_vhost_user(&mut self) -> Result<()> {
@@ -497,6 +510,8 @@ impl VhostUserHandle {
             mmap_handle,
         };
         self.vu
+            .as_mut()
+            .expect("used after shutdown")
             .set_log_base(0, Some(log))
             .map_err(Error::VhostUserSetLogBase)?;
 
@@ -504,6 +519,8 @@ impl VhostUserHandle {
     }
 
     fn set_vring_logging(&mut self, enable: bool) -> Result<()> {
+        let vu = self.vu.as_mut().expect("Used after shutdown");
+
         if let Some(vrings_info) = &self.vrings_info {
             for (i, vring_info) in vrings_info.iter().enumerate() {
                 let mut config_data = vring_info.config_data;
@@ -514,8 +531,7 @@ impl VhostUserHandle {
                     None
                 };
 
-                self.vu
-                    .set_vring_addr(i, &config_data)
+                vu.set_vring_addr(i, &config_data)
                     .map_err(Error::VhostUserSetVringAddr)?;
             }
         }
@@ -534,6 +550,8 @@ impl VhostUserHandle {
         // Enable VHOST_F_LOG_ALL feature
         let features = self.acked_features | (1 << VHOST_F_LOG_ALL);
         self.vu
+            .as_mut()
+            .expect("Used after shutdown")
             .set_features(features)
             .map_err(Error::VhostUserSetFeatures)?;
 
@@ -551,6 +569,8 @@ impl VhostUserHandle {
 
         // Disable VHOST_F_LOG_ALL feature
         self.vu
+            .as_mut()
+            .expect("Used after shutdown")
             .set_features(self.acked_features)
             .map_err(Error::VhostUserSetFeatures)?;
 
