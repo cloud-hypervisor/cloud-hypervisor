@@ -29,10 +29,19 @@ pub struct QcowDiskSync {
 }
 
 impl QcowDiskSync {
-    pub fn new(file: File, direct_io: bool) -> QcowResult<Self> {
-        Ok(QcowDiskSync {
-            qcow_file: Arc::new(Mutex::new(QcowFile::from(RawFile::new(file, direct_io))?)),
-        })
+    pub fn new(file: File, direct_io: bool, backing_files: bool) -> QcowResult<Self> {
+        if backing_files {
+            Ok(QcowDiskSync {
+                qcow_file: Arc::new(Mutex::new(QcowFile::from(RawFile::new(file, direct_io))?)),
+            })
+        } else {
+            Ok(QcowDiskSync {
+                qcow_file: Arc::new(Mutex::new(QcowFile::from_with_nesting_depth(
+                    RawFile::new(file, direct_io),
+                    0,
+                )?)),
+            })
+        }
     }
 }
 

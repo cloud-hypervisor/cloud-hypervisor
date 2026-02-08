@@ -2657,6 +2657,10 @@ impl DeviceManager {
             let image_type =
                 detect_image_type(&mut file).map_err(DeviceManagerError::DetectImageType)?;
 
+            if image_type != ImageType::Qcow2 && disk_cfg.backing_files {
+                warn!("Enabling backing_files option only applies for QCOW2 files");
+            }
+
             let image = match image_type {
                 ImageType::FixedVhd => {
                     // Use asynchronous backend relying on io_uring if the
@@ -2710,7 +2714,7 @@ impl DeviceManager {
                 ImageType::Qcow2 => {
                     info!("Using synchronous QCOW2 disk file");
                     Box::new(
-                        QcowDiskSync::new(file, disk_cfg.direct)
+                        QcowDiskSync::new(file, disk_cfg.direct, disk_cfg.backing_files)
                             .map_err(DeviceManagerError::CreateQcowDiskSync)?,
                     ) as Box<dyn DiskFile>
                 }

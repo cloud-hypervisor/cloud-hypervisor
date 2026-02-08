@@ -1093,7 +1093,7 @@ impl DiskConfig {
          ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
          id=<device_id>,pci_segment=<segment_id>,rate_limit_group=<group_id>,\
          queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>,\
-         serial=<serial_number>";
+         serial=<serial_number>,backing_files=on|off";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1118,7 +1118,8 @@ impl DiskConfig {
             .add("pci_segment")
             .add("serial")
             .add("rate_limit_group")
-            .add("queue_affinity");
+            .add("queue_affinity")
+            .add("backing_files");
         parser.parse(disk).map_err(Error::ParseDisk)?;
 
         let path = parser.get("path").map(PathBuf::from);
@@ -1203,6 +1204,12 @@ impl DiskConfig {
                     })
                     .collect()
             });
+        let backing_files = parser
+            .convert::<Toggle>("backing_files")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or(Toggle(false))
+            .0;
+
         let bw_tb_config = if bw_size != 0 && bw_refill_time != 0 {
             Some(TokenBucketConfig {
                 size: bw_size,
@@ -1247,6 +1254,7 @@ impl DiskConfig {
             pci_segment,
             serial,
             queue_affinity,
+            backing_files,
         })
     }
 
@@ -3414,6 +3422,7 @@ mod unit_tests {
             pci_segment: 0,
             serial: None,
             queue_affinity: None,
+            backing_files: false,
         }
     }
 
