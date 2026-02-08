@@ -276,6 +276,20 @@ pub struct MmioRegion {
     pub(crate) user_memory_regions: Vec<UserMemoryRegion>,
 }
 
+impl MmioRegion {
+    /// Returns the memory slot numbers for all user memory regions.
+    pub fn user_memory_region_slots(&self) -> impl Iterator<Item = u32> + '_ {
+        self.user_memory_regions.iter().map(|u| u.slot)
+    }
+
+    /// Returns true if any user memory region has a slot in the given set.
+    pub fn has_any_slot(&self, slots: &std::collections::HashSet<u32>) -> bool {
+        self.user_memory_regions
+            .iter()
+            .any(|u| slots.contains(&u.slot))
+    }
+}
+
 /// # Safety
 ///
 /// [`Self::find_user_address`] must always either return `Err`
