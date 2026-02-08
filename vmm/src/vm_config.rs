@@ -284,6 +284,8 @@ pub struct DiskConfig {
     pub serial: Option<String>,
     #[serde(default)]
     pub queue_affinity: Option<Vec<VirtQueueAffinity>>,
+    #[serde(default)]
+    pub backing_files: bool,
 }
 
 impl ApplyLandlock for DiskConfig {
