@@ -960,7 +960,7 @@ pub fn configure_system(
     rsdp_addr: Option<GuestAddress>,
     serial_number: Option<&str>,
     uuid: Option<&str>,
-    oem_strings: Option<&[&str]>,
+    oem_strings: Option<&[String]>,
     topology: Option<(u16, u16, u16, u16)>,
 ) -> super::Result<()> {
     // Write EBDA address to location where ACPICA expects to find it
@@ -968,8 +968,13 @@ pub fn configure_system(
         .write_obj((layout::EBDA_START.0 >> 4) as u16, layout::EBDA_POINTER)
         .map_err(Error::EbdaSetup)?;
 
-    let size = smbios::setup_smbios(guest_mem, serial_number, uuid, oem_strings)
-        .map_err(Error::SmbiosSetup)?;
+    let size = smbios::setup_smbios(
+        guest_mem,
+        serial_number,
+        uuid,
+        oem_strings.unwrap_or_default(),
+    )
+    .map_err(Error::SmbiosSetup)?;
 
     // Place the MP table after the SMIOS table aligned to 16 bytes
     let offset = GuestAddress(layout::SMBIOS_START).unchecked_add(size);

@@ -1879,10 +1879,6 @@ impl Vm {
             .as_ref()
             .and_then(|p| p.oem_strings.clone());
 
-        let oem_strings = oem_strings
-            .as_deref()
-            .map(|strings| strings.iter().map(|s| s.as_ref()).collect::<Vec<&str>>());
-
         let topology = self.cpu_manager.lock().unwrap().get_vcpu_topology();
 
         arch::configure_system(
