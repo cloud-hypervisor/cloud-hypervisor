@@ -838,9 +838,11 @@ impl PlatformConfig {
         static SYNTAX: LazyLock<String> = LazyLock::new(|| {
             let mut syntax = "Platform configuration parameters \
             \"num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,\
-            iommu_address_width=<bits>,serial_number=<dmi_device_serial_number>,\
-            uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>,iommufd=on|off,\
-            vfio_p2p_dma=on|off"
+            iommu_address_width=<bits>,iommufd=on|off,vfio_p2p_dma=on|off,system_manufacturer=<dmi_system_manufacturer>,\
+            system_product_name=<dmi_system_product_name>,system_version=<dmi_system_version>,\
+            system_serial_number=<dmi_system_serial_number>,system_uuid=<dmi_system_uuid>,\
+            system_sku_number=<dmi_system_sku_number>,system_family=<dmi_system_family>,\
+            oem_strings=<list_of_strings>,chassis_asset_tag=<dmi_chassis_asset_tag>"
                 .to_string();
 
             if cfg!(feature = "tdx") {
@@ -860,6 +862,46 @@ impl PlatformConfig {
     }
 
     pub fn parse(platform: &str) -> Result<Self> {
+        struct StringField {
+            key: &'static str,
+            apply: fn(&mut PlatformConfig, String),
+        }
+
+        const SMBIOS_STRING_FIELDS: &[StringField] = &[
+            StringField {
+                key: "system_manufacturer",
+                apply: |config, value| config.system_manufacturer = Some(value),
+            },
+            StringField {
+                key: "system_product_name",
+                apply: |config, value| config.system_product_name = Some(value),
+            },
+            StringField {
+                key: "system_version",
+                apply: |config, value| config.system_version = Some(value),
+            },
+            StringField {
+                key: "system_serial_number",
+                apply: |config, value| config.system_serial_number = Some(value),
+            },
+            StringField {
+                key: "system_uuid",
+                apply: |config, value| config.system_uuid = Some(value),
+            },
+            StringField {
+                key: "system_sku_number",
+                apply: |config, value| config.system_sku_number = Some(value),
+            },
+            StringField {
+                key: "system_family",
+                apply: |config, value| config.system_family = Some(value),
+            },
+            StringField {
+                key: "chassis_asset_tag",
+                apply: |config, value| config.chassis_asset_tag = Some(value),
+            },
+        ];
+
         let mut parser = OptionParser::new();
         parser
             .add("num_pci_segments")
@@ -870,6 +912,9 @@ impl PlatformConfig {
             .add("oem_strings")
             .add("iommufd")
             .add("vfio_p2p_dma");
+        for field in SMBIOS_STRING_FIELDS {
+            parser.add(field.key);
+        }
         #[cfg(feature = "tdx")]
         parser.add("tdx");
         #[cfg(feature = "sev_snp")]
@@ -888,10 +933,6 @@ impl PlatformConfig {
             .convert("iommu_address_width")
             .map_err(Error::ParsePlatform)?
             .unwrap_or(MAX_IOMMU_ADDRESS_WIDTH_BITS);
-        let serial_number = parser
-            .convert("serial_number")
-            .map_err(Error::ParsePlatform)?;
-        let uuid = parser.convert("uuid").map_err(Error::ParsePlatform)?;
         let oem_strings = parser
             .convert::<StringList>("oem_strings")
             .map_err(Error::ParsePlatform)?
@@ -918,20 +959,50 @@ impl PlatformConfig {
             .map_err(Error::ParsePlatform)?
             .unwrap_or(Toggle(false))
             .0;
-        Ok(PlatformConfig {
+
+        let mut platform_config = PlatformConfig {
             num_pci_segments,
             iommu_segments,
             iommu_address_width_bits,
-            serial_number,
-            uuid,
+            system_serial_number: None,
+            system_uuid: None,
             oem_strings,
+            system_manufacturer: None,
+            system_product_name: None,
+            system_version: None,
+            system_family: None,
+            system_sku_number: None,
+            chassis_asset_tag: None,
             iommufd,
-            vfio_p2p_dma,
             #[cfg(feature = "tdx")]
             tdx,
             #[cfg(feature = "sev_snp")]
             sev_snp,
-        })
+            vfio_p2p_dma,
+        };
+
+        for field in SMBIOS_STRING_FIELDS {
+            if let Some(value) = parser
+                .convert::<String>(field.key)
+                .map_err(Error::ParsePlatform)?
+            {
+                (field.apply)(&mut platform_config, value);
+            }
+        }
+
+        let legacy_serial_number = parser
+            .convert::<String>("serial_number")
+            .map_err(Error::ParsePlatform)?;
+        platform_config.system_serial_number = platform_config
+            .system_serial_number
+            .or(legacy_serial_number);
+
+        let legacy_uuid = parser
+            .convert::<String>("uuid")
+            .map_err(Error::ParsePlatform)?;
+        platform_config.system_uuid = platform_config.system_uuid.or(legacy_uuid);
+
+        Ok(platform_config)
     }
 
     pub fn validate(&self) -> ValidationResult<()> {
@@ -5018,11 +5089,17 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             num_pci_segments: MAX_NUM_PCI_SEGMENTS,
             iommu_segments: None,
             iommu_address_width_bits: MAX_IOMMU_ADDRESS_WIDTH_BITS,
-            serial_number: None,
-            uuid: None,
+            system_serial_number: None,
+            system_uuid: None,
             oem_strings: None,
             iommufd: false,
             vfio_p2p_dma: default_platformconfig_vfio_p2p_dma(),
+            system_manufacturer: None,
+            system_product_name: None,
+            system_version: None,
+            system_family: None,
+            system_sku_number: None,
+            chassis_asset_tag: None,
             #[cfg(feature = "tdx")]
             tdx: false,
             #[cfg(feature = "sev_snp")]
