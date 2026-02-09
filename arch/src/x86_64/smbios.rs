@@ -47,6 +47,8 @@ const OEM_STRINGS: u8 = 11;
 const END_OF_TABLE: u8 = 127;
 const PCI_SUPPORTED: u64 = 1 << 7;
 const IS_VIRTUAL_MACHINE: u8 = 1 << 4;
+pub const DEFAULT_SYSTEM_MANUFACTURER: &str = "Cloud Hypervisor";
+pub const DEFAULT_SYSTEM_PRODUCT_NAME: &str = "cloud-hypervisor";
 
 fn compute_checksum<T: Copy>(v: &T) -> u8 {
     let v: *const T = v;
@@ -59,8 +61,7 @@ fn compute_checksum<T: Copy>(v: &T) -> u8 {
     (!checksum).wrapping_add(1)
 }
 
-#[repr(C)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, Copy, Clone)]
 struct Smbios30Entrypoint {
     signature: [u8; 5usize],
@@ -75,8 +76,7 @@ struct Smbios30Entrypoint {
     physptr: u64,
 }
 
-#[repr(C)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, Copy, Clone)]
 struct SmbiosBiosInfo {
     r#type: u8,
@@ -92,8 +92,7 @@ struct SmbiosBiosInfo {
     characteristics_ext2: u8,
 }
 
-#[repr(C)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, Copy, Clone)]
 struct SmbiosSysInfo {
     r#type: u8,
@@ -109,8 +108,7 @@ struct SmbiosSysInfo {
     family: u8,
 }
 
-#[repr(C)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, Copy, Clone)]
 struct SmbiosOemStrings {
     r#type: u8,
@@ -119,8 +117,7 @@ struct SmbiosOemStrings {
     count: u8,
 }
 
-#[repr(C)]
-#[repr(packed)]
+#[repr(C, packed)]
 #[derive(Default, Copy, Clone)]
 struct SmbiosEndOfTable {
     r#type: u8,
@@ -163,11 +160,73 @@ fn write_string(
     Ok(curptr)
 }
 
+fn write_opt_string(
+    mem: &GuestMemoryMmap,
+    s: Option<&str>,
+    cur: GuestAddress,
+) -> Result<GuestAddress> {
+    if let Some(v) = s {
+        write_string(mem, v, cur)
+    } else {
+        Ok(cur)
+    }
+}
+
+fn write_string_terminator(
+    mem: &GuestMemoryMmap,
+    cur: GuestAddress,
+    has_strings: bool,
+) -> Result<GuestAddress> {
+    // SMBIOS DSP0134 §6.1.3: if all string-reference fields are 0, follow the
+    // formatted section with two null bytes (empty string-set).
+    if has_strings {
+        write_and_incr(mem, 0u8, cur)
+    } else {
+        let cur = write_and_incr(mem, 0u8, cur)?;
+        write_and_incr(mem, 0u8, cur)
+    }
+}
+
+fn write_type1_system(
+    mem: &GuestMemoryMmap,
+    curptr: &mut GuestAddress,
+    handle: &mut u16,
+    serial_number: Option<&str>,
+    uuid: Option<&str>,
+) -> Result<()> {
+    *handle += 1;
+
+    let uuid_number = uuid
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|e| Error::ParseUuid(e, uuid.unwrap().to_string()))?
+        .unwrap_or(Uuid::nil());
+    let serial_idx = serial_number.map(|_| 3).unwrap_or_default();
+
+    let smbios_sysinfo = SmbiosSysInfo {
+        r#type: SYSTEM_INFORMATION,
+        length: mem::size_of::<SmbiosSysInfo>() as u8,
+        handle: *handle,
+        manufacturer: 1, // First string written in this section
+        product_name: 2, // Second string written in this section
+        serial_number: serial_idx,
+        uuid: uuid_number.to_bytes_le(),
+        ..Default::default()
+    };
+
+    *curptr = write_and_incr(mem, smbios_sysinfo, *curptr)?;
+    *curptr = write_string(mem, DEFAULT_SYSTEM_MANUFACTURER, *curptr)?;
+    *curptr = write_string(mem, DEFAULT_SYSTEM_PRODUCT_NAME, *curptr)?;
+    *curptr = write_opt_string(mem, serial_number, *curptr)?;
+    *curptr = write_and_incr(mem, 0u8, *curptr)?;
+    Ok(())
+}
+
 pub fn setup_smbios(
     mem: &GuestMemoryMmap,
     serial_number: Option<&str>,
     uuid: Option<&str>,
-    oem_strings: Option<&[&str]>,
+    oem_strings: &[String],
 ) -> Result<u64> {
     let physptr = GuestAddress(SMBIOS_START)
         .checked_add(mem::size_of::<Smbios30Entrypoint>() as u64)
@@ -193,34 +252,9 @@ pub fn setup_smbios(
         curptr = write_and_incr(mem, 0u8, curptr)?;
     }
 
-    {
-        handle += 1;
+    write_type1_system(mem, &mut curptr, &mut handle, serial_number, uuid)?;
 
-        let uuid_number = uuid
-            .map(Uuid::parse_str)
-            .transpose()
-            .map_err(|e| Error::ParseUuid(e, uuid.unwrap().to_string()))?
-            .unwrap_or(Uuid::nil());
-        let smbios_sysinfo = SmbiosSysInfo {
-            r#type: SYSTEM_INFORMATION,
-            length: mem::size_of::<SmbiosSysInfo>() as u8,
-            handle,
-            manufacturer: 1, // First string written in this section
-            product_name: 2, // Second string written in this section
-            serial_number: serial_number.map(|_| 3).unwrap_or_default(), // 3rd string
-            uuid: uuid_number.to_bytes_le(), // set uuid
-            ..Default::default()
-        };
-        curptr = write_and_incr(mem, smbios_sysinfo, curptr)?;
-        curptr = write_string(mem, "Cloud Hypervisor", curptr)?;
-        curptr = write_string(mem, "cloud-hypervisor", curptr)?;
-        if let Some(serial_number) = serial_number {
-            curptr = write_string(mem, serial_number, curptr)?;
-        }
-        curptr = write_and_incr(mem, 0u8, curptr)?;
-    }
-
-    if let Some(oem_strings) = oem_strings {
+    if !oem_strings.is_empty() {
         handle += 1;
 
         let smbios_oemstrings = SmbiosOemStrings {
@@ -236,7 +270,7 @@ pub fn setup_smbios(
             curptr = write_string(mem, s, curptr)?;
         }
 
-        curptr = write_and_incr(mem, 0u8, curptr)?;
+        curptr = write_string_terminator(mem, curptr, true)?;
     }
 
     {
@@ -299,7 +333,7 @@ mod unit_tests {
     fn entrypoint_checksum() {
         let mem = GuestMemoryMmap::from_ranges(&[(GuestAddress(SMBIOS_START), 4096)]).unwrap();
 
-        setup_smbios(&mem, None, None, None).unwrap();
+        setup_smbios(&mem, None, None, &[]).unwrap();
 
         let smbios_ep: Smbios30Entrypoint = mem.read_obj(GuestAddress(SMBIOS_START)).unwrap();
 
