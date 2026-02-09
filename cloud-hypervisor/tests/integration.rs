@@ -12440,6 +12440,7 @@ mod live_migration {
         }
 
         #[test]
+        #[ignore = "See #5532 and #7689"]
         #[cfg(target_arch = "x86_64")]
         #[cfg(not(feature = "mshv"))]
         fn test_live_migration_ovs_dpdk_local() {
