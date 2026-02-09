@@ -1855,29 +1855,13 @@ impl Vm {
 
         let boot_vcpus = self.cpu_manager.lock().unwrap().boot_vcpus();
 
-        let serial_number = self
+        let smbios = self
             .config
             .lock()
             .unwrap()
             .platform
             .as_ref()
-            .and_then(|p| p.serial_number.clone());
-
-        let uuid = self
-            .config
-            .lock()
-            .unwrap()
-            .platform
-            .as_ref()
-            .and_then(|p| p.uuid.clone());
-
-        let oem_strings = self
-            .config
-            .lock()
-            .unwrap()
-            .platform
-            .as_ref()
-            .and_then(|p| p.oem_strings.clone());
+            .and_then(|p| p.smbios_config());
 
         let topology = self.cpu_manager.lock().unwrap().get_vcpu_topology();
 
@@ -1889,9 +1873,7 @@ impl Vm {
             boot_vcpus,
             entry_addr.setup_header,
             rsdp_addr,
-            serial_number.as_deref(),
-            uuid.as_deref(),
-            oem_strings.as_deref(),
+            smbios.as_ref(),
             topology,
         )
         .map_err(Error::ConfigureSystem)?;
