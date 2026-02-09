@@ -993,6 +993,9 @@ impl PlatformConfig {
         let legacy_serial_number = parser
             .convert::<String>("serial_number")
             .map_err(Error::ParsePlatform)?;
+        if legacy_serial_number.is_some() {
+            warn!("'serial_number' in --platform is deprecated; use 'system_serial_number'.");
+        }
         platform_config.system_serial_number = platform_config
             .system_serial_number
             .or(legacy_serial_number);
@@ -1000,6 +1003,9 @@ impl PlatformConfig {
         let legacy_uuid = parser
             .convert::<String>("uuid")
             .map_err(Error::ParsePlatform)?;
+        if legacy_uuid.is_some() {
+            warn!("'uuid' in --platform is deprecated; use 'system_uuid'.");
+        }
         platform_config.system_uuid = platform_config.system_uuid.or(legacy_uuid);
 
         Ok(platform_config)
