@@ -2219,7 +2219,7 @@ pub(crate) fn _test_dmi_serial_number(guest: &Guest) {
     let mut child = GuestCommand::new(guest)
         .default_cpus()
         .default_memory()
-        .default_kernel_cmdline_with_platform(Some("serial_number=a=b;c=d"))
+        .default_kernel_cmdline_with_platform(Some("system_serial_number=a=b;c=d"))
         .default_disks()
         .default_net()
         .capture_output()
@@ -2248,7 +2248,9 @@ pub(crate) fn _test_dmi_uuid(guest: &Guest) {
     let mut child = GuestCommand::new(guest)
         .default_cpus()
         .default_memory()
-        .default_kernel_cmdline_with_platform(Some("uuid=1e8aa28a-435d-4027-87f4-40dceff1fa0a"))
+        .default_kernel_cmdline_with_platform(Some(
+            "system_uuid=1e8aa28a-435d-4027-87f4-40dceff1fa0a",
+        ))
         .default_disks()
         .default_net()
         .capture_output()

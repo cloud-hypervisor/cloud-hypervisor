@@ -786,7 +786,11 @@ components:
         iommu_address_width_bits:
           type: integer
           format: uint8
+        system_serial_number:
+          type: string
         serial_number:
+          type: string
+        system_uuid:
           type: string
         uuid:
           type: string
@@ -794,6 +798,18 @@ components:
           type: array
           items:
             type: string
+        system_manufacturer:
+          type: string
+        system_product_name:
+          type: string
+        system_version:
+          type: string
+        system_family:
+          type: string
+        system_sku_number:
+          type: string
+        chassis_asset_tag:
+          type: string
         tdx:
           type: boolean
           default: false

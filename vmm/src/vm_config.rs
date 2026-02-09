@@ -131,12 +131,24 @@ pub struct PlatformConfig {
     pub iommu_segments: Option<Box<[u16]>>,
     #[serde(default = "default_platformconfig_iommu_address_width_bits")]
     pub iommu_address_width_bits: u8,
-    #[serde(default)]
-    pub serial_number: Option<String>,
-    #[serde(default)]
-    pub uuid: Option<String>,
+    #[serde(default, alias = "serial_number")]
+    pub system_serial_number: Option<String>,
+    #[serde(default, alias = "uuid")]
+    pub system_uuid: Option<String>,
     #[serde(default)]
     pub oem_strings: Option<Box<[String]>>,
+    #[serde(default)]
+    pub system_manufacturer: Option<String>,
+    #[serde(default)]
+    pub system_product_name: Option<String>,
+    #[serde(default)]
+    pub system_version: Option<String>,
+    #[serde(default)]
+    pub system_family: Option<String>,
+    #[serde(default)]
+    pub system_sku_number: Option<String>,
+    #[serde(default)]
+    pub chassis_asset_tag: Option<String>,
     #[cfg(feature = "tdx")]
     #[serde(default)]
     pub tdx: bool,
@@ -154,9 +166,38 @@ impl PlatformConfig {
     /// Returns `None` if no SMBIOS-relevant platform fields are set, otherwise
     /// `Some` with a [`SmbiosConfig`] built from the populated fields.
     pub fn smbios_config(&self) -> Option<arch::x86_64::SmbiosConfig> {
+        let has_system = [
+            &self.system_serial_number,
+            &self.system_uuid,
+            &self.system_manufacturer,
+            &self.system_product_name,
+            &self.system_version,
+            &self.system_family,
+            &self.system_sku_number,
+        ]
+        .iter()
+        .any(|v| v.is_some());
+
+        let system = has_system.then_some(arch::x86_64::SmbiosSystem {
+            manufacturer: self.system_manufacturer.clone(),
+            product_name: self.system_product_name.clone(),
+            version: self.system_version.clone(),
+            serial_number: self.system_serial_number.clone(),
+            uuid: self.system_uuid.clone(),
+            sku_number: self.system_sku_number.clone(),
+            family: self.system_family.clone(),
+        });
+
+        let chassis =
+            self.chassis_asset_tag
+                .clone()
+                .map(|asset_tag| arch::x86_64::SmbiosChassisConfig {
+                    asset_tag: Some(asset_tag),
+                });
+
         let smbios = arch::x86_64::SmbiosConfig {
-            serial_number: self.serial_number.clone(),
-            uuid: self.uuid.clone(),
+            system,
+            chassis,
             oem_strings: self.oem_strings.clone().unwrap_or_default(),
         };
 

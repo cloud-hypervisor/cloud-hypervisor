@@ -31,7 +31,7 @@ use linux_loader::loader::elf::start_info::{
     hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info,
 };
 use log::{debug, error, info};
-pub use smbios::SmbiosConfig;
+pub use smbios::{SmbiosChassisConfig, SmbiosConfig, SmbiosSystem};
 use thiserror::Error;
 use vm_memory::{
     Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
