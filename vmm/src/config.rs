@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 #[cfg(feature = "ivshmem")]
 use std::fs;
 use std::path::PathBuf;
@@ -320,6 +320,9 @@ pub enum ValidationError {
     /// Restore expects all net ids that have fds
     #[error("Net id {0} is associated with FDs and is required")]
     RestoreMissingRequiredNetId(String),
+    /// Restore expects all net ids that have fds
+    #[error("Restore config with id {0} is missing a matching base config")]
+    RestoreConfigIsMissingBaseConfig(String),
     /// Number of FDs passed during Restore are incorrect to the NetConfig
     #[error("Number of Net FDs passed for '{0}' during Restore: {1}. Expected: {2}")]
     RestoreNetFdCountMismatch(String, usize, usize),
@@ -2239,6 +2242,46 @@ pub struct RestoredNetConfig {
     pub fds: Option<Vec<i32>>,
 }
 
+impl RestoredNetConfig {
+    /// Ensures that there is a corresponding [`NetConfig`] in the given
+    /// [`VmConfig`] and that `num_fds` matches the expected value.
+    ///
+    /// - checks there is a matching device (by ID)
+    /// - checks the num of FDs matches the expected amount
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if let Some(net_cfg) = vm_config
+            .net
+            .iter()
+            .flatten()
+            .find(|net| net.id.as_ref() == Some(&self.id))
+        {
+            // Logic check: can only fail due to an internal bug in the API level
+            if let Some(fds) = &self.fds {
+                assert_eq!(
+                    fds.len(),
+                    self.num_fds,
+                    "API should have associated right amount of FDs with RestoredNetConfig"
+                );
+            }
+
+            let expected_num_fds = net_cfg.fds.as_ref().map_or(0, |fds| fds.len());
+            if self.num_fds == expected_num_fds {
+                Ok(())
+            } else {
+                Err(ValidationError::RestoreNetFdCountMismatch(
+                    self.id.clone(),
+                    self.num_fds,
+                    expected_num_fds,
+                ))
+            }
+        } else {
+            Err(ValidationError::RestoreConfigIsMissingBaseConfig(
+                self.id.clone(),
+            ))
+        }
+    }
+}
+
 fn deserialize_restorednetconfig_fds<'de, D>(
     d: D,
 ) -> std::result::Result<Option<Vec<i32>>, D::Error>
@@ -2315,42 +2358,47 @@ impl RestoreConfig {
     // corresponding 'RestoreNetConfig' with a matched 'id' and expected
     // number of FDs.
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        let mut restored_net_with_fds = HashMap::new();
-        for n in self.net_fds.iter().flatten() {
-            assert_eq!(
-                n.num_fds,
-                n.fds.as_ref().map_or(0, |f| f.len()),
-                "Invalid 'RestoredNetConfig' with conflicted fields."
-            );
-            if restored_net_with_fds.insert(n.id.clone(), n).is_some() {
-                return Err(ValidationError::IdentifierNotUnique(n.id.clone()));
-            }
-        }
-
-        for net_fds in vm_config.net.iter().flatten() {
-            if let Some(expected_fds) = &net_fds.fds {
-                let expected_id = net_fds
-                    .id
-                    .as_ref()
-                    .expect("Invalid 'NetConfig' with empty 'id' for VM restore.");
-                if let Some(r) = restored_net_with_fds.remove(expected_id) {
-                    if r.num_fds != expected_fds.len() {
-                        return Err(ValidationError::RestoreNetFdCountMismatch(
-                            expected_id.clone(),
-                            r.num_fds,
-                            expected_fds.len(),
+        // Find duplicate
+        {
+            let mut ids = HashSet::new();
+            if let Some(restore_net_cfgs) = &self.net_fds {
+                for restore_net_cfg in restore_net_cfgs {
+                    let unseen = ids.insert(restore_net_cfg.id.as_str());
+                    if !unseen {
+                        return Err(ValidationError::IdentifierNotUnique(
+                            restore_net_cfg.id.clone(),
                         ));
                     }
-                } else {
-                    return Err(ValidationError::RestoreMissingRequiredNetId(
-                        expected_id.clone(),
-                    ));
                 }
+            }
+        };
+
+        // Forward to the underlying validation function:
+        // - checks there is a matching device (by ID)
+        // - checks the num of FDs matches the expected amount
+        if let Some(restore_net_cfgs) = &self.net_fds {
+            for restore_net_cfg in restore_net_cfgs {
+                restore_net_cfg.validate(vm_config)?;
             }
         }
 
-        if !restored_net_with_fds.is_empty() {
-            warn!("Ignoring unused 'net_fds' for VM restore.");
+        // Check: Is there a restore config for each net with FDs?
+        for net in vm_config
+            .net
+            .iter()
+            .flatten()
+            .filter(|net| net.fds.is_some())
+        {
+            let has_matching_restore_cfg = self
+                .net_fds
+                .iter()
+                .flatten()
+                .any(|restore_cfg| Some(&restore_cfg.id) == net.id.as_ref());
+            if !has_matching_restore_cfg {
+                return Err(ValidationError::RestoreMissingRequiredNetId(
+                    net.id.clone().unwrap(),
+                ));
+            }
         }
 
         Ok(())
@@ -4017,8 +4065,8 @@ mod unit_tests {
         }]);
         assert_eq!(
             invalid_config.validate(&snapshot_vm_config),
-            Err(ValidationError::RestoreMissingRequiredNetId(
-                "net0".to_string()
+            Err(ValidationError::RestoreConfigIsMissingBaseConfig(
+                "netx".to_string()
             ))
         );
 
