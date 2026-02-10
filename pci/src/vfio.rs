@@ -276,6 +276,17 @@ pub struct MmioRegion {
     pub(crate) user_memory_regions: Vec<UserMemoryRegion>,
 }
 
+impl MmioRegion {
+    /// Returns true if this region has the exact same memory slots as the other region.
+    pub fn has_matching_slots(&self, other: &MmioRegion) -> bool {
+        self.user_memory_regions.len() == other.user_memory_regions.len()
+            && self
+                .user_memory_regions
+                .iter()
+                .all(|u| other.user_memory_regions.iter().any(|o| o.slot == u.slot))
+    }
+}
+
 /// # Safety
 ///
 /// [`Self::find_user_address`] must always either return `Err`
