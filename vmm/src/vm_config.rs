@@ -284,6 +284,8 @@ pub struct DiskConfig {
     pub serial: Option<String>,
     #[serde(default)]
     pub queue_affinity: Option<Vec<VirtQueueAffinity>>,
+    #[serde(default)]
+    pub bdf_device: Option<u8>,
 }
 
 impl ApplyLandlock for DiskConfig {
@@ -350,6 +352,8 @@ pub struct NetConfig {
     pub offload_ufo: bool,
     #[serde(default = "default_netconfig_true")]
     pub offload_csum: bool,
+    #[serde(default)]
+    pub bdf_device: Option<u8>,
 }
 
 pub fn default_netconfig_true() -> bool {
@@ -396,6 +400,8 @@ pub struct RngConfig {
     pub src: PathBuf,
     #[serde(default)]
     pub iommu: bool,
+    #[serde(default)]
+    pub bdf_device: Option<u8>,
 }
 
 pub const DEFAULT_RNG_SOURCE: &str = "/dev/urandom";
@@ -405,6 +411,7 @@ impl Default for RngConfig {
         RngConfig {
             src: PathBuf::from(DEFAULT_RNG_SOURCE),
             iommu: false,
+            bdf_device: None,
         }
     }
 }
@@ -426,6 +433,8 @@ pub struct BalloonConfig {
     /// Option to enable free page reporting from the guest.
     #[serde(default)]
     pub free_page_reporting: bool,
+    #[serde(default)]
+    pub bdf_device: Option<u8>,
 }
 
 #[cfg(feature = "pvmemcontrol")]
@@ -444,6 +453,8 @@ pub struct FsConfig {
     pub id: Option<String>,
     #[serde(default)]
     pub pci_segment: u16,
+    #[serde(default)]
+    pub bdf_device: Option<u8>,
 }
 
 pub fn default_fsconfig_num_queues() -> usize {
@@ -474,6 +485,8 @@ pub struct PmemConfig {
     pub id: Option<String>,
     #[serde(default)]
     pub pci_segment: u16,
+    #[serde(default)]
+    pub bdf_device: Option<u8>,
 }
 
 impl ApplyLandlock for PmemConfig {
@@ -502,6 +515,9 @@ pub struct ConsoleConfig {
     #[serde(default)]
     pub iommu: bool,
     pub socket: Option<PathBuf>,
+    /// PCI BDF to attach the console in the guest to
+    #[serde(default)]
+    pub bdf_device: Option<u8>,
 }
 
 pub fn default_consoleconfig_file() -> Option<PathBuf> {
@@ -607,6 +623,8 @@ pub struct VdpaConfig {
     pub id: Option<String>,
     #[serde(default)]
     pub pci_segment: u16,
+    #[serde(default)]
+    pub bdf_device: Option<u8>,
 }
 
 pub fn default_vdpaconfig_num_queues() -> usize {
@@ -630,6 +648,8 @@ pub struct VsockConfig {
     pub id: Option<String>,
     #[serde(default)]
     pub pci_segment: u16,
+    #[serde(default)]
+    pub bdf_device: Option<u8>,
 }
 
 impl ApplyLandlock for VsockConfig {
@@ -862,6 +882,7 @@ pub fn default_serial() -> ConsoleConfig {
         mode: ConsoleOutputMode::Null,
         iommu: false,
         socket: None,
+        bdf_device: None,
     }
 }
 
@@ -871,6 +892,7 @@ pub fn default_console() -> ConsoleConfig {
         mode: ConsoleOutputMode::Tty,
         iommu: false,
         socket: None,
+        bdf_device: None,
     }
 }
 
