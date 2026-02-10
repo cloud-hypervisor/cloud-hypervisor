@@ -169,6 +169,10 @@ Vhost-user devices are virtio backends running outside of the VMM, as its own
 separate process. They are usually used to bring more flexibility and increased
 isolation.
 
+Live migration with vhost-user devices is
+[currently not tested in CI](https://github.com/cloud-hypervisor/cloud-hypervisor/).
+Please file a bug if you have a problem with it.
+
 ### vhost-user-blk
 
 As part of the general effort to offload paravirtualized I/O to external
