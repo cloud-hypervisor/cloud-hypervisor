@@ -2830,7 +2830,7 @@ impl DeviceManager {
     }
 
     fn make_virtio_block_devices(&mut self) -> DeviceManagerResult<()> {
-        let mut block_devices = self.config.lock().unwrap().disks.clone();
+        let mut block_devices = self.config.lock().unwrap().disks.take();
         if let Some(disk_list_cfg) = &mut block_devices {
             for disk_cfg in disk_list_cfg.iter_mut() {
                 let device = self.make_virtio_block_device(disk_cfg, false)?;
@@ -3001,7 +3001,7 @@ impl DeviceManager {
 
     /// Add virto-net and vhost-user-net devices
     fn make_virtio_net_devices(&mut self) -> DeviceManagerResult<()> {
-        let mut net_devices = self.config.lock().unwrap().net.clone();
+        let mut net_devices = self.config.lock().unwrap().net.take();
         if let Some(net_list_cfg) = &mut net_devices {
             for net_cfg in net_list_cfg.iter_mut() {
                 let device = self.make_virtio_net_device(net_cfg)?;
@@ -3109,7 +3109,7 @@ impl DeviceManager {
     }
 
     fn make_virtio_fs_devices(&mut self) -> DeviceManagerResult<()> {
-        let mut fs_devices = self.config.lock().unwrap().fs.clone();
+        let mut fs_devices = self.config.lock().unwrap().fs.take();
         if let Some(fs_list_cfg) = &mut fs_devices {
             for fs_cfg in fs_list_cfg.iter_mut() {
                 let device = self.make_virtio_fs_device(fs_cfg)?;
@@ -3296,7 +3296,7 @@ impl DeviceManager {
 
     fn make_virtio_pmem_devices(&mut self) -> DeviceManagerResult<()> {
         // Add virtio-pmem if required
-        let mut pmem_devices = self.config.lock().unwrap().pmem.clone();
+        let mut pmem_devices = self.config.lock().unwrap().pmem.take();
         if let Some(pmem_list_cfg) = &mut pmem_devices {
             for pmem_cfg in pmem_list_cfg.iter_mut() {
                 let device = self.make_virtio_pmem_device(pmem_cfg)?;
@@ -3366,7 +3366,7 @@ impl DeviceManager {
     }
 
     fn make_virtio_vsock_devices(&mut self) -> DeviceManagerResult<()> {
-        let mut vsock = self.config.lock().unwrap().vsock.clone();
+        let mut vsock = self.config.lock().unwrap().vsock.take();
         if let Some(vsock_cfg) = &mut vsock {
             let device = self.make_virtio_vsock_device(vsock_cfg)?;
             self.virtio_devices.push(device);
@@ -3607,7 +3607,7 @@ impl DeviceManager {
 
     fn make_vdpa_devices(&mut self) -> DeviceManagerResult<()> {
         // Add vdpa if required
-        let mut vdpa_devices = self.config.lock().unwrap().vdpa.clone();
+        let mut vdpa_devices = self.config.lock().unwrap().vdpa.take();
         if let Some(vdpa_list_cfg) = &mut vdpa_devices {
             for vdpa_cfg in vdpa_list_cfg.iter_mut() {
                 let device = self.make_vdpa_device(vdpa_cfg)?;
@@ -3901,7 +3901,7 @@ impl DeviceManager {
 
     fn add_vfio_devices(&mut self) -> DeviceManagerResult<Vec<PciBdf>> {
         let mut iommu_attached_device_ids = Vec::new();
-        let mut devices = self.config.lock().unwrap().devices.clone();
+        let mut devices = self.config.lock().unwrap().devices.take();
 
         if let Some(device_list_cfg) = &mut devices {
             for device_cfg in device_list_cfg.iter_mut() {
@@ -4022,7 +4022,7 @@ impl DeviceManager {
     }
 
     fn add_user_devices(&mut self) -> DeviceManagerResult<Vec<PciBdf>> {
-        let mut user_devices = self.config.lock().unwrap().user_devices.clone();
+        let mut user_devices = self.config.lock().unwrap().user_devices.take();
 
         if let Some(device_list_cfg) = &mut user_devices {
             for device_cfg in device_list_cfg.iter_mut() {
