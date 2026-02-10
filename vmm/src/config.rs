@@ -115,6 +115,8 @@ pub enum Error {
     /// Failed parsing restore parameters
     #[error("Error parsing --restore")]
     ParseRestore(#[source] OptionParserError),
+    #[error("Error parsing network restore config")]
+    ParseRestoreNet(#[source] OptionParserError),
     /// Failed parsing NUMA parameters
     #[error("Error parsing --numa")]
     ParseNuma(#[source] OptionParserError),
@@ -2243,6 +2245,28 @@ pub struct RestoredNetConfig {
 }
 
 impl RestoredNetConfig {
+    /// Parses from a string in the form `net_fds=[net1@[23,24],net2@[25,26]`.
+    pub fn parse(restore: &str) -> Result<Vec<Self>> {
+        let mut parser = OptionParser::new();
+        parser.add("net_fds");
+        parser.parse(restore).map_err(Error::ParseRestoreNet)?;
+
+        let net_fds = parser
+            .convert::<Tuple<String, Vec<u64>>>("net_fds")
+            .map_err(Error::ParseRestore)?
+            .map(|v| {
+                v.0.iter()
+                    .map(|(id, fds)| RestoredNetConfig {
+                        id: id.clone(),
+                        num_fds: fds.len(),
+                        fds: Some(fds.iter().map(|e| *e as i32).collect()),
+                    })
+                    .collect::<Vec<_>>()
+            });
+
+        Ok(net_fds.unwrap_or(Vec::new()))
+    }
+
     /// Ensures that there is a corresponding [`NetConfig`] in the given
     /// [`VmConfig`] and that `num_fds` matches the expected value.
     ///
@@ -2334,18 +2358,14 @@ impl RestoreConfig {
             .map_err(Error::ParseRestore)?
             .unwrap_or(Toggle(false))
             .0;
-        let net_fds = parser
-            .convert::<Tuple<String, Vec<u64>>>("net_fds")
-            .map_err(Error::ParseRestore)?
-            .map(|v| {
-                v.0.iter()
-                    .map(|(id, fds)| RestoredNetConfig {
-                        id: id.clone(),
-                        num_fds: fds.len(),
-                        fds: Some(fds.iter().map(|e| *e as i32).collect()),
-                    })
-                    .collect()
-            });
+
+        let net_fds = if let Some(net_fds_cfg) = parser.get("net_fds") {
+            // Ugly but necessary hack to reuse the parser in the next level
+            let cfgs = RestoredNetConfig::parse(&format!("net_fds={net_fds_cfg}"))?;
+            Some(cfgs)
+        } else {
+            None
+        };
 
         Ok(RestoreConfig {
             source_url,
@@ -3978,6 +3998,26 @@ mod unit_tests {
         );
         // Parsing should fail as source_url is a required field
         RestoreConfig::parse("prefault=off").unwrap_err();
+        Ok(())
+    }
+
+    #[test]
+    fn test_restored_net_parsing() -> Result<()> {
+        assert_eq!(
+            RestoredNetConfig::parse("net_fds=[net0@[3,4],net1@[5,6,7,8]]")?,
+            vec![
+                RestoredNetConfig {
+                    id: "net0".to_string(),
+                    num_fds: 2,
+                    fds: Some(vec![3, 4]),
+                },
+                RestoredNetConfig {
+                    id: "net1".to_string(),
+                    num_fds: 4,
+                    fds: Some(vec![5, 6, 7, 8]),
+                }
+            ]
+        );
         Ok(())
     }
 

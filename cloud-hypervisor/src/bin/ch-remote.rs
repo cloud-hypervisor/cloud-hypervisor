@@ -9,6 +9,7 @@ mod test_util;
 
 use std::io::Read;
 use std::marker::PhantomData;
+use std::os::fd::RawFd;
 use std::os::unix::net::UnixStream;
 use std::process;
 
@@ -20,7 +21,7 @@ use clap::{Arg, ArgAction, ArgMatches, Command};
 use log::error;
 use option_parser::{ByteSized, ByteSizedParseError};
 use thiserror::Error;
-use vmm::config::RestoreConfig;
+use vmm::config::{RestoreConfig, RestoredNetConfig};
 use vmm::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
     VsockConfig,
@@ -61,6 +62,8 @@ enum Error {
     AddVsockConfig(#[source] vmm::config::Error),
     #[error("Error parsing restore syntax")]
     Restore(#[source] vmm::config::Error),
+    #[error("Error parsing restore syntax")]
+    ReceiveMigration(#[source] vmm::config::Error),
     #[error("Error reading from stdin")]
     ReadingStdin(#[source] std::io::Error),
     #[error("Error reading from file")]
@@ -502,18 +505,24 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                 .map_err(Error::HttpApiClient)
         }
         Some("receive-migration") => {
-            let receive_migration_data = receive_migration_data(
+            let (receive_migration_data, fds) = receive_migration_data(
                 matches
                     .subcommand_matches("receive-migration")
                     .unwrap()
-                    .get_one::<String>("receive_migration_config")
+                    .get_one::<String>("url")
                     .unwrap(),
-            );
-            simple_api_command(
+                matches
+                    .subcommand_matches("receive-migration")
+                    .unwrap()
+                    .get_one::<String>("net-fds")
+                    .unwrap(),
+            )?;
+            simple_api_command_with_fds(
                 socket,
                 "PUT",
                 "receive-migration",
                 Some(&receive_migration_data),
+                &fds,
             )
             .map_err(Error::HttpApiClient)
         }
@@ -715,13 +724,18 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
             proxy.api_vm_send_migration(&send_migration_data)
         }
         Some("receive-migration") => {
-            let receive_migration_data = receive_migration_data(
+            let (receive_migration_data, _fds) = receive_migration_data(
                 matches
                     .subcommand_matches("receive-migration")
                     .unwrap()
-                    .get_one::<String>("receive_migration_config")
+                    .get_one::<String>("url")
                     .unwrap(),
-            );
+                matches
+                    .subcommand_matches("receive-migration")
+                    .unwrap()
+                    .get_one::<String>("config")
+                    .unwrap(),
+            )?;
             proxy.api_vm_receive_migration(&receive_migration_data)
         }
         Some("create") => {
@@ -901,15 +915,26 @@ fn coredump_config(destination_url: &str) -> String {
     serde_json::to_string(&coredump_config).unwrap()
 }
 
-fn receive_migration_data(url: &str) -> String {
+fn receive_migration_data(url: &str, config: &str) -> Result<(String, Vec<RawFd>), Error> {
+    // Ugly but necessary hack to reuse the parser
+    let parsable_config_str = format!("net_fds=[{config}]");
+    let net_fds =
+        RestoredNetConfig::parse(&parsable_config_str).map_err(Error::ReceiveMigration)?;
+    let net_fds_raw = net_fds
+        .iter()
+        .flat_map(|net| net.fds.iter())
+        .flat_map(|vec| vec.iter())
+        .copied()
+        .collect::<Vec<_>>();
     let receive_migration_data = vmm::api::VmReceiveMigrationData {
         receiver_url: url.to_owned(),
-        // Only FDs transmitted via an SCM_RIGHTS UNIX Domain Socket message
-        // are valid. Would be omitted by Cloud Hypervisor anyway.
-        net_fds: vec![],
+        // This information is only informational. The actual FD sending happens
+        // via an SCM_RIGHTS message.
+        net_fds,
     };
 
-    serde_json::to_string(&receive_migration_data).unwrap()
+    let payload = serde_json::to_string(&receive_migration_data).unwrap();
+    Ok((payload, net_fds_raw))
 }
 
 fn send_migration_data(url: &str, local: bool) -> String {
@@ -1025,10 +1050,12 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
         Command::new("receive-migration")
             .about("Receive a VM migration")
             .arg(
-                Arg::new("receive_migration_config")
-                    .index(1)
-                    .help("<receiver_url>"),
-            ),
+                Arg::new("net-fds")
+                    .long("net-fds")
+                    .help("<net1@[23,24],net2@[25,26],...>")
+                    .num_args(1),
+            )
+            .arg(Arg::new("url").index(1).help("<receiver_url>")),
         Command::new("remove-device")
             .about("Remove VFIO and PCI device")
             .arg(Arg::new("id").index(1).help("<device_id>")),
