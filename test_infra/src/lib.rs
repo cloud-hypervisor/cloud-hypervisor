@@ -18,7 +18,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use std::{env, fmt, fs, io, thread};
 
-use rand::RngCore;
+use rand::Rng;
 use serde_json::Value;
 use ssh2::Session;
 use thiserror::Error;
