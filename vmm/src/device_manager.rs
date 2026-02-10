@@ -4607,13 +4607,18 @@ impl DeviceManager {
         }
 
         let (pci_device, bus_device, virtio_device, remove_dma_handler) = match pci_device_handle {
-            // No need to remove any virtio-mem mapping here as the container outlives all devices
+            // VirtioMemMappingSource::Container cleanup is handled by
+            // cleanup_vfio_container when the last VFIO device is removed.
             PciDeviceHandle::Vfio(vfio_pci_device) => {
-                for mmio_region in vfio_pci_device.lock().unwrap().mmio_regions() {
-                    self.mmio_regions
-                        .lock()
-                        .unwrap()
-                        .retain(|x| x.start != mmio_region.start);
+                // Remove this device's MMIO regions from the DeviceManager's
+                // mmio_regions list. We match on UserMemoryRegion slot numbers
+                // rather than MmioRegion start addresses because move_bar()
+                // updates the device's region addresses but not the
+                // DeviceManager's cloned copies.
+                let device_regions = vfio_pci_device.lock().unwrap().mmio_regions().clone();
+                let mut mmio_regions = self.mmio_regions.lock().unwrap();
+                for device_region in &device_regions {
+                    mmio_regions.retain(|x| !x.has_matching_slots(device_region));
                 }
 
                 (
