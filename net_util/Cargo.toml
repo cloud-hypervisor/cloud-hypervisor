@@ -6,7 +6,7 @@ version = "0.1.0"
 
 [dependencies]
 epoll = { workspace = true }
-getrandom = "0.4.0"
+getrandom = "0.4.1"
 libc = { workspace = true }
 log = { workspace = true }
 net_gen = { path = "../net_gen" }
