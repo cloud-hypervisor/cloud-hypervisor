@@ -186,8 +186,8 @@ pub enum ValidationError {
     #[error("Path missing when using socket console mode")]
     ConsoleSocketPathMissing,
     /// Max is less than boot
-    #[error("Max CPUs lower than boot CPUs")]
-    CpusMaxLowerThanBoot,
+    #[error("Max CPUs ({0}) lower than boot CPUs ({1})")]
+    CpusMaxLowerThanBoot(u32 /* max vCPUs */, u32 /* boot vCPUs */),
     /// Too many CPUs.
     #[error("Too many CPUs: specified {0} but {MAX_SUPPORTED_CPUS} is the limit")]
     TooManyCpus(u32 /* specified CPUs */),
@@ -221,14 +221,14 @@ pub enum ValidationError {
     #[error("Dies per package must be 1")]
     CpuTopologyDiesPerPackage,
     /// Virtio needs a min of 2 queues
-    #[error("Number of queues to virtio_net less than 2")]
-    VnetQueueLowerThan2,
+    #[error("Number of queues ({0}) to virtio_net should be higher than 2")]
+    VnetQueueLowerThan2(usize),
     /// The input queue number for virtio_net must match the number of input fds
-    #[error("Number of queues to virtio_net does not match the number of input FDs")]
-    VnetQueueFdMismatch,
+    #[error("Number of queues ({0}) to virtio_net does not match the number of FDs ({1})")]
+    VnetQueueFdMismatch(usize /* num of queues */, usize /* FD num */),
     /// Using reserved fd
-    #[error("Reserved fd number (<= 2)")]
-    VnetReservedFd,
+    #[error("Reserved fd number (<= 2): {0}")]
+    VnetReservedFd(i32),
     /// Hardware checksum offload is disabled.
     #[error("\"offload_tso\" and \"offload_ufo\" depend on \"offload_csum\"")]
     NoHardwareChecksumOffload,
@@ -247,8 +247,8 @@ pub enum ValidationError {
     #[error("No TDX firmware specified")]
     TdxFirmwareMissing,
     /// Insufficient vCPUs for queues
-    #[error("Number of vCPUs is insufficient for number of queues")]
-    TooManyQueues,
+    #[error("Queue count ({0}) must not exceed boot vCPUs ({1})")]
+    TooManyQueues(usize /* queues */, usize /* vCPUs */),
     /// Invalid queue size
     #[error("Queue size is smaller than {MINIMUM_BLOCK_QUEUE_SIZE}: {0}")]
     InvalidQueueSize(u16),
@@ -1260,7 +1260,10 @@ impl DiskConfig {
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
         if self.num_queues > vm_config.cpus.boot_vcpus as usize {
-            return Err(ValidationError::TooManyQueues);
+            return Err(ValidationError::TooManyQueues(
+                self.num_queues,
+                vm_config.cpus.boot_vcpus as usize,
+            ));
         }
 
         if self.queue_size <= MINIMUM_BLOCK_QUEUE_SIZE {
@@ -1492,23 +1495,30 @@ impl NetConfig {
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
         if self.num_queues < 2 {
-            return Err(ValidationError::VnetQueueLowerThan2);
+            return Err(ValidationError::VnetQueueLowerThan2(self.num_queues));
         }
 
-        if self.fds.is_some() && self.fds.as_ref().unwrap().len() * 2 != self.num_queues {
-            return Err(ValidationError::VnetQueueFdMismatch);
-        }
+        if let Some(fds) = &self.fds {
+            let actual_queues = fds.len() * 2;
+            if actual_queues != self.num_queues {
+                return Err(ValidationError::VnetQueueFdMismatch(
+                    self.num_queues,
+                    actual_queues,
+                ));
+            }
 
-        if let Some(fds) = self.fds.as_ref() {
-            for fd in fds {
-                if *fd <= 2 {
-                    return Err(ValidationError::VnetReservedFd);
+            for &fd in fds {
+                if fd <= 2 {
+                    return Err(ValidationError::VnetReservedFd(fd));
                 }
             }
         }
 
         if (self.num_queues / 2) > vm_config.cpus.boot_vcpus as usize {
-            return Err(ValidationError::TooManyQueues);
+            return Err(ValidationError::TooManyQueues(
+                self.num_queues,
+                vm_config.cpus.boot_vcpus as usize,
+            ));
         }
 
         if self.vhost_user && self.iommu {
@@ -1657,7 +1667,10 @@ impl FsConfig {
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
         if self.num_queues > vm_config.cpus.boot_vcpus as usize {
-            return Err(ValidationError::TooManyQueues);
+            return Err(ValidationError::TooManyQueues(
+                self.num_queues,
+                vm_config.cpus.boot_vcpus as usize,
+            ));
         }
 
         if let Some(platform_config) = vm_config.platform.as_ref() {
@@ -2558,7 +2571,10 @@ impl VmConfig {
         }
 
         if self.cpus.max_vcpus < self.cpus.boot_vcpus {
-            return Err(ValidationError::CpusMaxLowerThanBoot);
+            return Err(ValidationError::CpusMaxLowerThanBoot(
+                self.cpus.max_vcpus,
+                self.cpus.boot_vcpus,
+            ));
         }
 
         if self.cpus.max_vcpus > MAX_SUPPORTED_CPUS {
@@ -4213,7 +4229,7 @@ mod unit_tests {
         invalid_config.cpus.boot_vcpus = 32;
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::CpusMaxLowerThanBoot)
+            Err(ValidationError::CpusMaxLowerThanBoot(16, 32))
         );
 
         let mut invalid_config = valid_config.clone();
@@ -4301,7 +4317,7 @@ mod unit_tests {
         }]);
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::VnetReservedFd)
+            Err(ValidationError::VnetReservedFd(0))
         );
 
         let mut invalid_config = valid_config.clone();
