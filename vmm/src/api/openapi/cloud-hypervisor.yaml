@@ -1267,6 +1267,8 @@ components:
           type: string
         prefault:
           type: boolean
+        net_fds:
+          $ref: '#/components/schemas/RestoredNetConfig'
 
     ReceiveMigrationData:
       required:
@@ -1275,6 +1277,8 @@ components:
       properties:
         receiver_url:
           type: string
+        net_fds:
+          $ref: '#/components/schemas/RestoredNetConfig'
 
     SendMigrationData:
       required:
@@ -1304,3 +1308,21 @@ components:
           type: string
         access:
           type: string
+
+    RestoredNetConfig:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+        num_fds:
+          type: integer
+          format: int64
+        fds:
+          type: array
+          nullable: true
+          default: null
+          items:
+            type: integer
+            format: int32
