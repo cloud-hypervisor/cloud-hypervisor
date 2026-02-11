@@ -2202,7 +2202,11 @@ impl NumaConfig {
         let guest_numa_id = parser
             .convert::<u32>("guest_numa_id")
             .map_err(Error::ParseNuma)?
-            .unwrap_or(0);
+            .ok_or_else(|| {
+                Error::ParseNuma(OptionParserError::InvalidValue(
+                    "guest_numa_id is required for all NUMA nodes".to_string(),
+                ))
+            })?;
         let cpus = parser
             .convert::<IntegerList>("cpus")
             .map_err(Error::ParseNuma)?

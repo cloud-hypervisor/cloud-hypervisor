@@ -676,7 +676,6 @@ pub struct NumaDistance {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct NumaConfig {
-    #[serde(default)]
     pub guest_numa_id: u32,
     #[serde(default)]
     pub cpus: Option<Vec<u32>>,
