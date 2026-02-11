@@ -3061,6 +3061,9 @@ impl RequestHandler for Vmm {
                 event!("vm", "migration-receive-failed");
                 self.vm = VmOwnership::None;
                 self.vm_config = None;
+                return Err(MigratableError::CompleteMigration(anyhow!(
+                    "Migration was aborted"
+                )));
             }
             ReceiveMigrationState::Completed => {
                 // Serving and resume already happened in the protocol loop.
