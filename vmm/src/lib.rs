@@ -1875,7 +1875,7 @@ impl RequestHandler for Vmm {
         match &self.vm_config {
             Some(vm_config) => {
                 let state = match &self.vm {
-                    Some(vm) => vm.get_state()?,
+                    Some(vm) => vm.get_state(),
                     None => VmState::Created,
                 };
                 let config = vm_config.lock().unwrap().clone();
@@ -2347,7 +2347,7 @@ impl RequestHandler for Vmm {
                     return e;
                 }
 
-                if vm.get_state().unwrap() == VmState::Paused
+                if vm.get_state() == VmState::Paused
                     && let Err(e) = vm.resume()
                 {
                     return e;

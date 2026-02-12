@@ -19,7 +19,7 @@ use std::mem::size_of;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::net::UnixStream;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
 use std::{cmp, result, str, thread};
@@ -149,9 +149,6 @@ pub enum Error {
     #[cfg(target_arch = "aarch64")]
     #[error("Cannot enable interrupt controller")]
     EnableInterruptController(#[source] interrupt_controller::Error),
-
-    #[error("VM state is poisoned")]
-    PoisonedState,
 
     #[error("Error from device manager")]
     DeviceManager(#[source] DeviceManagerError),
@@ -511,7 +508,7 @@ pub struct Vm {
     threads: Vec<thread::JoinHandle<()>>,
     device_manager: Arc<Mutex<DeviceManager>>,
     config: Arc<Mutex<VmConfig>>,
-    state: RwLock<VmState>,
+    state: VmState,
     cpu_manager: Arc<Mutex<cpu::CpuManager>>,
     memory_manager: Arc<Mutex<MemoryManager>>,
     #[cfg_attr(any(not(feature = "kvm"), target_arch = "aarch64"), allow(dead_code))]
@@ -875,7 +872,7 @@ impl Vm {
             None
         };
 
-        let vm_state = if snapshot.is_some() {
+        let state = if snapshot.is_some() {
             VmState::Paused
         } else {
             VmState::Created
@@ -888,7 +885,7 @@ impl Vm {
             device_manager,
             config,
             threads: Vec::with_capacity(1),
-            state: RwLock::new(vm_state),
+            state,
             cpu_manager,
             memory_manager,
             vm,
@@ -1663,10 +1660,9 @@ impl Vm {
     }
 
     pub fn shutdown(&mut self) -> Result<()> {
-        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
         let new_state = VmState::Shutdown;
 
-        state.valid_transition(new_state)?;
+        self.state.valid_transition(new_state)?;
 
         // Wake up the DeviceManager threads so they will get terminated cleanly
         self.device_manager
@@ -1685,7 +1681,7 @@ impl Vm {
         for thread in self.threads.drain(..) {
             thread.join().map_err(Error::ThreadCleanup)?;
         }
-        *state = new_state;
+        self.state = new_state;
 
         Ok(())
     }
@@ -2372,7 +2368,7 @@ impl Vm {
 
     pub fn boot(&mut self) -> Result<()> {
         trace_scoped!("Vm::boot");
-        let current_state = self.get_state()?;
+        let current_state = self.state;
         if current_state == VmState::Paused {
             return self.resume().map_err(Error::Resume);
         }
@@ -2556,8 +2552,7 @@ impl Vm {
             .start_boot_vcpus(new_state == VmState::BreakPoint)
             .map_err(Error::CpuManager)?;
 
-        let mut state = self.state.try_write().map_err(|_| Error::PoisonedState)?;
-        *state = new_state;
+        self.state = new_state;
         Ok(())
     }
 
@@ -2587,12 +2582,9 @@ impl Vm {
         Arc::clone(&self.config)
     }
 
-    /// Get the VM state. Returns an error if the state is poisoned.
-    pub fn get_state(&self) -> Result<VmState> {
+    /// Get the VM state.
+    pub fn get_state(&self) -> VmState {
         self.state
-            .try_read()
-            .map_err(|_| Error::PoisonedState)
-            .map(|state| *state)
     }
 
     /// Gets the actual size of the balloon.
@@ -2844,13 +2836,8 @@ impl Vm {
 impl Pausable for Vm {
     fn pause(&mut self) -> std::result::Result<(), MigratableError> {
         event!("vm", "pausing");
-        let mut state = self
-            .state
-            .try_write()
-            .map_err(|e| MigratableError::Pause(anyhow!("Could not get VM state: {e}")))?;
         let new_state = VmState::Paused;
-
-        state
+        self.state
             .valid_transition(new_state)
             .map_err(|e| MigratableError::Pause(anyhow!("Invalid transition: {e:?}")))?;
 
@@ -2877,7 +2864,7 @@ impl Pausable for Vm {
             .pause()
             .map_err(|e| MigratableError::Pause(anyhow!("Could not pause the VM: {e}")))?;
 
-        *state = new_state;
+        self.state = new_state;
 
         event!("vm", "paused");
         Ok(())
@@ -2885,14 +2872,10 @@ impl Pausable for Vm {
 
     fn resume(&mut self) -> std::result::Result<(), MigratableError> {
         event!("vm", "resuming");
-        let current_state = self.get_state().unwrap();
-        let mut state = self
-            .state
-            .try_write()
-            .map_err(|e| MigratableError::Resume(anyhow!("Could not get VM state: {e}")))?;
+        let current_state = self.get_state();
         let new_state = VmState::Running;
 
-        state
+        self.state
             .valid_transition(new_state)
             .map_err(|e| MigratableError::Resume(anyhow!("Invalid transition: {e:?}")))?;
 
@@ -2915,7 +2898,7 @@ impl Pausable for Vm {
         self.device_manager.lock().unwrap().resume()?;
 
         // And we're back to the Running state.
-        *state = new_state;
+        self.state = new_state;
         event!("vm", "resumed");
         Ok(())
     }
@@ -2947,8 +2930,7 @@ impl Snapshottable for Vm {
             }
         }
 
-        let current_state = self.get_state().unwrap();
-        if current_state != VmState::Paused {
+        if self.get_state() != VmState::Paused {
             return Err(MigratableError::Snapshot(anyhow!(
                 "Trying to snapshot while VM is running"
             )));
@@ -3110,20 +3092,16 @@ impl Debuggable for Vm {
     }
 
     fn debug_pause(&mut self) -> std::result::Result<(), DebuggableError> {
-        if *self.state.read().unwrap() == VmState::Running {
+        if self.state == VmState::Running {
             self.pause().map_err(DebuggableError::Pause)?;
         }
 
-        let mut state = self
-            .state
-            .try_write()
-            .map_err(|_| DebuggableError::PoisonedState)?;
-        *state = VmState::BreakPoint;
+        self.state = VmState::BreakPoint;
         Ok(())
     }
 
     fn debug_resume(&mut self) -> std::result::Result<(), DebuggableError> {
-        if *self.state.read().unwrap() == VmState::BreakPoint {
+        if self.state == VmState::BreakPoint {
             self.resume().map_err(DebuggableError::Pause)?;
         }
 
@@ -3203,7 +3181,7 @@ impl GuestDebuggable for Vm {
             }
         }
 
-        match self.get_state().unwrap() {
+        match self.get_state() {
             VmState::Running => {
                 self.pause().map_err(GuestDebuggableError::Pause)?;
                 resume = true;
