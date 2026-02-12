@@ -26,6 +26,8 @@ struct InterruptRoute {
 }
 
 impl InterruptRoute {
+    // TODO(DemiMarie,vvu): do not create an EventFd directly.
+    // Leave the irqfd at `None` for registration later.
     pub fn new(allocator: &mut SystemAllocator) -> Result<Self> {
         Self::new_with_fd(allocator, Some(EventFd::new(libc::EFD_NONBLOCK)?))
     }
@@ -96,7 +98,7 @@ impl InterruptRoute {
         if self.registered {
             if let Some(ref irq_fd) = self.irq_fd {
                 vm.register_irqfd(irq_fd, self.gsi)
-                    .map_err(|e| io::Error::other(format!("Failed registering irq_fd: {e}")))?
+                    .map_err(|e| io::Error::other(format!("Failed registering irq_fd: {e}")))?;
             }
             // If the irqfd cannot be unregistered, what to do?  Spin?
             // Returning an error isn't helpful as the new irqfd is already registered.
@@ -235,6 +237,19 @@ impl InterruptSourceGroup for MsiInterruptGroup {
         let routes = self.gsi_msi_routes.lock().unwrap();
         self.set_gsi_routes(&routes)
     }
+
+    fn set_notifier(
+        &mut self,
+        index: InterruptIndex,
+        eventfd: Option<EventFd>,
+        vm: &dyn hypervisor::Vm,
+    ) -> Result<()> {
+        if let Some(route) = self.irq_routes.get(&index) {
+            return route.lock().unwrap().set_notifier(eventfd, vm);
+        }
+
+        Ok(())
+    }
 }
 
 pub struct LegacyUserspaceInterruptGroup {
@@ -323,6 +338,26 @@ impl InterruptManager for LegacyUserspaceInterruptManager {
     }
 }
 
+impl MsiInterruptManager {
+    fn create_group_raw(
+        &self,
+        config: <Self as InterruptManager>::GroupConfig,
+    ) -> Result<MsiInterruptGroup> {
+        let mut allocator = self.allocator.lock().unwrap();
+        let mut irq_routes: HashMap<InterruptIndex, Mutex<InterruptRoute>> =
+            HashMap::with_capacity(config.count as usize);
+        for i in config.base..config.base + config.count {
+            irq_routes.insert(i, Mutex::new(InterruptRoute::new(&mut allocator)?));
+        }
+
+        Ok(MsiInterruptGroup::new(
+            self.vm.clone(),
+            self.gsi_msi_routes.clone(),
+            irq_routes,
+        ))
+    }
+}
+
 impl InterruptManager for MsiInterruptManager {
     type GroupConfig = MsiIrqGroupConfig;
 
@@ -339,6 +374,14 @@ impl InterruptManager for MsiInterruptManager {
             self.gsi_msi_routes.clone(),
             irq_routes,
         )))
+    }
+
+    fn create_group_mut(
+        &self,
+        config: Self::GroupConfig,
+    ) -> vm_device::interrupt::Result<Arc<Mutex<dyn InterruptSourceGroup>>> {
+        let r = self.create_group_raw(config)?;
+        Ok(Arc::new(Mutex::new(r)))
     }
 
     fn destroy_group(&self, _group: Arc<dyn InterruptSourceGroup>) -> Result<()> {

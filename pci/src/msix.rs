@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::{io, result};
 
 use byteorder::{ByteOrder, LittleEndian};
@@ -15,6 +15,7 @@ use vm_device::interrupt::{
 };
 use vm_memory::ByteValued;
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
+use vmm_sys_util::eventfd::EventFd;
 
 use crate::{PciCapability, PciCapabilityId};
 
@@ -72,11 +73,66 @@ pub struct MsixConfigState {
     enabled: bool,
 }
 
+#[derive(Clone)]
+pub enum MaybeMutInterruptSourceGroup {
+    Immutable(Arc<dyn InterruptSourceGroup>),
+    Mutable(Arc<Mutex<dyn InterruptSourceGroup>>),
+}
+
+macro_rules! impl_method {
+    ($(
+        fn $i: ident(&self $(,$index:ident : $InterruptIndex:ty)*$(,)?) -> $r: ty;
+    )*) => {
+        $(
+            fn $i(&self $(,$index: $InterruptIndex)*) -> $r {
+                match self {
+                    Self::Immutable(source) => source.$i($($index),*),
+                    Self::Mutable(source) => source.lock().unwrap().$i($($index),*),
+                }
+            }
+        )*
+    };
+}
+
+impl InterruptSourceGroup for MaybeMutInterruptSourceGroup {
+    impl_method! {
+        fn trigger(&self, index: InterruptIndex) -> vm_device::interrupt::Result<()>;
+
+        fn notifier(&self, index: InterruptIndex) -> Option<vmm_sys_util::eventfd::EventFd>;
+
+        fn update(
+            &self,
+            index: InterruptIndex,
+            config: InterruptSourceConfig,
+            masked: bool,
+            set_gsi: bool,
+        ) -> vm_device::interrupt::Result<()>;
+
+        fn set_gsi(&self) -> vm_device::interrupt::Result<()>;
+    }
+}
+
+impl MaybeMutInterruptSourceGroup {
+    pub fn set_notifier(
+        &self,
+        index: InterruptIndex,
+        eventfd: Option<EventFd>,
+        vm: &dyn hypervisor::Vm,
+    ) -> std::io::Result<()> {
+        match self {
+            Self::Immutable(_) => panic!(
+                "Attempted to set a notifier of an immutable source.  You must mark your device as needing a mutable source by having sets_irqfd() return true."
+            ),
+            Self::Mutable(source) => source.lock().unwrap().set_notifier(index, eventfd, vm),
+        }
+    }
+}
+
 pub struct MsixConfig {
     pub table_entries: Vec<MsixTableEntry>,
     pub pba_entries: Vec<u64>,
     pub devid: u32,
-    interrupt_source_group: Arc<dyn InterruptSourceGroup>,
+    interrupt_source_group: MaybeMutInterruptSourceGroup,
     masked: bool,
     enabled: bool,
 }
@@ -84,7 +140,7 @@ pub struct MsixConfig {
 impl MsixConfig {
     pub fn new(
         msix_vectors: u16,
-        interrupt_source_group: Arc<dyn InterruptSourceGroup>,
+        interrupt_source_group: MaybeMutInterruptSourceGroup,
         devid: u32,
         state: Option<MsixConfigState>,
     ) -> result::Result<Self, Error> {
