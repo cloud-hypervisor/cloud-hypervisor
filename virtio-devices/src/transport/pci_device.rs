@@ -17,9 +17,10 @@ use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use log::{error, info};
 use pci::{
-    BarReprogrammingParams, MsixCap, MsixConfig, PciBarConfiguration, PciBarRegionType,
-    PciCapability, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice, PciDeviceError,
-    PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass, PciSubclass,
+    BarReprogrammingParams, MaybeMutInterruptSourceGroup, MsixCap, MsixConfig, PciBarConfiguration,
+    PciBarRegionType, PciCapability, PciCapabilityId, PciClassCode, PciConfiguration, PciDevice,
+    PciDeviceError, PciHeaderType, PciMassStorageSubclass, PciNetworkControllerSubclass,
+    PciSubclass,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -359,7 +360,7 @@ pub struct VirtioPciDevice {
     // PCI interrupts.
     interrupt_status: Arc<AtomicUsize>,
     virtio_interrupt: Option<Arc<dyn VirtioInterrupt>>,
-    interrupt_source_group: Arc<dyn InterruptSourceGroup>,
+    interrupt_source_group: MaybeMutInterruptSourceGroup,
 
     // virtio queues
     queues: Vec<Queue>,
@@ -433,17 +434,26 @@ impl VirtioPciDevice {
 
         let pci_device_id = VIRTIO_PCI_DEVICE_ID_BASE + locked_device.device_type() as u16;
 
-        let interrupt_source_group = interrupt_manager
-            .create_group(MsiIrqGroupConfig {
+        let interrupt_source_group: MaybeMutInterruptSourceGroup = {
+            let config = MsiIrqGroupConfig {
                 base: 0,
                 count: msix_num as InterruptIndex,
+            };
+            (if locked_device.interrupt_source_mutable() {
+                interrupt_manager
+                    .create_group_mut(config)
+                    .map(MaybeMutInterruptSourceGroup::Mutable)
+            } else {
+                interrupt_manager
+                    .create_group(config)
+                    .map(MaybeMutInterruptSourceGroup::Immutable)
             })
             .map_err(|e| {
                 VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
                     "Failed creating MSI interrupt group: {e}"
                 ))
-            })?;
-
+            })?
+        };
         let msix_state =
             vm_migration::state_from_id(snapshot, pci::MSIX_CONFIG_ID).map_err(|e| {
                 VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
@@ -452,14 +462,11 @@ impl VirtioPciDevice {
             })?;
 
         let (msix_config, msix_config_clone) = if msix_num > 0 {
+            let interrupt_source_group: MaybeMutInterruptSourceGroup =
+                interrupt_source_group.clone();
             let msix_config = Arc::new(Mutex::new(
-                MsixConfig::new(
-                    msix_num,
-                    interrupt_source_group.clone(),
-                    pci_device_bdf,
-                    msix_state,
-                )
-                .unwrap(),
+                MsixConfig::new(msix_num, interrupt_source_group, pci_device_bdf, msix_state)
+                    .unwrap(),
             ));
             let msix_config_clone = msix_config.clone();
             (Some(msix_config), Some(msix_config_clone))
@@ -598,7 +605,7 @@ impl VirtioPciDevice {
             memory,
             settings_bar: 0,
             use_64bit_bar,
-            interrupt_source_group,
+            interrupt_source_group: interrupt_source_group.clone(),
             cap_pci_cfg_info,
             bar_regions: vec![],
             activate_evt,
@@ -855,7 +862,7 @@ pub struct VirtioInterruptMsix {
     msix_config: Arc<Mutex<MsixConfig>>,
     config_vector: Arc<AtomicU16>,
     queues_vectors: Arc<Mutex<Vec<u16>>>,
-    interrupt_source_group: Arc<dyn InterruptSourceGroup>,
+    interrupt_source_group: MaybeMutInterruptSourceGroup,
 }
 
 impl VirtioInterruptMsix {
@@ -863,7 +870,7 @@ impl VirtioInterruptMsix {
         msix_config: Arc<Mutex<MsixConfig>>,
         config_vector: Arc<AtomicU16>,
         queues_vectors: Arc<Mutex<Vec<u16>>>,
-        interrupt_source_group: Arc<dyn InterruptSourceGroup>,
+        interrupt_source_group: MaybeMutInterruptSourceGroup,
     ) -> Self {
         VirtioInterruptMsix {
             msix_config,
@@ -917,11 +924,12 @@ impl VirtioInterrupt for VirtioInterruptMsix {
 
     fn set_notifier(
         &self,
-        _interrupt: u32,
-        _eventfd: Option<EventFd>,
-        _vm: &dyn hypervisor::Vm,
+        interrupt: u32,
+        eventfd: Option<EventFd>,
+        vm: &dyn hypervisor::Vm,
     ) -> std::io::Result<()> {
-        unimplemented!()
+        self.interrupt_source_group
+            .set_notifier(interrupt, eventfd, vm)
     }
 }
 

@@ -57,7 +57,8 @@
 //! * The virtual device backend requests the interrupt manager to create an interrupt group
 //!   according to guest configuration information
 
-use std::sync::Arc;
+use std::io::{Error, ErrorKind};
+use std::sync::{Arc, Mutex};
 
 pub use hypervisor::{InterruptSourceConfig, LegacyIrqSourceConfig, MsiIrqSourceConfig};
 use vmm_sys_util::eventfd::EventFd;
@@ -107,6 +108,30 @@ pub trait InterruptManager: Send + Sync {
     /// * count: number of Interrupt Sources to be managed by the group object.
     fn create_group(&self, config: Self::GroupConfig) -> Result<Arc<dyn InterruptSourceGroup>>;
 
+    /// Create an [InterruptSourceGroup](trait.InterruptSourceGroup.html) object to manage
+    /// interrupt sources for a virtual device
+    ///
+    /// An [InterruptSourceGroup](trait.InterruptSourceGroup.html) object manages all interrupt
+    /// sources of the same type for a virtual device.
+    ///
+    /// This is the same as [`Self::create_group`], except that the returned
+    /// [`InterruptSourceGroup`] allows setting the irqfd used as notifier via
+    /// [`InterruptSourceGroup::set_notifier`].
+    ///
+    /// # Arguments
+    /// * interrupt_type: type of interrupt source.
+    /// * base: base Interrupt Source ID to be managed by the group object.
+    /// * count: number of Interrupt Sources to be managed by the group object.
+    fn create_group_mut(
+        &self,
+        _config: Self::GroupConfig,
+    ) -> Result<Arc<Mutex<dyn InterruptSourceGroup>>> {
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "setting notifiers not supported",
+        ))
+    }
+
     /// Destroy an [InterruptSourceGroup](trait.InterruptSourceGroup.html) object created by
     /// [create_group()](trait.InterruptManager.html#tymethod.create_group).
     ///
@@ -137,7 +162,7 @@ pub trait InterruptSourceGroup: Send + Sync {
     /// Returns an interrupt notifier from this interrupt.
     ///
     /// An interrupt notifier allows for external components and processes
-    /// to inject interrupts into a guest, by writing to the file returned
+    /// to inject interrupts into a guest, by writing to the [`EventFd`] returned
     /// by this method.
     #[allow(unused_variables)]
     fn notifier(&self, index: InterruptIndex) -> Option<EventFd>;
@@ -159,4 +184,17 @@ pub trait InterruptSourceGroup: Send + Sync {
 
     /// Set the interrupt group GSI routing table.
     fn set_gsi(&self) -> Result<()>;
+
+    /// Sets the [`EventFd`] used to trigger interrupts.
+    fn set_notifier(
+        &mut self,
+        _index: InterruptIndex,
+        _eventfd: Option<EventFd>,
+        _vm: &dyn hypervisor::Vm,
+    ) -> Result<()> {
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "setting notifiers not supported",
+        ))
+    }
 }

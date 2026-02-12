@@ -37,7 +37,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::mmap::MmapRegion;
 use crate::msi::{MSI_CONFIG_ID, MsiConfigState};
-use crate::msix::MsixConfigState;
+use crate::msix::{MaybeMutInterruptSourceGroup, MsixConfigState};
 use crate::{
     BarReprogrammingParams, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, MsiCap, MsiConfig, MsixCap,
     MsixConfig, PCI_CONFIGURATION_ID, PciBarConfiguration, PciBarPrefetchable, PciBarRegionType,
@@ -863,7 +863,7 @@ impl VfioCommon {
 
         let msix_config = MsixConfig::new(
             msix_cap.table_size(),
-            interrupt_source_group.clone(),
+            MaybeMutInterruptSourceGroup::Immutable(interrupt_source_group.clone()),
             bdf.into(),
             state,
         )

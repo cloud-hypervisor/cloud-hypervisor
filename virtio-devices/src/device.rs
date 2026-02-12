@@ -80,6 +80,18 @@ pub trait VirtioDevice: Send {
     /// The maximum size of each queue that this device supports.
     fn queue_max_sizes(&self) -> &[u16];
 
+    /// Whether the device needs to register extra irqfds at runtime
+    /// from external sources.
+    /// The default is false.  If this is true, locking is required for
+    /// most operations involving interrupts (but not for sending)
+    /// interrupts from external irqfds).
+    ///
+    /// If the device claims to not need to register irqfds, but
+    /// attempts to do so, a panic will ensue.
+    fn interrupt_source_mutable(&self) -> bool {
+        false
+    }
+
     /// The set of feature bits that this device supports.
     fn features(&self) -> u64 {
         0
