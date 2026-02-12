@@ -85,6 +85,20 @@ pub trait VirtioDevice: Send {
         false
     }
 
+    /// The maximum number of doorbells the device supports.
+    /// Most devices don't support any.
+    /// Limited to 511 doorbells.
+    fn doorbells_max(&self) -> u16 {
+        0
+    }
+
+    /// The number of additional notifications the device supports.
+    /// Most devices don't support any.
+    /// Limited to 255 notifications.
+    fn notifications_max(&self) -> u8 {
+        0
+    }
+
     /// The set of feature bits that this device supports.
     fn features(&self) -> u64 {
         0
