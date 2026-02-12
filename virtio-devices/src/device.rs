@@ -85,6 +85,12 @@ pub trait VirtioDevice: Send {
         false
     }
 
+    /// The maximum number of doorbells the device supports.
+    /// Most devices don't support any.
+    fn doorbells_max(&self) -> u8 {
+        0
+    }
+
     /// The set of feature bits that this device supports.
     fn features(&self) -> u64 {
         0
