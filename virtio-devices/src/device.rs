@@ -77,6 +77,13 @@ pub trait VirtioDevice: Send {
     /// The virtio device type.
     fn device_type(&self) -> u32;
 
+    /// The maximum number of doorbells the device supports.
+    /// Most devices don't support any.
+    /// Limited to 511 doorbells.
+    fn doorbells_max(&self) -> u16 {
+        0
+    }
+
     /// The maximum size of each queue that this device supports.
     fn queue_max_sizes(&self) -> &[u16];
 
