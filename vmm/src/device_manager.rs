@@ -99,7 +99,7 @@ use virtio_devices::{
 use vm_allocator::{AddressAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
 use vm_device::interrupt::{
-    InterruptIndex, InterruptManager, LegacyIrqGroupConfig, MsiIrqGroupConfig,
+    InterruptIndex, InterruptManager, InterruptManagerMsi, LegacyIrqGroupConfig, MsiIrqGroupConfig,
 };
 use vm_device::{Bus, BusDevice, BusDeviceSync, Resource, UserspaceMapping};
 #[cfg(feature = "ivshmem")]
@@ -1018,7 +1018,7 @@ pub struct DeviceManager {
 
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     // MSI Interrupt Manager
-    msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+    msi_interrupt_manager: Arc<dyn InterruptManagerMsi<GroupConfig = MsiIrqGroupConfig>>,
 
     #[cfg_attr(feature = "mshv", allow(dead_code))]
     // Legacy Interrupt Manager
@@ -1249,7 +1249,7 @@ impl DeviceManager {
         // and then the legacy interrupt manager needs an IOAPIC. So we're
         // handling a linear dependency chain:
         // msi_interrupt_manager <- IOAPIC <- legacy_interrupt_manager.
-        let msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>> =
+        let msi_interrupt_manager: Arc<dyn InterruptManagerMsi<GroupConfig = MsiIrqGroupConfig>> =
             Arc::new(MsiInterruptManager::new(
                 Arc::clone(&address_manager.allocator),
                 vm,
@@ -4199,8 +4199,8 @@ impl DeviceManager {
             return Err(DeviceManagerError::MissingNode);
         }
 
-        // Allows support for one MSI-X vector per queue. It also adds 1
-        // as we need to take into account the dedicated vector to notify
+        // Allows support for one MSI-X vector per interrupt needed by the device.
+        // It also adds 1 as we need to take into account the dedicated vector to notify
         // about a virtio config change.
         let msix_num = (virtio_device.lock().unwrap().queue_max_sizes().len() + 1) as u16;
 
