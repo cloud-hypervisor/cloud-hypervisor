@@ -10,7 +10,7 @@ use arch::layout;
 use hypervisor::CpuState;
 use hypervisor::arch::aarch64::gic::{GicState, Vgic, VgicConfig};
 use vm_device::interrupt::{
-    InterruptIndex, InterruptManager, InterruptSourceConfig, InterruptSourceGroup,
+    InterruptIndex, InterruptManagerMsi, InterruptSourceConfig, InterruptSourceGroup,
     LegacyIrqSourceConfig, MsiIrqGroupConfig,
 };
 use vm_memory::address::Address;
@@ -41,7 +41,7 @@ impl Gic {
     #[allow(clippy::needless_pass_by_value)]
     pub fn new(
         vcpu_count: u32,
-        interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
+        interrupt_manager: Arc<dyn InterruptManagerMsi<GroupConfig = MsiIrqGroupConfig>>,
         vm: Arc<dyn hypervisor::Vm>,
     ) -> Result<Gic> {
         let interrupt_source_group = interrupt_manager
