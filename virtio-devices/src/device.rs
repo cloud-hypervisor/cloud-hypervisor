@@ -77,8 +77,23 @@ pub trait VirtioDevice: Send {
     /// The virtio device type.
     fn device_type(&self) -> u32;
 
+    /// The maximum number of doorbells the device supports.
+    /// Most devices don't support any.
+    /// Limited to [`crate::transport::MAX_DOORBELLS`] doorbells.
+    fn doorbells_max(&self) -> u16 {
+        0
+    }
+
     /// The maximum size of each queue that this device supports.
     fn queue_max_sizes(&self) -> &[u16];
+
+    /// The minimum number of MSI-X interrupts needed by the device.
+    /// Capped at u16::MAX, though anything greater than 2047 is an error.
+    /// Does not include the interrupt needed for configuration space change.
+    fn min_interupts(&self) -> u16 {
+        self.doorbells_max()
+            .saturating_add(self.queue_max_sizes().len().min(usize::from(u16::MAX)) as u16)
+    }
 
     /// Whether the device needs to register extra irqfds at runtime
     /// from external sources.
