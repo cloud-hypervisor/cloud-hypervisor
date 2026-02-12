@@ -231,28 +231,45 @@ impl PciSubclass for PciVirtioSubclass {
     }
 }
 
+// Max number of virtio queues
+const MAX_QUEUES: u64 = 0x400;
+
+// Automatically compute the position of the next entry in the BAR.
+// This handles alignment properly and is much less error-prone than
+// manual calculation.
+const fn next_bar_addr_align(offset: u64, size: u64, align: u64) -> u64 {
+    assert!(align >= 0x2000, "too small alignment for structure in BAR");
+    assert!(align.is_power_of_two(), "alignment must be a power of 2");
+    (offset + size).next_multiple_of(align)
+}
+// Same as next_bar_addr_align(), but with the default alignment (8K).
+const fn next_bar_addr(offset: u64, size: u64) -> u64 {
+    next_bar_addr_align(offset, size, 0x2000)
+}
+
 // Allocate one bar for the structs pointed to by the capability structures.
 // As per the PCI specification, because the same BAR shares MSI-X and non
 // MSI-X structures, it is recommended to use 8KiB alignment for all those
 // structures.
 const COMMON_CONFIG_BAR_OFFSET: u64 = 0x0000;
 const COMMON_CONFIG_SIZE: u64 = 56;
-const ISR_CONFIG_BAR_OFFSET: u64 = 0x2000;
+const ISR_CONFIG_BAR_OFFSET: u64 = next_bar_addr(COMMON_CONFIG_BAR_OFFSET, COMMON_CONFIG_SIZE);
 const ISR_CONFIG_SIZE: u64 = 1;
-const DEVICE_CONFIG_BAR_OFFSET: u64 = 0x4000;
+const DEVICE_CONFIG_BAR_OFFSET: u64 = next_bar_addr(ISR_CONFIG_BAR_OFFSET, ISR_CONFIG_SIZE);
 const DEVICE_CONFIG_SIZE: u64 = 0x1000;
-const NOTIFICATION_BAR_OFFSET: u64 = 0x6000;
-const NOTIFICATION_SIZE: u64 = 0x1000;
-const MSIX_TABLE_BAR_OFFSET: u64 = 0x8000;
+const NOTIFICATION_BAR_OFFSET: u64 = next_bar_addr(DEVICE_CONFIG_BAR_OFFSET, DEVICE_CONFIG_SIZE);
+const NOTIFICATION_SIZE: u64 = MAX_QUEUES * NOTIFY_OFF_MULTIPLIER as u64;
+const MSIX_TABLE_BAR_OFFSET: u64 = next_bar_addr(NOTIFICATION_BAR_OFFSET, NOTIFICATION_SIZE);
+
 // The size is 256KiB because the table can hold up to 2048 entries, with each
 // entry being 128 bits (4 DWORDS).
 const MSIX_TABLE_SIZE: u64 = 0x40000;
-const MSIX_PBA_BAR_OFFSET: u64 = 0x48000;
+const MSIX_PBA_BAR_OFFSET: u64 = next_bar_addr(MSIX_TABLE_BAR_OFFSET, MSIX_TABLE_SIZE);
 // The size is 2KiB because the Pending Bit Array has one bit per vector and it
 // can support up to 2048 vectors.
 const MSIX_PBA_SIZE: u64 = 0x800;
 // The BAR size must be a power of 2.
-const CAPABILITY_BAR_SIZE: u64 = 0x80000;
+const CAPABILITY_BAR_SIZE: u64 = (MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE).next_power_of_two();
 const VIRTIO_COMMON_BAR_INDEX: usize = 0;
 const VIRTIO_SHM_BAR_INDEX: usize = 2;
 
