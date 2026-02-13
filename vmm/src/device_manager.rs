@@ -15,7 +15,9 @@ use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
-use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "riscv64"))]
+use std::path::Path;
+use std::path::PathBuf;
 use std::result;
 use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "riscv64"))]
