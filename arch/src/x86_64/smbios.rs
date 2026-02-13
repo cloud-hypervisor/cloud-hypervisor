@@ -33,8 +33,8 @@ pub enum Error {
     #[error("Failure to write additional data to memory")]
     WriteData,
     /// Failure to parse uuid, uuid format may be error
-    #[error("Failure to parse uuid")]
-    ParseUuid(#[source] uuid::Error),
+    #[error("Failure to parse uuid: {1}")]
+    ParseUuid(#[source] uuid::Error, String),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -198,7 +198,7 @@ pub fn setup_smbios(
         let uuid_number = uuid
             .map(Uuid::parse_str)
             .transpose()
-            .map_err(Error::ParseUuid)?
+            .map_err(|e| Error::ParseUuid(e, uuid.unwrap().to_string()))?
             .unwrap_or(Uuid::nil());
         let smbios_sysinfo = SmbiosSysInfo {
             r#type: SYSTEM_INFORMATION,
