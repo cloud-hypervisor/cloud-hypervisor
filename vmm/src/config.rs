@@ -51,6 +51,11 @@ pub enum Error {
         "Error parsing --generic-vhost-user: virtio ID {0:?} invalid (leading zeros or unknown string)"
     )]
     ParseGenericVhostUserVirtioIdInvalid(String),
+    /// Generic vhost-user virtio ID is unsupported
+    #[error(
+        "Error parsing --generic-vhost-user: device with virtio ID {0:?} cannot be implemented via vhost-user"
+    )]
+    ParseGenericVhostUserVirtioIdUnsupported(String),
     /// Generic vhost-user socket is missing
     #[error("Error parsing --generic-vhost-user: socket missing")]
     ParseGenericVhostUserSockMissing,
@@ -1740,6 +1745,18 @@ impl GenericVhostUserConfig {
             },
             _ => return Err(Error::ParseGenericVhostUserVirtioIdInvalid(device_type_str)),
         };
+        match device_type {
+            // vhost-user devices of these types definitely cannot work.
+            // Cloud Hypervisor needs to know if an IOMMU exists so that it
+            // can perform address translation, and a vhost-user device has
+            // no supported way to reset the
+            VIRTIO_ID_WATCHDOG | VIRTIO_ID_IOMMU | VIRTIO_ID_BALLOON => {
+                return Err(Error::ParseGenericVhostUserVirtioIdUnsupported(
+                    device_type_str,
+                ));
+            }
+            _ => {}
+        }
         let id = parser.get("id");
         let pci_segment = parser
             .convert("pci_segment")
