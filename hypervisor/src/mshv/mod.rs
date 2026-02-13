@@ -873,6 +873,19 @@ impl cpu::Vcpu for MshvVcpu {
                     assert!(info.header.intercept_access_type == HV_INTERCEPT_ACCESS_EXECUTE as u8);
 
                     match ghcb_op {
+                        GHCB_INFO_SPECIAL_DBGPRINT => {
+                            // Handle debug print from guest
+                            // The guest sends a character to print via GHCB data
+                            // Sample debug print implementation that only prints ASCII characters and ignores the rest
+                            // let char_to_print = (ghcb_data & 0xFF) as u8;
+                            // if char_to_print.is_ascii() {
+                            // debug!("'{}'", char_to_print as char);
+                            // }
+                            // Not printing the character to slow down the guest a bit,
+                            // as these debug prints can be very frequent.
+                            // In real implementation, we might want to buffer these characters and
+                            // print them out together or implement some rate limiting.]
+                        }
                         GHCB_INFO_HYP_FEATURE_REQUEST => {
                             // Pre-condition: GHCB data must be zero
                             assert!(ghcb_data == 0);
