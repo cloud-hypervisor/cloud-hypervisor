@@ -42,7 +42,7 @@ use std::{cmp, result};
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
 use libc::{S_IFBLK, S_IFMT, ioctl};
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use thiserror::Error;
@@ -682,6 +682,109 @@ pub fn block_io_uring_is_supported() -> bool {
 
         true
     }
+}
+
+/// Probe whether the file/device supports punch hole and zero range
+pub fn probe_sparse_support(file: &File) -> bool {
+    let fd = file.as_raw_fd();
+
+    let is_block_device = {
+        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        // SAFETY: FFI call with valid fd and buffer
+        let ret = unsafe { libc::fstat(fd, stat.as_mut_ptr()) };
+        if ret != 0 {
+            warn!(
+                "Failed to stat file descriptor for sparse probe: {}",
+                io::Error::last_os_error()
+            );
+            return false;
+        }
+        // SAFETY: stat result is valid at this point
+        unsafe { (*stat.as_ptr()).st_mode & S_IFMT == S_IFBLK }
+    };
+
+    if is_block_device {
+        probe_block_device_sparse_support(fd)
+    } else {
+        probe_file_sparse_support(fd)
+    }
+}
+
+/// Probe sparse support for a regular file using fallocate().
+fn probe_file_sparse_support(fd: libc::c_int) -> bool {
+    const FALLOC_FL_KEEP_SIZE: libc::c_int = 0x01;
+    const FALLOC_FL_PUNCH_HOLE: libc::c_int = 0x02;
+    const FALLOC_FL_ZERO_RANGE: libc::c_int = 0x10;
+
+    // SAFETY: FFI call with valid fd
+    let file_size = unsafe { libc::lseek(fd, 0, libc::SEEK_END) };
+    if file_size < 0 {
+        let err = io::Error::last_os_error();
+        warn!("Failed to get file size for sparse probe: {err}");
+        return false;
+    }
+
+    // SAFETY: FFI call with valid fd, probing past EOF is safe with KEEP_SIZE
+    let punch_hole =
+        unsafe { libc::fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, file_size, 1) }
+            == 0;
+
+    if !punch_hole {
+        let err = io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::EOPNOTSUPP) {
+            debug!("File does not support FALLOC_FL_PUNCH_HOLE: {err}");
+        } else {
+            debug!("PUNCH_HOLE probe returned unexpected error: {err}");
+        }
+    }
+
+    // SAFETY: FFI call with valid fd, probing past EOF is safe with KEEP_SIZE
+    let zero_range =
+        unsafe { libc::fallocate(fd, FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE, file_size, 1) }
+            == 0;
+
+    if !zero_range {
+        let err = io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::EOPNOTSUPP) {
+            debug!("File does not support FALLOC_FL_ZERO_RANGE: {err}");
+        }
+    }
+
+    let supported = punch_hole || zero_range;
+    info!(
+        "Probed file sparse support: punch_hole={punch_hole}, zero_range={zero_range} => {supported}"
+    );
+    supported
+}
+
+/// Probe sparse support for a block device using ioctls.
+fn probe_block_device_sparse_support(fd: libc::c_int) -> bool {
+    ioctl_io_nr!(BLKDISCARD, 0x12, 119);
+    ioctl_io_nr!(BLKZEROOUT, 0x12, 127);
+
+    let range: [u64; 2] = [0, 0];
+
+    // SAFETY: FFI call with valid fd and valid range buffer
+    let punch_hole = unsafe { ioctl(fd, BLKDISCARD() as _, &range) } == 0;
+
+    if !punch_hole {
+        let err = io::Error::last_os_error();
+        debug!("Block device BLKDISCARD probe returned: {err}");
+    }
+
+    // SAFETY: FFI call with valid fd and valid range buffer
+    let zero_range = unsafe { ioctl(fd, BLKZEROOUT() as _, &range) } == 0;
+
+    if !zero_range {
+        let err = io::Error::last_os_error();
+        debug!("Block device BLKZEROOUT probe returned: {err}");
+    }
+
+    let supported = punch_hole || zero_range;
+    info!(
+        "Probed block device sparse support: punch_hole={punch_hole}, zero_range={zero_range} => {supported}"
+    );
+    supported
 }
 
 pub trait AsyncAdaptor {

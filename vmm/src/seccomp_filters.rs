@@ -108,6 +108,10 @@ mod kvm {
     pub const KVM_SET_NESTED_STATE: u64 = 1082175167;
 }
 
+// Block device ioctls for sparse support probing (not exported by libc)
+const BLKDISCARD: u64 = 0x1277; // _IO(0x12, 119)
+const BLKZEROOUT: u64 = 0x127f; // _IO(0x12, 127)
+
 // MSHV IOCTL code. This is unstable until the kernel code has been declared stable.
 #[cfg(feature = "mshv")]
 use hypervisor::mshv::mshv_ioctls::*;
@@ -259,6 +263,8 @@ fn create_vmm_ioctl_seccomp_rule_common(
         and![Cond::new(1, ArgLen::Dword, Eq, BLKPBSZGET as _)?],
         and![Cond::new(1, ArgLen::Dword, Eq, BLKIOMIN as _)?],
         and![Cond::new(1, ArgLen::Dword, Eq, BLKIOOPT as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, BLKDISCARD as _)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, BLKZEROOUT as _)?],
         and![Cond::new(1, ArgLen::Dword, Eq, FIOCLEX as _)?],
         and![Cond::new(1, ArgLen::Dword, Eq, FIONBIO as _)?],
         and![Cond::new(1, ArgLen::Dword, Eq, SIOCGIFFLAGS)?],
