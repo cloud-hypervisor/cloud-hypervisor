@@ -301,7 +301,10 @@ impl NetEpollHandler {
         // The NetQueuePair needs the epoll fd.
         self.net.epoll_fd = Some(helper.as_raw_fd());
 
-        helper.run(paused, paused_sync, self)?;
+        if let Err(err) = helper.run(paused, paused_sync, self) {
+            // We do not want to return Err(_) as this will lead to VMM exiting.
+            error!("Epoll Handler error: {err:?}");
+        }
 
         Ok(())
     }
