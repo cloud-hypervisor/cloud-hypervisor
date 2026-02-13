@@ -19,6 +19,7 @@ use option_parser::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_bindings::virtio_blk::VIRTIO_BLK_ID_BYTES;
+use virtio_bindings::virtio_ids::*;
 use virtio_devices::block::MINIMUM_BLOCK_QUEUE_SIZE;
 use virtio_devices::vhost_user::VIRTIO_FS_TAG_LEN;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
@@ -46,6 +47,11 @@ pub enum Error {
     /// Filesystem socket is missing
     #[error("Error parsing --fs: socket missing")]
     ParseFsSockMissing,
+    /// Generic vhost-user virtio ID is invalid
+    #[error(
+        "Error parsing --generic-vhost-user: virtio ID {0:?} invalid (leading zeros or unknown string)"
+    )]
+    ParseGenericVhostUserVirtioIdInvalid(String),
     /// Generic vhost-user socket is missing
     #[error("Error parsing --generic-vhost-user: socket missing")]
     ParseGenericVhostUserSockMissing,
@@ -1670,7 +1676,7 @@ impl BalloonConfig {
 
 impl GenericVhostUserConfig {
     pub const SYNTAX: &'static str = "generic vhost-user parameters \
-    \"virtio_id=<ID number for virtio device type (FS, block, net, etc)>,\
+    \"virtio_id=<ID number for virtio device type (FS, block, net, etc) or symbolic name>,\
     socket=<socket_path>,\
     queue_sizes=<list of queue sizes>,\
     id=<device_id>,pci_segment=<segment_id>\"";
@@ -1695,10 +1701,64 @@ impl GenericVhostUserConfig {
             .convert("queue_sizes")
             .map_err(Error::ParseGenericVhostUser)?
             .ok_or(Error::ParseGenericVhostUserQueueSizeMissing)?;
-        let device_type = parser
-            .convert("virtio_id")
+        let device_type_str = parser
+            .convert::<String>("virtio_id")
             .map_err(Error::ParseGenericVhostUser)?
             .ok_or(Error::ParseGenericVhostUserVirtioIdMissing)?;
+        let device_type = match device_type_str.as_bytes() {
+            b"net" => VIRTIO_ID_NET,
+            b"block" => VIRTIO_ID_BLOCK,
+            b"console" => VIRTIO_ID_CONSOLE,
+            b"rng" => VIRTIO_ID_RNG,
+            b"balloon" => VIRTIO_ID_BALLOON,
+            b"iomem" => VIRTIO_ID_IOMEM,
+            b"rpmsg" => VIRTIO_ID_RPMSG,
+            b"scsi" => VIRTIO_ID_SCSI,
+            b"9p" => VIRTIO_ID_9P,
+            b"mac80211_wlan" => VIRTIO_ID_MAC80211_WLAN,
+            b"rproc_serial" => VIRTIO_ID_RPROC_SERIAL,
+            b"caif" => VIRTIO_ID_CAIF,
+            b"memory_balloon" => VIRTIO_ID_MEMORY_BALLOON,
+            b"gpu" => VIRTIO_ID_GPU,
+            b"clock" => VIRTIO_ID_CLOCK,
+            b"input" => VIRTIO_ID_INPUT,
+            b"vsock" => VIRTIO_ID_VSOCK,
+            b"crypto" => VIRTIO_ID_CRYPTO,
+            b"signal_dist" => VIRTIO_ID_SIGNAL_DIST,
+            b"pstore" => VIRTIO_ID_PSTORE,
+            b"iommu" => VIRTIO_ID_IOMMU,
+            b"mem" => VIRTIO_ID_MEM,
+            b"sound" => VIRTIO_ID_SOUND,
+            b"fs" => VIRTIO_ID_FS,
+            b"pmem" => VIRTIO_ID_PMEM,
+            b"rpmb" => VIRTIO_ID_RPMB,
+            b"mac80211_hwsim" => VIRTIO_ID_MAC80211_HWSIM,
+            b"video_encoder" => VIRTIO_ID_VIDEO_ENCODER,
+            b"video_decoder" => VIRTIO_ID_VIDEO_DECODER,
+            b"scmi" => VIRTIO_ID_SCMI,
+            b"nitro_sec_mod" => VIRTIO_ID_NITRO_SEC_MOD,
+            b"i2c" => VIRTIO_ID_I2C_ADAPTER,
+            b"watchdog" => VIRTIO_ID_WATCHDOG,
+            b"can" => VIRTIO_ID_CAN,
+            b"dmabuf" => VIRTIO_ID_DMABUF,
+            b"param_serv" => VIRTIO_ID_PARAM_SERV,
+            b"audio_policy" => VIRTIO_ID_AUDIO_POLICY,
+            b"bt" => VIRTIO_ID_BT,
+            b"gpio" => VIRTIO_ID_GPIO,
+            b"rdma" => 42,
+            b"camera" => 43,
+            b"ism" => 44,
+            b"spi" => 45,
+            b"tee" => 46,
+            b"cpu_balloon" => 47,
+            b"media" => 48,
+            b"usb" => 49,
+            [b'1'..=b'9', ..] => match device_type_str.parse() {
+                Ok(id) => id,
+                Err(_) => return Err(Error::ParseGenericVhostUserVirtioIdInvalid(device_type_str)),
+            },
+            _ => return Err(Error::ParseGenericVhostUserVirtioIdInvalid(device_type_str)),
+        };
         let id = parser.get("id");
         let pci_segment = parser
             .convert("pci_segment")
