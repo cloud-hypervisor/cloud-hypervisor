@@ -34,6 +34,7 @@ pub mod dbus;
 pub mod http;
 
 use std::io;
+use std::num::NonZeroU32;
 use std::sync::mpsc::{RecvError, SendError, Sender, channel};
 
 use log::info;
@@ -256,19 +257,30 @@ pub struct VmCoredumpData {
     pub destination_url: String,
 }
 
-#[derive(Clone, Deserialize, Serialize, Default, Debug)]
+#[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct VmReceiveMigrationData {
     /// URL for the reception of migration state
     pub receiver_url: String,
 }
 
-#[derive(Clone, Deserialize, Serialize, Default, Debug)]
+#[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct VmSendMigrationData {
-    /// URL to migrate the VM to
+    /// URL to migrate the VM to.
+    ///
+    /// This is not actually a URL, but a string, such as
+    /// `tcp:<host>:<port>` or `unix:/path/to/socket`.
     pub destination_url: String,
     /// Send memory across socket without copying
     #[serde(default)]
     pub local: bool,
+    /// The number of parallel connections for migration
+    #[serde(default = "default_connections")]
+    pub connections: NonZeroU32,
+}
+
+// We use a single connection for backward compatibility as default.
+fn default_connections() -> NonZeroU32 {
+    NonZeroU32::new(1).unwrap()
 }
 
 pub enum ApiResponsePayload {
