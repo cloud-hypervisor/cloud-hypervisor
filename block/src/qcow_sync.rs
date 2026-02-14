@@ -628,12 +628,13 @@ impl AsyncIo for QcowSync {
 #[cfg(test)]
 mod unit_tests {
     use std::io::{Seek, SeekFrom, Write};
+    use std::thread;
 
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
     use crate::async_io::DiskFile;
-    use crate::qcow::{QcowFile, RawFile};
+    use crate::qcow::{BackingFileConfig, ImageType, QcowFile, RawFile};
 
     fn create_disk_with_data(
         file_size: u64,
@@ -865,7 +866,838 @@ mod unit_tests {
         let read_buf = async_read(&disk, offset, data.len());
         assert_eq!(
             read_buf, data,
-            "Cross-cluster read should match written data"
+            "Cross cluster read should match written data"
+        );
+    }
+
+    #[test]
+    fn test_backing_file_read() {
+        let backing_temp = TempFile::new().unwrap();
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 4;
+        let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
+        backing_temp.as_file().write_all(&pattern).unwrap();
+        backing_temp.as_file().sync_all().unwrap();
+        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
+
+        let overlay_temp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
+            let backing_config = BackingFileConfig {
+                path: backing_path,
+                format: Some(ImageType::Raw),
+            };
+            let _overlay =
+                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
+        }
+
+        let file = overlay_temp.as_file().try_clone().unwrap();
+        let disk = QcowDiskSync::new(file, false, true, true).unwrap();
+
+        // Read first cluster - should come from backing file
+        let buf = async_read(&disk, 0, cluster_size as usize);
+        assert_eq!(
+            &buf[..],
+            &pattern[..cluster_size as usize],
+            "First cluster should match backing file data"
+        );
+
+        let buf = async_read(&disk, cluster_size, cluster_size as usize);
+        assert_eq!(
+            &buf[..],
+            &pattern[cluster_size as usize..2 * cluster_size as usize],
+            "Second cluster should match backing file data"
+        );
+
+        // Read a partial range spanning cluster boundary
+        let mid = cluster_size - 512;
+        let len = 1024usize;
+        let buf = async_read(&disk, mid, len);
+        assert_eq!(
+            &buf[..],
+            &pattern[mid as usize..mid as usize + len],
+            "Cross cluster read from backing should match"
+        );
+
+        let buf = async_read(&disk, 0, file_size as usize);
+        assert_eq!(
+            &buf[..],
+            &pattern[..],
+            "Full file read from backing should match"
+        );
+    }
+
+    #[test]
+    fn test_backing_file_read_qcow2_backing() {
+        let backing_temp = TempFile::new().unwrap();
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 4;
+        let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
+        {
+            let raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
+            let mut qcow = QcowFile::new(raw, 3, file_size, true).unwrap();
+            qcow.seek(SeekFrom::Start(0)).unwrap();
+            qcow.write_all(&pattern).unwrap();
+            qcow.flush().unwrap();
+        }
+        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
+
+        let overlay_temp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
+            let backing_config = BackingFileConfig {
+                path: backing_path,
+                format: Some(ImageType::Qcow2),
+            };
+            let _overlay =
+                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
+        }
+
+        let file = overlay_temp.as_file().try_clone().unwrap();
+        let disk = QcowDiskSync::new(file, false, true, true).unwrap();
+
+        // Read first cluster - should come from QCOW2 backing
+        let buf = async_read(&disk, 0, cluster_size as usize);
+        assert_eq!(
+            &buf[..],
+            &pattern[..cluster_size as usize],
+            "First cluster from QCOW2 backing should match"
+        );
+
+        let buf = async_read(&disk, 0, file_size as usize);
+        assert_eq!(
+            &buf[..],
+            &pattern[..],
+            "Full file from QCOW2 backing should match"
+        );
+
+        // Write to first cluster, then verify second cluster still reads from backing
+        let new_data = vec![0xAB; cluster_size as usize];
+        async_write(&disk, 0, &new_data);
+        {
+            let mut async_io = disk.new_async_io(1).unwrap();
+            async_io.fsync(Some(99)).unwrap();
+        }
+
+        let buf = async_read(&disk, 0, cluster_size as usize);
+        assert_eq!(
+            &buf[..],
+            &new_data[..],
+            "Written cluster should be new data"
+        );
+
+        let buf = async_read(&disk, cluster_size, cluster_size as usize);
+        assert_eq!(
+            &buf[..],
+            &pattern[cluster_size as usize..2 * cluster_size as usize],
+            "Unwritten cluster should still come from backing"
+        );
+    }
+
+    #[test]
+    fn test_multi_queue_concurrent_reads() {
+        // Verify that multiple queues (threads) can read simultaneously.
+        // This exercises the RwLock + pread64 design: concurrent L2 cache hits
+        // proceed in parallel and data reads are position independent.
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 16;
+        let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
+        let (_temp, disk) = create_disk_with_data(file_size, &pattern, 0, true);
+        let disk = Arc::new(disk);
+
+        let threads: Vec<_> = (0..8)
+            .map(|t| {
+                let disk = Arc::clone(&disk);
+                let pattern = pattern.clone();
+                thread::spawn(move || {
+                    for i in 0..16u64 {
+                        // Each thread reads clusters in a different order
+                        let cluster_idx = (i + t * 2) % 16;
+                        let offset = cluster_idx * cluster_size;
+                        let buf = async_read(&disk, offset, cluster_size as usize);
+                        assert_eq!(
+                            &buf[..],
+                            &pattern[offset as usize..(offset + cluster_size) as usize],
+                            "Thread {t} cluster {cluster_idx} mismatch"
+                        );
+                    }
+                })
+            })
+            .collect();
+
+        for t in threads {
+            t.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn test_multi_queue_concurrent_reads_qcow2_backing() {
+        // Same as above but reads go through a Qcow2MetadataBacking,
+        // exercising concurrent metadata resolution + pread64 in the backing.
+        let backing_temp = TempFile::new().unwrap();
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 16;
+        let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
+        {
+            let raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
+            let mut qcow = QcowFile::new(raw, 3, file_size, true).unwrap();
+            qcow.seek(SeekFrom::Start(0)).unwrap();
+            qcow.write_all(&pattern).unwrap();
+            qcow.flush().unwrap();
+        }
+        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
+
+        let overlay_temp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
+            let backing_config = BackingFileConfig {
+                path: backing_path,
+                format: Some(ImageType::Qcow2),
+            };
+            let _overlay =
+                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
+        }
+
+        let file = overlay_temp.as_file().try_clone().unwrap();
+        let disk = Arc::new(QcowDiskSync::new(file, false, true, true).unwrap());
+
+        let threads: Vec<_> = (0..8)
+            .map(|t| {
+                let disk = Arc::clone(&disk);
+                let pattern = pattern.clone();
+                thread::spawn(move || {
+                    for i in 0..16u64 {
+                        let cluster_idx = (i + t * 2) % 16;
+                        let offset = cluster_idx * cluster_size;
+                        let buf = async_read(&disk, offset, cluster_size as usize);
+                        assert_eq!(
+                            &buf[..],
+                            &pattern[offset as usize..(offset + cluster_size) as usize],
+                            "Thread {t} cluster {cluster_idx} mismatch (qcow2 backing)"
+                        );
+                    }
+                })
+            })
+            .collect();
+
+        for t in threads {
+            t.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn test_three_layer_backing_chain() {
+        // raw base -> qcow2 mid -> qcow2 overlay
+        // Tests recursive shared_backing_from() with nested backing.
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 4;
+        let base_pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
+
+        // Layer 0: raw base
+        let base_temp = TempFile::new().unwrap();
+        base_temp.as_file().write_all(&base_pattern).unwrap();
+        base_temp.as_file().sync_all().unwrap();
+        let base_path = base_temp.as_path().to_str().unwrap().to_string();
+
+        // Layer 1: qcow2 mid pointing at raw base, write to cluster 0 only
+        let mid_temp = TempFile::new().unwrap();
+        let mid_pattern = vec![0xBBu8; cluster_size as usize];
+        {
+            let raw = RawFile::new(mid_temp.as_file().try_clone().unwrap(), false);
+            let backing_config = BackingFileConfig {
+                path: base_path,
+                format: Some(ImageType::Raw),
+            };
+            let mut mid =
+                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
+            mid.seek(SeekFrom::Start(0)).unwrap();
+            mid.write_all(&mid_pattern).unwrap();
+            mid.flush().unwrap();
+        }
+        let mid_path = mid_temp.as_path().to_str().unwrap().to_string();
+
+        // Layer 2: qcow2 overlay pointing at qcow2 mid, write to cluster 1 only
+        let overlay_temp = TempFile::new().unwrap();
+        let overlay_pattern = vec![0xCCu8; cluster_size as usize];
+        {
+            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
+            let backing_config = BackingFileConfig {
+                path: mid_path,
+                format: Some(ImageType::Qcow2),
+            };
+            let mut overlay =
+                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
+            overlay.seek(SeekFrom::Start(cluster_size)).unwrap();
+            overlay.write_all(&overlay_pattern).unwrap();
+            overlay.flush().unwrap();
+        }
+
+        let file = overlay_temp.as_file().try_clone().unwrap();
+        let disk = QcowDiskSync::new(file, false, true, true).unwrap();
+
+        // Cluster 0: mid wrote 0xBB
+        let buf = async_read(&disk, 0, cluster_size as usize);
+        assert!(
+            buf.iter().all(|&b| b == 0xBB),
+            "Cluster 0 should come from mid layer"
+        );
+
+        // Cluster 1: overlay wrote 0xCC
+        let buf = async_read(&disk, cluster_size, cluster_size as usize);
+        assert!(
+            buf.iter().all(|&b| b == 0xCC),
+            "Cluster 1 should come from overlay"
+        );
+
+        // Cluster 2: falls through mid (unwritten) to raw base
+        let buf = async_read(&disk, cluster_size * 2, cluster_size as usize);
+        let expected_start = (cluster_size * 2) as usize;
+        assert_eq!(
+            &buf[..],
+            &base_pattern[expected_start..expected_start + cluster_size as usize],
+            "Cluster 2 should come from raw base"
+        );
+
+        // Cluster 3: also falls through to raw base
+        let buf = async_read(&disk, cluster_size * 3, cluster_size as usize);
+        let expected_start = (cluster_size * 3) as usize;
+        assert_eq!(
+            &buf[..],
+            &base_pattern[expected_start..expected_start + cluster_size as usize],
+            "Cluster 3 should come from raw base"
+        );
+    }
+
+    #[test]
+    fn test_backing_cow_preserves_all_unwritten_clusters() {
+        // Write to specific clusters in the overlay, verify all others still
+        // read from the qcow2 backing correctly.
+        let cluster_size = 1u64 << 16;
+        let num_clusters = 8u64;
+        let file_size = cluster_size * num_clusters;
+        let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
+
+        let backing_temp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
+            let mut qcow = QcowFile::new(raw, 3, file_size, true).unwrap();
+            qcow.seek(SeekFrom::Start(0)).unwrap();
+            qcow.write_all(&pattern).unwrap();
+            qcow.flush().unwrap();
+        }
+        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
+
+        let overlay_temp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
+            let backing_config = BackingFileConfig {
+                path: backing_path,
+                format: Some(ImageType::Qcow2),
+            };
+            let _overlay =
+                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
+        }
+
+        let file = overlay_temp.as_file().try_clone().unwrap();
+        let disk = QcowDiskSync::new(file, false, true, true).unwrap();
+
+        let written = vec![0xFFu8; cluster_size as usize];
+        for &idx in &[0u64, 3, 7] {
+            async_write(&disk, idx * cluster_size, &written);
+        }
+        {
+            let mut async_io = disk.new_async_io(1).unwrap();
+            async_io.fsync(Some(99)).unwrap();
+        }
+
+        for &idx in &[0u64, 3, 7] {
+            let buf = async_read(&disk, idx * cluster_size, cluster_size as usize);
+            assert!(
+                buf.iter().all(|&b| b == 0xFF),
+                "Cluster {idx} should be written data"
+            );
+        }
+
+        // Verify unwritten clusters read from backing
+        for idx in 0..num_clusters {
+            if idx == 0 || idx == 3 || idx == 7 {
+                continue;
+            }
+            let offset = idx * cluster_size;
+            let buf = async_read(&disk, offset, cluster_size as usize);
+            assert_eq!(
+                &buf[..],
+                &pattern[offset as usize..(offset + cluster_size) as usize],
+                "Cluster {idx} should come from backing"
+            );
+        }
+    }
+
+    #[test]
+    fn test_qcow2_backing_read_beyond_virtual_size() {
+        // Read starting past the backing file virtual_size should return zeros.
+        let cluster_size = 1u64 << 16;
+        let backing_size = cluster_size * 2;
+        let overlay_size = cluster_size * 4; // overlay is larger than backing
+
+        let backing_temp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
+            let mut qcow = QcowFile::new(raw, 3, backing_size, true).unwrap();
+            qcow.seek(SeekFrom::Start(0)).unwrap();
+            qcow.write_all(&vec![0xAA; backing_size as usize]).unwrap();
+            qcow.flush().unwrap();
+        }
+        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
+
+        let overlay_temp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
+            let backing_config = BackingFileConfig {
+                path: backing_path,
+                format: Some(ImageType::Qcow2),
+            };
+            let _overlay =
+                QcowFile::new_from_backing(raw, 3, overlay_size, &backing_config, true).unwrap();
+        }
+
+        let file = overlay_temp.as_file().try_clone().unwrap();
+        let disk = QcowDiskSync::new(file, false, true, true).unwrap();
+
+        // Read cluster 2 (past backing virtual_size) - should be zeros
+        let buf = async_read(&disk, backing_size, cluster_size as usize);
+        assert!(
+            buf.iter().all(|&b| b == 0),
+            "Read beyond backing virtual_size should return zeros"
+        );
+    }
+
+    #[test]
+    fn test_qcow2_backing_read_spanning_virtual_size() {
+        // Read that starts within backing bounds but extends past virtual_size.
+        // First part should have backing data, remainder should be zeros.
+        let cluster_size = 1u64 << 16;
+        let backing_size = cluster_size * 2;
+        let overlay_size = cluster_size * 4;
+
+        let backing_temp = TempFile::new().unwrap();
+        let backing_data = vec![0xBBu8; backing_size as usize];
+        {
+            let raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
+            let mut qcow = QcowFile::new(raw, 3, backing_size, true).unwrap();
+            qcow.seek(SeekFrom::Start(0)).unwrap();
+            qcow.write_all(&backing_data).unwrap();
+            qcow.flush().unwrap();
+        }
+        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
+
+        let overlay_temp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
+            let backing_config = BackingFileConfig {
+                path: backing_path,
+                format: Some(ImageType::Qcow2),
+            };
+            let _overlay =
+                QcowFile::new_from_backing(raw, 3, overlay_size, &backing_config, true).unwrap();
+        }
+
+        let file = overlay_temp.as_file().try_clone().unwrap();
+        let disk = QcowDiskSync::new(file, false, true, true).unwrap();
+
+        // Read 2 clusters starting at cluster 1 (spans backing boundary)
+        let read_len = cluster_size as usize * 2;
+        let buf = async_read(&disk, cluster_size, read_len);
+
+        // First cluster should be backing data
+        assert!(
+            buf[..cluster_size as usize].iter().all(|&b| b == 0xBB),
+            "First half should come from backing"
+        );
+
+        // Second cluster is past backing virtual_size - zeros
+        assert!(
+            buf[cluster_size as usize..].iter().all(|&b| b == 0),
+            "Second half should be zeros (past backing virtual_size)"
+        );
+    }
+
+    #[test]
+    fn test_raw_backing_read_beyond_virtual_size() {
+        // Read past raw backing file virtual_size should return zeros.
+        let cluster_size = 1u64 << 16;
+        let backing_size = cluster_size * 2;
+        let overlay_size = cluster_size * 4;
+
+        let backing_temp = TempFile::new().unwrap();
+        let backing_data = vec![0xDD; backing_size as usize];
+        backing_temp.as_file().write_all(&backing_data).unwrap();
+        backing_temp.as_file().sync_all().unwrap();
+        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
+
+        let overlay_temp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
+            let backing_config = BackingFileConfig {
+                path: backing_path,
+                format: Some(ImageType::Raw),
+            };
+            let _overlay =
+                QcowFile::new_from_backing(raw, 3, overlay_size, &backing_config, true).unwrap();
+        }
+
+        let file = overlay_temp.as_file().try_clone().unwrap();
+        let disk = QcowDiskSync::new(file, false, true, true).unwrap();
+
+        // Read cluster 2 (past backing size) - should be zeros
+        let buf = async_read(&disk, backing_size, cluster_size as usize);
+        assert!(
+            buf.iter().all(|&b| b == 0),
+            "Read beyond raw backing virtual_size should return zeros"
+        );
+
+        // Read spanning boundary: cluster 1 has data, cluster 2 zeros
+        let read_len = cluster_size as usize * 2;
+        let buf = async_read(&disk, cluster_size, read_len);
+        assert!(
+            buf[..cluster_size as usize].iter().all(|&b| b == 0xDD),
+            "First half should come from raw backing"
+        );
+        assert!(
+            buf[cluster_size as usize..].iter().all(|&b| b == 0),
+            "Second half should be zeros (past raw backing size)"
+        );
+    }
+
+    #[test]
+    fn test_qcow2_backing_cross_cluster_read() {
+        // Read spanning a cluster boundary through qcow2 backing.
+        // Exercises the read_clusters loop in Qcow2MetadataBacking.
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 4;
+        let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
+
+        let backing_temp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(backing_temp.as_file().try_clone().unwrap(), false);
+            let mut qcow = QcowFile::new(raw, 3, file_size, true).unwrap();
+            qcow.seek(SeekFrom::Start(0)).unwrap();
+            qcow.write_all(&pattern).unwrap();
+            qcow.flush().unwrap();
+        }
+        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
+
+        let overlay_temp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
+            let backing_config = BackingFileConfig {
+                path: backing_path,
+                format: Some(ImageType::Qcow2),
+            };
+            let _overlay =
+                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
+        }
+
+        let file = overlay_temp.as_file().try_clone().unwrap();
+        let disk = QcowDiskSync::new(file, false, true, true).unwrap();
+
+        // Read spanning clusters 1-2 boundary: 512 bytes before + 512 after
+        let mid = cluster_size - 512;
+        let len = 1024usize;
+        let buf = async_read(&disk, mid, len);
+        assert_eq!(
+            &buf[..],
+            &pattern[mid as usize..mid as usize + len],
+            "Cross cluster read through qcow2 backing should match"
+        );
+
+        // Read spanning clusters 0-1-2 (3 clusters worth)
+        let start = cluster_size / 2;
+        let len = cluster_size as usize * 2;
+        let buf = async_read(&disk, start, len);
+        assert_eq!(
+            &buf[..],
+            &pattern[start as usize..start as usize + len],
+            "Multi cluster read through qcow2 backing should match"
+        );
+    }
+
+    #[test]
+    fn test_punch_hole_with_backing_fallthrough() {
+        // Write to overlay, then punch hole. After punch, the cluster should
+        // fall through to backing data (not zeros).
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 4;
+        let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
+
+        let backing_temp = TempFile::new().unwrap();
+        backing_temp.as_file().write_all(&pattern).unwrap();
+        backing_temp.as_file().sync_all().unwrap();
+        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
+
+        let overlay_temp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
+            let backing_config = BackingFileConfig {
+                path: backing_path,
+                format: Some(ImageType::Raw),
+            };
+            let _overlay =
+                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
+        }
+
+        let file = overlay_temp.as_file().try_clone().unwrap();
+        let disk = QcowDiskSync::new(file, false, true, true).unwrap();
+
+        let written = vec![0xFFu8; cluster_size as usize];
+        async_write(&disk, 0, &written);
+        {
+            let mut async_io = disk.new_async_io(1).unwrap();
+            async_io.fsync(Some(99)).unwrap();
+        }
+
+        let buf = async_read(&disk, 0, cluster_size as usize);
+        assert!(buf.iter().all(|&b| b == 0xFF), "Should read written data");
+
+        // Punch hole on cluster 0 - should deallocate and fall through to backing
+        {
+            let mut async_io = disk.new_async_io(1).unwrap();
+            async_io.punch_hole(0, cluster_size, 42).unwrap();
+            let (ud, res) = async_io.next_completed_request().unwrap();
+            assert_eq!(ud, 42);
+            assert_eq!(res, 0);
+        }
+
+        // Now read should return backing data, not zeros
+        let buf = async_read(&disk, 0, cluster_size as usize);
+        assert_eq!(
+            &buf[..],
+            &pattern[..cluster_size as usize],
+            "After punch_hole with backing, should read backing data"
+        );
+
+        // Cluster 1 should still be backing data throughout
+        let buf = async_read(&disk, cluster_size, cluster_size as usize);
+        assert_eq!(
+            &buf[..],
+            &pattern[cluster_size as usize..2 * cluster_size as usize],
+            "Untouched cluster should read from backing"
+        );
+    }
+
+    #[test]
+    fn test_rewrite_allocated_cluster() {
+        // Write to a cluster, then overwrite it. The second write should hit
+        // the already allocated path in map_write (no new cluster allocation).
+        let (_temp, disk) = create_disk_with_data(100 * 1024 * 1024, &[], 0, true);
+        let cluster_size = 1u64 << 16;
+
+        let data1 = vec![0xAAu8; cluster_size as usize];
+        async_write(&disk, 0, &data1);
+        {
+            let mut aio = disk.new_async_io(1).unwrap();
+            aio.fsync(Some(1)).unwrap();
+        }
+        let buf = async_read(&disk, 0, cluster_size as usize);
+        assert!(buf.iter().all(|&b| b == 0xAA), "First write should stick");
+
+        let data2 = vec![0xBBu8; cluster_size as usize];
+        async_write(&disk, 0, &data2);
+        {
+            let mut aio = disk.new_async_io(1).unwrap();
+            aio.fsync(Some(2)).unwrap();
+        }
+        let buf = async_read(&disk, 0, cluster_size as usize);
+        assert!(
+            buf.iter().all(|&b| b == 0xBB),
+            "Overwrite should replace data"
+        );
+    }
+
+    #[test]
+    fn test_partial_cluster_write_with_backing_cow() {
+        // Partial cluster write to an overlay with a backing file triggers COW.
+        // The unwritten part of the cluster must be copied from backing.
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 4;
+        let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
+
+        let backing_temp = TempFile::new().unwrap();
+        backing_temp.as_file().write_all(&pattern).unwrap();
+        backing_temp.as_file().sync_all().unwrap();
+        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
+
+        let overlay_temp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
+            let backing_config = BackingFileConfig {
+                path: backing_path,
+                format: Some(ImageType::Raw),
+            };
+            let _overlay =
+                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
+        }
+
+        let file = overlay_temp.as_file().try_clone().unwrap();
+        let disk = QcowDiskSync::new(file, false, true, true).unwrap();
+
+        // Write 4KB at offset 4KB within cluster 0 (partial cluster)
+        let write_offset = 4096u64;
+        let write_len = 4096usize;
+        let write_data = vec![0xEEu8; write_len];
+        async_write(&disk, write_offset, &write_data);
+        {
+            let mut aio = disk.new_async_io(1).unwrap();
+            aio.fsync(Some(1)).unwrap();
+        }
+
+        let buf = async_read(&disk, 0, cluster_size as usize);
+
+        // Before the write: should be COW'd from backing
+        assert_eq!(
+            &buf[..write_offset as usize],
+            &pattern[..write_offset as usize],
+            "Pre write region should be COW from backing"
+        );
+
+        assert_eq!(
+            &buf[write_offset as usize..write_offset as usize + write_len],
+            &write_data[..],
+            "Written region should be new data"
+        );
+
+        // After the write: should be COW'd from backing
+        let after_offset = write_offset as usize + write_len;
+        assert_eq!(
+            &buf[after_offset..cluster_size as usize],
+            &pattern[after_offset..cluster_size as usize],
+            "Post write region should be COW from backing"
+        );
+    }
+
+    #[test]
+    fn test_partial_cluster_deallocate() {
+        // Punch hole on a partial cluster range. The deallocate_bytes path
+        // should produce WriteZeroes actions for partial clusters.
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 4;
+
+        let data: Vec<u8> = (0..2 * cluster_size as usize)
+            .map(|i| (i % 251) as u8)
+            .collect();
+        let (_temp, disk) = create_disk_with_data(file_size, &data, 0, true);
+
+        // Punch a partial range: last 4KB of cluster 0 + first 4KB of cluster 1
+        let punch_offset = cluster_size - 4096;
+        let punch_len = 8192u64;
+        {
+            let mut aio = disk.new_async_io(1).unwrap();
+            aio.punch_hole(punch_offset, punch_len, 10).unwrap();
+            let (ud, res) = aio.next_completed_request().unwrap();
+            assert_eq!(ud, 10);
+            assert_eq!(res, 0);
+        }
+
+        let buf = async_read(&disk, 0, 2 * cluster_size as usize);
+
+        // Before punch: unchanged
+        assert_eq!(
+            &buf[..punch_offset as usize],
+            &data[..punch_offset as usize],
+            "Data before punch should be unchanged"
+        );
+
+        // Punched region: zeros
+        assert!(
+            buf[punch_offset as usize..(punch_offset + punch_len) as usize]
+                .iter()
+                .all(|&b| b == 0),
+            "Punched region should be zeros"
+        );
+
+        // After punch: unchanged
+        let after = (punch_offset + punch_len) as usize;
+        assert_eq!(
+            &buf[after..2 * cluster_size as usize],
+            &data[after..2 * cluster_size as usize],
+            "Data after punch should be unchanged"
+        );
+    }
+
+    #[test]
+    fn test_resize_grow() {
+        let cluster_size = 1u64 << 16;
+        let initial_size = cluster_size * 4;
+        let data = vec![0xAA; cluster_size as usize];
+        let (_temp, mut disk) = create_disk_with_data(initial_size, &data, 0, true);
+
+        assert_eq!(disk.logical_size().unwrap(), initial_size);
+
+        let new_size = cluster_size * 8;
+        disk.resize(new_size).unwrap();
+        assert_eq!(disk.logical_size().unwrap(), new_size);
+
+        // Original data intact
+        let buf = async_read(&disk, 0, cluster_size as usize);
+        assert!(
+            buf.iter().all(|&b| b == 0xAA),
+            "Original data should survive resize"
+        );
+
+        // New region reads as zeros
+        let buf = async_read(&disk, initial_size, cluster_size as usize);
+        assert!(
+            buf.iter().all(|&b| b == 0),
+            "Newly grown region should read as zeros"
+        );
+
+        // Can write to newly grown region
+        let new_data = vec![0xBB; cluster_size as usize];
+        async_write(&disk, initial_size, &new_data);
+        {
+            let mut aio = disk.new_async_io(1).unwrap();
+            aio.fsync(Some(1)).unwrap();
+        }
+        let buf = async_read(&disk, initial_size, cluster_size as usize);
+        assert!(
+            buf.iter().all(|&b| b == 0xBB),
+            "Write to grown region should work"
+        );
+    }
+
+    #[test]
+    fn test_resize_with_backing_file_rejected() {
+        let backing_temp = TempFile::new().unwrap();
+        let cluster_size = 1u64 << 16;
+        let file_size = cluster_size * 4;
+        backing_temp
+            .as_file()
+            .write_all(&vec![0u8; file_size as usize])
+            .unwrap();
+        backing_temp.as_file().sync_all().unwrap();
+        let backing_path = backing_temp.as_path().to_str().unwrap().to_string();
+
+        let overlay_temp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(overlay_temp.as_file().try_clone().unwrap(), false);
+            let backing_config = BackingFileConfig {
+                path: backing_path,
+                format: Some(ImageType::Raw),
+            };
+            let _overlay =
+                QcowFile::new_from_backing(raw, 3, file_size, &backing_config, true).unwrap();
+        }
+
+        let file = overlay_temp.as_file().try_clone().unwrap();
+        let mut disk = QcowDiskSync::new(file, false, true, true).unwrap();
+
+        assert_eq!(disk.logical_size().unwrap(), file_size);
+        let result = disk.resize(file_size * 2);
+        assert!(result.is_err(), "resize with backing file should fail");
+        assert_eq!(
+            disk.logical_size().unwrap(),
+            file_size,
+            "size should be unchanged after failed resize"
         );
     }
 }
