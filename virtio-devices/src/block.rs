@@ -986,6 +986,13 @@ impl VirtioDevice for Block {
         interrupt_cb: Arc<dyn VirtioInterrupt>,
         mut queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult {
+        // See if the guest didn't ack the device being read-only.
+        // If so, warn and pretend it did.
+        let original_acked_features = self.common.acked_features;
+        self.common.acked_features |= self.common.avail_features & (1u64 << VIRTIO_BLK_F_RO);
+        if original_acked_features != self.common.acked_features {
+            warn!("Guest did not acknowledge that device is read-only, acting as if it did!");
+        }
         self.common.activate(&queues, interrupt_cb.clone())?;
 
         self.update_writeback();
