@@ -688,7 +688,7 @@ impl Vm {
     }
 
     /// Determine if IOMMU should be forced based on confidential computing features.
-    fn should_force_iommu(_config: &Arc<Mutex<VmConfig>>) -> bool {
+    fn should_force_iommu(_config: &Mutex<VmConfig>) -> bool {
         #[cfg(feature = "tdx")]
         if _config.lock().unwrap().is_tdx_enabled() {
             return true;
@@ -701,7 +701,7 @@ impl Vm {
     }
 
     /// Determine if VM should stop on boot (for debugging).
-    fn should_stop_on_boot(config: &Arc<Mutex<VmConfig>>) -> bool {
+    fn should_stop_on_boot(config: &Mutex<VmConfig>) -> bool {
         #[cfg(feature = "guest_debug")]
         {
             config.lock().unwrap().gdb
@@ -716,7 +716,7 @@ impl Vm {
     /// Create and configure the CPU manager.
     #[allow(clippy::too_many_arguments)]
     fn create_cpu_manager(
-        config: &Arc<Mutex<VmConfig>>,
+        config: &Mutex<VmConfig>,
         vm: Arc<dyn hypervisor::Vm>,
         exit_evt: EventFd,
         reset_evt: EventFd,
@@ -767,7 +767,7 @@ impl Vm {
     /// Initialize TDX if enabled.
     #[cfg(feature = "tdx")]
     fn init_tdx_if_enabled(
-        config: &Arc<Mutex<VmConfig>>,
+        config: &Mutex<VmConfig>,
         vm: &Arc<dyn hypervisor::Vm>,
         cpu_manager: &Arc<Mutex<cpu::CpuManager>>,
     ) -> Result<()> {
@@ -798,7 +798,7 @@ impl Vm {
         boot_id_list: BTreeSet<String>,
         #[cfg(not(target_arch = "riscv64"))] timestamp: Instant,
         snapshot: Option<&Snapshot>,
-        _vm_config: &Arc<Mutex<VmConfig>>,
+        _vm_config: &Mutex<VmConfig>,
     ) -> Result<Arc<Mutex<DeviceManager>>> {
         #[cfg(feature = "tdx")]
         let dynamic = !_vm_config.lock().unwrap().is_tdx_enabled();
@@ -836,10 +836,10 @@ impl Vm {
     #[allow(clippy::too_many_arguments)]
     fn hypervisor_specific_init(
         vm: &Arc<dyn hypervisor::Vm>,
-        memory_manager: &Arc<Mutex<MemoryManager>>,
+        memory_manager: &Mutex<MemoryManager>,
         cpu_manager: &Arc<Mutex<cpu::CpuManager>>,
-        device_manager: &Arc<Mutex<DeviceManager>>,
-        config: &Arc<Mutex<VmConfig>>,
+        device_manager: &Mutex<DeviceManager>,
+        config: &Mutex<VmConfig>,
         hypervisor: &Arc<dyn hypervisor::Hypervisor>,
         console_info: Option<&ConsoleInfo>,
         console_resize_pipe: Option<&Arc<File>>,
@@ -954,10 +954,10 @@ impl Vm {
     #[allow(clippy::too_many_arguments)]
     fn init_sev_snp(
         vm: &Arc<dyn hypervisor::Vm>,
-        memory_manager: &Arc<Mutex<MemoryManager>>,
+        memory_manager: &Mutex<MemoryManager>,
         cpu_manager: &Arc<Mutex<cpu::CpuManager>>,
-        device_manager: &Arc<Mutex<DeviceManager>>,
-        config: &Arc<Mutex<VmConfig>>,
+        device_manager: &Mutex<DeviceManager>,
+        config: &Mutex<VmConfig>,
         console_info: Option<&ConsoleInfo>,
         console_resize_pipe: Option<&Arc<File>>,
         original_termios: &Arc<Mutex<Option<termios>>>,
@@ -1014,7 +1014,7 @@ impl Vm {
     #[cfg(feature = "mshv")]
     fn init_mshv(
         _vm: &Arc<dyn hypervisor::Vm>,
-        device_manager: &Arc<Mutex<DeviceManager>>,
+        device_manager: &Mutex<DeviceManager>,
         console_info: Option<&ConsoleInfo>,
         console_resize_pipe: Option<&Arc<File>>,
         original_termios: &Arc<Mutex<Option<termios>>>,
@@ -1046,7 +1046,7 @@ impl Vm {
     #[cfg(feature = "kvm")]
     fn init_kvm(
         vm: &Arc<dyn hypervisor::Vm>,
-        device_manager: &Arc<Mutex<DeviceManager>>,
+        device_manager: &Mutex<DeviceManager>,
         console_info: Option<ConsoleInfo>,
         console_resize_pipe: Option<Arc<File>>,
         original_termios: Arc<Mutex<Option<termios>>>,
@@ -1073,8 +1073,8 @@ impl Vm {
     /// Create fw_cfg device if enabled in configuration.
     #[cfg(feature = "fw_cfg")]
     fn create_fw_cfg_if_enabled(
-        config: &Arc<Mutex<VmConfig>>,
-        device_manager: &Arc<Mutex<DeviceManager>>,
+        config: &Mutex<VmConfig>,
+        device_manager: &Mutex<DeviceManager>,
     ) -> Result<()> {
         let fw_cfg_enabled = config
             .lock()
@@ -1097,8 +1097,8 @@ impl Vm {
     #[cfg(feature = "fw_cfg")]
     fn populate_fw_cfg(
         fw_cfg_config: &FwCfgConfig,
-        device_manager: &Arc<Mutex<DeviceManager>>,
-        config: &Arc<Mutex<VmConfig>>,
+        device_manager: &Mutex<DeviceManager>,
+        config: &Mutex<VmConfig>,
     ) -> Result<()> {
         let mut e820_option: Option<usize> = None;
         if fw_cfg_config.e820 {
@@ -1180,7 +1180,7 @@ impl Vm {
 
     fn create_numa_nodes(
         configs: Option<&[NumaConfig]>,
-        memory_manager: &Arc<Mutex<MemoryManager>>,
+        memory_manager: &Mutex<MemoryManager>,
     ) -> Result<NumaNodes> {
         let mm = memory_manager.lock().unwrap();
         let mm_zones = mm.memory_zones();
@@ -1598,8 +1598,8 @@ impl Vm {
     }
 
     fn load_payload_async(
-        memory_manager: &Arc<Mutex<MemoryManager>>,
-        config: &Arc<Mutex<VmConfig>>,
+        memory_manager: &Mutex<MemoryManager>,
+        config: &Mutex<VmConfig>,
         #[cfg(feature = "igvm")] cpu_manager: &Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {

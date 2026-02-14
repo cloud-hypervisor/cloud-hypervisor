@@ -128,7 +128,7 @@ pub trait VirtioDevice: Send {
 
     fn add_memory_region(
         &mut self,
-        _region: &Arc<GuestRegionMmap>,
+        _region: &GuestRegionMmap,
     ) -> std::result::Result<(), Error> {
         Ok(())
     }

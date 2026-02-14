@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::Instant;
 
 use acpi_tables::Aml;
@@ -192,7 +192,7 @@ bitflags! {
 
 impl MemoryAffinity {
     fn from_region(
-        region: &Arc<GuestRegionMmap>,
+        region: &GuestRegionMmap,
         proximity_domain: u32,
         flags: MemAffinityFlags,
     ) -> Self {
@@ -258,9 +258,9 @@ struct ViotPciRangeNode {
 }
 
 pub fn create_dsdt_table(
-    device_manager: &Arc<Mutex<DeviceManager>>,
-    cpu_manager: &Arc<Mutex<CpuManager>>,
-    memory_manager: &Arc<Mutex<MemoryManager>>,
+    device_manager: &Mutex<DeviceManager>,
+    cpu_manager: &Mutex<CpuManager>,
+    memory_manager: &Mutex<MemoryManager>,
 ) -> Sdt {
     trace_scoped!("create_dsdt_table");
     // DSDT
@@ -278,7 +278,7 @@ pub fn create_dsdt_table(
 
 const FACP_DSDT_OFFSET: usize = 140;
 
-fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Arc<Mutex<DeviceManager>>) -> Sdt {
+fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &Mutex<DeviceManager>) -> Sdt {
     trace_scoped!("create_facp_table");
 
     // Revision 6 of the ACPI FADT table is 276 bytes long
@@ -369,7 +369,7 @@ fn create_tpm2_table() -> Sdt {
 
 fn create_srat_table(
     numa_nodes: &NumaNodes,
-    device_manager: &Arc<Mutex<DeviceManager>>,
+    device_manager: &Mutex<DeviceManager>,
     #[cfg(target_arch = "x86_64")] topology: Option<(u16, u16, u16, u16)>,
 ) -> Sdt {
     let mut srat = Sdt::new(*b"SRAT", 36, 3, *b"CLOUDH", *b"CHSRAT  ", 1);
@@ -852,9 +852,9 @@ fn create_viot_table(iommu_bdf: &PciBdf, devices_bdf: &[PciBdf]) -> Sdt {
 // * `Vec<u64>` contains a list of table pointers stored in XSDT.
 fn create_acpi_tables_internal(
     dsdt_addr: GuestAddress,
-    device_manager: &Arc<Mutex<DeviceManager>>,
-    cpu_manager: &Arc<Mutex<CpuManager>>,
-    memory_manager: &Arc<Mutex<MemoryManager>>,
+    device_manager: &Mutex<DeviceManager>,
+    cpu_manager: &Mutex<CpuManager>,
+    memory_manager: &Mutex<MemoryManager>,
     numa_nodes: &NumaNodes,
     tpm_enabled: bool,
 ) -> (Rsdp, Vec<u8>, Vec<u64>) {
@@ -1040,9 +1040,9 @@ fn create_acpi_tables_internal(
 
 #[cfg(feature = "fw_cfg")]
 pub fn create_acpi_tables_for_fw_cfg(
-    device_manager: &Arc<Mutex<DeviceManager>>,
-    cpu_manager: &Arc<Mutex<CpuManager>>,
-    memory_manager: &Arc<Mutex<MemoryManager>>,
+    device_manager: &Mutex<DeviceManager>,
+    cpu_manager: &Mutex<CpuManager>,
+    memory_manager: &Mutex<MemoryManager>,
     numa_nodes: &NumaNodes,
     tpm_enabled: bool,
 ) -> Result<(), crate::vm::Error> {
@@ -1099,9 +1099,9 @@ pub fn create_acpi_tables_for_fw_cfg(
 
 pub fn create_acpi_tables(
     guest_mem: &GuestMemoryMmap,
-    device_manager: &Arc<Mutex<DeviceManager>>,
-    cpu_manager: &Arc<Mutex<CpuManager>>,
-    memory_manager: &Arc<Mutex<MemoryManager>>,
+    device_manager: &Mutex<DeviceManager>,
+    cpu_manager: &Mutex<CpuManager>,
+    memory_manager: &Mutex<MemoryManager>,
     numa_nodes: &NumaNodes,
     tpm_enabled: bool,
 ) -> GuestAddress {
@@ -1139,9 +1139,9 @@ pub fn create_acpi_tables(
 
 #[cfg(feature = "tdx")]
 pub fn create_acpi_tables_tdx(
-    device_manager: &Arc<Mutex<DeviceManager>>,
-    cpu_manager: &Arc<Mutex<CpuManager>>,
-    memory_manager: &Arc<Mutex<MemoryManager>>,
+    device_manager: &Mutex<DeviceManager>,
+    cpu_manager: &Mutex<CpuManager>,
+    memory_manager: &Mutex<MemoryManager>,
     numa_nodes: &NumaNodes,
 ) -> Vec<Sdt> {
     // DSDT
