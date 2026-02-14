@@ -169,7 +169,9 @@ fn has_feature(features: u64, feature_flag: u64) -> bool {
 impl BlockEpollHandler {
     fn check_request(features: u64, request_type: RequestType) -> result::Result<(), ExecuteError> {
         if has_feature(features, VIRTIO_BLK_F_RO.into())
-            && !(request_type == RequestType::In || request_type == RequestType::GetDeviceId)
+            && !(request_type == RequestType::In
+                || request_type == RequestType::GetDeviceId
+                || request_type == RequestType::Flush)
         {
             // For virtio spec compliance
             // "A device MUST set the status byte to VIRTIO_BLK_S_IOERR for a write request
