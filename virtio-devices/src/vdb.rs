@@ -133,6 +133,8 @@ pub enum Error {
     QueueAddUsed(#[source] virtio_queue::Error),
     #[error("Failed creating an iterator over the queue")]
     QueueIterator(#[source] virtio_queue::Error),
+    #[error("Too large max queues")]
+    TooLargeMaxQueues,
 }
 
 struct VdbEpollHandler {
@@ -275,6 +277,7 @@ pub struct Vdb {
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
+    max_queues: u8,
 }
 
 impl Vdb {
@@ -287,6 +290,10 @@ impl Vdb {
         max_queues: u32,
         uuid: [u8; 16],
     ) -> io::Result<Self> {
+        if max_queues > 127 {
+            warn!("Cannot support {max_queues} queues, limit is 127");
+            return Err(io::Error::other(Error::TooLargeMaxQueues));
+        }
         let queue_sizes = vec![QUEUE_SIZE; NUM_QUEUES];
 
         let (avail_features, acked_features, config, paused) = if let Some(state) = state {
@@ -333,6 +340,7 @@ impl Vdb {
             seccomp_action,
             exit_evt,
             interrupt_cb: None,
+            max_queues: max_queues as _,
         })
     }
 
@@ -375,6 +383,10 @@ impl VirtioDevice for Vdb {
 
     fn ack_features(&mut self, value: u64) {
         self.common.ack_features(value);
+    }
+
+    fn doorbells_max(&self) -> u8 {
+        self.max_queues * 2 + 1
     }
 
     fn read_config(&self, _offset: u64, _data: &mut [u8]) {}
