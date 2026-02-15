@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, result};
 
+use block::ImageType;
 use log::{debug, warn};
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
@@ -286,6 +287,8 @@ pub struct DiskConfig {
     pub queue_affinity: Option<Vec<VirtQueueAffinity>>,
     #[serde(default)]
     pub backing_files: bool,
+    #[serde(default)]
+    pub image_type: ImageType,
 }
 
 impl ApplyLandlock for DiskConfig {

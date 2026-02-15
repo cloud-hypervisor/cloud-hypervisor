@@ -30,12 +30,13 @@ pub mod vhdx_sync;
 
 use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::collections::VecDeque;
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
 use std::fs::File;
 use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
+use std::str::FromStr;
 use std::time::Instant;
 use std::{cmp, result};
 
@@ -788,12 +789,44 @@ pub trait AsyncAdaptor {
     }
 }
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ImageType {
     FixedVhd,
     Qcow2,
     Raw,
     Vhdx,
+    #[default]
+    Unknown,
+}
+
+impl fmt::Display for ImageType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ImageType::FixedVhd => write!(f, "vhd"),
+            ImageType::Qcow2 => write!(f, "qcow2"),
+            ImageType::Raw => write!(f, "raw"),
+            ImageType::Vhdx => write!(f, "vhdx"),
+            ImageType::Unknown => write!(f, "unknown"),
+        }
+    }
+}
+
+pub enum ImageTypeParseError {
+    InvalidValue(String),
+}
+
+impl FromStr for ImageType {
+    type Err = ImageTypeParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "vhd" => Ok(ImageType::FixedVhd),
+            "qcow2" => Ok(ImageType::Qcow2),
+            "raw" => Ok(ImageType::Raw),
+            "vhdx" => Ok(ImageType::Vhdx),
+            _ => Err(ImageTypeParseError::InvalidValue(s.to_string())),
+        }
+    }
 }
 
 const QCOW_MAGIC: u32 = 0x5146_49fb;

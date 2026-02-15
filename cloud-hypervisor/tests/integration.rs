@@ -2526,6 +2526,8 @@ mod common_parallel {
     use std::fs::OpenOptions;
     use std::io::SeekFrom;
 
+    use block::ImageType;
+
     use crate::*;
 
     #[test]
@@ -3172,7 +3174,7 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                format!("path={test_disk_path},pci_segment=15").as_str(),
+                format!("path={test_disk_path},pci_segment=15,image_type=raw").as_str(),
             ])
             .capture_output()
             .default_net();
@@ -3413,6 +3415,7 @@ mod common_parallel {
         disable_aio: bool,
         verify_os_disk: bool,
         backing_files: bool,
+        image_type: ImageType,
     ) {
         let disk_config = UbuntuDiskConfig::new(image_name.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -3433,9 +3436,9 @@ mod common_parallel {
             .args([
                 "--disk",
                 format!(
-                    "path={},backing_files={}",
+                    "path={},backing_files={},image_type={image_type}",
                     guest.disk_config.disk(DiskType::OperatingSystem).unwrap(),
-                    if backing_files { "on"} else {"off"}
+                    if backing_files { "on"} else {"off"},
                 )
                 .as_str(),
                 format!(
@@ -3505,17 +3508,17 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_io_uring() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, false, true, false, false);
+        _test_virtio_block(FOCAL_IMAGE_NAME, false, true, false, false, ImageType::Raw);
     }
 
     #[test]
     fn test_virtio_block_aio() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, true, false, false, false);
+        _test_virtio_block(FOCAL_IMAGE_NAME, true, false, false, false, ImageType::Raw);
     }
 
     #[test]
     fn test_virtio_block_sync() {
-        _test_virtio_block(FOCAL_IMAGE_NAME, true, true, false, false);
+        _test_virtio_block(FOCAL_IMAGE_NAME, true, true, false, false, ImageType::Raw);
     }
 
     /// Uses `qemu-img check` to verify disk image consistency.
@@ -3551,17 +3554,38 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2, false, false, true, false);
+        _test_virtio_block(
+            JAMMY_IMAGE_NAME_QCOW2,
+            false,
+            false,
+            true,
+            false,
+            ImageType::Qcow2,
+        );
     }
 
     #[test]
     fn test_virtio_block_qcow2_zlib() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_ZLIB, false, false, true, false);
+        _test_virtio_block(
+            JAMMY_IMAGE_NAME_QCOW2_ZLIB,
+            false,
+            false,
+            true,
+            false,
+            ImageType::Qcow2,
+        );
     }
 
     #[test]
     fn test_virtio_block_qcow2_zstd() {
-        _test_virtio_block(JAMMY_IMAGE_NAME_QCOW2_ZSTD, false, false, true, false);
+        _test_virtio_block(
+            JAMMY_IMAGE_NAME_QCOW2_ZSTD,
+            false,
+            false,
+            true,
+            false,
+            ImageType::Qcow2,
+        );
     }
 
     #[test]
@@ -3572,6 +3596,7 @@ mod common_parallel {
             false,
             true,
             true,
+            ImageType::Qcow2,
         );
     }
 
@@ -3583,6 +3608,7 @@ mod common_parallel {
             false,
             true,
             true,
+            ImageType::Qcow2,
         );
     }
 
@@ -3608,7 +3634,14 @@ mod common_parallel {
             .output()
             .expect("Expect generating VHD image from RAW image");
 
-        _test_virtio_block(FOCAL_IMAGE_NAME_VHD, false, false, false, false);
+        _test_virtio_block(
+            FOCAL_IMAGE_NAME_VHD,
+            false,
+            false,
+            false,
+            false,
+            ImageType::FixedVhd,
+        );
     }
 
     #[test]
@@ -3632,7 +3665,14 @@ mod common_parallel {
             .output()
             .expect("Expect generating dynamic VHDx image from RAW image");
 
-        _test_virtio_block(FOCAL_IMAGE_NAME_VHDX, false, false, true, false);
+        _test_virtio_block(
+            FOCAL_IMAGE_NAME_VHDX,
+            false,
+            false,
+            true,
+            false,
+            ImageType::Vhdx,
+        );
     }
 
     #[test]
@@ -4697,7 +4737,7 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                format!("path={}", vfio_disk_path.to_str().unwrap()).as_str(),
+                format!("path={},image_type=raw", vfio_disk_path.to_str().unwrap()).as_str(),
                 format!("path={},iommu=on,readonly=true", blk_file_path.to_str().unwrap()).as_str(),
             ])
             .args([

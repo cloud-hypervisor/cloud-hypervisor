@@ -41,6 +41,7 @@ vmm-sys-util = { workspace = true }
 zbus = { version = "5.7.1", optional = true }
 
 [dev-dependencies]
+block = { path = "../block" }
 dirs = { workspace = true }
 net_util = { path = "../net_util" }
 serde_json = { workspace = true }
