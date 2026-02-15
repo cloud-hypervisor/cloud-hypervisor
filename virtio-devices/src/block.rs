@@ -160,6 +160,7 @@ struct BlockEpollHandler {
     access_platform: Option<Arc<dyn AccessPlatform>>,
     host_cpus: Option<Vec<usize>>,
     acked_features: u64,
+    disable_sector0_writes: bool,
 }
 
 fn has_feature(features: u64, feature_flag: u64) -> bool {
@@ -167,8 +168,13 @@ fn has_feature(features: u64, feature_flag: u64) -> bool {
 }
 
 impl BlockEpollHandler {
-    fn check_request(features: u64, request_type: RequestType) -> result::Result<(), ExecuteError> {
-        if has_feature(features, VIRTIO_BLK_F_RO.into())
+    fn check_request(
+        features: u64,
+        request: &Request,
+        disable_sector0_writes: bool,
+    ) -> result::Result<(), ExecuteError> {
+        let request_type = request.request_type;
+        if (has_feature(features, VIRTIO_BLK_F_RO.into()))
             && !(request_type == RequestType::In || request_type == RequestType::GetDeviceId)
         {
             // For virtio spec compliance
@@ -176,6 +182,11 @@ impl BlockEpollHandler {
             // if the VIRTIO_BLK_F_RO feature if offered, and MUST NOT write any data."
             return Err(ExecuteError::ReadOnly);
         }
+
+        if request_type == RequestType::Out && disable_sector0_writes && request.sector == 0 {
+            return Err(ExecuteError::ReadOnly);
+        }
+
         Ok(())
     }
 
@@ -191,7 +202,10 @@ impl BlockEpollHandler {
             // For virtio spec compliance
             // "A device MUST set the status byte to VIRTIO_BLK_S_IOERR for a write request
             // if the VIRTIO_BLK_F_RO feature if offered, and MUST NOT write any data."
-            if let Err(e) = Self::check_request(self.acked_features, request.request_type) {
+            // Also, if sector 0 writes are disabled, treat writes to sector 0 as read-only as well.
+            if let Err(e) =
+                Self::check_request(self.acked_features, &request, self.disable_sector0_writes)
+            {
                 warn!("Request check failed: {request:x?} {e:?}");
                 desc_chain
                     .memory()
@@ -644,6 +658,7 @@ pub struct Block {
     exit_evt: EventFd,
     serial: Vec<u8>,
     queue_affinity: BTreeMap<u16, Vec<usize>>,
+    disable_sector0_writes: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -672,6 +687,7 @@ impl Block {
         exit_evt: EventFd,
         state: Option<BlockState>,
         queue_affinity: BTreeMap<u16, Vec<usize>>,
+        disable_sector0_writes: bool,
     ) -> io::Result<Self> {
         let (disk_nsectors, avail_features, acked_features, config, paused) =
             if let Some(state) = state {
@@ -772,6 +788,7 @@ impl Block {
             exit_evt,
             serial,
             queue_affinity,
+            disable_sector0_writes,
         })
     }
 
@@ -1016,6 +1033,7 @@ impl VirtioDevice for Block {
                 access_platform: self.common.access_platform.clone(),
                 host_cpus: self.queue_affinity.get(&queue_idx).cloned(),
                 acked_features: self.common.acked_features,
+                disable_sector0_writes: self.disable_sector0_writes,
             };
 
             let paused = self.common.paused.clone();
