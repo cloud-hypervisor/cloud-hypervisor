@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fs, result};
 
+use block::ImageType;
 use log::{debug, warn};
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
@@ -288,6 +289,8 @@ pub struct DiskConfig {
     pub backing_files: bool,
     #[serde(default = "default_diskconfig_sparse")]
     pub sparse: bool,
+    #[serde(default)]
+    pub image_type: ImageType,
 }
 
 impl ApplyLandlock for DiskConfig {

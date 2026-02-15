@@ -947,6 +947,9 @@ components:
         sparse:
           type: boolean
           default: true
+        image_type:
+          type: enum ["FixedVhd", "Qcow2", "Raw", "Vhdx"]
+
 
     NetConfig:
       type: object
