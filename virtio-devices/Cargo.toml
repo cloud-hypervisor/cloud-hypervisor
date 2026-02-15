@@ -16,6 +16,7 @@ block = { path = "../block" }
 byteorder = { workspace = true }
 epoll = { workspace = true }
 event_monitor = { path = "../event_monitor" }
+eventfd-checker = { path = "../eventfd-checker" }
 hypervisor = { path = "../hypervisor" }
 libc = { workspace = true }
 log = { workspace = true }

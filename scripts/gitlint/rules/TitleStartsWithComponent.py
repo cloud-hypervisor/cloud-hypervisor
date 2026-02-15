@@ -66,6 +66,7 @@ class TitleStartsWithComponent(LineRule):
             'vhost_user_block',
             'vhost_user_net',
             'virtio-devices',
+            'virtio-device-backend',
             'vm-allocator',
             'vm-device',
             'vmm',
