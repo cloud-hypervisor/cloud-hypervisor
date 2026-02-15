@@ -2677,13 +2677,18 @@ impl DeviceManager {
 
             let detected_image_type =
                 detect_image_type(&mut file).map_err(DeviceManagerError::DetectImageType)?;
+            let mut disable_sector0_writes = false;
+
             if disk_cfg.image_type == ImageType::Unknown {
                 warn!(
                     "No image_type specified - detected as {detected_image_type}. \
                     Configuration updated to persist type across reboots and migrations."
                 );
 
-                if detected_image_type != ImageType::Raw {
+                if detected_image_type == ImageType::Raw {
+                    warn!("Autodetected raw image type. Disabling sector 0 writes.");
+                    disable_sector0_writes = true;
+                } else {
                     warn!(
                         "Non-raw image type detected. In the future it will be necessary \
                         to specify image_type for non-raw files."
@@ -2850,6 +2855,7 @@ impl DeviceManager {
                     .map_err(DeviceManagerError::RestoreGetState)?,
                 queue_affinity,
                 disk_cfg.sparse,
+                disable_sector0_writes,
             )
             .map_err(DeviceManagerError::CreateVirtioBlock)?;
 
