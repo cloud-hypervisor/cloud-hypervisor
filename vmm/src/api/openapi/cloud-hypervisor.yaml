@@ -944,6 +944,9 @@ components:
         backing_files:
           type: boolean
           default: false
+        image_type:
+          type: enum ["FixedVhd", "Qcow2", "Raw", "Vhdx"]
+
 
     NetConfig:
       type: object
