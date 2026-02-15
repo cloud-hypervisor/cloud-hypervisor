@@ -333,7 +333,7 @@ mod adjuster {
     }
 }
 
-const TEST_LIST: [PerformanceTest; 42] = [
+const TEST_LIST: [PerformanceTest; 60] = [
     PerformanceTest {
         name: "boot_time_ms",
         func_ptr: performance_boot_time,
@@ -723,6 +723,282 @@ const TEST_LIST: [PerformanceTest; 42] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::identity,
+    },
+    PerformanceTest {
+        name: "block_qcow2_read_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(1),
+            queue_size: Some(128),
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::Read,
+                bandwidth: true,
+                test_file: QCOW2_UNCOMPRESSED_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_random_read_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(1),
+            queue_size: Some(128),
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::RandomRead,
+                bandwidth: true,
+                test_file: QCOW2_UNCOMPRESSED_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_read_warm_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(1),
+            queue_size: Some(128),
+            warmup_iterations: 2,
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::Read,
+                bandwidth: true,
+                test_file: QCOW2_UNCOMPRESSED_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_multi_queue_read_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(4),
+            queue_size: Some(128),
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::Read,
+                bandwidth: true,
+                test_file: QCOW2_UNCOMPRESSED_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_multi_queue_random_read_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(4),
+            queue_size: Some(128),
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::RandomRead,
+                bandwidth: true,
+                test_file: QCOW2_UNCOMPRESSED_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_multi_queue_read_warm_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(4),
+            queue_size: Some(128),
+            warmup_iterations: 2,
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::Read,
+                bandwidth: true,
+                test_file: QCOW2_UNCOMPRESSED_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_zlib_read_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(1),
+            queue_size: Some(128),
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::Read,
+                bandwidth: true,
+                test_file: QCOW2_ZLIB_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_zlib_random_read_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(1),
+            queue_size: Some(128),
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::RandomRead,
+                bandwidth: true,
+                test_file: QCOW2_ZLIB_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_zlib_read_warm_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(1),
+            queue_size: Some(128),
+            warmup_iterations: 2,
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::Read,
+                bandwidth: true,
+                test_file: QCOW2_ZLIB_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_zlib_multi_queue_read_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(4),
+            queue_size: Some(128),
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::Read,
+                bandwidth: true,
+                test_file: QCOW2_ZLIB_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_zlib_multi_queue_random_read_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(4),
+            queue_size: Some(128),
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::RandomRead,
+                bandwidth: true,
+                test_file: QCOW2_ZLIB_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_zlib_multi_queue_read_warm_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(4),
+            queue_size: Some(128),
+            warmup_iterations: 2,
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::Read,
+                bandwidth: true,
+                test_file: QCOW2_ZLIB_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_zstd_read_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(1),
+            queue_size: Some(128),
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::Read,
+                bandwidth: true,
+                test_file: QCOW2_ZSTD_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_zstd_random_read_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(1),
+            queue_size: Some(128),
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::RandomRead,
+                bandwidth: true,
+                test_file: QCOW2_ZSTD_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_zstd_read_warm_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(1),
+            queue_size: Some(128),
+            warmup_iterations: 2,
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::Read,
+                bandwidth: true,
+                test_file: QCOW2_ZSTD_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_zstd_multi_queue_read_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(4),
+            queue_size: Some(128),
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::Read,
+                bandwidth: true,
+                test_file: QCOW2_ZSTD_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_zstd_multi_queue_random_read_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(4),
+            queue_size: Some(128),
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::RandomRead,
+                bandwidth: true,
+                test_file: QCOW2_ZSTD_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "block_qcow2_zstd_multi_queue_read_warm_MiBps",
+        func_ptr: performance_block_io,
+        control: PerformanceTestControl {
+            num_queues: Some(4),
+            queue_size: Some(128),
+            warmup_iterations: 2,
+            block_control: Some(BlockControl {
+                fio_ops: FioOps::Read,
+                bandwidth: true,
+                test_file: QCOW2_ZSTD_IMG,
+            }),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::Bps_to_MiBps,
     },
     PerformanceTest {
         name: "block_qcow2_backing_qcow2_read_MiBps",

@@ -37,6 +37,9 @@ const QCOW2_BACKING_FILE: &str = "/var/tmp/ch-blk-io-test-qcow2-backing.qcow2";
 pub const OVERLAY_WITH_QCOW2_BACKING: &str = "/var/tmp/ch-blk-io-test-overlay-qcow2.qcow2";
 const RAW_BACKING_FILE: &str = "/var/tmp/ch-blk-io-test-raw-backing.raw";
 pub const OVERLAY_WITH_RAW_BACKING: &str = "/var/tmp/ch-blk-io-test-overlay-raw.qcow2";
+pub const QCOW2_UNCOMPRESSED_IMG: &str = "/var/tmp/ch-blk-io-test-uncompressed.qcow2";
+pub const QCOW2_ZLIB_IMG: &str = "/var/tmp/ch-blk-io-test-zlib.qcow2";
+pub const QCOW2_ZSTD_IMG: &str = "/var/tmp/ch-blk-io-test-zstd.qcow2";
 
 pub fn init_tests(overrides: &PerformanceTestOverrides) {
     let mut cmd = format!("dd if=/dev/zero of={BLK_IO_TEST_IMG} bs=1M count=4096");
@@ -78,6 +81,22 @@ pub fn init_tests(overrides: &PerformanceTestOverrides) {
         "qemu-img create -f qcow2 -b {RAW_BACKING_FILE} -F raw {OVERLAY_WITH_RAW_BACKING} 4G"
     );
     assert!(exec_host_command_output(&cmd).status.success());
+
+    // Standalone QCOW2 image with no backing file
+    cmd = format!("qemu-img create -f qcow2 -o preallocation=full {QCOW2_UNCOMPRESSED_IMG} 4G");
+    assert!(exec_host_command_output(&cmd).status.success());
+
+    // Zlib compressed QCOW2 image, convert populates actual compressed clusters
+    cmd = format!(
+        "qemu-img convert -f qcow2 -O qcow2 -c -o compression_type=zlib {QCOW2_UNCOMPRESSED_IMG} {QCOW2_ZLIB_IMG}"
+    );
+    assert!(exec_host_command_output(&cmd).status.success());
+
+    // Zstd compressed QCOW2 image, convert populates actual compressed clusters
+    cmd = format!(
+        "qemu-img convert -f qcow2 -O qcow2 -c -o compression_type=zstd {QCOW2_UNCOMPRESSED_IMG} {QCOW2_ZSTD_IMG}"
+    );
+    assert!(exec_host_command_output(&cmd).status.success());
 }
 
 pub fn cleanup_tests() {
@@ -91,6 +110,12 @@ pub fn cleanup_tests() {
         .unwrap_or_else(|_| panic!("Failed to remove file '{RAW_BACKING_FILE}'."));
     fs::remove_file(OVERLAY_WITH_RAW_BACKING)
         .unwrap_or_else(|_| panic!("Failed to remove file '{OVERLAY_WITH_RAW_BACKING}'."));
+    fs::remove_file(QCOW2_UNCOMPRESSED_IMG)
+        .unwrap_or_else(|_| panic!("Failed to remove file '{QCOW2_UNCOMPRESSED_IMG}'."));
+    fs::remove_file(QCOW2_ZLIB_IMG)
+        .unwrap_or_else(|_| panic!("Failed to remove file '{QCOW2_ZLIB_IMG}'."));
+    fs::remove_file(QCOW2_ZSTD_IMG)
+        .unwrap_or_else(|_| panic!("Failed to remove file '{QCOW2_ZSTD_IMG}'."));
 }
 
 // Performance tests are expected to be executed sequentially, so we can
