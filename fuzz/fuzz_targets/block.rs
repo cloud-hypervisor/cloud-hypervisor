@@ -68,6 +68,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
         None,
         queue_affinity,
         true,
+        false,
     )
     .unwrap();
 
