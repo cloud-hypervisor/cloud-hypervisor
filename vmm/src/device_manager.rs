@@ -677,6 +677,15 @@ pub enum DeviceManagerError {
     /// Disk resizing failed.
     #[error("Disk resize error")]
     DiskResize(#[source] virtio_devices::block::Error),
+
+    /// Disk image type does not match expected type.
+    #[error(
+        "Disk image type does not match expected type: specified = {specified}, detected = {detected}"
+    )]
+    DiskImageTypeMismatch {
+        specified: ImageType,
+        detected: ImageType,
+    },
 }
 
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
@@ -2665,14 +2674,40 @@ impl DeviceManager {
                         .clone(),
                 )
                 .map_err(DeviceManagerError::Disk)?;
-            let image_type =
-                detect_image_type(&mut file).map_err(DeviceManagerError::DetectImageType)?;
 
-            if image_type != ImageType::Qcow2 && disk_cfg.backing_files {
+            let detected_image_type =
+                detect_image_type(&mut file).map_err(DeviceManagerError::DetectImageType)?;
+            if disk_cfg.image_type == ImageType::Unknown {
+                warn!(
+                    "No image_type specified - detected as {detected_image_type}. \
+                    Configuration updated to persist type across reboots and migrations."
+                );
+
+                if detected_image_type != ImageType::Raw {
+                    warn!(
+                        "Non-raw image type detected. In the future it will be necessary \
+                        to specify image_type for non-raw files."
+                    );
+                }
+
+                if detected_image_type == ImageType::Qcow2 && disk_cfg.backing_files {
+                    warn!("QCOW2 image type autodetected. Disabling backing files");
+                    disk_cfg.backing_files = false;
+                }
+
+                disk_cfg.image_type = detected_image_type;
+            } else if disk_cfg.image_type != detected_image_type {
+                return Err(DeviceManagerError::DiskImageTypeMismatch {
+                    specified: disk_cfg.image_type,
+                    detected: detected_image_type,
+                });
+            }
+
+            if disk_cfg.image_type != ImageType::Qcow2 && disk_cfg.backing_files {
                 warn!("Enabling backing_files option only applies for QCOW2 files");
             }
 
-            let image = match image_type {
+            let image = match disk_cfg.image_type {
                 ImageType::FixedVhd => {
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
@@ -2749,6 +2784,7 @@ impl DeviceManager {
                             .map_err(DeviceManagerError::CreateFixedVhdxDiskSync)?,
                     ) as Box<dyn DiskFile>
                 }
+                ImageType::Unknown => unreachable!(),
             };
 
             let rate_limit_group =
