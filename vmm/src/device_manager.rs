@@ -103,9 +103,11 @@ use vm_device::interrupt::{
 };
 use vm_device::{Bus, BusDevice, BusDeviceSync, Resource, UserspaceMapping};
 #[cfg(feature = "ivshmem")]
+use vm_memory::VolatileMemory;
+#[cfg(feature = "ivshmem")]
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::guest_memory::FileOffset;
-use vm_memory::{Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion, VolatileMemory};
+use vm_memory::{Address, GuestAddress, GuestMemoryRegion, GuestUsize, MmapRegion};
 #[cfg(target_arch = "x86_64")]
 use vm_memory::{GuestAddressSpace, GuestMemory};
 use vm_migration::protocol::MemoryRangeTable;
@@ -821,53 +823,6 @@ impl DeviceRelocation for AddressManager {
                         .map_err(|e| {
                             io::Error::other(format!("failed to register ioevent: {e:?}"))
                         })?;
-                }
-            } else {
-                let virtio_dev = virtio_pci_dev.virtio_device();
-                let mut virtio_dev = virtio_dev.lock().unwrap();
-                if let Some(mut shm_regions) = virtio_dev.get_shm_regions()
-                    && shm_regions.addr.raw_value() == old_base
-                {
-                    // SAFETY: guaranteed by MmapRegion invariants
-                    unsafe {
-                        // Remove old mapping
-                        self.vm
-                            .remove_user_memory_region(
-                                shm_regions.mem_slot,
-                                old_base,
-                                shm_regions.mapping.len(),
-                                shm_regions.mapping.as_ptr(),
-                                false,
-                                false,
-                            )
-                            .map_err(|e| {
-                                io::Error::other(format!(
-                                    "failed to remove user memory region: {e:?}"
-                                ))
-                            })?;
-
-                        // Create new mapping by inserting new region to KVM.
-                        self.vm
-                            .create_user_memory_region(
-                                shm_regions.mem_slot,
-                                new_base,
-                                shm_regions.mapping.len(),
-                                shm_regions.mapping.as_ptr(),
-                                false,
-                                false,
-                            )
-                            .map_err(|e| {
-                                io::Error::other(format!(
-                                    "failed to create user memory regions: {e:?}"
-                                ))
-                            })?;
-                    }
-
-                    // Update shared memory regions to reflect the new mapping.
-                    shm_regions.addr = GuestAddress(new_base);
-                    virtio_dev.set_shm_regions(shm_regions).map_err(|e| {
-                        io::Error::other(format!("failed to update shared memory regions: {e:?}"))
-                    })?;
                 }
             }
         }
@@ -3104,7 +3059,6 @@ impl DeviceManager {
                     &fs_cfg.tag,
                     fs_cfg.num_queues,
                     fs_cfg.queue_size,
-                    None,
                     self.seccomp_action.clone(),
                     self.exit_evt
                         .try_clone()
