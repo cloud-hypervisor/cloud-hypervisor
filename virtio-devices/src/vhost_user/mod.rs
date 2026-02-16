@@ -387,7 +387,7 @@ impl VhostUserCommon {
     pub fn add_memory_region(
         &mut self,
         guest_memory: &Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-        region: &Arc<GuestRegionMmap>,
+        region: &GuestRegionMmap,
     ) -> std::result::Result<(), crate::Error> {
         if let Some(vu) = &self.vu {
             if self.acked_protocol_features & VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS.bits()

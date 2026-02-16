@@ -349,7 +349,7 @@ impl VirtioDevice for Fs {
 
     fn add_memory_region(
         &mut self,
-        region: &Arc<GuestRegionMmap>,
+        region: &GuestRegionMmap,
     ) -> std::result::Result<(), crate::Error> {
         self.vu_common.add_memory_region(&self.guest_memory, region)
     }
