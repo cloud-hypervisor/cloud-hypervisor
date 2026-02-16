@@ -3866,7 +3866,7 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .allocate_bars(
-                &self.address_manager.allocator,
+                &mut self.address_manager.allocator.lock().unwrap(),
                 &mut self.pci_segments[segment_id as usize]
                     .mem32_allocator
                     .lock()

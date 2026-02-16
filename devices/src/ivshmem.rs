@@ -217,7 +217,7 @@ impl BusDevice for IvshmemDevice {
 impl PciDevice for IvshmemDevice {
     fn allocate_bars(
         &mut self,
-        _allocator: &Arc<Mutex<SystemAllocator>>,
+        _allocator: &mut SystemAllocator,
         mmio32_allocator: &mut AddressAllocator,
         mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,
