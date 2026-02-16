@@ -2484,9 +2484,9 @@ impl Vm {
         // Loop over the ACPI tables and copy them to the HOB.
 
         for acpi_table in crate::acpi::create_acpi_tables_tdx(
-            &self.device_manager,
-            &self.cpu_manager,
-            &self.memory_manager,
+            &self.device_manager.lock().unwrap(),
+            &self.cpu_manager.lock().unwrap(),
+            &self.memory_manager.lock().unwrap(),
             &self.numa_nodes,
         ) {
             hob.add_acpi_table(&mem, acpi_table.as_slice())
@@ -2546,9 +2546,9 @@ impl Vm {
         let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
         let rsdp_addr = crate::acpi::create_acpi_tables(
             &mem,
-            &self.device_manager,
-            &self.cpu_manager,
-            &self.memory_manager,
+            &self.device_manager.lock().unwrap(),
+            &self.cpu_manager.lock().unwrap(),
+            &self.memory_manager.lock().unwrap(),
             &self.numa_nodes,
             tpm_enabled,
         );
@@ -2613,9 +2613,9 @@ impl Vm {
                 if fw_cfg_config.acpi_tables {
                     let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
                     crate::acpi::create_acpi_tables_for_fw_cfg(
-                        &self.device_manager,
-                        &self.cpu_manager,
-                        &self.memory_manager,
+                        &self.device_manager.lock().unwrap(),
+                        &self.cpu_manager.lock().unwrap(),
+                        &self.memory_manager.lock().unwrap(),
                         &self.numa_nodes,
                         tpm_enabled,
                     )?;
