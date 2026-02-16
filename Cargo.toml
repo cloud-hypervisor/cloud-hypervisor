@@ -45,7 +45,7 @@ resolver = "3"
 
 [workspace.dependencies]
 # rust-vmm crates
-acpi_tables = { git = "https://github.com/rust-vmm/acpi_tables", branch = "main" }
+acpi_tables = "0.2.0"
 kvm-bindings = "0.12.1"
 kvm-ioctls = "0.22.1"
 linux-loader = "0.13.1"
