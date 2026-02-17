@@ -12030,7 +12030,8 @@ mod vfio {
         handle_child_output(r, &output);
     }
 
-    fn test_guest_numa_generic_initiator() {
+    #[test]
+    fn test_nvidia_guest_numa_generic_initiator() {
         // Skip test if VFIO device is not available or not ready
         if !std::path::Path::new(NVIDIA_VFIO_DEVICE).exists() {
             println!("SKIPPED: VFIO device {} not found", NVIDIA_VFIO_DEVICE);
