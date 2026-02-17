@@ -27,8 +27,9 @@ use libc::{EINVAL, EIO};
 use super::qcow_raw_file::QcowRawFile;
 use super::refcount::RefCount;
 use super::util::{
-    l2_entry_compressed_cluster_layout, l2_entry_is_compressed, l2_entry_is_empty,
-    l2_entry_is_zero, l2_entry_make_std, l2_entry_make_zero, l2_entry_std_cluster_addr,
+    div_round_up_u64, l1_entry_make, l2_entry_compressed_cluster_layout, l2_entry_is_compressed,
+    l2_entry_is_empty, l2_entry_is_zero, l2_entry_make_std, l2_entry_make_zero,
+    l2_entry_std_cluster_addr,
 };
 use super::vec_cache::{CacheMap, Cacheable, VecCache};
 use super::{QcowHeader, refcount};
@@ -236,6 +237,16 @@ impl QcowMetadata {
         let mut unref = mem::take(&mut inner.unref_clusters);
         inner.avail_clusters.append(&mut unref);
         Ok(())
+    }
+
+    /// Resizes the QCOW2 image to the given new size. Only grow is
+    /// supported, shrink would require walking all L2 tables to reclaim
+    /// clusters beyond the new size and risks data loss.
+    ///
+    /// Returns an error if the new size is smaller than the current size.
+    pub fn resize(&self, new_size: u64) -> io::Result<()> {
+        let mut inner = self.inner.write().unwrap();
+        inner.resize(new_size)
     }
 
     /// Deallocates a cluster at the given guest address.
@@ -669,6 +680,110 @@ impl QcowState {
         Ok(())
     }
 
+    /// Resizes the image to the given new size. Only grow is supported,
+    /// shrink would require walking all L2 tables to reclaim clusters
+    /// beyond the new size and risks data loss.
+    fn resize(&mut self, new_size: u64) -> io::Result<()> {
+        let current_size = self.header.size;
+
+        if new_size == current_size {
+            return Ok(());
+        }
+
+        if new_size < current_size {
+            return Err(io::Error::other("shrinking QCOW2 images is not supported"));
+        }
+
+        let cluster_size = self.raw_file.cluster_size();
+        let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
+        let new_clusters = div_round_up_u64(new_size, cluster_size);
+        let needed_l1_entries = div_round_up_u64(new_clusters, entries_per_cluster) as u32;
+
+        if needed_l1_entries > self.header.l1_size {
+            self.grow_l1_table(needed_l1_entries)?;
+        }
+
+        self.header.size = new_size;
+
+        self.raw_file.file_mut().rewind()?;
+        self.header
+            .write_to(self.raw_file.file_mut())
+            .map_err(|e| io::Error::other(format!("failed to write header during resize: {e}")))?;
+
+        self.raw_file.file_mut().sync_all()?;
+
+        Ok(())
+    }
+
+    /// Grows the L1 table to accommodate at least the requested number of entries.
+    fn grow_l1_table(&mut self, new_l1_size: u32) -> io::Result<()> {
+        let old_l1_size = self.header.l1_size;
+        let old_l1_offset = self.header.l1_table_offset;
+        let cluster_size = self.raw_file.cluster_size();
+
+        let new_l1_bytes = new_l1_size as u64 * size_of::<u64>() as u64;
+        let new_l1_clusters = div_round_up_u64(new_l1_bytes, cluster_size);
+
+        // Allocate contiguous clusters at file end for new L1 table
+        let file_size = self.raw_file.file_mut().seek(io::SeekFrom::End(0))?;
+        let new_l1_offset = self.raw_file.cluster_address(file_size + cluster_size - 1);
+
+        let new_file_end = new_l1_offset + new_l1_clusters * cluster_size;
+        self.raw_file.file_mut().set_len(new_file_end)?;
+
+        // Set refcounts for the contiguous range
+        for i in 0..new_l1_clusters {
+            self.set_cluster_refcount_track_freed(new_l1_offset + i * cluster_size, 1)?;
+        }
+
+        let mut new_l1_data = vec![0u64; new_l1_size as usize];
+        let old_entries = self.l1_table.get_values();
+        new_l1_data[..old_entries.len()].copy_from_slice(old_entries);
+
+        for l2_addr in new_l1_data.iter_mut() {
+            if *l2_addr != 0 {
+                let refcount = self
+                    .refcounts
+                    .get_cluster_refcount(&mut self.raw_file, *l2_addr)
+                    .map_err(|e| {
+                        io::Error::other(format!("failed to get refcount during resize: {e}"))
+                    })?;
+                *l2_addr = l1_entry_make(*l2_addr, refcount == 1);
+            }
+        }
+
+        // Write the new L1 table to disk
+        self.raw_file
+            .write_pointer_table_direct(new_l1_offset, new_l1_data.iter())?;
+
+        self.raw_file.file_mut().sync_all()?;
+
+        self.header.l1_size = new_l1_size;
+        self.header.l1_table_offset = new_l1_offset;
+
+        self.raw_file.file_mut().rewind()?;
+        self.header
+            .write_to(self.raw_file.file_mut())
+            .map_err(|e| io::Error::other(format!("failed to write header during resize: {e}")))?;
+
+        self.raw_file.file_mut().sync_all()?;
+
+        // Free old L1 table clusters
+        let old_l1_bytes = old_l1_size as u64 * size_of::<u64>() as u64;
+        let old_l1_clusters = div_round_up_u64(old_l1_bytes, cluster_size);
+        for i in 0..old_l1_clusters {
+            let cluster_addr = old_l1_offset + i * cluster_size;
+            // Best effort: the old L1 clusters are no longer reachable,
+            // so a refcount update failure just leaks space.
+            let _ = self.set_cluster_refcount(cluster_addr, 0);
+        }
+
+        // Update L1 table cache
+        self.l1_table.extend(new_l1_size as usize);
+
+        Ok(())
+    }
+
     /// Deallocates a cluster at the given guest address.
     ///
     /// If sparse is true, fully deallocates and returns the host offset if
@@ -815,8 +930,6 @@ impl QcowState {
 
     /// Flushes all dirty metadata to disk.
     pub(super) fn sync_caches(&mut self) -> io::Result<()> {
-        use super::l1_entry_make;
-
         // Write out all dirty L2 tables.
         for (l1_index, l2_table) in self.l2_cache.iter_mut().filter(|(_k, v)| v.dirty()) {
             let addr = self.l1_table[*l1_index];
