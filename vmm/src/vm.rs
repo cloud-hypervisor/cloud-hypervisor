@@ -14,6 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 #[cfg(feature = "fw_cfg")]
 use std::ffi;
+use std::fmt::{Display, Formatter};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
 use std::num::Wrapping;
@@ -22,7 +23,7 @@ use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
-use std::{any, cmp, result, str, thread};
+use std::{any, cmp, fmt, result, str, thread};
 
 use anyhow::{Context, anyhow};
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
@@ -558,6 +559,26 @@ pub struct Vm {
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     stop_on_boot: bool,
     load_payload_handle: Option<thread::JoinHandle<Result<EntryPoint>>>,
+    /// Lifecycle event to replay after a restore/migration.
+    postponed_lifecycle_event: Option<PostponedLifecycleEvent>,
+}
+
+/// Guest induced events that can/must be postponed, e.g., during migration.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PostponedLifecycleEvent {
+    /// VM reboot aka. [`crate::EpollDispatch::Reset`].
+    Reboot,
+    /// VM shutdown aka. [`crate::EpollDispatch::GuestExit`].
+    Shutdown,
+}
+
+impl Display for PostponedLifecycleEvent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            PostponedLifecycleEvent::Reboot => write!(f, "Reboot (Reset)"),
+            PostponedLifecycleEvent::Shutdown => write!(f, "Shutdown (GuestExit)"),
+        }
+    }
 }
 
 impl Vm {
@@ -721,6 +742,15 @@ impl Vm {
         } else {
             VmState::Created
         };
+        let postponed_lifecycle_event = snapshot
+            .as_ref()
+            .map(|snapshot| {
+                get_vm_snapshot(snapshot)
+                    .map(|vm_snapshot| vm_snapshot.postponed_lifecycle_event)
+                    .map_err(Error::Restore)
+            })
+            .transpose()?
+            .flatten();
 
         Ok(Vm {
             #[cfg(feature = "tdx")]
@@ -740,6 +770,7 @@ impl Vm {
             hypervisor,
             stop_on_boot,
             load_payload_handle,
+            postponed_lifecycle_event,
         })
     }
 
@@ -1333,6 +1364,18 @@ impl Vm {
         }
 
         Ok(numa_nodes)
+    }
+
+    pub fn set_postponed_lifecycle_event(&mut self, event: PostponedLifecycleEvent) {
+        self.postponed_lifecycle_event = Some(event);
+    }
+
+    pub fn take_postponed_lifecycle_event(&mut self) -> Option<PostponedLifecycleEvent> {
+        self.postponed_lifecycle_event.take()
+    }
+
+    pub fn has_postponed_lifecycle_event(&self) -> bool {
+        self.postponed_lifecycle_event.is_some()
     }
 
     #[expect(clippy::too_many_arguments)]
@@ -3314,6 +3357,8 @@ impl Pausable for Vm {
 
 #[derive(Serialize, Deserialize)]
 pub struct VmSnapshot {
+    #[serde(default)]
+    pub postponed_lifecycle_event: Option<PostponedLifecycleEvent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clock: Option<hypervisor::ClockState>,
     #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -3375,6 +3420,7 @@ impl Snapshottable for Vm {
         };
 
         let vm_snapshot_state = VmSnapshot {
+            postponed_lifecycle_event: self.take_postponed_lifecycle_event(),
             clock: self.saved_clock.map(|saved| saved.state),
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             common_cpuid,
