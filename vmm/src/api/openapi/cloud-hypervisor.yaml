@@ -703,6 +703,9 @@ components:
           default: false
         max_phys_bits:
           type: integer
+        nested:
+          type: boolean
+          default: true
         affinity:
           type: array
           items:
