@@ -1243,6 +1243,8 @@ impl Vm {
                     }
                 }
 
+                node.device_id = config.device_id.clone();
+
                 numa_nodes.insert(config.guest_numa_id, node);
             }
         }
