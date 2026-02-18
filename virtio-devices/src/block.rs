@@ -161,6 +161,7 @@ struct BlockEpollHandler {
     host_cpus: Option<Vec<usize>>,
     acked_features: u64,
     disable_sector0_writes: bool,
+    alignment: u64,
 }
 
 fn has_feature(features: u64, feature_flag: u64) -> bool {
@@ -265,6 +266,7 @@ impl BlockEpollHandler {
                 &self.serial,
                 self.disable_sector0_writes,
                 desc_chain.head_index() as u64,
+                self.alignment,
             );
 
             if let Ok(ExecuteAsync {
@@ -662,6 +664,7 @@ pub struct Block {
     serial: Vec<u8>,
     queue_affinity: BTreeMap<u16, Vec<usize>>,
     disable_sector0_writes: bool,
+    alignment: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -693,6 +696,12 @@ impl Block {
         sparse: bool,
         disable_sector0_writes: bool,
     ) -> io::Result<Self> {
+        let topology = disk_image.topology();
+        info!("Disk topology: {topology:?}");
+        // VMM, Host I/O memory alignment needs
+        let alignment = topology.logical_block_size;
+        assert!(alignment.is_power_of_two());
+
         let (disk_nsectors, avail_features, acked_features, config, paused) =
             if let Some(state) = state {
                 info!("Restoring virtio-block {id}");
@@ -743,9 +752,6 @@ impl Block {
                 if read_only {
                     avail_features |= 1u64 << VIRTIO_BLK_F_RO;
                 }
-
-                let topology = disk_image.topology();
-                info!("Disk topology: {topology:?}");
 
                 let logical_block_size = if topology.logical_block_size > 512 {
                     topology.logical_block_size
@@ -807,6 +813,7 @@ impl Block {
             serial,
             queue_affinity,
             disable_sector0_writes,
+            alignment,
         })
     }
 
@@ -1059,6 +1066,7 @@ impl VirtioDevice for Block {
                 host_cpus: self.queue_affinity.get(&queue_idx).cloned(),
                 acked_features: self.common.acked_features,
                 disable_sector0_writes: self.disable_sector0_writes,
+                alignment: self.alignment,
             };
 
             let paused = self.common.paused.clone();

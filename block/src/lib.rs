@@ -424,6 +424,7 @@ impl Request {
         Ok(len)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn execute_async<B: Bitmap + 'static>(
         &mut self,
         mem: &vm_memory::GuestMemoryMmap<B>,
@@ -432,6 +433,7 @@ impl Request {
         serial: &[u8],
         disable_sector0_writes: bool,
         user_data: u64,
+        alignment: u64,
     ) -> result::Result<ExecuteAsync, ExecuteError> {
         let sector = self.sector;
         let request_type = self.request_type;
@@ -466,14 +468,17 @@ impl Request {
             assert!(origin_ptr.len() >= data_len);
             let origin_ptr = origin_ptr.ptr_guard();
 
-            // Verify the buffer alignment.
+            // We are in the VMM <-> Host Kernel async I/O path
+            // Backend device on the host when opened with O_DIRECT requires
+            // buffer addresses to be aligned to logical block size
+            // made visible to the guest virtio-blk driver through pci config
             // In case it's not properly aligned, an intermediate buffer is
             // created with the correct alignment, and a copy from/to the
             // origin buffer is performed, depending on the type of operation.
-            let iov_base = if (origin_ptr.as_ptr() as u64).is_multiple_of(SECTOR_SIZE) {
+            let iov_base = if (origin_ptr.as_ptr() as u64).is_multiple_of(alignment) {
                 origin_ptr.as_ptr() as *mut libc::c_void
             } else {
-                let layout = Layout::from_size_align(data_len, SECTOR_SIZE as usize).unwrap();
+                let layout = Layout::from_size_align(data_len, alignment as usize).unwrap();
                 // SAFETY: layout has non-zero size
                 let aligned_ptr = unsafe { alloc_zeroed(layout) };
                 if aligned_ptr.is_null() {
