@@ -16,7 +16,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
-use crate::{DiskTopology, probe_sparse_support};
+use crate::{DiskTopology, SECTOR_SIZE, probe_sparse_support};
 
 pub struct RawFileDiskAio {
     file: File,
@@ -43,10 +43,12 @@ impl DiskFile for RawFileDiskAio {
     }
 
     fn new_async_io(&self, ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
-        Ok(Box::new(
-            RawFileAsyncAio::new(self.file.as_raw_fd(), ring_depth)
-                .map_err(DiskFileError::NewAsyncIo)?,
-        ) as Box<dyn AsyncIo>)
+        let mut raw = RawFileAsyncAio::new(self.file.as_raw_fd(), ring_depth)
+            .map_err(DiskFileError::NewAsyncIo)?;
+        raw.alignment = DiskTopology::probe(&self.file)
+            .map(|t| t.logical_block_size)
+            .unwrap_or(SECTOR_SIZE);
+        Ok(Box::new(raw) as Box<dyn AsyncIo>)
     }
 
     fn topology(&mut self) -> DiskTopology {
@@ -71,6 +73,7 @@ pub struct RawFileAsyncAio {
     fd: RawFd,
     ctx: aio::IoContext,
     eventfd: EventFd,
+    alignment: u64,
 }
 
 impl RawFileAsyncAio {
@@ -78,13 +81,22 @@ impl RawFileAsyncAio {
         let eventfd = EventFd::new(libc::EFD_NONBLOCK)?;
         let ctx = aio::IoContext::new(queue_depth)?;
 
-        Ok(RawFileAsyncAio { fd, ctx, eventfd })
+        Ok(RawFileAsyncAio {
+            fd,
+            ctx,
+            eventfd,
+            alignment: SECTOR_SIZE,
+        })
     }
 }
 
 impl AsyncIo for RawFileAsyncAio {
     fn notifier(&self) -> &EventFd {
         &self.eventfd
+    }
+
+    fn alignment(&self) -> u64 {
+        self.alignment
     }
 
     fn read_vectored(

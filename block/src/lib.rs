@@ -436,6 +436,7 @@ impl Request {
         let sector = self.sector;
         let request_type = self.request_type;
         let offset = (sector << SECTOR_SHIFT) as libc::off_t;
+        let alignment = disk_image.alignment();
 
         let mut iovecs: SmallVec<[libc::iovec; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
             SmallVec::with_capacity(self.data_descriptors.len());
@@ -466,14 +467,15 @@ impl Request {
             assert!(origin_ptr.len() >= data_len);
             let origin_ptr = origin_ptr.ptr_guard();
 
-            // Verify the buffer alignment.
-            // In case it's not properly aligned, an intermediate buffer is
-            // created with the correct alignment, and a copy from/to the
-            // origin buffer is performed, depending on the type of operation.
-            let iov_base = if (origin_ptr.as_ptr() as u64).is_multiple_of(SECTOR_SIZE) {
+            // O_DIRECT requires buffer addresses to be aligned to the
+            // backend device's logical block size. In case it's not properly
+            // aligned, an intermediate buffer is created with the correct
+            // alignment, and a copy from/to the origin buffer is performed,
+            // depending on the type of operation.
+            let iov_base = if (origin_ptr.as_ptr() as u64).is_multiple_of(alignment) {
                 origin_ptr.as_ptr() as *mut libc::c_void
             } else {
-                let layout = Layout::from_size_align(data_len, SECTOR_SIZE as usize).unwrap();
+                let layout = Layout::from_size_align(data_len, alignment as usize).unwrap();
                 // SAFETY: layout has non-zero size
                 let aligned_ptr = unsafe { alloc_zeroed(layout) };
                 if aligned_ptr.is_null() {

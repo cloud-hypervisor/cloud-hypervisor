@@ -13,7 +13,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
-use crate::{DiskTopology, probe_sparse_support};
+use crate::{DiskTopology, SECTOR_SIZE, probe_sparse_support};
 
 pub struct RawFileDiskSync {
     file: File,
@@ -40,7 +40,11 @@ impl DiskFile for RawFileDiskSync {
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
-        Ok(Box::new(RawFileSync::new(self.file.as_raw_fd())) as Box<dyn AsyncIo>)
+        let mut raw = RawFileSync::new(self.file.as_raw_fd());
+        raw.alignment = DiskTopology::probe(&self.file)
+            .map(|t| t.logical_block_size)
+            .unwrap_or(SECTOR_SIZE);
+        Ok(Box::new(raw) as Box<dyn AsyncIo>)
     }
 
     fn topology(&mut self) -> DiskTopology {
@@ -65,6 +69,7 @@ pub struct RawFileSync {
     fd: RawFd,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
+    alignment: u64,
 }
 
 impl RawFileSync {
@@ -73,6 +78,7 @@ impl RawFileSync {
             fd,
             eventfd: EventFd::new(libc::EFD_NONBLOCK).expect("Failed creating EventFd for RawFile"),
             completion_list: VecDeque::new(),
+            alignment: SECTOR_SIZE,
         }
     }
 }
@@ -80,6 +86,10 @@ impl RawFileSync {
 impl AsyncIo for RawFileSync {
     fn notifier(&self) -> &EventFd {
         &self.eventfd
+    }
+
+    fn alignment(&self) -> u64 {
+        self.alignment
     }
 
     fn read_vectored(
