@@ -8,7 +8,7 @@ use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::{BatchRequest, DiskTopology};
+use crate::{BatchRequest, DiskTopology, SECTOR_SIZE};
 
 #[derive(Error, Debug)]
 pub enum DiskFileError {
@@ -144,5 +144,8 @@ pub trait AsyncIo: Send {
     }
     fn submit_batch_requests(&mut self, _batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
         Ok(())
+    }
+    fn alignment(&self) -> u64 {
+        SECTOR_SIZE
     }
 }
