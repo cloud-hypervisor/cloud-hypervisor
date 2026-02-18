@@ -40,6 +40,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/VmInfo"
+        404:
+          description: The VM instance has not been created yet.
 
   /vm.counters:
     get:
