@@ -1859,6 +1859,11 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             .collect())
     }
 
+    #[cfg(target_arch = "x86_64")]
+    fn get_msr_index_list(&self) -> hypervisor::Result<Vec<u32>> {
+        self.get_msr_list().map(|list| list.as_slice().to_vec())
+    }
+
     #[cfg(target_arch = "aarch64")]
     ///
     /// Retrieve AArch64 host maximum IPA size supported by KVM.

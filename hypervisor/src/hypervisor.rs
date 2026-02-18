@@ -141,6 +141,11 @@ pub trait Hypervisor: Send + Sync {
     /// Get feature MSRs supported by the hardware and hypervisor
     ///
     fn get_feature_msrs(&self) -> Result<Vec<MsrEntry>>;
+    #[cfg(target_arch = "x86_64")]
+    ///
+    /// Get the MSR indices supported by the hardware and hypervisor
+    ///
+    fn get_msr_index_list(&self) -> Result<Vec<u32>>;
     ///
     /// Check particular extensions if any
     ///
