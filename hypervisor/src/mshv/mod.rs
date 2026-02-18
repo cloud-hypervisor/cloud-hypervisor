@@ -399,6 +399,12 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         }
         Ok(cpuid)
     }
+
+    #[cfg(target_arch = "x86_64")]
+    fn get_msr_index_list(&self) -> hypervisor::Result<Vec<u32>> {
+        unimplemented!()
+    }
+
     #[cfg(target_arch = "x86_64")]
     fn get_feature_msrs(&self) -> hypervisor::Result<Vec<MsrEntry>> {
         unimplemented!()
