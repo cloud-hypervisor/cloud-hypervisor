@@ -394,6 +394,14 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         }
         Ok(cpuid)
     }
+
+    #[cfg(target_arch = "x86_64")]
+    fn get_msr_index_list(&self) -> hypervisor::Result<Vec<u32>> {
+        self.mshv
+            .get_msr_index_list()
+            .map_err(|e| crate::HypervisorError::GetMsrList(e.into()))
+    }
+
     #[cfg(target_arch = "x86_64")]
     fn get_msr_based_features(&self) -> hypervisor::Result<Vec<MsrEntry>> {
         // TODO: This is relevant for CPU profiles which will initially only be available

@@ -1732,6 +1732,19 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             .collect())
     }
 
+    #[cfg(target_arch = "x86_64")]
+    fn get_msr_index_list(&self) -> hypervisor::Result<Vec<u32>> {
+        let list = self.get_msr_list()?;
+        let num_msrs = list.as_fam_struct_ref().nmsrs;
+        let actual_num_msrs = list.as_slice().len();
+        assert_eq!(
+            actual_num_msrs, num_msrs as usize,
+            "BUG: the length of the MSR Index LIST FAM wrapper does not coincide with
+            the nmrs field value "
+        );
+        Ok(list.as_slice().to_vec())
+    }
+
     #[cfg(target_arch = "aarch64")]
     ///
     /// Retrieve AArch64 host maximum IPA size supported by KVM.
