@@ -19,8 +19,7 @@ use mshv_bindings::*;
 #[cfg(target_arch = "x86_64")]
 use mshv_ioctls::InterruptRequest;
 use mshv_ioctls::{
-    Mshv, NoDatamatch, VcpuFd, VmFd, VmType, make_default_partition_create_arg,
-    make_default_synthetic_features_mask, set_registers_64,
+    Mshv, NoDatamatch, VcpuFd, VmFd, VmType, make_default_synthetic_features_mask, set_registers_64,
 };
 use vfio_ioctls::VfioDeviceFd;
 use vm::DataMatch;
@@ -286,7 +285,8 @@ impl hypervisor::Hypervisor for MshvHypervisor {
                 VmType::Normal
             };
         }
-        let mut create_args = make_default_partition_create_arg(mshv_vm_type);
+
+        let mut create_args = self.mshv.make_default_partition_create_arg(mshv_vm_type);
         let mut disable_proc_features = hv_partition_processor_features::default();
         // SAFETY: Accessing a union element from bindgen generated bindings.
         unsafe {
