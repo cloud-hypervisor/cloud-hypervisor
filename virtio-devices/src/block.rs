@@ -263,6 +263,7 @@ impl BlockEpollHandler {
                 self.disk_nsectors.load(Ordering::SeqCst),
                 self.disk_image.as_mut(),
                 &self.serial,
+                self.disable_sector0_writes,
                 desc_chain.head_index() as u64,
             );
 
