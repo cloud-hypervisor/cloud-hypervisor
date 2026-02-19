@@ -430,6 +430,7 @@ impl Request {
         disk_nsectors: u64,
         disk_image: &mut dyn AsyncIo,
         serial: &[u8],
+        disable_sector0_writes: bool,
         user_data: u64,
     ) -> result::Result<ExecuteAsync, ExecuteError> {
         let sector = self.sector;
@@ -586,6 +587,11 @@ impl Request {
                     .map_err(ExecuteError::Read)?;
 
                 let discard_sector = u64::from_le_bytes(discard_sector);
+
+                if discard_sector == 0 && disable_sector0_writes {
+                    return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+                }
+
                 let discard_num_sectors = u32::from_le_bytes(discard_num_sectors);
 
                 let discard_offset = discard_sector * SECTOR_SIZE;
@@ -607,6 +613,7 @@ impl Request {
                 }
 
                 let mut wz_sector = [0u8; 8];
+
                 let mut wz_num_sectors = [0u8; 4];
                 mem.read_slice(&mut wz_sector, data_addr)
                     .map_err(ExecuteError::Read)?;
@@ -617,6 +624,9 @@ impl Request {
                 let wz_num_sectors = u32::from_le_bytes(wz_num_sectors);
 
                 let wz_offset = wz_sector * SECTOR_SIZE;
+                if wz_offset == 0 && disable_sector0_writes {
+                    return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+                }
                 let wz_length = (wz_num_sectors as u64) * SECTOR_SIZE;
 
                 disk_image
