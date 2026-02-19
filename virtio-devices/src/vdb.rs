@@ -26,9 +26,10 @@ use std::sync::{Arc, Barrier};
 
 use anyhow::anyhow;
 use event_monitor::event;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use seccompiler::SeccompAction;
 use thiserror::Error;
+use vhost::vhost_user::{BackendListener, BackendReqHandler, VhostUserProtocolFeatures};
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, Le32};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -112,6 +113,8 @@ const NUM_QUEUES: usize = 2;
 const FRONT2BACK_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 // Deflate virtio queue event.
 const BACK2FRONT_QUEUE_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 2;
+// vhost-user socket event
+const VHOST_USER_SOCKET_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -133,6 +136,228 @@ pub enum Error {
     QueueIterator(#[source] virtio_queue::Error),
     #[error("Too large max queues")]
     TooLargeMaxQueues,
+    #[error("Cannot accept connection")]
+    Accept(#[source] vhost::vhost_user::Error),
+}
+
+impl From<vhost::vhost_user::Error> for Error {
+    fn from(value: vhost::vhost_user::Error) -> Self {
+        Error::Accept(value)
+    }
+}
+
+pub struct Backend {}
+impl vhost::vhost_user::VhostUserBackendReqHandler for Backend {
+    fn set_owner(&self) -> vhost::vhost_user::Result<()> {
+        debug!("Session start");
+        Ok(())
+    }
+
+    fn reset_owner(&self) -> vhost::vhost_user::Result<()> {
+        warn!("Frontend used deprecated RESET_OWNER, ignoring");
+        Ok(())
+    }
+
+    fn reset_device(&self) -> vhost::vhost_user::Result<()> {
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::DEVICE_STATE,
+        ))
+    }
+
+    fn get_features(&self) -> vhost::vhost_user::Result<u64> {
+        todo!("Getting features")
+    }
+
+    fn set_features(&self, _features: u64) -> vhost::vhost_user::Result<()> {
+        todo!("Setting features")
+    }
+
+    fn set_mem_table(
+        &self,
+        _ctx: &[vhost::vhost_user::message::VhostUserMemoryRegion],
+        _files: Vec<std::fs::File>,
+    ) -> vhost::vhost_user::Result<()> {
+        todo!("Setting memory table")
+    }
+
+    fn set_vring_num(&self, _index: u32, _num: u32) -> vhost::vhost_user::Result<()> {
+        todo!("setting vring number")
+    }
+
+    fn set_vring_addr(
+        &self,
+        _index: u32,
+        _flags: vhost::vhost_user::message::VhostUserVringAddrFlags,
+        _descriptor: u64,
+        _used: u64,
+        _available: u64,
+        _log: u64,
+    ) -> vhost::vhost_user::Result<()> {
+        todo!("setting vring address")
+    }
+
+    fn set_vring_base(&self, _index: u32, _base: u32) -> vhost::vhost_user::Result<()> {
+        todo!("setting vring base")
+    }
+
+    fn get_vring_base(
+        &self,
+        _index: u32,
+    ) -> vhost::vhost_user::Result<vhost::vhost_user::message::VhostUserVringState> {
+        todo!("getting vring base")
+    }
+
+    fn set_vring_kick(
+        &self,
+        _index: u8,
+        _fd: Option<std::fs::File>,
+    ) -> vhost::vhost_user::Result<()> {
+        todo!("Setting vring kick fd")
+    }
+
+    fn set_vring_call(
+        &self,
+        _index: u8,
+        _fd: Option<std::fs::File>,
+    ) -> vhost::vhost_user::Result<()> {
+        todo!("setting vring call fd")
+    }
+
+    fn set_vring_err(
+        &self,
+        _index: u8,
+        _fd: Option<std::fs::File>,
+    ) -> vhost::vhost_user::Result<()> {
+        todo!("setting vring error fd")
+    }
+
+    fn get_protocol_features(
+        &self,
+    ) -> vhost::vhost_user::Result<vhost::vhost_user::VhostUserProtocolFeatures> {
+        todo!("getting protocol features")
+    }
+
+    fn set_protocol_features(&self, _features: u64) -> vhost::vhost_user::Result<()> {
+        todo!("setting protocol features")
+    }
+
+    fn get_queue_num(&self) -> vhost::vhost_user::Result<u64> {
+        todo!("getting number of queues")
+    }
+
+    fn set_vring_enable(&self, _index: u32, _enable: bool) -> vhost::vhost_user::Result<()> {
+        todo!("vring handling")
+    }
+
+    fn get_config(
+        &self,
+        _offset: u32,
+        _size: u32,
+        _flags: vhost::vhost_user::message::VhostUserConfigFlags,
+    ) -> vhost::vhost_user::Result<Vec<u8>> {
+        todo!("configuration space")
+    }
+
+    fn set_config(
+        &self,
+        _offset: u32,
+        _buf: &[u8],
+        _flags: vhost::vhost_user::message::VhostUserConfigFlags,
+    ) -> vhost::vhost_user::Result<()> {
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::CONFIG,
+        ))
+    }
+
+    fn set_gpu_socket(
+        &self,
+        _gpu_backend: vhost::vhost_user::GpuBackend,
+    ) -> vhost::vhost_user::Result<()> {
+        Err(vhost::vhost_user::Error::InvalidOperation(
+            "GPU display not supported",
+        ))
+    }
+
+    fn get_shared_object(
+        &self,
+        _uuid: vhost::vhost_user::message::VhostUserSharedMsg,
+    ) -> vhost::vhost_user::Result<std::fs::File> {
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::SHARED_OBJECT,
+        ))
+    }
+
+    fn get_inflight_fd(
+        &self,
+        _inflight: &vhost::vhost_user::message::VhostUserInflight,
+    ) -> vhost::vhost_user::Result<(vhost::vhost_user::message::VhostUserInflight, std::fs::File)>
+    {
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::INFLIGHT_SHMFD,
+        ))
+    }
+
+    fn set_inflight_fd(
+        &self,
+        _inflight: &vhost::vhost_user::message::VhostUserInflight,
+        _file: std::fs::File,
+    ) -> vhost::vhost_user::Result<()> {
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::INFLIGHT_SHMFD,
+        ))
+    }
+
+    fn get_max_mem_slots(&self) -> vhost::vhost_user::Result<u64> {
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS,
+        ))
+    }
+
+    fn add_mem_region(
+        &self,
+        _region: &vhost::vhost_user::message::VhostUserSingleMemoryRegion,
+        _fd: std::fs::File,
+    ) -> vhost::vhost_user::Result<()> {
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS,
+        ))
+    }
+
+    fn remove_mem_region(
+        &self,
+        _region: &vhost::vhost_user::message::VhostUserSingleMemoryRegion,
+    ) -> vhost::vhost_user::Result<()> {
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS,
+        ))
+    }
+
+    fn set_device_state_fd(
+        &self,
+        _direction: vhost::vhost_user::message::VhostTransferStateDirection,
+        _phase: vhost::vhost_user::message::VhostTransferStatePhase,
+        _fd: std::fs::File,
+    ) -> vhost::vhost_user::Result<Option<std::fs::File>> {
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::DEVICE_STATE,
+        ))
+    }
+
+    fn check_device_state(&self) -> vhost::vhost_user::Result<()> {
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::DEVICE_STATE,
+        ))
+    }
+
+    fn set_log_base(
+        &self,
+        _log: &vhost::vhost_user::message::VhostUserLog,
+        _file: std::fs::File,
+    ) -> vhost::vhost_user::Result<()> {
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::LOG_SHMFD,
+        ))
+    }
 }
 
 struct VdbEpollHandler {
@@ -144,6 +369,9 @@ struct VdbEpollHandler {
     back2front_queue_evt: EventFd,
     kill_evt: EventFd,
     pause_evt: EventFd,
+    #[allow(dead_code)]
+    backend: Arc<Backend>,
+    connection: Option<BackendReqHandler<Backend>>,
 }
 
 impl VdbEpollHandler {
@@ -191,11 +419,28 @@ impl VdbEpollHandler {
         }
     }
 
+    fn process_vhost_user_queue(&mut self) -> result::Result<(), Error> {
+        self.connection
+            .as_mut()
+            .unwrap()
+            .handle_request()
+            .map_err(From::from)
+    }
+
     fn run(
         &mut self,
         paused: &AtomicBool,
         paused_sync: &Barrier,
+        mut listener: BackendListener<Backend>,
     ) -> result::Result<(), EpollHelperError> {
+        let connection = listener
+            .accept()
+            .map_err(|t| EpollHelperError::IoError(std::io::Error::other(t)))?
+            .expect("TODO: nonblocking socket");
+        // TODO: retry if socket is nonblocking (via poll(2))
+        // TODO: accept incoming connection (synchronously!)
+        // TODO: handle incoming messages
+        // TODO: send interrupts
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
         helper.add_event(
             self.front2back_queue_evt.as_raw_fd(),
@@ -205,6 +450,8 @@ impl VdbEpollHandler {
             self.back2front_queue_evt.as_raw_fd(),
             BACK2FRONT_QUEUE_EVENT,
         )?;
+        helper.add_event(connection.as_raw_fd(), VHOST_USER_SOCKET_EVENT)?;
+        self.connection = Some(connection);
         helper.run(paused, paused_sync, self)?;
         Ok(())
     }
@@ -242,6 +489,13 @@ impl EpollHelperHandler for VdbEpollHandler {
                     ))
                 })?;
             }
+            VHOST_USER_SOCKET_EVENT => {
+                self.process_vhost_user_queue().map_err(|e| {
+                    EpollHelperError::HandleEvent(anyhow!(
+                        "Failed to handle vhost-user message: {e:?}"
+                    ))
+                })?;
+            }
             _ => {
                 return Err(EpollHelperError::HandleEvent(anyhow!(
                     "Unknown event for virtio-vdb"
@@ -276,10 +530,13 @@ pub struct Vdb {
     exit_evt: EventFd,
     interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     max_queues: u8,
+    backend: Arc<Backend>,
+    listener: Option<BackendListener<Backend>>,
 }
 
 impl Vdb {
     // Create a new virtio-vdb.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         seccomp_action: SeccompAction,
@@ -287,6 +544,8 @@ impl Vdb {
         state: Option<VdbState>,
         max_queues: u32,
         uuid: [u8; 16],
+        backend: Backend,
+        listener: BackendListener<Backend>,
     ) -> io::Result<Self> {
         if max_queues > 127 {
             warn!("Cannot support {max_queues} queues, limit is 127");
@@ -339,6 +598,8 @@ impl Vdb {
             exit_evt,
             interrupt_cb: None,
             max_queues: max_queues as _,
+            backend: Arc::new(backend),
+            listener: Some(listener),
         })
     }
 
@@ -418,7 +679,6 @@ impl VirtioDevice for Vdb {
         let (_, back2front_queue, back2front_queue_evt) = queues.remove(0);
 
         self.interrupt_cb = Some(interrupt_cb.clone());
-
         let mut handler = VdbEpollHandler {
             mem,
             back2front_queue,
@@ -428,11 +688,14 @@ impl VirtioDevice for Vdb {
             back2front_queue_evt,
             kill_evt,
             pause_evt,
+            backend: self.backend.clone(),
+            connection: None,
         };
 
         let paused = self.common.paused.clone();
         let paused_sync = self.common.paused_sync.clone();
         let mut epoll_threads = Vec::new();
+        let listener = self.listener.take().expect("double activate");
 
         spawn_virtio_thread(
             &self.id,
@@ -440,7 +703,7 @@ impl VirtioDevice for Vdb {
             Thread::VirtioVdb,
             &mut epoll_threads,
             &self.exit_evt,
-            move || handler.run(&paused, paused_sync.as_ref().unwrap()),
+            move || handler.run(&paused, paused_sync.as_ref().unwrap(), listener),
         )?;
         self.common.epoll_threads = Some(epoll_threads);
 
