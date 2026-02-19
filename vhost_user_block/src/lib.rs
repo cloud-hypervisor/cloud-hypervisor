@@ -224,9 +224,9 @@ impl VhostUserBlkBackend {
         let image_type = qcow::detect_image_type(&mut raw_img).unwrap();
         let image = match image_type {
             ImageType::Raw => Arc::new(Mutex::new(raw_img)) as Arc<Mutex<dyn DiskFile>>,
-            ImageType::Qcow2 => {
-                Arc::new(Mutex::new(QcowFile::from(raw_img).unwrap())) as Arc<Mutex<dyn DiskFile>>
-            }
+            ImageType::Qcow2 => Arc::new(Mutex::new(
+                QcowFile::from_with_nesting_depth(raw_img, 0).unwrap(),
+            )) as Arc<Mutex<dyn DiskFile>>,
         };
 
         let nsectors = (image.lock().unwrap().seek(SeekFrom::End(0)).unwrap()) / SECTOR_SIZE;
