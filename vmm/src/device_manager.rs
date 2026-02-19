@@ -2001,8 +2001,8 @@ impl DeviceManager {
                 mem_below_4g,
                 mem_above_4g,
                 reset_evt,
-                Some(vcpus_kill_signalled),
-                Some(vcpus_pause_signalled.clone()),
+                vcpus_kill_signalled,
+                vcpus_pause_signalled.clone(),
             )));
 
             self.bus_devices
