@@ -2349,6 +2349,11 @@ impl CpuManager {
         &self.vcpus_kill_signalled
     }
 
+    pub(crate) fn vcpus_pause_signalled(&self) -> &Arc<AtomicBool> {
+        &self.vcpus_pause_signalled
+    }
+
+    #[cfg(feature = "igvm")]
     #[cfg(all(feature = "igvm", feature = "mshv"))]
     pub(crate) fn get_cpuid_leaf(
         &self,
