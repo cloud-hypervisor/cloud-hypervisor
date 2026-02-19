@@ -229,7 +229,7 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
-    use crate::qcow::{QcowFile, RawFile};
+    use crate::qcow::{QcowFile, QcowHeader, RawFile};
 
     #[test]
     fn test_qcow_async_punch_hole_completion() {
@@ -481,5 +481,24 @@ mod unit_tests {
             read_buf.iter().all(|&b| b == 0),
             "After punch_hole via new_async_io, read should return zeros"
         );
+    }
+
+    #[test]
+    fn backing_files_disabled_error() {
+        let header =
+            QcowHeader::create_for_size_and_path(3, 0x10_0000, Some("/path/to/backing/file"))
+                .expect("Failed to create header.");
+        let temp_file = TempFile::new().unwrap();
+        let mut raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
+        header
+            .write_to(&mut raw_file)
+            .expect("Failed to write header.");
+
+        let file = temp_file.into_file();
+        match QcowDiskSync::new(file, false, false, true) {
+            Err(QcowError::BackingFilesDisabled) => {}
+            Err(other) => panic!("Expected BackingFilesDisabled, got: {other:?}"),
+            Ok(_) => panic!("Expected BackingFilesDisabled error, but succeeded"),
+        }
     }
 }
