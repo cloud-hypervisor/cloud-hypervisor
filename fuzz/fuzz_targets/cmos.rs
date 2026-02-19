@@ -26,6 +26,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
         u64::from_le_bytes(above_4g),
         EventFd::new(EFD_NONBLOCK).unwrap(),
         None,
+        None,
     );
 
     let mut i = 16;
