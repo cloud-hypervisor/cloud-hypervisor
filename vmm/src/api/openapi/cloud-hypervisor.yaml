@@ -941,6 +941,12 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/VirtQueueAffinity"
+        backing_files:
+          type: boolean
+          default: false
+        sparse:
+          type: boolean
+          default: true
 
     NetConfig:
       type: object
