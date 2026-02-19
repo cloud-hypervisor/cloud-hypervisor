@@ -2014,8 +2014,8 @@ impl DeviceManager {
                 mem_below_4g,
                 mem_above_4g,
                 reset_evt,
-                Some(vcpus_kill_signalled),
-                Some(Arc::clone(&vcpus_pause_signalled)),
+                vcpus_kill_signalled,
+                Arc::clone(&vcpus_pause_signalled),
             )));
 
             self.bus_devices
