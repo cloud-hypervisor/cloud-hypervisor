@@ -44,6 +44,8 @@ pub enum Error {
     BackingFileIo(#[source] io::Error),
     #[error("Backing file open error")]
     BackingFileOpen(#[source] Box<Error>),
+    #[error("Backing file support is disabled")]
+    BackingFilesDisabled,
     #[error("Backing file name is too long: {0} bytes over")]
     BackingFileTooLong(usize),
     #[error("Image is marked corrupt and cannot be opened for writing")]

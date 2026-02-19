@@ -14,7 +14,7 @@ use vmm_sys_util::write_zeroes::PunchHole;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
-use crate::qcow::{MAX_NESTING_DEPTH, QcowFile, RawFile, Result as QcowResult};
+use crate::qcow::{Error as QcowError, MAX_NESTING_DEPTH, QcowFile, RawFile, Result as QcowResult};
 use crate::{AsyncAdaptor, BlockBackend};
 
 pub struct QcowDiskSync {
@@ -32,12 +32,17 @@ pub struct QcowDiskSync {
 impl QcowDiskSync {
     pub fn new(file: File, direct_io: bool, backing_files: bool, sparse: bool) -> QcowResult<Self> {
         let max_nesting_depth = if backing_files { MAX_NESTING_DEPTH } else { 0 };
+        let qcow_file = QcowFile::from_with_nesting_depth(
+            RawFile::new(file, direct_io),
+            max_nesting_depth,
+            sparse,
+        )
+        .map_err(|e| match e {
+            QcowError::MaxNestingDepthExceeded if !backing_files => QcowError::BackingFilesDisabled,
+            other => other,
+        })?;
         Ok(QcowDiskSync {
-            qcow_file: Arc::new(Mutex::new(QcowFile::from_with_nesting_depth(
-                RawFile::new(file, direct_io),
-                max_nesting_depth,
-                sparse,
-            )?)),
+            qcow_file: Arc::new(Mutex::new(qcow_file)),
         })
     }
 }
