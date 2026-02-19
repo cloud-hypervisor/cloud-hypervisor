@@ -95,6 +95,9 @@ pub enum MigratableError {
     #[error("Failed to retrieve dirty ranges for migratable component")]
     DirtyLog(#[source] anyhow::Error),
 
+    #[error("Failed to cancel migration")]
+    CancelMigration(#[source] anyhow::Error),
+
     #[error("Failed to start migration for migratable component")]
     StartMigration(#[source] anyhow::Error),
 
