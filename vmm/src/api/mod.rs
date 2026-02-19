@@ -208,6 +208,10 @@ pub enum ApiError {
     #[error("Error dispatching the migration worker")]
     VmSendMigration(#[source] MigratableError),
 
+    /// Error cancelling migration
+    #[error("Error cancelling migration")]
+    VmCancelMigration(#[source] MigratableError),
+
     /// Error triggering power button
     #[error("Error triggering power button")]
     VmPowerButton(#[source] VmError),
@@ -758,6 +762,12 @@ pub trait RequestHandler {
         &mut self,
         send_data_migration: VmSendMigrationData,
     ) -> Result<(), MigratableError>;
+
+    /// Triggers a migration cancellation.
+    ///
+    /// The cancellation is not guaranteed to succeed, as the migration may have
+    /// succeeded already.
+    fn vm_cancel_migration(&mut self) -> Result<(), MigratableError>;
 
     fn vm_nmi(&mut self) -> Result<(), VmError>;
 }
@@ -1485,6 +1495,39 @@ impl ApiAction for VmReceiveMigration {
             let response = vmm
                 .vm_receive_migration(data)
                 .map_err(ApiError::VmReceiveMigration)
+                .map(|_| ApiResponsePayload::Empty);
+
+            response_sender
+                .send(response)
+                .map_err(VmmError::ApiResponseSend)?;
+
+            Ok(false)
+        })
+    }
+
+    fn send(
+        &self,
+        api_evt: EventFd,
+        api_sender: Sender<ApiRequest>,
+        data: Self::RequestBody,
+    ) -> ApiResult<Self::ResponseBody> {
+        get_response_body(self, api_evt, api_sender, data)
+    }
+}
+
+pub struct VmCancelMigration;
+
+impl ApiAction for VmCancelMigration {
+    type RequestBody = ();
+    type ResponseBody = Option<Body>;
+
+    fn request(&self, data: Self::RequestBody, response_sender: Sender<ApiResponse>) -> ApiRequest {
+        Box::new(move |vmm| {
+            info!("API request event: VmCancelMigration {data:?}");
+
+            let response = vmm
+                .vm_cancel_migration()
+                .map_err(ApiError::VmCancelMigration)
                 .map(|_| ApiResponsePayload::Empty);
 
             response_sender

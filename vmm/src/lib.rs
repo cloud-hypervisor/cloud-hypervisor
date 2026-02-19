@@ -3225,6 +3225,16 @@ impl RequestHandler for Vmm {
             }
         }
     }
+
+    fn vm_cancel_migration(&mut self) -> result::Result<(), MigratableError> {
+        let VmOwnership::Migration { .. } = &self.vm else {
+            return Err(MigratableError::CancelMigration(anyhow!(
+                "There is no ongoing migration"
+            )));
+        };
+
+        todo!()
+    }
 }
 
 const CPU_MANAGER_SNAPSHOT_ID: &str = "cpu-manager";
