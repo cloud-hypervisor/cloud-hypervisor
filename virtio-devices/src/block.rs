@@ -197,7 +197,12 @@ impl BlockEpollHandler {
         let mut batch_requests = Vec::new();
         let mut batch_inflight_requests = Vec::new();
 
-        while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
+        while let Some(mut desc_chain) = queue
+            .iter(self.mem.memory())
+            .map_err(Error::QueueIterator)
+            .inspect_err(|e| error!("CHV: virtqueue error: {e:?}."))?
+            .next()
+        {
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_deref())
                 .map_err(Error::RequestParsing)?;
 
@@ -570,7 +575,10 @@ impl BlockEpollHandler {
             helper.add_event(rate_limiter.as_raw_fd(), RATE_LIMITER_EVENT)?;
         }
         self.set_queue_thread_affinity();
-        helper.run(paused, paused_sync, self)?;
+        if let Err(err) = helper.run(paused, paused_sync, self) {
+            // We do not want to return Err(_) as this will lead to VMM exiting.
+            error!("Epoll Handler error: {err:?}");
+        }
 
         Ok(())
     }
