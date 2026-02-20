@@ -61,6 +61,22 @@ pub enum HypervisorVmError {
     #[error("Failed to create Vcpu")]
     CreateVcpu(#[source] anyhow::Error),
     ///
+    /// Could not filter the given MSRs because too many MSR filter ranges were provided.
+    ///
+    #[error(
+        "Too many separate MSR ranges to filter. Number of given ranges:={num_ranges}, but number of permitted ranges:={num_permitted_ranges}"
+    )]
+    TooManyMsrFilterRanges {
+        num_ranges: usize,
+        num_permitted_ranges: usize,
+    },
+    #[error(
+        "Could not filter the given MSR ranges: Failed to confirm MSR filtering capability: error_code:={error_code}"
+    )]
+    MissingMsrFilterCapability { error_code: i32 },
+    #[error("Could not filter the given MSR ranges. Error code:={error_code}")]
+    MsrFilter { error_code: i32 },
+    ///
     /// Identity map address error
     ///
     #[error("Failed to set identity map address")]

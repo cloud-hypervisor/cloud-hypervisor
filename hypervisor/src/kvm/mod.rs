@@ -17,7 +17,6 @@ use std::mem::offset_of;
 #[cfg(feature = "sev_snp")]
 use std::os::fd::FromRawFd;
 use std::os::fd::OwnedFd;
-#[cfg(any(feature = "sev_snp", feature = "tdx"))]
 use std::os::unix::io::AsRawFd;
 #[cfg(feature = "tdx")]
 use std::os::unix::io::RawFd;
@@ -82,7 +81,7 @@ use crate::ClockData;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{
     CpuIdEntry, FpuState, LapicState, MTRR_MSR_INDICES, MsrEntry, NUM_IOAPIC_PINS,
-    SpecialRegisters, XsaveState,
+    SpecialRegisters, XsaveState, msr_filter::MsrFilterRange,
 };
 use crate::{
     CpuState, HypervisorType, HypervisorVmConfig, InterruptSourceConfig, IoEventAddress,
@@ -216,6 +215,8 @@ const TDG_VP_VMCALL_SETUP_EVENT_NOTIFY_INTERRUPT: u64 = 0x10004;
 const TDG_VP_VMCALL_SUCCESS: u64 = 0;
 #[cfg(feature = "tdx")]
 const TDG_VP_VMCALL_INVALID_OPERAND: u64 = 0x8000000000000000;
+/// Maximum number of MSR ranges that KVM can filter
+pub const KVM_MSR_FILTER_MAX_RANGES: usize = 16;
 
 #[cfg(feature = "tdx")]
 ioctl_iowr_nr!(KVM_MEMORY_ENCRYPT_OP, KVMIO, 0xba, std::os::raw::c_ulong);
@@ -683,6 +684,78 @@ impl KvmVm {
             KVM_MEM_GUEST_MEMFD
         } else {
             0
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    /// Filter the given ranges of MSRs. This can be used to specify certain MSRs
+    /// that guests may not access.
+    ///
+    /// If the `default_deny` flag is set, MSRs that do not match any of the given
+    /// ranges, will be automatically denied, otherwise they are allowed.
+    ///
+    /// # Important
+    ///
+    /// This method should be called once before creating any vCPUs and never again.
+    fn msr_filter<'a>(&self, filter: &[MsrFilterRange<'a>], default_deny: bool) -> vm::Result<()> {
+        // Found here https://github.com/torvalds/linux/blob/master/include/uapi/linux/kvm.h#L929C9-L929C31
+        const KVM_CAP_MSR_FILTER: u64 = 189;
+        // Can be computed from https://github.com/torvalds/linux/blob/master/include/uapi/linux/kvm.h#L1458
+        const KVM_X86_SET_MSR_FILTER: u64 = 0x4188aec6;
+
+        let cap_result = self.fd.check_extension_raw(KVM_CAP_MSR_FILTER);
+        if cap_result <= 0 {
+            return Err(vm::HypervisorVmError::MissingMsrFilterCapability {
+                error_code: cap_result,
+            });
+        }
+        // Workaround until https://github.com/rust-vmm/kvm/pull/359 is merged
+        #[repr(C)]
+        #[derive(Clone, Copy, Default)]
+        struct KvmMsrFilterRange {
+            flags: u32,
+            nmrs: u32,
+            base: u32,
+            bitmap: *const u8,
+        }
+
+        #[repr(C)]
+        struct KvmMsrFilter {
+            flags: u32,
+            ranges: [KvmMsrFilterRange; KVM_MSR_FILTER_MAX_RANGES],
+        }
+
+        let mut kvm_filter = KvmMsrFilter {
+            flags: u32::from(default_deny),
+            ranges: [Default::default(); KVM_MSR_FILTER_MAX_RANGES],
+        };
+
+        let num_ranges = kvm_filter.ranges.len();
+        if num_ranges > KVM_MSR_FILTER_MAX_RANGES {
+            return Err(vm::HypervisorVmError::TooManyMsrFilterRanges {
+                num_ranges,
+                num_permitted_ranges: KVM_MSR_FILTER_MAX_RANGES,
+            });
+        }
+
+        for (range, kvm_range) in filter.iter().zip(kvm_filter.ranges.iter_mut()) {
+            kvm_range.flags = range.flags;
+            kvm_range.nmrs = range.nmsrs;
+            kvm_range.base = range.base;
+            kvm_range.bitmap = range.bitmap.as_ptr();
+        }
+        // SAFETY: SYSCALL with valid parameters. All raw pointers are derived from references that are valid for the duration of this entire method call.
+        let result = unsafe {
+            libc::ioctl(
+                self.fd.as_raw_fd(),
+                KVM_X86_SET_MSR_FILTER,
+                (&raw const kvm_filter).cast::<libc::c_void>(),
+            )
+        };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(vm::HypervisorVmError::MsrFilter { error_code: result })
         }
     }
 }
