@@ -18,10 +18,12 @@ use vhost::vhost_kern::VhostKernFeatures;
 use vhost::vhost_kern::vdpa::VhostKernVdpa;
 use vhost::vhost_kern::vhost_binding::VHOST_BACKEND_F_SUSPEND;
 use vhost::{VhostBackend, VringConfigData};
+use virtio_queue::desc::split::Descriptor as SplitDescriptor;
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
 use vm_device::dma_mapping::ExternalDmaMapping;
-use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+use vm_memory::{Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
+use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
@@ -104,6 +106,17 @@ pub struct VdpaState {
     pub backend_features: u64,
 }
 
+/// Queue metadata captured during activation, used for conservative dirty
+/// page tracking during cross-host live migration.
+struct VdpaQueueInfo {
+    /// GPA of the descriptor table
+    desc_table_gpa: u64,
+    /// GPA of the used ring
+    used_ring_gpa: u64,
+    /// Number of descriptors in the queue
+    queue_size: u16,
+}
+
 pub struct Vdpa {
     common: VirtioCommon,
     id: String,
@@ -112,6 +125,15 @@ pub struct Vdpa {
     enabled_queues: BTreeMap<usize, bool>,
     backend_features: u64,
     migrating: bool,
+    /// Set when the device has been suspended via VHOST_VDPA_SUSPEND during
+    /// the pause phase of migration. Used to trigger conservative dirty page
+    /// collection on the next dirty_log() call.
+    suspended: bool,
+    /// Guest memory reference stored during activation, needed to read
+    /// virtqueue descriptor rings for conservative dirty page marking.
+    guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+    /// Queue metadata captured during activation for descriptor ring walking.
+    queue_infos: Vec<VdpaQueueInfo>,
 }
 
 impl Vdpa {
@@ -195,6 +217,9 @@ impl Vdpa {
             enabled_queues: BTreeMap::new(),
             backend_features,
             migrating: false,
+            suspended: false,
+            guest_memory: None,
+            queue_infos: Vec::new(),
         })
     }
 
@@ -233,9 +258,19 @@ impl Vdpa {
             .set_backend_features(self.backend_features)
             .map_err(Error::SetBackendFeatures)?;
 
+        self.queue_infos.clear();
+
         for (queue_index, queue, queue_evt) in queues.iter() {
             let queue_max_size = queue.max_size();
             let queue_size = queue.size();
+
+            // Store queue metadata for conservative dirty page tracking
+            // during cross-host live migration.
+            self.queue_infos.push(VdpaQueueInfo {
+                desc_table_gpa: queue.desc_table(),
+                used_ring_gpa: queue.used_ring(),
+                queue_size,
+            });
             self.vhost
                 .as_ref()
                 .unwrap()
@@ -437,6 +472,10 @@ impl VirtioDevice for Vdpa {
         self.activate_vdpa(&mem.memory(), virtio_interrupt.as_ref(), &queues)
             .map_err(ActivateError::ActivateVdpa)?;
 
+        // Store guest memory reference for conservative dirty page tracking
+        // during cross-host live migration.
+        self.guest_memory = Some(mem);
+
         // Store the virtio interrupt handler as we need to return it on reset
         self.common.interrupt_cb = Some(virtio_interrupt);
 
@@ -449,6 +488,8 @@ impl VirtioDevice for Vdpa {
             error!("Failed to reset vhost-vdpa: {e:?}");
             return None;
         }
+
+        self.queue_infos.clear();
 
         event!("vdpa", "reset", "id", &self.id);
 
@@ -464,6 +505,16 @@ impl VirtioDevice for Vdpa {
 impl Pausable for Vdpa {
     fn pause(&mut self) -> std::result::Result<(), MigratableError> {
         if self.migrating {
+            // Suspend the vDPA device to stop all DMA. After this point,
+            // no more pages will be dirtied by the device, making it safe
+            // to collect conservative dirty pages in the next dirty_log() call.
+            if let Some(vhost) = self.vhost.as_ref() {
+                vhost.suspend().map_err(|e| {
+                    MigratableError::Pause(anyhow!("Error suspending vDPA device: {e:?}"))
+                })?;
+                self.suspended = true;
+                info!("vDPA device {} suspended for migration", self.id);
+            }
             Ok(())
         } else {
             Err(MigratableError::Pause(anyhow!(
@@ -516,23 +567,109 @@ impl Transportable for Vdpa {}
 
 impl Migratable for Vdpa {
     fn start_migration(&mut self) -> std::result::Result<(), MigratableError> {
-        self.migrating = true;
-        // Given there's no way to track dirty pages, we must suspend the
-        // device as soon as the migration process starts.
-        if self.backend_features & (1 << VHOST_BACKEND_F_SUSPEND) != 0 {
-            assert!(self.vhost.is_some());
-            self.vhost.as_ref().unwrap().suspend().map_err(|e| {
-                MigratableError::StartMigration(anyhow!("Error suspending vDPA device: {e:?}"))
-            })
-        } else {
-            Err(MigratableError::StartMigration(anyhow!(
+        // Verify the device supports suspend (required for stop-and-copy phase).
+        if self.backend_features & (1 << VHOST_BACKEND_F_SUSPEND) == 0 {
+            return Err(MigratableError::StartMigration(anyhow!(
                 "vDPA device can't be suspended"
-            )))
+            )));
         }
+        self.migrating = true;
+        // NOTE: We intentionally do NOT suspend the device here. The device
+        // continues running during pre-copy, allowing network traffic to flow.
+        // Suspension is deferred to pause() just before the final dirty page
+        // collection, minimizing network downtime.
+        Ok(())
+    }
+
+    fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
+        // During pre-copy (before pause/suspend), we cannot track device DMA
+        // writes. Return empty — KVM PML handles CPU-dirtied pages.
+        if !self.suspended {
+            return Ok(MemoryRangeTable::default());
+        }
+
+        // After suspend, conservatively mark all pages the device could have
+        // DMA-written to: used rings, descriptor tables, and all device-writable
+        // buffers referenced by descriptors.
+        self.suspended = false;
+
+        let mem = self
+            .guest_memory
+            .as_ref()
+            .ok_or_else(|| {
+                MigratableError::DirtyLog(anyhow!(
+                    "Guest memory not available for vDPA dirty page tracking"
+                ))
+            })?
+            .memory();
+
+        let page_mask: u64 = !0xFFF;
+        let mut table = MemoryRangeTable::default();
+
+        for qi in &self.queue_infos {
+            let queue_size = qi.queue_size as u64;
+
+            // 1. Mark used ring pages as dirty.
+            // Layout: flags(u16) + idx(u16) + queue_size * used_elem(u64) + avail_event(u16)
+            let used_ring_size = 4 + queue_size * 8 + 2;
+            let used_start = qi.used_ring_gpa & page_mask;
+            let used_end = (qi.used_ring_gpa + used_ring_size + 0xFFF) & page_mask;
+            table.push(MemoryRange {
+                gpa: used_start,
+                length: used_end - used_start,
+            });
+
+            // 2. Mark descriptor table pages as dirty (device may write back flags).
+            // Each descriptor is 16 bytes (addr:u64 + len:u32 + flags:u16 + next:u16).
+            let desc_table_size = queue_size * 16;
+            let desc_start = qi.desc_table_gpa & page_mask;
+            let desc_end = (qi.desc_table_gpa + desc_table_size + 0xFFF) & page_mask;
+            table.push(MemoryRange {
+                gpa: desc_start,
+                length: desc_end - desc_start,
+            });
+
+            // 3. Walk all descriptors and mark device-writable buffers as dirty.
+            // After suspend, the descriptor ring state is frozen — safe to read.
+            for i in 0..queue_size {
+                let desc_gpa = GuestAddress(qi.desc_table_gpa + i * 16);
+                let desc: SplitDescriptor = match mem.read_obj(desc_gpa) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        error!(
+                            "Failed to read vDPA descriptor {} from GPA {:#x}: {e}",
+                            i,
+                            desc_gpa.raw_value()
+                        );
+                        continue;
+                    }
+                };
+
+                // Device-writable descriptors (e.g. RX packet buffers)
+                if desc.is_write_only() && desc.len() > 0 {
+                    let buf_addr = desc.addr().raw_value();
+                    let buf_start = buf_addr & page_mask;
+                    let buf_end = (buf_addr + desc.len() as u64 + 0xFFF) & page_mask;
+                    table.push(MemoryRange {
+                        gpa: buf_start,
+                        length: buf_end - buf_start,
+                    });
+                }
+            }
+        }
+
+        info!(
+            "vDPA {}: conservative dirty log collected {} ranges",
+            self.id,
+            table.regions().len()
+        );
+
+        Ok(table)
     }
 
     fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
         self.migrating = false;
+        self.suspended = false;
         Ok(())
     }
 }
