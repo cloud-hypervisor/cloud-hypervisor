@@ -948,7 +948,8 @@ components:
           type: boolean
           default: true
         image_type:
-          type: enum ["FixedVhd", "Qcow2", "Raw", "Vhdx"]
+          type: string
+          enum: [FixedVhd, Qcow2, Raw, Vhdx, Unknown]
 
 
     NetConfig:
