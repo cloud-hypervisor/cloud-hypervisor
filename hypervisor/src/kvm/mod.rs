@@ -275,6 +275,8 @@ const TDG_VP_VMCALL_SETUP_EVENT_NOTIFY_INTERRUPT: u64 = 0x10004;
 const TDG_VP_VMCALL_SUCCESS: u64 = 0;
 #[cfg(feature = "tdx")]
 const TDG_VP_VMCALL_INVALID_OPERAND: u64 = 0x8000000000000000;
+/// Maximum number of MSR ranges that KVM can filter
+pub const KVM_MSR_FILTER_MAX_RANGES: usize = 16;
 
 #[cfg(feature = "tdx")]
 ioctl_iowr_nr!(KVM_MEMORY_ENCRYPT_OP, KVMIO, 0xba, raw::c_ulong);

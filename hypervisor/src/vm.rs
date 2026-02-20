@@ -288,6 +288,12 @@ pub enum HypervisorVmError {
     ///
     #[error("Failed to get the list of supported MSRs")]
     GetMsrList(#[source] anyhow::Error),
+    ///
+    /// Failed to construct MSR filter because the required size exceeded the
+    /// permitted maximum.
+    ///
+    #[error("Unable to filter permitted MSRs: the necessary MSR filter is too large")]
+    MsrFilterSize,
 }
 ///
 /// Result type for returning from a function
