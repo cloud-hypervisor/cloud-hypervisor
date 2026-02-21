@@ -46,6 +46,8 @@ pub enum Error {
     GetAddressRange,
     #[error("Failed to get the available index from the virtio queue")]
     GetAvailableIndex(#[source] virtio_queue::Error),
+    #[error("Failed to get the used index from the virtio queue")]
+    GetUsedIndex(#[source] virtio_queue::Error),
     #[error("Get virtio configuration size")]
     GetConfigSize(#[source] vhost::Error),
     #[error("Get virtio device identifier")]
@@ -301,16 +303,26 @@ impl Vdpa {
                 .unwrap()
                 .set_vring_addr(*queue_index, &config_data)
                 .map_err(Error::SetVringAddr)?;
+            let avail_idx = queue
+                .avail_idx(mem, Ordering::Acquire)
+                .map_err(Error::GetAvailableIndex)?
+                .0;
+            let used_idx = queue
+                .used_idx(mem, Ordering::Acquire)
+                .map_err(Error::GetUsedIndex)?
+                .0;
+            // Use used_idx for set_vring_base because the mlx5_vdpa kernel
+            // driver sets BOTH hw_available_index and hw_used_index to the
+            // same value. Using avail_idx causes an RX deadlock after live
+            // migration.
+            info!(
+                "vDPA queue {}: avail_idx={}, used_idx={}, setting vring_base={}",
+                queue_index, avail_idx, used_idx, used_idx
+            );
             self.vhost
                 .as_ref()
                 .unwrap()
-                .set_vring_base(
-                    *queue_index,
-                    queue
-                        .avail_idx(mem, Ordering::Acquire)
-                        .map_err(Error::GetAvailableIndex)?
-                        .0,
-                )
+                .set_vring_base(*queue_index, used_idx)
                 .map_err(Error::SetVringBase)?;
 
             if let Some(eventfd) =
@@ -328,6 +340,31 @@ impl Vdpa {
                 .unwrap()
                 .set_vring_kick(*queue_index, queue_evt)
                 .map_err(Error::SetVringKick)?;
+
+            // After migration, the guest virtio driver may have disabled device
+            // notifications (VRING_AVAIL_F_NO_INTERRUPT) because it was in NAPI
+            // polling mode. The new device respects this flag and won't send
+            // interrupts, causing a deadlock (guest waits for interrupt, device
+            // won't send one). Clear the flag to ensure the device notifies the
+            // guest about completed buffers, allowing the driver to resume.
+            let avail_flags_addr = GuestAddress(queue.avail_ring());
+            if let Ok(flags) = mem.read_obj::<u16>(avail_flags_addr) {
+                let flags_le = u16::from_le(flags);
+                if flags_le & 1 != 0 {
+                    // VRING_AVAIL_F_NO_INTERRUPT is set — clear it
+                    info!(
+                        "vDPA queue {}: clearing VRING_AVAIL_F_NO_INTERRUPT (flags=0x{:x})",
+                        queue_index, flags_le
+                    );
+                    let new_flags: u16 = (flags_le & !1u16).to_le();
+                    let _ = mem.write_obj(new_flags, avail_flags_addr);
+                } else {
+                    info!(
+                        "vDPA queue {}: avail flags=0x{:x} (notifications enabled)",
+                        queue_index, flags_le
+                    );
+                }
+            }
 
             self.enabled_queues.insert(*queue_index, false);
         }
@@ -578,6 +615,10 @@ impl Migratable for Vdpa {
         // continues running during pre-copy, allowing network traffic to flow.
         // Suspension is deferred to pause() just before the final dirty page
         // collection, minimizing network downtime.
+        info!(
+            "vDPA {}: migration started (device NOT suspended, traffic continues)",
+            self.id
+        );
         Ok(())
     }
 
@@ -585,6 +626,10 @@ impl Migratable for Vdpa {
         // During pre-copy (before pause/suspend), we cannot track device DMA
         // writes. Return empty — KVM PML handles CPU-dirtied pages.
         if !self.suspended {
+            info!(
+                "vDPA {}: dirty_log called (suspended=false, migrating={}), returning empty",
+                self.id, self.migrating
+            );
             return Ok(MemoryRangeTable::default());
         }
 
@@ -592,6 +637,12 @@ impl Migratable for Vdpa {
         // DMA-written to: used rings, descriptor tables, and all device-writable
         // buffers referenced by descriptors.
         self.suspended = false;
+
+        info!(
+            "vDPA {}: dirty_log collecting conservative dirty pages ({} queues)",
+            self.id,
+            self.queue_infos.len()
+        );
 
         let mem = self
             .guest_memory
@@ -605,8 +656,10 @@ impl Migratable for Vdpa {
 
         let page_mask: u64 = !0xFFF;
         let mut table = MemoryRangeTable::default();
+        let mut total_bytes: u64 = 0;
+        let mut write_desc_count: u64 = 0;
 
-        for qi in &self.queue_infos {
+        for (qi_idx, qi) in self.queue_infos.iter().enumerate() {
             let queue_size = qi.queue_size as u64;
 
             // 1. Mark used ring pages as dirty.
@@ -614,23 +667,35 @@ impl Migratable for Vdpa {
             let used_ring_size = 4 + queue_size * 8 + 2;
             let used_start = qi.used_ring_gpa & page_mask;
             let used_end = (qi.used_ring_gpa + used_ring_size + 0xFFF) & page_mask;
+            let used_range_len = used_end - used_start;
             table.push(MemoryRange {
                 gpa: used_start,
-                length: used_end - used_start,
+                length: used_range_len,
             });
+            total_bytes += used_range_len;
 
             // 2. Mark descriptor table pages as dirty (device may write back flags).
             // Each descriptor is 16 bytes (addr:u64 + len:u32 + flags:u16 + next:u16).
             let desc_table_size = queue_size * 16;
             let desc_start = qi.desc_table_gpa & page_mask;
             let desc_end = (qi.desc_table_gpa + desc_table_size + 0xFFF) & page_mask;
+            let desc_range_len = desc_end - desc_start;
             table.push(MemoryRange {
                 gpa: desc_start,
-                length: desc_end - desc_start,
+                length: desc_range_len,
             });
+            total_bytes += desc_range_len;
+
+            info!(
+                "vDPA {}: queue {}: desc_table GPA={:#x} ({} bytes), used_ring GPA={:#x} ({} bytes), size={}",
+                self.id, qi_idx, qi.desc_table_gpa, desc_range_len, qi.used_ring_gpa, used_range_len, queue_size
+            );
 
             // 3. Walk all descriptors and mark device-writable buffers as dirty.
             // After suspend, the descriptor ring state is frozen — safe to read.
+            // Also handles indirect descriptors by walking their tables.
+            let mut queue_write_descs = 0u64;
+            let mut queue_indirect_descs = 0u64;
             for i in 0..queue_size {
                 let desc_gpa = GuestAddress(qi.desc_table_gpa + i * 16);
                 let desc: SplitDescriptor = match mem.read_obj(desc_gpa) {
@@ -645,23 +710,74 @@ impl Migratable for Vdpa {
                     }
                 };
 
-                // Device-writable descriptors (e.g. RX packet buffers)
-                if desc.is_write_only() && desc.len() > 0 {
+                if desc.refers_to_indirect_table() && desc.len() > 0 {
+                    // Indirect descriptor: addr points to an indirect table,
+                    // len is the size of that table in bytes.
+                    let indirect_table_gpa = desc.addr().raw_value();
+                    let indirect_table_size = desc.len() as u64;
+                    let num_indirect = indirect_table_size / 16;
+                    queue_indirect_descs += 1;
+
+                    // Mark the indirect table pages as dirty
+                    let ind_start = indirect_table_gpa & page_mask;
+                    let ind_end = (indirect_table_gpa + indirect_table_size + 0xFFF) & page_mask;
+                    let ind_range_len = ind_end - ind_start;
+                    table.push(MemoryRange {
+                        gpa: ind_start,
+                        length: ind_range_len,
+                    });
+                    total_bytes += ind_range_len;
+
+                    // Walk entries in the indirect table
+                    for j in 0..num_indirect {
+                        let ind_desc_gpa = GuestAddress(indirect_table_gpa + j * 16);
+                        let ind_desc: SplitDescriptor = match mem.read_obj(ind_desc_gpa) {
+                            Ok(d) => d,
+                            Err(_) => continue,
+                        };
+                        if ind_desc.is_write_only() && ind_desc.len() > 0 {
+                            let buf_addr = ind_desc.addr().raw_value();
+                            let buf_start = buf_addr & page_mask;
+                            let buf_end =
+                                (buf_addr + ind_desc.len() as u64 + 0xFFF) & page_mask;
+                            let buf_range_len = buf_end - buf_start;
+                            table.push(MemoryRange {
+                                gpa: buf_start,
+                                length: buf_range_len,
+                            });
+                            total_bytes += buf_range_len;
+                            queue_write_descs += 1;
+                        }
+                    }
+                } else if desc.is_write_only() && desc.len() > 0 {
+                    // Direct device-writable descriptor (e.g. RX packet buffers)
                     let buf_addr = desc.addr().raw_value();
                     let buf_start = buf_addr & page_mask;
                     let buf_end = (buf_addr + desc.len() as u64 + 0xFFF) & page_mask;
+                    let buf_range_len = buf_end - buf_start;
                     table.push(MemoryRange {
                         gpa: buf_start,
-                        length: buf_end - buf_start,
+                        length: buf_range_len,
                     });
+                    total_bytes += buf_range_len;
+                    queue_write_descs += 1;
                 }
             }
+            write_desc_count += queue_write_descs;
+
+            info!(
+                "vDPA {}: queue {}: {} device-writable descriptors, {} indirect descriptors",
+                self.id, qi_idx, queue_write_descs, queue_indirect_descs
+            );
         }
 
         info!(
-            "vDPA {}: conservative dirty log collected {} ranges",
+            "vDPA {}: conservative dirty log: {} ranges, {} total bytes ({} KiB), {} write descriptors",
             self.id,
-            table.regions().len()
+            table.regions().len(),
+            total_bytes,
+            total_bytes / 1024,
+            write_desc_count
         );
 
         Ok(table)
