@@ -6,6 +6,7 @@
 
 mod decoder;
 mod header;
+pub(crate) mod metadata;
 mod qcow_raw_file;
 mod raw_file;
 mod refcount;
@@ -182,7 +183,7 @@ impl BackingFileOps for RawFile {
 }
 
 /// Backing file wrapper
-struct BackingFile {
+pub(crate) struct BackingFile {
     inner: Box<dyn BackingFileOps>,
     virtual_size: u64,
 }
@@ -276,6 +277,209 @@ impl Debug for BackingFile {
     }
 }
 
+/// Parses and validates a QCOW2 image file, returning the metadata, backing
+/// file and sparse flag.
+///
+/// This shared constructor is used by both QcowFile for sequential I/O
+/// and QcowDiskSync for lock based parallel I/O.
+pub(crate) fn parse_qcow(
+    mut file: RawFile,
+    max_nesting_depth: u32,
+    sparse: bool,
+) -> Result<(metadata::QcowState, Option<BackingFile>, bool)> {
+    let mut header = QcowHeader::new(&mut file)?;
+
+    // Only v2 and v3 files are supported.
+    if header.version != 2 && header.version != 3 {
+        return Err(Error::UnsupportedVersion(header.version));
+    }
+
+    // Make sure that the L1 table fits in RAM.
+    if u64::from(header.l1_size) > MAX_RAM_POINTER_TABLE_SIZE {
+        return Err(Error::InvalidL1TableSize(header.l1_size));
+    }
+
+    let cluster_bits: u32 = header.cluster_bits;
+    if !(MIN_CLUSTER_BITS..=MAX_CLUSTER_BITS).contains(&cluster_bits) {
+        return Err(Error::InvalidClusterSize);
+    }
+    let cluster_size = 0x01u64 << cluster_bits;
+
+    // Limit the total size of the disk.
+    if header.size > MAX_QCOW_FILE_SIZE {
+        return Err(Error::FileTooBig(header.size));
+    }
+
+    let direct_io = file.is_direct();
+
+    let backing_file = BackingFile::new(
+        header.backing_file.as_ref(),
+        direct_io,
+        max_nesting_depth,
+        sparse,
+    )?;
+
+    // Validate refcount order to be 0..6
+    let refcount_bits: u64 = 0x01u64
+        .checked_shl(header.refcount_order)
+        .ok_or(Error::UnsupportedRefcountOrder)?;
+    if refcount_bits > 64 {
+        return Err(Error::UnsupportedRefcountOrder);
+    }
+
+    // Need at least one refcount cluster
+    if header.refcount_table_clusters == 0 {
+        return Err(Error::NoRefcountClusters);
+    }
+    offset_is_cluster_boundary(header.l1_table_offset, header.cluster_bits)?;
+    offset_is_cluster_boundary(header.snapshots_offset, header.cluster_bits)?;
+    // refcount table must be a cluster boundary, and within the file's virtual or actual size.
+    offset_is_cluster_boundary(header.refcount_table_offset, header.cluster_bits)?;
+    let file_size = file.metadata().map_err(Error::GettingFileSize)?.len();
+    if header.refcount_table_offset > max(file_size, header.size) {
+        return Err(Error::RefcountTableOffEnd);
+    }
+
+    // The first cluster should always have a non-zero refcount, so if it is 0,
+    // this is an old file with broken refcounts, which requires a rebuild.
+    let mut refcount_rebuild_required = true;
+    file.seek(SeekFrom::Start(header.refcount_table_offset))
+        .map_err(Error::SeekingFile)?;
+    let first_refblock_addr = u64::read_be(&mut file).map_err(Error::ReadingHeader)?;
+    if first_refblock_addr != 0 {
+        file.seek(SeekFrom::Start(first_refblock_addr))
+            .map_err(Error::SeekingFile)?;
+        let first_cluster_refcount = u16::read_be(&mut file).map_err(Error::ReadingHeader)?;
+        if first_cluster_refcount != 0 {
+            refcount_rebuild_required = false;
+        }
+    }
+
+    if (header.compatible_features & COMPATIBLE_FEATURES_LAZY_REFCOUNTS) != 0 {
+        refcount_rebuild_required = true;
+    }
+
+    let mut raw_file =
+        QcowRawFile::from(file, cluster_size, refcount_bits).ok_or(Error::InvalidClusterSize)?;
+    let is_writable = raw_file.file().is_writable();
+
+    if header.is_corrupt() {
+        if is_writable {
+            return Err(Error::CorruptImage);
+        }
+        let path = read_link(format!("/proc/self/fd/{}", raw_file.file().as_raw_fd()))
+            .map_or_else(|_| "<unknown>".to_string(), |p| p.display().to_string());
+        warn!("QCOW2 image is marked corrupt, opening read-only: {path}");
+    }
+
+    // Image already has dirty bit set. Refcounts may be invalid.
+    if IncompatFeatures::from_bits_truncate(header.incompatible_features)
+        .contains(IncompatFeatures::DIRTY)
+    {
+        log::warn!("QCOW2 image not cleanly closed, rebuilding refcounts");
+        refcount_rebuild_required = true;
+    }
+
+    // Skip refcount rebuilding for readonly files.
+    if refcount_rebuild_required && is_writable {
+        QcowFile::rebuild_refcounts(&mut raw_file, header.clone())?;
+    }
+
+    let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
+    let num_clusters = div_round_up_u64(header.size, cluster_size);
+    let num_l2_clusters = div_round_up_u64(num_clusters, entries_per_cluster);
+    let l1_clusters = div_round_up_u64(num_l2_clusters, entries_per_cluster);
+    let header_clusters = div_round_up_u64(size_of::<QcowHeader>() as u64, cluster_size);
+    if num_l2_clusters > MAX_RAM_POINTER_TABLE_SIZE {
+        return Err(Error::TooManyL1Entries(num_l2_clusters));
+    }
+    let l1_table = VecCache::from_vec(
+        raw_file
+            .read_pointer_table(
+                header.l1_table_offset,
+                num_l2_clusters,
+                Some(L1_TABLE_OFFSET_MASK),
+            )
+            .map_err(Error::ReadingHeader)?,
+    );
+
+    let num_clusters = div_round_up_u64(header.size, cluster_size);
+    let refcount_clusters = max_refcount_clusters(
+        header.refcount_order,
+        cluster_size as u32,
+        (num_clusters + l1_clusters + num_l2_clusters + header_clusters) as u32,
+    );
+    // Check that the given header doesn't have a suspiciously sized refcount table.
+    if u64::from(header.refcount_table_clusters) > 2 * refcount_clusters {
+        return Err(Error::RefcountTableTooLarge);
+    }
+    if l1_clusters + refcount_clusters > MAX_RAM_POINTER_TABLE_SIZE {
+        return Err(Error::TooManyRefcounts(refcount_clusters));
+    }
+    let refcount_block_entries = cluster_size * 8 / refcount_bits;
+    let mut refcounts = RefCount::new(
+        &mut raw_file,
+        header.refcount_table_offset,
+        refcount_clusters,
+        refcount_block_entries,
+        cluster_size,
+        refcount_bits,
+    )
+    .map_err(Error::ReadingRefCounts)?;
+
+    let l2_entries = cluster_size / size_of::<u64>() as u64;
+
+    // Check that the L1 and refcount tables fit in a 64bit address space.
+    let l1_index = (header.size / cluster_size) / l2_entries;
+    header
+        .l1_table_offset
+        .checked_add(l1_index * size_of::<u64>() as u64)
+        .ok_or(Error::InvalidL1TableOffset)?;
+    header
+        .refcount_table_offset
+        .checked_add(u64::from(header.refcount_table_clusters) * cluster_size)
+        .ok_or(Error::InvalidRefcountTableOffset)?;
+
+    // Find available (refcount == 0) clusters for the free list.
+    let file_size = raw_file
+        .file_mut()
+        .metadata()
+        .map_err(Error::GettingFileSize)?
+        .len();
+    let mut avail_clusters = Vec::new();
+    for i in (0..file_size).step_by(cluster_size as usize) {
+        let refcount = refcounts
+            .get_cluster_refcount(&mut raw_file, i)
+            .map_err(Error::GettingRefcount)?;
+        if refcount == 0 {
+            avail_clusters.push(i);
+        }
+    }
+
+    if is_writable {
+        if !IncompatFeatures::from_bits_truncate(header.incompatible_features)
+            .contains(IncompatFeatures::DIRTY)
+        {
+            header.set_dirty_bit(raw_file.file_mut(), true)?;
+        }
+
+        header.clear_autoclear_features(raw_file.file_mut())?;
+    }
+
+    let inner = metadata::QcowState {
+        raw_file,
+        header,
+        l1_table,
+        l2_entries,
+        l2_cache: CacheMap::new(100),
+        refcounts,
+        avail_clusters,
+        unref_clusters: Vec::new(),
+    };
+
+    Ok((inner, backing_file, sparse))
+}
+
 /// Represents a qcow2 file. This is a sparse file format maintained by the qemu project.
 /// Full documentation of the format can be found in the qemu repository.
 ///
@@ -321,190 +525,34 @@ impl QcowFile {
     /// Creates a QcowFile from `file` and with a max nesting depth. File must be a valid qcow2
     /// image.
     pub fn from_with_nesting_depth(
-        mut file: RawFile,
+        file: RawFile,
         max_nesting_depth: u32,
         sparse: bool,
     ) -> Result<QcowFile> {
-        let header = QcowHeader::new(&mut file)?;
-
-        // Only v2 and v3 files are supported.
-        if header.version != 2 && header.version != 3 {
-            return Err(Error::UnsupportedVersion(header.version));
-        }
-
-        // Make sure that the L1 table fits in RAM.
-        if u64::from(header.l1_size) > MAX_RAM_POINTER_TABLE_SIZE {
-            return Err(Error::InvalidL1TableSize(header.l1_size));
-        }
-
-        let cluster_bits: u32 = header.cluster_bits;
-        if !(MIN_CLUSTER_BITS..=MAX_CLUSTER_BITS).contains(&cluster_bits) {
-            return Err(Error::InvalidClusterSize);
-        }
-        let cluster_size = 0x01u64 << cluster_bits;
-
-        // Limit the total size of the disk.
-        if header.size > MAX_QCOW_FILE_SIZE {
-            return Err(Error::FileTooBig(header.size));
-        }
-
-        let direct_io = file.is_direct();
-
-        let backing_file = BackingFile::new(
-            header.backing_file.as_ref(),
-            direct_io,
-            max_nesting_depth,
-            sparse,
-        )?;
-
-        // Validate refcount order to be 0..6
-        let refcount_bits: u64 = 0x01u64
-            .checked_shl(header.refcount_order)
-            .ok_or(Error::UnsupportedRefcountOrder)?;
-        if refcount_bits > 64 {
-            return Err(Error::UnsupportedRefcountOrder);
-        }
-
-        // Need at least one refcount cluster
-        if header.refcount_table_clusters == 0 {
-            return Err(Error::NoRefcountClusters);
-        }
-        offset_is_cluster_boundary(header.l1_table_offset, header.cluster_bits)?;
-        offset_is_cluster_boundary(header.snapshots_offset, header.cluster_bits)?;
-        // refcount table must be a cluster boundary, and within the file's virtual or actual size.
-        offset_is_cluster_boundary(header.refcount_table_offset, header.cluster_bits)?;
-        let file_size = file.metadata().map_err(Error::GettingFileSize)?.len();
-        if header.refcount_table_offset > max(file_size, header.size) {
-            return Err(Error::RefcountTableOffEnd);
-        }
-
-        // The first cluster should always have a non-zero refcount, so if it is 0,
-        // this is an old file with broken refcounts, which requires a rebuild.
-        let mut refcount_rebuild_required = true;
-        file.seek(SeekFrom::Start(header.refcount_table_offset))
-            .map_err(Error::SeekingFile)?;
-        let first_refblock_addr = u64::read_be(&mut file).map_err(Error::ReadingHeader)?;
-        if first_refblock_addr != 0 {
-            file.seek(SeekFrom::Start(first_refblock_addr))
-                .map_err(Error::SeekingFile)?;
-            let first_cluster_refcount = u16::read_be(&mut file).map_err(Error::ReadingHeader)?;
-            if first_cluster_refcount != 0 {
-                refcount_rebuild_required = false;
-            }
-        }
-
-        if (header.compatible_features & COMPATIBLE_FEATURES_LAZY_REFCOUNTS) != 0 {
-            refcount_rebuild_required = true;
-        }
-
-        let mut raw_file = QcowRawFile::from(file, cluster_size, refcount_bits)
-            .ok_or(Error::InvalidClusterSize)?;
-        let is_writable = raw_file.file().is_writable();
-
-        if header.is_corrupt() {
-            if is_writable {
-                return Err(Error::CorruptImage);
-            }
-            let path = read_link(format!("/proc/self/fd/{}", raw_file.file().as_raw_fd()))
-                .map_or_else(|_| "<unknown>".to_string(), |p| p.display().to_string());
-            warn!("QCOW2 image is marked corrupt, opening read-only: {path}");
-        }
-
-        // Image already has dirty bit set. Refcounts may be invalid.
-        if IncompatFeatures::from_bits_truncate(header.incompatible_features)
-            .contains(IncompatFeatures::DIRTY)
-        {
-            log::warn!("QCOW2 image not cleanly closed, rebuilding refcounts");
-            refcount_rebuild_required = true;
-        }
-
-        // Skip refcount rebuilding for readonly files.
-        if refcount_rebuild_required && is_writable {
-            QcowFile::rebuild_refcounts(&mut raw_file, header.clone())?;
-        }
-
-        let entries_per_cluster = cluster_size / size_of::<u64>() as u64;
-        let num_clusters = div_round_up_u64(header.size, cluster_size);
-        let num_l2_clusters = div_round_up_u64(num_clusters, entries_per_cluster);
-        let l1_clusters = div_round_up_u64(num_l2_clusters, entries_per_cluster);
-        let header_clusters = div_round_up_u64(size_of::<QcowHeader>() as u64, cluster_size);
-        if num_l2_clusters > MAX_RAM_POINTER_TABLE_SIZE {
-            return Err(Error::TooManyL1Entries(num_l2_clusters));
-        }
-        let l1_table = VecCache::from_vec(
-            raw_file
-                .read_pointer_table(
-                    header.l1_table_offset,
-                    num_l2_clusters,
-                    Some(L1_TABLE_OFFSET_MASK),
-                )
-                .map_err(Error::ReadingHeader)?,
-        );
-
-        let num_clusters = div_round_up_u64(header.size, cluster_size);
-        let refcount_clusters = max_refcount_clusters(
-            header.refcount_order,
-            cluster_size as u32,
-            (num_clusters + l1_clusters + num_l2_clusters + header_clusters) as u32,
-        );
-        // Check that the given header doesn't have a suspiciously sized refcount table.
-        if u64::from(header.refcount_table_clusters) > 2 * refcount_clusters {
-            return Err(Error::RefcountTableTooLarge);
-        }
-        if l1_clusters + refcount_clusters > MAX_RAM_POINTER_TABLE_SIZE {
-            return Err(Error::TooManyRefcounts(refcount_clusters));
-        }
-        let refcount_block_entries = cluster_size * 8 / refcount_bits;
-        let refcounts = RefCount::new(
-            &mut raw_file,
-            header.refcount_table_offset,
-            refcount_clusters,
-            refcount_block_entries,
-            cluster_size,
-            refcount_bits,
-        )
-        .map_err(Error::ReadingRefCounts)?;
-
-        let l2_entries = cluster_size / size_of::<u64>() as u64;
-
-        let mut qcow = QcowFile {
+        let (inner, backing_file, sparse) = parse_qcow(file, max_nesting_depth, sparse)?;
+        let metadata::QcowState {
             raw_file,
             header,
             l1_table,
             l2_entries,
-            l2_cache: CacheMap::new(100),
+            l2_cache,
+            refcounts,
+            avail_clusters,
+            unref_clusters,
+        } = inner;
+        Ok(QcowFile {
+            raw_file,
+            header,
+            l1_table,
+            l2_entries,
+            l2_cache,
             refcounts,
             current_offset: 0,
-            unref_clusters: Vec::new(),
-            avail_clusters: Vec::new(),
+            unref_clusters,
+            avail_clusters,
             backing_file,
             sparse,
-        };
-
-        // Check that the L1 and refcount tables fit in a 64bit address space.
-        qcow.header
-            .l1_table_offset
-            .checked_add(qcow.l1_address_offset(qcow.virtual_size()))
-            .ok_or(Error::InvalidL1TableOffset)?;
-        qcow.header
-            .refcount_table_offset
-            .checked_add(u64::from(qcow.header.refcount_table_clusters) * cluster_size)
-            .ok_or(Error::InvalidRefcountTableOffset)?;
-
-        qcow.find_avail_clusters()?;
-
-        if is_writable {
-            if !IncompatFeatures::from_bits_truncate(qcow.header.incompatible_features)
-                .contains(IncompatFeatures::DIRTY)
-            {
-                qcow.header.set_dirty_bit(qcow.raw_file.file_mut(), true)?;
-            }
-
-            qcow.header
-                .clear_autoclear_features(qcow.raw_file.file_mut())?;
-        }
-
-        Ok(qcow)
+        })
     }
 
     /// Creates a new QcowFile at the given path.
@@ -775,29 +823,6 @@ impl QcowFile {
 
         // Update L1 table cache
         self.l1_table.extend(new_l1_size as usize);
-
-        Ok(())
-    }
-
-    fn find_avail_clusters(&mut self) -> Result<()> {
-        let cluster_size = self.raw_file.cluster_size();
-
-        let file_size = self
-            .raw_file
-            .file_mut()
-            .metadata()
-            .map_err(Error::GettingFileSize)?
-            .len();
-
-        for i in (0..file_size).step_by(cluster_size as usize) {
-            let refcount = self
-                .refcounts
-                .get_cluster_refcount(&mut self.raw_file, i)
-                .map_err(Error::GettingRefcount)?;
-            if refcount == 0 {
-                self.avail_clusters.push(i);
-            }
-        }
 
         Ok(())
     }
@@ -1128,12 +1153,6 @@ impl QcowFile {
     // Gets the maximum virtual size of this image.
     fn virtual_size(&self) -> u64 {
         self.header.size
-    }
-
-    // Gets the offset of `address` in the L1 table.
-    fn l1_address_offset(&self, address: u64) -> u64 {
-        let l1_index = self.l1_table_index(address);
-        l1_index * size_of::<u64>() as u64
     }
 
     // Gets the offset of `address` in the L1 table.
