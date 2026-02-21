@@ -52,7 +52,6 @@ enum PciCapabilityType {
     Isr = 3,
     Device = 4,
     Pci = 5,
-    SharedMemory = 8,
 }
 
 // This offset represents the 2 bytes omitted from the VirtioPciCap structure
@@ -166,24 +165,6 @@ impl PciCapability for VirtioPciCap64 {
     }
 }
 
-impl VirtioPciCap64 {
-    pub fn new(cfg_type: PciCapabilityType, pci_bar: u8, id: u8, offset: u64, length: u64) -> Self {
-        VirtioPciCap64 {
-            cap: VirtioPciCap {
-                cap_len: (std::mem::size_of::<VirtioPciCap64>() as u8) + VIRTIO_PCI_CAP_LEN_OFFSET,
-                cfg_type: cfg_type as u8,
-                pci_bar,
-                id,
-                padding: [0; 2],
-                offset: Le32::from(offset as u32),
-                length: Le32::from(length as u32),
-            },
-            offset_hi: Le32::from((offset >> 32) as u32),
-            length_hi: Le32::from((length >> 32) as u32),
-        }
-    }
-}
-
 #[allow(dead_code)]
 #[repr(C, packed)]
 #[derive(Clone, Copy, Default)]
@@ -254,7 +235,6 @@ const MSIX_PBA_SIZE: u64 = 0x800;
 // The BAR size must be a power of 2.
 const CAPABILITY_BAR_SIZE: u64 = 0x80000;
 const VIRTIO_COMMON_BAR_INDEX: usize = 0;
-const VIRTIO_SHM_BAR_INDEX: usize = 2;
 
 const NOTIFY_OFF_MULTIPLIER: u32 = 4; // A dword per notification address.
 
@@ -945,8 +925,6 @@ impl PciDevice for VirtioPciDevice {
         resources: Option<Vec<Resource>>,
     ) -> std::result::Result<Vec<PciBarConfiguration>, PciDeviceError> {
         let mut bars = Vec::new();
-        let device_clone = self.device.clone();
-        let device = device_clone.lock().unwrap();
 
         let mut settings_bar_addr = None;
         let mut use_64bit_bar = self.use_64bit_bar;
@@ -1019,39 +997,6 @@ impl PciDevice for VirtioPciDevice {
         }
 
         bars.push(bar);
-
-        // Allocate a dedicated BAR if there are some shared memory regions.
-        if let Some(shm_list) = device.get_shm_regions() {
-            let bar = PciBarConfiguration::default()
-                .set_index(VIRTIO_SHM_BAR_INDEX)
-                .set_address(shm_list.addr.raw_value())
-                .set_size(shm_list.mapping.size() as _);
-
-            // The creation of the PCI BAR and its associated capabilities must
-            // happen only during the creation of a brand new VM. When a VM is
-            // restored from a known state, the BARs are already created with the
-            // right content, therefore we don't need to go through this codepath.
-            if !restoring {
-                self.configuration.add_pci_bar(&bar).map_err(|e| {
-                    PciDeviceError::IoRegistrationFailed(shm_list.addr.raw_value(), e)
-                })?;
-
-                for (idx, shm) in shm_list.region_list.iter().enumerate() {
-                    let shm_cap = VirtioPciCap64::new(
-                        PciCapabilityType::SharedMemory,
-                        VIRTIO_SHM_BAR_INDEX as u8,
-                        idx as u8,
-                        shm.offset,
-                        shm.len,
-                    );
-                    self.configuration
-                        .add_capability(&shm_cap)
-                        .map_err(PciDeviceError::CapabilitiesSetup)?;
-                }
-            }
-
-            bars.push(bar);
-        }
 
         self.bar_regions.clone_from(&bars);
 
