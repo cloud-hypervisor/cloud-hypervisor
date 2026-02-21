@@ -277,6 +277,28 @@ paths:
         500:
           description: The new device could not be added to the VM instance.
 
+  /vm.add-generic-vhost-user:
+    put:
+      summary: Add a new generic vhost-user device to the VM
+      requestBody:
+        description: The details of the new generic vhost-user device
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenericVhostUserConfig"
+        required: true
+      responses:
+        200:
+          description: The new device was successfully added to the VM instance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PciDeviceInfo"
+        204:
+          description: The new device was successfully (cold) added to the VM instance.
+        500:
+          description: The new device could not be added to the VM instance.
+
   /vm.add-pmem:
     put:
       summary: Add a new pmem device to the VM
@@ -603,6 +625,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FsConfig"
+        generic-vhost-user:
+          type: array
+          items:
+            $ref: "#/components/schemas/GenericVhostUserConfig"
         pmem:
           type: array
           items:
@@ -1056,6 +1082,26 @@ components:
           format: int16
         id:
           type: string
+
+    GenericVhostUserConfig:
+      required:
+        - queue_sizes
+        - socket
+        - tag
+        - virtio_id
+      type: object
+      properties:
+        socket:
+          type: string
+        queue_size:
+          type: array
+          items:
+            type: uint16
+        pci_segment:
+          type: integer
+          format: int16
+        virtio_id:
+          type: uint32
 
     PmemConfig:
       required:

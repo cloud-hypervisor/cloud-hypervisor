@@ -473,6 +473,24 @@ impl ApplyLandlock for FsConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct GenericVhostUserConfig {
+    pub socket: PathBuf,
+    pub queue_sizes: Vec<u16>,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub pci_segment: u16,
+    pub device_type: u32,
+}
+
+impl ApplyLandlock for GenericVhostUserConfig {
+    fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        landlock.add_rule_with_access(&self.socket, "rw")?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PmemConfig {
     pub file: PathBuf,
     #[serde(default)]
@@ -924,6 +942,7 @@ pub struct VmConfig {
     #[serde(default)]
     pub rng: RngConfig,
     pub balloon: Option<BalloonConfig>,
+    pub generic_vhost_user: Option<Vec<GenericVhostUserConfig>>,
     pub fs: Option<Vec<FsConfig>>,
     pub pmem: Option<Vec<PmemConfig>>,
     #[serde(default = "default_serial")]
@@ -997,6 +1016,12 @@ impl VmConfig {
         if let Some(fs_configs) = &self.fs {
             for fs_config in fs_configs.iter() {
                 fs_config.apply_landlock(&mut landlock)?;
+            }
+        }
+
+        if let Some(generic_vhost_user_configs) = &self.generic_vhost_user {
+            for generic_vhost_user_config in generic_vhost_user_configs.iter() {
+                generic_vhost_user_config.apply_landlock(&mut landlock)?;
             }
         }
 

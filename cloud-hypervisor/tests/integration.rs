@@ -470,6 +470,7 @@ fn prepare_virtiofsd(tmp_dir: &TempDir, shared_dir: &str) -> (std::process::Chil
         .args(["--shared-dir", shared_dir])
         .args(["--socket-path", virtiofsd_socket_path.as_str()])
         .args(["--cache", "never"])
+        .args(["--tag", "myfs"])
         .spawn()
         .unwrap();
 
@@ -1621,6 +1622,7 @@ fn test_boot_from_vhost_user_blk(
 fn _test_virtio_fs(
     prepare_daemon: &dyn Fn(&TempDir, &str) -> (std::process::Child, String),
     hotplug: bool,
+    use_generic_vhost_user: bool,
     pci_segment: Option<u16>,
 ) {
     #[cfg(target_arch = "aarch64")]
@@ -1670,8 +1672,13 @@ fn _test_virtio_fs(
     }
 
     let fs_params = format!(
-        "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024{}",
+        "socket={},id=myfs0,{}{}",
         virtiofsd_socket_path,
+        if use_generic_vhost_user {
+            "queue_sizes=[1024,1024],virtio_id=26"
+        } else {
+            "tag=myfs,num_queues=1,queue_size=1024"
+        },
         if let Some(pci_segment) = pci_segment {
             format!(",pci_segment={pci_segment}")
         } else {
@@ -1680,10 +1687,22 @@ fn _test_virtio_fs(
     );
 
     if !hotplug {
-        guest_command.args(["--fs", fs_params.as_str()]);
+        guest_command.args([
+            if use_generic_vhost_user {
+                "--generic-vhost-user"
+            } else {
+                "--fs"
+            },
+            fs_params.as_str(),
+        ]);
     }
 
     let mut child = guest_command.capture_output().spawn().unwrap();
+    let add_arg = if use_generic_vhost_user {
+        "add-generic-vhost-user"
+    } else {
+        "add-fs"
+    };
 
     let r = std::panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
@@ -1691,7 +1710,7 @@ fn _test_virtio_fs(
         if hotplug {
             // Add fs to the VM
             let (cmd_success, cmd_output) =
-                remote_command_w_output(&api_socket, "add-fs", Some(&fs_params));
+                remote_command_w_output(&api_socket, add_arg, Some(&fs_params));
             assert!(cmd_success);
 
             if let Some(pci_segment) = pci_segment {
@@ -1764,8 +1783,13 @@ fn _test_virtio_fs(
         let r = std::panic::catch_unwind(|| {
             thread::sleep(std::time::Duration::new(10, 0));
             let fs_params = format!(
-                "id=myfs0,tag=myfs,socket={},num_queues=1,queue_size=1024{}",
+                "id=myfs0,socket={},{}{}",
                 virtiofsd_socket_path,
+                if use_generic_vhost_user {
+                    "queue_sizes=[1024,1024],virtio_id=26"
+                } else {
+                    "tag=myfs,num_queues=1,queue_size=1024"
+                },
                 if let Some(pci_segment) = pci_segment {
                     format!(",pci_segment={pci_segment}")
                 } else {
@@ -1775,7 +1799,7 @@ fn _test_virtio_fs(
 
             // Add back and check it works
             let (cmd_success, cmd_output) =
-                remote_command_w_output(&api_socket, "add-fs", Some(&fs_params));
+                remote_command_w_output(&api_socket, add_arg, Some(&fs_params));
             assert!(cmd_success);
             if let Some(pci_segment) = pci_segment {
                 assert!(String::from_utf8_lossy(&cmd_output).contains(&format!(
@@ -5152,22 +5176,42 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_fs() {
-        _test_virtio_fs(&prepare_virtiofsd, false, None);
+        _test_virtio_fs(&prepare_virtiofsd, false, false, None);
     }
 
     #[test]
     fn test_virtio_fs_hotplug() {
-        _test_virtio_fs(&prepare_virtiofsd, true, None);
+        _test_virtio_fs(&prepare_virtiofsd, true, false, None);
     }
 
     #[test]
     fn test_virtio_fs_multi_segment_hotplug() {
-        _test_virtio_fs(&prepare_virtiofsd, true, Some(15));
+        _test_virtio_fs(&prepare_virtiofsd, true, false, Some(15));
     }
 
     #[test]
     fn test_virtio_fs_multi_segment() {
-        _test_virtio_fs(&prepare_virtiofsd, false, Some(15));
+        _test_virtio_fs(&prepare_virtiofsd, false, false, Some(15));
+    }
+
+    #[test]
+    fn test_generic_vhost_user() {
+        _test_virtio_fs(&prepare_virtiofsd, false, true, None);
+    }
+
+    #[test]
+    fn test_generic_vhost_user_hotplug() {
+        _test_virtio_fs(&prepare_virtiofsd, true, true, None);
+    }
+
+    #[test]
+    fn test_generic_vhost_user_multi_segment_hotplug() {
+        _test_virtio_fs(&prepare_virtiofsd, true, true, Some(15));
+    }
+
+    #[test]
+    fn test_generic_vhost_user_multi_segment() {
+        _test_virtio_fs(&prepare_virtiofsd, false, true, Some(15));
     }
 
     #[test]

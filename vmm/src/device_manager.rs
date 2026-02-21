@@ -127,8 +127,8 @@ use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 use crate::vm_config::IvshmemConfig;
 use crate::vm_config::{
     ConsoleOutputMode, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
-    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
-    VhostMode, VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
+    UserDeviceConfig, VdpaConfig, VhostMode, VmConfig, VsockConfig,
 };
 use crate::{DEVICE_MANAGER_SNAPSHOT_ID, GuestRegionMmap, PciDeviceInfo, device_node};
 
@@ -158,6 +158,7 @@ const IVSHMEM_DEVICE_NAME: &str = "__ivshmem";
 const DISK_DEVICE_NAME_PREFIX: &str = "_disk";
 const FS_DEVICE_NAME_PREFIX: &str = "_fs";
 const NET_DEVICE_NAME_PREFIX: &str = "_net";
+const GENERIC_VHOST_USER_DEVICE_NAME_PREFIX: &str = "_generic_vhost_user";
 const PMEM_DEVICE_NAME_PREFIX: &str = "_pmem";
 const VDPA_DEVICE_NAME_PREFIX: &str = "_vdpa";
 const VSOCK_DEVICE_NAME_PREFIX: &str = "_vsock";
@@ -197,6 +198,10 @@ pub enum DeviceManagerError {
     #[error("Cannot create virtio-rng device")]
     CreateVirtioRng(#[source] io::Error),
 
+    /// Cannot create generic vhost-user device
+    #[error("Cannot create generic vhost-user device")]
+    CreateGenericVhostUser(#[source] virtio_devices::vhost_user::Error),
+
     /// Cannot create virtio-fs device
     #[error("Cannot create virtio-fs device")]
     CreateVirtioFs(#[source] virtio_devices::vhost_user::Error),
@@ -204,6 +209,10 @@ pub enum DeviceManagerError {
     /// Virtio-fs device was created without a socket.
     #[error("Virtio-fs device was created without a socket")]
     NoVirtioFsSock,
+
+    /// Generic vhost-user device was created without a socket.
+    #[error("Generic vhost-user device was created without a socket")]
+    NoGenericVhostUserSock,
 
     /// Cannot create vhost-user-blk device
     #[error("Cannot create vhost-user-blk device")]
@@ -2554,6 +2563,9 @@ impl DeviceManager {
         self.make_virtio_net_devices()?;
         self.make_virtio_rng_devices()?;
 
+        // Add generic vhost-user if required
+        self.make_generic_vhost_user_devices()?;
+
         // Add virtio-fs if required
         self.make_virtio_fs_devices()?;
 
@@ -3118,6 +3130,72 @@ impl DeviceManager {
                 .unwrap()
                 .insert(id.clone(), device_node!(id, virtio_rng_device));
         }
+
+        Ok(())
+    }
+
+    fn make_generic_vhost_user_device(
+        &mut self,
+        generic_vhost_user_cfg: &mut GenericVhostUserConfig,
+    ) -> DeviceManagerResult<MetaVirtioDevice> {
+        let id = if let Some(id) = &generic_vhost_user_cfg.id {
+            id.clone()
+        } else {
+            let id = self.next_device_name(GENERIC_VHOST_USER_DEVICE_NAME_PREFIX)?;
+            generic_vhost_user_cfg.id = Some(id.clone());
+            id
+        };
+
+        info!("Creating generic vhost-user device: {generic_vhost_user_cfg:?}");
+
+        let mut node = device_node!(id);
+
+        if let Some(generic_vhost_user_socket) = generic_vhost_user_cfg.socket.to_str() {
+            let generic_vhost_user_device = Arc::new(Mutex::new(
+                virtio_devices::vhost_user::GenericVhostUser::new(
+                    id.clone(),
+                    generic_vhost_user_socket,
+                    generic_vhost_user_cfg.queue_sizes.clone(),
+                    generic_vhost_user_cfg.device_type,
+                    None,
+                    self.seccomp_action.clone(),
+                    self.exit_evt
+                        .try_clone()
+                        .map_err(DeviceManagerError::EventFd)?,
+                    self.force_iommu,
+                    state_from_id(self.snapshot.as_ref(), id.as_str())
+                        .map_err(DeviceManagerError::RestoreGetState)?,
+                )
+                .map_err(DeviceManagerError::CreateGenericVhostUser)?,
+            ));
+
+            // Update the device tree with the migratable device.
+            node.migratable =
+                Some(Arc::clone(&generic_vhost_user_device) as Arc<Mutex<dyn Migratable>>);
+            self.device_tree.lock().unwrap().insert(id.clone(), node);
+
+            Ok(MetaVirtioDevice {
+                virtio_device: Arc::clone(&generic_vhost_user_device)
+                    as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
+                iommu: false,
+                id,
+                pci_segment: generic_vhost_user_cfg.pci_segment,
+                dma_handler: None,
+            })
+        } else {
+            Err(DeviceManagerError::NoGenericVhostUserSock)
+        }
+    }
+
+    fn make_generic_vhost_user_devices(&mut self) -> DeviceManagerResult<()> {
+        let mut generic_vhost_user_devices = self.config.lock().unwrap().generic_vhost_user.clone();
+        if let Some(generic_vhost_user_list_cfg) = &mut generic_vhost_user_devices {
+            for generic_vhost_user_cfg in generic_vhost_user_list_cfg.iter_mut() {
+                let device = self.make_generic_vhost_user_device(generic_vhost_user_cfg)?;
+                self.virtio_devices.push(device);
+            }
+        }
+        self.config.lock().unwrap().generic_vhost_user = generic_vhost_user_devices;
 
         Ok(())
     }
@@ -4915,6 +4993,16 @@ impl DeviceManager {
         self.validate_identifier(&fs_cfg.id)?;
 
         let device = self.make_virtio_fs_device(fs_cfg)?;
+        self.hotplug_virtio_pci_device(device)
+    }
+
+    pub fn add_generic_vhost_user(
+        &mut self,
+        generic_vhost_user_cfg: &mut GenericVhostUserConfig,
+    ) -> DeviceManagerResult<PciDeviceInfo> {
+        self.validate_identifier(&generic_vhost_user_cfg.id)?;
+
+        let device = self.make_generic_vhost_user_device(generic_vhost_user_cfg)?;
         self.hotplug_virtio_pci_device(device)
     }
 

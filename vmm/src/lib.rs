@@ -59,8 +59,8 @@ use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
-    DeviceConfig, DiskConfig, FsConfig, NetConfig, PmemConfig, UserDeviceConfig, VdpaConfig,
-    VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
+    UserDeviceConfig, VdpaConfig, VmConfig, VsockConfig,
 };
 
 mod acpi;
@@ -2125,6 +2125,39 @@ impl RequestHandler for Vmm {
         }
     }
 
+    fn vm_add_generic_vhost_user(
+        &mut self,
+        generic_vhost_user_cfg: GenericVhostUserConfig,
+    ) -> result::Result<Option<Vec<u8>>, VmError> {
+        self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
+
+        {
+            // Validate the configuration change in a cloned configuration
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap().clone();
+            add_to_config(
+                &mut config.generic_vhost_user,
+                generic_vhost_user_cfg.clone(),
+            );
+            config.validate().map_err(VmError::ConfigValidation)?;
+        }
+
+        if let Some(ref mut vm) = self.vm {
+            let info = vm
+                .add_generic_vhost_user(generic_vhost_user_cfg)
+                .inspect_err(|e| {
+                    error!("Error when adding new generic vhost-user device to the VM: {e:?}");
+                })?;
+            serde_json::to_vec(&info)
+                .map(Some)
+                .map_err(VmError::SerializeJson)
+        } else {
+            // Update VmConfig by adding the new device.
+            let mut config = self.vm_config.as_ref().unwrap().lock().unwrap();
+            add_to_config(&mut config.generic_vhost_user, generic_vhost_user_cfg);
+            Ok(None)
+        }
+    }
+
     fn vm_add_pmem(&mut self, pmem_cfg: PmemConfig) -> result::Result<Option<Vec<u8>>, VmError> {
         self.vm_config.as_ref().ok_or(VmError::VmNotCreated)?;
 
@@ -2443,6 +2476,7 @@ mod unit_tests {
             },
             balloon: None,
             fs: None,
+            generic_vhost_user: None,
             pmem: None,
             serial: ConsoleConfig {
                 file: None,
@@ -2676,6 +2710,59 @@ mod unit_tests {
                 .clone()
                 .unwrap()[0],
             fs_config
+        );
+    }
+
+    #[test]
+    fn test_vmm_vm_cold_add_generic_vhost_user() {
+        let mut vmm = create_dummy_vmm();
+        let generic_vhost_user_config =
+            GenericVhostUserConfig::parse("virtio_id=26,socket=/tmp/sock,queue_sizes=[1024]")
+                .unwrap();
+
+        assert!(matches!(
+            vmm.vm_add_generic_vhost_user(generic_vhost_user_config.clone()),
+            Err(VmError::VmNotCreated)
+        ));
+
+        let _ = vmm.vm_create(create_dummy_vm_config());
+        assert!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .generic_vhost_user
+                .is_none()
+        );
+
+        assert!(
+            vmm.vm_add_generic_vhost_user(generic_vhost_user_config.clone())
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .generic_vhost_user
+                .clone()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            vmm.vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .generic_vhost_user
+                .clone()
+                .unwrap()[0],
+            generic_vhost_user_config
         );
     }
 
