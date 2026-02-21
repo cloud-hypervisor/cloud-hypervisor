@@ -441,7 +441,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     let mut test_disk_arg =
         format!("path={test_file},queue_size={queue_size},num_queues={num_queues}");
     if test_file == OVERLAY_WITH_QCOW2_BACKING || test_file == OVERLAY_WITH_RAW_BACKING {
-        test_disk_arg.push_str(",backing_files=on");
+        test_disk_arg.push_str(",image_type=qcow2,backing_files=on");
     }
 
     let mut child = GuestCommand::new(&guest)
