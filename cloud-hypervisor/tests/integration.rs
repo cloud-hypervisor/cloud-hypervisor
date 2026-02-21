@@ -12198,6 +12198,10 @@ mod vfio {
 }
 
 mod live_migration {
+    use core::fmt::Write;
+
+    use vmm::config::RestoredNetConfig;
+
     use crate::*;
 
     pub fn start_live_migration(
@@ -13370,10 +13374,29 @@ mod live_migration {
             .port()
     }
 
-    fn start_live_migration_tcp(src_api_socket: &str, dest_api_socket: &str) -> bool {
+    fn start_live_migration_tcp(
+        src_api_socket: &str,
+        dest_api_socket: &str,
+        new_net_fds: &[RestoredNetConfig],
+    ) -> bool {
         // Get an available TCP port
         let migration_port = get_available_port();
         let host_ip = "127.0.0.1";
+
+        let mut receive_migration_config_str = String::new();
+        if !new_net_fds.is_empty() {
+            receive_migration_config_str.push_str("[");
+            for cfg in new_net_fds {
+                write!(&mut receive_migration_config_str, "{}", cfg.id).unwrap();
+                receive_migration_config_str.push_str("@");
+                receive_migration_config_str.push_str("[");
+                for fd in cfg.fds.iter().flatten() {
+                    write!(&mut receive_migration_config_str, "{fd},").unwrap();
+                }
+                receive_migration_config_str.push_str("]");
+            }
+            receive_migration_config_str.push_str("]");
+        }
 
         // Start the 'receive-migration' command on the destination
         let mut receive_migration = Command::new(clh_command("ch-remote"))
@@ -13381,6 +13404,7 @@ mod live_migration {
                 &format!("--api-socket={dest_api_socket}"),
                 "receive-migration",
                 &format!("tcp:0.0.0.0:{migration_port}"),
+                &format!("--config {receive_migration_config_str}"),
             ])
             .stdin(Stdio::null())
             .stderr(Stdio::piped())
@@ -13529,7 +13553,180 @@ mod live_migration {
             }
             // Start TCP live migration
             assert!(
-                start_live_migration_tcp(&src_api_socket, &dest_api_socket),
+                start_live_migration_tcp(&src_api_socket, &dest_api_socket, &[]),
+                "Unsuccessful command: 'send-migration' or 'receive-migration'."
+            );
+        });
+
+        // Check and report any errors that occurred during live migration
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during live-migration",
+            );
+        }
+
+        // Check the source vm has been terminated successful (give it '3s' to settle)
+        thread::sleep(std::time::Duration::new(3, 0));
+        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Source VM was not terminated successfully.",
+            );
+        }
+
+        // After live migration, ensure the destination VM is running normally
+        let r = std::panic::catch_unwind(|| {
+            // Perform the same checks to ensure the VM has migrated correctly
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+        });
+
+        // Clean up the destination VM and ensure it terminates properly
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        handle_child_output(r, &dest_output);
+
+        // Check if the expected `console_text` is present in the destination VM's output
+        let r = std::panic::catch_unwind(|| {
+            assert!(String::from_utf8_lossy(&dest_output.stdout).contains(&console_text));
+        });
+        handle_child_output(r, &dest_output);
+    }
+
+    /// Tests live-migration via TCP and with virtio-net devices backed by external FDs.
+    fn _test_live_migration_tcp_and_external_fds() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let net_id = "net123";
+        let num_queue_pairs: usize = 2;
+        // use a name that does not conflict with tap dev created from other tests
+        let tap_name = "chtap42";
+        use std::str::FromStr;
+        let taps = net_util::open_tap(
+            Some(tap_name),
+            Some(std::net::IpAddr::V4(
+                std::net::Ipv4Addr::from_str(&guest.network.host_ip0).unwrap(),
+            )),
+            None,
+            &mut None,
+            None,
+            num_queue_pairs,
+            Some(libc::O_RDWR | libc::O_NONBLOCK),
+        )
+        .unwrap();
+
+        let kernel_path = direct_kernel_boot_path();
+        let console_text = String::from("On a branch floating down river a cricket, singing.");
+        let net_params = format!(
+            "id={},fd=[{},{}],mac={},ip={},mask=255.255.255.128,num_queues={}",
+            net_id,
+            taps[0].as_raw_fd(),
+            taps[1].as_raw_fd(),
+            guest.network.guest_mac0,
+            guest.network.host_ip0,
+            num_queue_pairs * 2,
+        );
+        let memory_param: &[&str] = &["--memory", "size=4G,shared=on"];
+        let boot_vcpus = 2;
+        let max_vcpus = 4;
+        let pmem_temp_file = TempFile::new().unwrap();
+        pmem_temp_file.as_file().set_len(128 << 20).unwrap();
+        std::process::Command::new("mkfs.ext4")
+            .arg(pmem_temp_file.as_path())
+            .output()
+            .expect("Expect creating disk image to succeed");
+        let pmem_path = String::from("/dev/pmem0");
+
+        // Start the source VM
+        let src_vm_path = clh_command("cloud-hypervisor");
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
+        src_vm_cmd
+            .args([
+                "--cpus",
+                format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
+            ])
+            .args(memory_param)
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .args([
+                "--pmem",
+                format!(
+                    "file={},discard_writes=on",
+                    pmem_temp_file.as_path().to_str().unwrap(),
+                )
+                .as_str(),
+            ])
+            .capture_output();
+        let mut src_child = src_vm_cmd.spawn().unwrap();
+
+        // Start the destination VM
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let new_taps = net_util::open_tap(
+            Some(tap_name),
+            Some(std::net::IpAddr::V4(
+                std::net::Ipv4Addr::from_str(&guest.network.host_ip0).unwrap(),
+            )),
+            None,
+            &mut None,
+            None,
+            num_queue_pairs,
+            Some(libc::O_RDWR | libc::O_NONBLOCK),
+        )
+        .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            // Ensure the source VM is running normally
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
+
+            // On x86_64 architecture, remove and re-add the virtio-net device
+            // to increase test coverage
+            #[cfg(target_arch = "x86_64")]
+            {
+                assert!(remote_command(
+                    &src_api_socket,
+                    "remove-device",
+                    Some(net_id),
+                ));
+                thread::sleep(Duration::new(10, 0));
+                // Re-add the virtio-net device
+                assert!(remote_command(
+                    &src_api_socket,
+                    "add-net",
+                    Some(net_params.as_str()),
+                ));
+                thread::sleep(Duration::new(10, 0));
+            }
+            // Start TCP live migration
+            assert!(
+                start_live_migration_tcp(
+                    &src_api_socket,
+                    &dest_api_socket,
+                    &[RestoredNetConfig {
+                        id: net_id.to_string(),
+                        num_fds: 2,
+                        fds: Some(vec![new_taps[0].as_raw_fd(), new_taps[1].as_raw_fd(),])
+                    }]
+                ),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -13590,6 +13787,11 @@ mod live_migration {
         #[test]
         fn test_live_migration_tcp() {
             _test_live_migration_tcp();
+        }
+
+        #[test]
+        fn test_live_migration_tcp_and_external_fds() {
+            _test_live_migration_tcp_and_external_fds();
         }
 
         #[test]
