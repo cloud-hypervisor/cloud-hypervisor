@@ -4,13 +4,14 @@
 //
 
 use std::collections::BTreeMap;
+use std::os::unix::io::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{io, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vhost::vdpa::{VhostVdpa, VhostVdpaIovaRange};
@@ -18,6 +19,15 @@ use vhost::vhost_kern::VhostKernFeatures;
 use vhost::vhost_kern::vdpa::VhostKernVdpa;
 use vhost::vhost_kern::vhost_binding::VHOST_BACKEND_F_SUSPEND;
 use vhost::{VhostBackend, VringConfigData};
+
+/// VHOST_BACKEND_F_RESUME: device supports resume after suspend.
+/// Not yet exposed by the vhost crate (v0.14.0), defined in linux/vhost_types.h.
+const VHOST_BACKEND_F_RESUME: u64 = 0x5;
+
+// VHOST_VDPA_RESUME ioctl number, not yet in the vhost crate.
+// Defined in linux/vhost.h as _IO(VHOST_VIRTIO, 0x7E), VHOST_VIRTIO = 0xAF.
+// _IO(type, nr) = (type << 8) | nr
+const VHOST_VDPA_RESUME: libc::c_ulong = (0xAF << 8) | 0x7E;
 use virtio_queue::desc::split::Descriptor as SplitDescriptor;
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
@@ -128,9 +138,12 @@ pub struct Vdpa {
     backend_features: u64,
     migrating: bool,
     /// Set when the device has been suspended via VHOST_VDPA_SUSPEND during
-    /// the pause phase of migration. Used to trigger conservative dirty page
-    /// collection on the next dirty_log() call.
+    /// the pause phase of migration. Cleared by resume() if migration fails.
     suspended: bool,
+    /// Set after dirty_log() has collected conservative dirty pages, to
+    /// prevent double-reporting. Separate from `suspended` so that resume()
+    /// can still detect that the device needs to be unsuspended.
+    dirty_reported: bool,
     /// Guest memory reference stored during activation, needed to read
     /// virtqueue descriptor rings for conservative dirty page marking.
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
@@ -220,6 +233,7 @@ impl Vdpa {
             backend_features,
             migrating: false,
             suspended: false,
+            dirty_reported: false,
             guest_memory: None,
             queue_infos: Vec::new(),
         })
@@ -487,16 +501,22 @@ impl VirtioDevice for Vdpa {
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
-        assert!(self.vhost.is_some());
-        if let Err(e) = self.vhost.as_ref().unwrap().get_config(offset as u32, data) {
-            error!("Failed reading virtio config: {e}");
+        if let Some(vhost) = self.vhost.as_ref() {
+            if let Err(e) = vhost.get_config(offset as u32, data) {
+                error!("Failed reading virtio config: {e}");
+            }
+        } else {
+            warn!("vDPA {}: read_config called but vhost handle is None", self.id);
         }
     }
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
-        assert!(self.vhost.is_some());
-        if let Err(e) = self.vhost.as_ref().unwrap().set_config(offset as u32, data) {
-            error!("Failed writing virtio config: {e}");
+        if let Some(vhost) = self.vhost.as_ref() {
+            if let Err(e) = vhost.set_config(offset as u32, data) {
+                error!("Failed writing virtio config: {e}");
+            }
+        } else {
+            warn!("vDPA {}: write_config called but vhost handle is None", self.id);
         }
     }
 
@@ -561,17 +581,54 @@ impl Pausable for Vdpa {
     }
 
     fn resume(&mut self) -> std::result::Result<(), MigratableError> {
-        if !self.common.paused.load(Ordering::SeqCst) {
-            return Ok(());
+        debug!(
+            "vDPA {}: resume() called (suspended={}, migrating={}, dirty_reported={}, F_RESUME={})",
+            self.id,
+            self.suspended,
+            self.migrating,
+            self.dirty_reported,
+            self.backend_features & (1 << VHOST_BACKEND_F_RESUME) != 0
+        );
+        // If the device was suspended (source, during migration pause phase) and we
+        // need to resume it (e.g., migration failed), issue VHOST_VDPA_RESUME.
+        // On the destination (fresh restore), suspended=false, so this is a no-op.
+        if self.suspended {
+            if self.backend_features & (1 << VHOST_BACKEND_F_RESUME) != 0 {
+                if let Some(vhost) = self.vhost.as_ref() {
+                    // SAFETY: VHOST_VDPA_RESUME is a simple ioctl with no pointer args.
+                    let ret = unsafe {
+                        libc::ioctl(vhost.as_raw_fd(), VHOST_VDPA_RESUME)
+                    };
+                    if ret < 0 {
+                        return Err(MigratableError::Resume(anyhow!(
+                            "VHOST_VDPA_RESUME ioctl failed: {}",
+                            io::Error::last_os_error()
+                        )));
+                    }
+                    info!("vDPA device {} resumed after failed migration", self.id);
+                } else {
+                    // vhost handle was dropped by snapshot() — device fd is closed.
+                    // The kernel resets the device on close, so it's no longer suspended.
+                    // The VM cannot recover from this state (same as upstream behavior).
+                    warn!(
+                        "vDPA device {} was suspended but vhost handle was dropped (snapshot \
+                         already sent). Device cannot be resumed — VM must be restarted.",
+                        self.id
+                    );
+                }
+            } else {
+                warn!(
+                    "vDPA device {} was suspended but backend doesn't support resume (F_RESUME not set). \
+                     Device may be in broken state.",
+                    self.id
+                );
+            }
+            self.suspended = false;
         }
 
-        if self.migrating {
-            Ok(())
-        } else {
-            Err(MigratableError::Resume(anyhow!(
-                "Can't resume a vDPA device outside live migration"
-            )))
-        }
+        self.migrating = false;
+        self.dirty_reported = false;
+        Ok(())
     }
 }
 
@@ -625,10 +682,11 @@ impl Migratable for Vdpa {
     fn dirty_log(&mut self) -> std::result::Result<MemoryRangeTable, MigratableError> {
         // During pre-copy (before pause/suspend), we cannot track device DMA
         // writes. Return empty — KVM PML handles CPU-dirtied pages.
-        if !self.suspended {
+        // Also return empty if we already reported dirty pages for this suspension.
+        if !self.suspended || self.dirty_reported {
             info!(
-                "vDPA {}: dirty_log called (suspended=false, migrating={}), returning empty",
-                self.id, self.migrating
+                "vDPA {}: dirty_log called (suspended={}, dirty_reported={}, migrating={}), returning empty",
+                self.id, self.suspended, self.dirty_reported, self.migrating
             );
             return Ok(MemoryRangeTable::default());
         }
@@ -636,7 +694,7 @@ impl Migratable for Vdpa {
         // After suspend, conservatively mark all pages the device could have
         // DMA-written to: used rings, descriptor tables, and all device-writable
         // buffers referenced by descriptors.
-        self.suspended = false;
+        self.dirty_reported = true;
 
         info!(
             "vDPA {}: dirty_log collecting conservative dirty pages ({} queues)",
@@ -786,6 +844,7 @@ impl Migratable for Vdpa {
     fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
         self.migrating = false;
         self.suspended = false;
+        self.dirty_reported = false;
         Ok(())
     }
 }

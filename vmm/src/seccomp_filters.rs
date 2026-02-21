@@ -25,6 +25,10 @@ use vhost::vhost_kern::vhost_binding::{
     VHOST_VDPA_SET_STATUS, VHOST_VDPA_SET_VRING_ENABLE, VHOST_VDPA_SUSPEND,
 };
 
+// VHOST_VDPA_RESUME is not yet exported by the vhost crate (v0.14.0).
+// _IO(VHOST_VIRTIO=0xAF, 0x7E) = (0xAF << 8) | 0x7E = 0xAF7E
+const VHOST_VDPA_RESUME_NR: u64 = 0xAF7E;
+
 #[derive(Copy, Clone)]
 pub enum Thread {
     HttpApi,
@@ -362,6 +366,7 @@ fn create_vmm_ioctl_seccomp_rule_common(
             VHOST_VDPA_GET_CONFIG_SIZE()
         )?],
         and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_SUSPEND())?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VHOST_VDPA_RESUME_NR)?],
     ];
 
     let hypervisor_rules = create_vmm_ioctl_seccomp_rule_hypervisor(hypervisor_type)?;
