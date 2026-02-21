@@ -7,7 +7,7 @@
 mod decoder;
 mod header;
 pub(crate) mod metadata;
-mod qcow_raw_file;
+pub(crate) mod qcow_raw_file;
 mod raw_file;
 mod refcount;
 mod util;
@@ -37,6 +37,7 @@ use header::{
 };
 use libc::{EINVAL, EIO, ENOSPC};
 use log::{error, warn};
+use metadata::ClusterReadMapping;
 use remain::sorted;
 use thiserror::Error;
 pub(crate) use util::MAX_NESTING_DEPTH;
@@ -162,29 +163,22 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-trait BackingFileOps: Send + Seek + Read {
-    fn read_at(&mut self, address: u64, buf: &mut [u8]) -> std::io::Result<()> {
-        self.seek(SeekFrom::Start(address))?;
-        self.read_exact(buf)
-    }
-    fn clone_box(&self) -> Box<dyn BackingFileOps>;
+/// Concrete backing file variants.
+pub(crate) enum BackingKind {
+    /// Raw backing file.
+    Raw(RawFile),
+    /// QCOW2 backing parsed into metadata and raw file.
+    Qcow {
+        inner: Box<metadata::QcowState>,
+        backing: Option<Box<BackingFile>>,
+    },
+    /// Full QcowFile used as backing, only in tests.
+    #[cfg(test)]
+    QcowFile(Box<QcowFile>),
 }
-
-impl BackingFileOps for QcowFile {
-    fn clone_box(&self) -> Box<dyn BackingFileOps> {
-        Box::new(self.clone())
-    }
-}
-
-impl BackingFileOps for RawFile {
-    fn clone_box(&self) -> Box<dyn BackingFileOps> {
-        Box::new(self.clone())
-    }
-}
-
 /// Backing file wrapper
 pub(crate) struct BackingFile {
-    inner: Box<dyn BackingFileOps>,
+    kind: BackingKind,
     virtual_size: u64,
 }
 
@@ -217,56 +211,108 @@ impl BackingFile {
             None => detect_image_type(&mut raw_file)?,
         };
 
-        let (inner, virtual_size): (Box<dyn BackingFileOps>, u64) = match backing_format {
+        let (kind, virtual_size) = match backing_format {
             ImageType::Raw => {
                 let size = raw_file
                     .seek(SeekFrom::End(0))
                     .map_err(Error::BackingFileIo)?;
                 raw_file.rewind().map_err(Error::BackingFileIo)?;
-                (Box::new(raw_file), size)
+                (BackingKind::Raw(raw_file), size)
             }
             ImageType::Qcow2 => {
-                let backing_qcow =
-                    QcowFile::from_with_nesting_depth(raw_file, max_nesting_depth - 1, sparse)
+                let (inner, nested_backing, _sparse) =
+                    parse_qcow(raw_file, max_nesting_depth - 1, sparse)
                         .map_err(|e| Error::BackingFileOpen(Box::new(e)))?;
-                let size = backing_qcow.virtual_size();
-                (Box::new(backing_qcow), size)
+                let size = inner.header.size;
+                (
+                    BackingKind::Qcow {
+                        inner: Box::new(inner),
+                        backing: nested_backing.map(Box::new),
+                    },
+                    size,
+                )
             }
         };
 
-        Ok(Some(Self {
-            inner,
-            virtual_size,
-        }))
+        Ok(Some(Self { kind, virtual_size }))
+    }
+
+    /// Consume and return the kind and virtual size.
+    pub(crate) fn into_kind(self) -> (BackingKind, u64) {
+        (self.kind, self.virtual_size)
     }
 
     /// Read from backing file, returning zeros for any portion beyond backing file size.
     #[inline]
-    fn read_at(&mut self, address: u64, buf: &mut [u8]) -> std::io::Result<()> {
+    pub(crate) fn read_at(&mut self, address: u64, buf: &mut [u8]) -> std::io::Result<()> {
         if address >= self.virtual_size {
-            // Entire read is beyond backing file
             buf.fill(0);
             return Ok(());
         }
 
         let available = (self.virtual_size - address) as usize;
-        if available >= buf.len() {
-            // Entire read is within backing file
-            self.inner.read_at(address, buf)
+        let (target, overflow) = if available >= buf.len() {
+            (buf, &mut [][..])
         } else {
-            // Partial read, fill the rest with zeroes
-            self.inner.read_at(address, &mut buf[..available])?;
-            buf[available..].fill(0);
-            Ok(())
-        }
+            buf.split_at_mut(available)
+        };
+        Self::read_at_inner(&mut self.kind, address, target)?;
+        overflow.fill(0);
+        Ok(())
     }
-}
 
-impl Clone for BackingFile {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone_box(),
-            virtual_size: self.virtual_size,
+    fn read_at_inner(kind: &mut BackingKind, address: u64, buf: &mut [u8]) -> std::io::Result<()> {
+        match kind {
+            BackingKind::Raw(file) => {
+                file.seek(SeekFrom::Start(address))?;
+                file.read_exact(buf)
+            }
+            #[cfg(test)]
+            BackingKind::QcowFile(qcow) => {
+                qcow.seek(SeekFrom::Start(address))?;
+                qcow.read_exact(buf)
+            }
+            BackingKind::Qcow { inner, backing } => {
+                let has_backing = backing.is_some();
+                let cluster_size = inner.raw_file.cluster_size();
+                let mut pos = 0usize;
+                while pos < buf.len() {
+                    let curr_addr = address + pos as u64;
+                    let intra = inner.raw_file.cluster_offset(curr_addr) as usize;
+                    let count = min(buf.len() - pos, cluster_size as usize - intra);
+                    let mapping = inner.map_cluster_read(curr_addr, count, has_backing)?;
+                    match mapping {
+                        ClusterReadMapping::Zero { length } => {
+                            buf[pos..pos + length as usize].fill(0);
+                        }
+                        ClusterReadMapping::Allocated {
+                            offset: host_off,
+                            length,
+                        } => {
+                            inner.raw_file.file_mut().seek(SeekFrom::Start(host_off))?;
+                            inner
+                                .raw_file
+                                .file_mut()
+                                .read_exact(&mut buf[pos..pos + length as usize])?;
+                        }
+                        ClusterReadMapping::Compressed { data } => {
+                            buf[pos..pos + data.len()].copy_from_slice(&data);
+                        }
+                        ClusterReadMapping::Backing {
+                            offset: backing_off,
+                            length,
+                        } => {
+                            if let Some(bf) = backing.as_mut() {
+                                bf.read_at(backing_off, &mut buf[pos..pos + length as usize])?;
+                            } else {
+                                buf[pos..pos + length as usize].fill(0);
+                            }
+                        }
+                    }
+                    pos += count;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -497,7 +543,7 @@ pub(crate) fn parse_qcow(
 /// #   Ok(())
 /// # }
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct QcowFile {
     raw_file: QcowRawFile,
     header: QcowHeader,
@@ -605,11 +651,12 @@ impl QcowFile {
         Ok(qcow)
     }
 
+    #[cfg(test)]
     pub fn set_backing_file(&mut self, backing: Option<Box<Self>>) {
         self.backing_file = backing.map(|b| {
             let virtual_size = b.virtual_size();
             BackingFile {
-                inner: Box::new(*b),
+                kind: BackingKind::QcowFile(b),
                 virtual_size,
             }
         });

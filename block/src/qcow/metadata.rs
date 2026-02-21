@@ -131,7 +131,7 @@ pub(crate) struct QcowState {
 }
 
 impl QcowMetadata {
-    pub(super) fn new(inner: QcowState) -> Self {
+    pub(crate) fn new(inner: QcowState) -> Self {
         QcowMetadata {
             inner: RwLock::new(inner),
         }
@@ -239,6 +239,21 @@ impl QcowMetadata {
         Ok(())
     }
 
+    /// Flushes dirty metadata caches and clears the dirty bit for
+    /// clean shutdown.
+    pub fn shutdown(&self) {
+        let mut inner = self.inner.write().unwrap();
+        let _ = inner.sync_caches();
+        let QcowState {
+            ref mut header,
+            ref mut raw_file,
+            ..
+        } = *inner;
+        if raw_file.file().is_writable() {
+            let _ = header.set_dirty_bit(raw_file.file_mut(), false);
+        }
+    }
+
     /// Resizes the QCOW2 image to the given new size. Only grow is
     /// supported, shrink would require walking all L2 tables to reclaim
     /// clusters beyond the new size and risks data loss.
@@ -271,6 +286,9 @@ impl QcowMetadata {
         cluster_size: u64,
         backing_file: Option<&dyn BackingRead>,
     ) -> io::Result<Vec<DeallocAction>> {
+        if address.checked_add(length as u64).is_none() {
+            return Ok(Vec::new());
+        }
         let mut inner = self.inner.write().unwrap();
         let mut actions = Vec::new();
 
@@ -484,6 +502,19 @@ impl QcowState {
             ClusterReadMapping::Zero {
                 length: count as u64,
             }
+        }
+    }
+
+    /// Maps a single cluster region for a sequential read.
+    pub(crate) fn map_cluster_read(
+        &mut self,
+        address: u64,
+        count: usize,
+        has_backing_file: bool,
+    ) -> io::Result<ClusterReadMapping> {
+        match self.try_map_read(address, count, has_backing_file)? {
+            Some(mapping) => Ok(mapping),
+            None => self.map_read_with_populate(address, count, has_backing_file),
         }
     }
 
