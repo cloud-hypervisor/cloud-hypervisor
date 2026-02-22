@@ -1,3 +1,4 @@
+- [v50.2](#v502)
 - [v50.1](#v501)
 - [v50.0](#v500)
     - [Configurable Nested Virtualization Option on x86_64](#configurable-nested-virtualization-option-on-x86_64)
@@ -409,6 +410,13 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+
+# v50.2
+
+This is a bug fix release. The following issues have been addressed:
+
+* Fix image_type in OpenAPI definition (#7734)
 
 # v50.1
 
