@@ -1,3 +1,4 @@
+- [v51.1](#v511)
 - [v51.0](#v510)
     - [Security Fixes](#security-fixes)
     - [Significant QCOW2 v3 Improvements](#significant-qcow2-v3-improvements)
@@ -417,6 +418,12 @@
     - [Console over virtio](#console-over-virtio)
     - [Unit testing](#unit-testing)
     - [Integration tests parallelization](#integration-tests-parallelization)
+
+# v51.1
+
+This is a bug fix release. The following issues have been addressed:
+
+* Fix image_type in OpenAPI definition (#7734)
 
 # v51.0
 
