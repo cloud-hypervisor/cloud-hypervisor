@@ -9,6 +9,7 @@ mod header;
 mod qcow_raw_file;
 mod raw_file;
 mod refcount;
+mod util;
 mod vec_cache;
 
 use std::cmp::{max, min};
@@ -37,6 +38,12 @@ use libc::{EINVAL, EIO, ENOSPC};
 use log::{error, warn};
 use remain::sorted;
 use thiserror::Error;
+pub(crate) use util::MAX_NESTING_DEPTH;
+use util::{
+    L1_TABLE_OFFSET_MASK, L2_TABLE_OFFSET_MASK, div_round_up_u32, div_round_up_u64, l1_entry_make,
+    l2_entry_compressed_cluster_layout, l2_entry_is_compressed, l2_entry_is_empty,
+    l2_entry_is_zero, l2_entry_make_std, l2_entry_make_zero, l2_entry_std_cluster_addr,
+};
 use vmm_sys_util::file_traits::{FileSetLen, FileSync};
 use vmm_sys_util::seek_hole::SeekHole;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
@@ -46,9 +53,6 @@ use crate::qcow::qcow_raw_file::{BeUint, QcowRawFile};
 pub use crate::qcow::raw_file::RawFile;
 use crate::qcow::refcount::RefCount;
 use crate::qcow::vec_cache::{CacheMap, Cacheable, VecCache};
-
-/// Nesting depth limit for disk formats that can open other disk files.
-pub(super) const MAX_NESTING_DEPTH: u32 = 10;
 
 #[sorted]
 #[derive(Debug, Error)]
@@ -156,60 +160,6 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-
-// bits 0-8 and 56-63 are reserved.
-const L1_TABLE_OFFSET_MASK: u64 = 0x00ff_ffff_ffff_fe00;
-const L2_TABLE_OFFSET_MASK: u64 = 0x00ff_ffff_ffff_fe00;
-// Flags
-const ZERO_FLAG: u64 = 1 << 0;
-const COMPRESSED_FLAG: u64 = 1 << 62;
-const COMPRESSED_SECTOR_SIZE: u64 = 512;
-const CLUSTER_USED_FLAG: u64 = 1 << 63;
-
-fn l2_entry_is_empty(l2_entry: u64) -> bool {
-    l2_entry == 0
-}
-
-// Check bit 0 - only valid for standard clusters.
-fn l2_entry_is_zero(l2_entry: u64) -> bool {
-    l2_entry & ZERO_FLAG != 0
-}
-
-fn l2_entry_is_compressed(l2_entry: u64) -> bool {
-    l2_entry & COMPRESSED_FLAG != 0
-}
-
-// Get file offset and size of compressed cluster data
-fn l2_entry_compressed_cluster_layout(l2_entry: u64, cluster_bits: u32) -> (u64, usize) {
-    let compressed_size_shift = 62 - (cluster_bits - 8);
-    let compressed_size_mask = (1 << (cluster_bits - 8)) - 1;
-    let compressed_cluster_addr = l2_entry & ((1 << compressed_size_shift) - 1);
-    let nsectors = (l2_entry >> compressed_size_shift & compressed_size_mask) + 1;
-    let compressed_cluster_size = ((nsectors * COMPRESSED_SECTOR_SIZE)
-        - (compressed_cluster_addr & (COMPRESSED_SECTOR_SIZE - 1)))
-        as usize;
-    (compressed_cluster_addr, compressed_cluster_size)
-}
-
-// Get file offset of standard (non-compressed) cluster
-fn l2_entry_std_cluster_addr(l2_entry: u64) -> u64 {
-    l2_entry & L2_TABLE_OFFSET_MASK
-}
-
-// Make L2 entry for standard (non-compressed) cluster
-fn l2_entry_make_std(cluster_addr: u64) -> u64 {
-    (cluster_addr & L2_TABLE_OFFSET_MASK) | CLUSTER_USED_FLAG
-}
-
-// Make L2 entry for preallocated zero cluster
-fn l2_entry_make_zero(cluster_addr: u64) -> u64 {
-    (cluster_addr & L2_TABLE_OFFSET_MASK) | CLUSTER_USED_FLAG | ZERO_FLAG
-}
-
-// Make L1 entry with optional flags
-fn l1_entry_make(cluster_addr: u64, refcount_is_one: bool) -> u64 {
-    (cluster_addr & L1_TABLE_OFFSET_MASK) | (refcount_is_one as u64 * CLUSTER_USED_FLAG)
-}
 
 trait BackingFileOps: Send + Seek + Read {
     fn read_at(&mut self, address: u64, buf: &mut [u8]) -> std::io::Result<()> {
@@ -2008,16 +1958,6 @@ impl BlockBackend for QcowFile {
     }
 }
 
-// Ceiling of the division of `dividend`/`divisor`.
-fn div_round_up_u64(dividend: u64, divisor: u64) -> u64 {
-    dividend / divisor + u64::from(!dividend.is_multiple_of(divisor))
-}
-
-// Ceiling of the division of `dividend`/`divisor`.
-fn div_round_up_u32(dividend: u32, divisor: u32) -> u32 {
-    dividend / divisor + u32::from(!dividend.is_multiple_of(divisor))
-}
-
 fn convert_copy<R, W>(reader: &mut R, writer: &mut W, offset: u64, size: u64) -> Result<()>
 where
     R: Read + Seek,
@@ -2153,6 +2093,7 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
     use vmm_sys_util::write_zeroes::WriteZeroes;
 
+    use super::util::{COMPRESSED_FLAG, ZERO_FLAG};
     use super::*;
 
     fn valid_header_v3() -> Vec<u8> {
