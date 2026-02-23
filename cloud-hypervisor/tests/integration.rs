@@ -889,28 +889,6 @@ fn fw_path(_fw_type: FwType) -> String {
     fw_path.to_str().unwrap().to_string()
 }
 
-#[derive(Debug)]
-struct MetaEvent {
-    event: String,
-    device_id: Option<String>,
-}
-
-impl MetaEvent {
-    pub fn match_with_json_event(&self, v: &serde_json::Value) -> bool {
-        let mut matched = false;
-        if v["event"].as_str().unwrap() == self.event {
-            if let Some(device_id) = &self.device_id {
-                if v["properties"]["id"].as_str().unwrap() == device_id {
-                    matched = true;
-                }
-            } else {
-                matched = true;
-            }
-        }
-        matched
-    }
-}
-
 // Parse the event_monitor file based on the format that each event
 // is followed by a double newline
 fn parse_event_file(event_file: &str) -> Vec<serde_json::Value> {
@@ -2584,31 +2562,11 @@ fn _test_simple_launch(guest: &Guest) {
         assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
         assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
         assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
-
-        let expected_sequential_events = [
-            &MetaEvent {
-                event: "starting".to_string(),
-                device_id: None,
-            },
-            &MetaEvent {
-                event: "booting".to_string(),
-                device_id: None,
-            },
-            &MetaEvent {
-                event: "booted".to_string(),
-                device_id: None,
-            },
-            &MetaEvent {
-                event: "activated".to_string(),
-                device_id: Some("_disk0".to_string()),
-            },
-            &MetaEvent {
-                event: "reset".to_string(),
-                device_id: Some("_disk0".to_string()),
-            },
-        ];
         assert!(check_sequential_events(
-            &expected_sequential_events,
+            &guest
+                .get_expected_seq_events_for_simple_launch()
+                .iter()
+                .collect::<Vec<_>>(),
             &event_path
         ));
 

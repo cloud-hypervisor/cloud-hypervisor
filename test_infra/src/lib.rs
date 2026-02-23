@@ -883,6 +883,28 @@ pub fn kill_child(child: &mut Child) {
     }
 }
 
+#[derive(Debug)]
+pub struct MetaEvent {
+    pub event: String,
+    pub device_id: Option<String>,
+}
+
+impl MetaEvent {
+    pub fn match_with_json_event(&self, v: &serde_json::Value) -> bool {
+        let mut matched = false;
+        if v["event"].as_str().unwrap() == self.event {
+            if let Some(device_id) = &self.device_id {
+                if v["properties"]["id"].as_str().unwrap() == device_id {
+                    matched = true;
+                }
+            } else {
+                matched = true;
+            }
+        }
+        matched
+    }
+}
+
 pub const PIPE_SIZE: i32 = 32 << 20;
 
 pub struct Guest {
@@ -1319,6 +1341,37 @@ impl Guest {
             self.ssh_command("sudo rm /mnt/test").unwrap();
             assert_eq!(self.ssh_command("sudo umount /mnt").unwrap(), "");
         }
+    }
+
+    pub fn get_expected_seq_events_for_simple_launch(&self) -> Vec<MetaEvent> {
+        let mut out_evt = vec![
+            MetaEvent {
+                event: "starting".to_string(),
+                device_id: None,
+            },
+            MetaEvent {
+                event: "booting".to_string(),
+                device_id: None,
+            },
+            MetaEvent {
+                event: "booted".to_string(),
+                device_id: None,
+            },
+            MetaEvent {
+                event: "activated".to_string(),
+                device_id: Some("_disk0".to_string()),
+            },
+        ];
+        // For confidential VM, reset of the device does not trigger a VMM exit, or
+        // It is handled in the PSP
+        // so we won't receive the "reset" event for disk0.
+        if self.vm_type != GuestVmType::Confidential {
+            out_evt.push(MetaEvent {
+                event: "reset".to_string(),
+                device_id: Some("_disk0".to_string()),
+            });
+        }
+        out_evt
     }
 }
 
