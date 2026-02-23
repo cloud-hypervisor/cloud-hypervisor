@@ -14441,6 +14441,7 @@ mod common_cvm {
         let mut guest = Guest::new(Box::new(disk_config));
         guest.vm_type = GuestVmType::Confidential;
         guest.boot_timeout = DEFAULT_CVM_TCP_LISTENER_TIMEOUT;
+        guest.nested = false;
         _test_simple_launch(&guest)
     }
 }
