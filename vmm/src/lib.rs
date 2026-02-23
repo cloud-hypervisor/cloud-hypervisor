@@ -2378,8 +2378,8 @@ mod unit_tests {
     #[cfg(target_arch = "x86_64")]
     use crate::vm_config::DebugConsoleConfig;
     use crate::vm_config::{
-        ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpusConfig, HotplugMethod, MemoryConfig,
-        PayloadConfig, RngConfig,
+        ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures, CpusConfig, HotplugMethod,
+        MemoryConfig, PayloadConfig, RngConfig,
     };
 
     fn create_dummy_vmm() -> Vmm {
@@ -2408,6 +2408,7 @@ mod unit_tests {
                 affinity: None,
                 features: CpuFeatures::default(),
                 nested: true,
+                core_scheduling: CoreScheduling::default(),
             },
             memory: MemoryConfig {
                 size: 536_870_912,

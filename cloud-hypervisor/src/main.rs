@@ -214,7 +214,7 @@ fn get_cli_options_sorted(
                     kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,\
                     affinity=<list_of_vcpus_with_their_associated_cpuset>,\
                     features=<list_of_features_to_enable>,\
-                    nested=on|off",
+                    nested=on|off,core_scheduling=vm|vcpu|off",
             )
             .default_value(default_vcpus)
             .group("vm-config"),
@@ -911,8 +911,8 @@ mod unit_tests {
     #[cfg(target_arch = "x86_64")]
     use vmm::vm_config::DebugConsoleConfig;
     use vmm::vm_config::{
-        ConsoleConfig, ConsoleOutputMode, CpuFeatures, CpusConfig, HotplugMethod, MemoryConfig,
-        PayloadConfig, RngConfig, VmConfig,
+        ConsoleConfig, ConsoleOutputMode, CoreScheduling, CpuFeatures, CpusConfig, HotplugMethod,
+        MemoryConfig, PayloadConfig, RngConfig, VmConfig,
     };
 
     use crate::test_util::assert_args_sorted;
@@ -963,6 +963,7 @@ mod unit_tests {
                 affinity: None,
                 features: CpuFeatures::default(),
                 nested: true,
+                core_scheduling: CoreScheduling::Vm,
             },
             memory: MemoryConfig {
                 size: 536_870_912,

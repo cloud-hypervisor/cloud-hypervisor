@@ -19,11 +19,12 @@ struct CpusConfig {
     affinity: Option<Vec<CpuAffinity>>,
     features: CpuFeatures,
     nested: bool,
+    core_scheduling: CoreScheduling,
 }
 ```
 
 ```
---cpus boot=<boot_vcpus>,max=<max_vcpus>,topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,affinity=<list_of_vcpus_with_their_associated_cpuset>,features=<list_of_features_to_enable>,nested=on|off
+--cpus boot=<boot_vcpus>,max=<max_vcpus>,topology=<threads_per_core>:<cores_per_die>:<dies_per_package>:<packages>,kvm_hyperv=on|off,max_phys_bits=<maximum_number_of_physical_bits>,affinity=<list_of_vcpus_with_their_associated_cpuset>,features=<list_of_features_to_enable>,nested=on|off,core_scheduling=vm|vcpu|off
 ```
 
 ### `boot`
@@ -221,3 +222,34 @@ _Example_
 ```
 --cpus nested=on
 ```
+
+### `core_scheduling`
+
+Core scheduling mode for vCPU threads.
+
+This option controls Linux core scheduling (`PR_SCHED_CORE`) for vCPU threads,
+which prevents untrusted tasks from sharing SMT siblings. This mitigates
+side-channel attacks (e.g. MDS, L1TF) between vCPU threads.
+
+Three modes are available:
+
+- `vm` (default): All vCPU threads share a single core scheduling cookie.
+  vCPUs may be co-scheduled on SMT siblings of the same core, providing
+  better performance while still isolating VM threads from host tasks.
+- `vcpu`: Each vCPU thread gets its own unique cookie. No two vCPUs can
+  share SMT siblings, providing the strongest isolation between vCPUs at
+  the cost of performance.
+- `off`: No core scheduling is applied.
+
+On kernels older than 5.14 (which lack `PR_SCHED_CORE` support), the
+option silently has no effect.
+
+_Example_
+
+```
+--cpus boot=2,core_scheduling=vm
+```
+
+In this example, both vCPUs will share the same core scheduling cookie,
+allowing them to be co-scheduled on SMT siblings while preventing host
+threads from sharing those siblings.
