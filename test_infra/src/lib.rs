@@ -1399,6 +1399,40 @@ impl Guest {
         };
         assert_eq!(self.get_cpu_count().unwrap_or_default(), cpu);
     }
+
+    fn get_expected_memory(&self) -> Option<u32> {
+        // For confidential VMs, the memory available to the guest is less than
+        // the memory assigned to the VM, as some of it is reserved for the PSP
+        // and bounce buffers.
+        // So we return the expected available memory for confidential VMs here.
+        let memory = match self.mem_size_str.as_str() {
+            "512M" => {
+                if self.vm_type == GuestVmType::Confidential {
+                    407_000
+                } else {
+                    480_000
+                }
+            }
+            "1G" => {
+                if self.vm_type == GuestVmType::Confidential {
+                    920_000
+                } else {
+                    960_000
+                }
+            }
+            // More to be added if more memory sizes are used in the tests
+            _ => panic!("Unsupported memory size: {}", self.mem_size_str),
+        };
+        Some(memory)
+    }
+
+    pub fn validate_memory(&self, expected_memory: Option<u32>) {
+        let memory = expected_memory
+            .or_else(|| self.get_expected_memory())
+            .unwrap_or_default();
+
+        assert!(self.get_total_memory().unwrap_or_default() > memory);
+    }
 }
 
 #[derive(Default)]
