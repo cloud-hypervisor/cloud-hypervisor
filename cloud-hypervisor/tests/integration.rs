@@ -14432,9 +14432,8 @@ mod fw_cfg {
 
 #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
 mod common_cvm {
-    use vm_memory::GuestAddress;
-
     use crate::*;
+
     #[test]
     fn test_focal_simple_launch() {
         let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
