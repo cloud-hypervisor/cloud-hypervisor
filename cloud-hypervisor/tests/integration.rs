@@ -995,7 +995,7 @@ fn test_cpu_topology(threads_per_core: u8, cores_per_package: u8, packages: u8, 
                 "boot={total_vcpus},topology={threads_per_core}:{cores_per_package}:1:{packages}"
             ),
         ])
-        .args(["--memory", "size=512M"])
+        .default_memory()
         .args(["--kernel", kernel_path])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
@@ -1175,7 +1175,7 @@ fn _test_power_button(acpi: bool) {
     };
 
     cmd.default_cpus()
-        .args(["--memory", "size=512M"])
+        .default_memory()
         .args(["--kernel", kernel_path.to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .capture_output()
@@ -1838,7 +1838,7 @@ fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
 
     let mut child = GuestCommand::new(&guest)
         .default_cpus()
-        .args(["--memory", "size=512M"])
+        .default_memory()
         .args(["--kernel", kernel_path.to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
@@ -1919,7 +1919,7 @@ fn _test_virtio_vsock(hotplug: bool) {
     let mut cmd = GuestCommand::new(&guest);
     cmd.args(["--api-socket", &api_socket]);
     cmd.default_cpus();
-    cmd.args(["--memory", "size=512M"]);
+    cmd.default_memory();
     cmd.args(["--kernel", kernel_path.to_str().unwrap()]);
     cmd.args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
     cmd.default_disks();
@@ -2282,7 +2282,7 @@ fn _test_virtio_iommu(acpi: bool) {
 
     let mut child = GuestCommand::new(&guest)
         .default_cpus()
-        .args(["--memory", "size=512M"])
+        .default_memory()
         .args(["--kernel", kernel_path.to_str().unwrap()])
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .args([
@@ -2639,7 +2639,7 @@ mod common_parallel {
 
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=2,max=4"])
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .capture_output()
@@ -2694,7 +2694,7 @@ mod common_parallel {
         let max_phys_bits: u8 = 36;
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("max_phys_bits={max_phys_bits}")])
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -2740,7 +2740,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=2,affinity=[0@[0,2],1@[1,3]]"])
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -2781,7 +2781,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -2992,7 +2992,7 @@ mod common_parallel {
 
         cmd.default_cpus()
             .args(["--api-socket", &api_socket])
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -3052,7 +3052,7 @@ mod common_parallel {
         let guest = Guest::new(Box::new(disk_config));
         let mut cmd = GuestCommand::new(&guest);
         cmd.default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .capture_output()
@@ -3089,7 +3089,7 @@ mod common_parallel {
         let guest = Guest::new(Box::new(disk_config));
         let mut cmd = GuestCommand::new(&guest);
         cmd.default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(["--net", guest.default_net_string_w_mtu(3000).as_str()])
@@ -3151,7 +3151,7 @@ mod common_parallel {
 
         let mut cmd = GuestCommand::new(&guest);
         cmd.default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -3322,7 +3322,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -3368,7 +3368,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -4457,7 +4457,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -4520,7 +4520,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -4587,7 +4587,7 @@ mod common_parallel {
 
         let child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -4637,7 +4637,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -4780,7 +4780,7 @@ mod common_parallel {
 
         let mut cloud_child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -4861,7 +4861,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args([
                 "--disk",
@@ -4971,7 +4971,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -5017,7 +5017,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(["--platform", "serial_number=a=b;c=d"])
@@ -5053,7 +5053,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(["--platform", "uuid=1e8aa28a-435d-4027-87f4-40dceff1fa0a"])
@@ -5094,7 +5094,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(["--platform", &oem_strings])
@@ -5197,7 +5197,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args([
                 "--disk",
@@ -5252,7 +5252,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -5297,7 +5297,7 @@ mod common_parallel {
         let guest = Guest::new(Box::new(disk_config));
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -5333,7 +5333,7 @@ mod common_parallel {
         let guest = Guest::new(Box::new(disk_config));
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -5375,7 +5375,7 @@ mod common_parallel {
         let console_str: &str = "console=ttyAMA0";
 
         cmd.default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args([
                 "--cmdline",
@@ -5431,7 +5431,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args([
                 "--cmdline",
@@ -5489,7 +5489,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args([
                 "--cmdline",
@@ -5558,7 +5558,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", &cmdline])
             .default_disks()
@@ -5605,7 +5605,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", &cmdline])
             .default_disks()
@@ -5669,7 +5669,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -5714,7 +5714,7 @@ mod common_parallel {
         let console_path = guest.tmp_dir.as_path().join("console-output");
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -6011,7 +6011,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args([
                 "--cmdline",
@@ -6108,7 +6108,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -6209,7 +6209,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=2,max=4"])
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args([
                 "--cmdline",
@@ -6562,7 +6562,7 @@ mod common_parallel {
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket])
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(["--landlock"])
@@ -6636,7 +6636,7 @@ mod common_parallel {
 
         cmd.args(["--api-socket", &api_socket])
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -6828,7 +6828,7 @@ mod common_parallel {
 
         cmd.args(["--api-socket", &api_socket])
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -6943,7 +6943,7 @@ mod common_parallel {
 
         cmd.args(["--api-socket", &api_socket])
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -7186,7 +7186,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -7398,7 +7398,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -7925,7 +7925,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -8127,7 +8127,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -8243,7 +8243,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -8481,7 +8481,7 @@ mod common_parallel {
 
         cmd.args(["--api-socket", &api_socket])
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -8623,7 +8623,7 @@ mod common_parallel {
 
         cmd.args(["--api-socket", &api_socket])
             .default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_net()
@@ -8841,7 +8841,7 @@ mod common_parallel {
 
         let mut cmd = GuestCommand::new(&guest);
         cmd.default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -8967,7 +8967,7 @@ mod common_parallel {
 
         let mut cmd = GuestCommand::new(&guest);
         cmd.default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -9050,7 +9050,7 @@ mod common_parallel {
 
         let mut cmd = GuestCommand::new(&guest);
         cmd.default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -9112,7 +9112,7 @@ mod common_parallel {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("boot={num_queue_pairs}")])
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -9237,7 +9237,7 @@ mod common_parallel {
         let mut guest_command = GuestCommand::new(&guest);
         guest_command
             .args(["--cpus", "boot=2"])
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -9866,7 +9866,7 @@ mod common_parallel {
         let kernel_path = direct_kernel_boot_path();
 
         cmd.default_cpus()
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args([
                 "--cmdline",
@@ -9915,7 +9915,7 @@ mod common_parallel {
 
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=4"])
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", cmd_line.as_str()])
             .default_disks()
@@ -10291,7 +10291,7 @@ mod ivshmem {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=2"])
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -14021,7 +14021,7 @@ mod aarch64_acpi {
 
             let mut child = GuestCommand::new(&guest)
                 .default_cpus()
-                .args(["--memory", "size=512M"])
+                .default_memory()
                 .args(["--kernel", edk2_path().to_str().unwrap()])
                 .default_disks()
                 .default_net()
@@ -14395,7 +14395,7 @@ mod fw_cfg {
         std::fs::write(&test_file, "test-file-content").unwrap();
 
         cmd.args(["--cpus", "boot=4"])
-            .args(["--memory", "size=512M"])
+            .default_memory()
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", cmd_line])
             .default_disks()
