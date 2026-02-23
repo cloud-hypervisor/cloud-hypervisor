@@ -918,6 +918,7 @@ pub struct Guest {
     pub console_type: Option<String>,
     pub num_cpu: u32,
     pub nested: bool,
+    pub mem_size_str: String,
 }
 
 // Return the next id that can be used for this guest. This is stored in a
@@ -989,6 +990,7 @@ impl Guest {
             console_type: None,
             num_cpu: 1u32,
             nested: true,
+            mem_size_str: "512M".to_string(),
         }
     }
 
@@ -1386,6 +1388,10 @@ impl Guest {
         )
     }
 
+    pub fn default_memory_string(&self) -> String {
+        format!("size={}", self.mem_size_str)
+    }
+
     pub fn validate_cpu_count(&self, expected_cpu_count: Option<u32>) {
         let cpu = match expected_cpu_count {
             Some(count) => count,
@@ -1578,6 +1584,10 @@ impl<'a> GuestCommand<'a> {
 
     pub fn default_cpus(&mut self) -> &mut Self {
         self.args(["--cpus", self.guest.default_cpus_string().as_str()])
+    }
+
+    pub fn default_memory(&mut self) -> &mut Self {
+        self.args(["--memory", self.guest.default_memory_string().as_str()])
     }
 }
 
