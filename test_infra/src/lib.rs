@@ -916,6 +916,8 @@ pub struct Guest {
     pub kernel_path: Option<String>,
     pub kernel_cmdline: Option<String>,
     pub console_type: Option<String>,
+    pub num_cpu: u32,
+    pub nested: bool,
 }
 
 // Return the next id that can be used for this guest. This is stored in a
@@ -985,6 +987,8 @@ impl Guest {
             kernel_path: None,
             kernel_cmdline: None,
             console_type: None,
+            num_cpu: 1u32,
+            nested: true,
         }
     }
 
@@ -1373,6 +1377,14 @@ impl Guest {
         }
         out_evt
     }
+
+    pub fn default_cpus_string(&self) -> String {
+        format!(
+            "boot={}{}",
+            self.num_cpu,
+            if self.nested { "" } else { ",nested=off" }
+        )
+    }
 }
 
 #[derive(Default)]
@@ -1554,6 +1566,10 @@ impl<'a> GuestCommand<'a> {
         }
 
         self
+    }
+
+    pub fn default_cpus(&mut self) -> &mut Self {
+        self.args(["--cpus", self.guest.default_cpus_string().as_str()])
     }
 }
 

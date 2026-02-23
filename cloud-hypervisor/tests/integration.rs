@@ -2545,7 +2545,7 @@ fn _test_simple_launch(guest: &Guest) {
     let event_path = temp_event_monitor_path(&guest.tmp_dir);
 
     let mut child = GuestCommand::new(guest)
-        .args(["--cpus", "boot=1"])
+        .default_cpus()
         .args(["--memory", "size=512M"])
         .default_kernel_cmdline()
         .default_disks()
