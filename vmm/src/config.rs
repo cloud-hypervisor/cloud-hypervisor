@@ -596,6 +596,23 @@ impl FromStr for HotplugMethod {
     }
 }
 
+pub enum ParseCoreSchedulingError {
+    InvalidValue(String),
+}
+
+impl FromStr for CoreScheduling {
+    type Err = ParseCoreSchedulingError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "vm" => Ok(CoreScheduling::Vm),
+            "vcpu" => Ok(CoreScheduling::Vcpu),
+            "off" => Ok(CoreScheduling::Off),
+            _ => Err(ParseCoreSchedulingError::InvalidValue(s.to_owned())),
+        }
+    }
+}
+
 pub enum CpuTopologyParseError {
     InvalidValue(String),
 }
@@ -640,7 +657,8 @@ impl CpusConfig {
             .add("max_phys_bits")
             .add("affinity")
             .add("features")
-            .add("nested");
+            .add("nested")
+            .add("core_scheduling");
         parser.parse(cpus).map_err(Error::ParseCpus)?;
 
         let boot_vcpus: u32 = parser
@@ -707,6 +725,11 @@ impl CpusConfig {
                 "nested=off is not supported on aarch64 and riscv64 architectures".to_string(),
             )));
         }
+        let core_scheduling = parser
+            .convert("core_scheduling")
+            .map_err(Error::ParseCpus)?
+            .unwrap_or(CoreScheduling::Vm);
+
         Ok(CpusConfig {
             boot_vcpus,
             max_vcpus,
@@ -716,6 +739,7 @@ impl CpusConfig {
             affinity,
             features,
             nested,
+            core_scheduling,
         })
     }
 }
@@ -3578,6 +3602,42 @@ mod unit_tests {
                 ..Default::default()
             },
         );
+
+        // Test core_scheduling parsing
+        assert_eq!(
+            CpusConfig::parse("boot=1,core_scheduling=vm")?,
+            CpusConfig {
+                boot_vcpus: 1,
+                max_vcpus: 1,
+                core_scheduling: CoreScheduling::Vm,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            CpusConfig::parse("boot=1,core_scheduling=vcpu")?,
+            CpusConfig {
+                boot_vcpus: 1,
+                max_vcpus: 1,
+                core_scheduling: CoreScheduling::Vcpu,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            CpusConfig::parse("boot=1,core_scheduling=off")?,
+            CpusConfig {
+                boot_vcpus: 1,
+                max_vcpus: 1,
+                core_scheduling: CoreScheduling::Off,
+                ..Default::default()
+            }
+        );
+        // Default (no core_scheduling specified) should be Vm
+        assert_eq!(
+            CpusConfig::parse("boot=1")?.core_scheduling,
+            CoreScheduling::Vm
+        );
+        // Invalid value should error
+        CpusConfig::parse("boot=1,core_scheduling=invalid").unwrap_err();
 
         Ok(())
     }

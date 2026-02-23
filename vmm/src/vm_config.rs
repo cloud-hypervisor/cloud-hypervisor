@@ -39,6 +39,14 @@ pub struct CpuFeatures {
     pub amx: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub enum CoreScheduling {
+    #[default]
+    Vm, // All vCPUs have the same cookie so can share a core
+    Vcpu, // Each vCPU has a unique cookie so can't share a core
+    Off,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpuTopology {
     pub threads_per_core: u16,
@@ -72,6 +80,8 @@ pub struct CpusConfig {
     pub features: CpuFeatures,
     #[serde(default = "default_cpusconfig_nested")]
     pub nested: bool,
+    #[serde(default)]
+    pub core_scheduling: CoreScheduling,
 }
 
 pub const DEFAULT_VCPUS: u32 = 1;
@@ -87,6 +97,7 @@ impl Default for CpusConfig {
             affinity: None,
             features: CpuFeatures::default(),
             nested: true,
+            core_scheduling: CoreScheduling::default(),
         }
     }
 }

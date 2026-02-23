@@ -738,6 +738,10 @@ components:
             $ref: "#/components/schemas/CpuAffinity"
         features:
           $ref: "#/components/schemas/CpuFeatures"
+        core_scheduling:
+          type: string
+          enum: ["Vm", "Vcpu", "Off"]
+          default: "Vm"
 
     PciSegmentConfig:
       required:
