@@ -706,10 +706,21 @@ cmd_shell() {
     ensure_build_dir
     ensure_latest_ctr
     process_volumes_args
-    say_warn "Starting a privileged shell prompt as root ..."
-    say_warn "WARNING: Your $CLH_ROOT_DIR folder will be bind-mounted in the container under $CTR_CLH_ROOT_DIR"
+
+    # Remaining args after -- are passed as a command to bash -c.
+    # With no args, an interactive shell is started.
+    tty_args="-ti"
+    shell_args=()
+    if [ $# -gt 0 ]; then
+        tty_args=""
+        shell_args+=("-c" "$*")
+    else
+        say_warn "Starting a privileged shell prompt as root ..."
+        say_warn "WARNING: Your $CLH_ROOT_DIR folder will be bind-mounted in the container under $CTR_CLH_ROOT_DIR"
+    fi
+
     $DOCKER_RUNTIME run \
-        -ti \
+        $tty_args \
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
         --privileged \
@@ -723,7 +734,8 @@ cmd_shell() {
         --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
         --env USER="root" \
         --entrypoint bash \
-        "$CTR_IMAGE"
+        "$CTR_IMAGE" \
+        "${shell_args[@]}"
 
     fix_dir_perms $?
 }
