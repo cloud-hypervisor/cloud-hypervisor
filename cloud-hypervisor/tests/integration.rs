@@ -2559,7 +2559,7 @@ fn _test_simple_launch(guest: &Guest) {
     let r = std::panic::catch_unwind(|| {
         guest.wait_vm_boot().unwrap();
 
-        assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
+        guest.validate_cpu_count(None);
         assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
         assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
         assert!(check_sequential_events(

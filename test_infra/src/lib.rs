@@ -1385,6 +1385,14 @@ impl Guest {
             if self.nested { "" } else { ",nested=off" }
         )
     }
+
+    pub fn validate_cpu_count(&self, expected_cpu_count: Option<u32>) {
+        let cpu = match expected_cpu_count {
+            Some(count) => count,
+            None => self.num_cpu,
+        };
+        assert_eq!(self.get_cpu_count().unwrap_or_default(), cpu);
+    }
 }
 
 #[derive(Default)]
