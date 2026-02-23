@@ -2546,7 +2546,7 @@ fn _test_simple_launch(guest: &Guest) {
 
     let mut child = GuestCommand::new(guest)
         .default_cpus()
-        .args(["--memory", "size=512M"])
+        .default_memory()
         .default_kernel_cmdline()
         .default_disks()
         .default_net()
