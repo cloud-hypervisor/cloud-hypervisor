@@ -5,6 +5,7 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::os::fd::AsRawFd;
+use std::sync::{Arc, Mutex};
 
 use vmm_sys_util::eventfd::EventFd;
 
@@ -15,24 +16,32 @@ use crate::vhdx::{Result as VhdxResult, Vhdx};
 use crate::{AsyncAdaptor, BlockBackend, Error};
 
 pub struct VhdxDiskSync {
-    vhdx_file: Vhdx,
+    // FIXME: The Mutex serializes all VHDX I/O operations across queues, which
+    // is necessary for correctness but eliminates any parallelism benefit from
+    // multiqueue. Vhdx::clone() shares the underlying file description across
+    // threads, so concurrent I/O from multiple queues races on the file offset
+    // causing data corruption.
+    //
+    // A proper fix would require restructuring the VHDX I/O path so that data
+    // operations can proceed in parallel with independent file descriptors.
+    vhdx_file: Arc<Mutex<Vhdx>>,
 }
 
 impl VhdxDiskSync {
     pub fn new(f: File) -> VhdxResult<Self> {
         Ok(VhdxDiskSync {
-            vhdx_file: Vhdx::new(f)?,
+            vhdx_file: Arc::new(Mutex::new(Vhdx::new(f)?)),
         })
     }
 }
 
 impl DiskFile for VhdxDiskSync {
     fn logical_size(&mut self) -> DiskFileResult<u64> {
-        Ok(self.vhdx_file.virtual_disk_size())
+        Ok(self.vhdx_file.lock().unwrap().virtual_disk_size())
     }
 
     fn physical_size(&mut self) -> DiskFileResult<u64> {
-        self.vhdx_file.physical_size().map_err(|e| {
+        self.vhdx_file.lock().unwrap().physical_size().map_err(|e| {
             let io_inner = match e {
                 Error::GetFileMetadata(e) => e,
                 _ => unreachable!(),
@@ -42,30 +51,28 @@ impl DiskFile for VhdxDiskSync {
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
-        Ok(
-            Box::new(VhdxSync::new(self.vhdx_file.clone()).map_err(DiskFileError::NewAsyncIo)?)
-                as Box<dyn AsyncIo>,
-        )
+        Ok(Box::new(VhdxSync::new(Arc::clone(&self.vhdx_file))) as Box<dyn AsyncIo>)
     }
 
     fn fd(&mut self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.vhdx_file.as_raw_fd())
+        BorrowedDiskFd::new(self.vhdx_file.lock().unwrap().as_raw_fd())
     }
 }
 
 pub struct VhdxSync {
-    vhdx_file: Vhdx,
+    vhdx_file: Arc<Mutex<Vhdx>>,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
 }
 
 impl VhdxSync {
-    pub fn new(vhdx_file: Vhdx) -> std::io::Result<Self> {
-        Ok(VhdxSync {
+    pub fn new(vhdx_file: Arc<Mutex<Vhdx>>) -> Self {
+        VhdxSync {
             vhdx_file,
-            eventfd: EventFd::new(libc::EFD_NONBLOCK)?,
+            eventfd: EventFd::new(libc::EFD_NONBLOCK)
+                .expect("Failed creating EventFd for VhdxSync"),
             completion_list: VecDeque::new(),
-        })
+        }
     }
 }
 
@@ -82,7 +89,7 @@ impl AsyncIo for VhdxSync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        self.vhdx_file.read_vectored_sync(
+        self.vhdx_file.lock().unwrap().read_vectored_sync(
             offset,
             iovecs,
             user_data,
@@ -97,7 +104,7 @@ impl AsyncIo for VhdxSync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        self.vhdx_file.write_vectored_sync(
+        self.vhdx_file.lock().unwrap().write_vectored_sync(
             offset,
             iovecs,
             user_data,
@@ -107,8 +114,11 @@ impl AsyncIo for VhdxSync {
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
-        self.vhdx_file
-            .fsync_sync(user_data, &self.eventfd, &mut self.completion_list)
+        self.vhdx_file.lock().unwrap().fsync_sync(
+            user_data,
+            &self.eventfd,
+            &mut self.completion_list,
+        )
     }
 
     fn next_completed_request(&mut self) -> Option<(u64, i32)> {
