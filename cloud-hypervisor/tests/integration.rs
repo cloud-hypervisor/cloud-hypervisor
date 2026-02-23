@@ -2560,7 +2560,7 @@ fn _test_simple_launch(guest: &Guest) {
         guest.wait_vm_boot().unwrap();
 
         guest.validate_cpu_count(None);
-        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        guest.validate_memory(None);
         assert_eq!(guest.get_pci_bridge_class().unwrap_or_default(), "0x060000");
         assert!(check_sequential_events(
             &guest
