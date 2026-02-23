@@ -60,15 +60,9 @@ jobs:
           MI_CLIENT_ID: ${{ secrets.MI_CLIENT_ID }}
         run: |
           set -e
-          echo "Installing Azure CLI if not already installed"
-          if ! command -v az &>/dev/null; then
-            curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
-          else
-            echo "Azure CLI already installed"
-          fi
           az --version
           echo "Logging into Azure CLI using Managed Identity"
-          az login --identity --client-id ${MI_CLIENT_ID}
+          az login --identity --client-id "${MI_CLIENT_ID}"
 
       - name: Get Location
         id: get-location
@@ -76,28 +70,26 @@ jobs:
           SKU: ${{ inputs.VM_SKU }}
           STORAGE_ACCOUNT_PATHS: ${{ secrets.STORAGE_ACCOUNT_PATHS }}
         run: |
-          set -e
+          set -feuo pipefail
           # Extract vCPU count from SKU (e.g., "Standard_D2s_v3" => 2)
-          vcpu=$(echo "$SKU" | sed -n 's/^Standard_[A-Za-z]\+\([0-9]\+\).*/\1/p')
-          if [[ -z "$vcpu" ]]; then
-            echo "Cannot extract vCPU count from SKU: $SKU"
+          if ! [[ "$SKU" =~ ^Standard_[A-Za-z]+([1-9][0-9]*) ]]; then
+            printf 'Cannot extract vCPU count from SKU: %q\n' "$SKU"
             exit 1
           fi
-
-          SUPPORTED_LOCATIONS=$(echo "$STORAGE_ACCOUNT_PATHS" | jq -r 'to_entries[] | .key')
-
+          vcpus=${BASH_REMATCH[1]}
+          # Use jq to filter out bad storage account locations that could trip up bash
+          SUPPORTED_LOCATIONS=$(LC_ALL=C jq -rn '$ARGS.positional[] | keys[] | select(test("\\A[A-Za-z][A-Za-z0-9._+-]*\\Z"; "s"))' \
+                                --jsonargs "$STORAGE_ACCOUNT_PATHS")
           for location in $SUPPORTED_LOCATIONS; do
             family=$(az vm list-skus --size "$SKU" --location "$location" --resource-type "virtualMachines" --query '[0].family' -o tsv)
-            if [[ -z "$family" ]]; then
+            if ! [[ "$family" =~ ^[A-Za-z0-9._]+$ ]]; then
               echo "Cannot determine VM family for SKU: $SKU in $location"
               continue
             fi
 
-            usage=$(az vm list-usage --location "$location" --query "[?name.value=='$family'] | [0]" -o json)
-            current=$(echo "$usage" | jq -r '.currentValue')
-            limit=$(echo "$usage" | jq -r '.limit')
-
-            if [[ $((limit - current)) -ge $vcpu ]]; then
+            remaining=$(az vm list-usage --location "$location" --query "[?name.value=='$family'] | [0]" -o json |
+                        LC_ALL=C jq '.limit + 0 - .currentValue >= $ARGS.positional[0]' --jsonargs "$vcpus")
+            if [[ "$remaining" = true ]]; then
               echo "Sufficient quota found in $location"
               echo "location=$location" >> "$GITHUB_OUTPUT"
               exit 0
