@@ -18,20 +18,23 @@
 // This implements a vhost-user device backend.  Documentation can be found at:
 // https://stefanha.github.io/virtio/vhost-user-slave.html
 
-use std::io::{self};
+use core::ffi;
+use std::os::fd::{BorrowedFd, OwnedFd, RawFd};
 use std::os::unix::io::AsRawFd;
-use std::result;
-use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Barrier};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Barrier, Mutex, MutexGuard};
+use std::{io, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
-use log::{error, info, warn};
+use libc::PROT_WRITE;
+use log::{debug, error, info, trace, warn};
 use seccompiler::SeccompAction;
 use thiserror::Error;
-use vhost::vhost_user::{BackendListener, BackendReqHandler};
+use vhost::vhost_user::message::VhostUserMemoryRegion;
+use vhost::vhost_user::{BackendListener, BackendReqHandler, VhostUserProtocolFeatures};
 use virtio_queue::{Queue, QueueT};
-use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryError, Le32};
+use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, Le32};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -118,8 +121,6 @@ const VHOST_USER_SOCKET_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 3;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Guest gave us bad memory addresses.")]
-    GuestMemory(#[source] GuestMemoryError),
     #[error("Guest gave us a write only descriptor that protocol says to read from")]
     UnexpectedWriteOnlyDescriptor,
     #[error("Guest sent us invalid request")]
@@ -148,38 +149,201 @@ impl From<vhost::vhost_user::Error> for Error {
     }
 }
 
-pub struct Backend {}
+type Region = Arc<vm_memory::GuestRegionMmap<vm_memory::bitmap::AtomicBitmap>>;
+
+// The most complex part of this struct is the threading model.
+// Implementations should use one thread per queue, rather than
+// being single-threaded.
+pub struct Backend {
+    pub avail_features: VhostUserProtocolFeatures,
+    pub active_features: AtomicU64,
+    pub queues: u64,
+    page_size_mask: u64,
+    region: Region,
+    pub current_offset: Mutex<usize>,
+}
+
+impl Backend {
+    pub fn new(avail_features: VhostUserProtocolFeatures, queues: u64, region: Region) -> Self {
+        // SAFETY: FFI call with valid parameters
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGE_SIZE) };
+        assert!(page_size.count_ones() == 1);
+        Self {
+            page_size_mask: u64::try_from(page_size).unwrap() - 1,
+            queues,
+            avail_features,
+            active_features: AtomicU64::new(0),
+            region,
+            current_offset: Mutex::new(0),
+        }
+    }
+}
+
+/// A kind of ioeventfd that might need to be registered with the VMM.
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum IoEventKind {
+    /// Register the doorbell call FD for the queue.
+    /// The VM can signal this via an ioeventfd.
+    DoorbellCall(u8),
+    /// Register the doorbell error FD for the queue.
+    /// The VM can signal this via an ioeventfd.
+    DoorbellErr(u8),
+    /// Register the IRQ notification FD for the queue.
+    /// Signalling this triggers an MSI-X interrupt.
+    VringKick(u8),
+    /// Register the doorbell call FD for the queue.
+    /// The VM can signal this via an ioeventfd.
+    Log,
+}
+
+/// A controller for ioeventfds.
+///
+/// VMMs provide this to device implementations that
+/// need to register and unregister ioeventfds at runtime.
+pub trait IoeventfdController {
+    fn register_eventfd(&self, kind: IoEventKind, eventfd: BorrowedFd) -> Result<(), io::Error>;
+    fn unregister_eventfd(&self, kind: IoEventKind, eventfd: BorrowedFd) -> Result<(), io::Error>;
+}
+
+/// A controller for irqfds.
+///
+/// VMMs provide this to device implementations that need
 impl vhost::vhost_user::VhostUserBackendReqHandler for Backend {
     fn set_owner(&self) -> vhost::vhost_user::Result<()> {
-        todo!()
+        debug!("Session start");
+        Ok(())
     }
 
     fn reset_owner(&self) -> vhost::vhost_user::Result<()> {
-        todo!()
+        warn!("Frontend used deprecated RESET_OWNER, ignoring");
+        Ok(())
     }
 
     fn reset_device(&self) -> vhost::vhost_user::Result<()> {
-        todo!()
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::DEVICE_STATE,
+        ))
     }
 
     fn get_features(&self) -> vhost::vhost_user::Result<u64> {
-        todo!()
+        Ok(self.avail_features.bits())
     }
 
-    fn set_features(&self, _features: u64) -> vhost::vhost_user::Result<()> {
-        todo!()
+    fn set_features(&self, features: u64) -> vhost::vhost_user::Result<()> {
+        if (!self.avail_features.bits() & features) == 0 {
+            self.active_features.store(features, Ordering::Release);
+            Ok(())
+        } else {
+            Err(vhost::vhost_user::Error::FeatureMismatch)
+        }
     }
 
     fn set_mem_table(
         &self,
-        _ctx: &[vhost::vhost_user::message::VhostUserMemoryRegion],
-        _files: Vec<std::fs::File>,
+        ctx: &[VhostUserMemoryRegion],
+        files: Vec<std::fs::File>,
     ) -> vhost::vhost_user::Result<()> {
-        todo!()
+        const _: () = assert!(
+            u64::MAX as usize as u64 == u64::MAX,
+            "32-bit platforms not supported"
+        );
+        const _: () = assert!(
+            u64::MAX as libc::size_t as u64 == u64::MAX,
+            "32-bit platforms not supported"
+        );
+        if ctx.len() != files.len() {
+            return Err(vhost::vhost_user::Error::InvalidParam);
+        }
+
+        // Validate all the regions before doing any mappings.
+        for &VhostUserMemoryRegion {
+            guest_phys_addr,
+            memory_size,
+            mmap_offset,
+            user_addr,
+            ..
+        } in ctx
+        {
+            // There must not be an overflow computing the end of the address
+            // spaces.
+            let (Some(_last_guest_phys_addr), Some(_last_user_addr), Some(last_byte_in_file)) = (
+                memory_size.checked_add(guest_phys_addr),
+                memory_size.checked_add(user_addr),
+                memory_size.checked_add(mmap_offset),
+            ) else {
+                return Err(vhost::vhost_user::Error::InvalidParam);
+            };
+
+            // mmap64() takes the size as size_t and the offset
+            // as off64_t.  Check that the size fits in size_t
+            // and that the last byte of the file fits in off64_t.
+            let (Ok(_memory_size), Ok(_another_size), Ok(_offset)) = (
+                libc::size_t::try_from(memory_size),
+                isize::try_from(memory_size),
+                libc::off64_t::try_from(last_byte_in_file),
+            ) else {
+                return Err(vhost::vhost_user::Error::InvalidParam);
+            };
+
+            // The mmap offset and size must be multiples of the page size.
+            if memory_size & self.page_size_mask != 0 || mmap_offset & self.page_size_mask != 0 {
+                return Err(vhost::vhost_user::Error::InvalidParam);
+            }
+
+            // The user address and guest physical address do not
+            // technically need to be multiples of the page size,
+            // but it would be very strange for them not to be.
+            if guest_phys_addr & self.page_size_mask != 0 || user_addr & self.page_size_mask != 0 {
+                return Err(vhost::vhost_user::Error::InvalidParam);
+            }
+        }
+
+        for (
+            &VhostUserMemoryRegion {
+                memory_size,
+                mmap_offset,
+                ..
+            },
+            file,
+        ) in ctx.iter().zip(files.iter())
+        {
+            let addr = self.region.as_ptr() as *mut ffi::c_void;
+            let region_size: usize = self.region.size();
+            let mut current_offset_ref: MutexGuard<usize> = self.current_offset.lock().unwrap();
+            let current_offset = *current_offset_ref;
+            let memory_size = usize::try_from(memory_size).expect("checked in previous loop");
+            isize::try_from(region_size).expect("region size {region_size} overflows isize");
+            assert!(
+                region_size >= current_offset,
+                "current offset is {current_offset} but region size is {region_size}"
+            );
+            if region_size - current_offset < memory_size {
+                return Err(vhost::vhost_user::Error::BackendInternalError);
+            }
+
+            // SAFETY: the address is checked to fit within the GuestRegionMmap
+            let addr_to_map = unsafe { addr.add(memory_size) };
+            // SAFETY: MAP_FIXED passed and the address is valid.
+            let addr = unsafe {
+                libc::mmap64(
+                    addr_to_map,
+                    memory_size,
+                    libc::PROT_READ | PROT_WRITE,
+                    libc::MAP_FIXED | libc::MAP_SHARED_VALIDATE,
+                    file.as_raw_fd(),
+                    mmap_offset.try_into().expect("checked in previous loop"),
+                )
+            };
+            if addr == libc::MAP_FAILED {
+                return Err(vhost::vhost_user::Error::BackendInternalError);
+            }
+            *current_offset_ref += memory_size;
+        }
+        Ok(())
     }
 
     fn set_vring_num(&self, _index: u32, _num: u32) -> vhost::vhost_user::Result<()> {
-        todo!()
+        todo!("setting vring number")
     }
 
     fn set_vring_addr(
@@ -191,18 +355,18 @@ impl vhost::vhost_user::VhostUserBackendReqHandler for Backend {
         _available: u64,
         _log: u64,
     ) -> vhost::vhost_user::Result<()> {
-        todo!()
+        todo!("setting vring address")
     }
 
     fn set_vring_base(&self, _index: u32, _base: u32) -> vhost::vhost_user::Result<()> {
-        todo!()
+        todo!("setting vring base")
     }
 
     fn get_vring_base(
         &self,
         _index: u32,
     ) -> vhost::vhost_user::Result<vhost::vhost_user::message::VhostUserVringState> {
-        todo!()
+        todo!("getting vring base")
     }
 
     fn set_vring_kick(
@@ -218,7 +382,7 @@ impl vhost::vhost_user::VhostUserBackendReqHandler for Backend {
         _index: u8,
         _fd: Option<std::fs::File>,
     ) -> vhost::vhost_user::Result<()> {
-        todo!()
+        todo!("setting vring call fd")
     }
 
     fn set_vring_err(
@@ -226,25 +390,25 @@ impl vhost::vhost_user::VhostUserBackendReqHandler for Backend {
         _index: u8,
         _fd: Option<std::fs::File>,
     ) -> vhost::vhost_user::Result<()> {
-        todo!()
+        todo!("setting vring error fd")
     }
 
     fn get_protocol_features(
         &self,
     ) -> vhost::vhost_user::Result<vhost::vhost_user::VhostUserProtocolFeatures> {
-        todo!()
+        todo!("getting protocol features")
     }
 
     fn set_protocol_features(&self, _features: u64) -> vhost::vhost_user::Result<()> {
-        todo!()
+        todo!("setting protocol features")
     }
 
     fn get_queue_num(&self) -> vhost::vhost_user::Result<u64> {
-        todo!()
+        todo!("getting number of queues")
     }
 
     fn set_vring_enable(&self, _index: u32, _enable: bool) -> vhost::vhost_user::Result<()> {
-        todo!()
+        todo!("vring handling")
     }
 
     fn get_config(
@@ -253,7 +417,7 @@ impl vhost::vhost_user::VhostUserBackendReqHandler for Backend {
         _size: u32,
         _flags: vhost::vhost_user::message::VhostUserConfigFlags,
     ) -> vhost::vhost_user::Result<Vec<u8>> {
-        todo!()
+        todo!("configuration space")
     }
 
     fn set_config(
@@ -262,21 +426,27 @@ impl vhost::vhost_user::VhostUserBackendReqHandler for Backend {
         _buf: &[u8],
         _flags: vhost::vhost_user::message::VhostUserConfigFlags,
     ) -> vhost::vhost_user::Result<()> {
-        todo!()
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::CONFIG,
+        ))
     }
 
     fn set_gpu_socket(
         &self,
         _gpu_backend: vhost::vhost_user::GpuBackend,
     ) -> vhost::vhost_user::Result<()> {
-        todo!()
+        Err(vhost::vhost_user::Error::InvalidOperation(
+            "GPU display not supported",
+        ))
     }
 
     fn get_shared_object(
         &self,
         _uuid: vhost::vhost_user::message::VhostUserSharedMsg,
     ) -> vhost::vhost_user::Result<std::fs::File> {
-        todo!()
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::SHARED_OBJECT,
+        ))
     }
 
     fn get_inflight_fd(
@@ -284,7 +454,9 @@ impl vhost::vhost_user::VhostUserBackendReqHandler for Backend {
         _inflight: &vhost::vhost_user::message::VhostUserInflight,
     ) -> vhost::vhost_user::Result<(vhost::vhost_user::message::VhostUserInflight, std::fs::File)>
     {
-        todo!()
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::INFLIGHT_SHMFD,
+        ))
     }
 
     fn set_inflight_fd(
@@ -292,11 +464,15 @@ impl vhost::vhost_user::VhostUserBackendReqHandler for Backend {
         _inflight: &vhost::vhost_user::message::VhostUserInflight,
         _file: std::fs::File,
     ) -> vhost::vhost_user::Result<()> {
-        todo!()
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::INFLIGHT_SHMFD,
+        ))
     }
 
     fn get_max_mem_slots(&self) -> vhost::vhost_user::Result<u64> {
-        todo!()
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS,
+        ))
     }
 
     fn add_mem_region(
@@ -304,14 +480,18 @@ impl vhost::vhost_user::VhostUserBackendReqHandler for Backend {
         _region: &vhost::vhost_user::message::VhostUserSingleMemoryRegion,
         _fd: std::fs::File,
     ) -> vhost::vhost_user::Result<()> {
-        todo!()
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS,
+        ))
     }
 
     fn remove_mem_region(
         &self,
         _region: &vhost::vhost_user::message::VhostUserSingleMemoryRegion,
     ) -> vhost::vhost_user::Result<()> {
-        todo!()
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS,
+        ))
     }
 
     fn set_device_state_fd(
@@ -320,11 +500,15 @@ impl vhost::vhost_user::VhostUserBackendReqHandler for Backend {
         _phase: vhost::vhost_user::message::VhostTransferStatePhase,
         _fd: std::fs::File,
     ) -> vhost::vhost_user::Result<Option<std::fs::File>> {
-        todo!()
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::DEVICE_STATE,
+        ))
     }
 
     fn check_device_state(&self) -> vhost::vhost_user::Result<()> {
-        todo!()
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::DEVICE_STATE,
+        ))
     }
 
     fn set_log_base(
@@ -332,7 +516,9 @@ impl vhost::vhost_user::VhostUserBackendReqHandler for Backend {
         _log: &vhost::vhost_user::message::VhostUserLog,
         _file: std::fs::File,
     ) -> vhost::vhost_user::Result<()> {
-        todo!()
+        Err(vhost::vhost_user::Error::InactiveOperation(
+            VhostUserProtocolFeatures::LOG_SHMFD,
+        ))
     }
 }
 
@@ -444,12 +630,12 @@ impl EpollHelperHandler for VdbEpollHandler {
             FRONT2BACK_QUEUE_EVENT => {
                 self.front2back_queue_evt.read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to get inflate queue event: {e:?}"
+                        "Failed to get front-to-back event: {e:?}"
                     ))
                 })?;
                 self.process_front2back_queue().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to signal used inflate queue: {e:?}"
+                        "Failed to process front-to-back queue: {e:?}"
                     ))
                 })?;
             }
@@ -461,7 +647,7 @@ impl EpollHelperHandler for VdbEpollHandler {
                 })?;
                 self.process_back2front_queue().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to signal used deflate queue: {e:?}"
+                        "Failed to process back-to-front queue: {e:?}"
                     ))
                 })?;
             }
@@ -508,6 +694,8 @@ pub struct Vdb {
     max_queues: u8,
     backend: Arc<Backend>,
     listener: Option<BackendListener<Backend>>,
+    msix_fds: [Option<OwnedFd>; MSIX_ARRAY_SIZE],
+    statuses: [bool; MSIX_ARRAY_SIZE],
 }
 
 impl Vdb {
@@ -557,6 +745,7 @@ impl Vdb {
             )
         };
 
+        const _: () = assert!(size_of::<RawFd>() == size_of::<OwnedFd>());
         Ok(Vdb {
             common: VirtioCommon {
                 device_type: VirtioDeviceType::Balloon as u32,
@@ -576,6 +765,8 @@ impl Vdb {
             max_queues: max_queues as _,
             backend: Arc::new(backend),
             listener: Some(listener),
+            statuses: [false; MSIX_ARRAY_SIZE],
+            msix_fds: [const { None }; MSIX_ARRAY_SIZE],
         })
     }
 
@@ -603,6 +794,9 @@ impl Drop for Vdb {
     }
 }
 
+const MSIX_ARRAY_OFFSET: usize = 512;
+const MSIX_ARRAY_SIZE: usize = 256;
+
 impl VirtioDevice for Vdb {
     fn device_type(&self) -> u32 {
         self.common.device_type
@@ -627,18 +821,29 @@ impl VirtioDevice for Vdb {
     fn read_config(&self, _offset: u64, _data: &mut [u8]) {}
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
-        if offset != 4 {
-            warn!("Driver attempted to write to invalid field");
+        if offset == 4
+            && let Ok(v) = data.try_into().map(u32::from_le_bytes)
+        {
+            match v {
+                1 => self.config.common.status = Le32::from(VIRTIO_DEVICE_BACKEND_STATUS_UP),
+                0 => self.config.common.status = Le32::from(VIRTIO_DEVICE_BACKEND_STATUS_DOWN),
+                _ => warn!("Invalid value {v} for VDB device status"),
+            }
             return;
         }
-        match *data {
-            [1, 0, 0, 0] | [1, 0] | [1] => {
-                self.config.common.status = Le32::from(VIRTIO_DEVICE_BACKEND_STATUS_UP);
-            }
-            [0, 0, 0, 0] | [0, 0] | [0] => {
-                self.config.common.status = Le32::from(VIRTIO_DEVICE_BACKEND_STATUS_DOWN);
-            }
-            _ => warn!("Invalid config space write"),
+        if offset & 1 == 0
+            && let Ok(offset) = usize::try_from(offset)
+            && (MSIX_ARRAY_OFFSET..MSIX_ARRAY_SIZE * 2).contains(&offset)
+            && let Ok(value) = data.try_into().map(u16::from_le_bytes)
+        {
+            let offset = (offset - MSIX_ARRAY_OFFSET) >> 1;
+            let fd = &mut self.msix_fds[offset];
+            let status = self.statuses[offset];
+            trace!(
+                "VDB driver wrote {value} to index {offset} in MSI-X activity array. Status: {}. FD {}.",
+                if status { "enabled" } else { "disabled" },
+                if fd.is_some() { "present" } else { "absent" }
+            );
         }
     }
 
