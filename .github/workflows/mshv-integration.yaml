@@ -42,13 +42,13 @@ jobs:
             echo "Logged in successfully."
             export PATH="\$HOME/.cargo/bin:\$PATH"
 
-            if [[ "${{ github.event_name }}" == "pull_request_target" ]]; then
+            if [[ "$GITHUB_EVENT_NAME" = 'pull_request_target' ]]; then
               git clone --depth 1 "$REPO_URL" "$REPO_DIR"
               cd "$REPO_DIR"
-              git fetch origin pull/${{ github.event.pull_request.number }}/merge
+              git fetch origin "pull/$PR_NUMBER/merge"
               git checkout FETCH_HEAD
             else
-              git clone --depth 1 --single-branch --branch "${{ github.ref_name }}" "$REPO_URL" "$REPO_DIR"
+              git clone --depth 1 --single-branch --branch "$GITHUB_REF_NAME" "$REPO_URL" "$REPO_DIR"
               cd "$REPO_DIR"
             fi
 
