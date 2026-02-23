@@ -7793,11 +7793,7 @@ mod common_parallel {
         _test_virtio_block_fstrim("vhd", "vpc", &["-o", "subformat=fixed"], false, false);
     }
 
-    // VHDX backend has a multiqueue bug causing filesystem corruption.
-    // The _test_virtio_block_fstrim helper uses num_queues>1 which triggers the bug.
-    // Ref: #7665
     #[test]
-    #[ignore]
     fn test_virtio_block_fstrim_unsupported_vhdx() {
         _test_virtio_block_fstrim("vhdx", "vhdx", &[], false, false);
     }
