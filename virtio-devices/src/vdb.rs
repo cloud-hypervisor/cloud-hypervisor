@@ -818,6 +818,10 @@ impl VirtioDevice for Vdb {
         self.max_queues * 2 + 1
     }
 
+    fn max_interrupts(&self) -> usize {
+        usize::from(self.max_queues) + self.queue_max_sizes().len()
+    }
+
     fn read_config(&self, _offset: u64, _data: &mut [u8]) {}
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
