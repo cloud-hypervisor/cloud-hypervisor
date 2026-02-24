@@ -19,7 +19,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::{PciCapability, PciCapabilityId};
 
-const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
+pub const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
 const MSIX_TABLE_ENTRIES_MODULO: u64 = 16;
 const MSIX_PBA_ENTRIES_MODULO: u64 = 8;
 const BITS_PER_PBA_ENTRY: usize = 64;
