@@ -84,8 +84,8 @@ use libc::{
 };
 use log::{debug, error, info, warn};
 use pci::{
-    DeviceRelocation, MmioRegion, PciBarRegionType, PciBdf, PciDevice, VfioDmaMapping,
-    VfioPciDevice, VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
+    DeviceRelocation, MAX_MSIX_VECTORS_PER_DEVICE, MmioRegion, PciBarRegionType, PciBdf, PciDevice,
+    VfioDmaMapping, VfioPciDevice, VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError,
 };
 use rate_limiter::group::RateLimiterGroup;
 use seccompiler::SeccompAction;
@@ -696,6 +696,10 @@ pub enum DeviceManagerError {
     /// Disk resizing failed.
     #[error("Disk resize error")]
     DiskResize(#[source] virtio_devices::block::Error),
+
+    /// Too many MSI-X interrupts
+    #[error("Too many MSI-X interrupts: {0}")]
+    TooManyInterrupts(u16),
 
     /// Disk image type does not match expected type.
     #[error(
@@ -4259,6 +4263,10 @@ impl DeviceManager {
             .unwrap()
             .min_interupts()
             .saturating_add(1);
+
+        if msix_num > MAX_MSIX_VECTORS_PER_DEVICE {
+            return Err(DeviceManagerError::TooManyInterrupts(msix_num));
+        }
 
         // Create the AccessPlatform trait from the implementation IommuMapping.
         // This will provide address translation for any virtio device sitting
