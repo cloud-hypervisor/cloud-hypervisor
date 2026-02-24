@@ -743,15 +743,10 @@ impl DeviceRelocation for AddressManager {
     ) -> std::result::Result<(), std::io::Error> {
         match region_type {
             PciBarRegionType::IoRegion => {
+                let mut sys_allocator = self.allocator.lock().unwrap();
                 // Update system allocator
-                self.allocator
-                    .lock()
-                    .unwrap()
-                    .free_io_addresses(GuestAddress(old_base), len as GuestUsize);
-
-                self.allocator
-                    .lock()
-                    .unwrap()
+                sys_allocator.free_io_addresses(GuestAddress(old_base), len as GuestUsize);
+                sys_allocator
                     .allocate_io_addresses(Some(GuestAddress(new_base)), len as GuestUsize, None)
                     .ok_or_else(|| io::Error::other("failed allocating new IO range"))?;
 
@@ -761,26 +756,22 @@ impl DeviceRelocation for AddressManager {
                     .map_err(io::Error::other)?;
             }
             PciBarRegionType::Memory32BitRegion | PciBarRegionType::Memory64BitRegion => {
-                let allocators = if region_type == PciBarRegionType::Memory32BitRegion {
+                let pci_mmio_allocators = if region_type == PciBarRegionType::Memory32BitRegion {
                     &self.pci_mmio32_allocators
                 } else {
                     &self.pci_mmio64_allocators
                 };
 
-                // Find the specific allocator that this BAR was allocated from and use it for new one
-                for allocator in allocators {
-                    let allocator_base = allocator.lock().unwrap().base();
-                    let allocator_end = allocator.lock().unwrap().end();
+                // Find the specific allocator that this BAR was allocated from and use it for a new one
+                for pci_mmio_allocator_mutex in pci_mmio_allocators {
+                    let mut pci_mmio_allocator = pci_mmio_allocator_mutex.lock().unwrap();
 
-                    if old_base >= allocator_base.0 && old_base <= allocator_end.0 {
-                        allocator
-                            .lock()
-                            .unwrap()
-                            .free(GuestAddress(old_base), len as GuestUsize);
+                    if old_base >= pci_mmio_allocator.base().0
+                        && old_base <= pci_mmio_allocator.end().0
+                    {
+                        pci_mmio_allocator.free(GuestAddress(old_base), len as GuestUsize);
 
-                        allocator
-                            .lock()
-                            .unwrap()
+                        pci_mmio_allocator
                             .allocate(Some(GuestAddress(new_base)), len as GuestUsize, Some(len))
                             .ok_or_else(|| io::Error::other("failed allocating new MMIO range"))?;
 
