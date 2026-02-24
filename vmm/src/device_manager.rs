@@ -684,6 +684,10 @@ pub enum DeviceManagerError {
     #[error("Disk resize error")]
     DiskResize(#[source] virtio_devices::block::Error),
 
+    /// Too many MSI-X interrupts
+    #[error("Too many MSI-X interrupts: {0}")]
+    TooManyInterrupts(usize),
+
     /// Disk image type does not match expected type.
     #[error(
         "Disk image type does not match expected type: specified = {specified}, detected = {detected}"
@@ -4204,7 +4208,15 @@ impl DeviceManager {
         // Allows support for one MSI-X vector per queue. It also adds 1
         // as we need to take into account the dedicated vector to notify
         // about a virtio config change.
-        let msix_num = (virtio_device.lock().unwrap().queue_max_sizes().len() + 1) as u16;
+        let msix_num = {
+            let virtio_device = virtio_device.lock().unwrap();
+            virtio_device.queue_max_sizes().len() + usize::from(virtio_device.doorbells_max())
+        };
+
+        if msix_num >= usize::from(u16::MAX - 1) {
+            return Err(DeviceManagerError::TooManyInterrupts(msix_num));
+        }
+        let msix_num = msix_num as u16 + 1;
 
         // Create the AccessPlatform trait from the implementation IommuMapping.
         // This will provide address translation for any virtio device sitting

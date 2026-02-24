@@ -429,7 +429,8 @@ impl VirtioPciDevice {
     ) -> Result<Self> {
         let mut locked_device = device.lock().unwrap();
         let mut queue_evts = Vec::new();
-        let num_queues = locked_device.queue_max_sizes().len();
+        let num_queues =
+            locked_device.queue_max_sizes().len() + usize::from(locked_device.doorbells_max());
         if num_queues > (NOTIFICATION_SIZE / u64::from(NOTIFY_OFF_MULTIPLIER)) as usize {
             return Err(VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
                 "Got {} queues, but limit is {}",
