@@ -846,34 +846,19 @@ fn probe_file_sparse_support(fd: libc::c_int) -> bool {
     supported
 }
 
-/// Probe sparse support for a block device using ioctls.
-fn probe_block_device_sparse_support(fd: libc::c_int) -> bool {
-    ioctl_io_nr!(BLKDISCARD, 0x12, 119);
-    ioctl_io_nr!(BLKZEROOUT, 0x12, 127);
-
-    let range: [u64; 2] = [0, 0];
-
-    // SAFETY: FFI call with valid fd and valid range buffer
-    let punch_hole = unsafe { ioctl(fd, BLKDISCARD() as _, &range) } == 0;
-
-    if !punch_hole {
-        let err = io::Error::last_os_error();
-        debug!("Block device BLKDISCARD probe returned: {err}");
-    }
-
-    // SAFETY: FFI call with valid fd and valid range buffer
-    let zero_range = unsafe { ioctl(fd, BLKZEROOUT() as _, &range) } == 0;
-
-    if !zero_range {
-        let err = io::Error::last_os_error();
-        debug!("Block device BLKZEROOUT probe returned: {err}");
-    }
-
-    let supported = punch_hole || zero_range;
-    info!(
-        "Probed block device sparse support: punch_hole={punch_hole}, zero_range={zero_range} => {supported}"
-    );
-    supported
+/// Probe sparse support for a block device.
+///
+/// Block devices always report sparse support. `BLKZEROOUT` is guaranteed to
+/// succeed as the kernel provides a software fallback writing explicit zeros
+/// when the hardware lacks a native write zeroes command. `BLKDISCARD` may fail
+/// at runtime with `EOPNOTSUPP` on devices without trim or discard support, but
+/// Linux guests handle this gracefully by ceasing discard requests.
+///
+/// There is no non destructive read only ioctl to query block device discard
+/// or write zeroes capabilities.
+fn probe_block_device_sparse_support(_fd: libc::c_int) -> bool {
+    info!("Block device: assuming sparse support");
+    true
 }
 
 /// Preallocate disk space for a disk image file.
