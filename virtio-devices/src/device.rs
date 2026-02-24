@@ -85,6 +85,13 @@ pub trait VirtioDevice: Send {
         false
     }
 
+    /// The maximum number of MSI-X interrupts this device needs.
+    /// Defaults to the number of queues.  One additional interrupt
+    /// will be used for the config space change event.
+    fn max_interrupts(&self) -> usize {
+        self.queue_max_sizes().len()
+    }
+
     /// The maximum number of doorbells the device supports.
     /// Most devices don't support any.
     /// Limited to 511 doorbells.

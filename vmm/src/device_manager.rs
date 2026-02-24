@@ -4202,7 +4202,7 @@ impl DeviceManager {
         // Allows support for one MSI-X vector per interrupt needed by the device.
         // It also adds 1 as we need to take into account the dedicated vector to notify
         // about a virtio config change.
-        let msix_num = (virtio_device.lock().unwrap().queue_max_sizes().len() + 1) as u16;
+        let msix_num = (virtio_device.lock().unwrap().max_interrupts() + 1) as u16;
 
         // Create the AccessPlatform trait from the implementation IommuMapping.
         // This will provide address translation for any virtio device sitting
