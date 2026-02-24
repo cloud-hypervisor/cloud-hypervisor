@@ -612,7 +612,6 @@ impl Vm {
             #[cfg(not(target_arch = "riscv64"))]
             timestamp,
             snapshot,
-            &config,
         )?;
 
         // Perform hypervisor-specific initialization
@@ -798,10 +797,9 @@ impl Vm {
         boot_id_list: BTreeSet<String>,
         #[cfg(not(target_arch = "riscv64"))] timestamp: Instant,
         snapshot: Option<&Snapshot>,
-        _vm_config: &Arc<Mutex<VmConfig>>,
     ) -> Result<Arc<Mutex<DeviceManager>>> {
         #[cfg(feature = "tdx")]
-        let dynamic = !_vm_config.lock().unwrap().is_tdx_enabled();
+        let dynamic = !config.lock().unwrap().is_tdx_enabled();
         #[cfg(not(feature = "tdx"))]
         let dynamic = true;
 
