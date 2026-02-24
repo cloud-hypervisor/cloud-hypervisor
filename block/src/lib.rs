@@ -35,10 +35,10 @@ use std::fs::File;
 use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Instant;
-use std::{cmp, result};
+use std::{cmp, fs, result};
 
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
@@ -846,28 +846,49 @@ fn probe_file_sparse_support(fd: libc::c_int) -> bool {
     supported
 }
 
-/// Probe sparse support for a block device using ioctls.
+/// Probe sparse support for a block device using sysfs.
 fn probe_block_device_sparse_support(fd: libc::c_int) -> bool {
-    ioctl_io_nr!(BLKDISCARD, 0x12, 119);
-    ioctl_io_nr!(BLKZEROOUT, 0x12, 127);
+    let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
 
-    let range: [u64; 2] = [0, 0];
-
-    // SAFETY: FFI call with valid fd and valid range buffer
-    let punch_hole = unsafe { ioctl(fd, BLKDISCARD() as _, &range) } == 0;
-
-    if !punch_hole {
-        let err = io::Error::last_os_error();
-        debug!("Block device BLKDISCARD probe returned: {err}");
+    // SAFETY: FFI call with valid fd and buffer
+    let ret = unsafe { libc::fstat(fd, stat.as_mut_ptr()) };
+    if ret != 0 {
+        warn!(
+            "Failed to stat file descriptor for block device sparse probe: {}",
+            io::Error::last_os_error()
+        );
+        return false;
     }
 
-    // SAFETY: FFI call with valid fd and valid range buffer
-    let zero_range = unsafe { ioctl(fd, BLKZEROOUT() as _, &range) } == 0;
+    // SAFETY: fstat succeeded (ret == 0)
+    let stat = unsafe { stat.assume_init() };
 
-    if !zero_range {
-        let err = io::Error::last_os_error();
-        debug!("Block device BLKZEROOUT probe returned: {err}");
-    }
+    let major = libc::major(stat.st_rdev);
+    let minor = libc::minor(stat.st_rdev);
+
+    let device_dir = PathBuf::from(format!("/sys/dev/block/{major}:{minor}"));
+    let queue_dir = if device_dir.join("queue").exists() {
+        device_dir.join("queue")
+    } else {
+        // partitions have no queue/ dir; use the parent block device's queue instead
+        device_dir.join("../queue")
+    };
+
+    let punch_hole = match fs::read_to_string(queue_dir.join("discard_granularity")) {
+        Ok(s) => s.trim().parse::<u64>().ok().is_some_and(|v| v > 0),
+        Err(e) => {
+            warn!("Failed to read discard_granularity for block device sparse probe: {e}");
+            false
+        }
+    };
+
+    let zero_range = match fs::read_to_string(queue_dir.join("write_zeroes_max_bytes")) {
+        Ok(s) => s.trim().parse::<u64>().ok().is_some_and(|v| v > 0),
+        Err(e) => {
+            warn!("Failed to read write_zeroes_max_bytes for block device sparse probe: {e}");
+            false
+        }
+    };
 
     let supported = punch_hole || zero_range;
     info!(
