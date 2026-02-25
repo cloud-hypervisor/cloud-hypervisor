@@ -11537,7 +11537,7 @@ mod windows {
             .args(["--kernel", edk2_path().to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
-            .default_disks()
+            .default_disks_sparse_off()
             .default_net()
             .capture_output()
             .spawn()
@@ -11586,7 +11586,7 @@ mod windows {
             .args([
                 "--disk",
                 format!(
-                    "path={},num_queues=4",
+                    "path={},num_queues=4,sparse=off",
                     windows_guest
                         .guest()
                         .disk_config
@@ -11654,7 +11654,7 @@ mod windows {
             .args(["--kernel", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
-            .default_disks()
+            .default_disks_sparse_off()
             .default_net()
             .capture_output()
             .spawn()
@@ -11743,7 +11743,7 @@ mod windows {
             .args(["--kernel", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
-            .default_disks()
+            .default_disks_sparse_off()
             .default_net()
             .capture_output()
             .spawn()
@@ -11818,7 +11818,7 @@ mod windows {
             .args(["--kernel", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
-            .default_disks()
+            .default_disks_sparse_off()
             .default_net()
             .capture_output()
             .spawn()
@@ -11892,7 +11892,7 @@ mod windows {
             .args(["--kernel", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
-            .default_disks()
+            .default_disks_sparse_off()
             .default_net()
             .capture_output()
             .spawn()
@@ -11966,7 +11966,7 @@ mod windows {
             .args(["--kernel", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
-            .default_disks()
+            .default_disks_sparse_off()
             .default_net()
             .capture_output()
             .spawn()
@@ -12062,7 +12062,7 @@ mod windows {
             .args(["--kernel", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
-            .default_disks()
+            .default_disks_sparse_off()
             .default_net()
             .capture_output()
             .spawn()
@@ -12194,7 +12194,7 @@ mod windows {
             .args(["--kernel", ovmf_path.to_str().unwrap()])
             .args(["--serial", "tty"])
             .args(["--console", "off"])
-            .default_disks()
+            .default_disks_sparse_off()
             // The multi net dev config is borrowed from test_multiple_network_interfaces
             .args([
                 "--net",
