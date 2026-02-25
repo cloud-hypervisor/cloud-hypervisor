@@ -377,6 +377,10 @@ pub struct VirtioPciDevice {
 
     // virtio queues
     queues: Vec<Queue>,
+
+    // List of queue events that must be triggered whenever the VM writes to
+    // `virtio::NOTIFY_REG_OFFSET` past the MMIO base. Each event must be triggered
+    // when the value being written equals the index of the event in this list.
     queue_evts: Vec<EventFd>,
 
     // Guest memory
