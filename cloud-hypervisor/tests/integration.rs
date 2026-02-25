@@ -7646,6 +7646,109 @@ mod common_parallel {
         _test_virtio_block_discard("vhdx", "vhdx", &[], false, false);
     }
 
+    #[test]
+    fn test_virtio_block_discard_loop_device() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let test_disk_path = guest.tmp_dir.as_path().join("loop_discard_test.raw");
+        let res = run_qemu_img(&test_disk_path, &["create", "-f", "raw"], Some(&["128M"]));
+        assert!(
+            res.status.success(),
+            "Failed to create raw backing image: {}",
+            String::from_utf8_lossy(&res.stderr)
+        );
+
+        let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 5);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                format!("path={},image_type=raw", &loop_dev).as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vdc")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk -t | grep vdc | awk '{print $6}'")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                4096
+            );
+
+            let discard_max = guest
+                .ssh_command("cat /sys/block/vdc/queue/discard_max_bytes")
+                .unwrap()
+                .trim()
+                .parse::<u64>()
+                .unwrap_or_default();
+            assert!(
+                discard_max > 0,
+                "discard_max_bytes={discard_max}, VIRTIO_BLK_F_DISCARD not negotiated"
+            );
+
+            guest
+                .ssh_command("sudo dd if=/dev/urandom of=/dev/vdc bs=4096 count=1024 oflag=direct")
+                .unwrap();
+            guest.ssh_command("sync").unwrap();
+
+            let result = guest
+                .ssh_command("sudo blkdiscard -v -o 0 -l 4194304 /dev/vdc 2>&1 || true")
+                .unwrap();
+            assert!(
+                !result.contains("Operation not supported")
+                    && !result.contains("BLKDISCARD ioctl failed"),
+                "blkdiscard failed on loop device: {result}"
+            );
+
+            guest.ssh_command("sync").unwrap();
+
+            assert_guest_disk_region_is_zero(&guest, "/dev/vdc", 0, 4194304);
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        Command::new("losetup")
+            .args(["-d", &loop_dev])
+            .output()
+            .expect("loop device not found");
+    }
+
     fn _test_virtio_block_fstrim(
         format_name: &str,
         qemu_img_format: &str,
