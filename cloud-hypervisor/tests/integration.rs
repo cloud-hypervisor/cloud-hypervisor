@@ -3570,17 +3570,23 @@ mod common_parallel {
         _test_virtio_block(FOCAL_IMAGE_NAME, true, true, false, false, ImageType::Raw);
     }
 
-    fn run_qemu_img(path: &std::path::Path, args: &[&str]) -> std::process::Output {
-        std::process::Command::new("qemu-img")
-            .arg(args[0])
+    fn run_qemu_img(
+        path: &std::path::Path,
+        args: &[&str],
+        trailing_args: Option<&[&str]>,
+    ) -> std::process::Output {
+        let mut cmd = std::process::Command::new("qemu-img");
+        cmd.arg(args[0])
             .args(&args[1..])
-            .arg(path.to_str().unwrap())
-            .output()
-            .unwrap()
+            .arg(path.to_str().unwrap());
+        if let Some(extra) = trailing_args {
+            cmd.args(extra);
+        }
+        cmd.output().unwrap()
     }
 
     fn get_image_info(path: &std::path::Path) -> Option<serde_json::Value> {
-        let output = run_qemu_img(path, &["info", "-U", "--output=json"]);
+        let output = run_qemu_img(path, &["info", "-U", "--output=json"], None);
 
         output.status.success().then(|| ())?;
         serde_json::from_slice(&output.stdout).ok()
@@ -3759,7 +3765,7 @@ mod common_parallel {
         initial_backing_checksum: Option<(std::path::PathBuf, String, u32)>,
     ) {
         let path = resolve_disk_path(path_or_image_name);
-        let output = run_qemu_img(&path, &["check"]);
+        let output = run_qemu_img(&path, &["check"], None);
 
         assert!(
             output.status.success(),
@@ -3777,7 +3783,7 @@ mod common_parallel {
 
         if let Some((backing_path, format, initial_checksum)) = initial_backing_checksum {
             if format.parse::<block::qcow::ImageType>().ok() != Some(block::qcow::ImageType::Raw) {
-                let output = run_qemu_img(&backing_path, &["check"]);
+                let output = run_qemu_img(&backing_path, &["check"], None);
 
                 assert!(
                     output.status.success(),
