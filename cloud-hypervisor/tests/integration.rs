@@ -7749,6 +7749,189 @@ mod common_parallel {
             .expect("loop device not found");
     }
 
+    #[test]
+    fn test_virtio_block_discard_dm_snapshot() {
+        // Verify that the guest remains stable when BLKDISCARD fails on the
+        // host backend.  DM snapshot targets do not support discard, so the
+        // VMM returns VIRTIO_BLK_S_IOERR.  The guest must handle this
+        // gracefully even under repeated attempts.
+        //
+        // DM topology follows the same pattern used by WindowsDiskConfig.
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let origin_path = guest.tmp_dir.as_path().join("dm_origin.raw");
+        let cow_path = guest.tmp_dir.as_path().join("dm_cow.raw");
+
+        let res = run_qemu_img(&origin_path, &["create", "-f", "raw"], Some(&["128M"]));
+        assert!(
+            res.status.success(),
+            "Failed to create origin image: {}",
+            String::from_utf8_lossy(&res.stderr)
+        );
+
+        let cow_size: u64 = 128 << 20;
+        let cow_sectors = cow_size / 512;
+        let cow_file = File::create(&cow_path).expect("Expect creating COW image to succeed");
+        cow_file
+            .set_len(cow_size)
+            .expect("Expect truncating COW image to succeed");
+
+        let origin_sectors: u64 = 128 * 1024 * 1024 / 512;
+        let origin_loop = create_loop_device(origin_path.to_str().unwrap(), 4096, 5);
+        let cow_loop = create_loop_device(cow_path.to_str().unwrap(), 512, 5);
+
+        let unique = format!(
+            "ch-test-{}",
+            guest
+                .tmp_dir
+                .as_path()
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+        );
+        let cow_dm_name = format!("{unique}-cow");
+        let snap_dm_name = format!("{unique}-snap");
+
+        let output = Command::new("dmsetup")
+            .args([
+                "create",
+                &cow_dm_name,
+                "--table",
+                &format!("0 {cow_sectors} linear {cow_loop} 0"),
+            ])
+            .output()
+            .expect("Failed to run dmsetup");
+        assert!(
+            output.status.success(),
+            "dmsetup create (cow linear) failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        Command::new("dmsetup")
+            .arg("mknodes")
+            .output()
+            .expect("dmsetup mknodes failed");
+
+        // dm-snapshot: origin + COW, non-persistent, chunk size 8 sectors.
+        let output = Command::new("dmsetup")
+            .args([
+                "create",
+                &snap_dm_name,
+                "--table",
+                &format!("0 {origin_sectors} snapshot {origin_loop} /dev/mapper/{cow_dm_name} N 8"),
+            ])
+            .output()
+            .expect("Failed to run dmsetup");
+        assert!(
+            output.status.success(),
+            "dmsetup create (snapshot) failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        Command::new("dmsetup")
+            .arg("mknodes")
+            .output()
+            .expect("dmsetup mknodes failed");
+
+        let dm_dev = format!("/dev/mapper/{snap_dm_name}");
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                format!("path={},image_type=raw", &dm_dev).as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vdc")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            let discard_max = guest
+                .ssh_command("cat /sys/block/vdc/queue/discard_max_bytes")
+                .unwrap()
+                .trim()
+                .parse::<u64>()
+                .unwrap_or_default();
+            assert!(
+                discard_max > 0,
+                "discard_max_bytes={discard_max}, VIRTIO_BLK_F_DISCARD not negotiated"
+            );
+
+            guest
+                .ssh_command("sudo dd if=/dev/urandom of=/dev/vdc bs=4096 count=1024 oflag=direct")
+                .unwrap();
+            guest.ssh_command("sync").unwrap();
+
+            // Discard is expected to fail on DM snapshot because the
+            // snapshot target does not support BLKDISCARD.
+            for attempt in 1..=3 {
+                let result = guest
+                    .ssh_command("sudo blkdiscard -o 0 -l 4194304 /dev/vdc 2>&1; echo rc=$?")
+                    .unwrap();
+                println!("blkdiscard attempt {attempt}: {result}");
+
+                let uptime = guest.ssh_command("uptime").unwrap();
+                assert!(
+                    !uptime.is_empty(),
+                    "Guest unresponsive after blkdiscard attempt {attempt}"
+                );
+            }
+
+            guest
+                .ssh_command("sudo dd if=/dev/urandom of=/dev/vdc bs=4096 count=256 oflag=direct")
+                .unwrap();
+            let readback = guest
+                .ssh_command("sudo dd if=/dev/vdc bs=4096 count=1 iflag=direct 2>/dev/null | od -A n -t x1 | head -1")
+                .unwrap();
+            assert!(
+                !readback.trim().is_empty(),
+                "Failed to read back from device after discard errors"
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let _ = Command::new("dmsetup")
+            .args(["remove", &snap_dm_name])
+            .output();
+        let _ = Command::new("dmsetup")
+            .args(["remove", &cow_dm_name])
+            .output();
+        let _ = Command::new("losetup").args(["-d", &origin_loop]).output();
+        let _ = Command::new("losetup").args(["-d", &cow_loop]).output();
+    }
+
     fn _test_virtio_block_fstrim(
         format_name: &str,
         qemu_img_format: &str,
