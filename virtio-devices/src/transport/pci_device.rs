@@ -10,7 +10,7 @@ use std::any::Any;
 use std::cmp;
 use std::io::Write;
 use std::ops::Deref;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 
 use anyhow::anyhow;
@@ -286,13 +286,16 @@ pub struct VirtioPciDeviceActivator {
     device: Arc<Mutex<dyn VirtioDevice>>,
     device_activated: Arc<AtomicBool>,
     queues: Option<Vec<(usize, Queue, EventFd)>>,
+    status: Option<Arc<AtomicU8>>,
     barrier: Option<Arc<Barrier>>,
     id: String,
 }
 
 impl VirtioPciDeviceActivator {
     pub fn activate(&mut self) -> ActivateResult {
-        self.device.lock().unwrap().activate(
+        let mut locked_device = self.device.lock().unwrap();
+        locked_device.set_device_status(self.status.take().unwrap());
+        locked_device.activate(
             self.memory.take().unwrap(),
             self.interrupt.take().unwrap(),
             self.queues.take().unwrap(),
@@ -641,13 +644,13 @@ impl VirtioPciDevice {
     fn is_driver_ready(&self) -> bool {
         let ready_bits =
             (DEVICE_ACKNOWLEDGE | DEVICE_DRIVER | DEVICE_DRIVER_OK | DEVICE_FEATURES_OK) as u8;
-        self.common_config.driver_status == ready_bits
-            && self.common_config.driver_status & DEVICE_FAILED as u8 == 0
+        let driver_status = self.common_config.driver_status.load(Ordering::Acquire);
+        driver_status == ready_bits && driver_status & DEVICE_FAILED as u8 == 0
     }
 
     /// Determines if the driver has requested the device (re)init / reset itself
     fn is_driver_init(&self) -> bool {
-        self.common_config.driver_status == DEVICE_INIT as u8
+        self.common_config.driver_status.load(Ordering::Acquire) == DEVICE_INIT as u8
     }
 
     pub fn config_bar_addr(&self) -> u64 {
@@ -798,6 +801,7 @@ impl VirtioPciDevice {
             memory: Some(self.memory.clone()),
             device: self.device.clone(),
             queues: Some(queues),
+            status: Some(self.common_config.driver_status.clone()),
             device_activated: self.device_activated.clone(),
             barrier,
             id: self.id.clone(),
@@ -1219,7 +1223,9 @@ impl PciDevice for VirtioPciDevice {
                 self.common_config.queue_select = 0;
             } else {
                 error!("Attempt to reset device when not implemented in underlying device");
-                self.common_config.driver_status = crate::DEVICE_FAILED as u8;
+                self.common_config
+                    .driver_status
+                    .store(crate::DEVICE_FAILED as u8, Ordering::Release);
             }
         }
 

@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::num::Wrapping;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 
@@ -100,6 +100,10 @@ pub trait VirtioDevice: Send {
         interrupt_evt: Arc<dyn VirtioInterrupt>,
         queues: Vec<(usize, Queue, EventFd)>,
     ) -> ActivateResult;
+
+    /// Passes the device status byte atomic back to the device to allow it to trigger a device
+    /// reset condition during fatal errors.
+    fn set_device_status(&mut self, _status: Arc<AtomicU8>) {}
 
     /// Optionally deactivates this device and returns ownership of the guest memory map, interrupt
     /// event, and queue events.
