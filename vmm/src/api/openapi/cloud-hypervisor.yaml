@@ -980,7 +980,11 @@ components:
         image_type:
           type: string
           enum: [FixedVhd, Qcow2, Raw, Vhdx, Unknown]
-
+        lock_granularity:
+          type: string
+          enum: [byte-range, full]
+          default: byte-range
+          description: Lock granularity for disk advisory locks. 'byte-range' locks [0, size) via OFD byte-range locking (default, works best with NetApp storage). 'full' uses the original whole-file OFD lock (l_start=0, l_len=0).
 
     NetConfig:
       type: object

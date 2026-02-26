@@ -33,6 +33,7 @@ use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use arch::{DeviceType, MmioDeviceInfo};
 use arch::{NumaNodes, layout};
 use block::async_io::DiskFile;
+use block::fcntl::LockGranularity;
 use block::fixed_vhd_sync::FixedVhdDiskSync;
 use block::qcow_sync::QcowDiskSync;
 use block::raw_async_aio::RawFileDiskAio;
@@ -2715,7 +2716,7 @@ impl DeviceManager {
                 warn!("Enabling backing_files option only applies for QCOW2 files");
             }
 
-            let image = match disk_cfg.image_type {
+            let mut image = match disk_cfg.image_type {
                 ImageType::FixedVhd => {
                     // Use asynchronous backend relying on io_uring if the
                     // syscalls are supported.
@@ -2836,6 +2837,14 @@ impl DeviceManager {
                 BTreeMap::new()
             };
 
+            let lock_granularity = match disk_cfg.lock_granularity {
+                crate::vm_config::LockGranularityChoice::Full => Some(LockGranularity::WholeFile),
+                crate::vm_config::LockGranularityChoice::ByteRange => image
+                    .physical_size()
+                    .ok()
+                    .map(|size| LockGranularity::ByteRange(0, size)),
+            };
+
             let mut virtio_block = virtio_devices::Block::new(
                 id.clone(),
                 image,
@@ -2859,6 +2868,7 @@ impl DeviceManager {
                 queue_affinity,
                 disk_cfg.sparse,
                 disable_sector0_writes,
+                lock_granularity,
             )
             .map_err(DeviceManagerError::CreateVirtioBlock)?;
 

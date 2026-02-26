@@ -27,6 +27,22 @@ use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
 use crate::landlock::LandlockAccess;
 use crate::vm_config::*;
 
+#[derive(Error, Debug)]
+#[error("invalid lock granularity value: {0}, expected 'byte-range' or 'full'")]
+pub struct LockGranularityParseError(String);
+
+impl FromStr for LockGranularityChoice {
+    type Err = LockGranularityParseError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "byte-range" => Ok(LockGranularityChoice::ByteRange),
+            "full" => Ok(LockGranularityChoice::Full),
+            _ => Err(LockGranularityParseError(s.to_owned())),
+        }
+    }
+}
+
 const MAX_NUM_PCI_SEGMENTS: u16 = 96;
 const MAX_IOMMU_ADDRESS_WIDTH_BITS: u8 = 64;
 
@@ -1159,7 +1175,7 @@ impl DiskConfig {
          id=<device_id>,pci_segment=<segment_id>,rate_limit_group=<group_id>,\
          queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>,\
          serial=<serial_number>,backing_files=on|off,sparse=on|off,\
-         image_type=<raw,qcow2,vhd,vhdx>";
+         image_type=<raw,qcow2,vhd,vhdx>,lock_granularity=byte-range|full";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1187,7 +1203,8 @@ impl DiskConfig {
             .add("queue_affinity")
             .add("backing_files")
             .add("sparse")
-            .add("image_type");
+            .add("image_type")
+            .add("lock_granularity");
 
         parser.parse(disk).map_err(Error::ParseDisk)?;
 
@@ -1289,6 +1306,10 @@ impl DiskConfig {
             ImageType::Unknown
         };
 
+        let lock_granularity = parser
+            .convert::<LockGranularityChoice>("lock_granularity")
+            .map_err(Error::ParseDisk)?
+            .unwrap_or_else(default_lock_granularity);
         let bw_tb_config = if bw_size != 0 && bw_refill_time != 0 {
             Some(TokenBucketConfig {
                 size: bw_size,
@@ -1341,6 +1362,7 @@ impl DiskConfig {
             backing_files,
             sparse,
             image_type,
+            lock_granularity,
         })
     }
 
@@ -3800,6 +3822,7 @@ mod unit_tests {
             backing_files: false,
             sparse: true,
             image_type: ImageType::Unknown,
+            lock_granularity: default_lock_granularity(),
         }
     }
 
@@ -3868,6 +3891,20 @@ mod unit_tests {
             DiskConfig::parse("path=/path/to_file,rate_limit_group=group0")?,
             DiskConfig {
                 rate_limit_group: Some("group0".to_string()),
+                ..disk_fixture()
+            }
+        );
+        assert_eq!(
+            DiskConfig::parse("path=/path/to_file,lock_granularity=full")?,
+            DiskConfig {
+                lock_granularity: LockGranularityChoice::Full,
+                ..disk_fixture()
+            }
+        );
+        assert_eq!(
+            DiskConfig::parse("path=/path/to_file,lock_granularity=byte-range")?,
+            DiskConfig {
+                lock_granularity: LockGranularityChoice::ByteRange,
                 ..disk_fixture()
             }
         );

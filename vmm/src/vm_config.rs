@@ -302,6 +302,8 @@ pub struct DiskConfig {
     pub sparse: bool,
     #[serde(default)]
     pub image_type: ImageType,
+    #[serde(default = "default_lock_granularity")]
+    pub lock_granularity: LockGranularityChoice,
 }
 
 impl ApplyLandlock for DiskConfig {
@@ -327,6 +329,20 @@ pub fn default_diskconfig_queue_size() -> u16 {
 
 pub fn default_diskconfig_sparse() -> bool {
     true
+}
+
+/// Lock granularity choice for disk advisory locks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LockGranularityChoice {
+    /// Byte-range lock covering [0, size) - default, works best with NetApp storage.
+    ByteRange,
+    /// Whole-file lock (l_start=0, l_len=0) - original OFD whole-file lock behavior.
+    Full,
+}
+
+pub fn default_lock_granularity() -> LockGranularityChoice {
+    LockGranularityChoice::ByteRange
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
