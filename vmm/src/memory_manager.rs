@@ -415,6 +415,10 @@ pub enum Error {
     /// Memory size is misaligned with default page size or its hugepage size
     #[error("Memory size is misaligned with default page size or its hugepage size")]
     MisalignedMemorySize,
+
+    /// Failed to prefault memory
+    #[error("Failed to prefault memory")]
+    PrefaultMemory(#[source] io::Error),
 }
 
 impl From<UffdError> for Error {
@@ -2083,11 +2087,12 @@ impl MemoryManager {
             let remainder = num_pages % num_threads;
 
             let barrier = Arc::new(Barrier::new(num_threads));
-            thread::scope(|s| {
+            thread::scope(|s| -> Result<(), Error> {
                 let r = &region;
+                let mut handles = Vec::new();
                 for i in 0..num_threads {
                     let barrier = Arc::clone(&barrier);
-                    s.spawn(move || {
+                    let handle = s.spawn(move || {
                         // Wait until all threads have been spawned to avoid contention
                         // over mmap_sem between thread stack allocation and page faulting.
                         barrier.wait();
@@ -2100,11 +2105,26 @@ impl MemoryManager {
                         };
                         if ret != 0 {
                             let e = io::Error::last_os_error();
-                            warn!("Failed to prefault pages: {e}");
+                            return Err(e);
                         }
+                        Ok(())
                     });
+                    handles.push(handle);
                 }
-            });
+
+                for handle in handles {
+                    handle
+                        .join()
+                        .map_err(|e| {
+                            Error::PrefaultMemory(io::Error::other(format!(
+                                "Prefault thread panicked: {e:?}"
+                            )))
+                        })?
+                        .map_err(Error::PrefaultMemory)?;
+                }
+
+                Ok(())
+            })?;
         }
 
         info!(
