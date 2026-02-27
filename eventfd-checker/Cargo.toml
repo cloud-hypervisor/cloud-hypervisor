@@ -1,0 +1,13 @@
+[package]
+edition.workspace = true
+name = "eventfd-checker"
+version = "0.1.0"
+
+[dependencies]
+libc = { workspace = true }
+rustix = { workspace = true }
+thiserror = { workspace = true }
+vmm-sys-util = { workspace = true }
+
+[lints]
+workspace = true
