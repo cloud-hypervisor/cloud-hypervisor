@@ -115,13 +115,13 @@ pub struct PciBus {
     /// Device 0 is host bridge.
     devices: HashMap<u32, Arc<Mutex<dyn PciDevice>>>,
     device_reloc: Arc<dyn DeviceRelocation>,
-    device_ids: Vec<bool>,
+    device_ids: [bool; NUM_DEVICE_IDS],
 }
 
 impl PciBus {
     pub fn new(pci_root: PciRoot, device_reloc: Arc<dyn DeviceRelocation>) -> Self {
         let mut devices: HashMap<u32, Arc<Mutex<dyn PciDevice>>> = HashMap::new();
-        let mut device_ids: Vec<bool> = vec![false; NUM_DEVICE_IDS];
+        let mut device_ids = [false; NUM_DEVICE_IDS];
 
         devices.insert(0, Arc::new(Mutex::new(pci_root)));
         device_ids[0] = true;
