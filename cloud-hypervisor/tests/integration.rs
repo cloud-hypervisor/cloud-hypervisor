@@ -20,7 +20,7 @@ use std::process::{Child, Command, Stdio};
 use std::string::String;
 use std::sync::mpsc::Receiver;
 use std::sync::{Mutex, mpsc};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{fs, io, thread};
 
 use net_util::MacAddr;
@@ -7095,24 +7095,6 @@ mod common_parallel {
             .open(LOOP_CTL_PATH)
             .unwrap();
 
-        // Request a free loop device
-        let loop_device_number =
-            unsafe { libc::ioctl(loop_ctl_file.as_raw_fd(), LOOP_CTL_GET_FREE as _) };
-
-        if loop_device_number < 0 {
-            panic!("Couldn't find a free loop device");
-        }
-
-        // Create loop device path
-        let loop_device_path = format!("{LOOP_DEVICE_PREFIX}{loop_device_number}");
-
-        // Open loop device
-        let loop_device_file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&loop_device_path)
-            .unwrap();
-
         // Open backing file
         let backing_file = OpenOptions::new()
             .read(true)
@@ -7120,13 +7102,34 @@ mod common_parallel {
             .open(backing_file_path)
             .unwrap();
 
-        let loop_config = LoopConfig {
-            fd: backing_file.as_raw_fd() as u32,
-            block_size,
-            ..Default::default()
-        };
-
+        // Retry the whole get free -> open -> configure sequence so that a
+        // race with another parallel test claiming the same loop device
+        // is resolved by requesting a new free device on each attempt.
+        let mut loop_device_path = String::new();
         for i in 0..num_retries {
+            // Request a free loop device
+            let loop_device_number =
+                unsafe { libc::ioctl(loop_ctl_file.as_raw_fd(), LOOP_CTL_GET_FREE as _) };
+
+            if loop_device_number < 0 {
+                panic!("Couldn't find a free loop device");
+            }
+
+            loop_device_path = format!("{LOOP_DEVICE_PREFIX}{loop_device_number}");
+
+            // Open loop device
+            let loop_device_file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&loop_device_path)
+                .unwrap();
+
+            let loop_config = LoopConfig {
+                fd: backing_file.as_raw_fd() as u32,
+                block_size,
+                ..Default::default()
+            };
+
             let ret = unsafe {
                 libc::ioctl(
                     loop_device_file.as_raw_fd(),
@@ -7134,28 +7137,32 @@ mod common_parallel {
                     &loop_config,
                 )
             };
-            if ret != 0 {
-                if i < num_retries - 1 {
-                    println!(
-                        "Iteration {}: Failed to configure the loop device {}: {}",
-                        i,
-                        loop_device_path,
-                        std::io::Error::last_os_error()
-                    );
-                } else {
-                    panic!(
-                        "Failed {} times trying to configure the loop device {}: {}",
-                        num_retries,
-                        loop_device_path,
-                        std::io::Error::last_os_error()
-                    );
-                }
-            } else {
+            if ret == 0 {
                 break;
             }
 
-            // Wait for a bit before retrying
-            thread::sleep(std::time::Duration::new(5, 0));
+            if i < num_retries - 1 {
+                println!(
+                    "Iteration {}: Failed to configure loop device {}: {}",
+                    i,
+                    loop_device_path,
+                    io::Error::last_os_error()
+                );
+                let jitter_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .subsec_nanos()
+                    % 500
+                    + 100;
+                thread::sleep(Duration::from_millis(jitter_ms as u64));
+            } else {
+                panic!(
+                    "Failed {} times trying to configure the loop device {}: {}",
+                    num_retries,
+                    loop_device_path,
+                    io::Error::last_os_error()
+                );
+            }
         }
 
         loop_device_path
