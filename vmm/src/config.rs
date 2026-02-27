@@ -1343,6 +1343,7 @@ impl DiskConfig {
             sparse,
             image_type,
             lock_granularity,
+            bdf_device: None,
         })
     }
 
@@ -1577,6 +1578,7 @@ impl NetConfig {
             offload_tso,
             offload_ufo,
             offload_csum,
+            bdf_device: None,
         };
         Ok(config)
     }
@@ -1665,7 +1667,11 @@ impl RngConfig {
             .unwrap_or(Toggle(false))
             .0;
 
-        Ok(RngConfig { src, iommu })
+        Ok(RngConfig {
+            src,
+            iommu,
+            bdf_device: None,
+        })
     }
 }
 
@@ -1701,6 +1707,7 @@ impl BalloonConfig {
             size,
             deflate_on_oom,
             free_page_reporting,
+            bdf_device: None,
         })
     }
 }
@@ -1825,6 +1832,7 @@ impl GenericVhostUserConfig {
             id,
             pci_segment,
             queue_sizes: converted_queue_sizes,
+            bdf_device: None,
         })
     }
 
@@ -1892,6 +1900,7 @@ impl FsConfig {
             queue_size,
             id,
             pci_segment,
+            bdf_device: None,
         })
     }
 
@@ -2061,6 +2070,7 @@ impl PmemConfig {
             discard_writes,
             id,
             pci_segment,
+            bdf_device: None,
         })
     }
 
@@ -2131,6 +2141,7 @@ impl ConsoleConfig {
             mode,
             iommu,
             socket,
+            bdf_device: None,
         })
     }
 }
@@ -2225,6 +2236,7 @@ impl DeviceConfig {
             id,
             pci_segment,
             x_nv_gpudirect_clique,
+            bdf_device: None,
         })
     }
 
@@ -2269,6 +2281,7 @@ impl UserDeviceConfig {
             socket,
             id,
             pci_segment,
+            bdf_device: None,
         })
     }
 
@@ -2331,6 +2344,7 @@ impl VdpaConfig {
             iommu,
             id,
             pci_segment,
+            bdf_device: None,
         })
     }
 
@@ -2391,6 +2405,7 @@ impl VsockConfig {
             iommu,
             id,
             pci_segment,
+            bdf_device: None,
         })
     }
 
@@ -3856,6 +3871,7 @@ mod unit_tests {
             sparse: true,
             image_type: ImageType::Unknown,
             lock_granularity: LockGranularityChoice::default(),
+            bdf_device: None,
         }
     }
 
@@ -3989,6 +4005,7 @@ mod unit_tests {
             offload_tso: true,
             offload_ufo: true,
             offload_csum: true,
+            bdf_device: None,
         }
     }
 
@@ -4080,6 +4097,7 @@ mod unit_tests {
             RngConfig {
                 src: PathBuf::from("/dev/random"),
                 iommu: true,
+                bdf_device: None,
             }
         );
         assert_eq!(
@@ -4100,6 +4118,7 @@ mod unit_tests {
             queue_size: 1024,
             id: None,
             pci_segment: 0,
+            bdf_device: None,
         }
     }
 
@@ -4156,6 +4175,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                         .iter()
                         .map(|&f| u16::try_from(f).unwrap())
                         .collect(),
+                    bdf_device: None,
                 }
             );
         } else {
@@ -4217,6 +4237,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             discard_writes: false,
             id: None,
             pci_segment: 0,
+            bdf_device: None,
         }
     }
 
@@ -4259,6 +4280,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 iommu: false,
                 file: None,
                 socket: None,
+                bdf_device: None,
             }
         );
         assert_eq!(
@@ -4268,6 +4290,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 iommu: false,
                 file: None,
                 socket: None,
+                bdf_device: None,
             }
         );
         assert_eq!(
@@ -4277,6 +4300,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 iommu: false,
                 file: None,
                 socket: None,
+                bdf_device: None,
             }
         );
         assert_eq!(
@@ -4286,6 +4310,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 iommu: false,
                 file: None,
                 socket: None,
+                bdf_device: None,
             }
         );
         assert_eq!(
@@ -4295,6 +4320,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 iommu: false,
                 file: Some(PathBuf::from("/tmp/console")),
                 socket: None,
+                bdf_device: None,
             }
         );
         assert_eq!(
@@ -4304,6 +4330,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 iommu: true,
                 file: None,
                 socket: None,
+                bdf_device: None,
             }
         );
         assert_eq!(
@@ -4313,6 +4340,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 iommu: true,
                 file: Some(PathBuf::from("/tmp/console")),
                 socket: None,
+                bdf_device: None,
             }
         );
         assert_eq!(
@@ -4322,6 +4350,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 iommu: true,
                 file: None,
                 socket: Some(PathBuf::from("/tmp/serial.sock")),
+                bdf_device: None,
             }
         );
         Ok(())
@@ -4334,6 +4363,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             iommu: false,
             pci_segment: 0,
             x_nv_gpudirect_clique: None,
+            bdf_device: None,
         }
     }
 
@@ -4373,6 +4403,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             iommu: false,
             id: None,
             pci_segment: 0,
+            bdf_device: None,
         }
     }
 
@@ -4417,6 +4448,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 iommu: false,
                 id: None,
                 pci_segment: 0,
+                bdf_device: None,
             }
         );
         assert_eq!(
@@ -4427,6 +4459,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 iommu: true,
                 id: None,
                 pci_segment: 0,
+                bdf_device: None,
             }
         );
         Ok(())
@@ -4855,6 +4888,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             rng: RngConfig {
                 src: PathBuf::from("/dev/urandom"),
                 iommu: false,
+                bdf_device: None,
             },
             balloon: None,
             fs: None,
@@ -4865,12 +4899,14 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 mode: ConsoleOutputMode::Null,
                 iommu: false,
                 socket: None,
+                bdf_device: None,
             },
             console: ConsoleConfig {
                 file: None,
                 mode: ConsoleOutputMode::Tty,
                 iommu: false,
                 socket: None,
+                bdf_device: None,
             },
             #[cfg(target_arch = "x86_64")]
             debug_console: DebugConsoleConfig::default(),
@@ -5188,6 +5224,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             id: None,
             iommu: true,
             pci_segment: 1,
+            bdf_device: None,
         });
         still_valid_config.validate().unwrap();
 
@@ -5264,6 +5301,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             id: None,
             iommu: false,
             pci_segment: 1,
+            bdf_device: None,
         });
         assert_eq!(
             invalid_config.validate(),
@@ -5280,6 +5318,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             pci_segment: 1,
             socket: PathBuf::new(),
             id: None,
+            bdf_device: None,
         }]);
         assert_eq!(
             invalid_config.validate(),
