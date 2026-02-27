@@ -2050,3 +2050,91 @@ fn generate_host_data() -> String {
     rand::rng().fill_bytes(&mut bytes);
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
+
+// Creates the path for direct kernel boot and return the path.
+// For x86_64, this function returns the vmlinux kernel path.
+// For AArch64, this function returns the PE kernel path.
+pub fn direct_kernel_boot_path() -> PathBuf {
+    let mut workload_path = dirs::home_dir().unwrap();
+    workload_path.push("workloads");
+
+    let mut kernel_path = workload_path;
+    #[cfg(target_arch = "x86_64")]
+    kernel_path.push("vmlinux-x86_64");
+    #[cfg(target_arch = "aarch64")]
+    kernel_path.push("Image-arm64");
+
+    kernel_path
+}
+
+pub fn edk2_path() -> PathBuf {
+    let mut workload_path = dirs::home_dir().unwrap();
+    workload_path.push("workloads");
+    let mut edk2_path = workload_path;
+    edk2_path.push(OVMF_NAME);
+
+    edk2_path
+}
+
+pub const DIRECT_KERNEL_BOOT_CMDLINE: &str =
+    "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1";
+
+pub const CONSOLE_TEST_STRING: &str = "Started OpenBSD Secure Shell server";
+
+// Constant taken from the VMM crate.
+pub const MAX_NUM_PCI_SEGMENTS: u16 = 96;
+
+#[cfg(target_arch = "x86_64")]
+pub mod x86_64 {
+    pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
+    pub const JAMMY_VFIO_IMAGE_NAME: &str =
+        "jammy-server-cloudimg-amd64-custom-vfio-20241012-0.raw";
+    pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhd";
+    pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhdx";
+    pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.raw";
+    pub const JAMMY_IMAGE_NAME_QCOW2: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_ZLIB: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-zlib.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_ZSTD: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-zstd.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-zstd.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-uncompressed.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-raw.qcow2";
+    pub const WINDOWS_IMAGE_NAME: &str = "windows-server-2022-amd64-2.raw";
+    pub const OVMF_NAME: &str = "CLOUDHV.fd";
+    pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'IO-APIC.*ttyS0' /proc/interrupts || true";
+}
+
+#[cfg(target_arch = "x86_64")]
+pub use x86_64::*;
+
+#[cfg(target_arch = "aarch64")]
+pub mod aarch64 {
+    pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0.raw";
+    pub const FOCAL_IMAGE_UPDATE_KERNEL_NAME: &str =
+        "focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw";
+    pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhd";
+    pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhdx";
+    pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.raw";
+    pub const JAMMY_IMAGE_NAME_QCOW2: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_ZLIB: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-zlib.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_ZSTD: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-zstd.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-zstd.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-uncompressed.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-raw.qcow2";
+    pub const WINDOWS_IMAGE_NAME: &str = "windows-11-iot-enterprise-aarch64.raw";
+    pub const OVMF_NAME: &str = "CLOUDHV_EFI.fd";
+    pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'GICv3.*uart-pl011' /proc/interrupts || true";
+    pub const GREP_PMU_IRQ_CMD: &str = "grep -c 'GICv3.*arm-pmu' /proc/interrupts || true";
+}
+
+#[cfg(target_arch = "aarch64")]
+pub use aarch64::*;
