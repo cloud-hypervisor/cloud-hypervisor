@@ -7262,6 +7262,92 @@ mod common_parallel {
     }
 
     #[test]
+    fn test_virtio_block_direct_io_block_device_alignment_4k() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        // The backing file for the loop device must live on a filesystem that
+        // supports O_DIRECT (e.g. ext4).  guest.tmp_dir is on tmpfs inside
+        // Docker, and the loop driver forwards I/O to the backing file.
+        let mut workloads_path = dirs::home_dir().unwrap();
+        workloads_path.push("workloads");
+        let img_dir = TempDir::new_in(workloads_path.as_path()).unwrap();
+        let test_disk_path = img_dir.as_path().join("directio_test.img");
+        // Preallocate the backing file -- a sparse file can deadlock when
+        // O_DIRECT writes through a loop device trigger block allocation
+        // in the backing filesystem.
+        assert!(
+            exec_host_command_output(&format!(
+                "fallocate -l 64M {}",
+                test_disk_path.to_str().unwrap()
+            ))
+            .status
+            .success(),
+            "fallocate failed"
+        );
+
+        let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 5);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                format!("path={},direct=on,image_type=raw", &loop_dev).as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk -t | grep vdc | awk '{print $6}'")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                4096
+            );
+
+            guest
+                .ssh_command(
+                    "sudo dd if=/dev/urandom of=/tmp/pattern bs=4096 count=1 && \
+                     sudo dd if=/tmp/pattern of=/dev/vdc bs=4096 count=1 seek=1 oflag=direct && \
+                     sudo dd if=/dev/vdc of=/tmp/readback bs=4096 count=1 skip=1 iflag=direct && \
+                     cmp /tmp/pattern /tmp/readback",
+                )
+                .unwrap();
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+
+        Command::new("losetup")
+            .args(["-d", &loop_dev])
+            .output()
+            .expect("loop device cleanup failed");
+    }
+
+    #[test]
     fn test_virtio_block_direct_io_file_backed_alignment_4k() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
