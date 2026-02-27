@@ -249,6 +249,7 @@ impl VirtioPciCommonConfig {
             0x12 => queues.len() as u16, // num_queues
             0x16 => self.queue_select,
             0x18 => self.with_queue(queues, |q| q.size()).unwrap_or(0),
+            // TODO: will panic if queue_select is out of bounds
             0x1a => self.msix_queues.lock().unwrap()[self.queue_select as usize],
             0x1c => u16::from(self.with_queue(queues, |q| q.ready()).unwrap_or(false)),
             0x1e => self.queue_select, // notify_off
@@ -265,6 +266,7 @@ impl VirtioPciCommonConfig {
             0x10 => self.msix_config.store(value, Ordering::Release),
             0x16 => self.queue_select = value,
             0x18 => self.with_queue_mut(queues, |q| q.set_size(value)),
+            // TODO: will panic if queue_select is out of bounds
             0x1a => self.msix_queues.lock().unwrap()[self.queue_select as usize] = value,
             0x1c => self.with_queue_mut(queues, |q| {
                 let ready = value == 1;

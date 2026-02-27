@@ -67,6 +67,19 @@ pub trait VirtioDevice: Send {
     /// The maximum size of each queue that this device supports.
     fn queue_max_sizes(&self) -> &[u16];
 
+    /// The maximum number of MSI-X interrupts this device needs.
+    /// Defaults to the number of queues.  One additional interrupt
+    /// will be used for the config space change event.
+    fn max_interrupts(&self) -> usize {
+        self.queue_max_sizes().len()
+    }
+
+    /// The maximum number of doorbells the device supports.
+    /// Most devices don't support any.
+    fn doorbells_max(&self) -> u8 {
+        0
+    }
+
     /// The set of feature bits that this device supports.
     fn features(&self) -> u64 {
         0
