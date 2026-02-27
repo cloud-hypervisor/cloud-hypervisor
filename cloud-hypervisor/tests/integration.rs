@@ -29,69 +29,6 @@ use vmm_sys_util::tempdir::TempDir;
 use vmm_sys_util::tempfile::TempFile;
 use wait_timeout::ChildExt;
 
-// Constant taken from the VMM crate.
-const MAX_NUM_PCI_SEGMENTS: u16 = 96;
-
-#[cfg(target_arch = "x86_64")]
-mod x86_64 {
-    pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
-    pub const JAMMY_VFIO_IMAGE_NAME: &str =
-        "jammy-server-cloudimg-amd64-custom-vfio-20241012-0.raw";
-    pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhd";
-    pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhdx";
-    pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.raw";
-    pub const JAMMY_IMAGE_NAME_QCOW2: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_ZLIB: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-zlib.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_ZSTD: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-uncompressed.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-raw.qcow2";
-    pub const WINDOWS_IMAGE_NAME: &str = "windows-server-2022-amd64-2.raw";
-    pub const OVMF_NAME: &str = "CLOUDHV.fd";
-    pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'IO-APIC.*ttyS0' /proc/interrupts || true";
-}
-
-#[cfg(target_arch = "x86_64")]
-use x86_64::*;
-
-#[cfg(target_arch = "aarch64")]
-mod aarch64 {
-    pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0.raw";
-    pub const FOCAL_IMAGE_UPDATE_KERNEL_NAME: &str =
-        "focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw";
-    pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhd";
-    pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhdx";
-    pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.raw";
-    pub const JAMMY_IMAGE_NAME_QCOW2: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_ZLIB: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-zlib.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_ZSTD: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-uncompressed.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-raw.qcow2";
-    pub const WINDOWS_IMAGE_NAME: &str = "windows-11-iot-enterprise-aarch64.raw";
-    pub const OVMF_NAME: &str = "CLOUDHV_EFI.fd";
-    pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'GICv3.*uart-pl011' /proc/interrupts || true";
-    pub const GREP_PMU_IRQ_CMD: &str = "grep -c 'GICv3.*arm-pmu' /proc/interrupts || true";
-}
-
-#[cfg(target_arch = "aarch64")]
-use aarch64::*;
-
-const DIRECT_KERNEL_BOOT_CMDLINE: &str =
-    "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1";
-
-const CONSOLE_TEST_STRING: &str = "Started OpenBSD Secure Shell server";
-
 // This enum exists to make it more convenient to
 // implement test for both D-Bus and REST APIs.
 enum TargetApi {
@@ -539,31 +476,6 @@ fn temp_snapshot_dir_path(tmp_dir: &TempDir) -> String {
 
 fn temp_vmcore_file_path(tmp_dir: &TempDir) -> String {
     String::from(tmp_dir.as_path().join("vmcore").to_str().unwrap())
-}
-
-// Creates the path for direct kernel boot and return the path.
-// For x86_64, this function returns the vmlinux kernel path.
-// For AArch64, this function returns the PE kernel path.
-fn direct_kernel_boot_path() -> PathBuf {
-    let mut workload_path = dirs::home_dir().unwrap();
-    workload_path.push("workloads");
-
-    let mut kernel_path = workload_path;
-    #[cfg(target_arch = "x86_64")]
-    kernel_path.push("vmlinux-x86_64");
-    #[cfg(target_arch = "aarch64")]
-    kernel_path.push("Image-arm64");
-
-    kernel_path
-}
-
-fn edk2_path() -> PathBuf {
-    let mut workload_path = dirs::home_dir().unwrap();
-    workload_path.push("workloads");
-    let mut edk2_path = workload_path;
-    edk2_path.push(OVMF_NAME);
-
-    edk2_path
 }
 
 fn cloud_hypervisor_release_path() -> String {
