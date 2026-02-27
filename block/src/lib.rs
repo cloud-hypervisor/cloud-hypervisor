@@ -38,7 +38,7 @@ use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::str::FromStr;
 use std::time::Instant;
-use std::{cmp, result};
+use std::{cmp, mem, result};
 
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
@@ -1161,8 +1161,73 @@ impl DiskTopology {
         Ok(block_size)
     }
 
+    /// Query the O_DIRECT alignment requirement for a regular file.
+    ///
+    /// Uses `statx(STATX_DIOALIGN)` (Linux >= 6.1) to obtain the exact
+    /// memory and offset alignment the kernel requires for direct I/O on
+    /// this specific file. Unlike `fstatvfs().f_bsize`, which only returns
+    /// the filesystem's preferred I/O block size, `STATX_DIOALIGN` reports
+    /// the true per-file DIO constraints accounting for the filesystem,
+    /// underlying block device, and any stacking (loop, dm, etc.).
+    fn query_file_alignment(f: &File) -> u64 {
+        // The libc crate does not expose statx / STATX_DIOALIGN on all
+        // targets (e.g. musl), so define the constant and a minimal repr(C)
+        // struct locally and invoke the syscall directly.
+        const STATX_DIOALIGN: u32 = 0x2000;
+
+        // Minimal statx layout, only the needed fields,
+        // everything else is padding.
+        #[repr(C)]
+        struct Statx {
+            stx_mask: u32,
+            _pad: [u8; 148],
+            stx_dio_mem_align: u32,
+            stx_dio_offset_align: u32,
+            _pad2: [u8; 96],
+        }
+
+        let mut stx = mem::MaybeUninit::<Statx>::zeroed();
+        // SAFETY: FFI syscall with valid fd and correctly sized buffer.
+        let ret = unsafe {
+            libc::syscall(
+                libc::SYS_statx,
+                f.as_raw_fd(),
+                c"".as_ptr(),
+                libc::AT_EMPTY_PATH,
+                STATX_DIOALIGN,
+                stx.as_mut_ptr(),
+            )
+        };
+        if ret == 0 {
+            // SAFETY: statx succeeded, the struct is fully initialized.
+            let stx = unsafe { stx.assume_init() };
+            if stx.stx_mask & STATX_DIOALIGN != 0 && stx.stx_dio_mem_align > 0 {
+                let align = cmp::max(stx.stx_dio_mem_align, stx.stx_dio_offset_align) as u64;
+                debug!("statx(STATX_DIOALIGN) returned alignment {align}");
+                return align;
+            }
+        }
+
+        debug!("DIO alignment query failed, falling back to default {SECTOR_SIZE}");
+        SECTOR_SIZE
+    }
+
     pub fn probe(f: &File) -> std::io::Result<Self> {
         if !Self::is_block_device(f)? {
+            // For regular files opened with O_DIRECT, the logical block size
+            // must reflect the filesystem DIO alignment so the guest issues
+            // correctly sized I/O.
+            // SAFETY: fcntl(F_GETFL) is always safe on a valid fd.
+            let flags = unsafe { libc::fcntl(f.as_raw_fd(), libc::F_GETFL) };
+            if flags >= 0 && (flags & libc::O_DIRECT) != 0 {
+                let alignment = Self::query_file_alignment(f);
+                return Ok(DiskTopology {
+                    logical_block_size: alignment,
+                    physical_block_size: alignment,
+                    minimum_io_size: alignment,
+                    optimal_io_size: 0,
+                });
+            }
             return Ok(DiskTopology::default());
         }
 
