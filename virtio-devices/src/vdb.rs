@@ -27,12 +27,13 @@ use std::{io, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
+use eventfd_checker;
 use libc::PROT_WRITE;
 use log::{debug, error, info, trace, warn};
 use seccompiler::SeccompAction;
 use thiserror::Error;
 use vhost::vhost_user::message::VhostUserMemoryRegion;
-use vhost::vhost_user::{BackendListener, BackendReqHandler, VhostUserProtocolFeatures};
+use vhost::vhost_user::{BackendListener, BackendReqHandler, Listener, VhostUserProtocolFeatures};
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, GuestAddressSpace, GuestMemoryAtomic, Le32};
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -155,26 +156,35 @@ type Region = Arc<vm_memory::GuestRegionMmap<vm_memory::bitmap::AtomicBitmap>>;
 // Implementations should use one thread per queue, rather than
 // being single-threaded.
 pub struct Backend {
-    pub avail_features: VhostUserProtocolFeatures,
-    pub active_features: AtomicU64,
-    pub queues: u64,
+    avail_features: u64,
+    active_features: AtomicU64,
+    queues: u8,
     page_size_mask: u64,
     region: Region,
-    pub current_offset: Mutex<usize>,
+    current_offset: Mutex<usize>,
+    interrupt_cb: Arc<dyn VirtioInterrupt>,
+    checker: eventfd_checker::ProcRoot,
+    vm: Arc<dyn hypervisor::Vm>,
 }
 
 impl Backend {
-    pub fn new(avail_features: VhostUserProtocolFeatures, queues: u64, region: Region) -> Self {
-        // SAFETY: FFI call with valid parameters
-        let page_size = unsafe { libc::sysconf(libc::_SC_PAGE_SIZE) };
-        assert!(page_size.count_ones() == 1);
-        Self {
-            page_size_mask: u64::try_from(page_size).unwrap() - 1,
-            queues,
-            avail_features,
-            active_features: AtomicU64::new(0),
-            region,
-            current_offset: Mutex::new(0),
+    fn convert_eventfd(
+        &self,
+        file: Option<std::fs::File>,
+    ) -> vhost::vhost_user::Result<Option<EventFd>> {
+        match file {
+            None => Ok(None),
+            Some(fd) => match self.checker.convert_to_eventfd(fd.into()) {
+                Ok(eventfd) => Ok(Some(eventfd)),
+                Err((_orig_fd, eventfd_checker::Error::NotEventFd)) => {
+                    warn!("Backend provided non-eventfd");
+                    Err(vhost::vhost_user::Error::IncorrectFds)
+                }
+                Err((_orig_fd, eventfd_checker::Error::IO(e))) => {
+                    error!("Cannot check if file descriptor is an eventfd: {e}");
+                    Err(vhost::vhost_user::Error::BackendInternalError)
+                }
+            },
         }
     }
 }
@@ -197,11 +207,11 @@ impl vhost::vhost_user::VhostUserBackendReqHandler for Backend {
     }
 
     fn get_features(&self) -> vhost::vhost_user::Result<u64> {
-        Ok(self.avail_features.bits())
+        Ok(self.avail_features)
     }
 
     fn set_features(&self, features: u64) -> vhost::vhost_user::Result<()> {
-        if (!self.avail_features.bits() & features) == 0 {
+        if (!self.avail_features & features) == 0 {
             self.active_features.store(features, Ordering::Release);
             Ok(())
         } else {
@@ -313,55 +323,108 @@ impl vhost::vhost_user::VhostUserBackendReqHandler for Backend {
         Ok(())
     }
 
-    fn set_vring_num(&self, _index: u32, _num: u32) -> vhost::vhost_user::Result<()> {
+    fn set_vring_num(&self, index: u32, _num: u32) -> vhost::vhost_user::Result<()> {
+        if index >= self.queues.into() {
+            error!(
+                "Frontend attempted to set vring number descriptor of queue {index}, but there are only {} queues",
+                self.queues
+            );
+            return Err(vhost::vhost_user::Error::InvalidParam);
+        }
         todo!("setting vring number")
     }
 
     fn set_vring_addr(
         &self,
-        _index: u32,
+        index: u32,
         _flags: vhost::vhost_user::message::VhostUserVringAddrFlags,
         _descriptor: u64,
         _used: u64,
         _available: u64,
         _log: u64,
     ) -> vhost::vhost_user::Result<()> {
+        if index >= self.queues.into() {
+            error!(
+                "Frontend attempted to set address of vring {index}, but there are only {} queues",
+                self.queues
+            );
+            return Err(vhost::vhost_user::Error::InvalidParam);
+        }
         todo!("setting vring address")
     }
 
-    fn set_vring_base(&self, _index: u32, _base: u32) -> vhost::vhost_user::Result<()> {
+    fn set_vring_base(&self, index: u32, _base: u32) -> vhost::vhost_user::Result<()> {
+        if index >= self.queues.into() {
+            error!(
+                "Frontend attempted to set base of vring {index}, but there are only {} queues",
+                self.queues
+            );
+            return Err(vhost::vhost_user::Error::InvalidParam);
+        }
         todo!("setting vring base")
     }
 
     fn get_vring_base(
         &self,
-        _index: u32,
+        index: u32,
     ) -> vhost::vhost_user::Result<vhost::vhost_user::message::VhostUserVringState> {
+        if index >= self.queues.into() {
+            error!(
+                "Frontend attempted to get base of vring {index}, but there are only {} queues",
+                self.queues
+            );
+            return Err(vhost::vhost_user::Error::InvalidParam);
+        }
         todo!("getting vring base")
     }
 
     fn set_vring_kick(
         &self,
-        _index: u8,
-        _fd: Option<std::fs::File>,
+        index: u8,
+        fd: Option<std::fs::File>,
     ) -> vhost::vhost_user::Result<()> {
-        todo!("Setting vring kick fd")
+        if index >= self.queues {
+            error!(
+                "Frontend attempted to set kick on vring {index}, but there are only {} queues",
+                self.queues
+            );
+            return Err(vhost::vhost_user::Error::InvalidParam);
+        }
+        let fd = self.convert_eventfd(fd)?;
+        self.interrupt_cb
+            .set_notifier(index.into(), fd, &*self.vm)
+            .map_err(|e| {
+                error!("Cannot set vring kick notifier: {e}");
+                vhost::vhost_user::Error::BackendInternalError
+            })
     }
 
     fn set_vring_call(
         &self,
-        _index: u8,
-        _fd: Option<std::fs::File>,
+        index: u8,
+        fd: Option<std::fs::File>,
     ) -> vhost::vhost_user::Result<()> {
+        if index >= self.queues {
+            error!(
+                "Frontend attempted to set call file descriptor of vring {index}, but there are only {} queues",
+                self.queues
+            );
+            return Err(vhost::vhost_user::Error::InvalidParam);
+        }
+        let _fd = self.convert_eventfd(fd)?;
         todo!("setting vring call fd")
     }
 
-    fn set_vring_err(
-        &self,
-        _index: u8,
-        _fd: Option<std::fs::File>,
-    ) -> vhost::vhost_user::Result<()> {
-        todo!("setting vring error fd")
+    fn set_vring_err(&self, index: u8, fd: Option<std::fs::File>) -> vhost::vhost_user::Result<()> {
+        if index >= self.queues {
+            error!(
+                "Frontend attempted to set error file descriptor of vring {index}, but there are only {} queues",
+                self.queues
+            );
+            return Err(vhost::vhost_user::Error::InvalidParam);
+        }
+        let _fd = self.convert_eventfd(fd)?;
+        todo!()
     }
 
     fn get_protocol_features(
@@ -375,10 +438,17 @@ impl vhost::vhost_user::VhostUserBackendReqHandler for Backend {
     }
 
     fn get_queue_num(&self) -> vhost::vhost_user::Result<u64> {
-        todo!("getting number of queues")
+        Ok(self.queues.into())
     }
 
-    fn set_vring_enable(&self, _index: u32, _enable: bool) -> vhost::vhost_user::Result<()> {
+    fn set_vring_enable(&self, index: u32, _enable: bool) -> vhost::vhost_user::Result<()> {
+        if index >= self.queues.into() {
+            error!(
+                "Frontend attempted to set enable vring {index}, but there are only {} queues",
+                self.queues
+            );
+            return Err(vhost::vhost_user::Error::InvalidParam);
+        }
         todo!("vring handling")
     }
 
@@ -497,7 +567,6 @@ struct VdbEpollHandler {
     mem: GuestMemoryAtomic<GuestMemoryMmap>,
     front2back_queue: Queue,
     back2front_queue: Queue,
-    interrupt_cb: Arc<dyn VirtioInterrupt>,
     front2back_queue_evt: EventFd,
     back2front_queue_evt: EventFd,
     kill_evt: EventFd,
@@ -509,7 +578,7 @@ struct VdbEpollHandler {
 
 impl VdbEpollHandler {
     fn signal(&self, int_type: VirtioInterruptType) -> result::Result<(), Error> {
-        self.interrupt_cb.trigger(int_type).map_err(|e| {
+        self.backend.interrupt_cb.trigger(int_type).map_err(|e| {
             error!("Failed to signal used queue: {e:?}");
             Error::FailedSignal(e)
         })
@@ -661,12 +730,12 @@ pub struct Vdb {
     config: VirtioDeviceBackendConfig,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
-    interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     max_queues: u8,
-    backend: Arc<Backend>,
-    listener: Option<BackendListener<Backend>>,
+    region: Region,
+    listener: Option<Listener>,
     msix_fds: [Option<OwnedFd>; MSIX_ARRAY_SIZE],
     statuses: [bool; MSIX_ARRAY_SIZE],
+    vm: Option<Arc<dyn hypervisor::Vm>>,
 }
 
 impl Vdb {
@@ -679,8 +748,9 @@ impl Vdb {
         state: Option<VdbState>,
         max_queues: u32,
         uuid: [u8; 16],
-        backend: Backend,
-        listener: BackendListener<Backend>,
+        listener: Listener,
+        vm: Arc<dyn hypervisor::Vm>,
+        region: Region,
     ) -> io::Result<Self> {
         if max_queues > 127 {
             warn!("Cannot support {max_queues} queues, limit is 127");
@@ -731,12 +801,12 @@ impl Vdb {
             config,
             seccomp_action,
             exit_evt,
-            interrupt_cb: None,
             max_queues: max_queues as _,
-            backend: Arc::new(backend),
             listener: Some(listener),
             statuses: [false; MSIX_ARRAY_SIZE],
             msix_fds: [const { None }; MSIX_ARRAY_SIZE],
+            region,
+            vm: Some(vm),
         })
     }
 
@@ -833,17 +903,29 @@ impl VirtioDevice for Vdb {
         let (_, front2back_queue, front2back_queue_evt) = queues.remove(0);
         let (_, back2front_queue, back2front_queue_evt) = queues.remove(0);
 
-        self.interrupt_cb = Some(interrupt_cb.clone());
+        // SAFETY: FFI call with valid parameters
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGE_SIZE) };
+        assert!(page_size > 0 && page_size.count_ones() == 1);
+        let backend = Arc::new(Backend {
+            avail_features: self.common.avail_features,
+            active_features: AtomicU64::new(0),
+            queues: self.max_queues,
+            page_size_mask: page_size as u64 - 1,
+            region: self.region.clone(),
+            current_offset: Mutex::new(0usize),
+            interrupt_cb,
+            checker: eventfd_checker::ProcRoot::new().expect("cannot open /proc"),
+            vm: self.vm.take().expect("double activate"),
+        });
         let mut handler = VdbEpollHandler {
             mem,
             back2front_queue,
             front2back_queue,
-            interrupt_cb,
             front2back_queue_evt,
             back2front_queue_evt,
             kill_evt,
             pause_evt,
-            backend: self.backend.clone(),
+            backend: backend.clone(),
             connection: None,
         };
 
@@ -858,7 +940,13 @@ impl VirtioDevice for Vdb {
             Thread::VirtioVdb,
             &mut epoll_threads,
             &self.exit_evt,
-            move || handler.run(&paused, paused_sync.as_ref().unwrap(), listener),
+            move || {
+                handler.run(
+                    &paused,
+                    paused_sync.as_ref().unwrap(),
+                    BackendListener::new(listener, backend).expect("never fails"),
+                )
+            },
         )?;
         self.common.epoll_threads = Some(epoll_threads);
 

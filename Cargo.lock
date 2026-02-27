@@ -2477,6 +2477,7 @@ dependencies = [
  "byteorder",
  "epoll",
  "event_monitor",
+ "eventfd-checker",
  "hypervisor",
  "libc",
  "log",
