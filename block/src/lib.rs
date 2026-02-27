@@ -1239,3 +1239,129 @@ impl DiskTopology {
         })
     }
 }
+
+#[cfg(test)]
+mod unit_tests {
+    use std::alloc::{Layout, alloc_zeroed, dealloc};
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::{ptr, slice};
+
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+
+    #[test]
+    fn test_probe_regular_file_returns_valid_alignment() {
+        let temp_file = TempFile::new().unwrap();
+        let mut f = temp_file.into_file();
+        f.write_all(&[0u8; 4096]).unwrap();
+        f.sync_all().unwrap();
+
+        let topo = DiskTopology::probe(&f).unwrap();
+
+        assert_eq!(
+            topo.logical_block_size, SECTOR_SIZE,
+            "probe() should return {SECTOR_SIZE} for regular files without O_DIRECT, got {}",
+            topo.logical_block_size
+        );
+    }
+
+    #[test]
+    fn test_probe_regular_file_with_direct_returns_dio_alignment() {
+        let temp_file = TempFile::new().unwrap();
+        let path = temp_file.as_path().to_owned();
+        {
+            let f = temp_file.as_file();
+            f.set_len(1 << 20).unwrap(); // 1 MiB
+            f.sync_all().unwrap();
+        }
+
+        let f = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_DIRECT)
+            .open(&path)
+            .unwrap();
+        let topo = DiskTopology::probe(&f).unwrap();
+
+        assert!(
+            topo.logical_block_size.is_power_of_two(),
+            "logical_block_size {} is not a power of two",
+            topo.logical_block_size
+        );
+        assert!(
+            topo.logical_block_size >= SECTOR_SIZE,
+            "logical_block_size {} is less than SECTOR_SIZE ({SECTOR_SIZE})",
+            topo.logical_block_size
+        );
+
+        let alignment = topo.logical_block_size as usize;
+        let layout = Layout::from_size_align(4096, alignment);
+        assert!(
+            layout.is_ok(),
+            "Layout::from_size_align(4096, {alignment}) failed: {:?}",
+            layout.err()
+        );
+    }
+
+    #[test]
+    fn test_dio_write_read_with_probed_alignment() {
+        let temp_file = TempFile::new().unwrap();
+        let path = temp_file.as_path().to_owned();
+        {
+            let f = temp_file.as_file();
+            f.set_len(1 << 20).unwrap(); // 1 MiB
+            f.sync_all().unwrap();
+        }
+
+        let f = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_DIRECT)
+            .open(&path)
+            .unwrap();
+        let topo = DiskTopology::probe(&f).unwrap();
+        let alignment = topo.logical_block_size as usize;
+
+        let layout = Layout::from_size_align(alignment, alignment).unwrap();
+        // SAFETY: layout is valid (non-zero, power-of-two alignment).
+        let buf = unsafe { alloc_zeroed(layout) };
+        assert!(!buf.is_null());
+
+        // SAFETY: buf is valid for `alignment` bytes.
+        unsafe { ptr::write_bytes(buf, 0xAB, alignment) };
+
+        // SAFETY: buf is aligned and sized for O_DIRECT; fd is valid.
+        let written =
+            unsafe { libc::pwrite(f.as_raw_fd(), buf as *const libc::c_void, alignment, 0) };
+        assert_eq!(
+            written as usize,
+            alignment,
+            "O_DIRECT pwrite failed: {}",
+            io::Error::last_os_error()
+        );
+
+        // SAFETY: buf is valid for `alignment` bytes.
+        unsafe { ptr::write_bytes(buf, 0x00, alignment) };
+        // SAFETY: buf is aligned and sized for O_DIRECT; fd is valid.
+        let read = unsafe { libc::pread(f.as_raw_fd(), buf as *mut libc::c_void, alignment, 0) };
+        assert_eq!(
+            read as usize,
+            alignment,
+            "O_DIRECT pread failed: {}",
+            io::Error::last_os_error()
+        );
+
+        // SAFETY: buf is valid for `alignment` bytes after successful pread.
+        let slice = unsafe { slice::from_raw_parts(buf, alignment) };
+        assert!(
+            slice.iter().all(|&b| b == 0xAB),
+            "Data mismatch after O_DIRECT roundtrip"
+        );
+
+        // SAFETY: buf was allocated with this layout via alloc_zeroed.
+        unsafe { dealloc(buf, layout) };
+    }
+}
