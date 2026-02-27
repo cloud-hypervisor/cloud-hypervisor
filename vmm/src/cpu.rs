@@ -679,8 +679,7 @@ pub struct CpuManager {
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     #[cfg(feature = "sev_snp")]
     sev_snp_enabled: bool,
-    // TID of the first vCPU thread that created a core scheduling cookie (VM mode).
-    // 0 = no leader yet, -1 = leader creating cookie, >0 = leader TID (cookie ready).
+    // State of the core scheduling group leader election (VM mode).
     core_scheduling_group_leader: Arc<AtomicI32>,
 }
 
@@ -691,6 +690,36 @@ const CPU_EJECT_FLAG: usize = 3;
 
 const CPU_STATUS_OFFSET: u64 = 4;
 const CPU_SELECTION_OFFSET: u64 = 0;
+
+/// State of the core scheduling group leader election for VM-wide cookie
+/// sharing.
+///
+/// The value will be in an `AtomicI32`. Positive values represent a leader
+/// TID (cookie ready).
+#[repr(i32)]
+enum CoreSchedulingLeader {
+    /// No leader elected yet.
+    Initial = 0,
+    /// A leader has been elected and is creating the cookie.
+    Elected = -1,
+    /// The leader failed to create the cookie.
+    Error = -2,
+}
+
+impl TryFrom<i32> for CoreSchedulingLeader {
+    type Error = ();
+    /// Convert from the raw `i32` (from the `AtomicI32`) value.
+    /// Quirky: Returns `Ok(state)` for known sentinel values, or `Err(())` for
+    /// a positive TID (cookie ready).
+    fn try_from(value: i32) -> result::Result<Self, ()> {
+        match value {
+            0 => Ok(Self::Initial),
+            -1 => Ok(Self::Elected),
+            -2 => Ok(Self::Error),
+            _ => Err(()),
+        }
+    }
+}
 
 impl BusDevice for CpuManager {
     fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
@@ -924,7 +953,9 @@ impl CpuManager {
             hypervisor,
             #[cfg(feature = "sev_snp")]
             sev_snp_enabled,
-            core_scheduling_group_leader: Arc::new(AtomicI32::new(0)),
+            core_scheduling_group_leader: Arc::new(AtomicI32::new(
+                CoreSchedulingLeader::Initial as i32,
+            )),
         })))
     }
 
@@ -1210,7 +1241,7 @@ impl CpuManager {
                             // SAFETY: gettid() is always safe to call.
                             let my_tid = unsafe { libc::gettid() };
                             if core_scheduling_group_leader
-                                .compare_exchange(0, -1, Ordering::AcqRel, Ordering::Acquire)
+                                .compare_exchange(CoreSchedulingLeader::Initial as i32, CoreSchedulingLeader::Elected as i32, Ordering::AcqRel, Ordering::Acquire)
                                 .is_ok()
                             {
                                 // We are the group leader — create the cookie
@@ -1218,6 +1249,8 @@ impl CpuManager {
                                     error!(
                                         "Failed to create core scheduling cookie: {e:?}"
                                     );
+                                    // This will force the loop in the other threads to break out
+                                    core_scheduling_group_leader.store(CoreSchedulingLeader::Error as i32, Ordering::Release);
                                     return;
                                 }
                                 // Signal that the cookie is ready by storing real TID
@@ -1225,14 +1258,15 @@ impl CpuManager {
                                     .store(my_tid, Ordering::Release);
                             } else {
                                 // Wait for the leader to finish creating the cookie
-                                let mut leader_tid =
-                                    core_scheduling_group_leader.load(Ordering::Acquire);
-                                while leader_tid <= 0 {
-                                    std::hint::spin_loop();
-                                    leader_tid =
-                                        core_scheduling_group_leader.load(Ordering::Acquire);
-                                }
-                                // Copy the leader's cookie to this thread
+                                let leader_tid = loop {
+                                    let v = core_scheduling_group_leader.load(Ordering::Acquire);
+                                    match CoreSchedulingLeader::try_from(v) {
+                                        Ok(CoreSchedulingLeader::Error) => return,
+                                        Ok(CoreSchedulingLeader::Initial |
+                                             CoreSchedulingLeader::Elected) => std::hint::spin_loop(),
+                                        Err(()) => break v,
+                                    }
+                                };
                                 if let Err(e) = core_scheduling_share_from(leader_tid) {
                                     error!(
                                         "Failed to share core scheduling cookie \
