@@ -1309,7 +1309,7 @@ impl DiskConfig {
         let lock_granularity = parser
             .convert::<LockGranularityChoice>("lock_granularity")
             .map_err(Error::ParseDisk)?
-            .unwrap_or_else(default_lock_granularity);
+            .unwrap_or_default();
         let bw_tb_config = if bw_size != 0 && bw_refill_time != 0 {
             Some(TokenBucketConfig {
                 size: bw_size,
@@ -3822,7 +3822,7 @@ mod unit_tests {
             backing_files: false,
             sparse: true,
             image_type: ImageType::Unknown,
-            lock_granularity: default_lock_granularity(),
+            lock_granularity: LockGranularityChoice::default(),
         }
     }
 
