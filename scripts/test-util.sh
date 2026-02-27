@@ -5,6 +5,7 @@ set -x
 
 hypervisor="kvm"
 test_filter=""
+skip_filter=""
 build_kernel=false
 
 # Download from a url with retries
@@ -121,6 +122,10 @@ process_common_args() {
         "--test-filter")
             shift
             test_filter="$1"
+            ;;
+        "--skip")
+            shift
+            skip_filter+=" --skip $1"
             ;;
         "--build-guest-kernel")
             build_kernel=true
