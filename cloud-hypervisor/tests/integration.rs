@@ -7261,6 +7261,126 @@ mod common_parallel {
             .expect("loop device not found");
     }
 
+    #[test]
+    fn test_virtio_block_direct_io_file_backed_alignment_4k() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let mut workloads_path = dirs::home_dir().unwrap();
+        workloads_path.push("workloads");
+        let img_dir = TempDir::new_in(workloads_path.as_path()).unwrap();
+        let fs_img_path = img_dir.as_path().join("fs_4ksec.img");
+
+        assert!(
+            exec_host_command_output(&format!(
+                "truncate -s 512M {}",
+                fs_img_path.to_str().unwrap()
+            ))
+            .status
+            .success(),
+            "truncate failed"
+        );
+
+        let loop_dev = exec_host_command_output(&format!(
+            "losetup --find --show --sector-size 4096 {}",
+            fs_img_path.to_str().unwrap()
+        ));
+        assert!(loop_dev.status.success(), "losetup failed");
+        let loop_dev_path = String::from_utf8_lossy(&loop_dev.stdout).trim().to_string();
+
+        assert!(
+            exec_host_command_output(&format!("mkfs.ext4 -q {loop_dev_path}"))
+                .status
+                .success(),
+            "mkfs.ext4 failed"
+        );
+
+        let mnt_dir = img_dir.as_path().join("mnt");
+        fs::create_dir_all(&mnt_dir).unwrap();
+        assert!(
+            exec_host_command_output(&format!(
+                "mount {} {}",
+                &loop_dev_path,
+                mnt_dir.to_str().unwrap()
+            ))
+            .status
+            .success(),
+            "mount failed"
+        );
+
+        let test_disk_path = mnt_dir.join("dio_file_test.raw");
+        assert!(
+            exec_host_command_output(&format!(
+                "truncate -s 64M {}",
+                test_disk_path.to_str().unwrap()
+            ))
+            .status
+            .success(),
+            "truncate test disk failed"
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={},direct=on,image_type=raw",
+                    test_disk_path.to_str().unwrap()
+                )
+                .as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            let log_sec: u32 = guest
+                .ssh_command("lsblk -t | grep vdc | awk '{print $6}'")
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap_or_default();
+            assert_eq!(
+                log_sec, 4096,
+                "expected 4096-byte logical sector for file on 4k-sector fs, got {log_sec}"
+            );
+
+            guest
+                .ssh_command(
+                    "sudo dd if=/dev/urandom of=/tmp/pattern bs=4096 count=8 && \
+                     sudo dd if=/tmp/pattern of=/dev/vdc bs=4096 count=8 seek=1 oflag=direct && \
+                     sudo dd if=/dev/vdc of=/tmp/readback bs=4096 count=8 skip=1 iflag=direct && \
+                     cmp /tmp/pattern /tmp/readback",
+                )
+                .unwrap();
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+
+        let _ = exec_host_command_output(&format!("umount {}", mnt_dir.to_str().unwrap()));
+        let _ = exec_host_command_output(&format!("losetup -d {loop_dev_path}"));
+    }
+
     // Helper function to verify sparse file
     fn verify_sparse_file(test_disk_path: &str, expected_ratio: f64) {
         let res = exec_host_command_output(&format!("ls -s --block-size=1 {}", test_disk_path));
