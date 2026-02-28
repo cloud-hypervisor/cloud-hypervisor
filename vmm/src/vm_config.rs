@@ -302,6 +302,8 @@ pub struct DiskConfig {
     pub sparse: bool,
     #[serde(default)]
     pub image_type: ImageType,
+    #[serde(default)]
+    pub lock_granularity: LockGranularityChoice,
 }
 
 impl ApplyLandlock for DiskConfig {
@@ -327,6 +329,21 @@ pub fn default_diskconfig_queue_size() -> u16 {
 
 pub fn default_diskconfig_sparse() -> bool {
     true
+}
+
+/// Lock granularity choice for disk advisory locks.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LockGranularityChoice {
+    /// Byte-range lock covering [0, size).
+    ///
+    /// This allows external management software to create snapshots of the disk
+    /// image. Without a byte-range lock, some NFS implementations may treat the
+    /// entire file as exclusively locked and prevent such operations (e.g. NetApp).
+    #[default]
+    ByteRange,
+    /// Whole-file lock (l_start=0, l_len=0) - original OFD whole-file lock behavior.
+    Full,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
