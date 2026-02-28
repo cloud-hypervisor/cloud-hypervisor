@@ -1068,11 +1068,11 @@ impl Guest {
         )
     }
 
-    pub fn api_create_body(&self, cpu_count: u8, kernel_path: &str, kernel_cmd: &str) -> String {
+    pub fn api_create_body(&self) -> String {
         let mut body = format!(
             r#"{{"cpus":{{"boot_vcpus":{},"max_vcpus":{}{}}},"net":[{{"ip":"{}","mask":"255.255.255.0","mac":"{}"}}],"disks":[{{"path":"{}"}},{{"path":"{}"}}]"#,
-            cpu_count,
-            cpu_count,
+            self.num_cpu,
+            self.num_cpu,
             if self.nested {
                 ""
             } else {
@@ -1093,12 +1093,14 @@ impl Guest {
                     .unwrap()
                     .to_str()
                     .unwrap(),
-                kernel_cmd,
+                self.kernel_cmdline.as_deref().unwrap(),
                 generate_host_data(),
             ));
         } else {
             body.push_str(&format!(
-                r#","payload":{{"kernel":"{kernel_path}","cmdline": "{kernel_cmd}"}}"#,
+                r#","payload":{{"kernel":"{}","cmdline": "{}"}}"#,
+                self.kernel_path.as_deref().unwrap(),
+                self.kernel_cmdline.as_deref().unwrap(),
             ));
         }
 
