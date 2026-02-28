@@ -1001,6 +1001,7 @@ mod unit_tests {
             rng: RngConfig {
                 src: PathBuf::from("/dev/urandom"),
                 iommu: false,
+                bdf_device: None,
             },
             balloon: None,
             fs: None,
@@ -1011,12 +1012,14 @@ mod unit_tests {
                 mode: ConsoleOutputMode::Null,
                 iommu: false,
                 socket: None,
+                bdf_device: None,
             },
             console: ConsoleConfig {
                 file: None,
                 mode: ConsoleOutputMode::Tty,
                 iommu: false,
                 socket: None,
+                bdf_device: None,
             },
             #[cfg(target_arch = "x86_64")]
             debug_console: DebugConsoleConfig::default(),
@@ -1224,6 +1227,42 @@ mod unit_tests {
                     "--kernel",
                     "/path/to/kernel",
                     "--disk",
+                    "path=/path/to/disk/1,addr=15.0",
+                    "path=/path/to/disk/2",
+                ],
+                r#"{
+                    "payload": {"kernel": "/path/to/kernel"},
+                    "disks": [
+                        {"path": "/path/to/disk/1", "bdf_device": 21},
+                        {"path": "/path/to/disk/2"}
+                    ]
+                }"#,
+                true,
+            ),
+            (
+                vec![
+                    "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
+                    "--disk",
+                    "path=/path/to/disk/1,addr=15.0",
+                    "path=/path/to/disk/2",
+                ],
+                r#"{
+                    "payload": {"kernel": "/path/to/kernel"},
+                    "disks": [
+                        {"path": "/path/to/disk/1", "bdf_device": 21},
+                        {"path": "/path/to/disk/2"}
+                    ]
+                }"#,
+                true,
+            ),
+            (
+                vec![
+                    "cloud-hypervisor",
+                    "--kernel",
+                    "/path/to/kernel",
+                    "--disk",
                     "path=/path/to/disk/1,image_type=raw",
                     "path=/path/to/disk/2,image_type=qcow2",
                 ],
@@ -1415,6 +1454,20 @@ mod unit_tests {
                 }"#,
                 true,
             ),
+            (
+                vec![
+                    "cloud-hypervisor", "--kernel", "/path/to/kernel",
+                    "--net",
+                    "mac=12:34:56:78:90:ab,host_mac=34:56:78:90:ab:cd,tap=tap0,ip=1.2.3.4,mask=5.6.7.8,addr=08.0",
+                ],
+                r#"{
+                    "payload": {"kernel": "/path/to/kernel"},
+                    "net": [
+                        {"mac": "12:34:56:78:90:ab", "host_mac": "34:56:78:90:ab:cd", "tap": "tap0", "ip": "1.2.3.4", "mask": "5.6.7.8", "num_queues": 2, "queue_size": 256, "bdf_device": 8}
+                    ]
+                }"#,
+                true,
+            ),
             #[cfg(target_arch = "x86_64")]
             (
                 vec![
@@ -1486,11 +1539,11 @@ mod unit_tests {
                 "--kernel",
                 "/path/to/kernel",
                 "--rng",
-                "src=/path/to/entropy/source",
+                "src=/path/to/entropy/source,addr=11.0",
             ],
             r#"{
                 "payload": {"kernel": "/path/to/kernel"},
-                "rng": {"src": "/path/to/entropy/source"}
+                "rng": {"src": "/path/to/entropy/source", "bdf_device": 17}
             }"#,
             true,
         )]
@@ -1507,14 +1560,14 @@ mod unit_tests {
                     "cloud-hypervisor", "--kernel", "/path/to/kernel",
                     "--memory", "shared=true",
                     "--fs",
-                    "tag=virtiofs1,socket=/path/to/sock1",
+                    "tag=virtiofs1,socket=/path/to/sock1,addr=10.0",
                     "tag=virtiofs2,socket=/path/to/sock2",
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
                     "memory" : { "shared": true, "size": 536870912 },
                     "fs": [
-                        {"tag": "virtiofs1", "socket": "/path/to/sock1"},
+                        {"tag": "virtiofs1", "socket": "/path/to/sock1", "bdf_device": 16},
                         {"tag": "virtiofs2", "socket": "/path/to/sock2"}
                     ]
                 }"#,
@@ -1586,13 +1639,13 @@ mod unit_tests {
                     "--kernel",
                     "/path/to/kernel",
                     "--pmem",
-                    "file=/path/to/img/1,size=1G",
+                    "file=/path/to/img/1,size=1G,addr=1F.0",
                     "file=/path/to/img/2,size=2G",
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
                     "pmem": [
-                        {"file": "/path/to/img/1", "size": 1073741824},
+                        {"file": "/path/to/img/1", "size": 1073741824,"bdf_device": 31},
                         {"file": "/path/to/img/2", "size": 2147483648}
                     ]
                 }"#,
@@ -1870,13 +1923,13 @@ mod unit_tests {
                     "--kernel",
                     "/path/to/kernel",
                     "--vdpa",
-                    "path=/path/to/device/1",
+                    "path=/path/to/device/1,addr=18.0",
                     "path=/path/to/device/2,num_queues=2",
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
                     "vdpa": [
-                        {"path": "/path/to/device/1", "num_queues": 1},
+                        {"path": "/path/to/device/1", "num_queues": 1, "bdf_device": 24},
                         {"path": "/path/to/device/2", "num_queues": 2}
                     ]
                 }"#,
@@ -1915,11 +1968,11 @@ mod unit_tests {
                     "--kernel",
                     "/path/to/kernel",
                     "--vsock",
-                    "cid=123,socket=/path/to/sock/1",
+                    "cid=123,socket=/path/to/sock/1,addr=0F.0",
                 ],
                 r#"{
                     "payload": {"kernel": "/path/to/kernel"},
-                    "vsock": {"cid": 123, "socket": "/path/to/sock/1"}
+                    "vsock": {"cid": 123, "socket": "/path/to/sock/1", "bdf_device": 15}
                 }"#,
                 true,
             ),
