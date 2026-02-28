@@ -1084,16 +1084,50 @@ impl Guest {
     }
 
     pub fn api_create_body(&self, cpu_count: u8, kernel_path: &str, kernel_cmd: &str) -> String {
-        format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"payload\":{{\"kernel\":\"{}\",\"cmdline\": \"{}\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
-                 cpu_count,
-                 cpu_count,
-                 kernel_path,
-                 kernel_cmd,
-                 self.network.host_ip0,
-                 self.network.guest_mac0,
-                 self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
-                 self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
+        let mut body = serde_json::json!({
+            "cpus": {
+            "boot_vcpus": cpu_count,
+            "max_vcpus": cpu_count,
+            },
+            "net": [
+            {
+                "ip": self.network.host_ip0,
+                "mask": "255.255.255.0",
+                "mac": self.network.guest_mac0,
+            }
+            ],
+            "disks": [
+            {
+                "path": self.disk_config.disk(DiskType::OperatingSystem).unwrap(),
+            },
+            {
+                "path": self.disk_config.disk(DiskType::CloudInit).unwrap(),
+            }
+            ]
+        });
+
+        if !self.nested {
+            body["cpus"]["nested"] = serde_json::json!(false);
         }
+
+        if self.vm_type == GuestVmType::Confidential {
+            body["platform"] = serde_json::json!({"sev_snp": true});
+            body["payload"] = serde_json::json!({
+            "igvm": direct_igvm_boot_path(Some("hvc0"))
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "cmdline": kernel_cmd,
+            "host_data": generate_host_data(),
+            });
+        } else {
+            body["payload"] = serde_json::json!({
+            "kernel": kernel_path,
+            "cmdline": kernel_cmd,
+            });
+        }
+
+        body.to_string()
     }
 
     pub fn get_cpu_count(&self) -> Result<u32, Error> {
@@ -1656,7 +1690,10 @@ impl<'a> GuestCommand<'a> {
             };
             let igvm = direct_igvm_boot_path(Some(console_str))
                 .expect("IGVM boot file not found for console type: {console_str}");
-            self.command.args(["--igvm", igvm.to_str().unwrap()]);
+            self.command.args([
+                "--igvm",
+                igvm.to_str().expect("IGVM path is not valid UTF-8"),
+            ]);
             self.command
                 .args(["--host-data", generate_host_data().as_str()]);
             self.command.args(["--platform", "sev_snp=on"]);
