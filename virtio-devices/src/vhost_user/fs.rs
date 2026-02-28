@@ -13,7 +13,6 @@ use serde_with::{Bytes, serde_as};
 use vhost::vhost_user::message::{VhostUserProtocolFeatures, VhostUserVirtioFeatures};
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
 use virtio_queue::Queue;
-use vm_device::UserspaceMapping;
 use vm_memory::{ByteValued, GuestMemoryAtomic};
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
@@ -25,8 +24,8 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::VhostUserCommon;
 use crate::{
-    ActivateResult, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_IOMMU_PLATFORM,
-    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList,
+    ActivateResult, GuestMemoryMmap, GuestRegionMmap, VIRTIO_F_IOMMU_PLATFORM, VirtioCommon,
+    VirtioDevice, VirtioDeviceType, VirtioInterrupt,
 };
 
 const NUM_QUEUE_OFFSET: usize = 1;
@@ -72,9 +71,6 @@ pub struct Fs {
     vu_common: VhostUserCommon,
     id: String,
     config: VirtioFsConfig,
-    // Hold ownership of the memory that is allocated for the device
-    // which will be automatically dropped when the device is dropped
-    cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
     seccomp_action: SeccompAction,
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     epoll_thread: Option<thread::JoinHandle<()>>,
@@ -91,7 +87,6 @@ impl Fs {
         tag: &str,
         req_num_queues: usize,
         queue_size: u16,
-        cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         iommu: bool,
@@ -200,7 +195,6 @@ impl Fs {
             },
             id,
             config,
-            cache,
             seccomp_action,
             guest_memory: None,
             epoll_thread: None,
@@ -331,41 +325,11 @@ impl VirtioDevice for Fs {
         self.vu_common.shutdown();
     }
 
-    fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
-        self.cache.as_ref().map(|cache| cache.0.clone())
-    }
-
-    fn set_shm_regions(
-        &mut self,
-        shm_regions: VirtioSharedMemoryList,
-    ) -> std::result::Result<(), crate::Error> {
-        if let Some(cache) = self.cache.as_mut() {
-            cache.0 = shm_regions;
-            Ok(())
-        } else {
-            Err(crate::Error::SetShmRegionsNotSupported)
-        }
-    }
-
     fn add_memory_region(
         &mut self,
         region: &Arc<GuestRegionMmap>,
     ) -> std::result::Result<(), crate::Error> {
         self.vu_common.add_memory_region(&self.guest_memory, region)
-    }
-
-    fn userspace_mappings(&self) -> Vec<UserspaceMapping> {
-        let mut mappings = Vec::new();
-        if let Some(cache) = self.cache.as_ref() {
-            mappings.push(UserspaceMapping {
-                mem_slot: cache.0.mem_slot,
-                addr: cache.0.addr,
-                mapping: cache.0.mapping.clone(),
-                mergeable: false,
-            });
-        }
-
-        mappings
     }
 }
 
