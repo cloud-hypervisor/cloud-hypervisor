@@ -90,11 +90,11 @@ pub use kvm_bindings::kvm_vcpu_events as VcpuEvents;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::nested::KvmNestedStateBuffer;
 pub use kvm_bindings::{
-    KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_IRQ_ROUTING_IRQCHIP, KVM_IRQ_ROUTING_MSI,
-    KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID, kvm_clock_data,
-    kvm_create_device, kvm_create_device as CreateDevice, kvm_device_attr as DeviceAttr,
-    kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug, kvm_irq_routing, kvm_irq_routing_entry,
-    kvm_mp_state, kvm_run, kvm_userspace_memory_region,
+    self, KVM_GUESTDBG_ENABLE, KVM_GUESTDBG_SINGLESTEP, KVM_IRQ_ROUTING_IRQCHIP,
+    KVM_IRQ_ROUTING_MSI, KVM_MEM_LOG_DIRTY_PAGES, KVM_MEM_READONLY, KVM_MSI_VALID_DEVID,
+    kvm_clock_data, kvm_create_device, kvm_create_device as CreateDevice,
+    kvm_device_attr as DeviceAttr, kvm_device_type_KVM_DEV_TYPE_VFIO, kvm_guest_debug,
+    kvm_irq_routing, kvm_irq_routing_entry, kvm_mp_state, kvm_run, kvm_userspace_memory_region,
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
@@ -109,14 +109,13 @@ use kvm_bindings::{KVM_REG_RISCV_CORE, kvm_riscv_core};
 use kvm_bindings::{KVM_X86_DEFAULT_VM, KVM_X86_SW_PROTECTED_VM, KVMIO, kvm_run__bindgen_ty_1};
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{Xsave as xsave2, kvm_xsave2};
-pub use kvm_ioctls::{Cap, Kvm, VcpuExit};
+pub use kvm_ioctls::{self, Cap, Kvm, VcpuExit};
 use thiserror::Error;
 use vfio_ioctls::VfioDeviceFd;
 #[cfg(target_arch = "x86_64")]
 use vmm_sys_util::{fam::FamStruct, ioctl_io_nr};
 #[cfg(feature = "tdx")]
 use vmm_sys_util::{ioctl::ioctl_with_val, ioctl_iowr_nr};
-pub use {kvm_bindings, kvm_ioctls};
 
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use crate::RegList;
