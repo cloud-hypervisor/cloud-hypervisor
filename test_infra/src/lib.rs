@@ -1435,6 +1435,88 @@ impl Guest {
     }
 }
 
+// A factory for creating guests with different configurations. The factory is initialized
+// with a GuestVmType, and created guests will have the same GuestVmType as the factory.
+// This allows creation of guests with different configurations (e.g. regular vs confidential)
+// without specifying the GuestVmType each time.
+// Based on the VmType, the default timeout for waiting for the VM to boot is also set,
+// which is used in the wait_vm_boot() method of the Guest struct. Additionally, nested
+// virtualization is disabled by default for confidential VMs, as it is not supported.
+pub struct GuestFactory(GuestVmType, u32, bool);
+
+impl GuestFactory {
+    pub fn new_regular_guest_factory() -> Self {
+        Self(GuestVmType::Regular, DEFAULT_TCP_LISTENER_TIMEOUT, true)
+    }
+
+    pub fn new_confidential_guest_factory() -> Self {
+        Self(
+            GuestVmType::Confidential,
+            DEFAULT_CVM_TCP_LISTENER_TIMEOUT,
+            false,
+        )
+    }
+
+    pub fn create_guest(&self, disk_config: Box<dyn DiskConfig>) -> Guest {
+        let mut guest = Guest::new(disk_config);
+        guest.vm_type = self.0;
+        guest.boot_timeout = self.1;
+        guest.nested = self.2;
+        guest
+    }
+
+    pub fn create_guest_with_cpu(&self, disk_config: Box<dyn DiskConfig>, cpu_count: u32) -> Guest {
+        let mut guest = Guest::new(disk_config);
+        guest.vm_type = self.0;
+        guest.num_cpu = cpu_count;
+        guest.boot_timeout = self.1;
+        guest.nested = self.2;
+        guest
+    }
+
+    pub fn create_guest_with_cpu_and_nested(
+        &self,
+        disk_config: Box<dyn DiskConfig>,
+        cpu_count: u32,
+        nested: bool,
+    ) -> Guest {
+        let mut guest = Guest::new(disk_config);
+        guest.vm_type = self.0;
+        guest.num_cpu = cpu_count;
+        guest.nested = nested;
+        guest.boot_timeout = self.1;
+        guest
+    }
+
+    pub fn create_guest_with_memory(
+        &self,
+        disk_config: Box<dyn DiskConfig>,
+        memory_size: String,
+    ) -> Guest {
+        let mut guest = Guest::new(disk_config);
+        guest.vm_type = self.0;
+        guest.boot_timeout = self.1;
+        guest.nested = self.2;
+        guest.mem_size_str = memory_size;
+        guest
+    }
+
+    pub fn create_guest_custom(
+        &self,
+        disk_config: Box<dyn DiskConfig>,
+        cpu_count: u32,
+        memory_size: String,
+        nested: bool,
+    ) -> Guest {
+        let mut guest = Guest::new(disk_config);
+        guest.vm_type = self.0;
+        guest.num_cpu = cpu_count;
+        guest.mem_size_str = memory_size;
+        guest.nested = nested;
+        guest
+    }
+}
+
 #[derive(Default)]
 pub enum VerbosityLevel {
     #[default]
