@@ -14340,4 +14340,13 @@ mod common_cvm {
         guest.nested = false;
         _test_simple_launch(&guest)
     }
+
+    #[test]
+    fn test_api_http_create_boot() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest_with_cpu(Box::new(disk_config), 4);
+        let target_api = TargetApi::new_http_api(&guest.tmp_dir);
+        _test_api_create_boot(&target_api, &guest);
+    }
 }
