@@ -1083,11 +1083,11 @@ impl Guest {
         )
     }
 
-    pub fn api_create_body(&self, cpu_count: u8, kernel_path: &str, kernel_cmd: &str) -> String {
+    pub fn api_create_body(&self) -> String {
         let mut body = serde_json::json!({
             "cpus": {
-            "boot_vcpus": cpu_count,
-            "max_vcpus": cpu_count,
+            "boot_vcpus": self.num_cpu,
+            "max_vcpus": self.num_cpu,
             },
             "net": [
             {
@@ -1117,13 +1117,13 @@ impl Guest {
                 .unwrap()
                 .to_str()
                 .unwrap(),
-            "cmdline": kernel_cmd,
+            "cmdline": self.kernel_cmdline.as_deref().unwrap(),
             "host_data": generate_host_data(),
             });
         } else {
             body["payload"] = serde_json::json!({
-            "kernel": kernel_path,
-            "cmdline": kernel_cmd,
+            "kernel": self.kernel_path.as_deref().unwrap(),
+            "cmdline": self.kernel_cmdline.as_deref().unwrap(),
             });
         }
 
