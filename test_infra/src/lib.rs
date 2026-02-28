@@ -998,6 +998,21 @@ impl Guest {
         Self::new_from_ip_range(disk_config, "192.168", next_guest_id())
     }
 
+    pub fn with_cpu(mut self, count: u32) -> Self {
+        self.num_cpu = count;
+        self
+    }
+
+    pub fn with_memory(mut self, mem_size: &str) -> Self {
+        self.mem_size_str = mem_size.to_string();
+        self
+    }
+
+    pub fn with_nested(mut self, nested: bool) -> Self {
+        self.nested = nested;
+        self
+    }
+
     pub fn default_net_string(&self) -> String {
         format!(
             "tap=,mac={},ip={},mask=255.255.255.128",
@@ -1432,6 +1447,45 @@ impl Guest {
             .unwrap_or_default();
 
         assert!(self.get_total_memory().unwrap_or_default() > memory);
+    }
+}
+
+// A factory for creating guests with different configurations. The factory is initialized
+// with a GuestVmType, and created guests will have the same GuestVmType as the factory.
+// This allows creation of guests with different configurations (e.g. regular vs confidential)
+// without specifying the GuestVmType each time.
+// Based on the VmType, the default timeout for waiting for the VM to boot is also set,
+// which is used in the wait_vm_boot() method of the Guest struct. Additionally, nested
+// virtualization is disabled by default for confidential VMs, as it is not supported.
+pub struct GuestFactory {
+    vm_type: GuestVmType,
+    boot_timeout: u32,
+    nested: bool,
+}
+
+impl GuestFactory {
+    pub fn new_regular_guest_factory() -> Self {
+        Self {
+            vm_type: GuestVmType::Regular,
+            boot_timeout: DEFAULT_TCP_LISTENER_TIMEOUT,
+            nested: true,
+        }
+    }
+
+    pub fn new_confidential_guest_factory() -> Self {
+        Self {
+            vm_type: GuestVmType::Confidential,
+            boot_timeout: DEFAULT_CVM_TCP_LISTENER_TIMEOUT,
+            nested: false,
+        }
+    }
+
+    pub fn create_guest(&self, disk_config: Box<dyn DiskConfig>) -> Guest {
+        let mut guest = Guest::new(disk_config);
+        guest.vm_type = self.vm_type;
+        guest.boot_timeout = self.boot_timeout;
+        guest.nested = self.nested;
+        guest
     }
 }
 
