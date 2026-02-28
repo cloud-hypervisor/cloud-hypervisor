@@ -14342,10 +14342,20 @@ mod common_cvm {
     #[test]
     fn test_focal_simple_launch() {
         let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let mut guest = Guest::new(Box::new(disk_config));
+        let guest = Guest::new(Box::new(disk_config));
         guest.vm_type = GuestVmType::Confidential;
         guest.boot_timeout = DEFAULT_CVM_TCP_LISTENER_TIMEOUT;
         guest.nested = false;
         _test_simple_launch(&guest)
+    }
+
+    #[test]
+    fn test_api_http_create_boot() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
+        let target_api = TargetApi::new_http_api(&guest.tmp_dir);
+        _test_api_create_boot(&target_api, &guest);
     }
 }
