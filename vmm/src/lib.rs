@@ -5,14 +5,21 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Read, Write, stdout};
+use std::io::{ErrorKind, Read, Write, stdout};
 use std::net::{TcpListener, TcpStream};
+use std::num::NonZeroU32;
+use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{
+    Receiver, RecvError, SendError, Sender, SyncSender, TrySendError, channel, sync_channel,
+};
 use std::sync::{Arc, Mutex};
+use std::thread::sleep;
+use std::time::Duration;
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
 use std::{io, result, thread};
@@ -27,7 +34,7 @@ use console_devices::{ConsoleInfo, pre_create_console_devices};
 use event_monitor::event;
 use landlock::LandlockError;
 use libc::{EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW, tcsetattr, termios};
-use log::{error, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
 use seccompiler::{SeccompAction, apply_filter};
@@ -37,7 +44,10 @@ use signal_hook::iterator::{Handle, Signals};
 use thiserror::Error;
 use tracer::trace_scoped;
 use vm_memory::bitmap::{AtomicBitmap, BitmapSlice};
-use vm_memory::{ReadVolatile, VolatileMemoryError, VolatileSlice, WriteVolatile};
+use vm_memory::{
+    GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, ReadVolatile,
+    VolatileMemoryError, VolatileSlice, WriteVolatile,
+};
 use vm_migration::protocol::*;
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
 use vmm_sys_util::eventfd::EventFd;
@@ -57,6 +67,7 @@ use crate::memory_manager::MemoryManager;
 use crate::migration::get_vm_snapshot;
 use crate::migration::{recv_vm_config, recv_vm_state};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
+use crate::sync_utils::Gate;
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
@@ -85,6 +96,7 @@ mod pci_segment;
 pub mod seccomp_filters;
 mod serial_manager;
 mod sigwinch_listener;
+mod sync_utils;
 pub mod vm;
 pub mod vm_config;
 
@@ -283,6 +295,15 @@ impl Write for SocketStream {
         match self {
             SocketStream::Unix(stream) => stream.flush(),
             SocketStream::Tcp(stream) => stream.flush(),
+        }
+    }
+}
+
+impl AsFd for SocketStream {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        match self {
+            SocketStream::Unix(s) => s.as_fd(),
+            SocketStream::Tcp(s) => s.as_fd(),
         }
     }
 }
@@ -688,6 +709,284 @@ pub struct Vmm {
     console_info: Option<ConsoleInfo>,
 }
 
+/// Wait for a file descriptor to become readable. In this case, we return
+/// true. In case, the eventfd was signaled, return false.
+fn wait_for_readable(
+    fd: &impl AsFd,
+    eventfd: &EventFd,
+) -> std::result::Result<bool, std::io::Error> {
+    let fd_event = eventfd.as_raw_fd().as_raw_fd();
+    let fd_io = fd.as_fd().as_raw_fd();
+    let mut poll_fds = [
+        libc::pollfd {
+            fd: fd_event,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd: fd_io,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+    ];
+
+    // SAFETY: This is safe, because the file descriptors are valid and the
+    // poll_fds array is properly initialized.
+    let ret = unsafe { libc::poll(poll_fds.as_mut_ptr(), poll_fds.len() as libc::nfds_t, -1) };
+
+    if ret < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    if poll_fds[0].revents & libc::POLLIN != 0 {
+        return Ok(false);
+    }
+    if poll_fds[1].revents & libc::POLLIN != 0 {
+        return Ok(true);
+    }
+
+    panic!("Poll returned, but neither file descriptor is readable?");
+}
+
+/// Abstract over the different types of listeners that can be used to receive connections.
+#[derive(Debug)]
+enum ReceiveListener {
+    Tcp(TcpListener),
+    Unix(UnixListener, Option<PathBuf>),
+}
+
+impl AsFd for ReceiveListener {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        match self {
+            ReceiveListener::Tcp(listener) => listener.as_fd(),
+            ReceiveListener::Unix(listener, _) => listener.as_fd(),
+        }
+    }
+}
+
+impl ReceiveListener {
+    /// Block until a connection is accepted.
+    fn accept(&mut self) -> std::result::Result<SocketStream, std::io::Error> {
+        match self {
+            ReceiveListener::Tcp(listener) => listener
+                .accept()
+                .map(|(socket, _)| SocketStream::Tcp(socket)),
+            ReceiveListener::Unix(listener, opt_path) => {
+                let socket = listener
+                    .accept()
+                    .map(|(socket, _)| SocketStream::Unix(socket))?;
+
+                // Remove the UNIX socket file after accepting the connection. Is this actually safe? If a user
+                // moves the file and creates a new one with the same name, we will delete the wrong file.
+                // Sounds like a confused deputy to me.
+                //
+                // TODO Don't do this?
+                if let Some(path) = opt_path.take() {
+                    std::fs::remove_file(&path)?;
+                }
+
+                Ok(socket)
+            }
+        }
+    }
+
+    /// Same as accept(), but returns None if the eventfd is signaled.
+    fn abortable_accept(
+        &mut self,
+        eventfd: &EventFd,
+    ) -> std::result::Result<Option<SocketStream>, std::io::Error> {
+        wait_for_readable(&self, eventfd)?
+            .then(|| self.accept())
+            .transpose()
+    }
+
+    fn try_clone(&self) -> std::result::Result<Self, std::io::Error> {
+        match self {
+            ReceiveListener::Tcp(listener) => listener.try_clone().map(ReceiveListener::Tcp),
+            ReceiveListener::Unix(listener, opt_path) => listener
+                .try_clone()
+                .map(|listener| ReceiveListener::Unix(listener, opt_path.clone())),
+        }
+    }
+}
+
+/// Handles a `Memory` request by writing its payload to the VM memory.
+fn vm_receive_memory<T>(
+    req: &Request,
+    socket: &mut T,
+    guest_mem: &GuestMemoryAtomic<GuestMemoryMmap>,
+) -> std::result::Result<(), MigratableError>
+where
+    T: Read + ReadVolatile,
+{
+    assert_eq!(req.command(), Command::Memory);
+
+    // Read table
+    let ranges = MemoryRangeTable::read_from(socket, req.length())?;
+    let mem = guest_mem.memory();
+
+    for range in ranges.regions() {
+        let mut offset: u64 = 0;
+        // Here we are manually handling the retry in case we can't the
+        // whole region at once because we can't use the implementation
+        // from vm-memory::GuestMemory of read_exact_from() as it is not
+        // following the correct behavior. For more info about this issue
+        // see: https://github.com/rust-vmm/vm-memory/issues/174
+        loop {
+            let bytes_read = mem
+                .read_volatile_from(
+                    GuestAddress(range.gpa + offset),
+                    socket,
+                    (range.length - offset) as usize,
+                )
+                .map_err(|e| {
+                    MigratableError::MigrateReceive(anyhow!(
+                        "Error receiving memory from socket: {e}",
+                    ))
+                })?;
+            offset += bytes_read as u64;
+
+            if offset == range.length {
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// We keep track of additional connections for receiving VM migration data
+/// here.
+struct ReceiveAdditionalConnections {
+    terminate_fd: EventFd,
+
+    // This is only an option to be able to join it in the destructor.
+    accept_thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl ReceiveAdditionalConnections {
+    /// Create a pair of file descriptors that map to the same underlying event_fd.
+    fn event_fd_pair() -> std::result::Result<(EventFd, EventFd), std::io::Error> {
+        let event_fd = EventFd::new(0)?;
+        Ok((event_fd.try_clone()?, event_fd))
+    }
+
+    /// Handle incoming requests.
+    ///
+    /// For now we only handle `Command::Memory` requests here. Everything else
+    /// needs to come via the main connection. This function returns when the
+    /// abort_event_fd is triggered or the connection is closed or encountered
+    /// an error.
+    fn handle_requests(
+        socket: &mut SocketStream,
+        abort_event_fd: &EventFd,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    ) -> std::result::Result<(), MigratableError> {
+        loop {
+            if !wait_for_readable(socket, abort_event_fd).map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Failed to poll descriptors: {e}"))
+            })? {
+                info!("Got signal to tear down connection.");
+                return Ok(());
+            }
+
+            // TODO We only check whether we should abort when waiting for a new
+            // request. If the sender just stops sending data mid-request, we
+            // should still be abortable, but we are not... In this case, we
+            // will hang forever. But given that the sender is also in charge of
+            // driving the migration to completion, this is not a major concern.
+            // In the long run, it would be preferable to move I/O to
+            // asynchronous tasks to be able to handle aborts more gracefully.
+
+            let req = match Request::read_from(socket) {
+                Ok(req) => req,
+                Err(MigratableError::MigrateSocket(io_error))
+                    if io_error.kind() == ErrorKind::UnexpectedEof =>
+                {
+                    debug!("Connection closed by peer");
+                    return Ok(());
+                }
+                Err(e) => return Err(e),
+            };
+
+            if req.command() != Command::Memory {
+                return Err(MigratableError::MigrateReceive(anyhow!(
+                    "Dropping connection. Only Memory commands are allowed on additional connections, but got {:?}",
+                    req.command()
+                )));
+            }
+
+            vm_receive_memory(&req, socket, guest_memory)?;
+            Response::ok().write_to(socket)?;
+        }
+    }
+
+    /// Starts a thread to accept incoming connections and handle them. These
+    /// additional connections are used to receive additional memory regions
+    /// during VM migration.
+    fn new(
+        listener: ReceiveListener,
+        guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    ) -> std::result::Result<Self, std::io::Error> {
+        let (terminate_fd1, terminate_fd2) = Self::event_fd_pair()?;
+
+        let accept_thread = std::thread::spawn(move || {
+            let terminate_fd = terminate_fd2;
+            let mut listener = listener;
+            let mut threads: Vec<std::thread::JoinHandle<()>> = Vec::new();
+            while let Ok(Some(mut socket)) = listener.abortable_accept(&terminate_fd) {
+                let guest_memory = guest_memory.clone();
+                let terminate_fd = terminate_fd.try_clone().unwrap();
+
+                // We handle errors locally and log them. Passing them along is
+                // painful with little value.
+                threads.push(std::thread::spawn(move || {
+                    if let Err(e) = Self::handle_requests(&mut socket, &terminate_fd, &guest_memory)
+                    {
+                        error!(
+                            "Failed to read more requests on additional receive connection: {e}"
+                        );
+                    }
+                }));
+            }
+
+            info!("Stopped accepting additional connections. Cleaning up threads.");
+            threads.into_iter().for_each(|thread| {
+                thread.join().unwrap();
+            });
+        });
+
+        Ok(Self {
+            accept_thread: Some(accept_thread),
+            terminate_fd: terminate_fd1,
+        })
+    }
+
+    /// Stop accepting additional connections and tear down all connections.
+    ///
+    /// This function does not wait for the operation to complete.
+    fn signal_termination(&self) {
+        // It's not really worth propagating this error, because it only happens if
+        // something hit the fan and we can't really do anything about it.
+        if let Err(e) = self.terminate_fd.write(1) {
+            error!("Failed to wake up other threads: {e}");
+        }
+    }
+}
+
+impl Drop for ReceiveAdditionalConnections {
+    fn drop(&mut self) {
+        self.signal_termination();
+        // This unwrap is safe, because we never write a None into
+        // self.accept_thread in other places.
+        let _accept_thread = self.accept_thread.take().unwrap();
+
+        // TODO The accept thread tries to join all threads it started, but we
+        // haven't implemented tearing them down yet.
+        // accept_thread.join().unwrap();
+    }
+}
+
 /// The receiver's state machine behind the migration protocol.
 enum ReceiveMigrationState {
     /// The connection is established and we haven't received any commands yet.
@@ -699,8 +998,16 @@ enum ReceiveMigrationState {
     /// We received file descriptors for memory. This can only happen on UNIX domain sockets.
     MemoryFdsReceived(Vec<(u32, File)>),
 
-    /// We received the VM configuration. We keep the memory configuration around to populate guest memory. From this point on, the sender can start sending memory updates.
-    Configured(Arc<Mutex<MemoryManager>>),
+    /// We received the VM configuration. We keep the memory configuration around to populate guest memory.
+    /// From this point on, the sender can start sending memory updates.
+    ///
+    /// While the memory manager can also be used to populate guest memory, we keep a direct reference to
+    /// the memory around to populate guest memory without having to acquire a lock.
+    Configured(
+        Arc<Mutex<MemoryManager>>,
+        GuestMemoryAtomic<GuestMemoryMmap>,
+        ReceiveAdditionalConnections,
+    ),
 
     /// Memory is populated and we received the state. The VM is ready to go.
     StateReceived,
@@ -718,6 +1025,383 @@ impl ReceiveMigrationState {
             self,
             ReceiveMigrationState::Completed | ReceiveMigrationState::Aborted
         )
+    }
+}
+
+/// Establishes a connection to a migration destination socket (TCP or UNIX).
+fn send_migration_socket(
+    destination_url: &str,
+) -> std::result::Result<SocketStream, MigratableError> {
+    if let Some(address) = destination_url.strip_prefix("tcp:") {
+        info!("Connecting to TCP socket at {address}");
+
+        let socket = TcpStream::connect(address).map_err(|e| {
+            MigratableError::MigrateSend(anyhow!("Error connecting to TCP socket: {e}"))
+        })?;
+
+        Ok(SocketStream::Tcp(socket))
+    } else if let Some(path) = destination_url.strip_prefix("unix:") {
+        info!("Connecting to UNIX socket at {path:?}");
+
+        let socket = UnixStream::connect(path).map_err(|e| {
+            MigratableError::MigrateSend(anyhow!("Error connecting to UNIX socket: {e}"))
+        })?;
+
+        Ok(SocketStream::Unix(socket))
+    } else {
+        Err(MigratableError::MigrateSend(anyhow!(
+            "Invalid destination: {destination_url}"
+        )))
+    }
+}
+
+/// Creates a listener socket for receiving incoming migration connections (TCP or UNIX).
+fn receive_migration_listener(
+    receiver_url: &str,
+) -> std::result::Result<ReceiveListener, MigratableError> {
+    if let Some(address) = receiver_url.strip_prefix("tcp:") {
+        TcpListener::bind(address)
+            .map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error binding to TCP socket: {e}"))
+            })
+            .map(ReceiveListener::Tcp)
+    } else if let Some(path) = receiver_url.strip_prefix("unix:") {
+        UnixListener::bind(path)
+            .map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error binding to UNIX socket: {e}"))
+            })
+            .map(|listener| ReceiveListener::Unix(listener, Some(path.into())))
+    } else {
+        Err(MigratableError::MigrateSend(anyhow!(
+            "Invalid source: {receiver_url}"
+        )))
+    }
+}
+
+fn send_memory_regions(
+    guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    ranges: &MemoryRangeTable,
+    fd: &mut SocketStream,
+) -> std::result::Result<(), MigratableError> {
+    let mem = guest_memory.memory();
+
+    for range in ranges.regions() {
+        let mut offset: u64 = 0;
+        // Here we are manually handling the retry in case we can't the
+        // whole region at once because we can't use the implementation
+        // from vm-memory::GuestMemory of write_all_to() as it is not
+        // following the correct behavior. For more info about this issue
+        // see: https://github.com/rust-vmm/vm-memory/issues/174
+        loop {
+            let bytes_written = mem
+                .write_volatile_to(
+                    GuestAddress(range.gpa + offset),
+                    fd,
+                    (range.length - offset) as usize,
+                )
+                .map_err(|e| {
+                    MigratableError::MigrateSend(anyhow!(
+                        "Error transferring memory to socket: {e}"
+                    ))
+                })?;
+            offset += bytes_written as u64;
+
+            if offset == range.length {
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// The different kinds of messages we can send to memory sending threads.
+#[derive(Debug)]
+enum SendMemoryThreadMessage {
+    /// A chunk of memory that the thread should send to the receiving side of the
+    /// live migration.
+    Memory(MemoryRangeTable),
+    /// A synchronization point after each iteration of sending memory. That way the
+    /// main thread knows when all memory is sent and acknowledged.
+    Gate(Arc<Gate>),
+    /// Sending memory is done and the threads are not needed anymore.
+    Disconnect,
+}
+
+/// The different kinds of messages the main thread can receive from a memory
+/// sending thread.
+#[derive(Debug)]
+enum SendMemoryThreadNotify {
+    /// A sending thread arrived at the gate. The main thread does not wait at the
+    /// gate, otherwise we could miss error messages.
+    Gate,
+    /// A sending thread encountered an error while sending memory.
+    Error(MigratableError),
+}
+
+/// This struct keeps track of additional threads we use to send VM memory.
+struct SendAdditionalConnections {
+    guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    threads: Vec<thread::JoinHandle<()>>,
+    sender: SyncSender<SendMemoryThreadMessage>,
+    // If an error occurs in one of the memory sending threads, the thread signals
+    // this using this flag. Only the main thread checks this variable, the worker
+    // threads will be stopped in the destructor.
+    cancel: Arc<AtomicBool>,
+    // After the main thread sent all memory chunks to the sender threads, it waits
+    // until one of the workers notifies it. Either because an error occurred, or
+    // because they arrived at the gate.
+    notify_rx: Receiver<SendMemoryThreadNotify>,
+}
+
+// Send memory from the given table.
+// Returns true if there were dirty pages to send
+fn vm_send_memory(
+    guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    socket: &mut SocketStream,
+    table: &MemoryRangeTable,
+) -> result::Result<(), MigratableError> {
+    Request::memory(table.length()).write_to(socket).unwrap();
+    table.write_to(socket)?;
+    // And then the memory itself
+    send_memory_regions(guest_memory, table, socket)?;
+    Response::read_from(socket)?.ok_or_abandon(
+        socket,
+        MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
+    )?;
+
+    Ok(())
+}
+
+impl SendAdditionalConnections {
+    /// How many requests can be waiting to be sent for each connection. To avoid
+    /// going OOM, we use a SyncChannel with a limited buffer size.
+    const BUFFERED_REQUESTS_PER_THREAD: usize = 64;
+
+    /// The size of each chunk of memory to send.
+    ///
+    /// We want to make this large, because each chunk is acknowledged and we
+    /// wait for the ack before sending the next chunk. The challenge is that if
+    /// it is _too_ large, we become more sensitive to network issues, like
+    /// packet drops in individual connections, because large amounts of data
+    /// can pool when throughput on one connection is temporarily reduced.
+    ///
+    /// We can consider making this configurable, but a better network protocol
+    /// that doesn't require ACKs would be more efficient.
+    ///
+    /// The best-case throughput per connection can be estimated via:
+    /// effective_throughput = chunk_size / (chunk_size / throughput_per_connection + round_trip_time
+    const CHUNK_SIZE: u64 = 64 /* MiB */ << 20;
+
+    fn new(
+        guest_mem: &GuestMemoryAtomic<GuestMemoryMmap>,
+        destination: &str,
+        connections: NonZeroU32,
+    ) -> std::result::Result<Self, MigratableError> {
+        let mut threads = Vec::new();
+        let configured_connections = connections.get();
+        let buffer_size = Self::BUFFERED_REQUESTS_PER_THREAD * configured_connections as usize;
+        let (channel_tx, channel_rx) = sync_channel::<SendMemoryThreadMessage>(buffer_size);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (notify_tx, notify_rx) = channel::<SendMemoryThreadNotify>();
+
+        // If only one connection is configured, we don't have to create any additional
+        // threads. In this case the main thread does the sending.
+        if configured_connections == 1 {
+            return Ok(Self {
+                guest_memory: guest_mem.clone(),
+                threads,
+                sender: channel_tx,
+                cancel,
+                notify_rx,
+            });
+        }
+
+        let recv = Arc::new(Mutex::new(channel_rx));
+
+        // If we use multiple threads to send memory, the main thread only distributes the
+        // memory chunks to the workers, but does not send memory anymore. Thus in this
+        // case we create one thread for each connection.
+        for n in 0..configured_connections {
+            let socket = (match send_migration_socket(destination) {
+                Err(e) if n == 0 => {
+                    // If we encounter a problem on the first additional connection, we assume the
+                    // other side does not support multiple connections and carry on.
+                    info!(
+                        "Could not establish additional connections for sending VM memory: {e}, ignoring!"
+                    );
+                    break;
+                }
+                otherwise => otherwise,
+            })?;
+            let guest_mem = guest_mem.clone();
+            let recv = recv.clone();
+            let cancel = cancel.clone();
+            let notify_tx = notify_tx.clone();
+
+            let thread = thread::Builder::new()
+                .name(format!("memory-sending-thread-{n}"))
+                .spawn(move || {
+                    info!("Spawned thread to send VM memory.");
+                    let mut socket = socket;
+                    loop {
+                        // Every memory sending thread receives messages from the main thread through
+                        // this channel. The lock is necessary to synchronize the multiple consumers.
+                        // If the workers are very quick, lock contention could become a performance
+                        // issue.
+                        // TODO: Verify whether lock contention is negligible compared to network time.
+                        let msg = recv.lock().unwrap().recv().unwrap();
+                        match msg {
+                            SendMemoryThreadMessage::Memory(table) => {
+                                match vm_send_memory(&guest_mem, &mut socket, &table) {
+                                    Ok(()) => (),
+                                    Err(e) => {
+                                        // Only the first thread that encounters an error sends it to the main thread.
+                                        if !cancel.swap(true, Ordering::Relaxed)
+                                            && let Err(e) =
+                                                notify_tx.send(SendMemoryThreadNotify::Error(e))
+                                        {
+                                            error!("Could not send error to main thread: {e}");
+                                        }
+                                        // In any case the worker exits gracefully.
+                                        break;
+                                    }
+                                }
+                            }
+                            SendMemoryThreadMessage::Gate(gate) => {
+                                if let Err(e) = notify_tx.send(SendMemoryThreadNotify::Gate) {
+                                    error!("Could not send barrier notify to main thread: {e}");
+                                    break;
+                                }
+                                gate.wait();
+                            }
+                            SendMemoryThreadMessage::Disconnect => {
+                                break;
+                            }
+                        }
+                    }
+                })
+                .map_err(MigratableError::SendMemoryThread)?;
+
+            threads.push(thread);
+        }
+
+        Ok(Self {
+            guest_memory: guest_mem.clone(),
+            threads,
+            sender: channel_tx,
+            cancel,
+            notify_rx,
+        })
+    }
+
+    /// Wait until all data that is in-flight has actually been send and acknowledged.
+    fn wait_for_pending_data(&self) -> std::result::Result<(), MigratableError> {
+        let gate = Arc::new(Gate::new());
+        for _ in 0..self.threads.len() {
+            self.sender
+                .send(SendMemoryThreadMessage::Gate(gate.clone()))
+                .unwrap();
+        }
+
+        // We cannot simply wait for the gate, otherwise we might miss it when a sender
+        // thread encounters an error. Thus we wait for the workers to notify us that they
+        // arrived at the gate using notify_rx.
+        let mut seen_threads = 0;
+        loop {
+            match self.notify_rx.recv().unwrap() {
+                SendMemoryThreadNotify::Error(e) => {
+                    // If an error occurred in one of the worker threads, we open the gate to make
+                    // sure that no thread hangs. After that we return the error.
+                    gate.open();
+                    return Err(e);
+                }
+                SendMemoryThreadNotify::Gate => {
+                    seen_threads += 1;
+                    if seen_threads == self.threads.len() {
+                        gate.open();
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Send memory via all connections that we have. This may be just one.
+    /// `socket` is the original socket that was used to connect to the
+    /// destination.
+    ///
+    /// When this function returns, all memory has been sent and acknowledged.
+    fn send_memory(
+        &self,
+        table: &MemoryRangeTable,
+        socket: &mut SocketStream,
+    ) -> std::result::Result<bool, MigratableError> {
+        if table.regions().is_empty() {
+            return Ok(false);
+        }
+
+        // In case we did not manage to establish additional connections, we just send everything
+        // from this thread.
+        if self.threads.is_empty() {
+            vm_send_memory(&self.guest_memory, socket, table)?;
+            return Ok(true);
+        }
+
+        // The chunk size is chosen to be big enough so that even very fast
+        // links need some milliseconds to send it.
+        'next_chunk: for chunk in table.partition(Self::CHUNK_SIZE) {
+            let mut chunk = SendMemoryThreadMessage::Memory(chunk);
+            // The channel has a limited size. Thus we may have to retry putting work into it.
+            'retry_chunk: loop {
+                // If one of the workers encountered an error, we return it.
+                if self.cancel.load(Ordering::Relaxed) {
+                    loop {
+                        match self.notify_rx.recv().unwrap() {
+                            SendMemoryThreadNotify::Gate => continue,
+                            SendMemoryThreadNotify::Error(e) => return Err(e),
+                        }
+                    }
+                }
+
+                match self.sender.try_send(chunk) {
+                    Ok(()) => continue 'next_chunk,
+                    Err(TrySendError::Full(unsent_chunk)) => {
+                        // The channel is full. We let this thread sleep for a short time and retry.
+                        sleep(Duration::from_millis(10));
+                        chunk = unsent_chunk;
+                        continue 'retry_chunk;
+                    }
+                    Err(TrySendError::Disconnected(_)) => {
+                        return Err(MigratableError::MigrateSend(anyhow!(
+                            "All sending threads died?"
+                        )));
+                    }
+                }
+            }
+        }
+
+        self.wait_for_pending_data()?;
+
+        Ok(true)
+    }
+}
+
+impl Drop for SendAdditionalConnections {
+    fn drop(&mut self) {
+        // Send a disconnect message to all workers.
+        for _ in 0..self.threads.len() {
+            // All threads may have terminated, leading to a dropped receiver. Thus we cannot
+            // simply do send().unwrap()
+            let e = self.sender.send(SendMemoryThreadMessage::Disconnect);
+            if let Err(e) = e {
+                error!("Could not send disconnect message to worker thread: {e}");
+            }
+        }
+
+        self.threads
+            .drain(..)
+            .for_each(|thread| thread.join().unwrap());
     }
 }
 
@@ -898,6 +1582,7 @@ impl Vmm {
     /// _not_ write any response to the socket.
     fn vm_receive_migration_step(
         &mut self,
+        listener: &ReceiveListener,
         socket: &mut SocketStream,
         state: ReceiveMigrationState,
         req: &Request,
@@ -911,14 +1596,33 @@ impl Vmm {
             )))
         };
 
-        let mut configure_vm =
-            |socket: &mut SocketStream,
-             memory_files: HashMap<u32, File>|
-             -> std::result::Result<Arc<Mutex<MemoryManager>>, MigratableError> {
-                let memory_manager = self.vm_receive_config(req, socket, memory_files)?;
+        #[allow(clippy::type_complexity)]
+        let mut configure_vm = |socket: &mut SocketStream,
+                                memory_files: HashMap<u32, File>|
+         -> std::result::Result<
+            (
+                Arc<Mutex<MemoryManager>>,
+                GuestMemoryAtomic<GuestMemoryMmap>,
+                ReceiveAdditionalConnections,
+            ),
+            MigratableError,
+        > {
+            let memory_manager = self.vm_receive_config(req, socket, memory_files)?;
 
-                Ok(memory_manager)
-            };
+            let guest_memory = memory_manager.lock().unwrap().guest_memory();
+            Ok((
+                memory_manager,
+                guest_memory.clone(),
+                listener
+                    .try_clone()
+                    .and_then(|l| ReceiveAdditionalConnections::new(l, guest_memory))
+                    .map_err(|e| {
+                        MigratableError::MigrateReceive(anyhow!(
+                            "Failed to create receive additional connections: {e}"
+                        ))
+                    })?,
+            ))
+        };
 
         let recv_memory_fd = |socket: &mut SocketStream,
                               mut memory_files: Vec<(u32, File)>|
@@ -941,27 +1645,33 @@ impl Vmm {
             },
             Started => match req.command() {
                 Command::MemoryFd => recv_memory_fd(socket, Vec::new()).map(MemoryFdsReceived),
-                Command::Config => configure_vm(socket, Default::default()).map(Configured),
+                Command::Config => configure_vm(socket, Default::default())
+                    .map(|res| Configured(res.0, res.1, res.2)),
                 _ => invalid_command(),
             },
             MemoryFdsReceived(memory_files) => match req.command() {
                 Command::MemoryFd => recv_memory_fd(socket, memory_files).map(MemoryFdsReceived),
-                Command::Config => {
-                    configure_vm(socket, HashMap::from_iter(memory_files)).map(Configured)
-                }
+                Command::Config => configure_vm(socket, HashMap::from_iter(memory_files))
+                    .map(|res| Configured(res.0, res.1, res.2)),
                 _ => invalid_command(),
             },
-            Configured(memory_manager) => match req.command() {
-                Command::Memory => {
-                    self.vm_receive_memory(req, socket, &mut memory_manager.lock().unwrap())?;
-                    Ok(Configured(memory_manager))
+            Configured(memory_manager, guest_memory, receive_additional_connections) => {
+                match req.command() {
+                    Command::Memory => {
+                        vm_receive_memory(req, socket, &guest_memory)?;
+                        Ok(Configured(
+                            memory_manager,
+                            guest_memory,
+                            receive_additional_connections,
+                        ))
+                    }
+                    Command::State => {
+                        self.vm_receive_state(req, socket, memory_manager)?;
+                        Ok(StateReceived)
+                    }
+                    _ => invalid_command(),
                 }
-                Command::State => {
-                    self.vm_receive_state(req, socket, memory_manager.clone())?;
-                    Ok(StateReceived)
-                }
-                _ => invalid_command(),
-            },
+            }
             StateReceived => match req.command() {
                 Command::Complete => {
                     // The unwrap is safe, because the state machine makes sure we called
@@ -1131,113 +1841,38 @@ impl Vmm {
         Ok(())
     }
 
-    fn vm_receive_memory<T>(
-        &mut self,
-        req: &Request,
-        socket: &mut T,
-        memory_manager: &mut MemoryManager,
-    ) -> std::result::Result<(), MigratableError>
-    where
-        T: Read + ReadVolatile,
-    {
-        // Read table
-        let table = MemoryRangeTable::read_from(socket, req.length())?;
-
-        // And then read the memory itself
-        memory_manager.receive_memory_regions(&table, socket)?;
-        Ok(())
-    }
-
-    fn socket_url_to_path(url: &str) -> result::Result<PathBuf, MigratableError> {
-        url.strip_prefix("unix:")
-            .ok_or_else(|| {
-                MigratableError::MigrateSend(anyhow!("Could not extract path from URL: {url}"))
-            })
-            .map(|s| s.into())
-    }
-
-    fn send_migration_socket(
-        destination_url: &str,
-    ) -> std::result::Result<SocketStream, MigratableError> {
-        if let Some(address) = destination_url.strip_prefix("tcp:") {
-            info!("Connecting to TCP socket at {address}");
-
-            let socket = TcpStream::connect(address).map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("Error connecting to TCP socket: {e}"))
-            })?;
-
-            Ok(SocketStream::Tcp(socket))
-        } else {
-            let path = Vmm::socket_url_to_path(destination_url)?;
-            info!("Connecting to UNIX socket at {path:?}");
-
-            let socket = UnixStream::connect(&path).map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("Error connecting to UNIX socket: {e}"))
-            })?;
-
-            Ok(SocketStream::Unix(socket))
-        }
-    }
-
-    fn receive_migration_socket(
-        receiver_url: &str,
-    ) -> std::result::Result<SocketStream, MigratableError> {
-        if let Some(address) = receiver_url.strip_prefix("tcp:") {
-            let listener = TcpListener::bind(address).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error binding to TCP socket: {e}"))
-            })?;
-
-            let (socket, _addr) = listener.accept().map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!(
-                    "Error accepting connection on TCP socket: {e}"
-                ))
-            })?;
-
-            Ok(SocketStream::Tcp(socket))
-        } else {
-            let path = Vmm::socket_url_to_path(receiver_url)?;
-            let listener = UnixListener::bind(&path).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error binding to UNIX socket: {e}"))
-            })?;
-
-            let (socket, _addr) = listener.accept().map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!(
-                    "Error accepting connection on UNIX socket: {e}"
-                ))
-            })?;
-
-            // Remove the UNIX socket file after accepting the connection
-            std::fs::remove_file(&path).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error removing UNIX socket file: {e}"))
-            })?;
-
-            Ok(SocketStream::Unix(socket))
-        }
-    }
-
-    // Returns true if there were dirty pages to send
-    fn vm_maybe_send_dirty_pages(
+    fn do_memory_migration(
         vm: &mut Vm,
         socket: &mut SocketStream,
-    ) -> result::Result<bool, MigratableError> {
-        // Send (dirty) memory table
-        let table = vm.dirty_log()?;
-
-        // But if there are no regions go straight to pause
-        if table.regions().is_empty() {
-            return Ok(false);
-        }
-
-        Request::memory(table.length()).write_to(socket).unwrap();
-        table.write_to(socket)?;
-        // And then the memory itself
-        vm.send_memory_regions(&table, socket)?;
-        Response::read_from(socket)?.ok_or_abandon(
-            socket,
-            MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
+        send_data_migration: &VmSendMigrationData,
+    ) -> result::Result<(), MigratableError> {
+        let mem_send = SendAdditionalConnections::new(
+            &vm.guest_memory(),
+            &send_data_migration.destination_url,
+            send_data_migration.connections,
         )?;
 
-        Ok(true)
+        // Start logging dirty pages
+        vm.start_dirty_log()?;
+
+        // Send memory table
+        mem_send.send_memory(&vm.memory_range_table()?, socket)?;
+
+        // Try at most 5 passes of dirty memory sending
+        const MAX_DIRTY_MIGRATIONS: usize = 5;
+        for i in 0..MAX_DIRTY_MIGRATIONS {
+            info!("Dirty memory migration {i} of {MAX_DIRTY_MIGRATIONS}");
+            if !mem_send.send_memory(&vm.dirty_log()?, socket)? {
+                break;
+            }
+        }
+
+        // Now pause VM
+        vm.pause()?;
+
+        // Send last batch of dirty pages
+        mem_send.send_memory(&vm.dirty_log()?, socket)?;
+        Ok(())
     }
 
     fn send_migration(
@@ -1247,7 +1882,7 @@ impl Vmm {
         send_data_migration: &VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
         // Set up the socket connection
-        let mut socket = Self::send_migration_socket(&send_data_migration.destination_url)?;
+        let mut socket = send_migration_socket(&send_data_migration.destination_url)?;
 
         // Start the migration
         Request::start().write_to(&mut socket)?;
@@ -1322,36 +1957,7 @@ impl Vmm {
             // Now pause VM
             vm.pause()?;
         } else {
-            // Start logging dirty pages
-            vm.start_dirty_log()?;
-
-            // Send memory table
-            let table = vm.memory_range_table()?;
-            Request::memory(table.length())
-                .write_to(&mut socket)
-                .unwrap();
-            table.write_to(&mut socket)?;
-            // And then the memory itself
-            vm.send_memory_regions(&table, &mut socket)?;
-            Response::read_from(&mut socket)?.ok_or_abandon(
-                &mut socket,
-                MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
-            )?;
-
-            // Try at most 5 passes of dirty memory sending
-            const MAX_DIRTY_MIGRATIONS: usize = 5;
-            for i in 0..MAX_DIRTY_MIGRATIONS {
-                info!("Dirty memory migration {i} of {MAX_DIRTY_MIGRATIONS}");
-                if !Self::vm_maybe_send_dirty_pages(vm, &mut socket)? {
-                    break;
-                }
-            }
-
-            // Now pause VM
-            vm.pause()?;
-
-            // Send last batch of dirty pages
-            Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
+            Self::do_memory_migration(vm, &mut socket, send_data_migration)?;
         }
 
         // We release the locks early to enable locking them on the destination host.
@@ -2301,8 +2907,12 @@ impl RequestHandler for Vmm {
             receive_data_migration.receiver_url
         );
 
+        let mut listener = receive_migration_listener(&receive_data_migration.receiver_url)?;
         // Accept the connection and get the socket
-        let mut socket = Vmm::receive_migration_socket(&receive_data_migration.receiver_url)?;
+        let mut socket = listener.accept().map_err(|e| {
+            warn!("Failed to accept migration connection: {e}");
+            MigratableError::MigrateReceive(anyhow!("Failed to accept migration connection: {e}"))
+        })?;
 
         let mut state = ReceiveMigrationState::Established;
 
@@ -2311,6 +2921,7 @@ impl RequestHandler for Vmm {
             trace!("Command {:?} received", req.command());
 
             let (response, new_state) = match self.vm_receive_migration_step(
+                &listener,
                 &mut socket,
                 state,
                 &req,

@@ -266,18 +266,95 @@ impl Response {
 }
 
 #[repr(C)]
-#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryRange {
     pub gpa: u64,
     pub length: u64,
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MemoryRangeTable {
     data: Vec<MemoryRange>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct MemoryRangeTableIterator {
+    chunk_size: u64,
+    data: Vec<MemoryRange>,
+}
+
+impl MemoryRangeTableIterator {
+    pub fn new(table: &MemoryRangeTable, chunk_size: u64) -> Self {
+        MemoryRangeTableIterator {
+            chunk_size,
+            data: table.data.clone(),
+        }
+    }
+}
+
+impl Iterator for MemoryRangeTableIterator {
+    type Item = MemoryRangeTable;
+
+    /// Return the next memory range in the table, making sure that
+    /// the returned range is not larger than `chunk_size`.
+    ///
+    /// **Note**: Do not rely on the order of the ranges returned by this
+    /// iterator. This allows for a more efficient implementation.
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut ranges: Vec<MemoryRange> = vec![];
+        let mut ranges_size: u64 = 0;
+
+        loop {
+            assert!(ranges_size <= self.chunk_size);
+
+            if ranges_size == self.chunk_size || self.data.is_empty() {
+                break;
+            }
+
+            if let Some(range) = self.data.pop() {
+                let next_range: MemoryRange = if ranges_size + range.length > self.chunk_size {
+                    // How many bytes we need to put back into the table.
+                    let leftover_bytes = ranges_size + range.length - self.chunk_size;
+                    assert!(leftover_bytes <= range.length);
+                    let returned_bytes = range.length - leftover_bytes;
+                    assert!(returned_bytes <= range.length);
+                    assert_eq!(leftover_bytes + returned_bytes, range.length);
+
+                    self.data.push(MemoryRange {
+                        gpa: range.gpa + returned_bytes,
+                        length: leftover_bytes,
+                    });
+                    MemoryRange {
+                        gpa: range.gpa,
+                        length: returned_bytes,
+                    }
+                } else {
+                    range
+                };
+
+                ranges_size += next_range.length;
+                ranges.push(next_range);
+            }
+        }
+
+        if ranges.is_empty() {
+            None
+        } else {
+            Some(MemoryRangeTable { data: ranges })
+        }
+    }
+}
+
 impl MemoryRangeTable {
+    pub fn ranges(&self) -> &[MemoryRange] {
+        &self.data
+    }
+
+    /// Partitions the table into chunks of at most `chunk_size` bytes.
+    pub fn partition(&self, chunk_size: u64) -> impl Iterator<Item = MemoryRangeTable> {
+        MemoryRangeTableIterator::new(self, chunk_size)
+    }
+
     /// Converts an iterator over a dirty bitmap into an iterator of dirty
     /// [`MemoryRange`]s, merging consecutive dirty pages into contiguous ranges.
     ///
@@ -407,5 +484,108 @@ mod unit_tests {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn test_memory_range_table_partition() {
+        // We start the test similar as the one above, but with a input that is simpler to parse for
+        // developers.
+        let input = [0b11_0011_0011_0011];
+
+        let start_gpa = 0x1000;
+        let page_size = 0x1000;
+
+        let table = MemoryRangeTable::from_dirty_bitmap(input, start_gpa, page_size);
+        let expected_regions = [
+            MemoryRange {
+                gpa: start_gpa,
+                length: page_size * 2,
+            },
+            MemoryRange {
+                gpa: start_gpa + 4 * page_size,
+                length: page_size * 2,
+            },
+            MemoryRange {
+                gpa: start_gpa + 8 * page_size,
+                length: page_size * 2,
+            },
+            MemoryRange {
+                gpa: start_gpa + 12 * page_size,
+                length: page_size * 2,
+            },
+        ];
+        assert_eq!(table.regions(), &expected_regions);
+
+        // In the first test, we expect to see the exact same result as above, as we use the length
+        // of every region (which is fixed!).
+        {
+            let chunks = table
+                .partition(page_size * 2)
+                .map(|table| table.data)
+                .collect::<Vec<_>>();
+
+            // The implementation currently returns the ranges in reverse order.
+            // For better testability, we reverse it.
+            let chunks = chunks
+                .into_iter()
+                .map(|vec| vec.into_iter().rev().collect::<Vec<_>>())
+                .rev()
+                .collect::<Vec<_>>();
+
+            assert_eq!(
+                chunks,
+                &[
+                    [expected_regions[0].clone()].to_vec(),
+                    [expected_regions[1].clone()].to_vec(),
+                    [expected_regions[2].clone()].to_vec(),
+                    [expected_regions[3].clone()].to_vec(),
+                ]
+            );
+        }
+
+        // Next, we have a more sophisticated test with a chunk size of 5 pages.
+        {
+            let chunks = table
+                .partition(page_size * 5)
+                .map(|table| table.data)
+                .collect::<Vec<_>>();
+
+            // The implementation currently returns the ranges in reverse order.
+            // For better testability, we reverse it.
+            let chunks = chunks
+                .into_iter()
+                .map(|vec| vec.into_iter().rev().collect::<Vec<_>>())
+                .collect::<Vec<_>>();
+
+            assert_eq!(
+                chunks,
+                &[
+                    vec![
+                        MemoryRange {
+                            gpa: start_gpa + 4 * page_size,
+                            length: page_size
+                        },
+                        MemoryRange {
+                            gpa: start_gpa + 8 * page_size,
+                            length: 2 * page_size
+                        },
+                        MemoryRange {
+                            gpa: start_gpa + 12 * page_size,
+                            length: 2 * page_size
+                        }
+                    ],
+                    vec![
+                        MemoryRange {
+                            gpa: start_gpa,
+                            length: 2 * page_size
+                        },
+                        MemoryRange {
+                            gpa: start_gpa + 5 * page_size,
+                            length: page_size
+                        }
+                    ]
+                ]
+            );
+        }
     }
 }

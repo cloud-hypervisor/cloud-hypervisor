@@ -1346,6 +1346,11 @@ components:
         - destination_url
       type: object
       properties:
+        connections:
+          type: integer
+          format: int64
+          default: 1
+          minimum: 1
         destination_url:
           type: string
         local:
