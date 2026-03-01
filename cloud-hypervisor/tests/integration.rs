@@ -14348,4 +14348,25 @@ mod common_cvm {
         let target_api = TargetApi::new_http_api(&guest.tmp_dir);
         _test_api_create_boot(&target_api, &guest);
     }
+
+    #[test]
+    fn test_api_http_shutdown() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest_with_cpu(Box::new(disk_config), 4);
+
+        let target_api = TargetApi::new_http_api(&guest.tmp_dir);
+        _test_api_shutdown(&target_api, &guest);
+    }
+
+    #[test]
+    fn test_api_http_delete() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest_with_cpu(Box::new(disk_config), 4);
+
+        let target_api = TargetApi::new_http_api(&guest.tmp_dir);
+        _test_api_delete(&target_api, &guest);
+    }
+
 }
