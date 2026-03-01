@@ -20,7 +20,7 @@ use std::process::{Child, Command, Stdio};
 use std::string::String;
 use std::sync::mpsc::Receiver;
 use std::sync::{Mutex, mpsc};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{fs, io, thread};
 
 use net_util::MacAddr;
@@ -7095,24 +7095,6 @@ mod common_parallel {
             .open(LOOP_CTL_PATH)
             .unwrap();
 
-        // Request a free loop device
-        let loop_device_number =
-            unsafe { libc::ioctl(loop_ctl_file.as_raw_fd(), LOOP_CTL_GET_FREE as _) };
-
-        if loop_device_number < 0 {
-            panic!("Couldn't find a free loop device");
-        }
-
-        // Create loop device path
-        let loop_device_path = format!("{LOOP_DEVICE_PREFIX}{loop_device_number}");
-
-        // Open loop device
-        let loop_device_file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&loop_device_path)
-            .unwrap();
-
         // Open backing file
         let backing_file = OpenOptions::new()
             .read(true)
@@ -7120,13 +7102,34 @@ mod common_parallel {
             .open(backing_file_path)
             .unwrap();
 
-        let loop_config = LoopConfig {
-            fd: backing_file.as_raw_fd() as u32,
-            block_size,
-            ..Default::default()
-        };
-
+        // Retry the whole get free -> open -> configure sequence so that a
+        // race with another parallel test claiming the same loop device
+        // is resolved by requesting a new free device on each attempt.
+        let mut loop_device_path = String::new();
         for i in 0..num_retries {
+            // Request a free loop device
+            let loop_device_number =
+                unsafe { libc::ioctl(loop_ctl_file.as_raw_fd(), LOOP_CTL_GET_FREE as _) };
+
+            if loop_device_number < 0 {
+                panic!("Couldn't find a free loop device");
+            }
+
+            loop_device_path = format!("{LOOP_DEVICE_PREFIX}{loop_device_number}");
+
+            // Open loop device
+            let loop_device_file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&loop_device_path)
+                .unwrap();
+
+            let loop_config = LoopConfig {
+                fd: backing_file.as_raw_fd() as u32,
+                block_size,
+                ..Default::default()
+            };
+
             let ret = unsafe {
                 libc::ioctl(
                     loop_device_file.as_raw_fd(),
@@ -7134,28 +7137,32 @@ mod common_parallel {
                     &loop_config,
                 )
             };
-            if ret != 0 {
-                if i < num_retries - 1 {
-                    println!(
-                        "Iteration {}: Failed to configure the loop device {}: {}",
-                        i,
-                        loop_device_path,
-                        std::io::Error::last_os_error()
-                    );
-                } else {
-                    panic!(
-                        "Failed {} times trying to configure the loop device {}: {}",
-                        num_retries,
-                        loop_device_path,
-                        std::io::Error::last_os_error()
-                    );
-                }
-            } else {
+            if ret == 0 {
                 break;
             }
 
-            // Wait for a bit before retrying
-            thread::sleep(std::time::Duration::new(5, 0));
+            if i < num_retries - 1 {
+                println!(
+                    "Iteration {}: Failed to configure loop device {}: {}",
+                    i,
+                    loop_device_path,
+                    io::Error::last_os_error()
+                );
+                let jitter_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .subsec_nanos()
+                    % 500
+                    + 100;
+                thread::sleep(Duration::from_millis(jitter_ms as u64));
+            } else {
+                panic!(
+                    "Failed {} times trying to configure the loop device {}: {}",
+                    num_retries,
+                    loop_device_path,
+                    io::Error::last_os_error()
+                );
+            }
         }
 
         loop_device_path
@@ -7252,6 +7259,212 @@ mod common_parallel {
             .args(["-d", &loop_dev])
             .output()
             .expect("loop device not found");
+    }
+
+    #[test]
+    fn test_virtio_block_direct_io_block_device_alignment_4k() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        // The backing file for the loop device must live on a filesystem that
+        // supports O_DIRECT (e.g. ext4).  guest.tmp_dir is on tmpfs inside
+        // Docker, and the loop driver forwards I/O to the backing file.
+        let mut workloads_path = dirs::home_dir().unwrap();
+        workloads_path.push("workloads");
+        let img_dir = TempDir::new_in(workloads_path.as_path()).unwrap();
+        let test_disk_path = img_dir.as_path().join("directio_test.img");
+        // Preallocate the backing file -- a sparse file can deadlock when
+        // O_DIRECT writes through a loop device trigger block allocation
+        // in the backing filesystem.
+        assert!(
+            exec_host_command_output(&format!(
+                "fallocate -l 64M {}",
+                test_disk_path.to_str().unwrap()
+            ))
+            .status
+            .success(),
+            "fallocate failed"
+        );
+
+        let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 5);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                format!("path={},direct=on,image_type=raw", &loop_dev).as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk -t | grep vdc | awk '{print $6}'")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                4096
+            );
+
+            guest
+                .ssh_command(
+                    "sudo dd if=/dev/urandom of=/tmp/pattern bs=4096 count=1 && \
+                     sudo dd if=/tmp/pattern of=/dev/vdc bs=4096 count=1 seek=1 oflag=direct && \
+                     sudo dd if=/dev/vdc of=/tmp/readback bs=4096 count=1 skip=1 iflag=direct && \
+                     cmp /tmp/pattern /tmp/readback",
+                )
+                .unwrap();
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+
+        Command::new("losetup")
+            .args(["-d", &loop_dev])
+            .output()
+            .expect("loop device cleanup failed");
+    }
+
+    #[test]
+    fn test_virtio_block_direct_io_file_backed_alignment_4k() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let mut workloads_path = dirs::home_dir().unwrap();
+        workloads_path.push("workloads");
+        let img_dir = TempDir::new_in(workloads_path.as_path()).unwrap();
+        let fs_img_path = img_dir.as_path().join("fs_4ksec.img");
+
+        assert!(
+            exec_host_command_output(&format!(
+                "truncate -s 512M {}",
+                fs_img_path.to_str().unwrap()
+            ))
+            .status
+            .success(),
+            "truncate failed"
+        );
+
+        let loop_dev = exec_host_command_output(&format!(
+            "losetup --find --show --sector-size 4096 {}",
+            fs_img_path.to_str().unwrap()
+        ));
+        assert!(loop_dev.status.success(), "losetup failed");
+        let loop_dev_path = String::from_utf8_lossy(&loop_dev.stdout).trim().to_string();
+
+        assert!(
+            exec_host_command_output(&format!("mkfs.ext4 -q {loop_dev_path}"))
+                .status
+                .success(),
+            "mkfs.ext4 failed"
+        );
+
+        let mnt_dir = img_dir.as_path().join("mnt");
+        fs::create_dir_all(&mnt_dir).unwrap();
+        assert!(
+            exec_host_command_output(&format!(
+                "mount {} {}",
+                &loop_dev_path,
+                mnt_dir.to_str().unwrap()
+            ))
+            .status
+            .success(),
+            "mount failed"
+        );
+
+        let test_disk_path = mnt_dir.join("dio_file_test.raw");
+        assert!(
+            exec_host_command_output(&format!(
+                "truncate -s 64M {}",
+                test_disk_path.to_str().unwrap()
+            ))
+            .status
+            .success(),
+            "truncate test disk failed"
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={},direct=on,image_type=raw",
+                    test_disk_path.to_str().unwrap()
+                )
+                .as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            let log_sec: u32 = guest
+                .ssh_command("lsblk -t | grep vdc | awk '{print $6}'")
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap_or_default();
+            assert_eq!(
+                log_sec, 4096,
+                "expected 4096-byte logical sector for file on 4k-sector fs, got {log_sec}"
+            );
+
+            guest
+                .ssh_command(
+                    "sudo dd if=/dev/urandom of=/tmp/pattern bs=4096 count=8 && \
+                     sudo dd if=/tmp/pattern of=/dev/vdc bs=4096 count=8 seek=1 oflag=direct && \
+                     sudo dd if=/dev/vdc of=/tmp/readback bs=4096 count=8 skip=1 iflag=direct && \
+                     cmp /tmp/pattern /tmp/readback",
+                )
+                .unwrap();
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+
+        let _ = exec_host_command_output(&format!("umount {}", mnt_dir.to_str().unwrap()));
+        let _ = exec_host_command_output(&format!("losetup -d {loop_dev_path}"));
     }
 
     // Helper function to verify sparse file
