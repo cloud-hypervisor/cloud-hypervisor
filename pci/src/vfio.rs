@@ -604,7 +604,7 @@ impl VfioCommon {
     #[allow(unused_variables)]
     pub(crate) fn allocate_bars(
         &mut self,
-        allocator: &Arc<Mutex<SystemAllocator>>,
+        allocator: &mut SystemAllocator,
         mmio32_allocator: &mut AddressAllocator,
         mmio64_allocator: &mut AddressAllocator,
         resources: Option<&[Resource]>,
@@ -743,8 +743,6 @@ impl VfioCommon {
                 PciBarRegionType::IoRegion => {
                     // The address needs to be 4 bytes aligned.
                     allocator
-                        .lock()
-                        .unwrap()
                         .allocate_io_addresses(restored_bar_addr, region_size, Some(0x4))
                         .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
                 }
@@ -1836,7 +1834,7 @@ const PCI_ROM_EXP_BAR_INDEX: usize = 12;
 impl PciDevice for VfioPciDevice {
     fn allocate_bars(
         &mut self,
-        allocator: &Arc<Mutex<SystemAllocator>>,
+        allocator: &mut SystemAllocator,
         mmio32_allocator: &mut AddressAllocator,
         mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,

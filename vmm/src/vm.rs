@@ -909,9 +909,10 @@ impl Vm {
 
         // Load payload asynchronously
         let load_payload_handle = if snapshot.is_none() {
+            let config = config.lock().unwrap();
             Self::load_payload_async(
-                memory_manager,
-                config,
+                Arc::clone(memory_manager),
+                &config,
                 #[cfg(feature = "igvm")]
                 cpu_manager,
                 #[cfg(feature = "sev_snp")]
@@ -973,9 +974,10 @@ impl Vm {
 
         // Load payload for SEV-SNP (IGVM parser needs cpu_manager for cpuid)
         let load_payload_handle = if snapshot.is_none() {
+            let config = config.lock().unwrap();
             Self::load_payload_async(
-                memory_manager,
-                config,
+                Arc::clone(memory_manager),
+                &config,
                 #[cfg(feature = "igvm")]
                 cpu_manager,
                 true,
@@ -1095,18 +1097,16 @@ impl Vm {
     #[cfg(feature = "fw_cfg")]
     fn populate_fw_cfg(
         fw_cfg_config: &FwCfgConfig,
-        device_manager: &Arc<Mutex<DeviceManager>>,
-        config: &Arc<Mutex<VmConfig>>,
+        device_manager: &DeviceManager,
+        config: &VmConfig,
     ) -> Result<()> {
         let mut e820_option: Option<usize> = None;
         if fw_cfg_config.e820 {
-            e820_option = Some(config.lock().unwrap().memory.size as usize);
+            e820_option = Some(config.memory.size as usize);
         }
         let mut kernel_option: Option<File> = None;
         if fw_cfg_config.kernel {
             let kernel = config
-                .lock()
-                .unwrap()
                 .payload
                 .as_ref()
                 .map(|p| p.kernel.as_ref().map(File::open))
@@ -1118,7 +1118,7 @@ impl Vm {
         let mut cmdline_option: Option<std::ffi::CString> = None;
         if fw_cfg_config.cmdline {
             let cmdline = Vm::generate_cmdline(
-                config.lock().unwrap().payload.as_ref().unwrap(),
+                config.payload.as_ref().unwrap(),
                 #[cfg(target_arch = "aarch64")]
                 device_manager,
             )
@@ -1130,8 +1130,6 @@ impl Vm {
         let mut initramfs_option: Option<File> = None;
         if fw_cfg_config.initramfs {
             let initramfs = config
-                .lock()
-                .unwrap()
                 .payload
                 .as_ref()
                 .map(|p| p.initramfs.as_ref().map(File::open))
@@ -1157,8 +1155,7 @@ impl Vm {
             fw_cfg_item_list_option = Some(fw_cfg_item_list);
         }
 
-        let device_manager_binding = device_manager.lock().unwrap();
-        let Some(fw_cfg) = device_manager_binding.fw_cfg() else {
+        let Some(fw_cfg) = device_manager.fw_cfg() else {
             return Err(Error::FwCfgDisabled);
         };
 
@@ -1380,9 +1377,8 @@ impl Vm {
 
     pub fn generate_cmdline(
         payload: &PayloadConfig,
-        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))] device_manager: &Arc<
-            Mutex<DeviceManager>,
-        >,
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+        device_manager: &DeviceManager,
     ) -> Result<Cmdline> {
         let mut cmdline = Cmdline::new(arch::CMDLINE_MAX_SIZE).map_err(Error::CmdLineCreate)?;
         if let Some(s) = payload.cmdline.as_ref() {
@@ -1390,7 +1386,7 @@ impl Vm {
         }
 
         #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-        for entry in device_manager.lock().unwrap().cmdline_additions() {
+        for entry in device_manager.cmdline_additions() {
             cmdline.insert_str(entry).map_err(Error::CmdLineInsertStr)?;
         }
         Ok(cmdline)
@@ -1598,24 +1594,21 @@ impl Vm {
     }
 
     fn load_payload_async(
-        memory_manager: &Arc<Mutex<MemoryManager>>,
-        config: &Arc<Mutex<VmConfig>>,
+        memory_manager: Arc<Mutex<MemoryManager>>,
+        config: &VmConfig,
         #[cfg(feature = "igvm")] cpu_manager: &Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
         // Kernel with TDX is loaded in a different manner
         #[cfg(feature = "tdx")]
-        if config.lock().unwrap().is_tdx_enabled() {
+        if config.is_tdx_enabled() {
             return Ok(None);
         }
 
         config
-            .lock()
-            .unwrap()
             .payload
             .as_ref()
             .map(|payload| {
-                let memory_manager = memory_manager.clone();
                 let payload = payload.clone();
                 #[cfg(feature = "igvm")]
                 let cpu_manager = cpu_manager.clone();
@@ -1706,7 +1699,7 @@ impl Vm {
     ) -> Result<()> {
         let cmdline = Self::generate_cmdline(
             self.config.lock().unwrap().payload.as_ref().unwrap(),
-            &self.device_manager,
+            &self.device_manager.lock().unwrap(),
         )?;
         let vcpu_mpidrs = self.cpu_manager.lock().unwrap().get_mpidrs();
         let vcpu_topology = self.cpu_manager.lock().unwrap().get_vcpu_topology();
@@ -1793,7 +1786,7 @@ impl Vm {
     fn configure_system(&mut self) -> Result<()> {
         let cmdline = Self::generate_cmdline(
             self.config.lock().unwrap().payload.as_ref().unwrap(),
-            &self.device_manager,
+            &self.device_manager.lock().unwrap(),
         )?;
         let num_vcpu = self.cpu_manager.lock().unwrap().vcpus().len();
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
@@ -2511,9 +2504,9 @@ impl Vm {
         // Loop over the ACPI tables and copy them to the HOB.
 
         for acpi_table in crate::acpi::create_acpi_tables_tdx(
-            &self.device_manager,
-            &self.cpu_manager,
-            &self.memory_manager,
+            &self.device_manager.lock().unwrap(),
+            &self.cpu_manager.lock().unwrap(),
+            &self.memory_manager.lock().unwrap(),
             &self.numa_nodes,
         ) {
             hob.add_acpi_table(&mem, acpi_table.as_slice())
@@ -2573,9 +2566,9 @@ impl Vm {
         let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
         let rsdp_addr = crate::acpi::create_acpi_tables(
             &mem,
-            &self.device_manager,
-            &self.cpu_manager,
-            &self.memory_manager,
+            &self.device_manager.lock().unwrap(),
+            &self.cpu_manager.lock().unwrap(),
+            &self.memory_manager.lock().unwrap(),
             &self.numa_nodes,
             tpm_enabled,
         );
@@ -2635,14 +2628,18 @@ impl Vm {
                     .map(|p| p.fw_cfg_config.clone())
                     .unwrap_or_default()
                     .ok_or(Error::VmMissingConfig)?;
-                Self::populate_fw_cfg(&fw_cfg_config, &self.device_manager, &self.config)?;
+                Self::populate_fw_cfg(
+                    &fw_cfg_config,
+                    &self.device_manager.lock().unwrap(),
+                    &self.config.lock().unwrap(),
+                )?;
 
                 if fw_cfg_config.acpi_tables {
                     let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
                     crate::acpi::create_acpi_tables_for_fw_cfg(
-                        &self.device_manager,
-                        &self.cpu_manager,
-                        &self.memory_manager,
+                        &self.device_manager.lock().unwrap(),
+                        &self.cpu_manager.lock().unwrap(),
+                        &self.memory_manager.lock().unwrap(),
                         &self.numa_nodes,
                         tpm_enabled,
                     )?;

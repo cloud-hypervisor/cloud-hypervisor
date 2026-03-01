@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::sync::{Arc, Barrier, Mutex, RwLock};
+use std::sync::{Arc, Barrier, RwLock};
 use std::{io, result};
 
 use log::{debug, warn};
@@ -722,7 +722,7 @@ impl PciDevice for PvmemcontrolPciDevice {
 
     fn allocate_bars(
         &mut self,
-        _allocator: &Arc<Mutex<SystemAllocator>>,
+        _allocator: &mut SystemAllocator,
         mmio32_allocator: &mut AddressAllocator,
         _mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,

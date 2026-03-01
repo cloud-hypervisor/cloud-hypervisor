@@ -88,7 +88,7 @@ impl VhostUserHandle {
         Ok(())
     }
 
-    pub fn add_memory_region(&mut self, region: &Arc<GuestRegionMmap>) -> Result<()> {
+    pub fn add_memory_region(&mut self, region: &GuestRegionMmap) -> Result<()> {
         let (mmap_handle, mmap_offset) = match region.file_offset() {
             Some(file_offset) => (file_offset.file().as_raw_fd(), file_offset.start()),
             None => return Err(Error::MissingRegionFd),

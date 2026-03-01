@@ -14,6 +14,8 @@ exclude = [
 
     # OSDev has added bot protection and accesses my result in 403 Forbidden.
     '^https://wiki.osdev.org',
+    # ARM developer documentation returns 403 to automated requests.
+    '^https://developer.arm.com',
     # Exclude all pages with $ in the URL since $XXX is a variable
     "\\$.*",
     # Exclude local files
