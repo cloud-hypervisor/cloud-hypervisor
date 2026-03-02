@@ -60,6 +60,7 @@ use crate::coredump::GuestDebuggable;
 use crate::device_manager::DeviceManager;
 use crate::landlock::Landlock;
 use crate::memory_manager::MemoryManager;
+use crate::migration::cancel::{CancelChannelMessage, CancelContextMigration};
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
 use crate::migration::transport::{
@@ -1556,6 +1557,7 @@ impl Vmm {
         send_data_migration: &VmSendMigrationData,
         initial_vm_state: VmState,
         seccomp_filters: &MigrationSeccompFilters,
+        cancel_ctx: &CancelContextMigration,
     ) -> result::Result<(), MigratableError> {
         // State machine that is updated with more context as we progress.
         let mut ctx = OngoingMigrationContext::new();
@@ -1677,6 +1679,14 @@ impl Vmm {
 
             mem_send.cleanup()?;
         }
+
+        // Last cancellation check before releasing the disk locks. After this
+        // point, they currently cannot be reacquired.
+        //
+        // Cancellation is checked repeatedly during memory transmission, which
+        // may take minutes. The remaining steps are short, so this final check
+        // is sufficient.
+        cancel_ctx.ok_or_cancelled(&mut socket)?;
 
         // We release the locks early to enable locking them on the destination host.
         // The VM is already stopped.
@@ -2033,6 +2043,10 @@ impl Vmm {
                 if let Err(e) = self.exit_evt.write(1) {
                     error!("Failed exiting the VMM after migration: {e}");
                 }
+            }
+            Err(MigratableError::Cancelled) => {
+                error!("Migration cancelled");
+                try_resume_vm_after_failed_migration(vm);
             }
             Err(e) => {
                 // Mimic the error chain that CH prints on error in the log.
@@ -3226,14 +3240,27 @@ impl RequestHandler for Vmm {
         }
     }
 
+    /// Tries cancelling the migration and waits for a succeeded cancellation or
+    /// an acknowledgment that the migration succeeded anyway.
     fn vm_cancel_migration(&mut self) -> result::Result<(), MigratableError> {
-        let VmOwnership::Migration { .. } = &self.vm else {
+        let VmOwnership::Migration {
+            migration_worker_handle,
+            ..
+        } = &self.vm
+        else {
             return Err(MigratableError::CancelMigration(anyhow!(
                 "There is no ongoing migration"
             )));
         };
 
-        todo!()
+        match migration_worker_handle.try_cancel_migration() {
+            CancelChannelMessage::CancellationSucceeded => Ok(()),
+            CancelChannelMessage::MigrationSucceeded => Err(MigratableError::CancelMigration(
+                anyhow!("Failed to cancel migration in time: the migration succeeded"),
+            )),
+            // The migration doesn't run anymore, and that is all that counts
+            CancelChannelMessage::MigrationFailed => Ok(()),
+        }
     }
 }
 

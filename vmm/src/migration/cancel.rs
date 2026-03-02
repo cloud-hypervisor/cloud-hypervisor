@@ -17,8 +17,6 @@
 //! worker observes the cancellation request. In that case, the worker reports the
 //! actual terminal outcome instead.
 
-#![expect(unused)]
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
