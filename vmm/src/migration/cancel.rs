@@ -13,8 +13,6 @@
 //! and also only if a cancellation request doesn't race with the final steps of
 //! moving a VM to the destination.
 
-#![expect(unused)]
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
