@@ -15,8 +15,6 @@
 //! a cancellation request is seen, the migration worker will fail with
 //! [`MigratableError::Canceled`].
 
-#![expect(unused)]
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 

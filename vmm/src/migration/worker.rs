@@ -28,6 +28,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::Vmm;
 use crate::api::VmSendMigrationData;
+use crate::migration::cancel::{CancelContextMigration, CancelContextVmm, new_cancel_context};
 use crate::vm::{Vm, VmState};
 
 #[derive(thiserror::Error)]
@@ -48,6 +49,7 @@ impl Debug for MigrationWorkerSpawnError {
 
 pub struct MigrationWorkerHandle {
     handle: Option<JoinHandle<MigrationWorkerResult>>,
+    cancel_ctx: CancelContextVmm,
 }
 
 impl MigrationWorkerHandle {
@@ -57,6 +59,10 @@ impl MigrationWorkerHandle {
             .expect("should have thread")
             .join()
             .expect("should join migration worker gracefully")
+    }
+
+    pub fn try_cancel_migration(&self) {
+        self.cancel_ctx.try_cancel_migration();
     }
 }
 
@@ -85,6 +91,7 @@ pub struct MigrationWorker {
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
     initial_vm_state: VmState,
     seccomp_filters: MigrationSeccompFilters,
+    cancel_ctx: CancelContextMigration,
 }
 
 impl MigrationWorker {
@@ -115,10 +122,20 @@ impl MigrationWorker {
                     &self.config,
                     self.initial_vm_state,
                     &self.seccomp_filters,
+                    &self.cancel_ctx,
                 )
             })
-            .inspect(|_| event!("vm", "migration-finished"))
-            .inspect_err(|_| event!("vm", "migration-failed"));
+            .inspect(|_| {
+                event!("vm", "migration-finished");
+            })
+            .inspect_err(|e| match e {
+                MigratableError::Canceled => {
+                    event!("vm", "migration-cancelled");
+                }
+                _ => {
+                    event!("vm", "migration-failed");
+                }
+            });
 
         // Notify VMM thread to check migration result.
         self.check_migration_evt.write(1).unwrap();
@@ -145,6 +162,8 @@ impl MigrationWorker {
         initial_vm_state: VmState,
         seccomp_filters: MigrationSeccompFilters,
     ) -> Result<MigrationWorkerHandle, MigrationWorkerSpawnError> {
+        let (cancel_ctx_vmm, cancel_ctx_migration) = new_cancel_context();
+
         let (vm_sender, vm_receiver) = mpsc::sync_channel(0);
         let worker = MigrationWorker {
             vm_receiver,
@@ -154,6 +173,7 @@ impl MigrationWorker {
             hypervisor,
             initial_vm_state,
             seccomp_filters,
+            cancel_ctx: cancel_ctx_migration,
         };
 
         let inner_handle = match thread::Builder::new()
@@ -173,6 +193,7 @@ impl MigrationWorker {
 
         Ok(MigrationWorkerHandle {
             handle: Some(inner_handle),
+            cancel_ctx: cancel_ctx_vmm,
         })
     }
 }
