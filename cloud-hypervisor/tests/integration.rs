@@ -24,73 +24,10 @@ use std::time::Duration;
 use std::{fs, io, thread};
 
 use net_util::MacAddr;
-use test_infra::*;
+use test_infra::{Guest, *};
 use vmm_sys_util::tempdir::TempDir;
 use vmm_sys_util::tempfile::TempFile;
 use wait_timeout::ChildExt;
-
-// Constant taken from the VMM crate.
-const MAX_NUM_PCI_SEGMENTS: u16 = 96;
-
-#[cfg(target_arch = "x86_64")]
-mod x86_64 {
-    pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
-    pub const JAMMY_VFIO_IMAGE_NAME: &str =
-        "jammy-server-cloudimg-amd64-custom-vfio-20241012-0.raw";
-    pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhd";
-    pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhdx";
-    pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.raw";
-    pub const JAMMY_IMAGE_NAME_QCOW2: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_ZLIB: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-zlib.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_ZSTD: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-uncompressed.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE: &str =
-        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-raw.qcow2";
-    pub const WINDOWS_IMAGE_NAME: &str = "windows-server-2022-amd64-2.raw";
-    pub const OVMF_NAME: &str = "CLOUDHV.fd";
-    pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'IO-APIC.*ttyS0' /proc/interrupts || true";
-}
-
-#[cfg(target_arch = "x86_64")]
-use x86_64::*;
-
-#[cfg(target_arch = "aarch64")]
-mod aarch64 {
-    pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0.raw";
-    pub const FOCAL_IMAGE_UPDATE_KERNEL_NAME: &str =
-        "focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw";
-    pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhd";
-    pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhdx";
-    pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.raw";
-    pub const JAMMY_IMAGE_NAME_QCOW2: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_ZLIB: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-zlib.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_ZSTD: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-zstd.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-uncompressed.qcow2";
-    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE: &str =
-        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-raw.qcow2";
-    pub const WINDOWS_IMAGE_NAME: &str = "windows-11-iot-enterprise-aarch64.raw";
-    pub const OVMF_NAME: &str = "CLOUDHV_EFI.fd";
-    pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'GICv3.*uart-pl011' /proc/interrupts || true";
-    pub const GREP_PMU_IRQ_CMD: &str = "grep -c 'GICv3.*arm-pmu' /proc/interrupts || true";
-}
-
-#[cfg(target_arch = "aarch64")]
-use aarch64::*;
-
-const DIRECT_KERNEL_BOOT_CMDLINE: &str =
-    "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1";
-
-const CONSOLE_TEST_STRING: &str = "Started OpenBSD Secure Shell server";
 
 // This enum exists to make it more convenient to
 // implement test for both D-Bus and REST APIs.
@@ -172,12 +109,7 @@ fn _test_api_create_boot(target_api: &TargetApi, guest: &Guest) {
     assert!(target_api.remote_command("ping", None));
 
     // Create the VM first
-    let cpu_count: u8 = 4;
-    let request_body = guest.api_create_body(
-        cpu_count,
-        direct_kernel_boot_path().to_str().unwrap(),
-        DIRECT_KERNEL_BOOT_CMDLINE,
-    );
+    let request_body = guest.api_create_body();
 
     let temp_config_path = guest.tmp_dir.as_path().join("config");
     std::fs::write(&temp_config_path, request_body).unwrap();
@@ -187,12 +119,12 @@ fn _test_api_create_boot(target_api: &TargetApi, guest: &Guest) {
 
     // Then boot it
     assert!(target_api.remote_command("boot", None));
-    thread::sleep(std::time::Duration::new(20, 0));
 
     let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
         // Check that the VM booted as expected
-        assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
-        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        guest.validate_cpu_count(None);
+        guest.validate_memory(None);
     });
 
     kill_child(&mut child);
@@ -217,12 +149,7 @@ fn _test_api_shutdown(target_api: &TargetApi, guest: &Guest) {
     assert!(target_api.remote_command("ping", None));
 
     // Create the VM first
-    let cpu_count: u8 = 4;
-    let request_body = guest.api_create_body(
-        cpu_count,
-        direct_kernel_boot_path().to_str().unwrap(),
-        DIRECT_KERNEL_BOOT_CMDLINE,
-    );
+    let request_body = guest.api_create_body();
 
     let temp_config_path = guest.tmp_dir.as_path().join("config");
     std::fs::write(&temp_config_path, request_body).unwrap();
@@ -237,8 +164,8 @@ fn _test_api_shutdown(target_api: &TargetApi, guest: &Guest) {
         guest.wait_vm_boot().unwrap();
 
         // Check that the VM booted as expected
-        assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
-        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        guest.validate_cpu_count(None);
+        guest.validate_memory(None);
 
         // Sync and shutdown without powering off to prevent filesystem
         // corruption.
@@ -257,8 +184,8 @@ fn _test_api_shutdown(target_api: &TargetApi, guest: &Guest) {
         guest.wait_vm_boot().unwrap();
 
         // Check that the VM booted as expected
-        assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
-        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        guest.validate_cpu_count(None);
+        guest.validate_memory(None);
     });
 
     kill_child(&mut child);
@@ -283,12 +210,8 @@ fn _test_api_delete(target_api: &TargetApi, guest: &Guest) {
     assert!(target_api.remote_command("ping", None));
 
     // Create the VM first
-    let cpu_count: u8 = 4;
-    let request_body = guest.api_create_body(
-        cpu_count,
-        direct_kernel_boot_path().to_str().unwrap(),
-        DIRECT_KERNEL_BOOT_CMDLINE,
-    );
+    let request_body = guest.api_create_body();
+
     let temp_config_path = guest.tmp_dir.as_path().join("config");
     std::fs::write(&temp_config_path, request_body).unwrap();
     let create_config = temp_config_path.as_os_str().to_str().unwrap();
@@ -302,8 +225,8 @@ fn _test_api_delete(target_api: &TargetApi, guest: &Guest) {
         guest.wait_vm_boot().unwrap();
 
         // Check that the VM booted as expected
-        assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
-        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        guest.validate_cpu_count(None);
+        guest.validate_memory(None);
 
         // Sync and shutdown without powering off to prevent filesystem
         // corruption.
@@ -324,8 +247,8 @@ fn _test_api_delete(target_api: &TargetApi, guest: &Guest) {
         guest.wait_vm_boot().unwrap();
 
         // Check that the VM booted as expected
-        assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
-        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        guest.validate_cpu_count(None);
+        guest.validate_memory(None);
     });
 
     kill_child(&mut child);
@@ -351,12 +274,7 @@ fn _test_api_pause_resume(target_api: &TargetApi, guest: &Guest) {
     assert!(target_api.remote_command("ping", None));
 
     // Create the VM first
-    let cpu_count: u8 = 4;
-    let request_body = guest.api_create_body(
-        cpu_count,
-        direct_kernel_boot_path().to_str().unwrap(),
-        DIRECT_KERNEL_BOOT_CMDLINE,
-    );
+    let request_body = guest.api_create_body();
 
     let temp_config_path = guest.tmp_dir.as_path().join("config");
     std::fs::write(&temp_config_path, request_body).unwrap();
@@ -370,8 +288,8 @@ fn _test_api_pause_resume(target_api: &TargetApi, guest: &Guest) {
 
     let r = std::panic::catch_unwind(|| {
         // Check that the VM booted as expected
-        assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
-        assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+        guest.validate_cpu_count(None);
+        guest.validate_memory(None);
 
         // We now pause the VM
         assert!(target_api.remote_command("pause", None));
@@ -399,7 +317,7 @@ fn _test_api_pause_resume(target_api: &TargetApi, guest: &Guest) {
         thread::sleep(std::time::Duration::new(2, 0));
 
         // Now we should be able to SSH back in and get the right number of CPUs
-        assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
+        guest.validate_cpu_count(None);
     });
 
     kill_child(&mut child);
@@ -539,31 +457,6 @@ fn temp_snapshot_dir_path(tmp_dir: &TempDir) -> String {
 
 fn temp_vmcore_file_path(tmp_dir: &TempDir) -> String {
     String::from(tmp_dir.as_path().join("vmcore").to_str().unwrap())
-}
-
-// Creates the path for direct kernel boot and return the path.
-// For x86_64, this function returns the vmlinux kernel path.
-// For AArch64, this function returns the PE kernel path.
-fn direct_kernel_boot_path() -> PathBuf {
-    let mut workload_path = dirs::home_dir().unwrap();
-    workload_path.push("workloads");
-
-    let mut kernel_path = workload_path;
-    #[cfg(target_arch = "x86_64")]
-    kernel_path.push("vmlinux-x86_64");
-    #[cfg(target_arch = "aarch64")]
-    kernel_path.push("Image-arm64");
-
-    kernel_path
-}
-
-fn edk2_path() -> PathBuf {
-    let mut workload_path = dirs::home_dir().unwrap();
-    workload_path.push("workloads");
-    let mut edk2_path = workload_path;
-    edk2_path.push(OVMF_NAME);
-
-    edk2_path
 }
 
 fn cloud_hypervisor_release_path() -> String {
@@ -2610,6 +2503,7 @@ mod common_parallel {
     use std::process::Command;
 
     use block::ImageType;
+    use test_infra::GuestFactory;
 
     use crate::*;
 
@@ -6049,7 +5943,8 @@ mod common_parallel {
     #[test]
     fn test_api_http_shutdown() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest_with_cpu(Box::new(disk_config), 4);
 
         let target_api = TargetApi::new_http_api(&guest.tmp_dir);
         _test_api_shutdown(&target_api, &guest);
@@ -6058,7 +5953,8 @@ mod common_parallel {
     #[test]
     fn test_api_http_delete() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest_with_cpu(Box::new(disk_config), 4);
 
         let target_api = TargetApi::new_http_api(&guest.tmp_dir);
         _test_api_delete(&target_api, &guest);
@@ -6067,7 +5963,8 @@ mod common_parallel {
     #[test]
     fn test_api_http_pause_resume() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest_with_cpu(Box::new(disk_config), 4);
 
         let target_api = TargetApi::new_http_api(&guest.tmp_dir);
         _test_api_pause_resume(&target_api, &guest);
@@ -6076,7 +5973,8 @@ mod common_parallel {
     #[test]
     fn test_api_http_create_boot() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest_with_cpu(Box::new(disk_config), 4);
 
         let target_api = TargetApi::new_http_api(&guest.tmp_dir);
         _test_api_create_boot(&target_api, &guest);
@@ -9980,12 +9878,7 @@ mod dbus_api {
         assert!(http_api.remote_command("ping", None));
 
         // Create the VM first
-        let cpu_count: u8 = 4;
-        let request_body = guest.api_create_body(
-            cpu_count,
-            direct_kernel_boot_path().to_str().unwrap(),
-            DIRECT_KERNEL_BOOT_CMDLINE,
-        );
+        let request_body = guest.api_create_body();
 
         let temp_config_path = guest.tmp_dir.as_path().join("config");
         std::fs::write(&temp_config_path, request_body).unwrap();
@@ -10000,8 +9893,8 @@ mod dbus_api {
             guest.wait_vm_boot().unwrap();
 
             // Check that the VM booted as expected
-            assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
-            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            guest.validate_cpu_count(None);
+            guest.validate_memory(None);
 
             // Sync and shutdown without powering off to prevent filesystem
             // corruption.
@@ -10019,8 +9912,8 @@ mod dbus_api {
             guest.wait_vm_boot().unwrap();
 
             // Check that the VM booted as expected
-            assert_eq!(guest.get_cpu_count().unwrap_or_default() as u8, cpu_count);
-            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
+            guest.validate_cpu_count(None);
+            guest.validate_memory(None);
         });
 
         kill_child(&mut child);
@@ -10032,7 +9925,8 @@ mod dbus_api {
     #[test]
     fn test_api_dbus_create_boot() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest_with_cpu(Box::new(disk_config), 4);
 
         let target_api = TargetApi::new_dbus_api(&guest.tmp_dir);
         _test_api_create_boot(&target_api, &guest);
@@ -10041,7 +9935,8 @@ mod dbus_api {
     #[test]
     fn test_api_dbus_shutdown() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest_with_cpu(Box::new(disk_config), 4);
 
         let target_api = TargetApi::new_dbus_api(&guest.tmp_dir);
         _test_api_shutdown(&target_api, &guest);
@@ -10050,7 +9945,8 @@ mod dbus_api {
     #[test]
     fn test_api_dbus_delete() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest_with_cpu(Box::new(disk_config), 4);
 
         let target_api = TargetApi::new_dbus_api(&guest.tmp_dir);
         _test_api_delete(&target_api, &guest);
@@ -10059,7 +9955,8 @@ mod dbus_api {
     #[test]
     fn test_api_dbus_pause_resume() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest_with_cpu(Box::new(disk_config), 4);
 
         let target_api = TargetApi::new_dbus_api(&guest.tmp_dir);
         _test_api_pause_resume(&target_api, &guest);
@@ -14437,10 +14334,39 @@ mod common_cvm {
     #[test]
     fn test_focal_simple_launch() {
         let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let mut guest = Guest::new(Box::new(disk_config));
-        guest.vm_type = GuestVmType::Confidential;
-        guest.boot_timeout = DEFAULT_CVM_TCP_LISTENER_TIMEOUT;
-        guest.nested = false;
+        let guest =
+            GuestFactory::new_confidential_guest_factory().create_guest(Box::new(disk_config));
+
         _test_simple_launch(&guest)
     }
+
+    #[test]
+    fn test_api_http_create_boot() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest_with_cpu(Box::new(disk_config), 4);
+        let target_api = TargetApi::new_http_api(&guest.tmp_dir);
+        _test_api_create_boot(&target_api, &guest);
+    }
+
+    #[test]
+    fn test_api_http_shutdown() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest_with_cpu(Box::new(disk_config), 4);
+
+        let target_api = TargetApi::new_http_api(&guest.tmp_dir);
+        _test_api_shutdown(&target_api, &guest);
+    }
+
+    #[test]
+    fn test_api_http_delete() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest_with_cpu(Box::new(disk_config), 4);
+
+        let target_api = TargetApi::new_http_api(&guest.tmp_dir);
+        _test_api_delete(&target_api, &guest);
+    }
+
 }

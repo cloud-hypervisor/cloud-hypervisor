@@ -985,8 +985,8 @@ impl Guest {
             network,
             vm_type: GuestVmType::Regular,
             boot_timeout: DEFAULT_TCP_LISTENER_TIMEOUT,
-            kernel_path: None,
-            kernel_cmdline: None,
+            kernel_path: direct_kernel_boot_path().to_str().map(String::from),
+            kernel_cmdline: Some(DIRECT_KERNEL_BOOT_CMDLINE.to_string()),
             console_type: None,
             num_cpu: 1u32,
             nested: true,
@@ -1068,17 +1068,44 @@ impl Guest {
         )
     }
 
-    pub fn api_create_body(&self, cpu_count: u8, kernel_path: &str, kernel_cmd: &str) -> String {
-        format! {"{{\"cpus\":{{\"boot_vcpus\":{},\"max_vcpus\":{}}},\"payload\":{{\"kernel\":\"{}\",\"cmdline\": \"{}\"}},\"net\":[{{\"ip\":\"{}\", \"mask\":\"255.255.255.0\", \"mac\":\"{}\"}}], \"disks\":[{{\"path\":\"{}\"}}, {{\"path\":\"{}\"}}]}}",
-                 cpu_count,
-                 cpu_count,
-                 kernel_path,
-                 kernel_cmd,
-                 self.network.host_ip0,
-                 self.network.guest_mac0,
-                 self.disk_config.disk(DiskType::OperatingSystem).unwrap().as_str(),
-                 self.disk_config.disk(DiskType::CloudInit).unwrap().as_str(),
+    pub fn api_create_body(&self) -> String {
+        let mut body = format!(
+            r#"{{"cpus":{{"boot_vcpus":{},"max_vcpus":{}{}}},"net":[{{"ip":"{}","mask":"255.255.255.0","mac":"{}"}}],"disks":[{{"path":"{}"}},{{"path":"{}"}}]"#,
+            self.num_cpu,
+            self.num_cpu,
+            if self.nested {
+                ""
+            } else {
+                r#","nested": false"#
+            },
+            self.network.host_ip0,
+            self.network.guest_mac0,
+            self.disk_config.disk(DiskType::OperatingSystem).unwrap(),
+            self.disk_config.disk(DiskType::CloudInit).unwrap(),
+        );
+
+        if self.vm_type == GuestVmType::Confidential {
+            body.push_str(r#","platform":{"sev_snp":true}"#);
+
+            body.push_str(&format!(
+                r#","payload":{{"igvm":"{}","cmdline": "{}","host_data": "{}"}}"#,
+                direct_igvm_boot_path(Some("hvc0"))
+                    .unwrap()
+                    .to_str()
+                    .unwrap(),
+                self.kernel_cmdline.as_deref().unwrap(),
+                generate_host_data(),
+            ));
+        } else {
+            body.push_str(&format!(
+                r#","payload":{{"kernel":"{}","cmdline": "{}"}}"#,
+                self.kernel_path.as_deref().unwrap(),
+                self.kernel_cmdline.as_deref().unwrap(),
+            ));
         }
+
+        body.push('}');
+        body
     }
 
     pub fn get_cpu_count(&self) -> Result<u32, Error> {
@@ -1435,6 +1462,88 @@ impl Guest {
     }
 }
 
+// A factory for creating guests with different configurations. The factory is initialized
+// with a GuestVmType, and created guests will have the same GuestVmType as the factory.
+// This allows creation of guests with different configurations (e.g. regular vs confidential)
+// without specifying the GuestVmType each time.
+// Based on the VmType, the default timeout for waiting for the VM to boot is also set,
+// which is used in the wait_vm_boot() method of the Guest struct. Additionally, nested
+// virtualization is disabled by default for confidential VMs, as it is not supported.
+pub struct GuestFactory(GuestVmType, u32, bool);
+
+impl GuestFactory {
+    pub fn new_regular_guest_factory() -> Self {
+        Self(GuestVmType::Regular, DEFAULT_TCP_LISTENER_TIMEOUT, true)
+    }
+
+    pub fn new_confidential_guest_factory() -> Self {
+        Self(
+            GuestVmType::Confidential,
+            DEFAULT_CVM_TCP_LISTENER_TIMEOUT,
+            false,
+        )
+    }
+
+    pub fn create_guest(&self, disk_config: Box<dyn DiskConfig>) -> Guest {
+        let mut guest = Guest::new(disk_config);
+        guest.vm_type = self.0;
+        guest.boot_timeout = self.1;
+        guest.nested = self.2;
+        guest
+    }
+
+    pub fn create_guest_with_cpu(&self, disk_config: Box<dyn DiskConfig>, cpu_count: u32) -> Guest {
+        let mut guest = Guest::new(disk_config);
+        guest.vm_type = self.0;
+        guest.num_cpu = cpu_count;
+        guest.boot_timeout = self.1;
+        guest.nested = self.2;
+        guest
+    }
+
+    pub fn create_guest_with_cpu_and_nested(
+        &self,
+        disk_config: Box<dyn DiskConfig>,
+        cpu_count: u32,
+        nested: bool,
+    ) -> Guest {
+        let mut guest = Guest::new(disk_config);
+        guest.vm_type = self.0;
+        guest.num_cpu = cpu_count;
+        guest.nested = nested;
+        guest.boot_timeout = self.1;
+        guest
+    }
+
+    pub fn create_guest_with_memory(
+        &self,
+        disk_config: Box<dyn DiskConfig>,
+        memory_size: String,
+    ) -> Guest {
+        let mut guest = Guest::new(disk_config);
+        guest.vm_type = self.0;
+        guest.boot_timeout = self.1;
+        guest.nested = self.2;
+        guest.mem_size_str = memory_size;
+        guest
+    }
+
+    pub fn create_guest_custom(
+        &self,
+        disk_config: Box<dyn DiskConfig>,
+        cpu_count: u32,
+        memory_size: String,
+        nested: bool,
+    ) -> Guest {
+        let mut guest = Guest::new(disk_config);
+        guest.vm_type = self.0;
+        guest.num_cpu = cpu_count;
+        guest.mem_size_str = memory_size;
+        guest.nested = nested;
+        guest
+    }
+}
+
 #[derive(Default)]
 pub enum VerbosityLevel {
     #[default]
@@ -1602,7 +1711,10 @@ impl<'a> GuestCommand<'a> {
             };
             let igvm = direct_igvm_boot_path(Some(console_str))
                 .expect("IGVM boot file not found for console type: {console_str}");
-            self.command.args(["--igvm", igvm.to_str().unwrap()]);
+            self.command.args([
+                "--igvm",
+                igvm.to_str().expect("IGVM path is not valid UTF-8"),
+            ]);
             self.command
                 .args(["--host-data", generate_host_data().as_str()]);
             self.command.args(["--platform", "sev_snp=on"]);
@@ -2050,3 +2162,91 @@ fn generate_host_data() -> String {
     rand::rng().fill_bytes(&mut bytes);
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
+
+// Creates the path for direct kernel boot and return the path.
+// For x86_64, this function returns the vmlinux kernel path.
+// For AArch64, this function returns the PE kernel path.
+pub fn direct_kernel_boot_path() -> PathBuf {
+    let mut workload_path = dirs::home_dir().unwrap();
+    workload_path.push("workloads");
+
+    let mut kernel_path = workload_path;
+    #[cfg(target_arch = "x86_64")]
+    kernel_path.push("vmlinux-x86_64");
+    #[cfg(target_arch = "aarch64")]
+    kernel_path.push("Image-arm64");
+
+    kernel_path
+}
+
+pub fn edk2_path() -> PathBuf {
+    let mut workload_path = dirs::home_dir().unwrap();
+    workload_path.push("workloads");
+    let mut edk2_path = workload_path;
+    edk2_path.push(OVMF_NAME);
+
+    edk2_path
+}
+
+pub const DIRECT_KERNEL_BOOT_CMDLINE: &str =
+    "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1";
+
+pub const CONSOLE_TEST_STRING: &str = "Started OpenBSD Secure Shell server";
+
+// Constant taken from the VMM crate.
+pub const MAX_NUM_PCI_SEGMENTS: u16 = 96;
+
+#[cfg(target_arch = "x86_64")]
+pub mod x86_64 {
+    pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
+    pub const JAMMY_VFIO_IMAGE_NAME: &str =
+        "jammy-server-cloudimg-amd64-custom-vfio-20241012-0.raw";
+    pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhd";
+    pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-amd64-custom-20210609-0.vhdx";
+    pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.raw";
+    pub const JAMMY_IMAGE_NAME_QCOW2: &str = "jammy-server-cloudimg-amd64-custom-20241017-0.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_ZLIB: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-zlib.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_ZSTD: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-zstd.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-zstd.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-uncompressed.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE: &str =
+        "jammy-server-cloudimg-amd64-custom-20241017-0-backing-raw.qcow2";
+    pub const WINDOWS_IMAGE_NAME: &str = "windows-server-2022-amd64-2.raw";
+    pub const OVMF_NAME: &str = "CLOUDHV.fd";
+    pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'IO-APIC.*ttyS0' /proc/interrupts || true";
+}
+
+#[cfg(target_arch = "x86_64")]
+pub use x86_64::*;
+
+#[cfg(target_arch = "aarch64")]
+pub mod aarch64 {
+    pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0.raw";
+    pub const FOCAL_IMAGE_UPDATE_KERNEL_NAME: &str =
+        "focal-server-cloudimg-arm64-custom-20210929-0-update-kernel.raw";
+    pub const FOCAL_IMAGE_NAME_VHD: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhd";
+    pub const FOCAL_IMAGE_NAME_VHDX: &str = "focal-server-cloudimg-arm64-custom-20210929-0.vhdx";
+    pub const JAMMY_IMAGE_NAME: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.raw";
+    pub const JAMMY_IMAGE_NAME_QCOW2: &str = "jammy-server-cloudimg-arm64-custom-20220329-0.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_ZLIB: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-zlib.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_ZSTD: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-zstd.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-zstd.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-uncompressed.qcow2";
+    pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE: &str =
+        "jammy-server-cloudimg-arm64-custom-20220329-0-backing-raw.qcow2";
+    pub const WINDOWS_IMAGE_NAME: &str = "windows-11-iot-enterprise-aarch64.raw";
+    pub const OVMF_NAME: &str = "CLOUDHV_EFI.fd";
+    pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'GICv3.*uart-pl011' /proc/interrupts || true";
+    pub const GREP_PMU_IRQ_CMD: &str = "grep -c 'GICv3.*arm-pmu' /proc/interrupts || true";
+}
+
+#[cfg(target_arch = "aarch64")]
+pub use aarch64::*;
