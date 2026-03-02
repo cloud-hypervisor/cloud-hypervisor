@@ -82,7 +82,7 @@ pub trait VirtioDevice: Send {
     /// If the device claims to not need to register irqfds, but
     /// attempts to do so, a panic will ensue.
     fn needs_ext_irqfds(&self) -> bool {
-        false
+        true
     }
 
     /// The set of feature bits that this device supports.
