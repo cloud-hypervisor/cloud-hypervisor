@@ -34,8 +34,8 @@ use vmm::vm_config::IvshmemConfig;
 use vmm::vm_config::{
     BalloonConfig, ConsoleConfig, DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig,
     LandlockConfig, NetConfig, NumaConfig, PciSegmentConfig, PlatformConfig, PmemConfig,
-    RateLimiterGroupConfig, RngConfig, SerialConfig, TpmConfig, UserDeviceConfig, VdpaConfig,
-    VmConfig, VsockConfig,
+    RateLimiterGroupConfig, RngConfig, RtcConfig, SerialConfig, TpmConfig, UserDeviceConfig,
+    VdpaConfig, VmConfig, VsockConfig,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
@@ -403,6 +403,12 @@ fn get_cli_options_sorted(
             .long("rng")
             .help(RngConfig::SYNTAX)
             .default_value(default_rng)
+            .group("vm-config"),
+        Arg::new("rtc")
+            .long("rtc")
+            .help(RtcConfig::SYNTAX)
+            .num_args(0..=1)
+            .default_missing_value("")
             .group("vm-config"),
         Arg::new("seccomp")
             .long("seccomp")
@@ -1043,6 +1049,7 @@ mod unit_tests {
             iommu: false,
             numa: None,
             watchdog: false,
+            rtc: None,
             #[cfg(feature = "guest_debug")]
             gdb: false,
             pci_segments: None,

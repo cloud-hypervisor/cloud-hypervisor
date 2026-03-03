@@ -451,6 +451,12 @@ impl Default for RngConfig {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RtcConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
+}
+
 impl ApplyLandlock for RngConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
         // Rng Path only need read access
@@ -1051,6 +1057,8 @@ pub struct VmConfig {
     pub numa: Option<Box<[NumaConfig]>>,
     #[serde(default)]
     pub watchdog: bool,
+    #[serde(default)]
+    pub rtc: Option<RtcConfig>,
     #[cfg(feature = "guest_debug")]
     #[serde(default)]
     pub gdb: bool,

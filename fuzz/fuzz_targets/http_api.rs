@@ -198,6 +198,7 @@ impl RequestHandler for StubApiRequestHandler {
                 iommu: false,
                 numa: None,
                 watchdog: false,
+                rtc: None,
                 gdb: false,
                 pci_segments: None,
                 platform: None,
