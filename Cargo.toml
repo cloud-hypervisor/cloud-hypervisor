@@ -70,7 +70,7 @@ igvm_defs = "0.4.0"
 # serde crates
 serde = "1.0.228"
 serde_json = "1.0.149"
-serde_with = { version = "3.16.1", default-features = false }
+serde_with = { version = "3.17.0", default-features = false }
 
 # other crates
 anyhow = "1.0.102"
@@ -90,7 +90,7 @@ signal-hook = "0.4.3"
 thiserror = "2.0.18"
 uuid = { version = "1.21.0" }
 wait-timeout = "0.2.1"
-zerocopy = { version = "0.8.39", default-features = false }
+zerocopy = { version = "0.8.40", default-features = false }
 
 [workspace.lints.clippy]
 # Any clippy lint (group) in alphabetical order:
