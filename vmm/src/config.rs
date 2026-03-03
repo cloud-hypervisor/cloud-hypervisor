@@ -471,6 +471,7 @@ pub struct VmParams<'a> {
     pub pvpanic: bool,
     pub numa: Option<Vec<&'a str>>,
     pub watchdog: bool,
+    pub virtio_rtc: bool,
     #[cfg(feature = "guest_debug")]
     pub gdb: bool,
     pub pci_segments: Option<Vec<&'a str>>,
@@ -541,6 +542,7 @@ impl<'a> VmParams<'a> {
             .get_many::<String>("numa")
             .map(|x| x.map(|y| y as &str).collect());
         let watchdog = args.get_flag("watchdog");
+        let virtio_rtc = args.get_flag("virtio-rtc");
         let pci_segments: Option<Vec<&str>> = args
             .get_many::<String>("pci-segment")
             .map(|x| x.map(|y| y as &str).collect());
@@ -590,6 +592,7 @@ impl<'a> VmParams<'a> {
             pvpanic,
             numa,
             watchdog,
+            virtio_rtc,
             #[cfg(feature = "guest_debug")]
             gdb,
             pci_segments,
@@ -3383,6 +3386,7 @@ impl VmConfig {
             iommu: false, // updated in VmConfig::validate()
             numa,
             watchdog: vm_params.watchdog,
+            virtio_rtc: vm_params.virtio_rtc,
             #[cfg(feature = "guest_debug")]
             gdb,
             pci_segments,
@@ -4722,6 +4726,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             iommu: false,
             numa: None,
             watchdog: false,
+            virtio_rtc: false,
             #[cfg(feature = "guest_debug")]
             gdb: false,
             pci_segments: None,
@@ -4966,6 +4971,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             iommu: false,
             numa: None,
             watchdog: false,
+            virtio_rtc: false,
             #[cfg(feature = "guest_debug")]
             gdb: false,
             pci_segments: None,

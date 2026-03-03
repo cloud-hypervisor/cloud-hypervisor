@@ -980,6 +980,8 @@ pub struct VmConfig {
     pub numa: Option<Vec<NumaConfig>>,
     #[serde(default)]
     pub watchdog: bool,
+    #[serde(default)]
+    pub virtio_rtc: bool,
     #[cfg(feature = "guest_debug")]
     #[serde(default)]
     pub gdb: bool,
