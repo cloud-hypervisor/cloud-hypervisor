@@ -247,11 +247,13 @@ fn get_cli_options_sorted(
             .long("device")
             .help(DeviceConfig::SYNTAX)
             .num_args(1..)
+            .action(ArgAction::Append)
             .group("vm-config"),
         Arg::new("disk")
             .long("disk")
             .help(DiskConfig::SYNTAX)
             .num_args(1..)
+            .action(ArgAction::Append)
             .group("vm-config"),
         Arg::new("event-monitor")
             .long("event-monitor")
@@ -267,6 +269,7 @@ fn get_cli_options_sorted(
             .long("fs")
             .help(FsConfig::SYNTAX)
             .num_args(1..)
+            .action(ArgAction::Append)
             .group("vm-config"),
         #[cfg(feature = "fw_cfg")]
         Arg::new("fw-cfg-config")
@@ -284,6 +287,7 @@ fn get_cli_options_sorted(
             .long("generic-vhost-user")
             .help(GenericVhostUserConfig::SYNTAX)
             .num_args(1..)
+            .action(ArgAction::Append)
             .group("vm-config"),
         #[cfg(feature = "igvm")]
         Arg::new("igvm")
@@ -329,6 +333,7 @@ fn get_cli_options_sorted(
             .long("landlock-rules")
             .help(LandlockConfig::SYNTAX)
             .num_args(1..)
+            .action(ArgAction::Append)
             .group("vm-config"),
         Arg::new("log-file")
             .long("log-file")
@@ -361,21 +366,25 @@ fn get_cli_options_sorted(
                      prefault=on|off\"",
             )
             .num_args(1..)
+            .action(ArgAction::Append)
             .group("vm-config"),
         Arg::new("net")
             .long("net")
             .help(NetConfig::SYNTAX)
             .num_args(1..)
+            .action(ArgAction::Append)
             .group("vm-config"),
         Arg::new("numa")
             .long("numa")
             .help(NumaConfig::SYNTAX)
             .num_args(1..)
+            .action(ArgAction::Append)
             .group("vm-config"),
         Arg::new("pci-segment")
             .long("pci-segment")
             .help(PciSegmentConfig::SYNTAX)
             .num_args(1..)
+            .action(ArgAction::Append)
             .group("vm-config"),
         Arg::new("platform")
             .long("platform")
@@ -388,6 +397,7 @@ fn get_cli_options_sorted(
             .long("pmem")
             .help(PmemConfig::SYNTAX)
             .num_args(1..)
+            .action(ArgAction::Append)
             .group("vm-config"),
         #[cfg(feature = "pvmemcontrol")]
         Arg::new("pvmemcontrol")
@@ -406,6 +416,7 @@ fn get_cli_options_sorted(
             .long("rate-limit-group")
             .help(RateLimiterGroupConfig::SYNTAX)
             .num_args(1..)
+            .action(ArgAction::Append)
             .group("vm-config"),
         Arg::new("restore")
             .long("restore")
@@ -438,6 +449,7 @@ fn get_cli_options_sorted(
             .long("user-device")
             .help(UserDeviceConfig::SYNTAX)
             .num_args(1..)
+            .action(ArgAction::Append)
             .group("vm-config"),
         Arg::new("v")
             .short('v')
@@ -448,6 +460,7 @@ fn get_cli_options_sorted(
             .long("vdpa")
             .help(VdpaConfig::SYNTAX)
             .num_args(1..)
+            .action(ArgAction::Append)
             .group("vm-config"),
         Arg::new("version")
             .short('V')
