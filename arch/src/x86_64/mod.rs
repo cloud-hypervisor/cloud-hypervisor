@@ -841,11 +841,13 @@ pub fn configure_vcpu(
             entry.ebx &= 0xffffff;
             entry.ebx |= x2apic_id << 24;
             apic_id_patched = true;
-            if !nested {
-                // Disable nested virtualization for Intel
-                entry.ecx &= !(1 << VMX_ECX_BIT);
+            if matches!(cpu_vendor, CpuVendor::Intel) {
+                if !nested {
+                    // Disable nested virtualization for Intel
+                    entry.ecx &= !(1 << VMX_ECX_BIT);
+                }
+                break;
             }
-            break;
         }
         if entry.function == 0x8000_0001 {
             if !nested {
