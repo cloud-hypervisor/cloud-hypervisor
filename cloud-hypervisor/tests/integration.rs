@@ -547,7 +547,11 @@ fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
     }
 }
 
-fn remote_command_w_output(api_socket: &str, command: &str, arg: Option<&str>) -> (bool, Vec<u8>) {
+fn remote_command_w_output(
+    api_socket: &str,
+    command: &str,
+    arg: Option<&str>,
+) -> (bool, Vec<u8>, Vec<u8>) {
     let mut cmd = Command::new(clh_command("ch-remote"));
     cmd.args([&format!("--api-socket={api_socket}"), command]);
 
@@ -557,7 +561,7 @@ fn remote_command_w_output(api_socket: &str, command: &str, arg: Option<&str>) -
 
     let output = cmd.output().expect("Failed to launch ch-remote");
 
-    (output.status.success(), output.stdout)
+    (output.status.success(), output.stdout, output.stderr)
 }
 
 fn resize_command(
@@ -1580,7 +1584,7 @@ fn _test_virtio_fs(
 
         if hotplug {
             // Add fs to the VM
-            let (cmd_success, cmd_output) =
+            let (cmd_success, cmd_output, _) =
                 remote_command_w_output(&api_socket, add_arg, Some(&fs_params));
             assert!(cmd_success);
 
@@ -1669,7 +1673,7 @@ fn _test_virtio_fs(
             );
 
             // Add back and check it works
-            let (cmd_success, cmd_output) =
+            let (cmd_success, cmd_output, _) =
                 remote_command_w_output(&api_socket, add_arg, Some(&fs_params));
             assert!(cmd_success);
             if let Some(pci_segment) = pci_segment {
@@ -1828,7 +1832,7 @@ fn _test_virtio_vsock(hotplug: bool) {
         guest.wait_vm_boot().unwrap();
 
         if hotplug {
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-vsock",
                 Some(format!("cid=3,socket={socket},id=test0").as_str()),
@@ -2023,7 +2027,7 @@ struct Counters {
 
 fn get_counters(api_socket: &str) -> Counters {
     // Get counters
-    let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "counters", None);
+    let (cmd_success, cmd_output, _) = remote_command_w_output(api_socket, "counters", None);
     assert!(cmd_success);
 
     let counters: HashMap<&str, HashMap<&str, u64>> =
@@ -2073,7 +2077,7 @@ fn pty_read(mut pty: std::fs::File) -> Receiver<String> {
 }
 
 fn get_pty_path(api_socket: &str, pty_type: &str) -> PathBuf {
-    let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "info", None);
+    let (cmd_success, cmd_output, _) = remote_command_w_output(api_socket, "info", None);
     assert!(cmd_success);
     let info: serde_json::Value = serde_json::from_slice(&cmd_output).unwrap_or_default();
     assert_eq!("Pty", info["config"][pty_type]["mode"]);
@@ -2121,7 +2125,7 @@ fn cleanup_vfio_network_interfaces() {
 }
 
 fn balloon_size(api_socket: &str) -> u64 {
-    let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "info", None);
+    let (cmd_success, cmd_output, _) = remote_command_w_output(api_socket, "info", None);
     assert!(cmd_success);
 
     let info: serde_json::Value = serde_json::from_slice(&cmd_output).unwrap_or_default();
@@ -2137,7 +2141,7 @@ fn balloon_size(api_socket: &str) -> u64 {
 }
 
 fn vm_state(api_socket: &str) -> String {
-    let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "info", None);
+    let (cmd_success, cmd_output, _) = remote_command_w_output(api_socket, "info", None);
     assert!(cmd_success);
 
     let info: serde_json::Value = serde_json::from_slice(&cmd_output).unwrap_or_default();
@@ -2947,7 +2951,7 @@ mod common_parallel {
         guest.wait_vm_boot().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some(
@@ -6605,7 +6609,7 @@ mod common_parallel {
             );
 
             // Now let's add the extra disk.
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some(
@@ -6654,7 +6658,7 @@ mod common_parallel {
             );
 
             // And add it back to validate unplug did work correctly.
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some(
@@ -6784,7 +6788,7 @@ mod common_parallel {
             guest.wait_vm_boot().unwrap();
 
             // Add the disk to the VM
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some("path=/tmp/resize.img,id=test0"),
@@ -6899,7 +6903,7 @@ mod common_parallel {
             guest.wait_vm_boot().unwrap();
 
             // Add the QCOW2 disk to the VM
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some(&format!(
@@ -8691,7 +8695,7 @@ mod common_parallel {
 
             let pmem_temp_file = TempFile::new().unwrap();
             pmem_temp_file.as_file().set_len(128 << 20).unwrap();
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-pmem",
                 Some(&format!(
@@ -8821,7 +8825,7 @@ mod common_parallel {
 
         let r = std::panic::catch_unwind(|| {
             // Add network
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-net",
                 Some(
@@ -8884,7 +8888,7 @@ mod common_parallel {
             thread::sleep(std::time::Duration::new(5, 0));
 
             // Add network
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-net",
                 Some(
@@ -9438,7 +9442,7 @@ mod common_parallel {
             // call to ch-remote from failing.
             thread::sleep(std::time::Duration::new(10, 0));
             // Hotplug the virtio-net device
-            let (cmd_success, cmd_output) =
+            let (cmd_success, cmd_output, _) =
                 remote_command_w_output(&api_socket, "add-net", Some(&net_params));
             assert!(cmd_success);
             #[cfg(target_arch = "x86_64")]
@@ -9714,7 +9718,7 @@ mod common_parallel {
             guest.wait_vm_boot().unwrap();
 
             // Hotplug the SPDK-NVMe device to the VM
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-user-device",
                 Some(&format!(
@@ -9829,7 +9833,7 @@ mod common_parallel {
 
             // Hotplug an extra vDPA block device behind the vIOMMU
             // Add a new vDPA device to the VM
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-vdpa",
                 Some("id=myvdpa0,path=/dev/vhost-vdpa-1,num_queues=1,pci_segment=1,iommu=on"),
@@ -12217,7 +12221,7 @@ mod windows {
             assert_eq!(netdev_ctrl_threads_count(child.id()), netdev_num);
 
             // Hotplug network device
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-net",
                 Some(windows_guest.guest().default_net_string().as_str()),
@@ -12293,7 +12297,7 @@ mod windows {
             assert_eq!(disk_ctrl_threads_count(child.id()), disk_num);
 
             // Hotplug disk device
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some(format!("path={disk},readonly=off").as_str()),
@@ -12323,7 +12327,7 @@ mod windows {
             assert_eq!(disk_ctrl_threads_count(child.id()), disk_num);
 
             // Remount and check the file exists with the expected contents
-            let (cmd_success, _cmd_output) = remote_command_w_output(
+            let (cmd_success, _cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some(format!("path={disk},readonly=off").as_str()),
@@ -12406,7 +12410,7 @@ mod windows {
                 let disk_id = it[0].as_str();
                 let disk = it[1].as_str();
                 // Hotplug disk device
-                let (cmd_success, cmd_output) = remote_command_w_output(
+                let (cmd_success, cmd_output, _) = remote_command_w_output(
                     &api_socket,
                     "add-disk",
                     Some(format!("path={disk},readonly=off").as_str()),
@@ -12449,7 +12453,7 @@ mod windows {
             // Remount
             for it in &disk_test_data {
                 let disk = it[1].as_str();
-                let (cmd_success, _cmd_output) = remote_command_w_output(
+                let (cmd_success, _cmd_output, _) = remote_command_w_output(
                     &api_socket,
                     "add-disk",
                     Some(format!("path={disk},readonly=off").as_str()),
@@ -12619,7 +12623,7 @@ mod vfio {
             guest.wait_vm_boot().unwrap();
 
             // Hotplug the card to the VM
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-device",
                 Some(format!("id=vfio0,path={NVIDIA_VFIO_DEVICE}").as_str()),
