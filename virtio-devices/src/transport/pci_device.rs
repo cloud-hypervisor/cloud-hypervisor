@@ -8,7 +8,7 @@
 
 use std::any::Any;
 use std::cmp;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
@@ -990,6 +990,45 @@ impl VirtioInterrupt for VirtioInterruptMsix {
     ) -> std::result::Result<(), hypervisor::HypervisorVmError> {
         self.interrupt_source_group
             .set_notifier(interrupt, eventfd, vm)
+    }
+}
+
+impl VirtioPciDevice {
+    #[cold]
+    fn bad_doorbell(doorbell: u64, num_doorbells: u64) -> std::io::Result<u64> {
+        Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            format!("tried to register doorbell {doorbell} but only {num_doorbells} are present"),
+        ))
+    }
+    pub fn doorbell_call_addr(&mut self, doorbell: u64, base_addr: u64) -> std::io::Result<u64> {
+        let num_doorbells = u64::from(self.num_doorbells);
+        if doorbell >= num_doorbells {
+            Self::bad_doorbell(doorbell, num_doorbells)
+        } else {
+            Ok(base_addr
+                .checked_add(doorbell * NOTIFY_OFF_MULTIPLIER as u64 + DOORBELL_BAR_OFFSET)
+                .expect("address goes past end of address space"))
+        }
+    }
+
+    pub fn doorbell_err_addr(&mut self, doorbell: u64, base_addr: u64) -> std::io::Result<u64> {
+        let num_doorbells = u64::from(self.num_doorbells);
+        if doorbell >= num_doorbells {
+            Self::bad_doorbell(doorbell, num_doorbells)
+        } else {
+            Ok(base_addr
+                .checked_add(
+                    (doorbell + MAX_QUEUES) * NOTIFY_OFF_MULTIPLIER as u64 + DOORBELL_BAR_OFFSET,
+                )
+                .expect("address goes past end of address space"))
+        }
+    }
+
+    pub fn doorbell_log_addr(&mut self, base_addr: u64) -> u64 {
+        base_addr
+            .checked_add((2 + MAX_QUEUES + 1) * NOTIFY_OFF_MULTIPLIER as u64 + DOORBELL_BAR_OFFSET)
+            .expect("address goes past end of address space")
     }
 }
 
