@@ -126,6 +126,82 @@ pub struct BlockError {
     ctx: Option<ErrorContext>,
 }
 
+impl BlockError {
+    /// Create a new `BlockError` from a kind and a source error.
+    pub fn new<E>(kind: BlockErrorKind, source: E) -> Self
+    where
+        E: StdError + Send + Sync + 'static,
+    {
+        Self {
+            kind,
+            source: Some(Box::new(source)),
+            ctx: None,
+        }
+    }
+
+    /// Create a `BlockError` from just a kind, with no underlying cause.
+    pub fn from_kind(kind: BlockErrorKind) -> Self {
+        Self {
+            kind,
+            source: None,
+            ctx: None,
+        }
+    }
+
+    /// Attach or replace the source error (builder-style).
+    pub fn with_source<E>(mut self, source: E) -> Self
+    where
+        E: StdError + Send + Sync + 'static,
+    {
+        self.source = Some(Box::new(source));
+        self
+    }
+
+    /// Attach diagnostic context.
+    pub fn with_ctx(mut self, ctx: ErrorContext) -> Self {
+        self.ctx = Some(ctx);
+        self
+    }
+
+    /// Shorthand: attach an operation name.
+    pub fn with_op(mut self, op: ErrorOp) -> Self {
+        self.ctx.get_or_insert_with(ErrorContext::default).op = Some(op);
+        self
+    }
+
+    /// Shorthand: attach a file path.
+    pub fn with_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.ctx.get_or_insert_with(ErrorContext::default).path = Some(path.into());
+        self
+    }
+
+    /// Shorthand: attach a byte offset.
+    pub fn with_offset(mut self, offset: u64) -> Self {
+        self.ctx.get_or_insert_with(ErrorContext::default).offset = Some(offset);
+        self
+    }
+
+    /// The error classification.
+    pub fn kind(&self) -> BlockErrorKind {
+        self.kind
+    }
+
+    /// The diagnostic context, if any.
+    pub fn context(&self) -> Option<&ErrorContext> {
+        self.ctx.as_ref()
+    }
+
+    /// Access the underlying source error, if any.
+    pub fn source_ref(&self) -> Option<&(dyn StdError + Send + Sync + 'static)> {
+        self.source.as_deref()
+    }
+
+    /// Try to downcast the source to a concrete type.
+    pub fn downcast_ref<T: StdError + 'static>(&self) -> Option<&T> {
+        self.source.as_ref()?.downcast_ref::<T>()
+    }
+}
+
 impl Display for BlockError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.kind)?;
