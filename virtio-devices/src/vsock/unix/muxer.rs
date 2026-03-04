@@ -241,6 +241,11 @@ impl VsockChannel for VsockMuxer {
 
         // We don't know how to handle packets addressed to other CIDs. We only handle the host
         // part of the guest - host communication here.
+        // TODO: support direct inter-VM communication
+        // TODO: support CID for hypervisor built-in services.
+        // Useful for things like unauthenticated login: without CoCo,
+        // the VMM has complete control over the guest, and so the guest
+        // giving the VMM a root shell is not a security risk.
         if pkt.dst_cid() != uapi::VSOCK_HOST_CID {
             info!(
                 "vsock: dropping guest packet for unknown CID: {:?}",
@@ -426,6 +431,7 @@ impl VsockMuxer {
                         // the guest side, we need to know the destination port. We'll read
                         // that port from a "connect" command received on this socket, so the
                         // next step is to ask to be notified the moment we can read from it.
+                        // TODO: support connections with hard-coded guest CIDs for forwarding.
                         self.add_listener(stream.as_raw_fd(), EpollListener::LocalStream(stream))
                     })
                     .unwrap_or_else(|err| {
