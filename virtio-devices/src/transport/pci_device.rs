@@ -1257,6 +1257,15 @@ impl PciDevice for VirtioPciDevice {
             {
                 // Handled with ioeventfds.
             }
+            o if (DOORBELL_BAR_OFFSET..DOORBELL_BAR_OFFSET + DOORBELL_BAR_SIZE).contains(&o) => {
+                // Handled with ioeventfds.
+            }
+            o if (VDB_NOTIFICATION_BAR_OFFSET
+                ..VDB_NOTIFICATION_BAR_OFFSET + VDB_NOTIFICATION_SIZE)
+                .contains(&o) =>
+            {
+                todo!("Getting interrupt state from VDB notification BAR")
+            }
             o if (MSIX_TABLE_BAR_OFFSET..MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE).contains(&o) => {
                 if let Some(msix_config) = &self.msix_config {
                     msix_config
@@ -1309,6 +1318,23 @@ impl PciDevice for VirtioPciDevice {
                 // Handled with ioeventfds.
                 #[cfg(not(feature = "sev_snp"))]
                 error!("Unexpected write to notification BAR: offset = 0x{o:x}");
+            }
+            o if (DOORBELL_BAR_OFFSET..DOORBELL_BAR_OFFSET + DOORBELL_BAR_SIZE).contains(&o) => {
+                #[cfg(feature = "sev_snp")]
+                for (event, addr) in self.ioeventfds(_base) {
+                    if addr == _base + offset {
+                        event.write(1).unwrap();
+                    }
+                }
+                // Handled with ioeventfds.
+                #[cfg(not(feature = "sev_snp"))]
+                error!("Unexpected write to doorbell BAR: offset = 0x{o:x}");
+            }
+            o if (VDB_NOTIFICATION_BAR_OFFSET
+                ..VDB_NOTIFICATION_BAR_OFFSET + VDB_NOTIFICATION_SIZE)
+                .contains(&o) =>
+            {
+                todo!("Masking and unmasking interrupts via VDB notification BAR")
             }
             o if (MSIX_TABLE_BAR_OFFSET..MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE).contains(&o) => {
                 if let Some(msix_config) = &self.msix_config {
