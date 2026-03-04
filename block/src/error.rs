@@ -16,6 +16,7 @@
 //!         +-- io::Error / etc.
 //! ```
 
+use std::error::Error as StdError;
 use std::fmt::{self, Display, Formatter};
 use std::path::PathBuf;
 
@@ -46,12 +47,12 @@ impl Display for BlockErrorKind {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io => write!(f, "I/O error"),
-            Self::InvalidFormat => write!(f, "invalid format"),
-            Self::UnsupportedFeature => write!(f, "unsupported feature"),
-            Self::CorruptImage => write!(f, "corrupt image"),
-            Self::OutOfBounds => write!(f, "out of bounds"),
-            Self::NotFound => write!(f, "not found"),
-            Self::Overflow => write!(f, "overflow"),
+            Self::InvalidFormat => write!(f, "Invalid format"),
+            Self::UnsupportedFeature => write!(f, "Unsupported feature"),
+            Self::CorruptImage => write!(f, "Corrupt image"),
+            Self::OutOfBounds => write!(f, "Out of bounds"),
+            Self::NotFound => write!(f, "Not found"),
+            Self::Overflow => write!(f, "Overflow"),
         }
     }
 }
@@ -107,5 +108,38 @@ impl Display for ErrorContext {
             write!(f, "op={op}")?;
         }
         Ok(())
+    }
+}
+
+/// Unified error type for the block crate.
+///
+/// Pairs a stable [`BlockErrorKind`] classification with an optional
+/// boxed source error (format-specific) and optional [`ErrorContext`].
+///
+/// Display renders kind + context only; the underlying cause is
+/// exposed via [`std::error::Error::source()`] for reporters that
+/// walk the chain.
+#[derive(Debug)]
+pub struct BlockError {
+    kind: BlockErrorKind,
+    source: Option<Box<dyn StdError + Send + Sync + 'static>>,
+    ctx: Option<ErrorContext>,
+}
+
+impl Display for BlockError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.kind)?;
+        if let Some(ctx) = &self.ctx {
+            write!(f, " ({ctx})")?;
+        }
+        Ok(())
+    }
+}
+
+impl StdError for BlockError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        self.source
+            .as_ref()
+            .map(|e| e.as_ref() as &(dyn StdError + 'static))
     }
 }
