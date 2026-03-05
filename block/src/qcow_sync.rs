@@ -144,8 +144,11 @@ fn shared_backing_from(bf: BackingFile) -> BlockResult<Arc<dyn BackingRead>> {
 
     let dup_fd = |fd: BorrowedFd<'_>| -> BlockResult<OwnedFd> {
         fd.try_clone_to_owned().map_err(|e| {
-            BlockError::new(BlockErrorKind::Io, QcowError::BackingFileIo(e))
-                .with_op(ErrorOp::DupBackingFd)
+            BlockError::new(
+                BlockErrorKind::Io,
+                QcowError::BackingFileIo(String::new(), e),
+            )
+            .with_op(ErrorOp::DupBackingFd)
         })
     };
 

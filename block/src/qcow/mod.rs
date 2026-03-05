@@ -59,10 +59,10 @@ use crate::qcow::vec_cache::{CacheMap, Cacheable, VecCache};
 #[sorted]
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("Backing file io error")]
-    BackingFileIo(#[source] io::Error),
-    #[error("Backing file open error")]
-    BackingFileOpen(#[source] Box<Error>),
+    #[error("Backing file I/O error: {0}")]
+    BackingFileIo(String /* path */, #[source] io::Error),
+    #[error("Backing file open error: {0}")]
+    BackingFileOpen(String /* path */, #[source] Box<Error>),
     #[error("Backing file support is disabled")]
     BackingFilesDisabled,
     #[error("Backing file name is too long: {0} bytes over")]
@@ -201,7 +201,7 @@ impl BackingFile {
         let backing_raw_file = OpenOptions::new()
             .read(true)
             .open(&config.path)
-            .map_err(Error::BackingFileIo)?;
+            .map_err(|e| Error::BackingFileIo(config.path.clone(), e))?;
 
         let mut raw_file = RawFile::new(backing_raw_file, direct_io);
 
@@ -215,14 +215,16 @@ impl BackingFile {
             ImageType::Raw => {
                 let size = raw_file
                     .seek(SeekFrom::End(0))
-                    .map_err(Error::BackingFileIo)?;
-                raw_file.rewind().map_err(Error::BackingFileIo)?;
+                    .map_err(|e| Error::BackingFileIo(config.path.clone(), e))?;
+                raw_file
+                    .rewind()
+                    .map_err(|e| Error::BackingFileIo(config.path.clone(), e))?;
                 (BackingKind::Raw(raw_file), size)
             }
             ImageType::Qcow2 => {
                 let (inner, nested_backing, _sparse) =
                     parse_qcow(raw_file, max_nesting_depth - 1, sparse)
-                        .map_err(|e| Error::BackingFileOpen(Box::new(e)))?;
+                        .map_err(|e| Error::BackingFileOpen(config.path.clone(), Box::new(e)))?;
                 let size = inner.header.size;
                 (
                     BackingKind::Qcow {
