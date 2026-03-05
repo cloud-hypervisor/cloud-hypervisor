@@ -33,6 +33,7 @@ use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use arch::{DeviceType, MmioDeviceInfo};
 use arch::{NumaNodes, layout};
 use block::async_io::DiskFile;
+use block::error::BlockError;
 use block::fixed_vhd_sync::FixedVhdDiskSync;
 use block::qcow_sync::QcowDiskSync;
 use block::raw_async_aio::RawFileDiskAio;
@@ -575,7 +576,7 @@ pub enum DeviceManagerError {
 
     /// Failed to create QcowDiskSync
     #[error("Failed to create QcowDiskSync")]
-    CreateQcowDiskSync(#[source] qcow::Error),
+    CreateQcowDiskSync(#[source] BlockError),
 
     /// Failed to create FixedVhdxDiskSync
     #[error("Failed to create FixedVhdxDiskSync")]
@@ -2776,6 +2777,10 @@ impl DeviceManager {
                             disk_cfg.backing_files,
                             disk_cfg.sparse,
                         )
+                        .map_err(|e| match &disk_cfg.path {
+                            Some(p) => e.with_path(p),
+                            None => e,
+                        })
                         .map_err(DeviceManagerError::CreateQcowDiskSync)?,
                     ) as Box<dyn DiskFile>
                 }
