@@ -735,6 +735,7 @@ impl Vmm {
 
         for signal in signals.forever() {
             match signal {
+                #[allow(clippy::collapsible_match)]
                 SIGTERM | SIGINT => {
                     if exit_evt.write(1).is_err() {
                         // Resetting the terminal is usually done as the VMM exits
