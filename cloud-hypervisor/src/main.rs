@@ -595,6 +595,8 @@ fn start_vmm(cmd_arguments: &ArgMatches) -> Result<Option<String>, Error> {
         }
     }
 
+    info!("{} starting", env!("BUILD_VERSION"));
+
     let hypervisor = hypervisor::new().map_err(Error::CreateHypervisor)?;
 
     #[cfg(feature = "guest_debug")]
