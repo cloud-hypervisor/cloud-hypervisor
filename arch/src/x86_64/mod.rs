@@ -641,6 +641,7 @@ pub fn generate_common_cpuid(
 
     // Update some existing CPUID
     for entry in cpuid.as_mut_slice().iter_mut() {
+        #[allow(unused_unsafe)]
         match entry.function {
             // Clear AMX related bits if the AMX feature is not enabled
             0x7 if !config.amx => {
@@ -715,7 +716,6 @@ pub fn generate_common_cpuid(
                     // SAFETY: cpuid called with valid leaves
                     && unsafe { std::arch::x86_64::__cpuid(0x8000_0000).eax } >= 0x8000_0006 =>
             {
-                #[allow(unused_unsafe)]
                 // SAFETY: cpuid called with valid leaves
                 let leaf = unsafe { std::arch::x86_64::__cpuid(0x8000_0006) };
                 entry.eax = leaf.eax;
