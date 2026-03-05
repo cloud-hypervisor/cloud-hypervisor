@@ -18,6 +18,7 @@
 
 use std::error::Error as StdError;
 use std::fmt::{self, Display, Formatter};
+use std::io;
 use std::path::PathBuf;
 
 /// Small, stable classification of block errors.
@@ -219,3 +220,12 @@ impl StdError for BlockError {
             .map(|e| e.as_ref() as &(dyn StdError + 'static))
     }
 }
+
+/// Convenience: wrap an `io::Error` as `BlockErrorKind::Io`.
+impl From<io::Error> for BlockError {
+    fn from(e: io::Error) -> Self {
+        Self::new(BlockErrorKind::Io, e)
+    }
+}
+
+pub type BlockResult<T> = Result<T, BlockError>;
