@@ -1394,6 +1394,7 @@ impl Vmm {
         ctx: &mut MemoryMigrationContext,
         is_converged: impl Fn(&MemoryMigrationContext) -> result::Result<bool, MigratableError>,
         mem_send: &mut SendAdditionalConnections,
+        cancel_ctx: &CancelContextReceiver,
     ) -> result::Result<MemoryRangeTable /* remaining */, MigratableError> {
         loop {
             let iteration_begin = Instant::now();
@@ -1413,7 +1414,7 @@ impl Vmm {
 
             // Send the current dirty pages
             let transfer_begin = Instant::now();
-            mem_send.send_memory(iteration_table, socket)?;
+            mem_send.send_memory(iteration_table, socket, cancel_ctx)?;
             let transfer_duration = transfer_begin.elapsed();
             ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
 
@@ -1540,6 +1541,7 @@ impl Vmm {
         send_data_migration: &VmSendMigrationData,
         mem_send: &mut SendAdditionalConnections,
         ctx: &mut OngoingMigrationContext,
+        cancel_ctx: &CancelContextReceiver,
     ) -> result::Result<(), MigratableError> {
         let mut mem_ctx = MemoryMigrationContext::new();
 
@@ -1551,6 +1553,7 @@ impl Vmm {
             // We bind send_data_migration to the callback
             |ctx| Self::is_precopy_converged(ctx, send_data_migration),
             mem_send,
+            cancel_ctx,
         )?;
         let downtime_begin = Instant::now();
         if vm.get_state() != VmState::Paused {
@@ -1566,7 +1569,7 @@ impl Vmm {
 
             mem_ctx.update_metrics_before_transfer(iteration_begin, &final_table);
             let transfer_begin = Instant::now();
-            mem_send.send_memory(final_table, socket)?;
+            mem_send.send_memory(final_table, socket, cancel_ctx)?;
             let transfer_duration = transfer_begin.elapsed();
             mem_ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
             mem_ctx.iteration += 1;
@@ -1700,6 +1703,7 @@ impl Vmm {
                 send_data_migration.tls_dir.as_deref(),
                 &vm.guest_memory(),
                 &seccomp_filters.tcp_worker,
+                cancel_ctx,
             )?;
 
             Self::do_memory_migration(
@@ -1708,6 +1712,7 @@ impl Vmm {
                 send_data_migration,
                 &mut mem_send,
                 &mut ctx,
+                cancel_ctx,
             )
             .inspect_err(|_| {
                 if let Err(e) = mem_send.cleanup_workers() {
@@ -1767,7 +1772,12 @@ impl Vmm {
                 && !matches!(send_data_migration.memory_mode, MigrationMode::Postcopy)
             {
                 let memory_ranges = vm.dirty_log()?;
-                transport::send_memory_ranges(&vm.guest_memory(), &memory_ranges, &mut socket)?;
+                transport::send_memory_ranges(
+                    &vm.guest_memory(),
+                    &memory_ranges,
+                    &mut socket,
+                    cancel_ctx,
+                )?;
             }
             Ok(snapshot)
         })?;
