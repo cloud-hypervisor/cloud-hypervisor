@@ -41,7 +41,7 @@ use block::raw_sync::RawFileDiskSync;
 use block::vhdx_sync::VhdxDiskSync;
 use block::{
     ImageType, block_aio_is_supported, block_io_uring_is_supported, detect_image_type,
-    preallocate_disk, qcow, vhdx,
+    preallocate_disk, vhdx,
 };
 #[cfg(feature = "io_uring")]
 use block::{fixed_vhd_async::FixedVhdDiskAsync, raw_async::RawFileDisk};
@@ -266,7 +266,7 @@ pub enum DeviceManagerError {
 
     /// Failed to parse disk image format
     #[error("Failed to parse disk image format")]
-    DetectImageType(#[source] io::Error),
+    DetectImageType(#[source] BlockError),
 
     /// Cannot create serial manager
     #[error("Cannot create serial manager")]
