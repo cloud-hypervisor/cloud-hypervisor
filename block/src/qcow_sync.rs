@@ -5,7 +5,7 @@
 use std::cmp::min;
 use std::collections::VecDeque;
 use std::fs::File;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
 use std::sync::Arc;
 use std::{io, ptr, slice};
 
@@ -15,13 +15,13 @@ use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
+use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
 use crate::qcow::qcow_raw_file::QcowRawFile;
 use crate::qcow::{
-    BackingFile, BackingKind, Error as QcowError, MAX_NESTING_DEPTH, RawFile, Result as QcowResult,
-    parse_qcow,
+    BackingFile, BackingKind, Error as QcowError, MAX_NESTING_DEPTH, RawFile, parse_qcow,
 };
 
 /// Raw backing file using pread64 on a duplicated fd.
@@ -139,27 +139,23 @@ impl Drop for Qcow2MetadataBacking {
 }
 
 /// Construct a thread safe backing file reader.
-fn shared_backing_from(bf: BackingFile) -> QcowResult<Arc<dyn BackingRead>> {
+fn shared_backing_from(bf: BackingFile) -> BlockResult<Arc<dyn BackingRead>> {
     let (kind, virtual_size) = bf.into_kind();
+
+    let dup_fd = |fd: BorrowedFd<'_>| -> BlockResult<OwnedFd> {
+        fd.try_clone_to_owned().map_err(|e| {
+            BlockError::new(BlockErrorKind::Io, QcowError::BackingFileIo(e))
+                .with_op(ErrorOp::DupBackingFd)
+        })
+    };
+
     match kind {
         BackingKind::Raw(raw_file) => {
-            // SAFETY: raw_file holds a valid open fd.
-            let dup_fd = unsafe { libc::dup(raw_file.as_raw_fd()) };
-            if dup_fd < 0 {
-                return Err(QcowError::BackingFileIo(io::Error::last_os_error()));
-            }
-            // SAFETY: dup_fd is a freshly duplicated valid fd.
-            let fd = unsafe { OwnedFd::from_raw_fd(dup_fd) };
+            let fd = dup_fd(raw_file.as_fd())?;
             Ok(Arc::new(RawBacking { fd, virtual_size }))
         }
         BackingKind::Qcow { inner, backing } => {
-            // SAFETY: inner.raw_file holds a valid open fd.
-            let dup_fd = unsafe { libc::dup(inner.raw_file.as_raw_fd()) };
-            if dup_fd < 0 {
-                return Err(QcowError::BackingFileIo(io::Error::last_os_error()));
-            }
-            // SAFETY: dup_fd is a freshly duplicated valid fd.
-            let data_fd = unsafe { OwnedFd::from_raw_fd(dup_fd) };
+            let data_fd = dup_fd(inner.raw_file.as_fd())?;
             Ok(Arc::new(Qcow2MetadataBacking {
                 metadata: Arc::new(QcowMetadata::new(*inner)),
                 data_fd,
@@ -182,17 +178,33 @@ pub struct QcowDiskSync {
 }
 
 impl QcowDiskSync {
-    pub fn new(file: File, direct_io: bool, backing_files: bool, sparse: bool) -> QcowResult<Self> {
+    pub fn new(
+        file: File,
+        direct_io: bool,
+        backing_files: bool,
+        sparse: bool,
+    ) -> BlockResult<Self> {
         let max_nesting_depth = if backing_files { MAX_NESTING_DEPTH } else { 0 };
         let (inner, backing_file, sparse) =
-            parse_qcow(RawFile::new(file, direct_io), max_nesting_depth, sparse).map_err(|e| {
-                match e {
+            parse_qcow(RawFile::new(file, direct_io), max_nesting_depth, sparse)
+                .map_err(|e| match e {
                     QcowError::MaxNestingDepthExceeded if !backing_files => {
                         QcowError::BackingFilesDisabled
                     }
                     other => other,
-                }
-            })?;
+                })
+                .map_err(|e| {
+                    let kind = match &e {
+                        QcowError::InvalidMagic | QcowError::UnsupportedVersion(_) => {
+                            BlockErrorKind::InvalidFormat
+                        }
+                        QcowError::UnsupportedFeature(_) | QcowError::BackingFilesDisabled => {
+                            BlockErrorKind::UnsupportedFeature
+                        }
+                        _ => BlockErrorKind::Io,
+                    };
+                    BlockError::new(kind, e).with_op(ErrorOp::Open)
+                })?;
         let data_raw_file = inner.raw_file.clone();
         Ok(QcowDiskSync {
             metadata: Arc::new(QcowMetadata::new(inner)),
