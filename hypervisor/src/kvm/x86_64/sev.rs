@@ -20,11 +20,17 @@ const KVM_SEV_INIT2: u32 = 22;
 const KVM_SEV_SNP_LAUNCH_START: u32 = 100;
 const KVM_SEV_SNP_LAUNCH_UPDATE: u32 = 101;
 const KVM_SEV_SNP_LAUNCH_FINISH: u32 = 102;
-// See AMD Spec Section 8.17 - SNP_LAUNCH_UPDATE
+// SNP_LAUNCH_UPDATE page types — linux/arch/x86/include/uapi/asm/sev-guest.h
+pub const SNP_PAGE_TYPE_NORMAL: u32 = 1;
+pub const SNP_PAGE_TYPE_VMSA: u32 = 2;
+pub const SNP_PAGE_TYPE_UNMEASURED: u32 = 4;
+pub const SNP_PAGE_TYPE_SECRETS: u32 = 5;
+pub const SNP_PAGE_TYPE_CPUID: u32 = 6;
+
+// See AMD Spec Section 8.17 — SNP_LAUNCH_UPDATE
 // The last 12 bits are metadata about the guest context
 // https://tinyurl.com/sev-guest-policy
 pub const GPA_METADATA_PADDING: u32 = 12;
-pub const SEV_VMSA_PAGE_TYPE: u32 = 2;
 
 #[derive(Debug)]
 pub struct SevFd {
@@ -54,7 +60,7 @@ pub(crate) struct KvmSevSnpLaunchStart {
     pub pad1: [u64; 4],
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Debug, Copy, Clone, Default)]
 pub(crate) struct KvmSevSnpLaunchUpdate {
     pub gfn_start: u64,
@@ -67,7 +73,7 @@ pub(crate) struct KvmSevSnpLaunchUpdate {
     pub pad2: [u64; 4],
 }
 
-#[repr(C)]
+#[repr(C, packed)]
 #[derive(Debug, Copy, Clone, Default)]
 pub(crate) struct KvmSevSnpLaunchFinish {
     pub id_block_uaddr: u64,
