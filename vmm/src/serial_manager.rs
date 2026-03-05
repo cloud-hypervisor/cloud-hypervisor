@@ -132,33 +132,34 @@ impl SerialManager {
 
         let in_fd = match output {
             ConsoleOutput::Pty(ref fd) => fd.as_raw_fd(),
-            ConsoleOutput::Tty(_) => {
+            ConsoleOutput::Tty(_)
                 // If running on an interactive TTY then accept input
                 // SAFETY: trivially safe
-                if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } {
-                    // SAFETY: STDIN_FILENO is a valid fd
-                    let fd = unsafe { libc::dup(libc::STDIN_FILENO) };
-                    if fd == -1 {
-                        return Err(Error::DupFd(std::io::Error::last_os_error()));
-                    }
-                    // SAFETY: fd is valid and owned by us
-                    let stdin_clone = unsafe { File::from_raw_fd(fd) };
-                    // SAFETY: FFI calls with correct arguments
-                    let ret = unsafe {
-                        let mut flags = libc::fcntl(stdin_clone.as_raw_fd(), libc::F_GETFL);
-                        flags |= libc::O_NONBLOCK;
-                        libc::fcntl(stdin_clone.as_raw_fd(), libc::F_SETFL, flags)
-                    };
-
-                    if ret < 0 {
-                        return Err(Error::SetNonBlocking(std::io::Error::last_os_error()));
-                    }
-
-                    output = ConsoleOutput::Tty(Arc::new(stdin_clone));
-                    fd
-                } else {
-                    return Ok(None);
+                if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } =>
+            {
+                // SAFETY: STDIN_FILENO is a valid fd
+                let fd = unsafe { libc::dup(libc::STDIN_FILENO) };
+                if fd == -1 {
+                    return Err(Error::DupFd(std::io::Error::last_os_error()));
                 }
+                // SAFETY: fd is valid and owned by us
+                let stdin_clone = unsafe { File::from_raw_fd(fd) };
+                // SAFETY: FFI calls with correct arguments
+                let ret = unsafe {
+                    let mut flags = libc::fcntl(stdin_clone.as_raw_fd(), libc::F_GETFL);
+                    flags |= libc::O_NONBLOCK;
+                    libc::fcntl(stdin_clone.as_raw_fd(), libc::F_SETFL, flags)
+                };
+
+                if ret < 0 {
+                    return Err(Error::SetNonBlocking(std::io::Error::last_os_error()));
+                }
+
+                output = ConsoleOutput::Tty(Arc::new(stdin_clone));
+                fd
+            }
+            ConsoleOutput::Tty(_) => {
+                return Ok(None);
             }
             ConsoleOutput::Socket(ref fd) => {
                 if let Some(path_in_socket) = socket {
