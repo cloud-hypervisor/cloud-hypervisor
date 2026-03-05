@@ -41,7 +41,7 @@ use block::raw_sync::RawFileDiskSync;
 use block::vhdx_sync::VhdxDiskSync;
 use block::{
     ImageType, block_aio_is_supported, block_io_uring_is_supported, detect_image_type,
-    preallocate_disk, vhdx,
+    open_disk_image, preallocate_disk, vhdx,
 };
 #[cfg(feature = "io_uring")]
 use block::{fixed_vhd_async::FixedVhdDiskAsync, raw_async::RawFileDisk};
@@ -177,7 +177,7 @@ pub enum DeviceManagerError {
 
     /// Cannot open disk path
     #[error("Cannot open disk path")]
-    Disk(#[source] io::Error),
+    Disk(#[source] BlockError),
 
     /// Cannot create vhost-user-net device
     #[error("Cannot create vhost-user-net device")]
@@ -2663,15 +2663,12 @@ impl DeviceManager {
                 options.custom_flags(libc::O_DIRECT);
             }
             // Open block device path
-            let mut file: File = options
-                .open(
-                    disk_cfg
-                        .path
-                        .as_ref()
-                        .ok_or(DeviceManagerError::NoDiskPath)?
-                        .clone(),
-                )
-                .map_err(DeviceManagerError::Disk)?;
+            let disk_path = disk_cfg
+                .path
+                .as_ref()
+                .ok_or(DeviceManagerError::NoDiskPath)?;
+            let mut file: File =
+                open_disk_image(disk_path, &options).map_err(DeviceManagerError::Disk)?;
 
             let detected_image_type =
                 detect_image_type(&mut file).map_err(DeviceManagerError::DetectImageType)?;

@@ -32,7 +32,7 @@ pub mod vhdx_sync;
 use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::collections::VecDeque;
 use std::fmt::{self, Debug};
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
 use std::os::unix::io::AsRawFd;
@@ -1063,6 +1063,16 @@ pub fn read_aligned_block_size(f: &mut File) -> std::io::Result<Vec<u8>> {
     };
     f.read_exact(&mut data)?;
     Ok(data)
+}
+
+/// Open a disk image file, returning a [`BlockError`] with path context
+/// on failure.
+pub fn open_disk_image(path: &Path, options: &OpenOptions) -> BlockResult<File> {
+    options.open(path).map_err(|e| {
+        BlockError::new(BlockErrorKind::Io, e)
+            .with_op(ErrorOp::Open)
+            .with_path(path)
+    })
 }
 
 /// Determine image type through file parsing.
