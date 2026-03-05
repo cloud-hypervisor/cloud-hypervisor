@@ -267,10 +267,6 @@ pub enum DeviceManagerError {
     #[error("Failed to parse disk image format")]
     DetectImageType(#[source] io::Error),
 
-    /// Cannot open qcow disk path
-    #[error("Cannot open qcow disk path")]
-    QcowDeviceCreate(#[source] qcow::Error),
-
     /// Cannot create serial manager
     #[error("Cannot create serial manager")]
     CreateSerialManager(#[source] SerialManagerError),
