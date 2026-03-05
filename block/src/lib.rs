@@ -59,6 +59,7 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::{aio, ioctl_io_nr};
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
+use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::vhdx::VhdxError;
 
 const SECTOR_SHIFT: u8 = 9;
@@ -1065,13 +1066,16 @@ pub fn read_aligned_block_size(f: &mut File) -> std::io::Result<Vec<u8>> {
 }
 
 /// Determine image type through file parsing.
-pub fn detect_image_type(f: &mut File) -> std::io::Result<ImageType> {
-    let block = read_aligned_block_size(f)?;
+pub fn detect_image_type(f: &mut File) -> BlockResult<ImageType> {
+    let block = read_aligned_block_size(f)
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::DetectImageType))?;
 
     // Check 4 first bytes to get the header value and determine the image type
     let image_type = if u32::from_be_bytes(block[0..4].try_into().unwrap()) == QCOW_MAGIC {
         ImageType::Qcow2
-    } else if vhd::is_fixed_vhd(f)? {
+    } else if vhd::is_fixed_vhd(f)
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::DetectImageType))?
+    {
         ImageType::FixedVhd
     } else if u64::from_le_bytes(block[0..8].try_into().unwrap()) == VHDX_SIGN {
         ImageType::Vhdx
