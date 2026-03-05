@@ -41,9 +41,8 @@ impl DiskFile for RawFileDiskSync {
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
         let mut raw = RawFileSync::new(self.file.as_raw_fd());
-        raw.alignment = DiskTopology::probe(&self.file)
-            .map(|t| t.logical_block_size)
-            .unwrap_or(SECTOR_SIZE);
+        raw.alignment =
+            DiskTopology::probe(&self.file).map_or(SECTOR_SIZE, |t| t.logical_block_size);
         Ok(Box::new(raw) as Box<dyn AsyncIo>)
     }
 
