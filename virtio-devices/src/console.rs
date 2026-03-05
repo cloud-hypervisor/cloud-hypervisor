@@ -526,11 +526,7 @@ impl ConsoleResizer {
         if let Some(tty) = self.tty.as_ref() {
             let (cols, rows) = get_win_size(tty);
             self.config.lock().unwrap().update_console_size(cols, rows);
-            if self
-                .acked_features
-                .fetch_and(1u64 << VIRTIO_CONSOLE_F_SIZE, Ordering::AcqRel)
-                != 0
-            {
+            if self.acked_features.load(Ordering::Acquire) & (1u64 << VIRTIO_CONSOLE_F_SIZE) != 0 {
                 // Send the interrupt to the driver
                 let _ = self.config_evt.write(1);
             }
