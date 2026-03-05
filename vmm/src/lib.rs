@@ -2384,10 +2384,10 @@ impl RequestHandler for Vmm {
             error!("Migration failed: {migration_err:?}");
 
             // Stop logging dirty pages only for non-local migrations
-            if !send_data_migration.local
-                && let Err(e) = vm.stop_dirty_log()
-            {
-                return e;
+            if let Err(e) = vm.stop_dirty_log() {
+                warn!(
+                    "Failed to stop dirty log: The VM might run slower but is operational: {e:?}"
+                );
             }
 
             if vm.get_state() == VmState::Paused
