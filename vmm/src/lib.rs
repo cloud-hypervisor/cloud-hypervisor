@@ -2305,6 +2305,8 @@ impl RequestHandler for Vmm {
         // Accept the connection and get the socket
         let mut socket = Vmm::receive_migration_socket(&receive_data_migration.receiver_url)?;
 
+        event!("vm", "migration-receive-started");
+
         let mut state = ReceiveMigrationState::Established;
 
         while !state.finished() {
@@ -2334,8 +2336,11 @@ impl RequestHandler for Vmm {
         }
 
         if let ReceiveMigrationState::Aborted = state {
+            event!("vm", "migration-receive-failed");
             self.vm = None;
             self.vm_config = None;
+        } else {
+            event!("vm", "migration-receive-finished");
         }
 
         Ok(())
@@ -2373,6 +2378,7 @@ impl RequestHandler for Vmm {
 
         let vm = self.vm.as_mut().unwrap();
 
+        event!("vm", "migration-started");
         Self::send_migration(
             vm,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -2382,6 +2388,7 @@ impl RequestHandler for Vmm {
         // Possible cleanup + resume VM
         .map_err(|migration_err| {
             error!("Migration failed: {migration_err:?}");
+            event!("vm", "migration-failed");
 
             // Stop logging dirty pages only for non-local migrations
             if let Err(e) = vm.stop_dirty_log() {
@@ -2399,6 +2406,8 @@ impl RequestHandler for Vmm {
 
             migration_err
         })?;
+
+        event!("vm", "migration-finished");
 
         // Shutdown the VM after the migration succeeded
         self.exit_evt.write(1).map_err(|e| {
