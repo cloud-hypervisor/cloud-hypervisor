@@ -161,11 +161,11 @@ impl SerialManager {
             ConsoleOutput::Tty(_) => {
                 return Ok(None);
             }
-            ConsoleOutput::Socket(ref fd) => {
+            ConsoleOutput::Socket(ref listener) => {
                 if let Some(path_in_socket) = socket {
                     socket_path = Some(path_in_socket.clone());
                 }
-                fd.as_raw_fd()
+                listener.as_raw_fd()
             }
             _ => return Ok(None),
         };
