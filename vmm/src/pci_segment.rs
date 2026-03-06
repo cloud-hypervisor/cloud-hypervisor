@@ -164,15 +164,22 @@ impl PciSegment {
         )
     }
 
-    pub(crate) fn next_device_bdf(&self) -> DeviceManagerResult<PciBdf> {
+    /// Allocates a device BDF on this PCI segment.
+    ///
+    /// - `device_id`: Device ID to request for BDF allocation
+    ///
+    /// ## Errors
+    /// * [`DeviceManagerError::AllocatePciDeviceId`] if device ID
+    ///   allocation on the bus fails.
+    pub(crate) fn allocate_device_bdf(&self, device_id: Option<u8>) -> DeviceManagerResult<PciBdf> {
         Ok(PciBdf::new(
             self.id,
             0,
             self.pci_bus
                 .lock()
                 .unwrap()
-                .next_device_id()
-                .map_err(DeviceManagerError::NextPciDeviceId)? as u8,
+                .allocate_device_id(device_id)
+                .map_err(DeviceManagerError::AllocatePciDeviceId)?,
             0,
         ))
     }
@@ -201,6 +208,65 @@ impl PciSegment {
         }
 
         Ok(())
+    }
+
+    #[cfg(test)]
+    /// Creates a PciSegment without the need for an [`AddressManager`]
+    /// for testing purpose.
+    ///
+    /// An [`AddressManager`] would otherwise be required to create
+    /// [`PciBus`] instances. Instead, we use any struct that implements
+    /// [`DeviceRelocation`] to instantiate a [`PciBus`].
+    pub(crate) fn new_without_address_manager(
+        id: u16,
+        numa_node: u32,
+        mem32_allocator: Arc<Mutex<AddressAllocator>>,
+        mem64_allocator: Arc<Mutex<AddressAllocator>>,
+        pci_irq_slots: &[u8; 32],
+        device_reloc: &Arc<dyn DeviceRelocation>,
+    ) -> DeviceManagerResult<Self> {
+        let pci_root = PciRoot::new(None);
+        let pci_bus = Arc::new(Mutex::new(PciBus::new(pci_root, device_reloc.clone())));
+
+        let pci_config_mmio = Arc::new(Mutex::new(PciConfigMmio::new(Arc::clone(&pci_bus))));
+        let mmio_config_address =
+            layout::PCI_MMCONFIG_START.0 + layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT * id as u64;
+
+        let start_of_mem32_area = mem32_allocator.lock().unwrap().base().0;
+        let end_of_mem32_area = mem32_allocator.lock().unwrap().end().0;
+
+        let start_of_mem64_area = mem64_allocator.lock().unwrap().base().0;
+        let end_of_mem64_area = mem64_allocator.lock().unwrap().end().0;
+
+        let segment = PciSegment {
+            id,
+            pci_bus,
+            pci_config_mmio,
+            mmio_config_address,
+            proximity_domain: numa_node,
+            pci_devices_up: 0,
+            pci_devices_down: 0,
+            #[cfg(target_arch = "x86_64")]
+            pci_config_io: None,
+            mem32_allocator,
+            mem64_allocator,
+            start_of_mem32_area,
+            end_of_mem32_area,
+            start_of_mem64_area,
+            end_of_mem64_area,
+            pci_irq_slots: *pci_irq_slots,
+        };
+
+        info!(
+            "Adding PCI segment: id={}, PCI MMIO config address: 0x{:x}, mem32 area [0x{:x}-0x{:x}, mem64 area [0x{:x}-0x{:x}",
+            segment.id,
+            segment.mmio_config_address,
+            segment.start_of_mem32_area,
+            segment.end_of_mem32_area,
+            segment.start_of_mem64_area,
+            segment.end_of_mem64_area
+        );
+        Ok(segment)
     }
 }
 
@@ -472,5 +538,104 @@ impl Aml for PciSegment {
             pci_dsdt_inner_data,
         )
         .to_aml_bytes(sink);
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use std::result::Result;
+
+    use vm_memory::GuestAddress;
+
+    use super::*;
+
+    #[derive(Debug)]
+    struct MocRelocDevice;
+    impl DeviceRelocation for MocRelocDevice {
+        fn move_bar(
+            &self,
+            _old_base: u64,
+            _new_base: u64,
+            _len: u64,
+            _pci_dev: &mut dyn pci::PciDevice,
+            _region_type: pci::PciBarRegionType,
+        ) -> Result<(), std::io::Error> {
+            Ok(())
+        }
+    }
+
+    fn setup() -> PciSegment {
+        let guest_addr = 0_u64;
+        let guest_size = 0x1000_usize;
+        let allocator_1 = Arc::new(Mutex::new(
+            AddressAllocator::new(GuestAddress(guest_addr), guest_size as u64).unwrap(),
+        ));
+        let allocator_2 = Arc::new(Mutex::new(
+            AddressAllocator::new(GuestAddress(guest_addr), guest_size as u64).unwrap(),
+        ));
+        let moc_device_reloc: Arc<dyn DeviceRelocation> = Arc::new(MocRelocDevice {});
+        let arr = [0_u8; 32];
+
+        PciSegment::new_without_address_manager(
+            0,
+            0,
+            allocator_1,
+            allocator_2,
+            &arr,
+            &moc_device_reloc,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    // Test the default bdf for a segment with an empty bus (except for the root device)
+    fn allocate_device_bdf_default() {
+        // The first address is occupied by the root
+        let segment = setup();
+        let bdf = segment.allocate_device_bdf(None).unwrap();
+        assert_eq!(bdf.segment(), segment.id);
+        assert_eq!(bdf.bus(), 0);
+        assert_eq!(bdf.device(), 1);
+        assert_eq!(bdf.function(), 0);
+    }
+
+    #[test]
+    // Test to acquire a bdf with s specific device ID
+    fn allocate_device_bdf_fixed_device_id() {
+        // The first address is occupied by the root
+        let expect_device_id = 0x10_u8;
+        let segment = setup();
+        let bdf = segment.allocate_device_bdf(Some(expect_device_id)).unwrap();
+        assert_eq!(bdf.segment(), segment.id);
+        assert_eq!(bdf.bus(), 0);
+        assert_eq!(bdf.device(), expect_device_id);
+        assert_eq!(bdf.function(), 0);
+    }
+
+    #[test]
+    // Test to acquire a bdf with invalid device id, one already
+    // taken and the other being greater then the number of allowed
+    // devices per bus.
+    fn allocate_device_bdf_invalid_device_id() {
+        // The first address is occupied by the root
+        let already_taken_device_id = 0x0_u8;
+        let overflow_device_id = 0xff_u8;
+        let segment = setup();
+        let bdf_res = segment.allocate_device_bdf(Some(already_taken_device_id));
+        assert!(matches!(
+            bdf_res,
+            Err(DeviceManagerError::AllocatePciDeviceId(e)) if matches!(
+                e,
+                pci::PciRootError::AlreadyInUsePciDeviceSlot(0x0)
+            )
+        ));
+        let bdf_res = segment.allocate_device_bdf(Some(overflow_device_id));
+        assert!(matches!(
+            bdf_res,
+            Err(DeviceManagerError::AllocatePciDeviceId(e)) if matches!(
+                e,
+                pci::PciRootError::InvalidPciDeviceSlot(0xff)
+            )
+        ));
     }
 }

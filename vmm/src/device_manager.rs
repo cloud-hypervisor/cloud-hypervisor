@@ -9,7 +9,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
@@ -478,7 +478,7 @@ pub enum DeviceManagerError {
 
     /// Failed to find an available PCI device ID.
     #[error("Failed to find an available PCI device ID")]
-    NextPciDeviceId(#[source] pci::PciRootError),
+    AllocatePciDeviceId(#[source] pci::PciRootError),
 
     /// Could not reserve the PCI device ID.
     #[error("Could not reserve the PCI device ID")]
@@ -915,6 +915,7 @@ struct MetaVirtioDevice {
     iommu: bool,
     id: String,
     pci_segment: u16,
+    bdf_device: Option<u8>,
     dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
 }
 
@@ -1000,7 +1001,7 @@ pub struct DeviceManager {
     cpu_manager: Arc<Mutex<CpuManager>>,
 
     // The virtio devices on the system
-    virtio_devices: Vec<MetaVirtioDevice>,
+    virtio_devices: VecDeque<MetaVirtioDevice>,
 
     /// All disks. Needed for locking and unlocking the images.
     block_devices: Vec<Arc<Mutex<Block>>>,
@@ -1341,7 +1342,7 @@ impl DeviceManager {
             config,
             memory_manager,
             cpu_manager,
-            virtio_devices: Vec::new(),
+            virtio_devices: VecDeque::new(),
             block_devices: vec![],
             bus_devices: Vec::new(),
             device_id_cnt,
@@ -1656,6 +1657,7 @@ impl DeviceManager {
                     &handle.id,
                     handle.pci_segment,
                     handle.dma_handler,
+                    handle.bdf_device,
                 )?;
 
                 // Track device BDF for Generic Initiator support
@@ -1687,7 +1689,8 @@ impl DeviceManager {
             }
 
             if let Some(iommu_device) = iommu_device {
-                let dev_id = self.add_virtio_pci_device(iommu_device, &None, &iommu_id, 0, None)?;
+                let dev_id =
+                    self.add_virtio_pci_device(iommu_device, &None, &iommu_id, 0, None, None)?;
                 self.iommu_attached_devices = Some((dev_id, iommu_attached_devices));
             }
         }
@@ -2389,14 +2392,21 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::CreateVirtioConsole)?;
         let virtio_console_device = Arc::new(Mutex::new(virtio_console_device));
-        self.virtio_devices.push(MetaVirtioDevice {
+        let device = MetaVirtioDevice {
             virtio_device: Arc::clone(&virtio_console_device)
                 as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
             iommu: console_config.iommu,
             id: id.clone(),
             pci_segment: 0,
             dma_handler: None,
-        });
+            bdf_device: console_config.bdf_device,
+        };
+
+        if console_config.bdf_device.is_some() {
+            self.virtio_devices.push_front(device);
+        } else {
+            self.virtio_devices.push_back(device);
+        }
 
         // Fill the device tree with a new node. In case of restore, we
         // know there is nothing to do, so we can simply override the
@@ -2892,6 +2902,7 @@ impl DeviceManager {
             id,
             pci_segment: disk_cfg.pci_segment,
             dma_handler: None,
+            bdf_device: disk_cfg.bdf_device,
         })
     }
 
@@ -2900,7 +2911,11 @@ impl DeviceManager {
         if let Some(disk_list_cfg) = &mut block_devices {
             for disk_cfg in disk_list_cfg.iter_mut() {
                 let device = self.make_virtio_block_device(disk_cfg, false)?;
-                self.virtio_devices.push(device);
+                if disk_cfg.bdf_device.is_some() {
+                    self.virtio_devices.push_front(device);
+                } else {
+                    self.virtio_devices.push_back(device);
+                }
             }
         }
         self.config.lock().unwrap().disks = block_devices;
@@ -3062,6 +3077,7 @@ impl DeviceManager {
             id,
             pci_segment: net_cfg.pci_segment,
             dma_handler: None,
+            bdf_device: net_cfg.bdf_device,
         })
     }
 
@@ -3071,7 +3087,11 @@ impl DeviceManager {
         if let Some(net_list_cfg) = &mut net_devices {
             for net_cfg in net_list_cfg.iter_mut() {
                 let device = self.make_virtio_net_device(net_cfg)?;
-                self.virtio_devices.push(device);
+                if net_cfg.bdf_device.is_some() {
+                    self.virtio_devices.push_front(device);
+                } else {
+                    self.virtio_devices.push_back(device);
+                }
             }
         }
         self.config.lock().unwrap().net = net_devices;
@@ -3100,14 +3120,20 @@ impl DeviceManager {
                 )
                 .map_err(DeviceManagerError::CreateVirtioRng)?,
             ));
-            self.virtio_devices.push(MetaVirtioDevice {
+            let device = MetaVirtioDevice {
                 virtio_device: Arc::clone(&virtio_rng_device)
                     as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
                 iommu: rng_config.iommu,
                 id: id.clone(),
                 pci_segment: 0,
                 dma_handler: None,
-            });
+                bdf_device: rng_config.bdf_device,
+            };
+            if rng_config.bdf_device.is_some() {
+                self.virtio_devices.push_front(device);
+            } else {
+                self.virtio_devices.push_back(device);
+            }
 
             // Fill the device tree with a new node. In case of restore, we
             // know there is nothing to do, so we can simply override the
@@ -3168,6 +3194,7 @@ impl DeviceManager {
                 id,
                 pci_segment: generic_vhost_user_cfg.pci_segment,
                 dma_handler: None,
+                bdf_device: None,
             })
         } else {
             Err(DeviceManagerError::NoGenericVhostUserSock)
@@ -3179,7 +3206,7 @@ impl DeviceManager {
         if let Some(generic_vhost_user_list_cfg) = &mut generic_vhost_user_devices {
             for generic_vhost_user_cfg in generic_vhost_user_list_cfg.iter_mut() {
                 let device = self.make_generic_vhost_user_device(generic_vhost_user_cfg)?;
-                self.virtio_devices.push(device);
+                self.virtio_devices.push_back(device);
             }
         }
         self.config.lock().unwrap().generic_vhost_user = generic_vhost_user_devices;
@@ -3234,6 +3261,7 @@ impl DeviceManager {
                 id,
                 pci_segment: fs_cfg.pci_segment,
                 dma_handler: None,
+                bdf_device: fs_cfg.bdf_device,
             })
         } else {
             Err(DeviceManagerError::NoVirtioFsSock)
@@ -3245,7 +3273,11 @@ impl DeviceManager {
         if let Some(fs_list_cfg) = &mut fs_devices {
             for fs_cfg in fs_list_cfg.iter_mut() {
                 let device = self.make_virtio_fs_device(fs_cfg)?;
-                self.virtio_devices.push(device);
+                if fs_cfg.bdf_device.is_some() {
+                    self.virtio_devices.push_front(device);
+                } else {
+                    self.virtio_devices.push_back(device);
+                }
             }
         }
         self.config.lock().unwrap().fs = fs_devices;
@@ -3423,6 +3455,7 @@ impl DeviceManager {
             id,
             pci_segment: pmem_cfg.pci_segment,
             dma_handler: None,
+            bdf_device: pmem_cfg.bdf_device,
         })
     }
 
@@ -3432,7 +3465,11 @@ impl DeviceManager {
         if let Some(pmem_list_cfg) = &mut pmem_devices {
             for pmem_cfg in pmem_list_cfg.iter_mut() {
                 let device = self.make_virtio_pmem_device(pmem_cfg)?;
-                self.virtio_devices.push(device);
+                if pmem_cfg.bdf_device.is_some() {
+                    self.virtio_devices.push_front(device);
+                } else {
+                    self.virtio_devices.push_back(device);
+                }
             }
         }
         self.config.lock().unwrap().pmem = pmem_devices;
@@ -3494,6 +3531,7 @@ impl DeviceManager {
             id,
             pci_segment: vsock_cfg.pci_segment,
             dma_handler: None,
+            bdf_device: vsock_cfg.bdf_device,
         })
     }
 
@@ -3501,7 +3539,11 @@ impl DeviceManager {
         let mut vsock = self.config.lock().unwrap().vsock.take();
         if let Some(vsock_cfg) = &mut vsock {
             let device = self.make_virtio_vsock_device(vsock_cfg)?;
-            self.virtio_devices.push(device);
+            if vsock_cfg.bdf_device.is_some() {
+                self.virtio_devices.push_front(device);
+            } else {
+                self.virtio_devices.push_back(device);
+            }
         }
         self.config.lock().unwrap().vsock = vsock;
 
@@ -3543,13 +3585,14 @@ impl DeviceManager {
 
                 self.virtio_mem_devices.push(Arc::clone(&virtio_mem_device));
 
-                self.virtio_devices.push(MetaVirtioDevice {
+                self.virtio_devices.push_back(MetaVirtioDevice {
                     virtio_device: Arc::clone(&virtio_mem_device)
                         as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
                     iommu: false,
                     id: memory_zone_id.clone(),
                     pci_segment: 0,
                     dma_handler: None,
+                    bdf_device: None,
                 });
 
                 // Fill the device tree with a new node. In case of restore, we
@@ -3576,7 +3619,7 @@ impl DeviceManager {
         let pci_segment_id = 0x0_u16;
 
         let (pci_segment_id, pci_device_bdf, resources) =
-            self.pci_resources(&id, pci_segment_id)?;
+            self.pci_resources(&id, pci_segment_id, None)?;
 
         info!("Creating pvmemcontrol device: id = {id}");
         let (pvmemcontrol_pci_device, pvmemcontrol_bus_device) =
@@ -3630,14 +3673,21 @@ impl DeviceManager {
 
             self.balloon = Some(virtio_balloon_device.clone());
 
-            self.virtio_devices.push(MetaVirtioDevice {
+            let device = MetaVirtioDevice {
                 virtio_device: Arc::clone(&virtio_balloon_device)
                     as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
                 iommu: false,
                 id: id.clone(),
                 pci_segment: 0,
                 dma_handler: None,
-            });
+                bdf_device: balloon_config.bdf_device,
+            };
+
+            if balloon_config.bdf_device.is_some() {
+                self.virtio_devices.push_front(device);
+            } else {
+                self.virtio_devices.push_back(device);
+            }
 
             self.device_tree
                 .lock()
@@ -3669,13 +3719,14 @@ impl DeviceManager {
             )
             .map_err(DeviceManagerError::CreateVirtioWatchdog)?,
         ));
-        self.virtio_devices.push(MetaVirtioDevice {
+        self.virtio_devices.push_back(MetaVirtioDevice {
             virtio_device: Arc::clone(&virtio_watchdog_device)
                 as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
             iommu: false,
             id: id.clone(),
             pci_segment: 0,
             dma_handler: None,
+            bdf_device: None,
         });
 
         self.device_tree
@@ -3734,6 +3785,7 @@ impl DeviceManager {
             id,
             pci_segment: vdpa_cfg.pci_segment,
             dma_handler: Some(vdpa_mapping),
+            bdf_device: vdpa_cfg.bdf_device,
         })
     }
 
@@ -3743,7 +3795,11 @@ impl DeviceManager {
         if let Some(vdpa_list_cfg) = &mut vdpa_devices {
             for vdpa_cfg in vdpa_list_cfg.iter_mut() {
                 let device = self.make_vdpa_device(vdpa_cfg)?;
-                self.virtio_devices.push(device);
+                if vdpa_cfg.bdf_device.is_some() {
+                    self.virtio_devices.push_front(device);
+                } else {
+                    self.virtio_devices.push_back(device);
+                }
             }
         }
         self.config.lock().unwrap().vdpa = vdpa_devices;
@@ -3820,7 +3876,7 @@ impl DeviceManager {
         };
 
         let (pci_segment_id, pci_device_bdf, resources) =
-            self.pci_resources(&vfio_name, device_cfg.pci_segment)?;
+            self.pci_resources(&vfio_name, device_cfg.pci_segment, device_cfg.bdf_device)?;
 
         let mut needs_dma_mapping = false;
 
@@ -4066,8 +4122,11 @@ impl DeviceManager {
             id
         };
 
-        let (pci_segment_id, pci_device_bdf, resources) =
-            self.pci_resources(&vfio_user_name, device_cfg.pci_segment)?;
+        let (pci_segment_id, pci_device_bdf, resources) = self.pci_resources(
+            &vfio_user_name,
+            device_cfg.pci_segment,
+            device_cfg.bdf_device,
+        )?;
 
         let legacy_interrupt_group =
             if let Some(legacy_interrupt_manager) = &self.legacy_interrupt_manager {
@@ -4183,6 +4242,7 @@ impl DeviceManager {
         virtio_device_id: &str,
         pci_segment_id: u16,
         dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
+        bdf_device: Option<u8>,
     ) -> DeviceManagerResult<PciBdf> {
         let id = format!("{VIRTIO_PCI_DEVICE_NAME_PREFIX}-{virtio_device_id}");
 
@@ -4191,7 +4251,7 @@ impl DeviceManager {
         node.children = vec![virtio_device_id.to_string()];
 
         let (pci_segment_id, pci_device_bdf, resources) =
-            self.pci_resources(&id, pci_segment_id)?;
+            self.pci_resources(&id, pci_segment_id, bdf_device)?;
 
         // Update the existing virtio node by setting the parent.
         if let Some(node) = self.device_tree.lock().unwrap().get_mut(virtio_device_id) {
@@ -4328,7 +4388,7 @@ impl DeviceManager {
         info!("Creating pvpanic device {id}");
 
         let (pci_segment_id, pci_device_bdf, resources) =
-            self.pci_resources(&id, pci_segment_id)?;
+            self.pci_resources(&id, pci_segment_id, None)?;
 
         let snapshot = snapshot_from_id(self.snapshot.as_ref(), id.as_str());
 
@@ -4366,7 +4426,7 @@ impl DeviceManager {
         info!("Creating ivshmem device {id}");
 
         let (pci_segment_id, pci_device_bdf, resources) =
-            self.pci_resources(&id, pci_segment_id)?;
+            self.pci_resources(&id, pci_segment_id, None)?;
         let snapshot = snapshot_from_id(self.snapshot.as_ref(), id.as_str());
 
         let ivshmem_ops = Arc::new(Mutex::new(IvshmemHandler {
@@ -4411,6 +4471,7 @@ impl DeviceManager {
         &self,
         id: &str,
         pci_segment_id: u16,
+        pci_device_id: Option<u8>,
     ) -> DeviceManagerResult<(u16, PciBdf, Option<Vec<Resource>>)> {
         // Look for the id in the device tree. If it can be found, that means
         // the device is being restored, otherwise it's created from scratch.
@@ -4437,7 +4498,8 @@ impl DeviceManager {
 
             (pci_segment_id, pci_device_bdf, resources)
         } else {
-            let pci_device_bdf = self.pci_segments[pci_segment_id as usize].next_device_bdf()?;
+            let pci_device_bdf =
+                self.pci_segments[pci_segment_id as usize].allocate_device_bdf(pci_device_id)?;
 
             (pci_segment_id, pci_device_bdf, None)
         })
@@ -4927,7 +4989,7 @@ impl DeviceManager {
         // Add the virtio device to the device manager list. This is important
         // as the list is used to notify virtio devices about memory updates
         // for instance.
-        self.virtio_devices.push(handle.clone());
+        self.virtio_devices.push_back(handle.clone());
 
         let mapping: Option<Arc<IommuMapping>> = if handle.iommu {
             self.iommu_mapping.clone()
@@ -4941,6 +5003,7 @@ impl DeviceManager {
             &handle.id,
             handle.pci_segment,
             handle.dma_handler,
+            handle.bdf_device,
         )?;
 
         // Update the PCIU bitmap

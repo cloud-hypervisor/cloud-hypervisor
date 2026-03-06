@@ -980,7 +980,9 @@ components:
         image_type:
           type: string
           enum: [FixedVhd, Qcow2, Raw, Vhdx, Unknown]
-
+        bdf_device:
+          type: int8
+          description: Device part of the PCI BDF for this device
 
     NetConfig:
       type: object
@@ -1034,6 +1036,9 @@ components:
         offload_csum:
           type: boolean
           default: true
+        bdf_device:
+          type: int8
+          description: Device part of the PCI BDF for this device
 
     RngConfig:
       required:
@@ -1045,6 +1050,9 @@ components:
         iommu:
           type: boolean
           default: false
+        bdf_device:
+          type: int8
+          description: Device part of the PCI BDF for this device
 
     BalloonConfig:
       required:
@@ -1062,6 +1070,9 @@ components:
           type: boolean
           default: false
           description: Enable guest to report free pages.
+        bdf_device:
+          type: int8
+          description: Device part of the PCI BDF for this device
 
     FsConfig:
       required:
@@ -1086,6 +1097,9 @@ components:
           format: int16
         id:
           type: string
+        bdf_device:
+          type: int8
+          description: Device part of the PCI BDF for this device
 
     GenericVhostUserConfig:
       required:
@@ -1128,6 +1142,9 @@ components:
           format: int16
         id:
           type: string
+        bdf_device:
+          type: int8
+          description: Device part of the PCI BDF for this device
 
     ConsoleConfig:
       required:
@@ -1144,6 +1161,9 @@ components:
         iommu:
           type: boolean
           default: false
+        bdf_device:
+          type: int8
+          description: Device part of the PCI BDF for this device
 
     DebugConsoleConfig:
       required:
@@ -1203,6 +1223,9 @@ components:
           format: int16
         id:
           type: string
+        bdf_device:
+          type: int8
+          description: Device part of the PCI BDF for this device
 
     VsockConfig:
       required:
@@ -1226,6 +1249,9 @@ components:
           format: int16
         id:
           type: string
+        bdf_device:
+          type: int8
+          description: Device part of the PCI BDF for this device
 
     NumaDistance:
       required:

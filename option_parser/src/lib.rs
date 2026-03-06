@@ -47,6 +47,8 @@ pub enum OptionParserError {
     Conversion(String /* field */, String /* value */),
     #[error("invalid value: {0}")]
     InvalidValue(String),
+    #[error("failed to convert {1}")]
+    NumberConversion(#[source] ParseIntError, String),
 }
 type OptionParserResult<T> = std::result::Result<T, OptionParserError>;
 
@@ -166,6 +168,41 @@ impl OptionParser {
             .get(option)
             .and_then(|v| v.value.as_ref())
             .is_some()
+    }
+
+    /// Parses the `addr` option of PCI devices and returns the PCI device as well as the function ID
+    ///
+    /// Returns a tuple consisting of the parsed IDs for device and function in this order. Returns an error if the
+    /// supplied `addr` values cannot be parsed to [`u8`]. The tuple might consist of two times [`None`] if `addr` was
+    /// not provided.
+    pub fn get_pci_device_function(
+        &self,
+    ) -> OptionParserResult<(Option<u8 /* Device ID */>, Option<u8 /* Function ID */>)> {
+        if let Some(addr_str) = self.get("addr") {
+            let (device_str, function_str) = addr_str
+                .split_once('.')
+                .ok_or(OptionParserError::InvalidValue(addr_str.to_owned()))?;
+
+            // We also accept hex number with `0x` prefix, but need to strip it before conversion in case it's present.
+            let device_str = device_str.strip_prefix("0x").unwrap_or(device_str);
+            let device_id = u8::from_str_radix(device_str, 16)
+                .map_err(|e| OptionParserError::NumberConversion(e, addr_str.to_owned()))?;
+
+            let function_str = function_str.strip_prefix("0x").unwrap_or(function_str);
+            let function_id = u8::from_str_radix(function_str, 16)
+                .map_err(|e| OptionParserError::NumberConversion(e, addr_str.to_owned()))?;
+
+            // Currently CHV only support single-function devices. Those are mapped to function ID 0 in all cases, so we
+            // disallow the assignment of any other function ID.
+            if function_id != 0 {
+                return Err(OptionParserError::InvalidValue(format!(
+                    "multi-function devices currently not supported; expected 0 got {function_id}"
+                )));
+            }
+            Ok((Some(device_id), Some(function_id)))
+        } else {
+            Ok((None, None))
+        }
     }
 
     pub fn convert<T: Parseable>(&self, option: &str) -> OptionParserResult<Option<T>> {
@@ -470,7 +507,8 @@ mod unit_tests {
             .add("hotplug_method")
             .add("hotplug_size")
             .add("topology")
-            .add("cmdline");
+            .add("cmdline")
+            .add("addr");
 
         assert_eq!(split_commas("\"\"").unwrap(), vec!["\"\""]);
         parser.parse("size=128M,hanging_param").unwrap_err();
@@ -522,6 +560,27 @@ mod unit_tests {
         );
         parser.parse("cmdline=\"").unwrap_err();
         parser.parse("cmdline=\"\"\"").unwrap_err();
+
+        parser.parse("addr=0A.0").unwrap();
+        assert_eq!(
+            (Some(0xa_u8), Some(0)),
+            parser.get_pci_device_function().expect("should be valid")
+        );
+        parser.parse("addr=0b.0").unwrap();
+        assert_eq!(
+            (Some(0xb_u8), Some(0)),
+            parser.get_pci_device_function().expect("should be valid")
+        );
+        parser.parse("addr=0A.1").unwrap();
+        assert!(matches!(
+            parser.get_pci_device_function(),
+            Err(OptionParserError::InvalidValue(_))
+        ));
+        parser.parse("addr=1g.0").unwrap();
+        assert!(matches!(
+            parser.get_pci_device_function(),
+            Err(OptionParserError::NumberConversion(_, _))
+        ));
     }
 
     #[test]
