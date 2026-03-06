@@ -2591,6 +2591,39 @@ fn _test_virtio_queue_affinity(guest: &Guest) {
     handle_child_output(r, &output);
 }
 
+fn _test_pci_msi(guest: &Guest) {
+    let mut cmd = GuestCommand::new(guest);
+    cmd.default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .capture_output()
+        .default_disks()
+        .default_net();
+
+    let mut child = cmd.spawn().unwrap();
+
+    guest.wait_vm_boot().unwrap();
+
+    let grep_cmd = format!("grep -c {} /proc/interrupts", get_msi_interrupt_pattern());
+
+    let r = std::panic::catch_unwind(|| {
+        assert_eq!(
+            guest
+                .ssh_command(&grep_cmd)
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            12
+        );
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
+
 mod common_parallel {
     use std::cmp;
     use std::fs::{File, OpenOptions, copy};
@@ -2973,38 +3006,8 @@ mod common_parallel {
     #[test]
     fn test_pci_msi() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-        let mut cmd = GuestCommand::new(&guest);
-        cmd.default_cpus()
-            .default_memory()
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .capture_output()
-            .default_disks()
-            .default_net();
-
-        let mut child = cmd.spawn().unwrap();
-
-        guest.wait_vm_boot().unwrap();
-
-        let grep_cmd = format!("grep -c {} /proc/interrupts", get_msi_interrupt_pattern());
-
-        let r = std::panic::catch_unwind(|| {
-            assert_eq!(
-                guest
-                    .ssh_command(&grep_cmd)
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                12
-            );
-        });
-
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-
-        handle_child_output(r, &output);
+        let guest = GuestFactory::new_regular_guest_factory().create_guest(Box::new(disk_config));
+        _test_pci_msi(&guest);
     }
 
     #[test]
