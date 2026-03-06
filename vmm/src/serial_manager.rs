@@ -181,7 +181,7 @@ impl SerialManager {
             _ => return Ok(None),
         };
 
-        let epoll_fd_data = if let ConsoleTransport::Socket(_) = transport {
+        let in_event = if let ConsoleTransport::Socket(_) = transport {
             EpollDispatch::Socket
         } else {
             EpollDispatch::File
@@ -191,7 +191,7 @@ impl SerialManager {
             epoll_fd,
             epoll::ControlOptions::EPOLL_CTL_ADD,
             in_fd,
-            epoll::Event::new(epoll::Events::EPOLLIN, epoll_fd_data as u64),
+            epoll::Event::new(epoll::Events::EPOLLIN, in_event as u64),
         )
         .map_err(Error::Epoll)?;
 
