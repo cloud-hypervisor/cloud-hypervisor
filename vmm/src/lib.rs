@@ -1283,6 +1283,14 @@ impl Vmm {
             // Log progress of the current iteration
             debug!("Precopy: {ctx}");
 
+            // Enables management software (e.g., libvirt) to easily track forward progress.
+            event!(
+                "vm",
+                "migration-memory-iteration",
+                "id",
+                ctx.iteration.to_string()
+            );
+
             // Increment iteration last: This way we ensure that the logging
             // above matches the actual iteration.
             ctx.iteration += 1;
