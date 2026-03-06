@@ -10,7 +10,7 @@ use std::net::IpAddr;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Barrier};
 use std::{result, thread};
 
@@ -20,8 +20,9 @@ use log::{debug, error, info};
 #[cfg(not(fuzzing))]
 use net_util::virtio_features_to_tap_offload;
 use net_util::{
-    CtrlQueue, MacAddr, NetCounters, NetQueuePair, OpenTapError, RxVirtio, Tap, TapError, TxVirtio,
-    VirtioNetConfig, build_net_config_space, build_net_config_space_with_mq, open_tap,
+    CtrlQueue, MacAddr, NetCounters, NetQueuePair, NetQueuePairError, OpenTapError, RxVirtio, Tap,
+    TapError, TxVirtio, VirtioNetConfig, build_net_config_space, build_net_config_space_with_mq,
+    open_tap,
 };
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
@@ -179,6 +180,7 @@ struct NetEpollHandler {
     // a restore as the vCPU thread isn't ready to handle the interrupt. This causes
     // issues when combined with VIRTIO_RING_F_EVENT_IDX interrupt suppression.
     driver_awake: bool,
+    device_status: Option<Arc<AtomicU8>>,
 }
 
 impl NetEpollHandler {
@@ -195,6 +197,10 @@ impl NetEpollHandler {
         let queue_evt = &self.queue_evt_pair.0;
         if let Err(e) = queue_evt.read() {
             error!("Failed to get rx queue event: {e:?}");
+        }
+
+        if self.needs_reset() {
+            return Ok(());
         }
 
         self.net.rx_desc_avail = true;
@@ -221,12 +227,21 @@ impl NetEpollHandler {
     }
 
     fn process_tx(&mut self) -> result::Result<(), DeviceError> {
-        if self
+        let res = self
             .net
-            .process_tx(&self.mem.memory(), &mut self.queue_pair.1)
-            .map_err(DeviceError::NetQueuePair)?
-            || !self.driver_awake
-        {
+            .process_tx(&self.mem.memory(), &mut self.queue_pair.1);
+
+        if let Err(NetQueuePairError::QueueIteratorFailed(_)) = res {
+            if let Some(device_status) = &self.device_status {
+                device_status.fetch_or(crate::DEVICE_NEEDS_RESET as u8, Ordering::SeqCst);
+            }
+            if let Err(e) = self.interrupt_cb.trigger(VirtioInterruptType::Config) {
+                error!("Failed to signal config interrupt: {e:?}");
+            }
+            return Ok(());
+        }
+
+        if res.map_err(DeviceError::NetQueuePair)? || !self.driver_awake {
             self.signal_used_queue(self.queue_index_base + 1)?;
             debug!("Signalling TX queue");
         } else {
@@ -250,12 +265,21 @@ impl NetEpollHandler {
     }
 
     fn handle_rx_tap_event(&mut self) -> result::Result<(), DeviceError> {
-        if self
+        let res = self
             .net
-            .process_rx(&self.mem.memory(), &mut self.queue_pair.0)
-            .map_err(DeviceError::NetQueuePair)?
-            || !self.driver_awake
-        {
+            .process_rx(&self.mem.memory(), &mut self.queue_pair.0);
+
+        if let Err(NetQueuePairError::QueueIteratorFailed(_)) = res {
+            if let Some(device_status) = &self.device_status {
+                device_status.fetch_or(crate::DEVICE_NEEDS_RESET as u8, Ordering::SeqCst);
+            }
+            if let Err(e) = self.interrupt_cb.trigger(VirtioInterruptType::Config) {
+                error!("Failed to signal config interrupt: {e:?}");
+            }
+            return Ok(());
+        }
+
+        if res.map_err(DeviceError::NetQueuePair)? || !self.driver_awake {
             self.signal_used_queue(self.queue_index_base)?;
             debug!("Signalling RX queue");
         } else {
@@ -301,7 +325,10 @@ impl NetEpollHandler {
         // The NetQueuePair needs the epoll fd.
         self.net.epoll_fd = Some(helper.as_raw_fd());
 
-        helper.run(paused, paused_sync, self)?;
+        if let Err(err) = helper.run(paused, paused_sync, self) {
+            // We do not want to return Err(_) as this will lead to VMM exiting.
+            error!("Epoll Handler error: {err:?}");
+        }
 
         Ok(())
     }
@@ -317,6 +344,11 @@ impl EpollHelperHandler for NetEpollHandler {
         match ev_type {
             RX_QUEUE_EVENT => {
                 self.driver_awake = true;
+
+                // handle_rx_event reads the queue_evt explicitly.
+                if self.needs_reset() {
+                    return Ok(());
+                }
                 self.handle_rx_event().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Error processing RX queue: {e:?}"))
                 })?;
@@ -326,12 +358,21 @@ impl EpollHelperHandler for NetEpollHandler {
                 if let Err(e) = queue_evt.read() {
                     error!("Failed to get tx queue event: {e:?}");
                 }
+
+                if self.needs_reset() {
+                    return Ok(());
+                }
+
                 self.driver_awake = true;
                 self.handle_tx_event().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Error processing TX queue: {e:?}"))
                 })?;
             }
             TX_TAP_EVENT => {
+                if self.needs_reset() {
+                    return Ok(());
+                }
+
                 self.handle_tx_event().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
                         "Error processing TX queue (TAP event): {e:?}"
@@ -339,6 +380,10 @@ impl EpollHelperHandler for NetEpollHandler {
                 })?;
             }
             RX_TAP_EVENT => {
+                if self.needs_reset() {
+                    return Ok(());
+                }
+
                 self.handle_rx_tap_event().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Error processing tap queue: {e:?}"))
                 })?;
@@ -352,6 +397,10 @@ impl EpollHelperHandler for NetEpollHandler {
                             "Error from 'rate_limiter.event_handler()': {e:?}"
                         ))
                     })?;
+
+                    if self.needs_reset() {
+                        return Ok(());
+                    }
 
                     if !self.net.rx_tap_listening && self.net.rx_desc_avail {
                         net_util::register_listener(
@@ -384,6 +433,10 @@ impl EpollHelperHandler for NetEpollHandler {
                         ))
                     })?;
 
+                    if self.needs_reset() {
+                        return Ok(());
+                    }
+
                     self.driver_awake = true;
                     self.process_tx().map_err(|e| {
                         EpollHelperError::HandleEvent(anyhow!("Error processing TX queue: {e:?}"))
@@ -404,6 +457,16 @@ impl EpollHelperHandler for NetEpollHandler {
     }
 }
 
+impl NetEpollHandler {
+    fn needs_reset(&self) -> bool {
+        if let Some(device_status) = &self.device_status {
+            (device_status.load(Ordering::SeqCst) & crate::DEVICE_NEEDS_RESET as u8) != 0
+        } else {
+            false
+        }
+    }
+}
+
 pub struct Net {
     common: VirtioCommon,
     id: String,
@@ -414,6 +477,7 @@ pub struct Net {
     seccomp_action: SeccompAction,
     rate_limiter_config: Option<RateLimiterConfig>,
     exit_evt: EventFd,
+    device_status: Option<Arc<AtomicU8>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -535,6 +599,7 @@ impl Net {
             seccomp_action,
             rate_limiter_config,
             exit_evt,
+            device_status: None,
         })
     }
 
@@ -803,6 +868,7 @@ impl VirtioDevice for Net {
                 kill_evt,
                 pause_evt,
                 driver_awake: false,
+                device_status: self.device_status.clone(),
             };
 
             let paused = self.common.paused.clone();
@@ -851,6 +917,10 @@ impl VirtioDevice for Net {
         );
 
         Some(counters)
+    }
+
+    fn set_device_status(&mut self, status: Arc<AtomicU8>) {
+        self.device_status = Some(status);
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {

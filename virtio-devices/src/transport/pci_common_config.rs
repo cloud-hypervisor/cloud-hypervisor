@@ -6,7 +6,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 use byteorder::{ByteOrder, LittleEndian};
@@ -125,7 +125,7 @@ pub fn get_vring_size(t: VringType, queue_size: u16) -> u64 {
 ///    le64 queue_used;                // 0x30 // read-write
 pub struct VirtioPciCommonConfig {
     pub access_platform: Option<Arc<dyn AccessPlatform>>,
-    pub driver_status: u8,
+    pub driver_status: Arc<AtomicU8>,
     pub config_generation: u8,
     pub device_feature_select: u32,
     pub driver_feature_select: u32,
@@ -141,7 +141,7 @@ impl VirtioPciCommonConfig {
     ) -> Self {
         VirtioPciCommonConfig {
             access_platform,
-            driver_status: state.driver_status,
+            driver_status: Arc::new(AtomicU8::new(state.driver_status)),
             config_generation: state.config_generation,
             device_feature_select: state.device_feature_select,
             driver_feature_select: state.driver_feature_select,
@@ -153,7 +153,7 @@ impl VirtioPciCommonConfig {
 
     fn state(&self) -> VirtioPciCommonConfigState {
         VirtioPciCommonConfigState {
-            driver_status: self.driver_status,
+            driver_status: self.driver_status.load(Ordering::Acquire),
             config_generation: self.config_generation,
             device_feature_select: self.device_feature_select,
             driver_feature_select: self.driver_feature_select,
@@ -223,7 +223,7 @@ impl VirtioPciCommonConfig {
         debug!("read_common_config_byte: offset 0x{offset:x}");
         // The driver is only allowed to do aligned, properly sized access.
         match offset {
-            0x14 => self.driver_status,
+            0x14 => self.driver_status.load(Ordering::Acquire),
             0x15 => self.config_generation,
             _ => {
                 warn!("invalid virtio config byte read: 0x{offset:x}");
@@ -235,7 +235,7 @@ impl VirtioPciCommonConfig {
     fn write_common_config_byte(&mut self, offset: u64, value: u8) {
         debug!("write_common_config_byte: offset 0x{offset:x}");
         match offset {
-            0x14 => self.driver_status = value,
+            0x14 => self.driver_status.store(value, Ordering::Release),
             _ => {
                 warn!("invalid virtio config byte write: 0x{offset:x}");
             }
@@ -445,7 +445,7 @@ mod unit_tests {
     fn write_base_regs() {
         let mut regs = VirtioPciCommonConfig {
             access_platform: None,
-            driver_status: 0xaa,
+            driver_status: Arc::new(AtomicU8::new(0xaa)),
             config_generation: 0x55,
             device_feature_select: 0x0,
             driver_feature_select: 0x0,

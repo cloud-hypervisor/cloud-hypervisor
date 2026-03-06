@@ -13,7 +13,7 @@ use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::{io, result};
 
@@ -161,6 +161,7 @@ struct BlockEpollHandler {
     host_cpus: Option<Vec<usize>>,
     acked_features: u64,
     disable_sector0_writes: bool,
+    device_status: Option<Arc<AtomicU8>>,
 }
 
 fn has_feature(features: u64, feature_flag: u64) -> bool {
@@ -192,12 +193,36 @@ impl BlockEpollHandler {
         Ok(())
     }
 
+    fn needs_reset(&self) -> bool {
+        if let Some(device_status) = &self.device_status {
+            (device_status.load(Ordering::SeqCst) & crate::DEVICE_NEEDS_RESET as u8) != 0
+        } else {
+            false
+        }
+    }
+
     fn process_queue_submit(&mut self) -> Result<()> {
         let queue = &mut self.queue;
         let mut batch_requests = Vec::new();
         let mut batch_inflight_requests = Vec::new();
 
-        while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
+        loop {
+            let mut desc_chain = match queue.iter(self.mem.memory()) {
+                Ok(mut iter) => match iter.next() {
+                    Some(c) => c,
+                    None => break,
+                },
+                Err(e) => {
+                    error!("CHV: virtqueue error on block device: {e:?}");
+                    if let Some(device_status) = &self.device_status {
+                        device_status.fetch_or(crate::DEVICE_NEEDS_RESET as u8, Ordering::SeqCst);
+                    }
+                    if let Err(e) = self.interrupt_cb.trigger(VirtioInterruptType::Config) {
+                        error!("Failed to signal config interrupt: {:?}", e);
+                    }
+                    return Ok(());
+                }
+            };
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_deref())
                 .map_err(Error::RequestParsing)?;
 
@@ -570,7 +595,10 @@ impl BlockEpollHandler {
             helper.add_event(rate_limiter.as_raw_fd(), RATE_LIMITER_EVENT)?;
         }
         self.set_queue_thread_affinity();
-        helper.run(paused, paused_sync, self)?;
+        if let Err(err) = helper.run(paused, paused_sync, self) {
+            // We do not want to return Err(_) as this will lead to VMM exiting.
+            error!("Epoll Handler error: {err:?}");
+        }
 
         Ok(())
     }
@@ -589,6 +617,10 @@ impl EpollHelperHandler for BlockEpollHandler {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
 
+                if self.needs_reset() {
+                    return Ok(());
+                }
+
                 let rate_limit_reached = self.rate_limiter.as_ref().is_some_and(|r| r.is_blocked());
 
                 // Process the queue only when the rate limit is not reached
@@ -600,6 +632,10 @@ impl EpollHelperHandler for BlockEpollHandler {
                 self.disk_image.notifier().read().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
+
+                if self.needs_reset() {
+                    return Ok(());
+                }
 
                 self.process_queue_complete().map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
@@ -620,6 +656,10 @@ impl EpollHelperHandler for BlockEpollHandler {
                 self.try_signal_used_queue()?;
             }
             RATE_LIMITER_EVENT => {
+                if self.needs_reset() {
+                    return Ok(());
+                }
+
                 if let Some(rate_limiter) = &mut self.rate_limiter {
                     // Upon rate limiter event, call the rate limiter handler
                     // and restart processing the queue.
@@ -662,6 +702,7 @@ pub struct Block {
     serial: Vec<u8>,
     queue_affinity: BTreeMap<u16, Vec<usize>>,
     disable_sector0_writes: bool,
+    device_status: Option<Arc<AtomicU8>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -671,6 +712,7 @@ pub struct BlockState {
     pub avail_features: u64,
     pub acked_features: u64,
     pub config: VirtioBlockConfig,
+    pub device_status: u8,
 }
 
 impl Block {
@@ -693,7 +735,7 @@ impl Block {
         sparse: bool,
         disable_sector0_writes: bool,
     ) -> io::Result<Self> {
-        let (disk_nsectors, avail_features, acked_features, config, paused) =
+        let (disk_nsectors, avail_features, acked_features, config, paused, device_status) =
             if let Some(state) = state {
                 info!("Restoring virtio-block {id}");
                 (
@@ -702,6 +744,7 @@ impl Block {
                     state.acked_features,
                     state.config,
                     true,
+                    Some(Arc::new(AtomicU8::new(state.device_status))),
                 )
             } else {
                 let disk_size = disk_image
@@ -778,7 +821,7 @@ impl Block {
                     config.num_queues = num_queues as u16;
                 }
 
-                (disk_nsectors, avail_features, 0, config, false)
+                (disk_nsectors, avail_features, 0, config, false, None)
             };
 
         let serial = serial.map_or_else(|| build_serial(&disk_path), Vec::from);
@@ -807,6 +850,7 @@ impl Block {
             serial,
             queue_affinity,
             disable_sector0_writes,
+            device_status,
         })
     }
 
@@ -892,6 +936,10 @@ impl Block {
             avail_features: self.common.avail_features,
             acked_features: self.common.acked_features,
             config: self.config,
+            device_status: self
+                .device_status
+                .as_ref()
+                .map_or(0, |s| s.load(Ordering::SeqCst)),
         }
     }
 
@@ -1059,6 +1107,7 @@ impl VirtioDevice for Block {
                 host_cpus: self.queue_affinity.get(&queue_idx).cloned(),
                 acked_features: self.common.acked_features,
                 disable_sector0_writes: self.disable_sector0_writes,
+                device_status: self.device_status.clone(),
             };
 
             let paused = self.common.paused.clone();
