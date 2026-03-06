@@ -2433,7 +2433,7 @@ impl DeviceManager {
         // SAFETY: console_info is Some, so it's safe to unwrap.
         let console_info = console_info.unwrap();
 
-        let serial_writer: Option<Box<dyn io::Write + Send>> = match console_info.serial_main_fd {
+        let serial_writer: Option<Box<dyn io::Write + Send>> = match console_info.serial {
             ConsoleTransport::File(ref file) | ConsoleTransport::Tty(ref file) => {
                 Some(Box::new(Arc::clone(file)))
             }
@@ -2443,18 +2443,15 @@ impl DeviceManager {
             | ConsoleTransport::Socket(_) => None,
         };
 
-        if !matches!(console_info.serial_main_fd, ConsoleTransport::Off) {
+        if !matches!(console_info.serial, ConsoleTransport::Off) {
             let serial = self.add_serial_device(interrupt_manager, serial_writer)?;
-            self.serial_manager = match console_info.serial_main_fd {
+            self.serial_manager = match console_info.serial {
                 ConsoleTransport::Pty(_)
                 | ConsoleTransport::Tty(_)
                 | ConsoleTransport::Socket(_) => {
-                    let serial_manager = SerialManager::new(
-                        serial,
-                        console_info.serial_main_fd,
-                        serial_config.socket,
-                    )
-                    .map_err(DeviceManagerError::CreateSerialManager)?;
+                    let serial_manager =
+                        SerialManager::new(serial, console_info.serial, serial_config.socket)
+                            .map_err(DeviceManagerError::CreateSerialManager)?;
                     if let Some(mut serial_manager) = serial_manager {
                         serial_manager
                             .start_thread(
@@ -2474,9 +2471,7 @@ impl DeviceManager {
 
         #[cfg(target_arch = "x86_64")]
         {
-            let debug_console_writer: Option<Box<dyn io::Write + Send>> = match console_info
-                .debug_main_fd
-            {
+            let debug_console_writer: Option<Box<dyn io::Write + Send>> = match console_info.debug {
                 ConsoleTransport::File(file) | ConsoleTransport::Tty(file) => Some(Box::new(file)),
                 ConsoleTransport::Off
                 | ConsoleTransport::Null
@@ -2489,7 +2484,7 @@ impl DeviceManager {
         }
 
         let console_resizer =
-            self.add_virtio_console_device(console_info.console_main_fd, console_resize_pipe)?;
+            self.add_virtio_console_device(console_info.console, console_resize_pipe)?;
 
         Ok(Arc::new(Console { console_resizer }))
     }
