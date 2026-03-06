@@ -1052,25 +1052,13 @@ fn _test_guest_numa_nodes(acpi: bool) {
 }
 
 #[allow(unused_variables)]
-fn _test_power_button(acpi: bool) {
-    let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-    let guest = Guest::new(Box::new(disk_config));
+fn _test_power_button(guest: &Guest) {
     let mut cmd = GuestCommand::new(&guest);
     let api_socket = temp_api_path(&guest.tmp_dir);
 
-    #[cfg(target_arch = "x86_64")]
-    let kernel_path = direct_kernel_boot_path();
-    #[cfg(target_arch = "aarch64")]
-    let kernel_path = if acpi {
-        edk2_path()
-    } else {
-        direct_kernel_boot_path()
-    };
-
     cmd.default_cpus()
         .default_memory()
-        .args(["--kernel", kernel_path.to_str().unwrap()])
-        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .default_kernel_cmdline()
         .capture_output()
         .default_disks()
         .default_net()
@@ -2828,7 +2816,9 @@ mod common_parallel {
 
     #[test]
     fn test_power_button() {
-        _test_power_button(false);
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_regular_guest_factory().create_guest(Box::new(disk_config));
+        _test_power_button(&guest);
     }
 
     #[test]
@@ -14454,7 +14444,11 @@ mod aarch64_acpi {
 
     #[test]
     fn test_power_button_acpi() {
-        _test_power_button(true);
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_kernel_path(edk2_path().to_str().unwrap());
+        _test_power_button(&guest);
     }
 
     #[test]
