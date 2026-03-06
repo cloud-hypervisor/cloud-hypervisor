@@ -10970,6 +10970,138 @@ mod common_sequential {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_uffd() {
+        _test_snapshot_restore_uffd();
+    }
+
+    fn _test_snapshot_restore_uffd() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
+
+        let console_text = String::from("On a branch floating down river a cricket, singing.");
+        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+        let socket = temp_vsock_path(&guest.tmp_dir);
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_source])
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=2G"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .default_net()
+            .args(["--vsock", format!("cid=3,socket={socket}").as_str()])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_920_000);
+
+            guest.check_devices_common(Some(&socket), Some(&console_text), None);
+
+            snapshot_and_check_events(&api_socket_source, &snapshot_dir, &event_path);
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let r = std::panic::catch_unwind(|| {
+            assert!(String::from_utf8_lossy(&output.stdout).contains(&console_text));
+        });
+        handle_child_output(r, &output);
+
+        Command::new("rm")
+            .arg("-f")
+            .arg(socket.as_str())
+            .output()
+            .unwrap();
+
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+        let event_path_restored = format!("{}.2", temp_event_monitor_path(&guest.tmp_dir));
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_restored])
+            .args([
+                "--event-monitor",
+                format!("path={event_path_restored}").as_str(),
+            ])
+            .args([
+                "--restore",
+                format!("source_url=file://{snapshot_dir},memory_restore_mode=ondemand").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        thread::sleep(std::time::Duration::new(20, 0));
+
+        let latest_events = [&MetaEvent {
+            event: "restored".to_string(),
+            device_id: None,
+        }];
+        assert!(check_latest_events_exact(
+            &latest_events,
+            &event_path_restored
+        ));
+
+        let r = std::panic::catch_unwind(|| {
+            assert!(remote_command(&api_socket_restored, "resume", None));
+            thread::sleep(std::time::Duration::new(1, 0));
+            let latest_events = [
+                &MetaEvent {
+                    event: "resuming".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "resumed".to_string(),
+                    device_id: None,
+                },
+            ];
+            assert!(check_latest_events_exact(
+                &latest_events,
+                &event_path_restored
+            ));
+
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_920_000);
+
+            guest.check_devices_common(Some(&socket), Some(&console_text), None);
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let r = std::panic::catch_unwind(|| {
+            assert!(String::from_utf8_lossy(&output.stdout).contains(&console_text));
+
+            let logs = format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                logs.contains("UFFD restore: demand-paged restore enabled"),
+                "Expected UFFD restore path to be enabled. output: {logs}"
+            );
+        });
+        handle_child_output(r, &output);
+
+        let _ = remove_dir_all(snapshot_dir.as_str());
+    }
+
+    #[test]
     #[cfg(not(feature = "mshv"))] // See issue #7437
     #[ignore = "See #6970"]
     fn test_snapshot_restore_with_fd() {
