@@ -1442,6 +1442,14 @@ impl Guest {
         )
     }
 
+    pub fn default_cpus_with_affinity_string(&self) -> String {
+        format!(
+            "boot={},affinity=[0@[0,2],1@[1,3]]{}",
+            self.num_cpu,
+            if self.nested { "" } else { ",nested=off" }
+        )
+    }
+
     pub fn default_memory_string(&self) -> String {
         format!("size={}", self.mem_size_str)
     }
@@ -1714,6 +1722,16 @@ impl<'a> GuestCommand<'a> {
 
     pub fn default_cpus(&mut self) -> &mut Self {
         self.args(["--cpus", self.guest.default_cpus_string().as_str()])
+    }
+
+    pub fn default_cpus_with_affinity(&mut self) -> &mut Self {
+        // Only support cpu affinity for 2 VCPUs for now,
+        // as it is only used in a test that validates cpu affinity is applied correctly.
+        assert_eq!(self.guest.num_cpu, 2);
+        self.args([
+            "--cpus",
+            self.guest.default_cpus_with_affinity_string().as_str(),
+        ])
     }
 
     pub fn default_memory(&mut self) -> &mut Self {
