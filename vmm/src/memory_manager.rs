@@ -7,15 +7,18 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{self};
+use std::io::{self, Read as _, Seek, SeekFrom};
 use std::ops::{BitAnd, Not, Sub};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use std::os::fd::AsFd;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{ffi, result, thread};
+
+use crate::uffd;
 
 use acpi_tables::{Aml, aml};
 use anyhow::anyhow;
@@ -45,7 +48,9 @@ use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, SnapshotData, Snapshottable, Transportable,
 };
+use vmm_sys_util::eventfd::EventFd;
 
+use crate::config::MemoryRestoreMode;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::{
     CoredumpMemoryRegion, CoredumpMemoryRegions, DumpState, GuestDebuggableError,
@@ -53,6 +58,19 @@ use crate::coredump::{
 use crate::migration::url_to_path;
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID};
+
+struct UffdHandler {
+    stop_event: EventFd,
+    result_rx: Receiver<Result<(), io::Error>>,
+    handle: thread::JoinHandle<()>,
+}
+
+struct UffdRange {
+    host_addr: u64,
+    length: u64,
+    file_offset: u64,
+    page_size: u64,
+}
 
 pub const MEMORY_MANAGER_ACPI_SIZE: usize = 0x18;
 
@@ -116,13 +134,23 @@ impl VirtioMemZone {
     }
 }
 
-#[derive(Default)]
 pub struct MemoryZone {
     regions: Vec<Arc<GuestRegionMmap>>,
     virtio_mem_zone: Option<VirtioMemZone>,
+    shared: bool,
+    hugepages: bool,
 }
 
 impl MemoryZone {
+    fn new(shared: bool, hugepages: bool) -> Self {
+        Self {
+            regions: Vec::new(),
+            virtio_mem_zone: None,
+            shared,
+            hugepages,
+        }
+    }
+
     pub fn regions(&self) -> &Vec<Arc<GuestRegionMmap>> {
         &self.regions
     }
@@ -191,6 +219,8 @@ pub struct MemoryManager {
     pub acpi_address: Option<GuestAddress>,
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     uefi_flash: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
+
+    uffd_handler: Option<UffdHandler>,
 }
 
 #[derive(Error, Debug)]
@@ -551,7 +581,10 @@ impl MemoryManager {
         }
 
         // Add zone id to the list of memory zones.
-        memory_zones.insert(zone.id.clone(), MemoryZone::default());
+        memory_zones.insert(
+            zone.id.clone(),
+            MemoryZone::new(zone.shared, zone.hugepages),
+        );
 
         for ram_region in ram_regions.iter() {
             let mut ram_region_offset = 0;
@@ -642,7 +675,10 @@ impl MemoryManager {
                         );
                         return Err(Error::DuplicateZoneId);
                     }
-                    memory_zones.insert(zone.id.clone(), MemoryZone::default());
+                    memory_zones.insert(
+                        zone.id.clone(),
+                        MemoryZone::new(zone.shared, zone.hugepages),
+                    );
                 }
 
                 if ram_region_consumed {
@@ -670,7 +706,10 @@ impl MemoryManager {
         let mut memory_zones = HashMap::new();
 
         for zone_config in zones_config {
-            memory_zones.insert(zone_config.id.clone(), MemoryZone::default());
+            memory_zones.insert(
+                zone_config.id.clone(),
+                MemoryZone::new(zone_config.shared, zone_config.hugepages),
+            );
         }
 
         for guest_ram_mapping in guest_ram_mappings {
@@ -758,6 +797,402 @@ impl MemoryManager {
         }
 
         Ok(())
+    }
+
+    /// Restore guest memory using userfaultfd for lazy demand paging.
+    ///
+    /// Instead of reading the entire snapshot into guest RAM upfront (which
+    /// blocks restore for hundreds of milliseconds at multi-GB sizes), this
+    /// registers the guest memory regions with a userfaultfd. A background
+    /// thread handles page faults by reading the corresponding page from the
+    /// snapshot file and copying it into guest memory via `UFFDIO_COPY`.
+    ///
+    /// This preserves the original memory mapping type (anonymous or shared),
+    /// making it compatible with VFIO device passthrough and shared-memory
+    /// guest RAM.
+    ///
+    /// Fails the restore if UFFD setup cannot be completed successfully.
+    ///
+    /// The handler thread keeps the snapshot file open while lazy restore
+    /// is active. The file must remain available until the VM is shut down or
+    /// all faulted pages have been served.
+    fn restore_by_uffd(
+        &mut self,
+        file_path: &PathBuf,
+        saved_regions: &MemoryRangeTable,
+    ) -> Result<(), Error> {
+        if saved_regions.is_empty() {
+            return Ok(());
+        }
+
+        let guest_memory = self.guest_memory.memory();
+        let required_uffd_features = self.required_uffd_features();
+
+        // SAFETY: sysconf(_SC_PAGESIZE) is always safe.
+        let base_page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        if base_page_size <= 0 {
+            return Err(Error::Restore(MigratableError::Restore(anyhow!(
+                "UFFD restore: failed to determine host page size",
+            ))));
+        }
+        let base_page_size = base_page_size as u64;
+
+        let hugepage_size = if self.hugepages {
+            self.hugepage_size
+                .or_else(|| statfs_get_bsize("/dev/hugepages").ok())
+                .unwrap_or(2 << 20)
+        } else {
+            0
+        };
+
+        info!(
+            "UFFD restore: attempting demand-paged restore for {} region(s)",
+            saved_regions.regions().len()
+        );
+
+        if saved_regions
+            .regions()
+            .iter()
+            .any(|range| range.gpa % base_page_size != 0 || range.length % base_page_size != 0)
+        {
+            return Err(Error::Restore(MigratableError::Restore(anyhow!(
+                "UFFD restore: snapshot ranges are not page-aligned",
+            ))));
+        }
+
+        let snapshot_file = File::open(file_path).map_err(Error::SnapshotOpen)?;
+
+        let uffd_fd = uffd::create(required_uffd_features).map_err(|e| {
+            Error::Restore(MigratableError::Restore(anyhow!(
+                "UFFD restore: failed to create or initialize userfaultfd: {e}",
+            )))
+        })?;
+        // SAFETY: we just created this fd via the userfaultfd syscall above.
+        // Wrapping it immediately ensures it is closed on all error paths.
+        let uffd_file = unsafe { File::from_raw_fd(uffd_fd) };
+
+        let mut handler_ranges: Vec<UffdRange> = Vec::new();
+        let mut file_offset: u64 = 0;
+
+        for range in saved_regions.regions() {
+            let host_addr = guest_memory
+                .get_host_address(GuestAddress(range.gpa))
+                .map_err(|_| {
+                    Error::Restore(MigratableError::Restore(anyhow!(
+                        "Cannot translate GPA {:#x} to host address for UFFD registration",
+                        range.gpa
+                    )))
+                })? as u64;
+
+            let ioctls = uffd::register(uffd_file.as_raw_fd(), host_addr, range.length)
+                .map_err(|e| {
+                    Error::Restore(MigratableError::Restore(anyhow!(
+                        "UFFD restore: register failed for region at {host_addr:#x}+{:#x}: {e}",
+                        range.length
+                    )))
+                })?;
+
+            if ioctls & crate::userfaultfd::UFFD_API_RANGE_IOCTLS_BASIC
+                != crate::userfaultfd::UFFD_API_RANGE_IOCTLS_BASIC
+            {
+                return Err(Error::Restore(MigratableError::Restore(anyhow!(
+                    "UFFD restore: registered region at {host_addr:#x}+{:#x} without COPY/WAKE support",
+                    range.length
+                ))));
+            }
+
+            let range_page_size = self
+                .memory_zones
+                .values()
+                .find(|zone| {
+                    zone.regions().iter().any(|r| {
+                        let start = r.start_addr().raw_value();
+                        range.gpa >= start && range.gpa < start + r.len()
+                    })
+                })
+                .map_or(base_page_size, |zone| {
+                    if zone.hugepages {
+                        hugepage_size
+                    } else {
+                        base_page_size
+                    }
+                });
+
+            handler_ranges.push(UffdRange {
+                host_addr,
+                length: range.length,
+                file_offset,
+                page_size: range_page_size,
+            });
+
+            file_offset += range.length;
+        }
+
+        info!(
+            "UFFD restore: registered {} region(s), {} total bytes, spawning handler",
+            handler_ranges.len(),
+            file_offset
+        );
+
+        let stop_event = EventFd::new(libc::EFD_NONBLOCK).map_err(Error::EventFdFail)?;
+        let thread_stop_event = stop_event.try_clone().map_err(Error::EventFdFail)?;
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let (result_tx, result_rx) = mpsc::sync_channel(1);
+        let handle = thread::Builder::new()
+            .name("uffd-handler".to_string())
+            .spawn(move || {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                    let max_page_size = handler_ranges
+                        .iter()
+                        .map(|r| r.page_size)
+                        .max()
+                        .unwrap_or(base_page_size);
+                    let result = Self::uffd_handler_loop(
+                        uffd_file,
+                        thread_stop_event,
+                        snapshot_file,
+                        &handler_ranges,
+                        max_page_size,
+                        &ready_tx,
+                    );
+
+                    if let Err(e) = &result {
+                        error!("UFFD handler exited with error: {e}");
+                    }
+
+                    result_tx.send(result).ok();
+                }))
+                .map_err(|_| {
+                    error!("uffd-handler thread panicked");
+                })
+                .ok();
+            })
+            .map_err(|e| {
+                Error::Restore(MigratableError::Restore(anyhow!(
+                    "UFFD restore: failed to spawn handler thread: {e}",
+                )))
+            })?;
+
+        if ready_rx.recv().is_err() {
+            handle.join().ok();
+            return Err(Error::Restore(MigratableError::Restore(anyhow!(
+                "UFFD restore: handler terminated before startup completed",
+            ))));
+        }
+
+        if let Ok(Err(e)) = result_rx.try_recv() {
+            handle.join().ok();
+            return Err(Error::Restore(MigratableError::Restore(anyhow!(
+                "UFFD restore: handler failed right after startup: {e}",
+            ))));
+        }
+
+        self.uffd_handler = Some(UffdHandler {
+            stop_event,
+            result_rx,
+            handle,
+        });
+
+        info!("UFFD restore: demand-paged restore enabled");
+
+        Ok(())
+    }
+
+    fn required_uffd_features(&self) -> u64 {
+        let mut features = 0u64;
+        if self
+            .memory_zones
+            .values()
+            .any(|z| z.shared && !z.hugepages)
+        {
+            features |= crate::userfaultfd::UFFD_FEATURE_MISSING_SHMEM;
+        }
+        if self.memory_zones.values().any(|z| z.hugepages) {
+            features |= crate::userfaultfd::UFFD_FEATURE_MISSING_HUGETLBFS;
+        }
+        features
+    }
+
+    fn stop_uffd_handler(&mut self) {
+        if let Some(uffd_handler) = self.uffd_handler.take() {
+            uffd_handler.stop_event.write(1).ok();
+            uffd_handler.handle.join().ok();
+
+            match uffd_handler.result_rx.try_recv() {
+                Ok(Err(e)) => error!("UFFD handler terminated with error: {e}"),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    warn!("UFFD handler terminated unexpectedly (possible panic)");
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Poll the UFFD fd and serve page faults from the snapshot file.
+    ///
+    /// Runs until the fd is closed (EPOLLHUP) or an unrecoverable error occurs.
+    /// Each fault triggers a seek + read from the snapshot file followed by a
+    /// `UFFDIO_COPY` to resolve the fault and wake the faulting thread.
+    #[allow(clippy::needless_pass_by_value)]
+    fn uffd_handler_loop(
+        uffd_file: File,
+        stop_event: EventFd,
+        mut snapshot_file: File,
+        ranges: &[UffdRange],
+        page_size: u64,
+        ready_tx: &SyncSender<()>,
+    ) -> Result<(), io::Error> {
+        let uffd_fd = uffd_file.as_raw_fd();
+        let mut page_buf = vec![0u8; page_size as usize];
+
+        let total_pages: u64 = ranges
+            .iter()
+            .map(|r| r.length.div_ceil(r.page_size))
+            .sum();
+        let mut pages_served: u64 = 0;
+
+        const TOKEN_STOP: u64 = 0;
+        const TOKEN_UFFD: u64 = 1;
+
+        let epoll_fd = epoll::create(true).map_err(io::Error::other)?;
+        // SAFETY: epoll_fd is valid and owned by this scope.
+        let _epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
+
+        epoll::ctl(
+            epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            stop_event.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, TOKEN_STOP),
+        )
+        .map_err(io::Error::other)?;
+
+        epoll::ctl(
+            epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            uffd_fd,
+            epoll::Event::new(epoll::Events::EPOLLIN | epoll::Events::EPOLLHUP, TOKEN_UFFD),
+        )
+        .map_err(io::Error::other)?;
+
+        ready_tx.send(()).ok();
+
+        let mut events = vec![epoll::Event::new(epoll::Events::empty(), 0); 2];
+        loop {
+            let num_events = match epoll::wait(epoll_fd, -1, &mut events) {
+                Ok(n) => n,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            };
+
+            let mut got_uffd_data = false;
+            for event in events.iter().take(num_events) {
+                let token = event.data;
+                let evt_flags = event.events;
+
+                if token == TOKEN_STOP {
+                    stop_event.read().ok();
+                    info!("UFFD handler: received stop event, exiting");
+                    return Ok(());
+                }
+
+                if token == TOKEN_UFFD
+                    && (evt_flags & epoll::Events::EPOLLHUP.bits()) != 0
+                    && (evt_flags & epoll::Events::EPOLLIN.bits()) == 0
+                {
+                    info!("UFFD handler: fd closed (EPOLLHUP), exiting");
+                    return Ok(());
+                }
+
+                if token == TOKEN_UFFD && (evt_flags & epoll::Events::EPOLLIN.bits()) != 0 {
+                    got_uffd_data = true;
+                }
+            }
+
+            if !got_uffd_data {
+                continue;
+            }
+
+            // SAFETY: UffdMsg is a plain repr(C) struct, safe to zero-init.
+            let mut msg: uffd::UffdMsg = unsafe { std::mem::zeroed() };
+            // SAFETY: reading a uffd_msg-sized struct from the valid uffd fd.
+            let n = unsafe {
+                libc::read(
+                    uffd_fd,
+                    &mut msg as *mut uffd::UffdMsg as *mut libc::c_void,
+                    std::mem::size_of::<uffd::UffdMsg>(),
+                )
+            };
+            if n < 0 {
+                let err = io::Error::last_os_error();
+                if err.kind() == io::ErrorKind::WouldBlock {
+                    continue;
+                }
+                return Err(err);
+            }
+            if n == 0 {
+                info!("UFFD handler: EOF on fd, exiting");
+                return Ok(());
+            }
+            if n as usize != std::mem::size_of::<uffd::UffdMsg>() {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "Short read from userfaultfd",
+                ));
+            }
+
+            if msg.event != crate::userfaultfd::UFFD_EVENT_PAGEFAULT {
+                continue;
+            }
+
+            let fault_addr = msg.pf_address;
+
+            let mut served = false;
+            for range in ranges {
+                // Round down to the page boundary containing the faulted address.
+                let page_addr = fault_addr & !(range.page_size - 1);
+                if page_addr >= range.host_addr && page_addr < range.host_addr + range.length {
+                    let offset_in_range = page_addr - range.host_addr;
+                    let file_pos = range.file_offset + offset_in_range;
+
+                    snapshot_file.seek(SeekFrom::Start(file_pos))?;
+                    snapshot_file.read_exact(&mut page_buf[..range.page_size as usize])?;
+
+                    loop {
+                        match uffd::copy(uffd_fd, page_addr, page_buf.as_ptr(), range.page_size) {
+                            Ok(()) => {
+                                pages_served += 1;
+                                break;
+                            }
+                            Err(e) if e.raw_os_error() == Some(libc::EEXIST) => {
+                                if let Err(e) = uffd::wake(uffd_fd, page_addr, range.page_size) {
+                                    warn!("UFFDIO_WAKE failed at {page_addr:#x}: {e}");
+                                }
+                                break;
+                            }
+                            Err(e) if e.raw_os_error() == Some(libc::EAGAIN) => {
+                                // The kernel can report a transient EAGAIN while the fault
+                                // is being resolved; yield and retry instead of aborting restore.
+                                thread::yield_now();
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    served = true;
+                    break;
+                }
+            }
+
+            if !served {
+                return Err(io::Error::other(format!(
+                    "UFFD handler: fault at {fault_addr:#x} does not belong to any registered range",
+                )));
+            }
+
+            if pages_served == total_pages {
+                info!("UFFD handler: all {pages_served} pages served, exiting");
+                return Ok(());
+            }
+        }
     }
 
     fn validate_memory_config(
@@ -1235,6 +1670,7 @@ impl MemoryManager {
             #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
             uefi_flash: None,
             thp: config.thp,
+            uffd_handler: None,
         };
 
         Ok(Arc::new(Mutex::new(memory_manager)))
@@ -1246,6 +1682,7 @@ impl MemoryManager {
         config: &MemoryConfig,
         source_url: Option<&str>,
         prefault: bool,
+        memory_restore_mode: MemoryRestoreMode,
         phys_bits: u8,
     ) -> Result<Arc<Mutex<MemoryManager>>, Error> {
         if let Some(source_url) = source_url {
@@ -1266,9 +1703,15 @@ impl MemoryManager {
                 Default::default(),
             )?;
 
-            mm.lock()
-                .unwrap()
-                .fill_saved_regions(memory_file_path, &mem_snapshot.memory_ranges)?;
+            if memory_restore_mode == MemoryRestoreMode::Ondemand {
+                mm.lock()
+                    .unwrap()
+                    .restore_by_uffd(&memory_file_path, &mem_snapshot.memory_ranges)?;
+            } else {
+                mm.lock()
+                    .unwrap()
+                    .fill_saved_regions(memory_file_path, &mem_snapshot.memory_ranges)?;
+            }
 
             Ok(mm)
         } else {
@@ -2529,6 +2972,12 @@ impl Aml for MemoryManager {
 }
 
 impl Pausable for MemoryManager {}
+
+impl Drop for MemoryManager {
+    fn drop(&mut self) {
+        self.stop_uffd_handler();
+    }
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct MemoryManagerSnapshotData {
