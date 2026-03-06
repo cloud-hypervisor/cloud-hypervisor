@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::{ffi, io};
 
 use block::async_io::DiskFile;
+use block::fcntl::LockGranularityChoice;
 use block::raw_sync::RawFileDiskSync;
 use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
@@ -69,6 +70,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
         queue_affinity,
         true,
         false,
+        LockGranularityChoice::default(),
     )
     .unwrap();
 

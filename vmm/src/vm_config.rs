@@ -9,6 +9,7 @@ use std::str::FromStr;
 use std::{fs, result};
 
 use block::ImageType;
+pub use block::fcntl::LockGranularityChoice;
 use log::{debug, warn};
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
@@ -302,6 +303,8 @@ pub struct DiskConfig {
     pub sparse: bool,
     #[serde(default)]
     pub image_type: ImageType,
+    #[serde(default)]
+    pub lock_granularity: LockGranularityChoice,
 }
 
 impl ApplyLandlock for DiskConfig {

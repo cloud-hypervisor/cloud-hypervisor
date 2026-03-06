@@ -2859,6 +2859,7 @@ impl DeviceManager {
                 queue_affinity,
                 disk_cfg.sparse,
                 disable_sector0_writes,
+                disk_cfg.lock_granularity,
             )
             .map_err(DeviceManagerError::CreateVirtioBlock)?;
 

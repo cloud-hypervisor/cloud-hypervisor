@@ -16,6 +16,7 @@
 use std::fmt::Debug;
 use std::io;
 use std::os::fd::{AsRawFd, RawFd};
+use std::str::FromStr;
 
 use thiserror::Error;
 
@@ -136,6 +137,38 @@ impl LockGranularity {
         match self {
             LockGranularity::WholeFile => 0, /* EOF */
             LockGranularity::ByteRange(_, len) => len,
+        }
+    }
+}
+
+/// User-facing choice for the lock granularity.
+///
+/// This allows external management software to create snapshots of the disk
+/// image. Without a byte-range lock, some NFS implementations may treat the
+/// entire file as exclusively locked and prevent such operations (e.g. NetApp).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LockGranularityChoice {
+    /// Byte-range lock covering [0, size).
+    #[default]
+    ByteRange,
+    /// Whole-file lock (l_start=0, l_len=0) - original OFD whole-file lock behavior.
+    Full,
+}
+
+/// Error returned when parsing a [`LockGranularityChoice`] from a string.
+#[derive(Error, Debug)]
+#[error("Invalid lock granularity value: {0}, expected 'byte-range' or 'full'")]
+pub struct LockGranularityParseError(String);
+
+impl FromStr for LockGranularityChoice {
+    type Err = LockGranularityParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "byte-range" => Ok(LockGranularityChoice::ByteRange),
+            "full" => Ok(LockGranularityChoice::Full),
+            _ => Err(LockGranularityParseError(s.to_owned())),
         }
     }
 }
