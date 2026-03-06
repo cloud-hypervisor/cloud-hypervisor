@@ -128,6 +128,17 @@ impl SerialManager {
         mut transport: ConsoleTransport,
         socket: Option<PathBuf>,
     ) -> Result<Option<Self>> {
+        let epoll_fd = epoll::create(true).map_err(Error::Epoll)?;
+        let kill_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
+
+        epoll::ctl(
+            epoll_fd,
+            epoll::ControlOptions::EPOLL_CTL_ADD,
+            kill_evt.as_raw_fd(),
+            epoll::Event::new(epoll::Events::EPOLLIN, EpollDispatch::Kill as u64),
+        )
+        .map_err(Error::Epoll)?;
+
         let mut socket_path: Option<PathBuf> = None;
 
         let in_fd = match transport {
@@ -169,17 +180,6 @@ impl SerialManager {
             }
             _ => return Ok(None),
         };
-
-        let epoll_fd = epoll::create(true).map_err(Error::Epoll)?;
-        let kill_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFd)?;
-
-        epoll::ctl(
-            epoll_fd,
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            kill_evt.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, EpollDispatch::Kill as u64),
-        )
-        .map_err(Error::Epoll)?;
 
         let epoll_fd_data = if let ConsoleTransport::Socket(_) = transport {
             EpollDispatch::Socket
