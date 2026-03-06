@@ -37,6 +37,12 @@ pub trait VirtioInterrupt: Send + Sync {
     fn notifier(&self, _int_type: VirtioInterruptType) -> Option<EventFd> {
         None
     }
+    fn set_notifier(
+        &self,
+        interrupt: u32,
+        eventfd: Option<EventFd>,
+        vm: &dyn hypervisor::Vm,
+    ) -> Result<(), hypervisor::HypervisorVmError>;
 }
 
 #[derive(Clone)]
@@ -66,6 +72,31 @@ pub trait VirtioDevice: Send {
 
     /// The maximum size of each queue that this device supports.
     fn queue_max_sizes(&self) -> &[u16];
+
+    /// Whether the device needs to register extra irqfds at runtime
+    /// from external sources.
+    /// The default is false.  If this is true, locking is required for
+    /// most operations involving interrupts (but not for sending)
+    /// interrupts from external irqfds).
+    ///
+    /// If the device claims to not need to register irqfds, but
+    /// attempts to do so, a panic will ensue.
+    fn needs_ext_irqfds(&self) -> bool {
+        false
+    }
+
+    /// The maximum number of MSI-X interrupts this device needs.
+    /// Defaults to the number of queues.  One additional interrupt
+    /// will be used for the config space change event.
+    fn max_interrupts(&self) -> usize {
+        self.queue_max_sizes().len()
+    }
+
+    /// The maximum number of doorbells the device supports.
+    /// Most devices don't support any.
+    fn doorbells_max(&self) -> u8 {
+        0
+    }
 
     /// The set of feature bits that this device supports.
     fn features(&self) -> u64 {

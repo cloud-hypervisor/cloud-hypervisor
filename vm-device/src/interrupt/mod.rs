@@ -57,7 +57,7 @@
 //! * The virtual device backend requests the interrupt manager to create an interrupt group
 //!   according to guest configuration information
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 pub use hypervisor::{InterruptSourceConfig, LegacyIrqSourceConfig, MsiIrqSourceConfig};
 use vmm_sys_util::eventfd::EventFd;
@@ -116,6 +116,27 @@ pub trait InterruptManager: Send + Sync {
     fn destroy_group(&self, group: Arc<dyn InterruptSourceGroup>) -> Result<()>;
 }
 
+/// Trait to manage MSI interrupt sources for virtual device backends.
+///
+/// The InterruptManager implementations should protect itself from concurrent accesses internally,
+/// so it could be invoked from multi-threaded context.
+pub trait InterruptManagerMsi: InterruptManager {
+    /// Create an [InterruptSourceGroupMsi](trait.InterruptSourceGroupMsi.html) object to manage
+    /// interrupt sources for a virtual device
+    ///
+    /// An [InterruptSourceGroupMsi](trait.InterruptSourceGroupMsi.html) object manages all interrupt
+    /// sources of the same type for a virtual device.
+    ///
+    /// # Arguments
+    /// * interrupt_type: type of interrupt source.
+    /// * base: base Interrupt Source ID to be managed by the group object.
+    /// * count: number of Interrupt Sources to be managed by the group object.
+    fn create_group_msi_mutex(
+        &self,
+        config: Self::GroupConfig,
+    ) -> Result<Arc<Mutex<dyn InterruptSourceGroupMsi>>>;
+}
+
 pub trait InterruptSourceGroup: Send + Sync {
     /// Enable the interrupt sources in the group to generate interrupts.
     fn enable(&self) -> Result<()> {
@@ -137,7 +158,7 @@ pub trait InterruptSourceGroup: Send + Sync {
     /// Returns an interrupt notifier from this interrupt.
     ///
     /// An interrupt notifier allows for external components and processes
-    /// to inject interrupts into a guest, by writing to the file returned
+    /// to inject interrupts into a guest, by writing to the [`EventFd`] returned
     /// by this method.
     #[allow(unused_variables)]
     fn notifier(&self, index: InterruptIndex) -> Option<EventFd>;
@@ -159,4 +180,14 @@ pub trait InterruptSourceGroup: Send + Sync {
 
     /// Set the interrupt group GSI routing table.
     fn set_gsi(&self) -> Result<()>;
+}
+
+pub trait InterruptSourceGroupMsi: InterruptSourceGroup {
+    /// Sets the [`EventFd`] used to trigger interrupts.
+    fn set_notifier(
+        &mut self,
+        index: InterruptIndex,
+        eventfd: Option<EventFd>,
+        vm: &dyn hypervisor::Vm,
+    ) -> core::result::Result<(), hypervisor::HypervisorVmError>;
 }

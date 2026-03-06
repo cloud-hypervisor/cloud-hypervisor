@@ -736,6 +736,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "eventfd-checker"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rustix",
+ "thiserror 2.0.18",
+ "vmm-sys-util",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2467,6 +2477,8 @@ dependencies = [
  "byteorder",
  "epoll",
  "event_monitor",
+ "eventfd-checker",
+ "hypervisor",
  "libc",
  "log",
  "mshv-ioctls",
