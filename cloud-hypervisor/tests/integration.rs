@@ -14904,4 +14904,12 @@ mod common_cvm {
             .with_cpu(4);
         _test_virtio_queue_affinity(&guest);
     }
+
+    #[test]
+    fn test_pci_msi() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest =
+            GuestFactory::new_confidential_guest_factory().create_guest(Box::new(disk_config));
+        _test_pci_msi(&guest);
+    }
 }
