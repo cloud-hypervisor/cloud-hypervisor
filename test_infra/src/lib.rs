@@ -1013,6 +1013,11 @@ impl Guest {
         self
     }
 
+    pub fn with_kernel_path(mut self, kernel_path: &str) -> Self {
+        self.kernel_path = Some(kernel_path.to_string());
+        self
+    }
+
     pub fn default_net_string(&self) -> String {
         format!(
             "tap=,mac={},ip={},mask=255.255.255.128",
