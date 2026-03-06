@@ -25,7 +25,7 @@ use devices::ioapic;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::HypervisorVmError;
 use libc::_SC_NPROCESSORS_ONLN;
-use log::{debug, error, info, warn};
+use log::{debug, error, info, trace, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracer::trace_scoped;
@@ -2673,11 +2673,11 @@ impl Migratable for MemoryManager {
             let sub_table = MemoryRangeTable::from_dirty_bitmap(dirty_bitmap, r.gpa, 4096);
 
             if sub_table.regions().is_empty() {
-                info!("Dirty Memory Range Table is empty");
+                trace!("Dirty Memory Range Table is empty");
             } else {
-                info!("Dirty Memory Range Table:");
+                trace!("Dirty Memory Range Table:");
                 for range in sub_table.regions() {
-                    info!("GPA: {:x} size: {} (KiB)", range.gpa, range.length / 1024);
+                    trace!("GPA: {:x} size: {} (KiB)", range.gpa, range.length / 1024);
                 }
             }
 
