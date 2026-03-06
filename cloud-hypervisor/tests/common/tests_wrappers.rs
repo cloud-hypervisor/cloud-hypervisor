@@ -987,7 +987,7 @@ pub(crate) fn _test_virtio_fs(
             } else {
                 assert!(
                     String::from_utf8_lossy(&cmd_output)
-                        .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}")
+                        .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:07.0\"}")
                 );
             }
 
@@ -1075,7 +1075,7 @@ pub(crate) fn _test_virtio_fs(
             } else {
                 assert!(
                     String::from_utf8_lossy(&cmd_output)
-                        .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}")
+                        .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:07.0\"}")
                 );
             }
 
@@ -1215,7 +1215,7 @@ pub(crate) fn _test_virtio_vsock(guest: &Guest, hotplug: bool) {
             assert!(cmd_success);
             assert!(
                 String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
+                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:07.0\"}")
             );
             thread::sleep(std::time::Duration::new(10, 0));
             // Check adding a second one fails
@@ -2687,7 +2687,7 @@ pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool) {
         assert!(cmd_success);
         assert!(
             String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
+                .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:07.0\"}")
         );
 
         thread::sleep(std::time::Duration::new(10, 0));
@@ -2736,7 +2736,7 @@ pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool) {
         assert!(cmd_success);
         assert!(
             String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
+                .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:07.0\"}")
         );
 
         thread::sleep(std::time::Duration::new(10, 0));
@@ -2927,7 +2927,7 @@ pub(crate) fn _test_net_hotplug(
         } else {
             assert!(
                 String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
+                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:07.0\"}")
             );
         }
 
@@ -2990,7 +2990,7 @@ pub(crate) fn _test_net_hotplug(
         } else {
             assert!(
                 String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"test1\",\"bdf\":\"0000:00:06.0\"}")
+                    .contains("{\"id\":\"test1\",\"bdf\":\"0000:00:07.0\"}")
             );
         }
 
@@ -3283,7 +3283,7 @@ pub(crate) fn _test_macvtap(
     // Create a macvtap interface for the guest VM to use
     assert!(
         exec_host_command_status(&format!(
-            "sudo ip link add link {phy_net} name {guest_macvtap_name} type macvtap mod bridge"
+            "sudo ip link add link {phy_net} name {guest_macvtap_name} type macvtap mode bridge"
         ))
         .success()
     );
@@ -3312,7 +3312,7 @@ pub(crate) fn _test_macvtap(
     // the host machine to use
     assert!(
         exec_host_command_status(&format!(
-            "sudo ip link add link {phy_net} name {host_macvtap_name} type macvtap mod bridge"
+            "sudo ip link add link {phy_net} name {host_macvtap_name} type macvtap mode bridge"
         ))
         .success()
     );
@@ -3359,12 +3359,12 @@ pub(crate) fn _test_macvtap(
         #[cfg(target_arch = "x86_64")]
         assert!(
             String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"_net2\",\"bdf\":\"0000:00:05.0\"}")
+                .contains("{\"id\":\"_net2\",\"bdf\":\"0000:00:06.0\"}")
         );
         #[cfg(target_arch = "aarch64")]
         assert!(
             String::from_utf8_lossy(&cmd_output)
-                .contains("{\"id\":\"_net0\",\"bdf\":\"0000:00:05.0\"}")
+                .contains("{\"id\":\"_net0\",\"bdf\":\"0000:00:06.0\"}")
         );
     }
 
