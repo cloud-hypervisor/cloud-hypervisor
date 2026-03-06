@@ -48,7 +48,6 @@ const VIRTIO_RTC_S_EOPNOTSUPP: u8 = 2;
 const VIRTIO_RTC_S_ENODEV: u8 = 3;
 #[allow(unused)]
 const VIRTIO_RTC_S_EINVAL: u8 = 4;
-#[allow(unused)]
 const VIRTIO_RTC_S_EIO: u8 = 5;
 
 // Clock types
@@ -200,9 +199,10 @@ impl RtcEpollHandler {
 
         while let Some(mut desc_chain) = self.queue.pop_descriptor_chain(self.mem.memory()) {
             let req_desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
+            let req_len = req_desc.len();
 
             // The request descriptor must be readable by the device.
-            if req_desc.is_write_only() {
+            if req_desc.is_write_only() || req_len < size_of::<VirtioRtcReqHead>() as u32 {
                 return Err(Error::InvalidDescriptor);
             }
 
@@ -224,6 +224,13 @@ impl RtcEpollHandler {
             let request = match req_head.msg_type {
                 VIRTIO_RTC_REQ_CFG => VirtioRtcRequest::Cfg,
                 VIRTIO_RTC_REQ_CLOCK_CAP => {
+                    if req_len
+                        < (size_of::<VirtioRtcReqHead>() + size_of::<VirtioRtcReqClockBody>())
+                            as u32
+                    {
+                        return Err(Error::InvalidDescriptor);
+                    }
+
                     let body: VirtioRtcReqClockBody = desc_chain
                         .memory()
                         .read_obj(body_addr)
@@ -233,6 +240,13 @@ impl RtcEpollHandler {
                     }
                 }
                 VIRTIO_RTC_REQ_READ => {
+                    if req_len
+                        < (size_of::<VirtioRtcReqHead>() + size_of::<VirtioRtcReqClockBody>())
+                            as u32
+                    {
+                        return Err(Error::InvalidDescriptor);
+                    }
+
                     let body: VirtioRtcReqClockBody = desc_chain
                         .memory()
                         .read_obj(body_addr)
@@ -242,6 +256,13 @@ impl RtcEpollHandler {
                     }
                 }
                 VIRTIO_RTC_REQ_CROSS_CAP => {
+                    if req_len
+                        < (size_of::<VirtioRtcReqHead>() + size_of::<VirtioRtcReqCrossCapBody>())
+                            as u32
+                    {
+                        return Err(Error::InvalidDescriptor);
+                    }
+
                     let body: VirtioRtcReqCrossCapBody = desc_chain
                         .memory()
                         .read_obj(body_addr)
@@ -268,42 +289,49 @@ impl RtcEpollHandler {
                 .translate_gva(self.access_platform.as_deref(), resp_desc.len() as usize);
 
             let resp_len = match &response {
+                VirtioRtcResponse::Cfg(_) => size_of::<VirtioRtcRespCfg>() as u32,
+                VirtioRtcResponse::ClockCap(_) => size_of::<VirtioRtcRespClockCap>() as u32,
+                VirtioRtcResponse::Read(_) => size_of::<VirtioRtcRespRead>() as u32,
+                VirtioRtcResponse::CrossCap(_) => size_of::<VirtioRtcRespCrossCap>() as u32,
+                VirtioRtcResponse::Error(_) => size_of::<VirtioRtcRespHead>() as u32,
+            };
+
+            if resp_desc.len() < resp_len {
+                return Err(Error::InvalidDescriptor);
+            }
+
+            match &response {
                 VirtioRtcResponse::Cfg(resp) => {
                     desc_chain
                         .memory()
                         .write_obj(*resp, resp_addr)
                         .map_err(Error::GuestMemoryWrite)?;
-                    size_of::<VirtioRtcRespCfg>() as u32
                 }
                 VirtioRtcResponse::ClockCap(resp) => {
                     desc_chain
                         .memory()
                         .write_obj(*resp, resp_addr)
                         .map_err(Error::GuestMemoryWrite)?;
-                    size_of::<VirtioRtcRespClockCap>() as u32
                 }
                 VirtioRtcResponse::Read(resp) => {
                     desc_chain
                         .memory()
                         .write_obj(*resp, resp_addr)
                         .map_err(Error::GuestMemoryWrite)?;
-                    size_of::<VirtioRtcRespRead>() as u32
                 }
                 VirtioRtcResponse::CrossCap(resp) => {
                     desc_chain
                         .memory()
                         .write_obj(*resp, resp_addr)
                         .map_err(Error::GuestMemoryWrite)?;
-                    size_of::<VirtioRtcRespCrossCap>() as u32
                 }
                 VirtioRtcResponse::Error(resp) => {
                     desc_chain
                         .memory()
                         .write_obj(*resp, resp_addr)
                         .map_err(Error::GuestMemoryWrite)?;
-                    size_of::<VirtioRtcRespHead>() as u32
                 }
-            };
+            }
 
             self.queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), resp_len)
