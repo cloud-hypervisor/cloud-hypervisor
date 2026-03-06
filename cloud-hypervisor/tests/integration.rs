@@ -14855,4 +14855,12 @@ mod common_cvm {
         let target_api = TargetApi::new_http_api(&guest.tmp_dir);
         _test_api_delete(&target_api, &guest);
     }
+
+    #[test]
+    fn test_power_button() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest =
+            GuestFactory::new_confidential_guest_factory().create_guest(Box::new(disk_config));
+        _test_power_button(&guest);
+    }
 }
