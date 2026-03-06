@@ -116,7 +116,7 @@ use vm_migration::{
 use vm_virtio::{AccessPlatform, VirtioDeviceType};
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::console_devices::{ConsoleDeviceError, ConsoleInfo, ConsoleOutput};
+use crate::console_devices::{ConsoleDeviceError, ConsoleInfo, ConsoleTransport};
 use crate::cpu::{CPU_MANAGER_ACPI_SIZE, CpuManager};
 use crate::device_tree::{DeviceNode, DeviceTree};
 use crate::interrupt::{LegacyUserspaceInterruptManager, MsiInterruptManager};
@@ -2334,17 +2334,17 @@ impl DeviceManager {
 
     fn add_virtio_console_device(
         &mut self,
-        console_fd: ConsoleOutput,
+        console_fd: ConsoleTransport,
         resize_pipe: Option<Arc<File>>,
     ) -> DeviceManagerResult<Option<Arc<virtio_devices::ConsoleResizer>>> {
         let console_config = self.config.lock().unwrap().console.clone();
         let endpoint = match console_fd {
-            ConsoleOutput::File(file) => Endpoint::File(file),
-            ConsoleOutput::Pty(file) => {
+            ConsoleTransport::File(file) => Endpoint::File(file),
+            ConsoleTransport::Pty(file) => {
                 self.console_resize_pipe = resize_pipe;
                 Endpoint::PtyPair(Arc::new(file.try_clone().unwrap()), file)
             }
-            ConsoleOutput::Tty(stdout) => {
+            ConsoleTransport::Tty(stdout) => {
                 if stdout.is_terminal() {
                     self.console_resize_pipe = resize_pipe;
                 }
@@ -2365,11 +2365,11 @@ impl DeviceManager {
                     Endpoint::File(stdout)
                 }
             }
-            ConsoleOutput::Socket(_) => {
+            ConsoleTransport::Socket(_) => {
                 return Err(DeviceManagerError::NoSocketOptionSupportForConsoleDevice);
             }
-            ConsoleOutput::Null => Endpoint::Null,
-            ConsoleOutput::Off => return Ok(None),
+            ConsoleTransport::Null => Endpoint::Null,
+            ConsoleTransport::Off => return Ok(None),
         };
         let id = String::from(CONSOLE_DEVICE_NAME);
 
@@ -2434,19 +2434,21 @@ impl DeviceManager {
         let console_info = console_info.unwrap();
 
         let serial_writer: Option<Box<dyn io::Write + Send>> = match console_info.serial_main_fd {
-            ConsoleOutput::File(ref file) | ConsoleOutput::Tty(ref file) => {
+            ConsoleTransport::File(ref file) | ConsoleTransport::Tty(ref file) => {
                 Some(Box::new(Arc::clone(file)))
             }
-            ConsoleOutput::Off
-            | ConsoleOutput::Null
-            | ConsoleOutput::Pty(_)
-            | ConsoleOutput::Socket(_) => None,
+            ConsoleTransport::Off
+            | ConsoleTransport::Null
+            | ConsoleTransport::Pty(_)
+            | ConsoleTransport::Socket(_) => None,
         };
 
-        if !matches!(console_info.serial_main_fd, ConsoleOutput::Off) {
+        if !matches!(console_info.serial_main_fd, ConsoleTransport::Off) {
             let serial = self.add_serial_device(interrupt_manager, serial_writer)?;
             self.serial_manager = match console_info.serial_main_fd {
-                ConsoleOutput::Pty(_) | ConsoleOutput::Tty(_) | ConsoleOutput::Socket(_) => {
+                ConsoleTransport::Pty(_)
+                | ConsoleTransport::Tty(_)
+                | ConsoleTransport::Socket(_) => {
                     let serial_manager = SerialManager::new(
                         serial,
                         console_info.serial_main_fd,
@@ -2472,14 +2474,15 @@ impl DeviceManager {
 
         #[cfg(target_arch = "x86_64")]
         {
-            let debug_console_writer: Option<Box<dyn io::Write + Send>> =
-                match console_info.debug_main_fd {
-                    ConsoleOutput::File(file) | ConsoleOutput::Tty(file) => Some(Box::new(file)),
-                    ConsoleOutput::Off
-                    | ConsoleOutput::Null
-                    | ConsoleOutput::Pty(_)
-                    | ConsoleOutput::Socket(_) => None,
-                };
+            let debug_console_writer: Option<Box<dyn io::Write + Send>> = match console_info
+                .debug_main_fd
+            {
+                ConsoleTransport::File(file) | ConsoleTransport::Tty(file) => Some(Box::new(file)),
+                ConsoleTransport::Off
+                | ConsoleTransport::Null
+                | ConsoleTransport::Pty(_)
+                | ConsoleTransport::Socket(_) => None,
+            };
             if let Some(writer) = debug_console_writer {
                 let _ = self.add_debug_console_device(writer)?;
             }

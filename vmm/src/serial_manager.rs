@@ -24,7 +24,7 @@ use serial_buffer::SerialBuffer;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::console_devices::ConsoleOutput;
+use crate::console_devices::ConsoleTransport;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -114,7 +114,7 @@ pub struct SerialManager {
     #[cfg(target_arch = "aarch64")]
     serial: Arc<Mutex<Pl011>>,
     epoll_file: File,
-    in_file: ConsoleOutput,
+    in_file: ConsoleTransport,
     kill_evt: EventFd,
     handle: Option<thread::JoinHandle<()>>,
     pty_write_out: Option<Arc<AtomicBool>>,
@@ -125,14 +125,14 @@ impl SerialManager {
     pub fn new(
         #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))] serial: Arc<Mutex<Serial>>,
         #[cfg(target_arch = "aarch64")] serial: Arc<Mutex<Pl011>>,
-        mut output: ConsoleOutput,
+        mut output: ConsoleTransport,
         socket: Option<PathBuf>,
     ) -> Result<Option<Self>> {
         let mut socket_path: Option<PathBuf> = None;
 
         let in_fd = match output {
-            ConsoleOutput::Pty(ref fd) => fd.as_raw_fd(),
-            ConsoleOutput::Tty(_)
+            ConsoleTransport::Pty(ref fd) => fd.as_raw_fd(),
+            ConsoleTransport::Tty(_)
                 // If running on an interactive TTY then accept input
                 // SAFETY: trivially safe
                 if unsafe { libc::isatty(libc::STDIN_FILENO) == 1 } =>
@@ -155,13 +155,13 @@ impl SerialManager {
                     return Err(Error::SetNonBlocking(std::io::Error::last_os_error()));
                 }
 
-                output = ConsoleOutput::Tty(Arc::new(stdin_clone));
+                output = ConsoleTransport::Tty(Arc::new(stdin_clone));
                 fd
             }
-            ConsoleOutput::Tty(_) => {
+            ConsoleTransport::Tty(_) => {
                 return Ok(None);
             }
-            ConsoleOutput::Socket(ref listener) => {
+            ConsoleTransport::Socket(ref listener) => {
                 if let Some(path_in_socket) = socket {
                     socket_path = Some(path_in_socket.clone());
                 }
@@ -181,7 +181,7 @@ impl SerialManager {
         )
         .map_err(Error::Epoll)?;
 
-        let epoll_fd_data = if let ConsoleOutput::Socket(_) = output {
+        let epoll_fd_data = if let ConsoleTransport::Socket(_) = output {
             EpollDispatch::Socket
         } else {
             EpollDispatch::File
@@ -196,7 +196,7 @@ impl SerialManager {
         .map_err(Error::Epoll)?;
 
         let mut pty_write_out = None;
-        if let ConsoleOutput::Pty(ref file) = output {
+        if let ConsoleTransport::Pty(ref file) = output {
             let write_out = Arc::new(AtomicBool::new(false));
             pty_write_out = Some(write_out.clone());
             let writer = file.try_clone().map_err(Error::FileClone)?;
@@ -295,7 +295,7 @@ impl SerialManager {
                             }
                         };
 
-                        if matches!(in_file, ConsoleOutput::Pty(_)) && num_events == 0 {
+                        if matches!(in_file, ConsoleTransport::Pty(_)) && num_events == 0 {
                             // This very specific case happens when the serial is connected
                             // to a PTY. We know EPOLLHUP is always present when there's nothing
                             // connected at the other end of the PTY. That's why getting no event
@@ -320,7 +320,7 @@ impl SerialManager {
                                             .map_err(Error::AcceptConnection)?;
                                     }
 
-                                    let ConsoleOutput::Socket(ref listener) = in_file else {
+                                    let ConsoleTransport::Socket(ref listener) = in_file else {
                                         unreachable!();
                                     };
 
@@ -349,7 +349,7 @@ impl SerialManager {
                                     if event.events & libc::EPOLLIN as u32 != 0 {
                                         let mut input = [0u8; 64];
                                         let count = match &in_file {
-                                            ConsoleOutput::Socket(_) => {
+                                            ConsoleTransport::Socket(_) => {
                                                 if let Some(mut serial_reader) = reader.as_ref() {
                                                     let count = serial_reader
                                                         .read(&mut input)
@@ -371,11 +371,10 @@ impl SerialManager {
                                                     0
                                                 }
                                             }
-                                            ConsoleOutput::Pty(file) | ConsoleOutput::Tty(file) => {
-                                                (&**file)
-                                                    .read(&mut input)
-                                                    .map_err(Error::ReadInput)?
-                                            }
+                                            ConsoleTransport::Pty(file)
+                                            | ConsoleTransport::Tty(file) => (&**file)
+                                                .read(&mut input)
+                                                .map_err(Error::ReadInput)?,
                                             _ => unreachable!(),
                                         };
 
@@ -432,7 +431,7 @@ impl Drop for SerialManager {
         if let Some(handle) = self.handle.take() {
             handle.join().ok();
         }
-        if let ConsoleOutput::Socket(_) = self.in_file
+        if let ConsoleTransport::Socket(_) = self.in_file
             && let Some(socket_path) = self.socket_path.as_ref()
         {
             std::fs::remove_file(socket_path.as_os_str())
