@@ -1781,28 +1781,15 @@ fn get_fd_count(pid: u32) -> usize {
     fs::read_dir(format!("/proc/{pid}/fd")).unwrap().count()
 }
 
-fn _test_virtio_vsock(hotplug: bool) {
-    let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-    let guest = Guest::new(Box::new(disk_config));
-
-    #[cfg(target_arch = "x86_64")]
-    let kernel_path = direct_kernel_boot_path();
-    #[cfg(target_arch = "aarch64")]
-    let kernel_path = if hotplug {
-        edk2_path()
-    } else {
-        direct_kernel_boot_path()
-    };
-
+fn _test_virtio_vsock(guest: &Guest, hotplug: bool) {
     let socket = temp_vsock_path(&guest.tmp_dir);
     let api_socket = temp_api_path(&guest.tmp_dir);
 
-    let mut cmd = GuestCommand::new(&guest);
+    let mut cmd = GuestCommand::new(guest);
     cmd.args(["--api-socket", &api_socket]);
     cmd.default_cpus();
     cmd.default_memory();
-    cmd.args(["--kernel", kernel_path.to_str().unwrap()]);
-    cmd.args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE]);
+    cmd.default_kernel_cmdline();
     cmd.default_disks();
     cmd.default_net();
 
@@ -5965,12 +5952,21 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_vsock() {
-        _test_virtio_vsock(false);
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_regular_guest_factory().create_guest(Box::new(disk_config));
+        _test_virtio_vsock(&guest, false);
     }
 
     #[test]
     fn test_virtio_vsock_hotplug() {
-        _test_virtio_vsock(true);
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        #[cfg(target_arch = "x86_64")]
+        let guest = GuestFactory::new_regular_guest_factory().create_guest(Box::new(disk_config));
+        #[cfg(target_arch = "aarch64")]
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_kernel_path(edk2_path().to_str().unwrap());
+        _test_virtio_vsock(&guest, true);
     }
 
     #[test]
