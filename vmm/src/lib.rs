@@ -1328,6 +1328,13 @@ impl Vmm {
                 ctx.calculated_downtime.map_or(0, |d| d.as_millis())
             );
 
+            event!(
+                "vm",
+                "migration-memory-iteration",
+                "id",
+                format!("{}", ctx.iteration)
+            );
+
             // Prepare next iteration.
             ctx.iteration += 1;
         }
