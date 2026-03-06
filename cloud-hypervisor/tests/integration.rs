@@ -2503,6 +2503,42 @@ fn _test_multi_cpu(guest: &Guest) {
     handle_child_output(r, &output);
 }
 
+fn _test_cpu_affinity(guest: &Guest) {
+    // We need the host to have at least 4 CPUs if we want to be able
+    // to run this test.
+    let host_cpus_count = exec_host_command_output("nproc");
+    assert!(
+        String::from_utf8_lossy(&host_cpus_count.stdout)
+            .trim()
+            .parse::<u16>()
+            .unwrap_or(0)
+            >= 4
+    );
+
+    let mut child = GuestCommand::new(guest)
+        .default_cpus_with_affinity()
+        .default_memory()
+        .default_kernel_cmdline()
+        .default_disks()
+        .default_net()
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+        let pid = child.id();
+        let taskset_vcpu0 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep vcpu0 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
+        assert_eq!(String::from_utf8_lossy(&taskset_vcpu0.stdout).trim(), "0,2");
+        let taskset_vcpu1 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep vcpu1 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
+        assert_eq!(String::from_utf8_lossy(&taskset_vcpu1.stdout).trim(), "1,3");
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+    handle_child_output(r, &output);
+}
+
 mod common_parallel {
     use std::cmp;
     use std::fs::{File, OpenOptions, copy};
@@ -2639,42 +2675,10 @@ mod common_parallel {
     #[test]
     fn test_cpu_affinity() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-
-        // We need the host to have at least 4 CPUs if we want to be able
-        // to run this test.
-        let host_cpus_count = exec_host_command_output("nproc");
-        assert!(
-            String::from_utf8_lossy(&host_cpus_count.stdout)
-                .trim()
-                .parse::<u16>()
-                .unwrap_or(0)
-                >= 4
-        );
-
-        let mut child = GuestCommand::new(&guest)
-            .args(["--cpus", "boot=2,affinity=[0@[0,2],1@[1,3]]"])
-            .default_memory()
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .default_disks()
-            .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-            let pid = child.id();
-            let taskset_vcpu0 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep vcpu0 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
-            assert_eq!(String::from_utf8_lossy(&taskset_vcpu0.stdout).trim(), "0,2");
-            let taskset_vcpu1 = exec_host_command_output(format!("taskset -pc $(ps -T -p {pid} | grep vcpu1 | xargs | cut -f 2 -d \" \") | cut -f 6 -d \" \"").as_str());
-            assert_eq!(String::from_utf8_lossy(&taskset_vcpu1.stdout).trim(), "1,3");
-        });
-
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-        handle_child_output(r, &output);
+        let guest = GuestFactory::new_regular_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(2);
+        _test_cpu_affinity(&guest);
     }
 
     #[test]

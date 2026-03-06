@@ -1441,6 +1441,13 @@ impl Guest {
             if self.nested { "" } else { ",nested=off" }
         )
     }
+    pub fn default_cpus_with_affinity_string(&self) -> String {
+        format!(
+            "boot={},affinity=[0@[0,2],1@[1,3]]{}",
+            self.num_cpu,
+            if self.nested { "" } else { ",nested=off" }
+        )
+    }
 
     pub fn default_memory_string(&self) -> String {
         format!("size={}", self.mem_size_str)
@@ -1714,6 +1721,13 @@ impl<'a> GuestCommand<'a> {
 
     pub fn default_cpus(&mut self) -> &mut Self {
         self.args(["--cpus", self.guest.default_cpus_string().as_str()])
+    }
+
+    pub fn default_cpus_with_affinity(&mut self) -> &mut Self {
+        self.args([
+            "--cpus",
+            self.guest.default_cpus_with_affinity_string().as_str(),
+        ])
     }
 
     pub fn default_memory(&mut self) -> &mut Self {
