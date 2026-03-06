@@ -2623,6 +2623,49 @@ fn _test_pci_msi(guest: &Guest) {
     handle_child_output(r, &output);
 }
 
+fn _test_virtio_net_ctrl_queue(guest: &Guest) {
+    let mut cmd = GuestCommand::new(guest);
+    cmd.default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .args(["--net", guest.default_net_string_w_mtu(3000).as_str()])
+        .capture_output()
+        .default_disks();
+
+    let mut child = cmd.spawn().unwrap();
+
+    guest.wait_vm_boot().unwrap();
+
+    #[cfg(target_arch = "aarch64")]
+    let iface = "enp0s4";
+    #[cfg(target_arch = "x86_64")]
+    let iface = "ens4";
+
+    let r = std::panic::catch_unwind(|| {
+        assert_eq!(
+            guest
+                .ssh_command(
+                    format!("sudo ethtool -K {iface} rx-gro-hw off && echo success").as_str()
+                )
+                .unwrap()
+                .trim(),
+            "success"
+        );
+        assert_eq!(
+            guest
+                .ssh_command(format!("cat /sys/class/net/{iface}/mtu").as_str())
+                .unwrap()
+                .trim(),
+            "3000"
+        );
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
+
 mod common_parallel {
     use std::cmp;
     use std::fs::{File, OpenOptions, copy};
@@ -3012,48 +3055,8 @@ mod common_parallel {
     #[test]
     fn test_virtio_net_ctrl_queue() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-        let mut cmd = GuestCommand::new(&guest);
-        cmd.default_cpus()
-            .default_memory()
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(["--net", guest.default_net_string_w_mtu(3000).as_str()])
-            .capture_output()
-            .default_disks();
-
-        let mut child = cmd.spawn().unwrap();
-
-        guest.wait_vm_boot().unwrap();
-
-        #[cfg(target_arch = "aarch64")]
-        let iface = "enp0s4";
-        #[cfg(target_arch = "x86_64")]
-        let iface = "ens4";
-
-        let r = std::panic::catch_unwind(|| {
-            assert_eq!(
-                guest
-                    .ssh_command(
-                        format!("sudo ethtool -K {iface} rx-gro-hw off && echo success").as_str()
-                    )
-                    .unwrap()
-                    .trim(),
-                "success"
-            );
-            assert_eq!(
-                guest
-                    .ssh_command(format!("cat /sys/class/net/{iface}/mtu").as_str())
-                    .unwrap()
-                    .trim(),
-                "3000"
-            );
-        });
-
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-
-        handle_child_output(r, &output);
+        let guest = GuestFactory::new_regular_guest_factory().create_guest(Box::new(disk_config));
+        _test_virtio_net_ctrl_queue(&guest);
     }
 
     #[test]
