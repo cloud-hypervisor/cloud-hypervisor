@@ -6,6 +6,7 @@
 use std::fs::File;
 use std::io::Read;
 use std::net::Shutdown;
+use std::os::fd::OwnedFd;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::os::unix::net::UnixStream;
 use std::panic::AssertUnwindSafe;
@@ -113,7 +114,7 @@ pub struct SerialManager {
     serial: Arc<Mutex<Serial>>,
     #[cfg(target_arch = "aarch64")]
     serial: Arc<Mutex<Pl011>>,
-    epoll_file: File,
+    epoll_fd: OwnedFd,
     transport: ConsoleTransport,
     kill_evt: EventFd,
     handle: Option<thread::JoinHandle<()>>,
@@ -208,13 +209,13 @@ impl SerialManager {
                 .set_out(Some(Box::new(buffer)));
         }
 
-        // Use 'File' to enforce closing on 'epoll_fd'
+        // Use 'OwnedFd' to manage lifetime
         // SAFETY: epoll_fd is valid
-        let epoll_file = unsafe { File::from_raw_fd(epoll_fd) };
+        let epoll_fd = unsafe { OwnedFd::from_raw_fd(epoll_fd) };
 
         Ok(Some(SerialManager {
             serial,
-            epoll_file,
+            epoll_fd,
             transport,
             kill_evt,
             handle: None,
@@ -256,7 +257,7 @@ impl SerialManager {
             return Ok(());
         }
 
-        let epoll_fd = self.epoll_file.as_raw_fd();
+        let epoll_fd = self.epoll_fd.try_clone().map_err(Error::Epoll)?;
         let transport = self.transport.clone();
         let serial = self.serial.clone();
         let pty_write_out = self.pty_write_out.clone();
@@ -278,22 +279,23 @@ impl SerialManager {
                         [epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
 
                     loop {
-                        let num_events = match epoll::wait(epoll_fd, timeout, &mut events[..]) {
-                            Ok(res) => res,
-                            Err(e) => {
-                                if e.kind() == io::ErrorKind::Interrupted {
-                                    // It's well defined from the epoll_wait() syscall
-                                    // documentation that the epoll loop can be interrupted
-                                    // before any of the requested events occurred or the
-                                    // timeout expired. In both those cases, epoll_wait()
-                                    // returns an error of type EINTR, but this should not
-                                    // be considered as a regular error. Instead it is more
-                                    // appropriate to retry, by calling into epoll_wait().
-                                    continue;
+                        let num_events =
+                            match epoll::wait(epoll_fd.as_raw_fd(), timeout, &mut events[..]) {
+                                Ok(res) => res,
+                                Err(e) => {
+                                    if e.kind() == io::ErrorKind::Interrupted {
+                                        // It's well defined from the epoll_wait() syscall
+                                        // documentation that the epoll loop can be interrupted
+                                        // before any of the requested events occurred or the
+                                        // timeout expired. In both those cases, epoll_wait()
+                                        // returns an error of type EINTR, but this should not
+                                        // be considered as a regular error. Instead it is more
+                                        // appropriate to retry, by calling into epoll_wait().
+                                        continue;
+                                    }
+                                    return Err(Error::Epoll(e));
                                 }
-                                return Err(Error::Epoll(e));
-                            }
-                        };
+                            };
 
                         if matches!(transport, ConsoleTransport::Pty(_)) && num_events == 0 {
                             // This very specific case happens when the serial is connected
@@ -332,7 +334,7 @@ impl SerialManager {
                                         unix_stream.try_clone().map_err(Error::CloneUnixStream)?;
 
                                     epoll::ctl(
-                                        epoll_fd,
+                                        epoll_fd.as_raw_fd(),
                                         epoll::ControlOptions::EPOLL_CTL_ADD,
                                         unix_stream.as_raw_fd(),
                                         epoll::Event::new(
