@@ -2471,6 +2471,37 @@ fn _test_simple_launch(guest: &Guest) {
     handle_child_output(r, &output);
 }
 
+fn _test_multi_cpu(guest: &Guest) {
+    let mut cmd = GuestCommand::new(guest);
+    cmd.args(["--cpus", "boot=2,max=4"])
+        .default_memory()
+        .default_kernel_cmdline()
+        .capture_output()
+        .default_disks()
+        .default_net();
+
+    let mut child = cmd.spawn().unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
+
+        assert_eq!(
+            guest
+                .ssh_command(r#"sudo dmesg | grep "smp: Brought up" | sed "s/\[\ *[0-9.]*\] //""#)
+                .unwrap()
+                .trim(),
+            "smp: Brought up 1 node, 2 CPUs"
+        );
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
+
 mod common_parallel {
     use std::cmp;
     use std::fs::{File, OpenOptions, copy};
@@ -2502,41 +2533,9 @@ mod common_parallel {
 
     #[test]
     fn test_multi_cpu() {
-        let jammy_image = JAMMY_IMAGE_NAME.to_string();
-        let disk_config = UbuntuDiskConfig::new(jammy_image);
-        let guest = Guest::new(Box::new(disk_config));
-
-        let mut cmd = GuestCommand::new(&guest);
-        cmd.args(["--cpus", "boot=2,max=4"])
-            .default_memory()
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .capture_output()
-            .default_disks()
-            .default_net();
-
-        let mut child = cmd.spawn().unwrap();
-
-        let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-
-            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
-
-            assert_eq!(
-                guest
-                    .ssh_command(
-                        r#"sudo dmesg | grep "smp: Brought up" | sed "s/\[\ *[0-9.]*\] //""#
-                    )
-                    .unwrap()
-                    .trim(),
-                "smp: Brought up 1 node, 2 CPUs"
-            );
-        });
-
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-
-        handle_child_output(r, &output);
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_regular_guest_factory().create_guest(Box::new(disk_config));
+        _test_multi_cpu(&guest);
     }
 
     #[test]
