@@ -56,7 +56,7 @@ pub enum ConsoleDeviceError {
 type ConsoleDeviceResult<T> = result::Result<T, ConsoleDeviceError>;
 
 #[derive(Clone)]
-pub enum ConsoleOutput {
+pub enum ConsoleTransport {
     File(Arc<File>),
     Pty(Arc<File>),
     Tty(Arc<File>),
@@ -67,10 +67,10 @@ pub enum ConsoleOutput {
 
 #[derive(Clone)]
 pub struct ConsoleInfo {
-    pub console_main_fd: ConsoleOutput,
-    pub serial_main_fd: ConsoleOutput,
+    pub console_main_fd: ConsoleTransport,
+    pub serial_main_fd: ConsoleTransport,
     #[cfg(target_arch = "x86_64")]
-    pub debug_main_fd: ConsoleOutput,
+    pub debug_main_fd: ConsoleTransport,
 }
 
 fn modify_mode<F: FnOnce(&mut termios)>(
@@ -185,7 +185,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             ConsoleOutputMode::File => {
                 let file = File::create(vmconfig.console.file.as_ref().unwrap())
                     .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
-                ConsoleOutput::File(Arc::new(file))
+                ConsoleTransport::File(Arc::new(file))
             }
             ConsoleOutputMode::Pty => {
                 let (main_fd, sub_fd, path) =
@@ -200,7 +200,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                     )
                     .map_err(ConsoleDeviceError::StartSigwinchListener)?,
                 ));
-                ConsoleOutput::Pty(Arc::new(main_fd))
+                ConsoleTransport::Pty(Arc::new(main_fd))
             }
             ConsoleOutputMode::Tty => {
                 // Duplicating the file descriptors like this is needed as otherwise
@@ -222,26 +222,26 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
 
                 // Make sure stdout is in raw mode, if it's a terminal.
                 set_raw_mode(&stdout, &mut original_termios_opt)?;
-                ConsoleOutput::Tty(Arc::new(stdout))
+                ConsoleTransport::Tty(Arc::new(stdout))
             }
             ConsoleOutputMode::Socket => {
                 return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice);
             }
-            ConsoleOutputMode::Null => ConsoleOutput::Null,
-            ConsoleOutputMode::Off => ConsoleOutput::Off,
+            ConsoleOutputMode::Null => ConsoleTransport::Null,
+            ConsoleOutputMode::Off => ConsoleTransport::Off,
         },
         serial_main_fd: match vmconfig.serial.mode {
             ConsoleOutputMode::File => {
                 let file = File::create(vmconfig.serial.file.as_ref().unwrap())
                     .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
-                ConsoleOutput::File(Arc::new(file))
+                ConsoleTransport::File(Arc::new(file))
             }
             ConsoleOutputMode::Pty => {
                 let (main_fd, sub_fd, path) =
                     create_pty().map_err(ConsoleDeviceError::CreateConsoleDevice)?;
                 set_raw_mode(&sub_fd.as_raw_fd(), &mut original_termios_opt)?;
                 vmconfig.serial.file = Some(path.clone());
-                ConsoleOutput::Pty(Arc::new(main_fd))
+                ConsoleTransport::Pty(Arc::new(main_fd))
             }
             ConsoleOutputMode::Tty => {
                 // During vm_shutdown, when serial device is closed, FD#2(STDOUT)
@@ -257,41 +257,41 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
                 // Make sure stdout is in raw mode, if it's a terminal.
                 set_raw_mode(&stdout, &mut original_termios_opt)?;
 
-                ConsoleOutput::Tty(Arc::new(stdout))
+                ConsoleTransport::Tty(Arc::new(stdout))
             }
             ConsoleOutputMode::Socket => {
                 let listener = UnixListener::bind(vmconfig.serial.socket.as_ref().unwrap())
                     .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
-                ConsoleOutput::Socket(Arc::new(listener))
+                ConsoleTransport::Socket(Arc::new(listener))
             }
-            ConsoleOutputMode::Null => ConsoleOutput::Null,
-            ConsoleOutputMode::Off => ConsoleOutput::Off,
+            ConsoleOutputMode::Null => ConsoleTransport::Null,
+            ConsoleOutputMode::Off => ConsoleTransport::Off,
         },
         #[cfg(target_arch = "x86_64")]
         debug_main_fd: match vmconfig.debug_console.mode {
             ConsoleOutputMode::File => {
                 let file = File::create(vmconfig.debug_console.file.as_ref().unwrap())
                     .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
-                ConsoleOutput::File(Arc::new(file))
+                ConsoleTransport::File(Arc::new(file))
             }
             ConsoleOutputMode::Pty => {
                 let (main_fd, sub_fd, path) =
                     create_pty().map_err(ConsoleDeviceError::CreateConsoleDevice)?;
                 set_raw_mode(&sub_fd.as_raw_fd(), &mut original_termios_opt)?;
                 vmconfig.debug_console.file = Some(path.clone());
-                ConsoleOutput::Pty(Arc::new(main_fd))
+                ConsoleTransport::Pty(Arc::new(main_fd))
             }
             ConsoleOutputMode::Tty => {
                 let out =
                     dup_stdout().map_err(|e| ConsoleDeviceError::CreateConsoleDevice(e.into()))?;
                 set_raw_mode(&out, &mut original_termios_opt)?;
-                ConsoleOutput::Tty(Arc::new(out))
+                ConsoleTransport::Tty(Arc::new(out))
             }
             ConsoleOutputMode::Socket => {
                 return Err(ConsoleDeviceError::NoSocketOptionSupportForConsoleDevice);
             }
-            ConsoleOutputMode::Null => ConsoleOutput::Null,
-            ConsoleOutputMode::Off => ConsoleOutput::Off,
+            ConsoleOutputMode::Null => ConsoleTransport::Null,
+            ConsoleOutputMode::Off => ConsoleTransport::Off,
         },
     };
 
