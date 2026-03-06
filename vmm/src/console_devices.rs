@@ -67,10 +67,10 @@ pub enum ConsoleTransport {
 
 #[derive(Clone)]
 pub struct ConsoleInfo {
-    pub console_main_fd: ConsoleTransport,
-    pub serial_main_fd: ConsoleTransport,
+    pub console: ConsoleTransport,
+    pub serial: ConsoleTransport,
     #[cfg(target_arch = "x86_64")]
-    pub debug_main_fd: ConsoleTransport,
+    pub debug: ConsoleTransport,
 }
 
 fn modify_mode<F: FnOnce(&mut termios)>(
@@ -181,7 +181,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
     let mut original_termios_opt = vmm.original_termios_opt.lock().unwrap();
 
     let console_info = ConsoleInfo {
-        console_main_fd: match vmconfig.console.mode {
+        console: match vmconfig.console.mode {
             ConsoleOutputMode::File => {
                 let file = File::create(vmconfig.console.file.as_ref().unwrap())
                     .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
@@ -230,7 +230,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             ConsoleOutputMode::Null => ConsoleTransport::Null,
             ConsoleOutputMode::Off => ConsoleTransport::Off,
         },
-        serial_main_fd: match vmconfig.serial.mode {
+        serial: match vmconfig.serial.mode {
             ConsoleOutputMode::File => {
                 let file = File::create(vmconfig.serial.file.as_ref().unwrap())
                     .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
@@ -268,7 +268,7 @@ pub(crate) fn pre_create_console_devices(vmm: &mut Vmm) -> ConsoleDeviceResult<C
             ConsoleOutputMode::Off => ConsoleTransport::Off,
         },
         #[cfg(target_arch = "x86_64")]
-        debug_main_fd: match vmconfig.debug_console.mode {
+        debug: match vmconfig.debug_console.mode {
             ConsoleOutputMode::File => {
                 let file = File::create(vmconfig.debug_console.file.as_ref().unwrap())
                     .map_err(ConsoleDeviceError::CreateConsoleDevice)?;
