@@ -980,7 +980,10 @@ components:
         image_type:
           type: string
           enum: [FixedVhd, Qcow2, Raw, Vhdx, Unknown]
-
+        lock_granularity:
+          type: string
+          enum: [byte-range, full]
+          default: byte-range
 
     NetConfig:
       type: object

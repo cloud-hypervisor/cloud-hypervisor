@@ -19,7 +19,7 @@ use std::{io, result};
 
 use anyhow::anyhow;
 use block::async_io::{AsyncIo, AsyncIoError, DiskFile, DiskFileError};
-use block::fcntl::{LockError, LockGranularity, LockType, get_lock_state};
+use block::fcntl::{LockError, LockGranularity, LockGranularityChoice, LockType, get_lock_state};
 use block::{
     ExecuteAsync, ExecuteError, Request, RequestType, VirtioBlockConfig, build_serial, fcntl,
 };
@@ -662,6 +662,7 @@ pub struct Block {
     serial: Vec<u8>,
     queue_affinity: BTreeMap<u16, Vec<usize>>,
     disable_sector0_writes: bool,
+    lock_granularity_choice: LockGranularityChoice,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -692,6 +693,7 @@ impl Block {
         queue_affinity: BTreeMap<u16, Vec<usize>>,
         sparse: bool,
         disable_sector0_writes: bool,
+        lock_granularity: LockGranularityChoice,
     ) -> io::Result<Self> {
         let (disk_nsectors, avail_features, acked_features, config, paused) =
             if let Some(state) = state {
@@ -807,6 +809,7 @@ impl Block {
             serial,
             queue_affinity,
             disable_sector0_writes,
+            lock_granularity_choice: lock_granularity,
         })
     }
 
@@ -815,23 +818,27 @@ impl Block {
     }
 
     /// Returns the granularity for the advisory lock for this disk.
-    // TODO In future, we could add a `lock_granularity=` configuration to the CLI.
-    // For now, we stick to QEMU behavior.
     fn lock_granularity(&mut self) -> LockGranularity {
-        self.disk_image.physical_size().map_or_else(
-            // use a safe fallback
-            |e| {
-                let fallback = LockGranularity::WholeFile;
-                warn!(
-                    "Can't get disk size for id={},path={}, falling back to {:?}: error: {e}",
-                    self.id,
-                    self.disk_path.display(),
-                    fallback
-                );
-                fallback
-            },
-            |size| LockGranularity::ByteRange(0, size),
-        )
+        match self.lock_granularity_choice {
+            LockGranularityChoice::Full => LockGranularity::WholeFile,
+            LockGranularityChoice::ByteRange => {
+                // Byte-range lock covering [0, size)
+                self.disk_image.physical_size().map_or_else(
+                    // use a safe fallback
+                    |e| {
+                        let fallback = LockGranularity::WholeFile;
+                        warn!(
+                            "Can't get disk size for id={},path={}, falling back to {:?}: error: {e}",
+                            self.id,
+                            self.disk_path.display(),
+                            fallback
+                        );
+                        fallback
+                    },
+                    |size| LockGranularity::ByteRange(0, size),
+                )
+            }
+        }
     }
 
     /// Tries to set an advisory lock for the corresponding disk image.
