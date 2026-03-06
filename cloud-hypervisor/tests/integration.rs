@@ -1715,6 +1715,68 @@ fn _test_virtio_fs(
     handle_child_output(r, &output);
 }
 
+fn test_virtio_rtc() {
+    let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+    let guest = Guest::new(Box::new(disk_config));
+
+    let kernel_path = direct_kernel_boot_path();
+
+    // virtio-rtc is always created by the VMM (no CLI flag needed)
+    let mut child = GuestCommand::new(&guest)
+        .default_cpus()
+        .default_memory()
+        .args(["--kernel", kernel_path.to_str().unwrap()])
+        .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+        .default_disks()
+        .default_net()
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        // Fail fast if the virtio-rtc driver is not loaded.
+        assert_eq!(
+            guest
+                .ssh_command(
+                    "test -d /sys/bus/virtio/drivers/virtio_rtc && echo ok || echo missing"
+                )
+                .unwrap()
+                .trim(),
+            "ok"
+        );
+
+        // Find the PTP device backed by virtio-rtc (clock_name starts with
+        // "Virtio PTP"), which may coexist with KVM's "KVM virtual PTP".
+        let ptp_dev = guest
+            .ssh_command(
+                "for d in /sys/class/ptp/ptp*; do \
+                   if grep -q '^Virtio PTP' \"$d/clock_name\" 2>/dev/null; then \
+                     basename \"$d\"; break; \
+                   fi; \
+                 done",
+            )
+            .unwrap();
+        let ptp_dev = ptp_dev.trim();
+        assert!(ptp_dev.starts_with("ptp"), "No virtio-rtc PTP device found");
+
+        // Verify the device node exists
+        assert_eq!(
+            guest
+                .ssh_command(&format!("ls /dev/{ptp_dev} 2>/dev/null || echo missing"))
+                .unwrap()
+                .trim(),
+            format!("/dev/{ptp_dev}")
+        );
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
+
 fn test_virtio_pmem(discard_writes: bool, specify_size: bool) {
     let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
     let guest = Guest::new(Box::new(disk_config));
@@ -5115,6 +5177,11 @@ mod common_parallel {
     #[test]
     fn test_generic_vhost_user_multi_segment() {
         _test_virtio_fs(&prepare_virtiofsd, false, true, Some(15));
+    }
+
+    #[test]
+    fn test_virtio_rtc() {
+        test_virtio_rtc();
     }
 
     #[test]
