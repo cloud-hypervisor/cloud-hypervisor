@@ -114,7 +114,7 @@ pub struct SerialManager {
     #[cfg(target_arch = "aarch64")]
     serial: Arc<Mutex<Pl011>>,
     epoll_file: File,
-    in_file: ConsoleTransport,
+    transport: ConsoleTransport,
     kill_evt: EventFd,
     handle: Option<thread::JoinHandle<()>>,
     pty_write_out: Option<Arc<AtomicBool>>,
@@ -125,12 +125,12 @@ impl SerialManager {
     pub fn new(
         #[cfg(any(target_arch = "x86_64", target_arch = "riscv64"))] serial: Arc<Mutex<Serial>>,
         #[cfg(target_arch = "aarch64")] serial: Arc<Mutex<Pl011>>,
-        mut output: ConsoleTransport,
+        mut transport: ConsoleTransport,
         socket: Option<PathBuf>,
     ) -> Result<Option<Self>> {
         let mut socket_path: Option<PathBuf> = None;
 
-        let in_fd = match output {
+        let in_fd = match transport {
             ConsoleTransport::Pty(ref fd) => fd.as_raw_fd(),
             ConsoleTransport::Tty(_)
                 // If running on an interactive TTY then accept input
@@ -155,7 +155,7 @@ impl SerialManager {
                     return Err(Error::SetNonBlocking(std::io::Error::last_os_error()));
                 }
 
-                output = ConsoleTransport::Tty(Arc::new(stdin_clone));
+                transport = ConsoleTransport::Tty(Arc::new(stdin_clone));
                 fd
             }
             ConsoleTransport::Tty(_) => {
@@ -181,7 +181,7 @@ impl SerialManager {
         )
         .map_err(Error::Epoll)?;
 
-        let epoll_fd_data = if let ConsoleTransport::Socket(_) = output {
+        let epoll_fd_data = if let ConsoleTransport::Socket(_) = transport {
             EpollDispatch::Socket
         } else {
             EpollDispatch::File
@@ -196,7 +196,7 @@ impl SerialManager {
         .map_err(Error::Epoll)?;
 
         let mut pty_write_out = None;
-        if let ConsoleTransport::Pty(ref file) = output {
+        if let ConsoleTransport::Pty(ref file) = transport {
             let write_out = Arc::new(AtomicBool::new(false));
             pty_write_out = Some(write_out.clone());
             let writer = file.try_clone().map_err(Error::FileClone)?;
@@ -215,7 +215,7 @@ impl SerialManager {
         Ok(Some(SerialManager {
             serial,
             epoll_file,
-            in_file: output,
+            transport,
             kill_evt,
             handle: None,
             pty_write_out,
@@ -257,7 +257,7 @@ impl SerialManager {
         }
 
         let epoll_fd = self.epoll_file.as_raw_fd();
-        let in_file = self.in_file.clone();
+        let transport = self.transport.clone();
         let serial = self.serial.clone();
         let pty_write_out = self.pty_write_out.clone();
         let mut reader: Option<UnixStream> = None;
@@ -295,7 +295,7 @@ impl SerialManager {
                             }
                         };
 
-                        if matches!(in_file, ConsoleTransport::Pty(_)) && num_events == 0 {
+                        if matches!(transport, ConsoleTransport::Pty(_)) && num_events == 0 {
                             // This very specific case happens when the serial is connected
                             // to a PTY. We know EPOLLHUP is always present when there's nothing
                             // connected at the other end of the PTY. That's why getting no event
@@ -320,7 +320,7 @@ impl SerialManager {
                                             .map_err(Error::AcceptConnection)?;
                                     }
 
-                                    let ConsoleTransport::Socket(ref listener) = in_file else {
+                                    let ConsoleTransport::Socket(ref listener) = transport else {
                                         unreachable!();
                                     };
 
@@ -348,7 +348,7 @@ impl SerialManager {
                                 EpollDispatch::File => {
                                     if event.events & libc::EPOLLIN as u32 != 0 {
                                         let mut input = [0u8; 64];
-                                        let count = match &in_file {
+                                        let count = match &transport {
                                             ConsoleTransport::Socket(_) => {
                                                 if let Some(mut serial_reader) = reader.as_ref() {
                                                     let count = serial_reader
@@ -431,7 +431,7 @@ impl Drop for SerialManager {
         if let Some(handle) = self.handle.take() {
             handle.join().ok();
         }
-        if let ConsoleTransport::Socket(_) = self.in_file
+        if let ConsoleTransport::Socket(_) = self.transport
             && let Some(socket_path) = self.socket_path.as_ref()
         {
             std::fs::remove_file(socket_path.as_os_str())
