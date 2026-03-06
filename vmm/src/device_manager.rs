@@ -2334,11 +2334,11 @@ impl DeviceManager {
 
     fn add_virtio_console_device(
         &mut self,
-        console_fd: ConsoleTransport,
+        transport: ConsoleTransport,
         resize_pipe: Option<Arc<File>>,
     ) -> DeviceManagerResult<Option<Arc<virtio_devices::ConsoleResizer>>> {
         let console_config = self.config.lock().unwrap().console.clone();
-        let endpoint = match console_fd {
+        let endpoint = match transport {
             ConsoleTransport::File(file) => Endpoint::File(file),
             ConsoleTransport::Pty(file) => {
                 self.console_resize_pipe = resize_pipe;
