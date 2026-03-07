@@ -14928,4 +14928,16 @@ mod common_cvm {
             GuestFactory::new_confidential_guest_factory().create_guest(Box::new(disk_config));
         _test_virtio_net_ctrl_queue(&guest);
     }
+
+    #[test]
+    fn test_pci_multiple_segments() {
+        // Use 8 segments to test the multiple segment support since it's more than the default 6
+        //  supported by Linux
+        // IGVM file used by Sev-Snp Guest now support up to 8 segments, so we can use 8 segments for testing.
+        let num_pci_segments: u16 = 8;
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest =
+            GuestFactory::new_confidential_guest_factory().create_guest(Box::new(disk_config));
+        _test_pci_multiple_segments(&guest, num_pci_segments, 5);
+    }
 }
