@@ -98,7 +98,7 @@ struct VirtioIommuConfig {
     domain_range: VirtioIommuRange32,
     probe_size: u32,
     bypass: u8,
-    _reserved: [u8; 7],
+    _reserved: [u8; 3],
 }
 
 /// Virtio IOMMU request type
