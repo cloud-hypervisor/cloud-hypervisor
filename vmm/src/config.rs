@@ -356,6 +356,9 @@ pub enum ValidationError {
     /// Number of FDs passed during Restore are incorrect to the NetConfig
     #[error("Number of Net FDs passed for '{0}' during Restore: {1}. Expected: {2}")]
     RestoreNetFdCountMismatch(String, usize, usize),
+    /// Invalid restore configuration
+    #[error("Invalid restore configuration: {0}")]
+    InvalidRestoreConfig(String),
     /// Path provided in landlock-rules doesn't exist
     #[error("Path {0:?} provided in landlock-rules does not exist")]
     LandlockPathDoesNotExist(PathBuf),
@@ -2565,27 +2568,60 @@ where
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MemoryRestoreMode {
+    #[default]
+    Copy,
+    Ondemand,
+}
+
+#[derive(Debug, Error)]
+pub enum MemoryRestoreModeParseError {
+    #[error("invalid value: {0}")]
+    InvalidValue(String),
+}
+
+impl FromStr for MemoryRestoreMode {
+    type Err = MemoryRestoreModeParseError;
+
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "copy" => Ok(Self::Copy),
+            "ondemand" => Ok(Self::Ondemand),
+            _ => Err(MemoryRestoreModeParseError::InvalidValue(s.to_owned())),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
 pub struct RestoreConfig {
     pub source_url: PathBuf,
     #[serde(default)]
     pub prefault: bool,
     #[serde(default)]
+    pub memory_restore_mode: MemoryRestoreMode,
+    #[serde(default)]
     pub net_fds: Option<Vec<RestoredNetConfig>>,
 }
 
 impl RestoreConfig {
     pub const SYNTAX: &'static str = "Restore from a VM snapshot. \
-        \nRestore parameters \"source_url=<source_url>,prefault=on|off,\
+        \nRestore parameters \"source_url=<source_url>,prefault=on|off,memory_restore_mode=copy|ondemand,\
         net_fds=<list_of_net_ids_with_their_associated_fds>\" \
         \n`source_url` should be a valid URL (e.g file:///foo/bar or tcp://192.168.1.10/foo) \
-        \n`prefault` brings memory pages in when enabled (disabled by default) \
+        \n`prefault` controls eager prefaulting for the copy-based restore path (disabled by default) \
+        \n`memory_restore_mode=copy` preserves the existing eager read-copy restore behavior, while `memory_restore_mode=ondemand` enables lazy demand paging and fails restore if userfaultfd support is unavailable \
         \n`net_fds` is a list of net ids with new file descriptors. \
         Only net devices backed by FDs directly are needed as input.";
 
     pub fn parse(restore: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("source_url").add("prefault").add("net_fds");
+        parser
+            .add("source_url")
+            .add("prefault")
+            .add("memory_restore_mode")
+            .add("net_fds");
         parser.parse(restore).map_err(Error::ParseRestore)?;
 
         let source_url = parser
@@ -2597,6 +2633,10 @@ impl RestoreConfig {
             .map_err(Error::ParseRestore)?
             .unwrap_or(Toggle(false))
             .0;
+        let memory_restore_mode = parser
+            .convert::<MemoryRestoreMode>("memory_restore_mode")
+            .map_err(Error::ParseRestore)?
+            .unwrap_or_default();
         let net_fds = parser
             .convert::<Tuple<String, Vec<u64>>>("net_fds")
             .map_err(Error::ParseRestore)?
@@ -2613,6 +2653,7 @@ impl RestoreConfig {
         Ok(RestoreConfig {
             source_url,
             prefault,
+            memory_restore_mode,
             net_fds,
         })
     }
@@ -2621,6 +2662,12 @@ impl RestoreConfig {
     // corresponding 'RestoreNetConfig' with a matched 'id' and expected
     // number of FDs.
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if self.memory_restore_mode == MemoryRestoreMode::Ondemand && self.prefault {
+            return Err(ValidationError::InvalidRestoreConfig(
+                "'prefault=on' cannot be combined with 'memory_restore_mode=ondemand'".to_string(),
+            ));
+        }
+
         let mut restored_net_with_fds = HashMap::new();
         for n in self.net_fds.iter().flatten() {
             assert_eq!(
@@ -4484,6 +4531,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
                 prefault: false,
+                memory_restore_mode: MemoryRestoreMode::Copy,
                 net_fds: None,
             }
         );
@@ -4494,6 +4542,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             RestoreConfig {
                 source_url: PathBuf::from("/path/to/snapshot"),
                 prefault: false,
+                memory_restore_mode: MemoryRestoreMode::Copy,
                 net_fds: Some(vec![
                     RestoredNetConfig {
                         id: "net0".to_string(),
@@ -4508,9 +4557,38 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 ]),
             }
         );
+        assert_eq!(
+            RestoreConfig::parse("source_url=/path/to/snapshot,memory_restore_mode=ondemand")?,
+            RestoreConfig {
+                source_url: PathBuf::from("/path/to/snapshot"),
+                prefault: false,
+                memory_restore_mode: MemoryRestoreMode::Ondemand,
+                net_fds: None,
+            }
+        );
         // Parsing should fail as source_url is a required field
         RestoreConfig::parse("prefault=off").unwrap_err();
         Ok(())
+    }
+
+    #[test]
+    fn test_restore_config_serde() {
+        assert_eq!(
+            serde_json::from_str::<RestoreConfig>(
+                r#"{"source_url":"/path/to/snapshot"}"#
+            )
+            .unwrap()
+            .memory_restore_mode,
+            MemoryRestoreMode::Copy
+        );
+        assert_eq!(
+            serde_json::from_str::<RestoreConfig>(
+                r#"{"source_url":"/path/to/snapshot","memory_restore_mode":"ondemand"}"#
+            )
+            .unwrap()
+            .memory_restore_mode,
+            MemoryRestoreMode::Ondemand
+        );
     }
 
     #[test]
@@ -4575,6 +4653,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let valid_config = RestoreConfig {
             source_url: PathBuf::from("/path/to/snapshot"),
             prefault: false,
+            memory_restore_mode: MemoryRestoreMode::Copy,
             net_fds: Some(vec![
                 RestoredNetConfig {
                     id: "net0".to_string(),
@@ -4649,6 +4728,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let another_valid_config = RestoreConfig {
             source_url: PathBuf::from("/path/to/snapshot"),
             prefault: false,
+            memory_restore_mode: MemoryRestoreMode::Copy,
             net_fds: None,
         };
         snapshot_vm_config.net = Some(vec![NetConfig {
@@ -4657,6 +4737,28 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..net_fixture()
         }]);
         another_valid_config.validate(&snapshot_vm_config).unwrap();
+
+        let invalid_restore_mode = RestoreConfig {
+            source_url: PathBuf::from("/path/to/snapshot"),
+            prefault: true,
+            memory_restore_mode: MemoryRestoreMode::Ondemand,
+            net_fds: None,
+        };
+        assert_eq!(
+            invalid_restore_mode.validate(&snapshot_vm_config),
+            Err(ValidationError::InvalidRestoreConfig(
+                "'prefault=on' cannot be combined with 'memory_restore_mode=ondemand'".to_string()
+            ))
+        );
+
+        snapshot_vm_config.memory.hugepages = true;
+        let hugepages_restore_mode = RestoreConfig {
+            source_url: PathBuf::from("/path/to/snapshot"),
+            prefault: false,
+            memory_restore_mode: MemoryRestoreMode::Ondemand,
+            net_fds: None,
+        };
+        hugepages_restore_mode.validate(&snapshot_vm_config).unwrap();
     }
 
     fn platform_fixture() -> PlatformConfig {

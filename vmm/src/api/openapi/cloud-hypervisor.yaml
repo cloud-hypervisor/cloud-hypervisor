@@ -1332,6 +1332,12 @@ components:
           type: string
         prefault:
           type: boolean
+        memory_restore_mode:
+          type: string
+          default: "copy"
+          enum:
+            - copy
+            - ondemand
 
     ReceiveMigrationData:
       required:

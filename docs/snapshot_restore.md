@@ -93,7 +93,30 @@ start using it.
 At this point, the VM is fully restored and is identical to the VM which was
 snapshot earlier.
 
+Restore also supports selecting how guest memory is populated:
+
+```bash
+./cloud-hypervisor \
+    --api-socket /tmp/cloud-hypervisor.sock \
+    --restore source_url=file:///home/foo/snapshot,memory_restore_mode=ondemand
+```
+
+If `memory_restore_mode` is omitted, Cloud Hypervisor uses the eager-copy
+restore path (`copy`).
+
+With `memory_restore_mode=ondemand`, restore uses `userfaultfd` to fault snapshot
+pages in on first access instead of copying the full `memory-ranges` file into
+guest RAM before restore completes. This mode is strict: if Cloud Hypervisor
+cannot enable the `userfaultfd` restore path, restore fails instead of falling
+back to `copy`.
+
+Current constraints for `memory_restore_mode=ondemand`:
+
+- `prefault=on` is not supported
+- the snapshot memory ranges must be page-aligned
+
 ## Restore a VM with new Net FDs
+
 For a VM created with FDs explicitly passed to NetConfig, a set of valid FDs
 need to be provided along with the VM restore command in the following syntax:
 
@@ -104,6 +127,7 @@ need to be provided along with the VM restore command in the following syntax:
 # Second terminal
 ./ch-remote --api-socket=/tmp/cloud-hypervisor.sock restore source_url=file:///home/foo/snapshot net_fds=[net1@[23,24],net2@[25,26]]
 ```
+
 In the example above, the net device with id `net1` will be backed by FDs '23'
 and '24', and the net device with id `net2` will be backed by FDs '25' and '26'
 from the restored VM.
