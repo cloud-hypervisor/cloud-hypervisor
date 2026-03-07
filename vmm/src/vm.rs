@@ -66,9 +66,7 @@ use tracer::trace_scoped;
 use vm_device::Bus;
 #[cfg(feature = "tdx")]
 use vm_memory::{Address, ByteValued, GuestMemoryRegion, ReadVolatile};
-use vm_memory::{
-    Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, WriteVolatile,
-};
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
 use vm_migration::protocol::{MemoryRangeTable, Request, Response};
 use vm_migration::{
     Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable, snapshot_from_id,
@@ -2850,45 +2848,8 @@ impl Vm {
         Ok(())
     }
 
-    pub fn send_memory_regions<F>(
-        &mut self,
-        ranges: &MemoryRangeTable,
-        fd: &mut F,
-    ) -> std::result::Result<(), MigratableError>
-    where
-        F: WriteVolatile,
-    {
-        let guest_memory = self.memory_manager.lock().as_ref().unwrap().guest_memory();
-        let mem = guest_memory.memory();
-
-        for range in ranges.regions() {
-            let mut offset: u64 = 0;
-            // Here we are manually handling the retry in case we can't the
-            // whole region at once because we can't use the implementation
-            // from vm-memory::GuestMemory of write_all_to() as it is not
-            // following the correct behavior. For more info about this issue
-            // see: https://github.com/rust-vmm/vm-memory/issues/174
-            loop {
-                let bytes_written = mem
-                    .write_volatile_to(
-                        GuestAddress(range.gpa + offset),
-                        fd,
-                        (range.length - offset) as usize,
-                    )
-                    .map_err(|e| {
-                        MigratableError::MigrateSend(anyhow!(
-                            "Error transferring memory to socket: {e}"
-                        ))
-                    })?;
-                offset += bytes_written as u64;
-
-                if offset == range.length {
-                    break;
-                }
-            }
-        }
-
-        Ok(())
+    pub fn guest_memory(&self) -> GuestMemoryAtomic<GuestMemoryMmap> {
+        self.memory_manager.lock().unwrap().guest_memory()
     }
 
     pub fn memory_range_table(&self) -> std::result::Result<MemoryRangeTable, MigratableError> {
