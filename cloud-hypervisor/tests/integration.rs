@@ -2667,6 +2667,108 @@ fn _test_virtio_net_ctrl_queue(guest: &Guest) {
     handle_child_output(r, &output);
 }
 
+fn _test_pci_multiple_segments(
+    guest: &Guest,
+    max_num_pci_segments: u16,
+    pci_segments_for_disk: u16,
+) {
+    // Prepare another disk file for the virtio-disk device
+    let test_disk_path = String::from(
+        guest
+            .tmp_dir
+            .as_path()
+            .join("test-disk.raw")
+            .to_str()
+            .unwrap(),
+    );
+    assert!(
+        exec_host_command_status(format!("truncate {test_disk_path} -s 4M").as_str()).success()
+    );
+    assert!(exec_host_command_status(format!("mkfs.ext4 {test_disk_path}").as_str()).success());
+
+    let mut cmd = GuestCommand::new(guest);
+    cmd.default_cpus()
+        .default_memory()
+        .default_kernel_cmdline_with_platform(Some(&format!(
+            "num_pci_segments={max_num_pci_segments}"
+        )))
+        .args([
+            "--disk",
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+            )
+            .as_str(),
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::CloudInit).unwrap()
+            )
+            .as_str(),
+            format!("path={test_disk_path},pci_segment={pci_segments_for_disk},image_type=raw")
+                .as_str(),
+        ])
+        .capture_output()
+        .default_net();
+
+    let mut child = cmd.spawn().unwrap();
+
+    guest.wait_vm_boot().unwrap();
+
+    let grep_cmd = "lspci | grep \"Host bridge\" | wc -l";
+
+    let r = std::panic::catch_unwind(|| {
+        // There should be MAX_NUM_PCI_SEGMENTS PCI host bridges in the guest.
+        assert_eq!(
+            guest
+                .ssh_command(grep_cmd)
+                .unwrap()
+                .trim()
+                .parse::<u16>()
+                .unwrap_or_default(),
+            max_num_pci_segments
+        );
+
+        // Check both if /dev/vdc exists and if the block size is 4M.
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep vdc | grep -c 4M")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            1
+        );
+
+        // Mount the device.
+        guest.ssh_command("mkdir mount_image").unwrap();
+        guest
+            .ssh_command("sudo mount -o rw -t ext4 /dev/vdc mount_image/")
+            .unwrap();
+        // Grant all users with write permission.
+        guest.ssh_command("sudo chmod a+w mount_image/").unwrap();
+
+        // Write something to the device.
+        guest
+            .ssh_command("sudo echo \"bar\" >> mount_image/foo")
+            .unwrap();
+
+        // Check the content of the block device. The file "foo" should
+        // contain "bar".
+        assert_eq!(
+            guest
+                .ssh_command("sudo cat mount_image/foo")
+                .unwrap()
+                .trim(),
+            "bar"
+        );
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
+
 mod common_parallel {
     use std::cmp;
     use std::fs::{File, OpenOptions, copy};
@@ -3063,105 +3165,8 @@ mod common_parallel {
     #[test]
     fn test_pci_multiple_segments() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-
-        // Prepare another disk file for the virtio-disk device
-        let test_disk_path = String::from(
-            guest
-                .tmp_dir
-                .as_path()
-                .join("test-disk.raw")
-                .to_str()
-                .unwrap(),
-        );
-        assert!(
-            exec_host_command_status(format!("truncate {test_disk_path} -s 4M").as_str()).success()
-        );
-        assert!(exec_host_command_status(format!("mkfs.ext4 {test_disk_path}").as_str()).success());
-
-        let mut cmd = GuestCommand::new(&guest);
-        cmd.default_cpus()
-            .default_memory()
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args([
-                "--platform",
-                &format!("num_pci_segments={MAX_NUM_PCI_SEGMENTS}"),
-            ])
-            .args([
-                "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
-                format!("path={test_disk_path},pci_segment=15,image_type=raw").as_str(),
-            ])
-            .capture_output()
-            .default_net();
-
-        let mut child = cmd.spawn().unwrap();
-
-        guest.wait_vm_boot().unwrap();
-
-        let grep_cmd = "lspci | grep \"Host bridge\" | wc -l";
-
-        let r = std::panic::catch_unwind(|| {
-            // There should be MAX_NUM_PCI_SEGMENTS PCI host bridges in the guest.
-            assert_eq!(
-                guest
-                    .ssh_command(grep_cmd)
-                    .unwrap()
-                    .trim()
-                    .parse::<u16>()
-                    .unwrap_or_default(),
-                MAX_NUM_PCI_SEGMENTS
-            );
-
-            // Check both if /dev/vdc exists and if the block size is 4M.
-            assert_eq!(
-                guest
-                    .ssh_command("lsblk | grep vdc | grep -c 4M")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                1
-            );
-
-            // Mount the device.
-            guest.ssh_command("mkdir mount_image").unwrap();
-            guest
-                .ssh_command("sudo mount -o rw -t ext4 /dev/vdc mount_image/")
-                .unwrap();
-            // Grant all users with write permission.
-            guest.ssh_command("sudo chmod a+w mount_image/").unwrap();
-
-            // Write something to the device.
-            guest
-                .ssh_command("sudo echo \"bar\" >> mount_image/foo")
-                .unwrap();
-
-            // Check the content of the block device. The file "foo" should
-            // contain "bar".
-            assert_eq!(
-                guest
-                    .ssh_command("sudo cat mount_image/foo")
-                    .unwrap()
-                    .trim(),
-                "bar"
-            );
-        });
-
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-
-        handle_child_output(r, &output);
+        let guest = GuestFactory::new_regular_guest_factory().create_guest(Box::new(disk_config));
+        _test_pci_multiple_segments(&guest, MAX_NUM_PCI_SEGMENTS, 15u16);
     }
 
     #[test]
