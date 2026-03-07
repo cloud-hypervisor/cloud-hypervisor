@@ -28,7 +28,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::{
     ActivateError, ActivateResult, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK,
-    DEVICE_FEATURES_OK, GuestMemoryMmap, VIRTIO_F_IOMMU_PLATFORM, VirtioCommon, VirtioDevice,
+    DEVICE_FEATURES_OK, GuestMemoryMmap, VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice,
     VirtioInterrupt, VirtioInterruptType, get_host_address_range,
 };
 
@@ -164,7 +164,7 @@ impl Vdpa {
 
             let iova_range = vhost.get_iova_range().map_err(Error::GetIovaRange)?;
 
-            if avail_features & (1u64 << VIRTIO_F_IOMMU_PLATFORM) == 0 {
+            if avail_features & (1u64 << VIRTIO_F_ACCESS_PLATFORM) == 0 {
                 return Err(Error::MissingAccessPlatformVirtioFeature);
             }
 

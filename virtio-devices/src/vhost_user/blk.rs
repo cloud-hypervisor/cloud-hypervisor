@@ -31,7 +31,7 @@ use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::VhostUserCommon;
-use crate::{GuestMemoryMmap, GuestRegionMmap, VIRTIO_F_IOMMU_PLATFORM, VirtioInterrupt};
+use crate::{GuestMemoryMmap, GuestRegionMmap, VIRTIO_F_ACCESS_PLATFORM, VirtioInterrupt};
 
 const DEFAULT_QUEUE_NUMBER: usize = 1;
 
@@ -239,7 +239,7 @@ impl VirtioDevice for Blk {
     fn features(&self) -> u64 {
         let mut features = self.common.avail_features;
         if self.iommu {
-            features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+            features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
         }
         features
     }

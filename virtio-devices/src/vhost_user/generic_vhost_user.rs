@@ -27,7 +27,7 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::VhostUserCommon;
 use crate::{
-    ActivateResult, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_IOMMU_PLATFORM,
+    ActivateResult, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM,
     VirtioCommon, VirtioDevice, VirtioInterrupt, VirtioSharedMemoryList,
 };
 
@@ -218,7 +218,7 @@ impl VirtioDevice for GenericVhostUser {
     fn features(&self) -> u64 {
         let mut features = self.common.avail_features;
         if self.iommu {
-            features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+            features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
         }
         features
     }

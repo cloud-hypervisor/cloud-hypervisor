@@ -50,7 +50,7 @@ use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::{
     ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
-    Error as DeviceError, GuestMemoryMmap, VIRTIO_F_IN_ORDER, VIRTIO_F_IOMMU_PLATFORM,
+    Error as DeviceError, GuestMemoryMmap, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_IN_ORDER,
     VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
     VirtioInterruptType,
 };
@@ -349,7 +349,7 @@ where
             let mut avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_IN_ORDER);
 
             if iommu {
-                avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+                avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
             }
             (avail_features, 0, false)
         };
