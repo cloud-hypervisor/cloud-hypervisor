@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
+use std::time::{Duration, Instant};
+
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -242,5 +244,64 @@ pub trait Migratable: Send + Pausable + Snapshottable + Transportable {
 
     fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
         Ok(())
+    }
+}
+
+/// The (internal) context of an ongoing memory transmission consisting of
+/// multiple iterations.
+///
+/// The struct is supposed to be updated for each new iteration but also
+/// within an iteration to always reflect the latest state.
+#[derive(Debug, PartialOrd, PartialEq)]
+pub struct MemoryMigrationContext {
+    /// Current iteration: 0 initial total transmission, >0 delta transmission.
+    pub iteration: usize,
+    /// Total bytes sent across all iterations.
+    pub total_sent_bytes: u64,
+    /// Total bytes to send in the current iteration.
+    pub current_iteration_total_bytes: u64,
+    /// Mean bandwidth in bits per second.
+    pub bandwidth_bps: f64,
+    /// Calculated downtime in milliseconds regarding the current bandwidth and
+    /// the remaining memory.
+    ///
+    /// Please note that this ignores any additional migration overhead and
+    /// only looks at the memory transfer itself.
+    pub calculated_downtime: Option<Duration>,
+    /// Begin of the memory migration.
+    pub migration_begin: Instant,
+    /// Duration of the memory migration.
+    pub migration_duration: Option<Duration>,
+    /// Begin of the current iteration.
+    pub iteration_begin: Instant,
+    /// Duration of the current iteration.
+    pub iteration_duration: Option<Duration>,
+    /// Begin of the current transfer.
+    pub transfer_begin: Instant,
+    /// Duration of the current transfer.
+    pub transfer_duration: Option<Duration>,
+}
+
+impl MemoryMigrationContext {
+    pub fn new() -> Self {
+        Self {
+            iteration: 0,
+            total_sent_bytes: 0,
+            current_iteration_total_bytes: 0,
+            bandwidth_bps: 0.0,
+            calculated_downtime: None,
+            migration_begin: Instant::now(),
+            migration_duration: None,
+            iteration_begin: Instant::now(),
+            iteration_duration: None,
+            transfer_begin: Instant::now(),
+            transfer_duration: None,
+        }
+    }
+}
+
+impl Default for MemoryMigrationContext {
+    fn default() -> Self {
+        Self::new()
     }
 }

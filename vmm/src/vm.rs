@@ -2850,6 +2850,7 @@ impl Vm {
         Ok(())
     }
 
+    /// Sends memory regions over the wire as-is without meta information.
     pub fn send_memory_regions<F>(
         &mut self,
         ranges: &MemoryRangeTable,
