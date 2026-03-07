@@ -3,6 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #![no_main]
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+
 use devices::legacy::Cmos;
 use libc::EFD_NONBLOCK;
 use libfuzzer_sys::{fuzz_target, Corpus};
@@ -25,7 +28,8 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
         u64::from_le_bytes(below_4g),
         u64::from_le_bytes(above_4g),
         EventFd::new(EFD_NONBLOCK).unwrap(),
-        None,
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicBool::new(false)),
     );
 
     let mut i = 16;

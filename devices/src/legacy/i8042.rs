@@ -16,14 +16,20 @@ use vmm_sys_util::eventfd::EventFd;
 pub struct I8042Device {
     reset_evt: EventFd,
     vcpus_kill_signalled: Arc<AtomicBool>,
+    vcpus_pause_signalled: Arc<AtomicBool>,
 }
 
 impl I8042Device {
     /// Constructs a i8042 device that will signal the given event when the guest requests it.
-    pub fn new(reset_evt: EventFd, vcpus_kill_signalled: Arc<AtomicBool>) -> I8042Device {
+    pub fn new(
+        reset_evt: EventFd,
+        vcpus_kill_signalled: Arc<AtomicBool>,
+        vcpus_pause_signalled: Arc<AtomicBool>,
+    ) -> I8042Device {
         I8042Device {
             reset_evt,
             vcpus_kill_signalled,
+            vcpus_pause_signalled,
         }
     }
 }
@@ -50,7 +56,9 @@ impl BusDevice for I8042Device {
             }
             // Spin until we are sure the reset_evt has been handled and that when
             // we return from the KVM_RUN we will exit rather than re-enter the guest.
-            while !self.vcpus_kill_signalled.load(Ordering::SeqCst) {
+            while !self.vcpus_kill_signalled.load(Ordering::SeqCst)
+                && !self.vcpus_pause_signalled.load(Ordering::SeqCst)
+            {
                 // This is more effective than thread::yield_now() at
                 // avoiding a priority inversion with the VMM thread
                 thread::sleep(std::time::Duration::from_millis(1));
