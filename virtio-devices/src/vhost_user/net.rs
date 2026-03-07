@@ -30,8 +30,8 @@ use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use crate::vhost_user::{DEFAULT_VIRTIO_FEATURES, Error, Result, VhostUserCommon};
 use crate::{
-    ActivateResult, GuestMemoryMmap, GuestRegionMmap, NetCtrlEpollHandler, VIRTIO_F_IOMMU_PLATFORM,
-    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
+    ActivateResult, GuestMemoryMmap, GuestRegionMmap, NetCtrlEpollHandler,
+    VIRTIO_F_ACCESS_PLATFORM, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt,
 };
 
 const DEFAULT_QUEUE_NUMBER: usize = 2;
@@ -275,7 +275,7 @@ impl VirtioDevice for Net {
     fn features(&self) -> u64 {
         let mut features = self.common.avail_features;
         if self.iommu {
-            features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+            features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
         }
         features
     }
