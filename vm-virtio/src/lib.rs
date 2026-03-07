@@ -39,7 +39,7 @@ pub enum VirtioDeviceType {
     Mem = 24,
     Fs = 26,
     Pmem = 27,
-    Watchdog = 35, // Temporary until official number allocated
+    Watchdog = 35,
     Unknown = 0xFF,
 }
 
