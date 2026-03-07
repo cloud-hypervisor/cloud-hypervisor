@@ -265,7 +265,7 @@ impl ConsoleEpollHandler {
                 out.flush().map_err(Error::OutputFlush)?;
             }
             trans_queue
-                .add_used(desc_chain.memory(), desc_chain.head_index(), desc.len())
+                .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
                 .map_err(Error::QueueAddUsed)?;
             used_descs = true;
         }
