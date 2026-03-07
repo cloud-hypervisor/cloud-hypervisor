@@ -107,19 +107,6 @@ pub trait VirtioDevice: Send {
         None
     }
 
-    /// Returns the list of shared memory regions required by the device.
-    fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
-        None
-    }
-
-    /// Updates the list of shared memory regions required by the device.
-    fn set_shm_regions(
-        &mut self,
-        _shm_regions: VirtioSharedMemoryList,
-    ) -> std::result::Result<(), Error> {
-        std::unimplemented!()
-    }
-
     /// Some devices may need to do some explicit shutdown work. This method
     /// may be implemented to do this. The VMM should call shutdown() on
     /// every device as part of shutting down the VM. Acting on the device
