@@ -2768,6 +2768,41 @@ fn _test_pci_multiple_segments(
     handle_child_output(r, &output);
 }
 
+fn _test_direct_kernel_boot(guest: &Guest) {
+    let mut child = GuestCommand::new(guest)
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .default_disks()
+        .default_net()
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        guest.validate_cpu_count(None);
+        guest.validate_memory(None);
+
+        let grep_cmd = format!("grep -c {} /proc/interrupts", get_msi_interrupt_pattern());
+        assert_eq!(
+            guest
+                .ssh_command(&grep_cmd)
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            12
+        );
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
+
 mod common_parallel {
     use std::cmp;
     use std::fs::{File, OpenOptions, copy};
@@ -3250,43 +3285,8 @@ mod common_parallel {
     #[test]
     fn test_direct_kernel_boot() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-
-        let kernel_path = direct_kernel_boot_path();
-
-        let mut child = GuestCommand::new(&guest)
-            .default_cpus()
-            .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .default_disks()
-            .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-
-            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 1);
-            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-
-            let grep_cmd = format!("grep -c {} /proc/interrupts", get_msi_interrupt_pattern());
-            assert_eq!(
-                guest
-                    .ssh_command(&grep_cmd)
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                12
-            );
-        });
-
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-
-        handle_child_output(r, &output);
+        let guest = GuestFactory::new_regular_guest_factory().create_guest(Box::new(disk_config));
+        _test_direct_kernel_boot(&guest);
     }
 
     #[test]
