@@ -24,7 +24,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 use super::{
     ActivateError, ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError,
-    EpollHelperHandler, Error as DeviceError, VIRTIO_F_IOMMU_PLATFORM, VIRTIO_F_VERSION_1,
+    EpollHelperHandler, Error as DeviceError, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1,
     VirtioCommon, VirtioDevice, VirtioDeviceType,
 };
 use crate::seccomp_filters::Thread;
@@ -180,7 +180,7 @@ impl Rng {
             let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
 
             if iommu {
-                avail_features |= 1u64 << VIRTIO_F_IOMMU_PLATFORM;
+                avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
             }
 
             (avail_features, 0, false)
