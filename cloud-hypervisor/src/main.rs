@@ -199,11 +199,10 @@ fn get_cli_options_sorted(
             .long("cmdline")
             .help("Kernel command line")
             .num_args(1)
-            .group("vm-config"), Arg::new("console")
+            .group("vm-config"),
+        Arg::new("console")
             .long("console")
-            .help(
-                "Control (virtio) console: \"off|null|pty|tty|file=</path/to/a/file>,iommu=on|off\"",
-            )
+            .help("Control (virtio) console: \"off|null|pty|tty|file=</path/to/a/file>,iommu=on|off\"")
             .default_value("tty")
             .group("vm-config"),
         Arg::new("cpus")
