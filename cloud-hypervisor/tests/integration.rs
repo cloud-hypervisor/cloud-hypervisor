@@ -15008,4 +15008,87 @@ mod common_cvm {
             GuestFactory::new_confidential_guest_factory().create_guest(Box::new(disk_config));
         _test_direct_kernel_boot(&guest);
     }
+
+    #[test]
+    fn test_virtio_block_io_uring() {
+        let guest = make_virtio_block_guest(
+            &GuestFactory::new_confidential_guest_factory(),
+            FOCAL_IMAGE_NAME,
+        );
+        _test_virtio_block(&guest, false, true, false, false, ImageType::Raw);
+    }
+
+    #[test]
+    fn test_virtio_block_aio() {
+        let guest = make_virtio_block_guest(
+            &GuestFactory::new_confidential_guest_factory(),
+            FOCAL_IMAGE_NAME,
+        );
+        _test_virtio_block(&guest, true, false, false, false, ImageType::Raw);
+    }
+
+    #[test]
+    fn test_virtio_block_sync() {
+        let guest = make_virtio_block_guest(
+            &GuestFactory::new_confidential_guest_factory(),
+            FOCAL_IMAGE_NAME,
+        );
+        _test_virtio_block(&guest, true, true, false, false, ImageType::Raw);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2() {
+        let guest = make_virtio_block_guest(
+            &GuestFactory::new_confidential_guest_factory(),
+            JAMMY_IMAGE_NAME_QCOW2,
+        );
+        _test_virtio_block(&guest, false, false, true, false, ImageType::Qcow2);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_zlib() {
+        let guest = make_virtio_block_guest(
+            &GuestFactory::new_confidential_guest_factory(),
+            JAMMY_IMAGE_NAME_QCOW2_ZLIB,
+        );
+        _test_virtio_block(&guest, false, false, true, false, ImageType::Qcow2);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_zstd() {
+        let guest = make_virtio_block_guest(
+            &GuestFactory::new_confidential_guest_factory(),
+            JAMMY_IMAGE_NAME_QCOW2_ZSTD,
+        );
+        _test_virtio_block(&guest, false, false, true, false, ImageType::Qcow2);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_backing_zstd_file() {
+        let guest = make_virtio_block_guest(
+            &GuestFactory::new_confidential_guest_factory(),
+            JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE,
+        );
+
+        _test_virtio_block(&guest, false, false, true, true, ImageType::Qcow2);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_backing_uncompressed_file() {
+        let guest = make_virtio_block_guest(
+            &GuestFactory::new_confidential_guest_factory(),
+            JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE,
+        );
+
+        _test_virtio_block(&guest, false, false, true, true, ImageType::Qcow2);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_backing_raw_file() {
+        let guest = make_virtio_block_guest(
+            &GuestFactory::new_confidential_guest_factory(),
+            JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE,
+        );
+        _test_virtio_block(&guest, false, false, true, true, ImageType::Qcow2);
+    }
 }
