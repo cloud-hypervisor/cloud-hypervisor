@@ -14929,4 +14929,88 @@ mod common_cvm {
             GuestFactory::new_confidential_guest_factory().create_guest(Box::new(disk_config));
         _test_direct_kernel_boot(&guest);
     }
+
+    #[test]
+    fn test_virtio_block_io_uring() {
+        let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
+        _test_virtio_block(&guest, false, true, false, false, ImageType::Raw);
+    }
+
+    #[test]
+    fn test_virtio_block_aio() {
+        let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
+        _test_virtio_block(&guest, true, false, false, false, ImageType::Raw);
+    }
+
+    #[test]
+    fn test_virtio_block_sync() {
+        let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
+        _test_virtio_block(&guest, true, true, false, false, ImageType::Raw);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
+        _test_virtio_block(&guest, false, false, true, false, ImageType::Qcow2);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_zlib() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2_ZLIB.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
+        _test_virtio_block(&guest, false, false, true, false, ImageType::Qcow2);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_zstd() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2_ZSTD.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
+        _test_virtio_block(&guest, false, false, true, false, ImageType::Qcow2);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_backing_zstd_file() {
+        let disk_config =
+            UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2_BACKING_ZSTD_FILE.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
+        _test_virtio_block(&guest, false, false, true, true, ImageType::Qcow2);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_backing_uncompressed_file() {
+        let disk_config =
+            UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2_BACKING_UNCOMPRESSED_FILE.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
+        _test_virtio_block(&guest, false, false, true, true, ImageType::Qcow2);
+    }
+
+    #[test]
+    fn test_virtio_block_qcow2_backing_raw_file() {
+        let disk_config =
+            UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE.to_string());
+        let guest = GuestFactory::new_confidential_guest_factory()
+            .create_guest(Box::new(disk_config))
+            .with_cpu(4);
+        _test_virtio_block(&guest, false, false, true, true, ImageType::Qcow2);
+    }
 }
