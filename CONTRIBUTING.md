@@ -58,7 +58,7 @@ commit you make.
 
 ## Certificate of Origin
 
-In order to get a clear contribution chain of trust we use the [signed-off-by language](https://web.archive.org/web/20230406041855/https://01.org/community/signed-process)
+In order to get a clear contribution chain of trust we use the [signed-off-by language](https://www.kernel.org/doc/Documentation/process/submitting-patches.rst)
 used by the Linux kernel project.
 
 ## Patch format
