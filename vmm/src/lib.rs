@@ -1157,33 +1157,6 @@ impl Vmm {
         Ok(())
     }
 
-    /// Transmits the given [`MemoryRangeTable`] over the wire if there is at
-    /// least one region.
-    ///
-    /// Sends a memory migration request, the range table, and the corresponding
-    /// guest memory regions over the given socket. Waits for acknowledgment
-    /// from the destination.
-    fn vm_send_dirty_pages(
-        vm: &mut Vm,
-        socket: &mut SocketStream,
-        table: &MemoryRangeTable,
-    ) -> result::Result<(), MigratableError> {
-        if table.regions().is_empty() {
-            return Ok(());
-        }
-
-        Request::memory(table.length()).write_to(socket)?;
-        table.write_to(socket)?;
-        // And then the memory itself
-        vm.send_memory_regions(table, socket)?;
-        migration_transport::expect_ok_response(
-            socket,
-            MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
-        )?;
-
-        Ok(())
-    }
-
     /// Performs the initial memory transmission (iteration zero) plus a
     /// variable number of memory iterations with the goal to eventually migrate
     /// the VM in a reasonably small downtime.
@@ -1214,7 +1187,7 @@ impl Vmm {
 
             // Send the current dirty pages
             let transfer_begin = Instant::now();
-            Self::vm_send_dirty_pages(vm, socket, &iteration_table)?;
+            migration_transport::vm_send_dirty_pages(vm, socket, &iteration_table)?;
             let transfer_duration = transfer_begin.elapsed();
             ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
 
@@ -1356,7 +1329,7 @@ impl Vmm {
 
             ctx.update_metrics_before_transfer(iteration_begin, &final_table);
             let transfer_begin = Instant::now();
-            Vmm::vm_send_dirty_pages(vm, socket, &final_table)?;
+            migration_transport::vm_send_dirty_pages(vm, socket, &final_table)?;
             let transfer_duration = transfer_begin.elapsed();
             ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
             ctx.iteration += 1;
