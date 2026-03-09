@@ -1341,15 +1341,7 @@ impl Vmm {
             common_cpuid,
             memory_manager_data: vm.memory_manager_data(),
         };
-        let config_data = serde_json::to_vec(&vm_migration_config).unwrap();
-        Request::config(config_data.len() as u64).write_to(&mut socket)?;
-        socket
-            .write_all(&config_data)
-            .map_err(MigratableError::MigrateSocket)?;
-        migration_transport::expect_ok_response(
-            &mut socket,
-            MigratableError::MigrateSend(anyhow!("Error during config migration")),
-        )?;
+        migration_transport::send_config(&mut socket, &vm_migration_config)?;
 
         // Let every Migratable object know about the migration being started.
         vm.start_migration()?;
