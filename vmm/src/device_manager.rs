@@ -691,6 +691,8 @@ pub enum DeviceManagerError {
         specified: ImageType,
         detected: ImageType,
     },
+    #[error("SEV-SNP guest requires max gpa_width >= 41, got {0}")]
+    SevSnpInvalidGpaWidth(u8),
 }
 
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
@@ -1154,11 +1156,49 @@ fn create_mmio_allocators(
     mmio_allocators
 }
 
+fn calculate_mmio64_area(
+    hypervisor: &dyn hypervisor::Hypervisor,
+    config: &Arc<Mutex<VmConfig>>,
+    num_pci_segments: u16,
+    memory_manager: &Arc<Mutex<MemoryManager>>,
+) -> DeviceManagerResult<(u64, u64)> {
+    #[cfg(not(feature = "sev_snp"))]
+    let sev_snp_enabled = false;
+    #[cfg(feature = "sev_snp")]
+    let sev_snp_enabled = config.lock().unwrap().is_sev_snp_enabled();
+
+    if sev_snp_enabled {
+        // The idea here is to make sure that bar address space do not collide
+        // with guest address. Here we conrifm the guest can have at least 1TB
+        // Guest memory, and then we put the MMIO space right below the Max boundary.
+        // PCI MMIO address space allocation strategy:
+        // - Allocate 64-bit MMIO space in the high address range to avoid collisions
+        //   with guest RAM and other memory regions
+        // - Each PCI segment is allocated a 4 GiB aperture for its 64-bit BAR space
+        // TODO: remove this once we have a way to dynamically
+        // inject ACPI tables.
+        assert!(num_pci_segments <= 96);
+        let phys_width =
+            crate::vm::physical_bits(hypervisor, config.lock().unwrap().cpus.max_phys_bits);
+        if phys_width < 41 {
+            return Err(DeviceManagerError::SevSnpInvalidGpaWidth(phys_width));
+        }
+        let start_of_device_area = 0x10000000000u64;
+
+        let end_of_device_area = start_of_device_area + (num_pci_segments as u64 * (4 << 30)) - 1;
+        Ok((start_of_device_area, end_of_device_area))
+    } else {
+        let mm = memory_manager.lock().unwrap();
+        Ok((mm.start_of_device_area().0, mm.end_of_device_area().0))
+    }
+}
+
 impl DeviceManager {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         io_bus: Arc<Bus>,
         mmio_bus: Arc<Bus>,
+        hypervisor: &dyn hypervisor::Hypervisor,
         vm: Arc<dyn hypervisor::Vm>,
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
@@ -1223,8 +1263,8 @@ impl DeviceManager {
             }
         }
 
-        let start_of_mmio64_area = memory_manager.lock().unwrap().start_of_device_area().0;
-        let end_of_mmio64_area = memory_manager.lock().unwrap().end_of_device_area().0;
+        let (start_of_mmio64_area, end_of_mmio64_area) =
+            calculate_mmio64_area(hypervisor, &config, num_pci_segments, &memory_manager)?;
         let pci_mmio64_allocators = create_mmio_allocators(
             start_of_mmio64_area,
             end_of_mmio64_area,

@@ -598,6 +598,7 @@ impl Vm {
         let device_manager = Self::create_device_manager(
             io_bus,
             mmio_bus,
+            hypervisor.as_ref(),
             vm.clone(),
             config.clone(),
             memory_manager.clone(),
@@ -784,6 +785,7 @@ impl Vm {
     fn create_device_manager(
         io_bus: Arc<Bus>,
         mmio_bus: Arc<Bus>,
+        hypervisor: &dyn hypervisor::Hypervisor,
         vm: Arc<dyn hypervisor::Vm>,
         config: Arc<Mutex<VmConfig>>,
         memory_manager: Arc<Mutex<MemoryManager>>,
@@ -806,6 +808,7 @@ impl Vm {
         DeviceManager::new(
             io_bus,
             mmio_bus,
+            hypervisor,
             vm,
             config,
             memory_manager,
