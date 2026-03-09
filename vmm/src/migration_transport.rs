@@ -12,8 +12,8 @@ use std::result::Result;
 use anyhow::{Context, anyhow};
 use log::info;
 use serde_json;
-use vm_migration::MigratableError;
 use vm_migration::protocol::{Request, Response};
+use vm_migration::{MigratableError, Snapshot};
 
 use crate::{SocketStream, VmMigrationConfig};
 
@@ -115,5 +115,23 @@ pub(crate) fn send_config(
     expect_ok_response(
         socket,
         MigratableError::MigrateSend(anyhow!("Error during config migration")),
+    )
+}
+
+/// Serialize and send the VM snapshot payload.
+pub(crate) fn send_state(
+    socket: &mut SocketStream,
+    snapshot: &Snapshot,
+) -> Result<(), MigratableError> {
+    let snapshot_data = serde_json::to_vec(snapshot)
+        .context("Error serializing VM snapshot")
+        .map_err(MigratableError::MigrateSend)?;
+    Request::state(snapshot_data.len() as u64).write_to(socket)?;
+    socket
+        .write_all(&snapshot_data)
+        .map_err(MigratableError::MigrateSocket)?;
+    expect_ok_response(
+        socket,
+        MigratableError::MigrateSend(anyhow!("Error during state migration")),
     )
 }
