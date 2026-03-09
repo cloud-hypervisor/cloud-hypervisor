@@ -2142,20 +2142,20 @@ pub fn convert(
     dst_file: RawFile,
     dst_type: ImageType,
     src_max_nesting_depth: u32,
-) -> Result<()> {
-    let src_type = detect_image_type(&mut src_file)?;
+) -> BlockResult<()> {
+    let src_type =
+        detect_image_type(&mut src_file).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
     match src_type {
         ImageType::Qcow2 => {
             let mut src_reader =
-                QcowFile::from_with_nesting_depth(src_file, src_max_nesting_depth, true)?;
+                QcowFile::from_with_nesting_depth(src_file, src_max_nesting_depth, true)
+                    .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
             convert_reader(&mut src_reader, dst_file, dst_type)
-                .map_err(|e| Error::ReadingData(io::Error::other(e)))
         }
         ImageType::Raw => {
             // src_file is a raw file.
             let mut src_reader = src_file;
             convert_reader(&mut src_reader, dst_file, dst_type)
-                .map_err(|e| Error::ReadingData(io::Error::other(e)))
         }
     }
 }
