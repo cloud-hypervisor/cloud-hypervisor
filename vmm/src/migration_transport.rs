@@ -12,9 +12,10 @@ use std::result::Result;
 use anyhow::anyhow;
 use log::info;
 use serde_json;
-use vm_migration::protocol::{Request, Response};
+use vm_migration::protocol::{MemoryRangeTable, Request, Response};
 use vm_migration::{MigratableError, Snapshot};
 
+use crate::vm::Vm;
 use crate::{SocketStream, VmMigrationConfig};
 
 /// Extract a UNIX socket path from a "unix:" migration URL.
@@ -137,4 +138,31 @@ pub(crate) fn send_state(
         socket,
         MigratableError::MigrateSend(anyhow!("Error during state migration")),
     )
+}
+
+/// Transmits the given [`MemoryRangeTable`] over the wire if there is at
+/// least one region.
+///
+/// Sends a memory migration request, the range table, and the corresponding
+/// guest memory regions over the given socket. Waits for acknowledgment
+/// from the destination.
+pub(crate) fn vm_send_dirty_pages(
+    vm: &mut Vm,
+    socket: &mut SocketStream,
+    table: &MemoryRangeTable,
+) -> Result<(), MigratableError> {
+    if table.regions().is_empty() {
+        return Ok(());
+    }
+
+    Request::memory(table.length()).write_to(socket)?;
+    table.write_to(socket)?;
+    // And then the memory itself
+    vm.send_memory_regions(table, socket)?;
+    expect_ok_response(
+        socket,
+        MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
+    )?;
+
+    Ok(())
 }
