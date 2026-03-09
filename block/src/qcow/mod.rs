@@ -508,7 +508,9 @@ pub(crate) fn parse_qcow(
         if !IncompatFeatures::from_bits_truncate(header.incompatible_features)
             .contains(IncompatFeatures::DIRTY)
         {
-            header.set_dirty_bit(raw_file.file_mut(), true)?;
+            header
+                .set_dirty_bit(raw_file.file_mut(), true)
+                .map_err(|e| Error::WritingHeader(io::Error::other(e)))?;
         }
 
         header.clear_autoclear_features(raw_file.file_mut())?;
