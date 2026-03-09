@@ -2100,21 +2100,27 @@ where
     Ok(())
 }
 
-fn convert_reader<R>(reader: &mut R, dst_file: RawFile, dst_type: ImageType) -> Result<()>
+fn convert_reader<R>(reader: &mut R, dst_file: RawFile, dst_type: ImageType) -> BlockResult<()>
 where
     R: Read + Seek + SeekHole,
 {
-    let src_size = reader.seek(SeekFrom::End(0)).map_err(Error::SeekingFile)?;
-    reader.rewind().map_err(Error::SeekingFile)?;
+    let src_size = reader
+        .seek(SeekFrom::End(0))
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
+    reader
+        .rewind()
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
 
     // Ensure the destination file is empty before writing to it.
-    dst_file.set_len(0).map_err(Error::SettingFileSize)?;
+    dst_file
+        .set_len(0)
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SettingFileSize(e)))?;
 
     match dst_type {
         ImageType::Qcow2 => {
-            let mut dst_writer = QcowFile::new(dst_file, 3, src_size, true)?;
+            let mut dst_writer = QcowFile::new(dst_file, 3, src_size, true)
+                .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
             convert_reader_writer(reader, &mut dst_writer, src_size)
-                .map_err(|e| Error::WritingData(io::Error::other(e)))
         }
         ImageType::Raw => {
             let mut dst_writer = dst_file;
@@ -2122,9 +2128,8 @@ where
             // of the desired size.
             dst_writer
                 .set_len(src_size)
-                .map_err(Error::SettingFileSize)?;
+                .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SettingFileSize(e)))?;
             convert_reader_writer(reader, &mut dst_writer, src_size)
-                .map_err(|e| Error::WritingData(io::Error::other(e)))
         }
     }
 }
@@ -2144,11 +2149,13 @@ pub fn convert(
             let mut src_reader =
                 QcowFile::from_with_nesting_depth(src_file, src_max_nesting_depth, true)?;
             convert_reader(&mut src_reader, dst_file, dst_type)
+                .map_err(|e| Error::ReadingData(io::Error::other(e)))
         }
         ImageType::Raw => {
             // src_file is a raw file.
             let mut src_reader = src_file;
             convert_reader(&mut src_reader, dst_file, dst_type)
+                .map_err(|e| Error::ReadingData(io::Error::other(e)))
         }
     }
 }
