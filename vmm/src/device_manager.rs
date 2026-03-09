@@ -1080,6 +1080,7 @@ pub struct DeviceManager {
     // Exit event
     exit_evt: EventFd,
     reset_evt: EventFd,
+    guest_exit_evt: EventFd,
 
     #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     id_to_dev_info: HashMap<(DeviceType, String), MmioDeviceInfo>,
@@ -1206,6 +1207,7 @@ impl DeviceManager {
         cpu_manager: Arc<Mutex<CpuManager>>,
         exit_evt: EventFd,
         reset_evt: EventFd,
+        guest_exit_evt: EventFd,
         seccomp_action: SeccompAction,
         numa_nodes: NumaNodes,
         activate_evt: &EventFd,
@@ -1402,6 +1404,7 @@ impl DeviceManager {
             device_tree,
             exit_evt,
             reset_evt,
+            guest_exit_evt,
             #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
             id_to_dev_info: HashMap::new(),
             seccomp_action,
@@ -1517,6 +1520,9 @@ impl DeviceManager {
                     .try_clone()
                     .map_err(DeviceManagerError::EventFd)?,
                 self.exit_evt
+                    .try_clone()
+                    .map_err(DeviceManagerError::EventFd)?,
+                self.guest_exit_evt
                     .try_clone()
                     .map_err(DeviceManagerError::EventFd)?,
             )?;
@@ -1889,6 +1895,7 @@ impl DeviceManager {
         interrupt_manager: &dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>,
         reset_evt: EventFd,
         exit_evt: EventFd,
+        _guest_exit_evt: EventFd,
     ) -> DeviceManagerResult<Option<Arc<Mutex<devices::AcpiGedDevice>>>> {
         let vcpus_kill_signalled = self
             .cpu_manager
