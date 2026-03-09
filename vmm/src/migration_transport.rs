@@ -12,11 +12,11 @@ use std::result::Result;
 use anyhow::{Context, anyhow};
 use log::info;
 use serde_json;
+use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic};
 use vm_migration::protocol::{MemoryRangeTable, Request, Response};
 use vm_migration::{MigratableError, Snapshot};
 
-use crate::vm::Vm;
-use crate::{SocketStream, VmMigrationConfig};
+use crate::{GuestMemoryMmap, SocketStream, VmMigrationConfig};
 
 /// Extract a UNIX socket path from a "unix:" migration URL.
 fn socket_url_to_path(url: &str) -> Result<PathBuf, anyhow::Error> {
@@ -137,29 +137,55 @@ pub(crate) fn send_state(
     )
 }
 
-/// Transmits the given [`MemoryRangeTable`] over the wire if there is at
-/// least one region.
+/// Transmits the given [`MemoryRangeTable`] and the corresponding guest memory
+/// content over the wire if there is at least one range.
 ///
 /// Sends a memory migration request, the range table, and the corresponding
-/// guest memory regions over the given socket. Waits for acknowledgment
+/// guest memory range over the given socket. Waits for acknowledgment
 /// from the destination.
-pub(crate) fn vm_send_dirty_pages(
-    vm: &mut Vm,
+pub(crate) fn send_memory_ranges(
+    guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    ranges: &MemoryRangeTable,
     socket: &mut SocketStream,
-    table: &MemoryRangeTable,
 ) -> Result<(), MigratableError> {
-    if table.regions().is_empty() {
+    if ranges.regions().is_empty() {
         return Ok(());
     }
 
-    Request::memory(table.length()).write_to(socket)?;
-    table.write_to(socket)?;
+    // Send the memory table
+    Request::memory(ranges.length()).write_to(socket)?;
+    ranges.write_to(socket)?;
+
     // And then the memory itself
-    vm.send_memory_regions(table, socket)?;
+    let mem = guest_memory.memory();
+    for range in ranges.regions() {
+        let mut offset: u64 = 0;
+        // Here we are manually handling the retry in case we can't read the
+        // whole region at once because we can't use the implementation
+        // from vm-memory::GuestMemory of write_all_to() as it is not
+        // following the correct behavior. For more info about this issue
+        // see: https://github.com/rust-vmm/vm-memory/issues/174
+        loop {
+            let bytes_written = mem
+                .write_volatile_to(
+                    GuestAddress(range.gpa + offset),
+                    socket,
+                    (range.length - offset) as usize,
+                )
+                .map_err(|e| {
+                    MigratableError::MigrateSend(anyhow!(
+                        "Error transferring memory to socket: {e}"
+                    ))
+                })?;
+            offset += bytes_written as u64;
+
+            if offset == range.length {
+                break;
+            }
+        }
+    }
     expect_ok_response(
         socket,
         MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
-    )?;
-
-    Ok(())
+    )
 }

@@ -1187,7 +1187,7 @@ impl Vmm {
 
             // Send the current dirty pages
             let transfer_begin = Instant::now();
-            migration_transport::vm_send_dirty_pages(vm, socket, &iteration_table)?;
+            migration_transport::send_memory_ranges(&vm.guest_memory(), &iteration_table, socket)?;
             let transfer_duration = transfer_begin.elapsed();
             ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
 
@@ -1329,7 +1329,7 @@ impl Vmm {
 
             ctx.update_metrics_before_transfer(iteration_begin, &final_table);
             let transfer_begin = Instant::now();
-            migration_transport::vm_send_dirty_pages(vm, socket, &final_table)?;
+            migration_transport::send_memory_ranges(&vm.guest_memory(), &final_table, socket)?;
             let transfer_duration = transfer_begin.elapsed();
             ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
             ctx.iteration += 1;
