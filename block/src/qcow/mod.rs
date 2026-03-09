@@ -678,8 +678,11 @@ impl QcowFile {
     }
 
     /// Returns an L2_table of cluster addresses, only used for debugging.
-    pub fn l2_table(&mut self, l1_index: usize) -> Result<Option<&[u64]>> {
-        let l2_addr_disk = *self.l1_table.get(l1_index).ok_or(Error::InvalidIndex)?;
+    pub fn l2_table(&mut self, l1_index: usize) -> BlockResult<Option<&[u64]>> {
+        let l2_addr_disk = *self
+            .l1_table
+            .get(l1_index)
+            .ok_or_else(|| BlockError::new(BlockErrorKind::OutOfBounds, Error::InvalidIndex))?;
 
         if l2_addr_disk == 0 {
             // Reading from an unallocated cluster will return zeros.
@@ -690,7 +693,7 @@ impl QcowFile {
             // Not in the cache.
             let table = VecCache::from_vec(
                 Self::read_l2_cluster(&mut self.raw_file, l2_addr_disk)
-                    .map_err(Error::ReadingPointers)?,
+                    .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingPointers(e)))?,
             );
             let l1_table = &self.l1_table;
             let raw_file = &mut self.raw_file;
@@ -698,7 +701,7 @@ impl QcowFile {
                 .insert(l1_index, table, |index, evicted| {
                     raw_file.write_pointer_table_direct(l1_table[index], evicted.iter())
                 })
-                .map_err(Error::EvictingCache)?;
+                .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::EvictingCache(e)))?;
         }
 
         // The index must exist as it was just inserted if it didn't already.
@@ -711,19 +714,19 @@ impl QcowFile {
     }
 
     /// Returns the `index`th refcount block from the file.
-    pub fn refcount_block(&mut self, index: usize) -> Result<Option<&[u64]>> {
+    pub fn refcount_block(&mut self, index: usize) -> BlockResult<Option<&[u64]>> {
         self.refcounts
             .refcount_block(&mut self.raw_file, index)
-            .map_err(Error::ReadingRefCountBlock)
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingRefCountBlock(e)))
     }
 
     /// Returns the first cluster in the file with a 0 refcount. Used for testing.
-    pub fn first_zero_refcount(&mut self) -> Result<Option<u64>> {
+    pub fn first_zero_refcount(&mut self) -> BlockResult<Option<u64>> {
         let file_size = self
             .raw_file
             .file_mut()
             .metadata()
-            .map_err(Error::GettingFileSize)?
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingFileSize(e)))?
             .len();
         let cluster_size = 0x01u64 << self.header.cluster_bits;
 
@@ -732,7 +735,7 @@ impl QcowFile {
             let cluster_refcount = self
                 .refcounts
                 .get_cluster_refcount(&mut self.raw_file, cluster_addr)
-                .map_err(Error::GettingRefcount)?;
+                .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingRefcount(e)))?;
             if cluster_refcount == 0 {
                 return Ok(Some(cluster_addr));
             }
