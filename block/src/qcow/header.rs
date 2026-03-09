@@ -20,6 +20,7 @@ use super::decoder::{Decoder, ZlibDecoder, ZstdDecoder};
 use super::qcow_raw_file::BeUint;
 use super::raw_file::RawFile;
 use super::{Error, Result, div_round_up_u32, div_round_up_u64};
+use crate::error::{BlockError, BlockErrorKind, BlockResult};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ImageType {
@@ -511,13 +512,14 @@ impl QcowHeader {
     }
 
     /// Write only the incompatible_features field to the file at its fixed offset.
-    fn write_incompatible_features<F: Seek + Write>(&self, file: &mut F) -> Result<()> {
+    fn write_incompatible_features<F: Seek + Write>(&self, file: &mut F) -> BlockResult<()> {
         if self.version != 3 {
             return Ok(());
         }
         file.seek(SeekFrom::Start(V2_BARE_HEADER_SIZE as u64))
-            .map_err(Error::WritingHeader)?;
-        u64::write_be(file, self.incompatible_features).map_err(Error::WritingHeader)?;
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::WritingHeader(e)))?;
+        u64::write_be(file, self.incompatible_features)
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::WritingHeader(e)))?;
         Ok(())
     }
 
@@ -529,7 +531,7 @@ impl QcowHeader {
         &mut self,
         file: &mut F,
         dirty: bool,
-    ) -> Result<()> {
+    ) -> BlockResult<()> {
         if self.version == 3 {
             if dirty {
                 self.incompatible_features |= IncompatFeatures::DIRTY.bits();
@@ -537,7 +539,8 @@ impl QcowHeader {
                 self.incompatible_features &= !IncompatFeatures::DIRTY.bits();
             }
             self.write_incompatible_features(file)?;
-            file.fsync().map_err(Error::SyncingHeader)?;
+            file.fsync()
+                .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SyncingHeader(e)))?;
         }
         Ok(())
     }
@@ -546,11 +549,12 @@ impl QcowHeader {
     ///
     /// This marks the image as corrupted. Once set, the image can only be
     /// opened read-only until repaired.
-    pub fn set_corrupt_bit<F: Seek + Write + FileSync>(&mut self, file: &mut F) -> Result<()> {
+    pub fn set_corrupt_bit<F: Seek + Write + FileSync>(&mut self, file: &mut F) -> BlockResult<()> {
         if self.version == 3 {
             self.incompatible_features |= IncompatFeatures::CORRUPT.bits();
             self.write_incompatible_features(file)?;
-            file.fsync().map_err(Error::SyncingHeader)?;
+            file.fsync()
+                .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SyncingHeader(e)))?;
         }
         Ok(())
     }
