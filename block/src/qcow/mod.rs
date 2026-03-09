@@ -2060,7 +2060,7 @@ where
     Ok(())
 }
 
-fn convert_reader_writer<R, W>(reader: &mut R, writer: &mut W, size: u64) -> Result<()>
+fn convert_reader_writer<R, W>(reader: &mut R, writer: &mut W, size: u64) -> BlockResult<()>
 where
     R: Read + Seek + SeekHole,
     W: Write + Seek,
@@ -2068,24 +2068,32 @@ where
     let mut offset = 0;
     while offset < size {
         // Find the next range of data.
-        let next_data = match reader.seek_data(offset).map_err(Error::SeekingFile)? {
+        let next_data = match reader
+            .seek_data(offset)
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?
+        {
             Some(o) => o,
             None => {
                 // No more data in the file.
                 break;
             }
         };
-        let next_hole = match reader.seek_hole(next_data).map_err(Error::SeekingFile)? {
+        let next_hole = match reader
+            .seek_hole(next_data)
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?
+        {
             Some(o) => o,
             None => {
                 // This should not happen - there should always be at least one hole
                 // after any data.
-                return Err(Error::SeekingFile(io::Error::from_raw_os_error(EINVAL)));
+                return Err(BlockError::new(
+                    BlockErrorKind::Io,
+                    Error::SeekingFile(io::Error::from_raw_os_error(EINVAL)),
+                ));
             }
         };
         let count = next_hole - next_data;
-        convert_copy(reader, writer, next_data, count)
-            .map_err(|e| Error::ReadingData(io::Error::other(e)))?;
+        convert_copy(reader, writer, next_data, count)?;
         offset = next_hole;
     }
 
@@ -2106,6 +2114,7 @@ where
         ImageType::Qcow2 => {
             let mut dst_writer = QcowFile::new(dst_file, 3, src_size, true)?;
             convert_reader_writer(reader, &mut dst_writer, src_size)
+                .map_err(|e| Error::WritingData(io::Error::other(e)))
         }
         ImageType::Raw => {
             let mut dst_writer = dst_file;
@@ -2115,6 +2124,7 @@ where
                 .set_len(src_size)
                 .map_err(Error::SettingFileSize)?;
             convert_reader_writer(reader, &mut dst_writer, src_size)
+                .map_err(|e| Error::WritingData(io::Error::other(e)))
         }
     }
 }
