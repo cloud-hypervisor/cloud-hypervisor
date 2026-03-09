@@ -21,7 +21,7 @@ pub const GED_DEVICE_ACPI_SIZE: usize = 0x1;
 
 /// A device for handling ACPI shutdown and reboot
 pub struct AcpiShutdownDevice {
-    exit_evt: EventFd,
+    guest_exit_evt: EventFd,
     reset_evt: EventFd,
     vcpus_kill_signalled: Arc<AtomicBool>,
 }
@@ -29,12 +29,12 @@ pub struct AcpiShutdownDevice {
 impl AcpiShutdownDevice {
     /// Constructs a device that will signal the given event when the guest requests it.
     pub fn new(
-        exit_evt: EventFd,
+        guest_exit_evt: EventFd,
         reset_evt: EventFd,
         vcpus_kill_signalled: Arc<AtomicBool>,
     ) -> AcpiShutdownDevice {
         AcpiShutdownDevice {
-            exit_evt,
+            guest_exit_evt,
             reset_evt,
             vcpus_kill_signalled,
         }
@@ -68,7 +68,7 @@ impl BusDevice for AcpiShutdownDevice {
         const SLEEP_VALUE_BIT: u8 = 2;
         if data[0] == (S5_SLEEP_VALUE << SLEEP_VALUE_BIT) | (1 << SLEEP_STATUS_EN_BIT) {
             info!("ACPI Shutdown signalled");
-            if let Err(e) = self.exit_evt.write(1) {
+            if let Err(e) = self.guest_exit_evt.write(1) {
                 error!("Error triggering ACPI shutdown event: {e}");
             }
             // Spin until we are sure the reset_evt has been handled and that when
