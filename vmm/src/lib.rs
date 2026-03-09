@@ -1360,15 +1360,7 @@ impl Vmm {
 
         // Capture snapshot and send it
         let vm_snapshot = vm.snapshot()?;
-        let snapshot_data = serde_json::to_vec(&vm_snapshot).unwrap();
-        Request::state(snapshot_data.len() as u64).write_to(&mut socket)?;
-        socket
-            .write_all(&snapshot_data)
-            .map_err(MigratableError::MigrateSocket)?;
-        migration_transport::expect_ok_response(
-            &mut socket,
-            MigratableError::MigrateSend(anyhow!("Error during state migration")),
-        )?;
+        migration_transport::send_state(&mut socket, &vm_snapshot)?;
         // Complete the migration
         // At this step, the receiving VMM will acquire disk locks again.
         migration_transport::send_request_expect_ok(
