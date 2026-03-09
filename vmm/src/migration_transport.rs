@@ -11,6 +11,7 @@ use std::result::Result;
 use anyhow::anyhow;
 use log::info;
 use vm_migration::MigratableError;
+use vm_migration::protocol::{Request, Response};
 
 use crate::SocketStream;
 
@@ -82,4 +83,24 @@ pub(crate) fn receive_migration_socket(
 
         Ok(SocketStream::Unix(socket))
     }
+}
+
+/// Read a response and return Ok(()) if it was a [`Response::Ok`].
+pub(crate) fn expect_ok_response(
+    socket: &mut SocketStream,
+    error: MigratableError,
+) -> Result<(), MigratableError> {
+    Response::read_from(socket)?
+        .ok_or_abandon(socket, error)
+        .map(|_| ())
+}
+
+/// Send a request and validate that the peer responds with OK.
+pub(crate) fn send_request_expect_ok(
+    socket: &mut SocketStream,
+    request: Request,
+    error: MigratableError,
+) -> Result<(), MigratableError> {
+    request.write_to(socket)?;
+    expect_ok_response(socket, error)
 }

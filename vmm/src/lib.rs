@@ -1173,7 +1173,7 @@ impl Vmm {
         table.write_to(socket)?;
         // And then the memory itself
         vm.send_memory_regions(table, socket)?;
-        Response::read_from(socket)?.ok_or_abandon(
+        migration_transport::expect_ok_response(
             socket,
             MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
         )?;
@@ -1286,9 +1286,9 @@ impl Vmm {
             migration_transport::send_migration_socket(&send_data_migration.destination_url)?;
 
         // Start the migration
-        Request::start().write_to(&mut socket)?;
-        Response::read_from(&mut socket)?.ok_or_abandon(
+        migration_transport::send_request_expect_ok(
             &mut socket,
+            Request::start(),
             MigratableError::MigrateSend(anyhow!("Error starting migration")),
         )?;
 
@@ -1346,7 +1346,7 @@ impl Vmm {
         socket
             .write_all(&config_data)
             .map_err(MigratableError::MigrateSocket)?;
-        Response::read_from(&mut socket)?.ok_or_abandon(
+        migration_transport::expect_ok_response(
             &mut socket,
             MigratableError::MigrateSend(anyhow!("Error during config migration")),
         )?;
@@ -1373,15 +1373,15 @@ impl Vmm {
         socket
             .write_all(&snapshot_data)
             .map_err(MigratableError::MigrateSocket)?;
-        Response::read_from(&mut socket)?.ok_or_abandon(
+        migration_transport::expect_ok_response(
             &mut socket,
             MigratableError::MigrateSend(anyhow!("Error during state migration")),
         )?;
         // Complete the migration
         // At this step, the receiving VMM will acquire disk locks again.
-        Request::complete().write_to(&mut socket)?;
-        Response::read_from(&mut socket)?.ok_or_abandon(
+        migration_transport::send_request_expect_ok(
             &mut socket,
+            Request::complete(),
             MigratableError::MigrateSend(anyhow!("Error completing migration")),
         )?;
 
