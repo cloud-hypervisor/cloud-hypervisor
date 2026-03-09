@@ -6,10 +6,11 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write, stdout};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpStream;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::UnixStream;
 use std::panic::AssertUnwindSafe;
+#[cfg(feature = "guest_debug")]
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
@@ -84,6 +85,7 @@ pub mod interrupt;
 pub mod landlock;
 pub mod memory_manager;
 pub mod migration;
+pub mod migration_transport;
 mod pci_segment;
 pub mod seccomp_filters;
 mod serial_manager;
@@ -1152,73 +1154,6 @@ impl Vmm {
         Ok(())
     }
 
-    fn socket_url_to_path(url: &str) -> result::Result<PathBuf, MigratableError> {
-        url.strip_prefix("unix:")
-            .ok_or_else(|| {
-                MigratableError::MigrateSend(anyhow!("Could not extract path from URL: {url}"))
-            })
-            .map(|s| s.into())
-    }
-
-    fn send_migration_socket(
-        destination_url: &str,
-    ) -> std::result::Result<SocketStream, MigratableError> {
-        if let Some(address) = destination_url.strip_prefix("tcp:") {
-            info!("Connecting to TCP socket at {address}");
-
-            let socket = TcpStream::connect(address).map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("Error connecting to TCP socket: {e}"))
-            })?;
-
-            Ok(SocketStream::Tcp(socket))
-        } else {
-            let path = Vmm::socket_url_to_path(destination_url)?;
-            info!("Connecting to UNIX socket at {path:?}");
-
-            let socket = UnixStream::connect(&path).map_err(|e| {
-                MigratableError::MigrateSend(anyhow!("Error connecting to UNIX socket: {e}"))
-            })?;
-
-            Ok(SocketStream::Unix(socket))
-        }
-    }
-
-    fn receive_migration_socket(
-        receiver_url: &str,
-    ) -> std::result::Result<SocketStream, MigratableError> {
-        if let Some(address) = receiver_url.strip_prefix("tcp:") {
-            let listener = TcpListener::bind(address).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error binding to TCP socket: {e}"))
-            })?;
-
-            let (socket, _addr) = listener.accept().map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!(
-                    "Error accepting connection on TCP socket: {e}"
-                ))
-            })?;
-
-            Ok(SocketStream::Tcp(socket))
-        } else {
-            let path = Vmm::socket_url_to_path(receiver_url)?;
-            let listener = UnixListener::bind(&path).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error binding to UNIX socket: {e}"))
-            })?;
-
-            let (socket, _addr) = listener.accept().map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!(
-                    "Error accepting connection on UNIX socket: {e}"
-                ))
-            })?;
-
-            // Remove the UNIX socket file after accepting the connection
-            std::fs::remove_file(&path).map_err(|e| {
-                MigratableError::MigrateReceive(anyhow!("Error removing UNIX socket file: {e}"))
-            })?;
-
-            Ok(SocketStream::Unix(socket))
-        }
-    }
-
     /// Transmits the given [`MemoryRangeTable`] over the wire if there is at
     /// least one region.
     ///
@@ -1347,7 +1282,8 @@ impl Vmm {
         send_data_migration: &VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
         // Set up the socket connection
-        let mut socket = Self::send_migration_socket(&send_data_migration.destination_url)?;
+        let mut socket =
+            migration_transport::send_migration_socket(&send_data_migration.destination_url)?;
 
         // Start the migration
         Request::start().write_to(&mut socket)?;
@@ -2373,7 +2309,8 @@ impl RequestHandler for Vmm {
         );
 
         // Accept the connection and get the socket
-        let mut socket = Vmm::receive_migration_socket(&receive_data_migration.receiver_url)?;
+        let mut socket =
+            migration_transport::receive_migration_socket(&receive_data_migration.receiver_url)?;
 
         event!("vm", "migration-receive-started");
 
@@ -2498,6 +2435,8 @@ const DEVICE_MANAGER_SNAPSHOT_ID: &str = "device-manager";
 
 #[cfg(test)]
 mod unit_tests {
+    use std::path::PathBuf;
+
     use super::*;
     #[cfg(target_arch = "x86_64")]
     use crate::vm_config::DebugConsoleConfig;
