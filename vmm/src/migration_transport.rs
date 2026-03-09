@@ -3,17 +3,19 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::result::Result;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use log::info;
+use serde_json;
 use vm_migration::MigratableError;
 use vm_migration::protocol::{Request, Response};
 
-use crate::SocketStream;
+use crate::{SocketStream, VmMigrationConfig};
 
 /// Extract a UNIX socket path from a "unix:" migration URL.
 fn socket_url_to_path(url: &str) -> Result<PathBuf, anyhow::Error> {
@@ -96,4 +98,22 @@ pub(crate) fn send_request_expect_ok(
 ) -> Result<(), MigratableError> {
     request.write_to(socket)?;
     expect_ok_response(socket, error)
+}
+
+/// Serialize and send the VM configuration payload.
+pub(crate) fn send_config(
+    socket: &mut SocketStream,
+    config: &VmMigrationConfig,
+) -> Result<(), MigratableError> {
+    let config_data = serde_json::to_vec(config)
+        .context("Error serializing VM migration config")
+        .map_err(MigratableError::MigrateSend)?;
+    Request::config(config_data.len() as u64).write_to(socket)?;
+    socket
+        .write_all(&config_data)
+        .map_err(MigratableError::MigrateSocket)?;
+    expect_ok_response(
+        socket,
+        MigratableError::MigrateSend(anyhow!("Error during config migration")),
+    )
 }
