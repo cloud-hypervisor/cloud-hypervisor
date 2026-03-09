@@ -51,6 +51,7 @@ use vmm_sys_util::seek_hole::SeekHole;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
 use crate::BlockBackend;
+use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::qcow::qcow_raw_file::{BeUint, QcowRawFile};
 pub use crate::qcow::raw_file::RawFile;
 use crate::qcow::refcount::RefCount;
@@ -2028,7 +2029,7 @@ impl BlockBackend for QcowFile {
     }
 }
 
-fn convert_copy<R, W>(reader: &mut R, writer: &mut W, offset: u64, size: u64) -> Result<()>
+fn convert_copy<R, W>(reader: &mut R, writer: &mut W, offset: u64, size: u64) -> BlockResult<()>
 where
     R: Read + Seek,
     W: Write + Seek,
@@ -2038,16 +2039,18 @@ where
     let mut read_count = 0;
     reader
         .seek(SeekFrom::Start(offset))
-        .map_err(Error::SeekingFile)?;
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
     writer
         .seek(SeekFrom::Start(offset))
-        .map_err(Error::SeekingFile)?;
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
     loop {
         let this_count = min(CHUNK_SIZE as u64, size - read_count) as usize;
         let nread = reader
             .read(&mut buf[..this_count])
-            .map_err(Error::ReadingData)?;
-        writer.write(&buf[..nread]).map_err(Error::WritingData)?;
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingData(e)))?;
+        writer
+            .write(&buf[..nread])
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::WritingData(e)))?;
         read_count += nread as u64;
         if nread == 0 || read_count == size {
             break;
@@ -2081,7 +2084,8 @@ where
             }
         };
         let count = next_hole - next_data;
-        convert_copy(reader, writer, next_data, count)?;
+        convert_copy(reader, writer, next_data, count)
+            .map_err(|e| Error::ReadingData(io::Error::other(e)))?;
         offset = next_hole;
     }
 
