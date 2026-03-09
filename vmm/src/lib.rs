@@ -2369,6 +2369,16 @@ impl RequestHandler for Vmm {
             .as_mut()
             .ok_or_else(|| MigratableError::MigrateSend(anyhow!("VM is not running")))?;
 
+        // Only running VMs can be migrated: Future work can fix this to allow
+        // also the migration of paused VMs while preserving the state in success
+        // and error case. See #7815.
+        if vm.get_state() != VmState::Running {
+            return Err(MigratableError::MigrateSend(anyhow!(
+                "VM is not in running state: {:?}",
+                vm.get_state()
+            )));
+        }
+
         Self::send_migration(
             vm,
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
