@@ -11,6 +11,7 @@
 use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::fs::{File, Metadata};
 use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::slice;
 
@@ -395,5 +396,11 @@ impl Clone for RawFile {
 impl AsRawFd for RawFile {
     fn as_raw_fd(&self) -> RawFd {
         self.file.as_raw_fd()
+    }
+}
+
+impl AsFd for RawFile {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.file.as_fd()
     }
 }
