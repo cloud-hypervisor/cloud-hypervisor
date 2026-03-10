@@ -4,12 +4,14 @@
 //
 
 use anyhow::anyhow;
+pub use context::MemoryMigrationContext;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::protocol::MemoryRangeTable;
 
 mod bitpos_iterator;
+mod context;
 pub mod protocol;
 
 #[derive(Error, Debug)]
