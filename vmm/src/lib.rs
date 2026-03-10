@@ -6,9 +6,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write, stdout};
-use std::net::TcpStream;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::os::unix::net::UnixStream;
 use std::panic::AssertUnwindSafe;
 #[cfg(feature = "guest_debug")]
 use std::path::PathBuf;
@@ -37,8 +35,8 @@ use serde::{Deserialize, Serialize};
 use signal_hook::iterator::{Handle, Signals};
 use thiserror::Error;
 use tracer::trace_scoped;
-use vm_memory::bitmap::{AtomicBitmap, BitmapSlice};
-use vm_memory::{ReadVolatile, VolatileMemoryError, VolatileSlice, WriteVolatile};
+use vm_memory::ReadVolatile;
+use vm_memory::bitmap::AtomicBitmap;
 use vm_migration::protocol::*;
 use vm_migration::{
     MemoryMigrationContext, Migratable, MigratableError, Pausable, Snapshot, Snapshottable,
@@ -60,6 +58,7 @@ use crate::memory_manager::MemoryManager;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
 use crate::migration::{recv_vm_config, recv_vm_state};
+use crate::migration_transport::SocketStream;
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
@@ -258,89 +257,6 @@ impl From<u64> for EpollDispatch {
             3 => ActivateVirtioDevices,
             4 => Debug,
             _ => Unknown,
-        }
-    }
-}
-
-enum SocketStream {
-    Unix(UnixStream),
-    Tcp(TcpStream),
-}
-
-impl Read for SocketStream {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        match self {
-            SocketStream::Unix(stream) => stream.read(buf),
-            SocketStream::Tcp(stream) => stream.read(buf),
-        }
-    }
-}
-
-impl Write for SocketStream {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        match self {
-            SocketStream::Unix(stream) => stream.write(buf),
-            SocketStream::Tcp(stream) => stream.write(buf),
-        }
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        match self {
-            SocketStream::Unix(stream) => stream.flush(),
-            SocketStream::Tcp(stream) => stream.flush(),
-        }
-    }
-}
-
-impl AsRawFd for SocketStream {
-    fn as_raw_fd(&self) -> RawFd {
-        match self {
-            SocketStream::Unix(s) => s.as_raw_fd(),
-            SocketStream::Tcp(s) => s.as_raw_fd(),
-        }
-    }
-}
-
-impl ReadVolatile for SocketStream {
-    fn read_volatile<B: BitmapSlice>(
-        &mut self,
-        buf: &mut VolatileSlice<B>,
-    ) -> std::result::Result<usize, VolatileMemoryError> {
-        match self {
-            SocketStream::Unix(s) => s.read_volatile(buf),
-            SocketStream::Tcp(s) => s.read_volatile(buf),
-        }
-    }
-
-    fn read_exact_volatile<B: BitmapSlice>(
-        &mut self,
-        buf: &mut VolatileSlice<B>,
-    ) -> std::result::Result<(), VolatileMemoryError> {
-        match self {
-            SocketStream::Unix(s) => s.read_exact_volatile(buf),
-            SocketStream::Tcp(s) => s.read_exact_volatile(buf),
-        }
-    }
-}
-
-impl WriteVolatile for SocketStream {
-    fn write_volatile<B: BitmapSlice>(
-        &mut self,
-        buf: &VolatileSlice<B>,
-    ) -> std::result::Result<usize, VolatileMemoryError> {
-        match self {
-            SocketStream::Unix(s) => s.write_volatile(buf),
-            SocketStream::Tcp(s) => s.write_volatile(buf),
-        }
-    }
-
-    fn write_all_volatile<B: BitmapSlice>(
-        &mut self,
-        buf: &VolatileSlice<B>,
-    ) -> std::result::Result<(), VolatileMemoryError> {
-        match self {
-            SocketStream::Unix(s) => s.write_all_volatile(buf),
-            SocketStream::Tcp(s) => s.write_all_volatile(buf),
         }
     }
 }

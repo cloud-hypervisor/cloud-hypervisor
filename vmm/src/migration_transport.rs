@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::io::Write;
+use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::result::Result;
@@ -12,11 +13,99 @@ use std::result::Result;
 use anyhow::anyhow;
 use log::info;
 use serde_json;
-use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
+use vm_memory::bitmap::BitmapSlice;
+use vm_memory::{
+    GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, ReadVolatile,
+    VolatileMemoryError, VolatileSlice, WriteVolatile,
+};
 use vm_migration::protocol::{MemoryRangeTable, Request, Response};
 use vm_migration::{MigratableError, Snapshot};
 
-use crate::{GuestMemoryMmap, SocketStream, VmMigrationConfig};
+use crate::{GuestMemoryMmap, VmMigrationConfig};
+
+/// Transport-agnostic stream used by the migration protocol.
+pub(crate) enum SocketStream {
+    Unix(UnixStream),
+    Tcp(TcpStream),
+}
+
+impl Read for SocketStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            SocketStream::Unix(stream) => stream.read(buf),
+            SocketStream::Tcp(stream) => stream.read(buf),
+        }
+    }
+}
+
+impl Write for SocketStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            SocketStream::Unix(stream) => stream.write(buf),
+            SocketStream::Tcp(stream) => stream.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            SocketStream::Unix(stream) => stream.flush(),
+            SocketStream::Tcp(stream) => stream.flush(),
+        }
+    }
+}
+
+impl AsRawFd for SocketStream {
+    fn as_raw_fd(&self) -> RawFd {
+        match self {
+            SocketStream::Unix(s) => s.as_raw_fd(),
+            SocketStream::Tcp(s) => s.as_raw_fd(),
+        }
+    }
+}
+
+impl ReadVolatile for SocketStream {
+    fn read_volatile<B: BitmapSlice>(
+        &mut self,
+        buf: &mut VolatileSlice<B>,
+    ) -> Result<usize, VolatileMemoryError> {
+        match self {
+            SocketStream::Unix(s) => s.read_volatile(buf),
+            SocketStream::Tcp(s) => s.read_volatile(buf),
+        }
+    }
+
+    fn read_exact_volatile<B: BitmapSlice>(
+        &mut self,
+        buf: &mut VolatileSlice<B>,
+    ) -> Result<(), VolatileMemoryError> {
+        match self {
+            SocketStream::Unix(s) => s.read_exact_volatile(buf),
+            SocketStream::Tcp(s) => s.read_exact_volatile(buf),
+        }
+    }
+}
+
+impl WriteVolatile for SocketStream {
+    fn write_volatile<B: BitmapSlice>(
+        &mut self,
+        buf: &VolatileSlice<B>,
+    ) -> Result<usize, VolatileMemoryError> {
+        match self {
+            SocketStream::Unix(s) => s.write_volatile(buf),
+            SocketStream::Tcp(s) => s.write_volatile(buf),
+        }
+    }
+
+    fn write_all_volatile<B: BitmapSlice>(
+        &mut self,
+        buf: &VolatileSlice<B>,
+    ) -> Result<(), VolatileMemoryError> {
+        match self {
+            SocketStream::Unix(s) => s.write_all_volatile(buf),
+            SocketStream::Tcp(s) => s.write_all_volatile(buf),
+        }
+    }
+}
 
 /// Extract a UNIX socket path from a "unix:" migration URL.
 fn socket_url_to_path(url: &str) -> Result<PathBuf, MigratableError> {
