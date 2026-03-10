@@ -186,6 +186,9 @@ impl BlockEpollHandler {
         }
 
         if request_type == RequestType::Out && disable_sector0_writes && request.sector == 0 {
+            warn!(
+                "Attempting to write to sector 0 on a raw disk without specifying image_type=raw"
+            );
             return Err(ExecuteError::ReadOnly);
         }
 
