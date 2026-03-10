@@ -6,6 +6,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+// TODO:
+// - Inform device of doorbell base address and multiplier.
+// - Inform device when base address changes.
+// - Receive ioeventfds from device.
+
 use std::any::Any;
 use std::cmp;
 use std::io::{ErrorKind, Write};
@@ -986,12 +991,13 @@ impl VirtioPciDevice {
         ))
     }
 
-    pub fn doorbell_addr(&mut self, doorbell: u64, base_addr: u64) -> std::io::Result<u64> {
+    pub fn doorbell_addr(&mut self, doorbell: u64) -> std::io::Result<u64> {
         let num_doorbells = u64::from(self.num_doorbells);
         if doorbell >= num_doorbells {
             Self::bad_index(doorbell, num_doorbells, "doorbell")
         } else {
-            Ok(base_addr
+            Ok(self
+                .config_bar_addr()
                 .checked_add(doorbell * NOTIFY_OFF_MULTIPLIER as u64 + DOORBELL_BAR_OFFSET)
                 .expect("address goes past end of address space"))
         }

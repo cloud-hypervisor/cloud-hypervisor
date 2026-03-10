@@ -411,7 +411,7 @@ impl vhost::vhost_user::VhostUserBackendReqHandler for Backend {
             return Err(vhost::vhost_user::Error::InvalidParam);
         }
         let _fd = self.convert_eventfd(fd)?;
-        todo!("setting vring call fd")
+        todo!()
     }
 
     fn set_vring_err(&self, index: u8, fd: Option<std::fs::File>) -> vhost::vhost_user::Result<()> {
@@ -724,6 +724,7 @@ unsafe impl ByteValued for VdbState {}
 
 // Virtio device backend
 pub struct Vdb {
+    vm: Option<Arc<dyn hypervisor::Vm>>,
     common: VirtioCommon,
     id: String,
     config: VirtioDeviceBackendConfig,
@@ -734,7 +735,6 @@ pub struct Vdb {
     listener: Option<Listener>,
     msix_fds: [Option<OwnedFd>; MSIX_ARRAY_SIZE],
     statuses: [bool; MSIX_ARRAY_SIZE],
-    vm: Option<Arc<dyn hypervisor::Vm>>,
 }
 
 impl Vdb {
