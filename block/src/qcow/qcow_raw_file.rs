@@ -7,7 +7,7 @@
 use std::fmt::Debug;
 use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use vmm_sys_util::write_zeroes::WriteZeroes;
@@ -359,5 +359,11 @@ impl Clone for QcowRawFile {
 impl AsRawFd for QcowRawFile {
     fn as_raw_fd(&self) -> RawFd {
         self.file.as_raw_fd()
+    }
+}
+
+impl AsFd for QcowRawFile {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.file.as_fd()
     }
 }
