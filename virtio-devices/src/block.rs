@@ -182,6 +182,9 @@ impl BlockEpollHandler {
             // For virtio spec compliance
             // "A device MUST set the status byte to VIRTIO_BLK_S_IOERR for a write request
             // if the VIRTIO_BLK_F_RO feature if offered, and MUST NOT write any data."
+            warn!(
+                "Rejecting block request {request_type:?}: device is read-only (VIRTIO_BLK_F_RO negotiated)"
+            );
             return Err(ExecuteError::ReadOnly);
         }
 
