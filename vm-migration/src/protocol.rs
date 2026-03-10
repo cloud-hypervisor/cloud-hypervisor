@@ -376,6 +376,11 @@ impl MemoryRangeTable {
         }
         Self { data }
     }
+
+    /// Returns the effective size in bytes.
+    pub fn effective_size(&self) -> u64 {
+        self.data.iter().map(|r| r.length).sum()
+    }
 }
 
 #[cfg(test)]
