@@ -2190,9 +2190,10 @@ impl RequestHandler for Vmm {
             receive_data_migration.receiver_url
         );
 
+        let mut listener =
+            migration_transport::receive_migration_listener(&receive_data_migration.receiver_url)?;
         // Accept the connection and get the socket
-        let mut socket =
-            migration_transport::receive_migration_socket(&receive_data_migration.receiver_url)?;
+        let mut socket = listener.accept()?;
 
         event!("vm", "migration-receive-started");
 

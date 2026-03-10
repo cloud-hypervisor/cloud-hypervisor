@@ -10,7 +10,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::result::Result;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use log::info;
 use serde_json;
 use vm_memory::bitmap::BitmapSlice;
@@ -22,6 +22,31 @@ use vm_migration::protocol::{MemoryRangeTable, Request, Response};
 use vm_migration::{MigratableError, Snapshot};
 
 use crate::{GuestMemoryMmap, VmMigrationConfig};
+
+/// Transport-agnostic listener used to receive connections.
+#[derive(Debug)]
+pub(crate) enum ReceiveListener {
+    Tcp(TcpListener),
+    Unix(UnixListener),
+}
+
+impl ReceiveListener {
+    /// Block until a connection is accepted.
+    pub(crate) fn accept(&mut self) -> Result<SocketStream, MigratableError> {
+        match self {
+            ReceiveListener::Tcp(listener) => listener
+                .accept()
+                .map(|(socket, _)| SocketStream::Tcp(socket))
+                .context("Failed to accept TCP migration connection")
+                .map_err(MigratableError::MigrateReceive),
+            ReceiveListener::Unix(listener) => listener
+                .accept()
+                .map(|(socket, _)| SocketStream::Unix(socket))
+                .context("Failed to accept Unix migration connection")
+                .map_err(MigratableError::MigrateReceive),
+        }
+    }
+}
 
 /// Transport-agnostic stream used by the migration protocol.
 pub(crate) enum SocketStream {
@@ -140,40 +165,21 @@ pub(crate) fn send_migration_socket(
     }
 }
 
-/// Bind and accept a migration connection for the receiver side.
-pub(crate) fn receive_migration_socket(
+/// Bind a migration listener for the receiver side.
+pub(crate) fn receive_migration_listener(
     receiver_url: &str,
-) -> Result<SocketStream, MigratableError> {
+) -> Result<ReceiveListener, MigratableError> {
     if let Some(address) = receiver_url.strip_prefix("tcp:") {
-        let listener = TcpListener::bind(address).map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error binding to TCP socket: {e}"))
-        })?;
-
-        let (socket, _addr) = listener.accept().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!(
-                "Error accepting connection on TCP socket: {e}"
-            ))
-        })?;
-
-        Ok(SocketStream::Tcp(socket))
+        TcpListener::bind(address)
+            .map(ReceiveListener::Tcp)
+            .context("Error binding to TCP socket")
+            .map_err(MigratableError::MigrateReceive)
     } else {
         let path = socket_url_to_path(receiver_url)?;
-        let listener = UnixListener::bind(&path).map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error binding to UNIX socket: {e}"))
-        })?;
-
-        let (socket, _addr) = listener.accept().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!(
-                "Error accepting connection on UNIX socket: {e}"
-            ))
-        })?;
-
-        // Remove the UNIX socket file after accepting the connection
-        std::fs::remove_file(&path).map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error removing UNIX socket file: {e}"))
-        })?;
-
-        Ok(SocketStream::Unix(socket))
+        UnixListener::bind(&path)
+            .map(ReceiveListener::Unix)
+            .context("Error binding to UNIX socket")
+            .map_err(MigratableError::MigrateReceive)
     }
 }
 
