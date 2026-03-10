@@ -39,7 +39,10 @@ use tracer::trace_scoped;
 use vm_memory::bitmap::{AtomicBitmap, BitmapSlice};
 use vm_memory::{ReadVolatile, VolatileMemoryError, VolatileSlice, WriteVolatile};
 use vm_migration::protocol::*;
-use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vm_migration::{
+    MemoryMigrationContext, Migratable, MigratableError, Pausable, Snapshot, Snapshottable,
+    Transportable,
+};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
@@ -1252,27 +1255,37 @@ impl Vmm {
     fn do_memory_iterations(
         vm: &mut Vm,
         socket: &mut SocketStream,
-        iteration_counter: &mut u64,
-        is_converged: impl Fn(u64) -> bool,
+        ctx: &mut MemoryMigrationContext,
+        is_converged: impl Fn(&MemoryMigrationContext) -> bool,
     ) -> result::Result<MemoryRangeTable /* remaining */, MigratableError> {
         loop {
-            let iteration_table = if *iteration_counter == 0 {
+            let iteration_begin = Instant::now();
+
+            let iteration_table = if ctx.iteration == 0 {
                 vm.memory_range_table()?
             } else {
                 // TODO do this in a thread #7816
                 vm.dirty_log()?
             };
 
-            if is_converged(*iteration_counter) {
-                debug!("Precopy converged: iter={iteration_counter}");
+            ctx.update_metrics_before_transfer(iteration_begin, &iteration_table);
+            if is_converged(ctx) {
+                debug!("Precopy converged: {ctx}");
                 break Ok(iteration_table);
             }
 
             // Send the current dirty pages
+            let transfer_begin = Instant::now();
             Self::vm_send_dirty_pages(vm, socket, &iteration_table)?;
+            let transfer_duration = transfer_begin.elapsed();
+            ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
 
-            // Prepare next iteration.
-            *iteration_counter += 1;
+            // Log progress of the current iteration
+            debug!("Precopy: {ctx}");
+
+            // Increment iteration last: This way we ensure that the logging
+            // above matches the actual iteration.
+            ctx.iteration += 1;
         }
     }
 
@@ -1286,22 +1299,35 @@ impl Vmm {
         vm: &mut Vm,
         socket: &mut SocketStream,
     ) -> result::Result<(), MigratableError> {
-        const MAX_ITERATIONS: u64 = 5;
+        const MAX_ITERATIONS: usize = 5;
 
-        let mut iteration_counter = 0;
-        let is_converged = |iteration_counter: u64| iteration_counter >= MAX_ITERATIONS;
+        let mut ctx = MemoryMigrationContext::new();
+        let is_converged = |ctx: &MemoryMigrationContext| {
+            // TODO: Add check for configurable downtime and max migration time #7111
+            ctx.iteration >= MAX_ITERATIONS || ctx.current_iteration_total_bytes == 0
+        };
 
         vm.start_dirty_log()?;
-        let remaining =
-            Self::do_memory_iterations(vm, socket, &mut iteration_counter, is_converged)?;
+        let remaining = Self::do_memory_iterations(vm, socket, &mut ctx, is_converged)?;
         vm.pause()?;
 
-        // Send last batch of dirty pages
-        let mut final_table = vm.dirty_log()?;
-        final_table.extend(remaining);
-        Vmm::vm_send_dirty_pages(vm, socket, &final_table)?;
+        // Send last batch of dirty pages: final iteration
+        {
+            let iteration_begin = Instant::now();
 
-        info!("Memory migration complete");
+            let mut final_table = vm.dirty_log()?;
+            final_table.extend(remaining);
+
+            ctx.update_metrics_before_transfer(iteration_begin, &final_table);
+            let transfer_begin = Instant::now();
+            Vmm::vm_send_dirty_pages(vm, socket, &final_table)?;
+            let transfer_duration = transfer_begin.elapsed();
+            ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
+            ctx.iteration += 1;
+        }
+        ctx.finalize();
+
+        info!("Precopy complete: {ctx}");
 
         Ok(())
     }
