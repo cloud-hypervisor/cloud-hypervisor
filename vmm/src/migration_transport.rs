@@ -281,3 +281,41 @@ pub(crate) fn send_memory_regions(
         MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
     )
 }
+
+/// Receive memory contents for the given range table into guest memory.
+pub(crate) fn receive_memory_regions(
+    guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    ranges: &MemoryRangeTable,
+    socket: &mut SocketStream,
+) -> Result<(), MigratableError> {
+    let mem = guest_memory.memory();
+
+    for range in ranges.regions() {
+        let mut offset: u64 = 0;
+        // Here we are manually handling the retry in case we can't read the
+        // whole region at once because we can't use the implementation
+        // from vm-memory::GuestMemory of read_exact_from() as it is not
+        // following the correct behavior. For more info about this issue
+        // see: https://github.com/rust-vmm/vm-memory/issues/174
+        loop {
+            let bytes_read = mem
+                .read_volatile_from(
+                    GuestAddress(range.gpa + offset),
+                    socket,
+                    (range.length - offset) as usize,
+                )
+                .map_err(|e| {
+                    MigratableError::MigrateReceive(anyhow!(
+                        "Error receiving memory from socket: {e}"
+                    ))
+                })?;
+            offset += bytes_read as u64;
+
+            if offset == range.length {
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
