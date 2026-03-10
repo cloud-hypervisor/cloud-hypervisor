@@ -7533,6 +7533,24 @@ mod common_parallel {
         expect_discard_success: bool,
         verify_disk: bool,
     ) {
+        _test_virtio_block_discard_with_backend(
+            format_name,
+            qemu_img_format,
+            extra_create_args,
+            expect_discard_success,
+            verify_disk,
+            false,
+        );
+    }
+
+    fn _test_virtio_block_discard_with_backend(
+        format_name: &str,
+        qemu_img_format: &str,
+        extra_create_args: &[&str],
+        expect_discard_success: bool,
+        verify_disk: bool,
+        disable_io_uring: bool,
+    ) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
@@ -7574,9 +7592,14 @@ mod common_parallel {
                 )
                 .as_str(),
                 format!(
-                    "path={},num_queues=4,image_type={}",
+                    "path={},num_queues=4,image_type={}{}",
                     test_disk_path.to_str().unwrap(),
-                    format_name.to_lowercase()
+                    format_name.to_lowercase(),
+                    if disable_io_uring {
+                        ",_disable_io_uring=on"
+                    } else {
+                        ""
+                    }
                 )
                 .as_str(),
             ])
@@ -7752,6 +7775,11 @@ mod common_parallel {
     #[test]
     fn test_virtio_block_discard_raw() {
         _test_virtio_block_discard("raw", "raw", &[], true, false);
+    }
+
+    #[test]
+    fn test_virtio_block_discard_raw_aio() {
+        _test_virtio_block_discard_with_backend("raw", "raw", &[], true, false, true);
     }
 
     #[test]
@@ -8057,6 +8085,24 @@ mod common_parallel {
         expect_fstrim_success: bool,
         verify_disk: bool,
     ) {
+        _test_virtio_block_fstrim_with_backend(
+            format_name,
+            qemu_img_format,
+            extra_create_args,
+            expect_fstrim_success,
+            verify_disk,
+            false,
+        );
+    }
+
+    fn _test_virtio_block_fstrim_with_backend(
+        format_name: &str,
+        qemu_img_format: &str,
+        extra_create_args: &[&str],
+        expect_fstrim_success: bool,
+        verify_disk: bool,
+        disable_io_uring: bool,
+    ) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
@@ -8101,9 +8147,14 @@ mod common_parallel {
                 )
                 .as_str(),
                 format!(
-                    "path={},num_queues=4,image_type={}",
+                    "path={},num_queues=4,image_type={}{}",
                     test_disk_path.to_str().unwrap(),
-                    format_name.to_lowercase()
+                    format_name.to_lowercase(),
+                    if disable_io_uring {
+                        ",_disable_io_uring=on"
+                    } else {
+                        ""
+                    }
                 )
                 .as_str(),
             ])
@@ -8240,6 +8291,11 @@ mod common_parallel {
     #[test]
     fn test_virtio_block_fstrim_raw() {
         _test_virtio_block_fstrim("raw", "raw", &[], true, false);
+    }
+
+    #[test]
+    fn test_virtio_block_fstrim_raw_aio() {
+        _test_virtio_block_fstrim_with_backend("raw", "raw", &[], true, false, true);
     }
 
     #[test]
