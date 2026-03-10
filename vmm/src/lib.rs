@@ -2364,41 +2364,42 @@ impl RequestHandler for Vmm {
             )));
         }
 
-        if let Some(vm) = self.vm.as_mut() {
-            Self::send_migration(
-                vm,
-                #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
-                self.hypervisor.as_ref(),
-                &send_data_migration,
-            )
-            .map_err(|migration_err| {
-                error!("Migration failed: {migration_err:?}");
+        let vm = self
+            .vm
+            .as_mut()
+            .ok_or_else(|| MigratableError::MigrateSend(anyhow!("VM is not running")))?;
 
-                // Stop logging dirty pages only for non-local migrations
-                if !send_data_migration.local
-                    && let Err(e) = vm.stop_dirty_log()
-                {
-                    return e;
-                }
+        Self::send_migration(
+            vm,
+            #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
+            self.hypervisor.as_ref(),
+            &send_data_migration,
+        )
+        .map_err(|migration_err| {
+            error!("Migration failed: {migration_err:?}");
 
-                if vm.get_state() == VmState::Paused
-                    && let Err(e) = vm.resume()
-                {
-                    return e;
-                }
+            // Stop logging dirty pages only for non-local migrations
+            if !send_data_migration.local
+                && let Err(e) = vm.stop_dirty_log()
+            {
+                return e;
+            }
 
-                migration_err
-            })?;
+            if vm.get_state() == VmState::Paused
+                && let Err(e) = vm.resume()
+            {
+                return e;
+            }
 
-            // Shutdown the VM after the migration succeeded
-            self.exit_evt.write(1).map_err(|e| {
-                MigratableError::MigrateSend(anyhow!(
-                    "Failed shutting down the VM after migration: {e:?}"
-                ))
-            })
-        } else {
-            Err(MigratableError::MigrateSend(anyhow!("VM is not running")))
-        }
+            migration_err
+        })?;
+
+        // Shutdown the VM after the migration succeeded
+        self.exit_evt.write(1).map_err(|e| {
+            MigratableError::MigrateSend(anyhow!(
+                "Failed shutting down the VM after migration: {e:?}"
+            ))
+        })
     }
 }
 
