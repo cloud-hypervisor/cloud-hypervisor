@@ -12,6 +12,8 @@ use std::str::FromStr;
 
 use block::ImageType;
 use clap::ArgMatches;
+#[allow(unused_imports)]
+use hypervisor::HypervisorType;
 use log::{debug, warn};
 use option_parser::{
     ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple,
@@ -398,6 +400,8 @@ pub enum ValidationError {
     /// Invalid NUMA Configuration
     #[error("NUMA Configuration is invalid")]
     InvalidNumaConfig(String),
+    #[error("Nested virtualization is always turned on with KVM on AArch64")]
+    NestedIsAlwaysOnAarch64WithKvm(String),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -717,14 +721,6 @@ impl CpusConfig {
             .map_err(Error::ParseCpus)?
             .is_none_or(|toggle| toggle.0);
 
-        // Nested virtualization is always turned on for aarch64 and riscv64
-        // TODO: revisit this when nested support can be turned of on these architectures
-        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
-        if !nested {
-            return Err(Error::ParseCpus(OptionParserError::InvalidValue(
-                "nested=off is not supported on aarch64 and riscv64 architectures".to_string(),
-            )));
-        }
         let core_scheduling = parser
             .convert("core_scheduling")
             .map_err(Error::ParseCpus)?
@@ -2799,6 +2795,33 @@ impl VmConfig {
         } else {
             false
         }
+    }
+
+    pub fn validate_nested(&self, _hv_type: HypervisorType) -> ValidationResult<()> {
+        // Nested virtualization is always turned on for aarch64 and riscv64 on KVM
+        // On MSHV nested not supported on aarch64, it is allowed to be turned off.
+        // TODO: revisit this when nested support can be turned off on these architectures
+        #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
+        {
+            cfg_if::cfg_if! {
+                if #[cfg(all(feature = "kvm", feature = "mshv"))] {
+                    // Both features enabled: check runtime hypervisor type
+                    let is_kvm = _hv_type == HypervisorType::Kvm;
+                } else if #[cfg(feature = "kvm")] {
+                    // Only KVM enabled
+                    let is_kvm = true;
+                } else {
+                    // Only MSHV or neither enabled
+                    let is_kvm = false;
+                }
+            };
+            if is_kvm && !self.cpus.nested {
+                return Err(ValidationError::NestedIsAlwaysOnAarch64WithKvm(
+                    "Nested virtualization must be enabled on AArch64 with KVM".to_string(),
+                ));
+            }
+        }
+        Ok(())
     }
 
     // Also enables virtio-iommu if the config needs it

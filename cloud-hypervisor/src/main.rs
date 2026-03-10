@@ -58,6 +58,8 @@ enum Error {
     StartVmmThread(#[source] vmm::Error),
     #[error("Error parsing config")]
     ParsingConfig(#[source] vmm::config::Error),
+    #[error("Error validating VM config")]
+    ValidatingConfig(#[source] vmm::config::ValidationError),
     #[error("Error creating VM")]
     VmCreate(#[source] vmm::api::ApiError),
     #[error("Error booting VM")]
@@ -597,7 +599,7 @@ fn start_vmm(cmd_arguments: &ArgMatches) -> Result<Option<String>, Error> {
     info!("{} starting", env!("BUILD_VERSION"));
 
     let hypervisor = hypervisor::new().map_err(Error::CreateHypervisor)?;
-
+    let hv_type = hypervisor.hypervisor_type();
     #[cfg(feature = "guest_debug")]
     let gdb_socket_path = if let Some(gdb_config) = cmd_arguments.get_one::<String>("gdb") {
         let mut parser = OptionParser::new();
@@ -731,7 +733,9 @@ fn start_vmm(cmd_arguments: &ArgMatches) -> Result<Option<String>, Error> {
         if payload_present {
             let vm_params = VmParams::from_arg_matches(cmd_arguments);
             let vm_config = VmConfig::parse(vm_params).map_err(Error::ParsingConfig)?;
-
+            vm_config
+                .validate_nested(hv_type)
+                .map_err(Error::ValidatingConfig)?;
             // Create and boot the VM based off the VM config we just built.
             let sender = api_request_sender.clone();
             vmm::api::VmCreate
