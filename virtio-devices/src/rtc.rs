@@ -11,7 +11,7 @@ use std::{io, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
-use log::{error, info};
+use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -46,7 +46,6 @@ const VIRTIO_RTC_REQ_CROSS_CAP: u16 = 0x1002;
 const VIRTIO_RTC_S_OK: u8 = 0;
 const VIRTIO_RTC_S_EOPNOTSUPP: u8 = 2;
 const VIRTIO_RTC_S_ENODEV: u8 = 3;
-#[allow(unused)]
 const VIRTIO_RTC_S_EINVAL: u8 = 4;
 const VIRTIO_RTC_S_EIO: u8 = 5;
 
@@ -157,6 +156,7 @@ enum VirtioRtcRequest {
     ClockCap { clock_id: u16 },
     Read { clock_id: u16 },
     CrossCap { clock_id: u16, _hw_counter: u8 },
+    Invalid,
     Unknown,
 }
 
@@ -198,140 +198,18 @@ impl RtcEpollHandler {
         let mut used_descs = false;
 
         while let Some(mut desc_chain) = self.queue.pop_descriptor_chain(self.mem.memory()) {
-            let req_desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
-            let req_len = req_desc.len();
+            let access_platform = self.access_platform.as_deref();
 
-            // The request descriptor must be readable by the device.
-            if req_desc.is_write_only() || req_len < size_of::<VirtioRtcReqHead>() as u32 {
-                return Err(Error::InvalidDescriptor);
-            }
-
-            let req_addr = req_desc
-                .addr()
-                .translate_gva(self.access_platform.as_deref(), req_desc.len() as usize);
-
-            // Read the request header
-            let req_head: VirtioRtcReqHead = desc_chain
-                .memory()
-                .read_obj(req_addr)
-                .map_err(Error::GuestMemoryRead)?;
-
-            let body_addr = req_addr
-                .checked_add(size_of::<VirtioRtcReqHead>() as u64)
-                .ok_or(Error::InvalidDescriptor)?;
-
-            // Parse the full request based on msg_type
-            let request = match req_head.msg_type {
-                VIRTIO_RTC_REQ_CFG => VirtioRtcRequest::Cfg,
-                VIRTIO_RTC_REQ_CLOCK_CAP => {
-                    if req_len
-                        < (size_of::<VirtioRtcReqHead>() + size_of::<VirtioRtcReqClockBody>())
-                            as u32
-                    {
-                        return Err(Error::InvalidDescriptor);
-                    }
-
-                    let body: VirtioRtcReqClockBody = desc_chain
-                        .memory()
-                        .read_obj(body_addr)
-                        .map_err(Error::GuestMemoryRead)?;
-                    VirtioRtcRequest::ClockCap {
-                        clock_id: body.clock_id,
-                    }
+            // Process the descriptor chain and prepare the response.
+            // If processing fails, we still need to add a used descriptor with a response indicating the error.
+            // And continue the loop to process the full queue, instead of breaking on the first error.
+            let resp_len = match Self::process_descriptor(access_platform, &mut desc_chain) {
+                Ok(len) => len,
+                Err(e) => {
+                    error!("Failed to process virtio-rtc descriptor: {e}");
+                    0
                 }
-                VIRTIO_RTC_REQ_READ => {
-                    if req_len
-                        < (size_of::<VirtioRtcReqHead>() + size_of::<VirtioRtcReqClockBody>())
-                            as u32
-                    {
-                        return Err(Error::InvalidDescriptor);
-                    }
-
-                    let body: VirtioRtcReqClockBody = desc_chain
-                        .memory()
-                        .read_obj(body_addr)
-                        .map_err(Error::GuestMemoryRead)?;
-                    VirtioRtcRequest::Read {
-                        clock_id: body.clock_id,
-                    }
-                }
-                VIRTIO_RTC_REQ_CROSS_CAP => {
-                    if req_len
-                        < (size_of::<VirtioRtcReqHead>() + size_of::<VirtioRtcReqCrossCapBody>())
-                            as u32
-                    {
-                        return Err(Error::InvalidDescriptor);
-                    }
-
-                    let body: VirtioRtcReqCrossCapBody = desc_chain
-                        .memory()
-                        .read_obj(body_addr)
-                        .map_err(Error::GuestMemoryRead)?;
-                    VirtioRtcRequest::CrossCap {
-                        clock_id: body.clock_id,
-                        _hw_counter: body.hw_counter,
-                    }
-                }
-                _ => VirtioRtcRequest::Unknown,
             };
-
-            let response = self.handle_request(&request);
-
-            let resp_desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
-
-            // The response descriptor must be writable by the device.
-            if !resp_desc.is_write_only() {
-                return Err(Error::InvalidDescriptor);
-            }
-
-            let resp_addr = resp_desc
-                .addr()
-                .translate_gva(self.access_platform.as_deref(), resp_desc.len() as usize);
-
-            let resp_len = match &response {
-                VirtioRtcResponse::Cfg(_) => size_of::<VirtioRtcRespCfg>() as u32,
-                VirtioRtcResponse::ClockCap(_) => size_of::<VirtioRtcRespClockCap>() as u32,
-                VirtioRtcResponse::Read(_) => size_of::<VirtioRtcRespRead>() as u32,
-                VirtioRtcResponse::CrossCap(_) => size_of::<VirtioRtcRespCrossCap>() as u32,
-                VirtioRtcResponse::Error(_) => size_of::<VirtioRtcRespHead>() as u32,
-            };
-
-            if resp_desc.len() < resp_len {
-                return Err(Error::InvalidDescriptor);
-            }
-
-            match &response {
-                VirtioRtcResponse::Cfg(resp) => {
-                    desc_chain
-                        .memory()
-                        .write_obj(*resp, resp_addr)
-                        .map_err(Error::GuestMemoryWrite)?;
-                }
-                VirtioRtcResponse::ClockCap(resp) => {
-                    desc_chain
-                        .memory()
-                        .write_obj(*resp, resp_addr)
-                        .map_err(Error::GuestMemoryWrite)?;
-                }
-                VirtioRtcResponse::Read(resp) => {
-                    desc_chain
-                        .memory()
-                        .write_obj(*resp, resp_addr)
-                        .map_err(Error::GuestMemoryWrite)?;
-                }
-                VirtioRtcResponse::CrossCap(resp) => {
-                    desc_chain
-                        .memory()
-                        .write_obj(*resp, resp_addr)
-                        .map_err(Error::GuestMemoryWrite)?;
-                }
-                VirtioRtcResponse::Error(resp) => {
-                    desc_chain
-                        .memory()
-                        .write_obj(*resp, resp_addr)
-                        .map_err(Error::GuestMemoryWrite)?;
-                }
-            }
 
             self.queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), resp_len)
@@ -343,7 +221,164 @@ impl RtcEpollHandler {
         Ok(used_descs)
     }
 
-    fn handle_request(&self, req: &VirtioRtcRequest) -> VirtioRtcResponse {
+    fn process_descriptor<M>(
+        access_platform: Option<&dyn AccessPlatform>,
+        desc_chain: &mut virtio_queue::DescriptorChain<M>,
+    ) -> Result<u32, Error>
+    where
+        M: std::ops::Deref,
+        M::Target: vm_memory::GuestMemory,
+    {
+        let req_desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
+        let req_len = req_desc.len();
+
+        // The request descriptor must be readable by the device.
+        if req_desc.is_write_only() || req_len < size_of::<VirtioRtcReqHead>() as u32 {
+            return Err(Error::InvalidDescriptor);
+        }
+
+        let req_addr = req_desc
+            .addr()
+            .translate_gva(access_platform, req_desc.len() as usize);
+
+        // Read the request header
+        let req_head: VirtioRtcReqHead = desc_chain
+            .memory()
+            .read_obj(req_addr)
+            .map_err(Error::GuestMemoryRead)?;
+
+        let body_addr = req_addr
+            .checked_add(size_of::<VirtioRtcReqHead>() as u64)
+            .ok_or(Error::InvalidDescriptor)?;
+
+        // Parse the full request based on msg_type
+        let request = match req_head.msg_type {
+            VIRTIO_RTC_REQ_CFG => VirtioRtcRequest::Cfg,
+            VIRTIO_RTC_REQ_CLOCK_CAP => {
+                if req_len
+                    < (size_of::<VirtioRtcReqHead>() + size_of::<VirtioRtcReqClockBody>()) as u32
+                {
+                    VirtioRtcRequest::Invalid
+                } else {
+                    let body: VirtioRtcReqClockBody = desc_chain
+                        .memory()
+                        .read_obj(body_addr)
+                        .map_err(Error::GuestMemoryRead)?;
+                    VirtioRtcRequest::ClockCap {
+                        clock_id: body.clock_id,
+                    }
+                }
+            }
+            VIRTIO_RTC_REQ_READ => {
+                if req_len
+                    < (size_of::<VirtioRtcReqHead>() + size_of::<VirtioRtcReqClockBody>()) as u32
+                {
+                    VirtioRtcRequest::Invalid
+                } else {
+                    let body: VirtioRtcReqClockBody = desc_chain
+                        .memory()
+                        .read_obj(body_addr)
+                        .map_err(Error::GuestMemoryRead)?;
+                    VirtioRtcRequest::Read {
+                        clock_id: body.clock_id,
+                    }
+                }
+            }
+            VIRTIO_RTC_REQ_CROSS_CAP => {
+                if req_len
+                    < (size_of::<VirtioRtcReqHead>() + size_of::<VirtioRtcReqCrossCapBody>()) as u32
+                {
+                    VirtioRtcRequest::Invalid
+                } else {
+                    let body: VirtioRtcReqCrossCapBody = desc_chain
+                        .memory()
+                        .read_obj(body_addr)
+                        .map_err(Error::GuestMemoryRead)?;
+                    VirtioRtcRequest::CrossCap {
+                        clock_id: body.clock_id,
+                        _hw_counter: body.hw_counter,
+                    }
+                }
+            }
+            _ => VirtioRtcRequest::Unknown,
+        };
+
+        let response = Self::handle_request(&request);
+
+        let resp_desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
+
+        // The response descriptor must be writable by the device.
+        if !resp_desc.is_write_only() {
+            return Err(Error::InvalidDescriptor);
+        }
+
+        let resp_addr = resp_desc
+            .addr()
+            .translate_gva(access_platform, resp_desc.len() as usize);
+
+        let resp_len = match &response {
+            VirtioRtcResponse::Cfg(_) => size_of::<VirtioRtcRespCfg>() as u32,
+            VirtioRtcResponse::ClockCap(_) => size_of::<VirtioRtcRespClockCap>() as u32,
+            VirtioRtcResponse::Read(_) => size_of::<VirtioRtcRespRead>() as u32,
+            VirtioRtcResponse::CrossCap(_) => size_of::<VirtioRtcRespCrossCap>() as u32,
+            VirtioRtcResponse::Error(_) => size_of::<VirtioRtcRespHead>() as u32,
+        };
+
+        if resp_desc.len() < resp_len {
+            // If the write-only buffer can at least hold the response head,
+            // write an EINVAL status per the spec.
+            if resp_desc.len() >= size_of::<VirtioRtcRespHead>() as u32 {
+                let einval = VirtioRtcRespHead {
+                    status: VIRTIO_RTC_S_EINVAL,
+                    ..Default::default()
+                };
+                desc_chain
+                    .memory()
+                    .write_obj(einval, resp_addr)
+                    .map_err(Error::GuestMemoryWrite)?;
+                return Ok(size_of::<VirtioRtcRespHead>() as u32);
+            }
+            return Err(Error::InvalidDescriptor);
+        }
+
+        match &response {
+            VirtioRtcResponse::Cfg(resp) => {
+                desc_chain
+                    .memory()
+                    .write_obj(*resp, resp_addr)
+                    .map_err(Error::GuestMemoryWrite)?;
+            }
+            VirtioRtcResponse::ClockCap(resp) => {
+                desc_chain
+                    .memory()
+                    .write_obj(*resp, resp_addr)
+                    .map_err(Error::GuestMemoryWrite)?;
+            }
+            VirtioRtcResponse::Read(resp) => {
+                desc_chain
+                    .memory()
+                    .write_obj(*resp, resp_addr)
+                    .map_err(Error::GuestMemoryWrite)?;
+            }
+            VirtioRtcResponse::CrossCap(resp) => {
+                desc_chain
+                    .memory()
+                    .write_obj(*resp, resp_addr)
+                    .map_err(Error::GuestMemoryWrite)?;
+            }
+            VirtioRtcResponse::Error(resp) => {
+                warn!("virtio-rtc: responding with error status {}", resp.status);
+                desc_chain
+                    .memory()
+                    .write_obj(*resp, resp_addr)
+                    .map_err(Error::GuestMemoryWrite)?;
+            }
+        }
+
+        Ok(resp_len)
+    }
+
+    fn handle_request(req: &VirtioRtcRequest) -> VirtioRtcResponse {
         match req {
             VirtioRtcRequest::Cfg => VirtioRtcResponse::Cfg(VirtioRtcRespCfg {
                 head: VirtioRtcRespHead {
@@ -371,16 +406,28 @@ impl RtcEpollHandler {
                     },
                     ..Default::default()
                 }),
-            }
+            },
             VirtioRtcRequest::Read { clock_id } => match clock_id {
                 0 => match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-                    Ok(now) => VirtioRtcResponse::Read(VirtioRtcRespRead {
-                        head: VirtioRtcRespHead {
-                            status: VIRTIO_RTC_S_OK,
-                            ..Default::default()
-                        },
-                        clock_reading: now.as_nanos() as u64,
-                    }),
+                    Ok(now) => {
+                        let nanos = now.as_nanos();
+                        if nanos > u64::MAX as u128 {
+                            return VirtioRtcResponse::Read(VirtioRtcRespRead {
+                                head: VirtioRtcRespHead {
+                                    status: VIRTIO_RTC_S_EIO,
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            });
+                        }
+                        VirtioRtcResponse::Read(VirtioRtcRespRead {
+                            head: VirtioRtcRespHead {
+                                status: VIRTIO_RTC_S_OK,
+                                ..Default::default()
+                            },
+                            clock_reading: nanos as u64,
+                        })
+                    }
                     Err(_) => VirtioRtcResponse::Read(VirtioRtcRespRead {
                         head: VirtioRtcRespHead {
                             status: VIRTIO_RTC_S_EIO,
@@ -396,7 +443,7 @@ impl RtcEpollHandler {
                     },
                     ..Default::default()
                 }),
-            }
+            },
             VirtioRtcRequest::CrossCap { clock_id, .. } => match clock_id {
                 0 => VirtioRtcResponse::CrossCap(VirtioRtcRespCrossCap {
                     head: VirtioRtcRespHead {
@@ -413,7 +460,11 @@ impl RtcEpollHandler {
                     },
                     ..Default::default()
                 }),
-            }
+            },
+            VirtioRtcRequest::Invalid => VirtioRtcResponse::Error(VirtioRtcRespHead {
+                status: VIRTIO_RTC_S_EINVAL,
+                ..Default::default()
+            }),
             VirtioRtcRequest::Unknown => VirtioRtcResponse::Error(VirtioRtcRespHead {
                 status: VIRTIO_RTC_S_EOPNOTSUPP,
                 ..Default::default()
