@@ -31,6 +31,8 @@ use anyhow::anyhow;
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::kvm_create_guest_memfd;
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
+#[cfg(feature = "sev_snp")]
+use log::info;
 #[cfg(target_arch = "x86_64")]
 use log::warn;
 use vmm_sys_util::errno;
@@ -138,6 +140,22 @@ use crate::kvm::x86_64::XsaveStateError;
 #[cfg(target_arch = "x86_64")]
 ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 
+// TODO: The following VM types are defined in latest linux kernel arch/x86/include/uapi/asm/kvm.h but doesn't exist in kvm binding yet.
+pub const KVM_X86_SNP_VM: u32 = 4;
+#[cfg(feature = "sev_snp")]
+use igvm_defs::PAGE_SIZE_4K;
+#[cfg(feature = "sev_snp")]
+use kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE;
+use vm_memory::GuestAddress;
+#[cfg(feature = "sev_snp")]
+use x86_64::sev;
+// Hardcoded GPA of VMSA page for KVM
+pub const KVM_VMSA_PAGE_ADDRESS: GuestAddress = GuestAddress(0xffff_ffff_f000);
+pub const KVM_VMSA_PAGE_SIZE: usize = 0x1000;
+#[cfg(feature = "igvm")]
+pub const STAGE0_START_ADDRESS: GuestAddress = GuestAddress(0xffe0_0000);
+#[cfg(feature = "igvm")]
+pub const STAGE0_SIZE: usize = 0x20_0000;
 // Maximum virtual address space.
 #[cfg(target_arch = "x86_64")]
 const VIRTUAL_ADDRESS_SIZE_IN_BITS: usize = 1 << 48;
@@ -503,6 +521,8 @@ pub struct KvmVm {
     fd: Arc<VmFd>,
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
+    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    sev_fd: Option<x86_64::sev::SevFd>,
     dirty_log_slots: Arc<RwLock<HashMap<u32, KvmDirtyLogSlot>>>,
     #[cfg(target_arch = "x86_64")]
     memfd: Option<OwnedFd>,
@@ -614,6 +634,72 @@ impl KvmVm {
 /// let vm = hypervisor.create_vm(HypervisorVmConfig::default()).expect("new VM fd creation failed");
 /// ```
 impl vm::Vm for KvmVm {
+    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    fn sev_snp_init(&self, guest_policy: igvm_defs::SnpPolicy) -> vm::Result<()> {
+        self.sev_fd
+            .as_ref()
+            .unwrap()
+            .launch_start(&self.fd, guest_policy)
+            .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
+    }
+
+    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    fn import_isolated_pages(
+        &self,
+        page_type: u32,
+        page_size: u32,
+        // host page frame numbers
+        pfns: &[u64],
+        uaddrs: &[u64],
+    ) -> vm::Result<()> {
+        if pfns.is_empty() {
+            return Ok(());
+        }
+        assert_eq!(pfns.len(), uaddrs.len());
+        // VMSA pages are not supported by launch_update
+        // https://elixir.bootlin.com/linux/v6.11/source/arch/x86/kvm/svm/sev.c#L2377
+        if page_type == sev::SNP_PAGE_TYPE_VMSA {
+            return Ok(());
+        }
+        for i in 0..pfns.len() {
+            self.fd
+                .set_memory_attributes(kvm_memory_attributes {
+                    address: pfns[i] << sev::GPA_METADATA_PADDING,
+                    size: page_size as u64,
+                    attributes: kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
+                    // Flags must be zero o/w error (flags aren't being used here yet)
+                    flags: 0,
+                })
+                .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
+            self.sev_fd
+                .as_ref()
+                .unwrap()
+                .launch_update(&self.fd, uaddrs[i], page_size as u64, pfns[i], page_type)
+                .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
+        }
+
+        Ok(())
+    }
+
+    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    fn complete_isolated_import(
+        &self,
+        snp_id_block: igvm_defs::IGVM_VHS_SNP_ID_BLOCK,
+        host_data: [u8; 32],
+        id_block_enabled: u8,
+    ) -> vm::Result<()> {
+        self.sev_fd
+            .as_ref()
+            .unwrap()
+            .launch_finish(
+                &self.fd,
+                host_data,
+                id_block_enabled,
+                snp_id_block.author_key_enabled,
+            )
+            .map_err(|e| vm::HypervisorVmError::CompleteIsolatedImport(e.into()))
+    }
+
     #[cfg(target_arch = "x86_64")]
     ///
     /// Sets the address of the one-page region in the VM's address space.
@@ -694,6 +780,8 @@ impl vm::Vm for KvmVm {
             hyperv_synic: AtomicBool::new(false),
             #[cfg(target_arch = "x86_64")]
             xsave_size,
+            #[cfg(feature = "sev_snp")]
+            vm_fd: self.fd.clone(),
         };
         Ok(Box::new(vcpu))
     }
@@ -912,6 +1000,18 @@ impl vm::Vm for KvmVm {
         // SAFETY: Safe because caller promised this is safe.
         unsafe {
             self.set_user_memory_region(region)
+                .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
+        }
+
+        #[cfg(feature = "sev_snp")]
+        if self.kvm_guest_memfd_supported {
+            self.fd
+                .set_memory_attributes(kvm_memory_attributes {
+                    address: region.guest_phys_addr,
+                    size: region.memory_size,
+                    attributes: KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
+                    flags: 0,
+                })
                 .map_err(|e| vm::HypervisorVmError::CreateUserMemory(e.into()))?;
         }
         Ok(())
@@ -1347,6 +1447,12 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 } else {
                     vm_type = KVM_X86_DEFAULT_VM.into();
                 }
+            } else if #[cfg(feature = "sev_snp")] {
+                if _config.sev_snp_enabled {
+                    vm_type = KVM_X86_SNP_VM.into();
+                } else {
+                    vm_type = KVM_X86_DEFAULT_VM.into();
+                }
             } else {
                 vm_type = KVM_X86_DEFAULT_VM.into();
             }
@@ -1386,7 +1492,8 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             }
 
             // TODO: Check capability instead of VM type for guest memfd support once supported in kvm-ioctls.
-            let kvm_guest_memfd_supported = vm_type == kvm_bindings::KVM_X86_SW_PROTECTED_VM as u64;
+            let kvm_guest_memfd_supported = vm_type == kvm_bindings::KVM_X86_SW_PROTECTED_VM as u64
+                || vm_type == KVM_X86_SNP_VM as u64;
             let memfd = if kvm_guest_memfd_supported {
                 // TODO: Refactor to create memfd when the memory region is created so
                 // that the size is appropriate.
@@ -1405,10 +1512,37 @@ impl hypervisor::Hypervisor for KvmHypervisor {
                 None
             };
 
+            #[cfg(feature = "sev_snp")]
+            let sev_fd = {
+                let sev_snp_enabled = vm_type == KVM_X86_SNP_VM as u64;
+                if sev_snp_enabled {
+                    let mask = self.kvm.check_extension_int(crate::kvm::Cap::ExitHypercall);
+                    let cap = kvm_bindings::kvm_enable_cap {
+                        cap: kvm_bindings::KVM_CAP_EXIT_HYPERCALL,
+                        args: [mask as _, 0, 0, 0],
+                        ..Default::default()
+                    };
+                    vm_fd
+                        .enable_cap(&cap)
+                        .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
+                    let sev_dev = x86_64::sev::SevFd::new(&"/dev/sev".to_string())
+                        .map_err(|e| hypervisor::HypervisorError::SevSnpCapabilities(e.into()))?;
+                    // This ioctl initializes the sev context and must be called right after opening the sev device.
+                    sev_dev
+                        .init2(&vm_fd)
+                        .map_err(|e| hypervisor::HypervisorError::VmCreate(e.into()))?;
+                    Some(sev_dev)
+                } else {
+                    None
+                }
+            };
+
             Ok(Arc::new(KvmVm {
                 fd: vm_fd,
                 msrs,
                 dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                #[cfg(feature = "sev_snp")]
+                sev_fd,
                 memfd,
                 kvm_guest_memfd_supported,
             }))
@@ -1504,6 +1638,8 @@ pub struct KvmVcpu {
     hyperv_synic: AtomicBool,
     #[cfg(target_arch = "x86_64")]
     xsave_size: i32,
+    #[cfg(feature = "sev_snp")]
+    vm_fd: Arc<VmFd>,
 }
 
 /// Implementation of Vcpu trait for KVM
@@ -2163,6 +2299,49 @@ impl cpu::Vcpu for KvmVcpu {
                 #[cfg(feature = "tdx")]
                 VcpuExit::Unsupported(KVM_EXIT_TDX) => Ok(cpu::VmExit::Tdx),
                 VcpuExit::Debug(_) => Ok(cpu::VmExit::Debug),
+                #[cfg(feature = "sev_snp")]
+                VcpuExit::Hypercall(hypercall) => {
+                    // https://docs.kernel.org/virt/kvm/x86/hypercalls.html#kvm-hc-map-gpa-range
+                    info!("VcpuExit::Hypercall");
+                    const KVM_HC_MAP_GPA_RANGE: u64 = 12;
+                    // 4th bit of attributes argument is encrypted page bit
+                    match hypercall.nr {
+                        KVM_HC_MAP_GPA_RANGE => {
+                            info!("Handling KVM_HC_MAP_GPA_RANGE hypercall");
+                            // guest physical address of start page
+                            let address = hypercall.args[0];
+                            // num pages to map from start address
+                            let num_pages = hypercall.args[1];
+                            // bits[0-3]  = page size encoding
+                            // bits[4]   = 1 if private, 0 if shared
+                            // bits[5-63] = zero
+                            let attributes = hypercall.args[2];
+                            // TODO: Add 2mb page support
+                            let size = num_pages * PAGE_SIZE_4K;
+                            // bit 4 = private attribute encoding
+                            const PRIVATE_ENCODING_BITMASK: u64 = 0b10000;
+                            info!("hypercall attributes: {:#b}", attributes);
+                            let set_private_attr = if attributes & PRIVATE_ENCODING_BITMASK > 0 {
+                                KVM_MEMORY_ATTRIBUTE_PRIVATE as u64
+                            } else {
+                                // the only attribute available is private, o/w 0
+                                // https://docs.kernel.org/virt/kvm/api.html#kvm-set-memory-attributes
+                                0u64
+                            };
+                            let mem_attributes = kvm_memory_attributes {
+                                address,
+                                size,
+                                attributes: set_private_attr,
+                                ..Default::default()
+                            };
+                            self.vm_fd
+                                .set_memory_attributes(mem_attributes)
+                                .map(|_| cpu::VmExit::Ignore)
+                                .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))
+                        }
+                        _ => Ok(cpu::VmExit::Ignore),
+                    }
+                }
 
                 r => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
                     "Unexpected exit reason on vcpu run: {r:?}"
@@ -3015,6 +3194,54 @@ impl cpu::Vcpu for KvmVcpu {
             }
             Ok(_) => Ok(()),
         }
+    }
+
+    #[cfg(feature = "sev_snp")]
+    fn set_sev_control_register(
+        &self,
+        _vmsa_pfn: u64,
+        vmsa: igvm::snp_defs::SevVmsa,
+    ) -> cpu::Result<()> {
+        use crate::arch::x86::SegmentRegister;
+
+        let mut sregs = self
+            .fd
+            .get_sregs()
+            .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::GetSpecialRegs(e.into()))?;
+        sregs.cs = SegmentRegister::from(vmsa.cs).into();
+        sregs.ds = SegmentRegister::from(vmsa.ds).into();
+        sregs.es = SegmentRegister::from(vmsa.es).into();
+        sregs.fs = SegmentRegister::from(vmsa.fs).into();
+        sregs.gs = SegmentRegister::from(vmsa.gs).into();
+        sregs.ss = SegmentRegister::from(vmsa.ss).into();
+        sregs.tr = SegmentRegister::from(vmsa.tr).into();
+        sregs.ldt = SegmentRegister::from(vmsa.ldtr).into();
+
+        sregs.cr0 = vmsa.cr0;
+        sregs.cr4 = vmsa.cr4;
+        sregs.efer = vmsa.efer;
+
+        sregs.idt.base = vmsa.idtr.base;
+        sregs.idt.limit = vmsa.idtr.limit.try_into().unwrap();
+        sregs.gdt.base = vmsa.gdtr.base;
+        sregs.gdt.limit = vmsa.gdtr.limit.try_into().unwrap();
+        self.fd
+            .set_sregs(&sregs)
+            .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::SetSpecialRegs(e.into()))?;
+
+        let mut regs = self
+            .fd
+            .get_regs()
+            .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::GetRegister(e.into()))?;
+        regs.rip = vmsa.rip;
+        regs.rdx = vmsa.rdx;
+        regs.rflags = vmsa.rflags;
+
+        self.fd
+            .set_regs(&regs)
+            .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+
+        Ok(())
     }
 }
 

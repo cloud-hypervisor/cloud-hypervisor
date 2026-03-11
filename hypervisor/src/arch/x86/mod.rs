@@ -139,6 +139,30 @@ impl SegmentRegister {
     }
 }
 
+// Convert an SEV-SNP VMSA segment selector into our SegmentRegister.
+// The attrib field is a packed 16-bit access rights word matching the
+// Intel SDM Vol.3 Table 24-2 segment access rights layout.
+#[cfg(feature = "sev_snp")]
+impl From<igvm::snp_defs::SevSelector> for SegmentRegister {
+    fn from(s: igvm::snp_defs::SevSelector) -> Self {
+        let a = s.attrib as u32;
+        Self {
+            base: s.base,
+            limit: s.limit,
+            selector: s.selector,
+            type_: (a & 0xf) as u8,
+            s: ((a >> 4) & 1) as u8,
+            dpl: ((a >> 5) & 3) as u8,
+            present: ((a >> 7) & 1) as u8,
+            avl: ((a >> 12) & 1) as u8,
+            l: ((a >> 13) & 1) as u8,
+            db: ((a >> 14) & 1) as u8,
+            g: ((a >> 15) & 1) as u8,
+            unusable: ((a >> 16) & 1) as u8,
+        }
+    }
+}
+
 // Code segment
 pub const CODE_SEGMENT_TYPE: u8 = 0x8;
 
