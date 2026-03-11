@@ -520,6 +520,10 @@ components:
             type: string
       description: Virtual Machine Monitor information
 
+    VmState:
+      type: string
+      enum: [Created, Running, Shutdown, Paused]
+
     VmInfo:
       required:
         - config
@@ -529,8 +533,8 @@ components:
         config:
           $ref: "#/components/schemas/VmConfig"
         state:
-          type: string
-          enum: [Created, Running, Shutdown, Paused]
+          $ref: "#/components/schemas/VmState"
+
         memory_actual_size:
           type: integer
           format: int64
@@ -710,6 +714,11 @@ components:
         packages:
           type: integer
 
+    CoreSchedulingMode:
+      type: string
+      enum: ["Vm", "Vcpu", "Off"]
+      default: "Vm"
+
     CpusConfig:
       required:
         - boot_vcpus
@@ -739,9 +748,8 @@ components:
         features:
           $ref: "#/components/schemas/CpuFeatures"
         core_scheduling:
-          type: string
-          enum: ["Vm", "Vcpu", "Off"]
-          default: "Vm"
+          $ref: "#/components/schemas/CoreSchedulingMode"
+
 
     PciSegmentConfig:
       required:
@@ -931,6 +939,15 @@ components:
           items:
             type: integer
 
+    ImageType:
+      type: string
+      enum: ["FixedVhd", "Qcow2", "Raw", "Vhdx", "Unknown"]
+
+    LockGranularity:
+      type: string
+      enum: [byte-range, full]
+      default: byte-range
+
     DiskConfig:
       type: object
       properties:
@@ -978,12 +995,9 @@ components:
           type: boolean
           default: true
         image_type:
-          type: string
-          enum: [FixedVhd, Qcow2, Raw, Vhdx, Unknown]
+          $ref: "#/components/schemas/ImageType"
         lock_granularity:
-          type: string
-          enum: [byte-range, full]
-          default: byte-range
+          $ref: "#/components/schemas/LockGranularity"
 
     NetConfig:
       type: object
@@ -1132,6 +1146,10 @@ components:
         id:
           type: string
 
+    ConsoleMode:
+      type: string
+      enum: ["Off", "Pty", "Tty", "File", "Socket", "Null"]
+
     ConsoleConfig:
       required:
         - mode
@@ -1142,8 +1160,7 @@ components:
         socket:
           type: string
         mode:
-          type: string
-          enum: ["Off", "Pty", "Tty", "File", "Socket", "Null"]
+          $ref: "#/components/schemas/ConsoleMode"
         iommu:
           type: boolean
           default: false
@@ -1156,8 +1173,7 @@ components:
         file:
           type: string
         mode:
-          type: string
-          enum: ["Off", "Pty", "Tty", "File", "Null"]
+          $ref: "#/components/schemas/ConsoleMode"
         iobase:
           type: integer
 
