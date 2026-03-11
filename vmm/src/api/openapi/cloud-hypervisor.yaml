@@ -945,8 +945,8 @@ components:
 
     LockGranularity:
       type: string
-      enum: [byte-range, full]
-      default: byte-range
+      enum: [ByteRange, Full]
+      default: ByteRange
 
     DiskConfig:
       type: object
