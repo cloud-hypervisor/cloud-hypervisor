@@ -163,12 +163,16 @@ impl VfioUserPciDevice {
                 let file_offset = file_offset.as_ref().unwrap();
 
                 for s in mmaps.iter() {
+                    // The fd is a per-area fd where the mapping starts at
+                    // offset 0. This is different from VFIO as it uses a
+                    // single device fd where sparse_area.offset locates data
+                    // within that fd.
                     let mapping = match MmapRegion::mmap(
                         s.size,
                         prot,
                         file_offset.file().as_fd(),
                         file_offset.start(),
-                        s.offset,
+                        0,
                     ) {
                         Ok(mapping) => Arc::new(mapping),
                         Err(e) => {
