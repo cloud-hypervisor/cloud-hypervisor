@@ -440,8 +440,16 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
 
     let mut test_disk_arg =
         format!("path={test_file},queue_size={queue_size},num_queues={num_queues}");
-    if test_file == OVERLAY_WITH_QCOW2_BACKING || test_file == OVERLAY_WITH_RAW_BACKING {
-        test_disk_arg.push_str(",image_type=qcow2,backing_files=on");
+    if test_file == OVERLAY_WITH_QCOW2_BACKING
+        || test_file == OVERLAY_WITH_RAW_BACKING
+        || test_file == QCOW2_UNCOMPRESSED_IMG
+        || test_file == QCOW2_ZLIB_IMG
+        || test_file == QCOW2_ZSTD_IMG
+    {
+        test_disk_arg.push_str(",image_type=qcow2");
+        if test_file == OVERLAY_WITH_QCOW2_BACKING || test_file == OVERLAY_WITH_RAW_BACKING {
+            test_disk_arg.push_str(",backing_files=on");
+        }
     } else if test_file == BLK_IO_TEST_IMG {
         test_disk_arg.push_str(",image_type=raw");
     }
