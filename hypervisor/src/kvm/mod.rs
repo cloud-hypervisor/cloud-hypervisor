@@ -427,10 +427,10 @@ struct KvmDirtyLogSlot {
 
 /// Wrapper over KVM VM ioctls.
 pub struct KvmVm {
-    fd: Arc<VmFd>,
+    fd: VmFd,
     #[cfg(target_arch = "x86_64")]
     msrs: Vec<MsrEntry>,
-    dirty_log_slots: Arc<RwLock<HashMap<u32, KvmDirtyLogSlot>>>,
+    dirty_log_slots: RwLock<HashMap<u32, KvmDirtyLogSlot>>,
 }
 
 impl KvmVm {
@@ -1238,8 +1238,6 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             break;
         }
 
-        let vm_fd = Arc::new(fd);
-
         #[cfg(target_arch = "x86_64")]
         {
             let msr_list = self.get_msr_list()?;
@@ -1256,17 +1254,17 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             }
 
             Ok(Arc::new(KvmVm {
-                fd: vm_fd,
+                fd,
                 msrs,
-                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                dirty_log_slots: RwLock::new(HashMap::new()),
             }))
         }
 
         #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
         {
             Ok(Arc::new(KvmVm {
-                fd: vm_fd,
-                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                fd,
+                dirty_log_slots: RwLock::new(HashMap::new()),
             }))
         }
     }
