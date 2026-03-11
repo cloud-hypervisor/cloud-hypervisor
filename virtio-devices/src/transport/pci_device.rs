@@ -272,7 +272,7 @@ const MSIX_PBA_BAR_OFFSET: u64 = next_bar_addr(MSIX_TABLE_BAR_OFFSET, MSIX_TABLE
 const MSIX_PBA_SIZE: u64 = 0x800;
 // The BAR size must be a power of 2.
 const CAPABILITY_BAR_SIZE: u64 = (MSIX_PBA_BAR_OFFSET + MSIX_PBA_SIZE).next_power_of_two();
-const VIRTIO_COMMON_BAR_INDEX: usize = 0;
+const VIRTIO_COMMON_BAR_INDEX: u8 = 0;
 const VIRTIO_SHM_BAR_INDEX: usize = 2;
 
 const NOTIFY_OFF_MULTIPLIER: u32 = 4; // A dword per notification address.
@@ -367,9 +367,6 @@ pub struct VirtioPciDevice {
 
     // Guest memory
     memory: GuestMemoryAtomic<GuestMemoryMmap>,
-
-    // Settings PCI BAR
-    settings_bar: u8,
 
     // Whether to use 64-bit bar location or 32-bit
     use_64bit_bar: bool,
@@ -611,7 +608,6 @@ impl VirtioPciDevice {
             queues,
             queue_evts,
             memory,
-            settings_bar: 0,
             use_64bit_bar,
             cap_pci_cfg_info,
             bar_regions: vec![],
@@ -677,17 +673,15 @@ impl VirtioPciDevice {
     }
 
     pub fn config_bar_addr(&self) -> u64 {
-        self.configuration.get_bar_addr(self.settings_bar as usize)
+        self.configuration
+            .get_bar_addr(VIRTIO_COMMON_BAR_INDEX.into())
     }
 
-    fn add_pci_capabilities(
-        &mut self,
-        settings_bar: u8,
-    ) -> std::result::Result<(), PciDeviceError> {
+    fn add_pci_capabilities(&mut self) -> std::result::Result<(), PciDeviceError> {
         // Add pointers to the different configuration structures from the PCI capabilities.
         let common_cap = VirtioPciCap::new(
             PciCapabilityType::Common,
-            settings_bar,
+            VIRTIO_COMMON_BAR_INDEX,
             COMMON_CONFIG_BAR_OFFSET as u32,
             COMMON_CONFIG_SIZE as u32,
         );
@@ -697,7 +691,7 @@ impl VirtioPciDevice {
 
         let isr_cap = VirtioPciCap::new(
             PciCapabilityType::Isr,
-            settings_bar,
+            VIRTIO_COMMON_BAR_INDEX,
             ISR_CONFIG_BAR_OFFSET as u32,
             ISR_CONFIG_SIZE as u32,
         );
@@ -708,7 +702,7 @@ impl VirtioPciDevice {
         // TODO(dgreid) - set based on device's configuration size?
         let device_cap = VirtioPciCap::new(
             PciCapabilityType::Device,
-            settings_bar,
+            VIRTIO_COMMON_BAR_INDEX,
             DEVICE_CONFIG_BAR_OFFSET as u32,
             DEVICE_CONFIG_SIZE as u32,
         );
@@ -718,7 +712,7 @@ impl VirtioPciDevice {
 
         let notify_cap = VirtioPciNotifyCap::new(
             PciCapabilityType::Notify,
-            settings_bar,
+            VIRTIO_COMMON_BAR_INDEX,
             NOTIFICATION_BAR_OFFSET as u32,
             NOTIFICATION_SIZE as u32,
             Le32::from(NOTIFY_OFF_MULTIPLIER),
@@ -736,17 +730,16 @@ impl VirtioPciDevice {
         self.cap_pci_cfg_info.cap = configuration_cap;
 
         let msix_cap = MsixCap::new(
-            settings_bar,
+            VIRTIO_COMMON_BAR_INDEX,
             self.msix_num,
             MSIX_TABLE_BAR_OFFSET as u32,
-            settings_bar,
+            VIRTIO_COMMON_BAR_INDEX,
             MSIX_PBA_BAR_OFFSET as u32,
         );
         self.configuration
             .add_capability(&msix_cap)
             .map_err(PciDeviceError::CapabilitiesSetup)?;
 
-        self.settings_bar = settings_bar;
         Ok(())
     }
 
@@ -991,7 +984,7 @@ impl PciDevice for VirtioPciDevice {
                 if let Resource::PciBar {
                     index, base, type_, ..
                 } = resource
-                    && index == VIRTIO_COMMON_BAR_INDEX
+                    && index == usize::from(VIRTIO_COMMON_BAR_INDEX)
                 {
                     settings_bar_addr = Some(GuestAddress(base));
                     use_64bit_bar = match type_ {
@@ -1035,7 +1028,7 @@ impl PciDevice for VirtioPciDevice {
         };
 
         let bar = PciBarConfiguration::default()
-            .set_index(VIRTIO_COMMON_BAR_INDEX)
+            .set_index(VIRTIO_COMMON_BAR_INDEX.into())
             .set_address(virtio_pci_bar_addr.raw_value())
             .set_size(CAPABILITY_BAR_SIZE)
             .set_region_type(region_type);
@@ -1050,7 +1043,7 @@ impl PciDevice for VirtioPciDevice {
             })?;
 
             // Once the BARs are allocated, the capabilities can be added to the PCI configuration.
-            self.add_pci_capabilities(VIRTIO_COMMON_BAR_INDEX as u8)?;
+            self.add_pci_capabilities()?;
         }
 
         bars.push(bar);
