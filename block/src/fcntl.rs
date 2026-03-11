@@ -147,7 +147,6 @@ impl LockGranularity {
 /// image. Without a byte-range lock, some NFS implementations may treat the
 /// entire file as exclusively locked and prevent such operations (e.g. NetApp).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "kebab-case")]
 pub enum LockGranularityChoice {
     /// Byte-range lock covering [0, size).
     #[default]
