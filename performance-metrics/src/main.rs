@@ -1214,7 +1214,6 @@ fn run_test_with_timeout(
         let _ = sender.send(output);
     });
 
-    // Todo: Need to cleanup/kill all hanging child processes
     let test_timeout = test.calc_timeout(&test_iterations, &test_timeout);
     receiver
         .recv_timeout(Duration::from_secs(test_timeout))
@@ -1223,8 +1222,16 @@ fn run_test_with_timeout(
                 "[Error] Test '{}' time-out after {} seconds",
                 test.name, test_timeout
             );
+            cleanup_stale_processes();
             Error::TestTimeout
         })?
+}
+
+fn cleanup_stale_processes() {
+    for proc in &["cloud-hypervisor", "iperf3", "ethr"] {
+        let _ = Command::new("pkill").args(["-9", "-f", proc]).status();
+    }
+    thread::sleep(Duration::from_secs(2));
 }
 
 fn date() -> String {
