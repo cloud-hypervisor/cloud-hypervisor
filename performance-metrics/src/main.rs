@@ -1234,6 +1234,14 @@ fn cleanup_stale_processes() {
     thread::sleep(Duration::from_secs(2));
 }
 
+fn settle_host() {
+    let _ = Command::new("sync").status();
+    let _ = Command::new("bash")
+        .args(["-c", "echo 3 > /proc/sys/vm/drop_caches"])
+        .status();
+    thread::sleep(Duration::from_secs(1));
+}
+
 fn date() -> String {
     let output = test_infra::exec_host_command_output("date");
     String::from_utf8_lossy(&output.stdout).trim().to_string()
@@ -1334,6 +1342,7 @@ fn main() {
 
     for test in test_list.iter() {
         if test_filter.is_empty() || test_filter.iter().any(|&s| test.name.contains(s)) {
+            settle_host();
             match run_test_with_timeout(test, &overrides) {
                 Ok(r) => {
                     metrics_report.results.push(r);
