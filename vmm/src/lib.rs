@@ -27,7 +27,7 @@ use console_devices::{ConsoleInfo, pre_create_console_devices};
 use event_monitor::event;
 use landlock::LandlockError;
 use libc::{EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW, tcsetattr, termios};
-use log::{error, info, trace, warn};
+use log::{debug, error, info, trace, warn};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
 use seccompiler::{SeccompAction, apply_filter};
@@ -1216,29 +1216,94 @@ impl Vmm {
         }
     }
 
-    // Returns true if there were dirty pages to send
-    fn vm_maybe_send_dirty_pages(
+    /// Transmits the given [`MemoryRangeTable`] over the wire if there is at
+    /// least one region.
+    ///
+    /// Sends a memory migration request, the range table, and the corresponding
+    /// guest memory regions over the given socket. Waits for acknowledgment
+    /// from the destination.
+    fn vm_send_dirty_pages(
         vm: &mut Vm,
         socket: &mut SocketStream,
-    ) -> result::Result<bool, MigratableError> {
-        // Send (dirty) memory table
-        let table = vm.dirty_log()?;
-
-        // But if there are no regions go straight to pause
+        table: &MemoryRangeTable,
+    ) -> result::Result<(), MigratableError> {
         if table.regions().is_empty() {
-            return Ok(false);
+            return Ok(());
         }
 
-        Request::memory(table.length()).write_to(socket).unwrap();
+        Request::memory(table.length()).write_to(socket)?;
         table.write_to(socket)?;
         // And then the memory itself
-        vm.send_memory_regions(&table, socket)?;
+        vm.send_memory_regions(table, socket)?;
         Response::read_from(socket)?.ok_or_abandon(
             socket,
             MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
         )?;
 
-        Ok(true)
+        Ok(())
+    }
+
+    /// Performs the initial memory transmission (iteration zero) plus a
+    /// variable number of memory iterations with the goal to eventually migrate
+    /// the VM in a reasonably small downtime.
+    ///
+    /// This returns as soon as the precopy migration indicates it is converged
+    /// (e.g., reasonably small downtime) is reached.
+    fn do_memory_iterations(
+        vm: &mut Vm,
+        socket: &mut SocketStream,
+        iteration_counter: &mut u64,
+        is_converged: impl Fn(u64) -> bool,
+    ) -> result::Result<MemoryRangeTable /* remaining */, MigratableError> {
+        loop {
+            let iteration_table = if *iteration_counter == 0 {
+                vm.memory_range_table()?
+            } else {
+                // TODO do this in a thread #7816
+                vm.dirty_log()?
+            };
+
+            if is_converged(*iteration_counter) {
+                debug!("Precopy converged: iter={iteration_counter}");
+                break Ok(iteration_table);
+            }
+
+            // Send the current dirty pages
+            Self::vm_send_dirty_pages(vm, socket, &iteration_table)?;
+
+            // Prepare next iteration.
+            *iteration_counter += 1;
+        }
+    }
+
+    /// Performs the memory migration including multiple iterations.
+    ///
+    /// This includes:
+    /// - initial memory - VM is running
+    /// - multiple memory delta transmissions - VM is running
+    /// - final memory iteration - VM is paused
+    fn do_memory_migration(
+        vm: &mut Vm,
+        socket: &mut SocketStream,
+    ) -> result::Result<(), MigratableError> {
+        const MAX_ITERATIONS: u64 = 5;
+
+        let mut iteration_counter = 0;
+        let is_converged = |iteration_counter: u64| iteration_counter >= MAX_ITERATIONS;
+
+        vm.start_dirty_log()?;
+        let remaining =
+            Self::do_memory_iterations(vm, socket, &mut iteration_counter, is_converged)?;
+        vm.pause()?;
+
+        // Send last batch of dirty pages
+        let mut final_table = vm.dirty_log()?;
+        final_table.extend(remaining);
+        Vmm::vm_send_dirty_pages(vm, socket, &final_table)?;
+
+        info!("Memory migration complete");
+
+        Ok(())
     }
 
     fn send_migration(
@@ -1323,36 +1388,7 @@ impl Vmm {
             // Now pause VM
             vm.pause()?;
         } else {
-            // Start logging dirty pages
-            vm.start_dirty_log()?;
-
-            // Send memory table
-            let table = vm.memory_range_table()?;
-            Request::memory(table.length())
-                .write_to(&mut socket)
-                .unwrap();
-            table.write_to(&mut socket)?;
-            // And then the memory itself
-            vm.send_memory_regions(&table, &mut socket)?;
-            Response::read_from(&mut socket)?.ok_or_abandon(
-                &mut socket,
-                MigratableError::MigrateSend(anyhow!("Error during dirty memory migration")),
-            )?;
-
-            // Try at most 5 passes of dirty memory sending
-            const MAX_DIRTY_MIGRATIONS: usize = 5;
-            for i in 0..MAX_DIRTY_MIGRATIONS {
-                info!("Dirty memory migration {i} of {MAX_DIRTY_MIGRATIONS}");
-                if !Self::vm_maybe_send_dirty_pages(vm, &mut socket)? {
-                    break;
-                }
-            }
-
-            // Now pause VM
-            vm.pause()?;
-
-            // Send last batch of dirty pages
-            Self::vm_maybe_send_dirty_pages(vm, &mut socket)?;
+            Self::do_memory_migration(vm, &mut socket)?;
         }
 
         // We release the locks early to enable locking them on the destination host.
