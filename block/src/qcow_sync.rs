@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::fs::File;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
 use std::sync::Arc;
-use std::{io, ptr, slice};
+use std::{fmt, io, ptr, slice};
 
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
@@ -178,6 +178,15 @@ pub struct QcowDiskSync {
     backing_file: Option<Arc<dyn BackingRead>>,
     sparse: bool,
     data_raw_file: QcowRawFile,
+}
+
+impl fmt::Debug for QcowDiskSync {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("QcowDiskSync")
+            .field("sparse", &self.sparse)
+            .field("has_backing", &self.backing_file.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl QcowDiskSync {
