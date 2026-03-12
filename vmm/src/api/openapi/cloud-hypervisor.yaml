@@ -1405,6 +1405,11 @@ components:
             Defaults to 3600s (one hour).
         timeout_strategy:
           $ref: "#/components/schemas/TimeoutStrategy"
+        connections:
+          type: integer
+          format: int64
+          default: 1
+          minimum: 1
 
     VmAddUserDevice:
       required:
