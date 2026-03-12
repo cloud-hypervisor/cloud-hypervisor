@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write, stdout};
-use std::num::NonZero;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::panic::AssertUnwindSafe;
 #[cfg(feature = "guest_debug")]
@@ -1258,7 +1257,7 @@ impl Vmm {
         } else {
             let mut mem_send = migration_transport::SendAdditionalConnections::new(
                 &send_data_migration.destination_url,
-                NonZero::new(1).unwrap(),
+                send_data_migration.connections,
                 &vm.guest_memory(),
             )?;
 
