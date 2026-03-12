@@ -284,6 +284,12 @@ impl disk_file::DiskSize for QcowDiskSync {
     }
 }
 
+impl disk_file::PhysicalSize for QcowDiskSync {
+    fn physical_size(&self) -> BlockResult<u64> {
+        Ok(self.data_raw_file.physical_size()?)
+    }
+}
+
 pub struct QcowSync {
     metadata: Arc<QcowMetadata>,
     data_file: QcowRawFile,
