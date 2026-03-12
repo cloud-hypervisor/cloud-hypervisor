@@ -326,6 +326,8 @@ impl disk_file::Resizable for QcowDiskSync {
     }
 }
 
+impl disk_file::DiskFile for QcowDiskSync {}
+
 pub struct QcowSync {
     metadata: Arc<QcowMetadata>,
     data_file: QcowRawFile,
