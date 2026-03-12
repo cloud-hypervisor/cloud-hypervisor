@@ -81,3 +81,12 @@ pub trait SparseCapable: Send + Debug {
         false
     }
 }
+
+/// Live disk resize support.
+///
+/// Implementations may return an error if the backend does not
+/// support resizing (e.g. fixed size formats).
+pub trait Resizable: Send + Debug {
+    /// Resizes the disk image to the given size in bytes, if the backend supports it.
+    fn resize(&mut self, size: u64) -> BlockResult<()>;
+}
