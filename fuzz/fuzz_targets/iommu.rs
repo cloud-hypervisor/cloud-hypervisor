@@ -114,6 +114,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
                 (0, request_queue, request_evt),
                 (0, _event_queue, _event_evt),
             ],
+            device_status: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         })
         .ok();
 
