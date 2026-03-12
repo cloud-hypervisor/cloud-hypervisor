@@ -34,7 +34,7 @@ pub mod dbus;
 pub mod http;
 
 use std::io;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU32, NonZeroU64};
 use std::str::FromStr;
 use std::sync::mpsc::{RecvError, SendError, Sender, channel};
 use std::time::Duration;
@@ -302,7 +302,7 @@ pub struct VmSendMigrationParseError(#[source] OptionParserError);
 #[derive(Clone, Deserialize, Serialize, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct VmSendMigrationData {
-    /// URL to migrate the VM to
+    /// Migration destination, e.g. `tcp:<host>:<port>` or `unix:/path/to/socket`.
     pub destination_url: String,
     /// Send memory across socket without copying
     #[serde(default)]
@@ -318,13 +318,17 @@ pub struct VmSendMigrationData {
     /// The timeout strategy for the migration.
     #[serde(default)]
     pub timeout_strategy: TimeoutStrategy,
+
+    /// The number of parallel connections for migration.
+    #[serde(default = "VmSendMigrationData::default_connections")]
+    pub connections: NonZeroU32,
 }
 
 impl VmSendMigrationData {
     pub const SYNTAX: &'static str = "VM send migration parameters \
         \"destination_url=<url>[,local=on|off,\
         downtime_ms=<milliseconds>,timeout_s=<seconds>,\
-        timeout_strategy=cancel|ignore]\"";
+        timeout_strategy=cancel|ignore,connections=<amount>]\"";
 
     // Same as QEMU.
     pub const DEFAULT_DOWNTIME: Duration = Duration::from_millis(300);
@@ -339,6 +343,11 @@ impl VmSendMigrationData {
         NonZeroU64::new(Self::DEFAULT_TIMEOUT.as_secs()).unwrap()
     }
 
+    // Use a single connection as default for backward compatibility.
+    fn default_connections() -> NonZeroU32 {
+        NonZeroU32::new(1).unwrap()
+    }
+
     pub fn parse(migration: &str) -> Result<Self, VmSendMigrationParseError> {
         let mut parser = OptionParser::new();
         parser
@@ -346,7 +355,8 @@ impl VmSendMigrationData {
             .add("local")
             .add("downtime_ms")
             .add("timeout_s")
-            .add("timeout_strategy");
+            .add("timeout_strategy")
+            .add("connections");
         parser.parse(migration).map_err(VmSendMigrationParseError)?;
 
         let destination_url = parser.get("destination_url").ok_or_else(|| {
@@ -385,6 +395,17 @@ impl VmSendMigrationData {
             .convert("timeout_strategy")
             .map_err(VmSendMigrationParseError)?
             .unwrap_or_default();
+        let connections = match parser
+            .convert::<u32>("connections")
+            .map_err(VmSendMigrationParseError)?
+        {
+            Some(v) => NonZeroU32::new(v).ok_or_else(|| {
+                VmSendMigrationParseError(OptionParserError::InvalidValue(
+                    "connections must be non-zero".to_string(),
+                ))
+            })?,
+            None => Self::default_connections(),
+        };
 
         Ok(Self {
             destination_url,
@@ -392,6 +413,7 @@ impl VmSendMigrationData {
             downtime_ms,
             timeout_s,
             timeout_strategy,
+            connections,
         })
     }
 
@@ -1679,13 +1701,14 @@ mod unit_tests {
     fn test_vm_send_migration_data_parse() {
         // Fully specified
         let data = VmSendMigrationData::parse(
-            "destination_url=tcp://192.168.1.1:8080,local=on,downtime_ms=200,timeout_s=3600,timeout_strategy=cancel"
+            "destination_url=tcp://192.168.1.1:8080,local=on,downtime_ms=200,timeout_s=3600,timeout_strategy=cancel,connections=2"
         ).expect("valid migration string should parse");
         assert_eq!(data.destination_url, "tcp://192.168.1.1:8080");
         assert!(data.local);
         assert_eq!(data.downtime_ms.get(), 200);
         assert_eq!(data.timeout_s.get(), 3600);
         assert_eq!(data.timeout_strategy, TimeoutStrategy::Cancel);
+        assert_eq!(data.connections.get(), 2);
 
         // Defaults applied when optional fields are omitted
         let data = VmSendMigrationData::parse("destination_url=tcp://192.168.1.1:8080")
@@ -1695,6 +1718,7 @@ mod unit_tests {
         assert_eq!(data.downtime_ms, VmSendMigrationData::default_downtime_ms());
         assert_eq!(data.timeout_s, VmSendMigrationData::default_timeout_s());
         assert_eq!(data.timeout_strategy, TimeoutStrategy::default());
+        assert_eq!(data.connections, VmSendMigrationData::default_connections());
 
         // Missing destination_url is an error
         VmSendMigrationData::parse("local=on,downtime_ms=200").unwrap_err();
@@ -1707,6 +1731,10 @@ mod unit_tests {
         // Zero timeout_s is rejected
         let _data = VmSendMigrationData::parse("destination_url=unix:/tmp/sock,timeout_s=0")
             .expect_err("zero timeout_s should be rejected");
+
+        // Zero connections is rejected
+        let _data = VmSendMigrationData::parse("destination_url=unix:/tmp/sock,connections=0")
+            .expect_err("zero connections should be rejected");
 
         // Unknown option is an error
         VmSendMigrationData::parse("destination_url=unix:/tmp/sock,unknown_field=foo").unwrap_err();
@@ -1732,12 +1760,13 @@ mod unit_tests {
                 downtime_ms: NonZeroU64::new(150).unwrap(),
                 timeout_s: VmSendMigrationData::default_timeout_s(),
                 timeout_strategy: Default::default(),
+                connections: VmSendMigrationData::default_connections(),
             }
         );
 
         // Happy path, fully specified
         let data =
-            VmSendMigrationData::parse("destination_url=tcp://192.168.1.1:8080,downtime_ms=150,timeout_s=900,timeout_strategy=ignore")
+            VmSendMigrationData::parse("destination_url=tcp://192.168.1.1:8080,downtime_ms=150,timeout_s=900,timeout_strategy=ignore,connections=4")
                 .unwrap();
         assert_eq!(
             data,
@@ -1747,6 +1776,7 @@ mod unit_tests {
                 downtime_ms: NonZeroU64::new(150).unwrap(),
                 timeout_s: NonZeroU64::new(900).unwrap(),
                 timeout_strategy: TimeoutStrategy::Ignore,
+                connections: NonZeroU32::new(4).unwrap(),
             }
         );
     }
