@@ -889,7 +889,7 @@ impl Vmm {
             },
             Configured(memory_manager, guest_memory) => match req.command() {
                 Command::Memory => {
-                    self.vm_receive_memory(req, socket, &guest_memory)?;
+                    migration_transport::receive_memory_regions(&guest_memory, req, socket)?;
                     Ok(Configured(memory_manager, guest_memory))
                 }
                 Command::State => {
@@ -1065,18 +1065,6 @@ impl Vmm {
         self.vm = Some(vm);
 
         Ok(())
-    }
-
-    fn vm_receive_memory(
-        &mut self,
-        req: &Request,
-        socket: &mut SocketStream,
-        guest_mem: &GuestMemoryAtomic<GuestMemoryMmap>,
-    ) -> std::result::Result<(), MigratableError> {
-        let table = MemoryRangeTable::read_from(socket, req.length())?;
-
-        // And then the memory itself
-        migration_transport::receive_memory_regions(guest_mem, &table, socket)
     }
 
     /// Performs the initial memory transmission (iteration zero) plus a
