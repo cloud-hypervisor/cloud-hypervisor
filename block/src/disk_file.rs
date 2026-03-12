@@ -35,7 +35,7 @@
 
 use std::fmt::Debug;
 
-use crate::async_io::BorrowedDiskFd;
+use crate::async_io::{AsyncIo, BorrowedDiskFd};
 use crate::{BlockResult, DiskTopology};
 
 /// Reported capacity of a disk image.
@@ -97,3 +97,33 @@ pub trait Resizable: Send + Debug {
 /// `Sync` is required so that `Arc<dyn DiskFile>` can be shared
 /// across threads for concurrent readonly access.
 pub trait DiskFile: DiskSize + Geometry + Sync {}
+
+/// Extended disk file trait for virtio queue workers.
+///
+/// Adds cloning and async I/O construction on top of [`DiskFile`].
+/// `Unpin` is required so trait objects can be moved freely.
+pub trait AsyncDiskFile: DiskFile + Unpin {
+    /// Creates an independent handle for a queue worker.
+    ///
+    /// The clone shares internally reference counted state (e.g.
+    /// `Arc<Metadata>`) with the original, but owns its own file
+    /// descriptor and I/O completion resources. Each virtio queue
+    /// gets one clone so that workers can operate in parallel
+    /// without contending on I/O state.
+    ///
+    /// Returns `Box<dyn AsyncDiskFile>` (not `AsyncFullDiskFile`)
+    /// because clones only serve as data plane handles for queue
+    /// workers. The original remains the control plane for feature
+    /// negotiation and configuration.
+    fn try_clone(&self) -> BlockResult<Box<dyn AsyncDiskFile>>;
+
+    /// Constructs a per queue async I/O engine.
+    ///
+    /// # Arguments
+    ///
+    /// * `ring_depth` - maximum number of in flight I/O operations.
+    ///   Callers typically pass the virtio queue size. Must be greater
+    ///   than zero. Backends that do not use an async ring (e.g. sync
+    ///   fallback implementations) may ignore this value.
+    fn new_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>>;
+}
