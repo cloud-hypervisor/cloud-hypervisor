@@ -132,6 +132,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
             mem: guest_memory,
             interrupt_cb: Arc::new(NoopVirtioInterrupt {}),
             queues: vec![(0, input_queue, input_evt), (1, output_queue, output_evt)],
+            device_status: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         })
         .unwrap();
 

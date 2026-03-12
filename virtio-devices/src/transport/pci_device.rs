@@ -10,7 +10,7 @@ use std::any::Any;
 use std::cmp;
 use std::io::Write;
 use std::ops::Deref;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 
 use anyhow::anyhow;
@@ -306,6 +306,7 @@ pub struct VirtioPciDeviceActivator {
     queues: Option<Vec<(usize, Queue, EventFd)>>,
     barrier: Option<Arc<Barrier>>,
     id: String,
+    status: Arc<AtomicU8>,
 }
 
 impl VirtioPciDeviceActivator {
@@ -315,6 +316,7 @@ impl VirtioPciDeviceActivator {
             mem: self.memory.take().unwrap(),
             interrupt_cb: self.interrupt.take().unwrap(),
             queues: self.queues.take().unwrap(),
+            device_status: self.status,
         })?;
         self.device_activated.store(true, Ordering::SeqCst);
 
@@ -820,6 +822,7 @@ impl VirtioPciDevice {
             device_activated: self.device_activated.clone(),
             barrier,
             id: self.id.clone(),
+            status: self.common_config.driver_status.clone(),
         }
     }
 

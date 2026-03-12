@@ -13,7 +13,7 @@ use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::{io, result};
 
@@ -161,6 +161,8 @@ struct BlockEpollHandler {
     host_cpus: Option<Vec<usize>>,
     acked_features: u64,
     disable_sector0_writes: bool,
+    #[allow(unused)]
+    device_status: Arc<AtomicU8>,
 }
 
 fn has_feature(features: u64, feature_flag: u64) -> bool {
@@ -666,6 +668,7 @@ pub struct Block {
     queue_affinity: BTreeMap<u16, Vec<usize>>,
     disable_sector0_writes: bool,
     lock_granularity_choice: LockGranularityChoice,
+    device_status: Arc<AtomicU8>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -813,6 +816,7 @@ impl Block {
             queue_affinity,
             disable_sector0_writes,
             lock_granularity_choice: lock_granularity,
+            device_status: Arc::new(AtomicU8::new(0)),
         })
     }
 
@@ -1013,7 +1017,9 @@ impl VirtioDevice for Block {
             mem,
             interrupt_cb,
             mut queues,
+            device_status,
         } = context;
+        self.device_status = device_status;
         // See if the guest didn't ack the device being read-only.
         // If so, warn and pretend it did.
         let original_acked_features = self.common.acked_features;
@@ -1069,6 +1075,7 @@ impl VirtioDevice for Block {
                 host_cpus: self.queue_affinity.get(&queue_idx).cloned(),
                 acked_features: self.common.acked_features,
                 disable_sector0_writes: self.disable_sector0_writes,
+                device_status: self.device_status.clone(),
             };
 
             let paused = self.common.paused.clone();

@@ -10,7 +10,7 @@ use std::net::IpAddr;
 use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::{AsRawFd, RawFd};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Barrier};
 use std::{result, thread};
 
@@ -179,6 +179,8 @@ struct NetEpollHandler {
     // a restore as the vCPU thread isn't ready to handle the interrupt. This causes
     // issues when combined with VIRTIO_RING_F_EVENT_IDX interrupt suppression.
     driver_awake: bool,
+    #[allow(unused)]
+    device_status: Arc<AtomicU8>,
 }
 
 impl NetEpollHandler {
@@ -414,6 +416,7 @@ pub struct Net {
     seccomp_action: SeccompAction,
     rate_limiter_config: Option<RateLimiterConfig>,
     exit_evt: EventFd,
+    device_status: Arc<AtomicU8>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -535,6 +538,7 @@ impl Net {
             seccomp_action,
             rate_limiter_config,
             exit_evt,
+            device_status: Arc::new(AtomicU8::new(0)),
         })
     }
 
@@ -698,7 +702,9 @@ impl VirtioDevice for Net {
             mem,
             interrupt_cb,
             mut queues,
+            device_status,
         } = context;
+        self.device_status = device_status;
         self.common.activate(&queues, interrupt_cb.clone())?;
 
         let num_queues = queues.len();
@@ -803,6 +809,7 @@ impl VirtioDevice for Net {
                 kill_evt,
                 pause_evt,
                 driver_awake: false,
+                device_status: self.device_status.clone(),
             };
 
             let paused = self.common.paused.clone();

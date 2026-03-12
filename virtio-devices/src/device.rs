@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::num::Wrapping;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 
@@ -57,6 +57,7 @@ pub struct ActivationContext {
     pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
     pub interrupt_cb: Arc<dyn VirtioInterrupt>,
     pub queues: Vec<(usize, Queue, EventFd)>,
+    pub device_status: Arc<AtomicU8>,
 }
 
 /// Trait for virtio devices to be driven by a virtio transport.
