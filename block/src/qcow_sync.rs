@@ -15,6 +15,7 @@ use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
+use crate::disk_file;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
@@ -274,6 +275,12 @@ impl DiskFile for QcowDiskSync {
 impl Drop for QcowDiskSync {
     fn drop(&mut self) {
         self.metadata.shutdown();
+    }
+}
+
+impl disk_file::DiskSize for QcowDiskSync {
+    fn logical_size(&self) -> BlockResult<u64> {
+        Ok(self.metadata.virtual_size())
     }
 }
 
