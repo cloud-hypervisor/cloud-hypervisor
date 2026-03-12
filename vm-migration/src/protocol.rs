@@ -332,19 +332,19 @@ impl MemoryRangeTable {
     pub fn read_from(fd: &mut dyn Read, length: u64) -> Result<MemoryRangeTable, MigratableError> {
         assert!((length as usize).is_multiple_of(size_of::<MemoryRange>()));
 
-        let mut data: Vec<MemoryRange> = Vec::new();
-        data.resize_with(
-            length as usize / (std::mem::size_of::<MemoryRange>()),
-            Default::default,
-        );
-        // SAFETY: the slice is constructed with the correct arguments
-        fd.read_exact(unsafe {
-            std::slice::from_raw_parts_mut(
-                data.as_ptr() as *mut MemoryRange as *mut u8,
-                length as usize,
-            )
-        })
-        .map_err(MigratableError::MigrateSocket)?;
+        let mut data: Vec<MemoryRange> =
+            vec![MemoryRange::default(); length as usize / size_of::<MemoryRange>()];
+
+        // SAFETY: The pointer points to the just created vector data.
+        // `MemoryRange` can be read from and written to bytes since it's `[repr(C)]`.
+        // The vector data was initialized with `length as usize / size_of::<MemoryRange>()` valid
+        // `MemoryRange`s so the memory is valid for `length` bytes.
+        // During the lifetime of the slice, neither the backing vector nor the pointed to memory are accessed.
+        let data_slice_bytes =
+            unsafe { std::slice::from_raw_parts_mut(data.as_mut_ptr().cast(), length as usize) };
+
+        fd.read_exact(data_slice_bytes)
+            .map_err(MigratableError::MigrateSocket)?;
 
         Ok(Self { data })
     }
