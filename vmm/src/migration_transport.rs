@@ -5,12 +5,17 @@
 
 use std::io::{self, ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::num::NonZeroU32;
 use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::result::Result;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, Sender, SyncSender, TrySendError, channel, sync_channel};
+use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use log::{debug, error, info};
@@ -24,6 +29,7 @@ use vm_migration::protocol::{Command, MemoryRangeTable, Request, Response};
 use vm_migration::{MigratableError, Snapshot};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::sync_utils::Gate;
 use crate::{GuestMemoryMmap, VmMigrationConfig};
 
 /// Transport-agnostic listener used to receive connections.
@@ -365,6 +371,330 @@ impl Drop for ReceiveAdditionalConnections {
     fn drop(&mut self) {
         if self.accept_thread.is_some() {
             error!("ReceiveAdditionalConnections did no cleanup!");
+            let _ = self.cleanup();
+        }
+    }
+}
+
+/// The different kinds of messages we can send to memory sending threads.
+#[derive(Debug)]
+enum SendMemoryThreadMessage {
+    /// A chunk of memory that the thread should send to the receiving side of the
+    /// live migration.
+    Memory(MemoryRangeTable),
+    /// A synchronization point after each iteration of sending memory. That way the
+    /// main thread knows when all memory is sent and acknowledged.
+    Gate(Arc<Gate>),
+    /// Sending memory is done and the threads are not needed anymore.
+    Disconnect,
+}
+
+/// The different kinds of messages the main thread can receive from a memory
+/// sending thread.
+#[derive(Debug)]
+enum SendMemoryThreadNotify {
+    /// A sending thread arrived at the gate. The main thread does not wait at the
+    /// gate, otherwise we could miss error messages.
+    Gate,
+    /// A sending thread encountered an error while sending memory.
+    Error,
+}
+
+/// This struct keeps track of additional threads we use to send VM memory.
+pub(crate) struct SendAdditionalConnections {
+    guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    threads: Vec<thread::JoinHandle<Result<(), MigratableError>>>,
+    /// Sender to all workers. The receiver is shared by all workers.
+    message_tx: SyncSender<SendMemoryThreadMessage>,
+    /// If an error occurs in one of the memory sending threads, the main thread signals
+    /// this using this flag. Only the main thread checks this variable, the worker
+    /// threads will be stopped during cleanup.
+    worker_error: Arc<AtomicBool>,
+    /// After the main thread sent all memory chunks to the sender threads, it waits
+    /// until one of the workers notifies it. Either because an error occurred, or
+    /// because they arrived at the gate.
+    notify_rx: Receiver<SendMemoryThreadNotify>,
+}
+
+impl SendAdditionalConnections {
+    /// How many requests can be waiting to be sent for each connection. To avoid going
+    /// OOM, we use a [`SyncChannel`] with a limited buffer size.
+    const BUFFERED_REQUESTS_PER_THREAD: usize = 64;
+
+    /// The size of each chunk of memory to send.
+    ///
+    /// We want to make this large, because each chunk is acknowledged and we wait
+    /// for the ack before sending the next chunk. The challenge is that if it is
+    /// _too_ large, we become more sensitive to network issues, like packet drops
+    /// in individual connections, because large amounts of data can pool when
+    /// throughput on one connection is temporarily reduced.
+    ///
+    /// We can consider making this configurable, but a better network protocol that
+    /// doesn't require ACKs would be more efficient.
+    ///
+    /// The best-case throughput per connection can be estimated via:
+    /// chunk_size / (chunk_size / throughput_per_connection + round_trip_time)
+    ///
+    /// This chunk size together with eight connections is sufficient to saturate a 100G link.
+    const CHUNK_SIZE: u64 = 64 /* MiB */ << 20;
+
+    pub fn new(
+        destination: &str,
+        connections: NonZeroU32,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    ) -> Result<Self, MigratableError> {
+        let mut threads = Vec::new();
+        let configured_connections = connections.get();
+        let buffer_size = Self::BUFFERED_REQUESTS_PER_THREAD * configured_connections as usize;
+        let (message_tx, message_rx) = sync_channel::<SendMemoryThreadMessage>(buffer_size);
+        let worker_error = Arc::new(AtomicBool::new(false));
+        let (notify_tx, notify_rx) = channel::<SendMemoryThreadNotify>();
+
+        // If one connection is configured, we don't have to create any additional threads.
+        // In this case the main thread does the sending.
+        if configured_connections == 1 {
+            return Ok(Self {
+                guest_memory: guest_memory.clone(),
+                threads,
+                message_tx,
+                worker_error,
+                notify_rx,
+            });
+        }
+
+        let message_rx = Arc::new(Mutex::new(message_rx));
+        // If we use multiple threads to send memory, the main thread only distributes
+        // the memory chunks to the workers, but does not send memory anymore. Thus in
+        // this case we create one additional thread for each connection.
+        for n in 0..configured_connections {
+            let mut socket = send_migration_socket(destination)?;
+            let guest_memory = guest_memory.clone();
+            let message_rx = message_rx.clone();
+            let worker_error = worker_error.clone();
+            let notify_tx = notify_tx.clone();
+
+            let thread = thread::Builder::new()
+                .name(format!("migrate-send-memory-{n}"))
+                .spawn(move || {
+                    Self::worker_send_memory(
+                        &mut socket,
+                        &guest_memory,
+                        &message_rx,
+                        &worker_error,
+                        &notify_tx,
+                    )
+                })
+                .inspect_err(|_| {
+                    // If an error occurs here, we still do some light cleanup.
+                    for _ in 0..threads.len() {
+                        message_tx.send(SendMemoryThreadMessage::Disconnect).ok();
+                    }
+                    threads.drain(..).for_each(|thread| {
+                        thread.join().ok();
+                    });
+                })
+                .context("Error spawning send-memory thread")
+                .map_err(MigratableError::MigrateSend)?;
+            threads.push(thread);
+        }
+
+        Ok(Self {
+            guest_memory: guest_memory.clone(),
+            threads,
+            message_tx,
+            worker_error,
+            notify_rx,
+        })
+    }
+
+    fn worker_send_memory(
+        socket: &mut SocketStream,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+        message_rx: &Mutex<Receiver<SendMemoryThreadMessage>>,
+        worker_error: &AtomicBool,
+        notify_tx: &Sender<SendMemoryThreadNotify>,
+    ) -> Result<(), MigratableError> {
+        info!("Spawned thread to send VM memory.");
+        loop {
+            // Every memory sending thread receives messages from the main thread through this
+            // channel. The lock is necessary to synchronize the multiple consumers. If the
+            // workers are very quick, lock contention could become a performance issue.
+            let message = message_rx
+                .lock()
+                .map_err(|_| MigratableError::MigrateSend(anyhow!("message_rx mutex is poisoned")))
+                .inspect_err(|_| {
+                    worker_error.store(true, Ordering::Relaxed);
+                    // We ignore errors during error handling.
+                    notify_tx.send(SendMemoryThreadNotify::Error).ok();
+                })?
+                .recv()
+                .context("Error receiving message from main thread")
+                .map_err(MigratableError::MigrateSend)
+                .inspect_err(|_| {
+                    worker_error.store(true, Ordering::Relaxed);
+                    notify_tx.send(SendMemoryThreadNotify::Error).ok();
+                })?;
+            match message {
+                SendMemoryThreadMessage::Memory(table) => {
+                    send_memory_regions(guest_memory, &table, socket)
+                        .inspect_err(|_| {
+                            worker_error.store(true, Ordering::Relaxed);
+                            notify_tx.send(SendMemoryThreadNotify::Error).ok();
+                        })
+                        .context("Error sending memory to receiver side")
+                        .map_err(MigratableError::MigrateSend)?;
+                }
+                SendMemoryThreadMessage::Gate(gate) => {
+                    notify_tx
+                        .send(SendMemoryThreadNotify::Gate)
+                        .context("Error sending gate notification to main thread")
+                        .map_err(MigratableError::MigrateSend)
+                        .inspect_err(|_| {
+                            // Sending via `notify_tx` just failed, so we don't try to send another
+                            // message via it.
+                            worker_error.store(true, Ordering::Relaxed);
+                        })?;
+                    gate.wait();
+                }
+                SendMemoryThreadMessage::Disconnect => {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    /// Send memory via all connections that we have. `socket` is the original socket
+    /// that was used to connect to the destination. Returns Ok(true) if memory was
+    /// sent, Ok(false) if the given table was empty.
+    ///
+    /// When this function returns, all memory has been sent and acknowledged.
+    pub(crate) fn send_memory(
+        &mut self,
+        table: MemoryRangeTable,
+        socket: &mut SocketStream,
+    ) -> Result<bool, MigratableError> {
+        if table.regions().is_empty() {
+            return Ok(false);
+        }
+
+        // If we use only one connection, we send the memory directly.
+        if self.threads.is_empty() {
+            send_memory_regions(&self.guest_memory, &table, socket)?;
+            return Ok(true);
+        }
+
+        // The chunk size is chosen to be big enough so that even very fast links need some
+        // milliseconds to send it.
+        for chunk in table.partition(Self::CHUNK_SIZE) {
+            self.send_chunk(chunk)?;
+        }
+
+        self.wait_for_pending_data()?;
+        Ok(true)
+    }
+
+    fn send_chunk(&mut self, chunk: MemoryRangeTable) -> Result<(), MigratableError> {
+        let mut chunk = SendMemoryThreadMessage::Memory(chunk);
+        // [`Self::message_tx`] has a limited size, so we may have to retry sending the chunk
+        loop {
+            if self.worker_error.load(Ordering::Relaxed) {
+                return self.cleanup();
+            }
+
+            match self.message_tx.try_send(chunk) {
+                Ok(()) => {
+                    return Ok(());
+                }
+                Err(TrySendError::Full(unsent_chunk)) => {
+                    // The channel is full. We wait for a short time and retry.
+                    thread::sleep(Duration::from_millis(10));
+                    chunk = unsent_chunk;
+                }
+                Err(TrySendError::Disconnected(_)) => {
+                    // The workers didn't disconnect for no reason, thus we do a cleanup.
+                    return Err(self.cleanup().err().unwrap_or(MigratableError::MigrateSend(
+                        anyhow!("All sending threads disconnected, but none returned an error?"),
+                    )));
+                }
+            }
+        }
+    }
+
+    /// Wait until all data that is in-flight has actually been sent and acknowledged.
+    fn wait_for_pending_data(&mut self) -> Result<(), MigratableError> {
+        let gate = Arc::new(Gate::new());
+        for _ in 0..self.threads.len() {
+            self.message_tx
+                .send(SendMemoryThreadMessage::Gate(gate.clone()))
+                .context("Error sending gate message to workers")
+                .map_err(MigratableError::MigrateSend)?;
+        }
+
+        // We cannot simply wait at the gate, otherwise we might miss it when a sender
+        // thread encounters an error. Thus we wait for the workers to notify us that
+        // they arrived at the gate.
+        let mut seen_threads = 0;
+        loop {
+            match self
+                .notify_rx
+                .recv()
+                .context("Error receiving message from workers")
+                .map_err(MigratableError::MigrateSend)?
+            {
+                SendMemoryThreadNotify::Gate => {
+                    seen_threads += 1;
+                    if seen_threads == self.threads.len() {
+                        gate.open();
+                        return Ok(());
+                    }
+                }
+                SendMemoryThreadNotify::Error => {
+                    // If an error occurred in one of the worker threads, we open
+                    // the gate to make sure that no thread hangs. After that, we
+                    // receive the error from Self::cleanup() and return it.
+                    gate.open();
+                    return self.cleanup();
+                }
+            }
+        }
+    }
+
+    /// Sends disconnect messages to all workers and joins them.
+    pub(crate) fn cleanup(&mut self) -> Result<(), MigratableError> {
+        // Send disconnect messages to all workers.
+        for _ in 0..self.threads.len() {
+            // All threads may have terminated, leading to a dropped receiver. Thus we ignore
+            // errors here.
+            self.message_tx
+                .send(SendMemoryThreadMessage::Disconnect)
+                .ok();
+        }
+
+        let mut first_err = Ok(());
+        self.threads.drain(..).for_each(|thread| {
+            let err = match thread.join() {
+                Ok(Ok(())) => None,
+                Ok(Err(e)) => Some(e),
+                Err(panic) => Some(MigratableError::MigrateSend(anyhow!(
+                    "send-memory thread panicked: {panic:?}"
+                ))),
+            };
+
+            if let Some(e) = err
+                && first_err.is_ok()
+            {
+                first_err = Err(e);
+            }
+        });
+
+        first_err
+    }
+}
+
+impl Drop for SendAdditionalConnections {
+    fn drop(&mut self) {
+        if !self.threads.is_empty() {
+            error!("SendAdditionalConnections did no cleanup!");
             let _ = self.cleanup();
         }
     }
