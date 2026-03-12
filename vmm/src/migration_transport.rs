@@ -67,6 +67,22 @@ impl ReceiveListener {
             .then(|| self.accept())
             .transpose()
     }
+
+    /// Tries to clone a [`ReceiveListener`].
+    pub(crate) fn try_clone(&self) -> Result<Self, MigratableError> {
+        match self {
+            ReceiveListener::Tcp(listener) => listener
+                .try_clone()
+                .map(ReceiveListener::Tcp)
+                .context("Failed to clone TCP listener")
+                .map_err(MigratableError::MigrateReceive),
+            ReceiveListener::Unix(listener) => listener
+                .try_clone()
+                .map(ReceiveListener::Unix)
+                .context("Failed to clone Unix listener")
+                .map_err(MigratableError::MigrateReceive),
+        }
+    }
 }
 
 impl AsFd for ReceiveListener {
