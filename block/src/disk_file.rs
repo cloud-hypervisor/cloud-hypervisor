@@ -115,3 +115,20 @@ pub trait AsyncDiskFile: DiskFile + Unpin {
     /// Constructs an async I/O engine for the given ring depth.
     fn new_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>>;
 }
+
+/// Full capability async disk file trait.
+///
+/// Combines [`FullDiskFile`] (all optional capabilities) with
+/// [`AsyncDiskFile`] (async I/O construction). This is the top level
+/// trait for virtio block devices that need both feature negotiation
+/// and async queue workers.
+///
+/// The type narrowing on [`AsyncDiskFile::try_clone`] is intentional:
+/// clones only serve as data plane handles for queue workers, while
+/// the original `AsyncFullDiskFile` handle remains the control plane
+/// for feature negotiation and configuration.
+pub trait AsyncFullDiskFile: FullDiskFile + AsyncDiskFile {}
+
+/// Blanket implementation: any type implementing both [`FullDiskFile`]
+/// and [`AsyncDiskFile`] automatically satisfies [`AsyncFullDiskFile`].
+impl<T: FullDiskFile + AsyncDiskFile> AsyncFullDiskFile for T {}
