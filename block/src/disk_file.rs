@@ -84,3 +84,10 @@ pub trait Resizable: Send + Debug {
     /// Resizes the disk image to the given size in bytes.
     fn resize(&mut self, size: u64) -> BlockResult<()>;
 }
+
+/// Supertrait bundling universal disk capabilities.
+///
+/// Every disk format implements `DiskSize` and `HasTopology`.
+/// `Sync` is required so that `Arc<dyn DiskFile>` can be shared
+/// across threads for concurrent readonly access.
+pub trait DiskFile: DiskSize + HasTopology + Sync {}
