@@ -296,6 +296,8 @@ impl disk_file::DiskFd for QcowDiskSync {
     }
 }
 
+impl disk_file::Geometry for QcowDiskSync {}
+
 pub struct QcowSync {
     metadata: Arc<QcowMetadata>,
     data_file: QcowRawFile,
