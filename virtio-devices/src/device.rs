@@ -140,6 +140,28 @@ pub trait VirtioDevice: Send {
         Ok(())
     }
 
+    /// Sets the device's config address base. This is only necessary for
+    /// devices that need to know the guest physical address of the PCI BARs
+    /// they use. Therefore, it is only meaningful for PCIe devices.
+    /// Most devices won't implement this method.
+    ///
+    /// One valid use of this method is to set the address at which the
+    /// device should register custom ioeventfds.
+    ///
+    /// This method will be called *before* [`Self::activate`] and
+    /// implementations must be prepared for this.
+    fn set_config_address_base(&mut self, _base: u64) {}
+
+    /// Returns any custom ioeventfds the device has registered.
+    /// The device manager uses this to relocate them when it
+    /// relocates the device's configuration space.
+    ///
+    /// Most devices do not need this and should use the default
+    /// implementation, which returns None.
+    fn ioeventfds(&self) -> Option<Box<dyn Iterator<Item = (&EventFd, u64)>>> {
+        None
+    }
+
     /// Returns the list of userspace mappings associated with this device.
     fn userspace_mappings(&self) -> Vec<UserspaceMapping> {
         Vec::new()
