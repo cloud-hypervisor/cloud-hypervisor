@@ -32,3 +32,13 @@
 //!
 //! Readonly accessors take `&self`. Only [`Resizable::resize`] requires
 //! `&mut self`. Errors are returned as [`BlockResult`].
+
+use std::fmt::Debug;
+
+use crate::BlockResult;
+
+/// Reported capacity of a disk image.
+pub trait DiskSize: Send + Debug {
+    /// Virtual size of the disk image in bytes (reported capacity).
+    fn logical_size(&self) -> BlockResult<u64>;
+}
