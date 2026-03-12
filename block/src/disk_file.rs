@@ -65,3 +65,16 @@ pub trait HasTopology: Send + Debug {
         DiskTopology::default()
     }
 }
+
+/// Sparse and zero flag support for thin provisioned disk images.
+pub trait SparseCapable: Send + Debug {
+    /// Indicates support for sparse operations (punch hole, write zeroes, discard).
+    fn supports_sparse_operations(&self) -> bool {
+        false
+    }
+
+    /// Indicates support for zero flag optimization in WRITE_ZEROES.
+    fn supports_zero_flag(&self) -> bool {
+        false
+    }
+}
