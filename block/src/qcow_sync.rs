@@ -12,9 +12,7 @@ use std::{fmt, io, ptr, slice};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
-};
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
 use crate::disk_file;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::metadata::{
@@ -225,50 +223,6 @@ impl QcowDiskSync {
             sparse,
             data_raw_file,
         })
-    }
-}
-
-impl DiskFile for QcowDiskSync {
-    fn logical_size(&mut self) -> DiskFileResult<u64> {
-        Ok(self.metadata.virtual_size())
-    }
-
-    fn physical_size(&mut self) -> DiskFileResult<u64> {
-        self.data_raw_file
-            .physical_size()
-            .map_err(DiskFileError::Size)
-    }
-
-    fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
-        Ok(Box::new(QcowSync::new(
-            Arc::clone(&self.metadata),
-            self.data_raw_file.clone(),
-            self.backing_file.as_ref().map(Arc::clone),
-            self.sparse,
-        )) as Box<dyn AsyncIo>)
-    }
-
-    fn resize(&mut self, size: u64) -> DiskFileResult<()> {
-        if self.backing_file.is_some() {
-            return Err(DiskFileError::ResizeError(io::Error::other(
-                "resize not supported with backing file",
-            )));
-        }
-        self.metadata
-            .resize(size)
-            .map_err(DiskFileError::ResizeError)
-    }
-
-    fn supports_sparse_operations(&self) -> bool {
-        true
-    }
-
-    fn supports_zero_flag(&self) -> bool {
-        true
-    }
-
-    fn fd(&mut self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.data_raw_file.as_raw_fd())
     }
 }
 
@@ -734,7 +688,7 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
-    use crate::async_io::DiskFile;
+    use crate::disk_file::{AsyncDiskFile, DiskSize, Resizable};
     use crate::qcow::{BackingFileConfig, ImageType, QcowFile, RawFile};
 
     fn create_disk_with_data(
