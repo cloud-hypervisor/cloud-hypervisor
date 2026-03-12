@@ -18,7 +18,9 @@ use std::sync::{Arc, Barrier};
 use std::{io, result};
 
 use anyhow::anyhow;
-use block::async_io::{AsyncIo, AsyncIoError, DiskFile, DiskFileError};
+use block::async_io::{AsyncIo, AsyncIoError};
+use block::disk_file::DiskBackend;
+use block::error::BlockError;
 use block::fcntl::{LockError, LockGranularity, LockGranularityChoice, LockType, get_lock_state};
 use block::{
     ExecuteAsync, ExecuteError, Request, RequestType, VirtioBlockConfig, build_serial, fcntl,
@@ -104,7 +106,7 @@ pub enum Error {
     #[error("Failed signal config interrupt")]
     ConfigChange(#[source] io::Error),
     #[error("Disk resize failed")]
-    DiskResize(#[source] DiskFileError),
+    DiskResize(#[source] BlockError),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -697,7 +699,7 @@ impl EpollHelperHandler for BlockEpollHandler {
 pub struct Block {
     common: VirtioCommon,
     id: String,
-    disk_image: Box<dyn DiskFile>,
+    disk_image: DiskBackend,
     disk_path: PathBuf,
     disk_nsectors: Arc<AtomicU64>,
     config: VirtioBlockConfig,
@@ -727,7 +729,7 @@ impl Block {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
-        mut disk_image: Box<dyn DiskFile>,
+        mut disk_image: DiskBackend,
         disk_path: PathBuf,
         read_only: bool,
         iommu: bool,
