@@ -35,8 +35,8 @@
 
 use std::fmt::Debug;
 
-use crate::BlockResult;
 use crate::async_io::BorrowedDiskFd;
+use crate::{BlockResult, DiskTopology};
 
 /// Reported capacity of a disk image.
 pub trait DiskSize: Send + Debug {
@@ -54,4 +54,14 @@ pub trait PhysicalSize: Send + Debug {
 pub trait DiskFd: Send + Debug {
     /// Borrows the underlying file descriptor.
     fn fd(&self) -> BorrowedDiskFd<'_>;
+}
+
+/// Sector and cluster geometry of a disk image.
+///
+/// Default returns `DiskTopology::default()` (512B logical/physical).
+pub trait HasTopology: Send + Debug {
+    /// Returns the disk topology.
+    fn topology(&self) -> DiskTopology {
+        DiskTopology::default()
+    }
 }
