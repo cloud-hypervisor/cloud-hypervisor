@@ -41,6 +41,14 @@ members = [
   "vmm",
 ]
 package.edition = "2024"
+# Minimum buildable version:
+# Keep in sync with version in .github/workflows/build.yaml
+# Policy on MSRV (see #4318):
+# Can only be bumped if satisfying any of the following:
+# a.) A dependency requires it,
+# b.) If we want to use a new feature and that MSRV is at least 6 months old,
+# c.) There is a security issue that is addressed by the toolchain update.
+package.rust-version = "1.89.0"
 resolver = "3"
 
 [workspace.dependencies]

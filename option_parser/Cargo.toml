@@ -2,6 +2,7 @@
 authors = ["The Cloud Hypervisor Authors"]
 edition.workspace = true
 name = "option_parser"
+rust-version.workspace = true
 version = "0.1.0"
 
 [dependencies]
