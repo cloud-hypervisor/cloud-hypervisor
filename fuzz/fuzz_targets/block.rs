@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::{ffi, io};
 
 use block::async_io::DiskFile;
+use block::disk_file::DiskBackend;
 use block::fcntl::LockGranularityChoice;
 use block::raw_sync::RawFileDiskSync;
 use libfuzzer_sys::{fuzz_target, Corpus};
@@ -56,7 +57,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     let queue_affinity = BTreeMap::new();
     let mut block = Block::new(
         "tmp".to_owned(),
-        qcow_disk,
+        DiskBackend::Legacy(qcow_disk),
         PathBuf::from(""),
         false,
         false,

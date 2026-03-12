@@ -33,6 +33,7 @@ use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use arch::{DeviceType, MmioDeviceInfo};
 use arch::{NumaNodes, layout};
 use block::async_io::DiskFile;
+use block::disk_file::DiskBackend;
 use block::error::BlockError;
 use block::fixed_vhd_sync::FixedVhdDiskSync;
 use block::qcow_sync::QcowDiskSync;
@@ -2721,17 +2722,17 @@ impl DeviceManager {
                         unreachable!("Checked in if statement above");
                         #[cfg(feature = "io_uring")]
                         {
-                            Box::new(
+                            DiskBackend::Legacy(Box::new(
                                 FixedVhdDiskAsync::new(file)
                                     .map_err(DeviceManagerError::CreateFixedVhdDiskAsync)?,
-                            ) as Box<dyn DiskFile>
+                            ) as Box<dyn DiskFile>)
                         }
                     } else {
                         info!("Using synchronous fixed VHD disk file");
-                        Box::new(
+                        DiskBackend::Legacy(Box::new(
                             FixedVhdDiskSync::new(file)
                                 .map_err(DeviceManagerError::CreateFixedVhdDiskSync)?,
-                        ) as Box<dyn DiskFile>
+                        ) as Box<dyn DiskFile>)
                     }
                 }
                 ImageType::Raw => {
@@ -2755,19 +2756,23 @@ impl DeviceManager {
                         unreachable!("Checked in if statement above");
                         #[cfg(feature = "io_uring")]
                         {
-                            Box::new(RawFileDisk::new(file)) as Box<dyn DiskFile>
+                            DiskBackend::Legacy(
+                                Box::new(RawFileDisk::new(file)) as Box<dyn DiskFile>
+                            )
                         }
                     } else if !disk_cfg.disable_aio && self.aio_is_supported() {
                         info!("Using asynchronous RAW disk file (aio)");
-                        Box::new(RawFileDiskAio::new(file)) as Box<dyn DiskFile>
+                        DiskBackend::Legacy(Box::new(RawFileDiskAio::new(file)) as Box<dyn DiskFile>)
                     } else {
                         info!("Using synchronous RAW disk file");
-                        Box::new(RawFileDiskSync::new(file)) as Box<dyn DiskFile>
+                        DiskBackend::Legacy(
+                            Box::new(RawFileDiskSync::new(file)) as Box<dyn DiskFile>
+                        )
                     }
                 }
                 ImageType::Qcow2 => {
                     info!("Using synchronous QCOW2 disk file");
-                    Box::new(
+                    DiskBackend::Next(Box::new(
                         QcowDiskSync::new(
                             file,
                             disk_cfg.direct,
@@ -2779,14 +2784,14 @@ impl DeviceManager {
                             None => e,
                         })
                         .map_err(DeviceManagerError::CreateQcowDiskSync)?,
-                    ) as Box<dyn DiskFile>
+                    ))
                 }
                 ImageType::Vhdx => {
                     info!("Using synchronous VHDX disk file");
-                    Box::new(
+                    DiskBackend::Legacy(Box::new(
                         VhdxDiskSync::new(file)
                             .map_err(DeviceManagerError::CreateFixedVhdxDiskSync)?,
-                    ) as Box<dyn DiskFile>
+                    ) as Box<dyn DiskFile>)
                 }
                 ImageType::Unknown => unreachable!(),
             };
