@@ -346,7 +346,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
             Ok(Arc::new(MshvVm {
                 fd: vm_fd,
                 msrs: ArcSwap::new(Vec::<MsrEntry>::new().into()),
-                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                dirty_log_slots: RwLock::new(HashMap::new()),
                 #[cfg(feature = "sev_snp")]
                 sev_snp_enabled: mshv_vm_type == VmType::Snp,
                 #[cfg(feature = "sev_snp")]
@@ -364,7 +364,7 @@ impl hypervisor::Hypervisor for MshvHypervisor {
         {
             Ok(Arc::new(MshvVm {
                 fd: vm_fd,
-                dirty_log_slots: Arc::new(RwLock::new(HashMap::new())),
+                dirty_log_slots: RwLock::new(HashMap::new()),
             }))
         }
     }
@@ -1716,7 +1716,7 @@ pub struct MshvVm {
     fd: Arc<VmFd>,
     #[cfg(target_arch = "x86_64")]
     msrs: ArcSwap<Vec<MsrEntry>>,
-    dirty_log_slots: Arc<RwLock<HashMap<u64, MshvDirtyLogSlot>>>,
+    dirty_log_slots: RwLock<HashMap<u64, MshvDirtyLogSlot>>,
     #[cfg(feature = "sev_snp")]
     sev_snp_enabled: bool,
     #[cfg(feature = "sev_snp")]
