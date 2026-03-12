@@ -404,11 +404,8 @@ impl Snapshottable for VirtioPciCommonConfig {
 
 #[cfg(test)]
 mod unit_tests {
-    use vm_memory::GuestMemoryAtomic;
-    use vmm_sys_util::eventfd::EventFd;
-
     use super::*;
-    use crate::{ActivateResult, GuestMemoryMmap, VirtioInterrupt};
+    use crate::{ActivateResult, ActivationContext};
 
     struct DummyDevice(u32);
     const QUEUE_SIZE: u16 = 256;
@@ -421,12 +418,7 @@ mod unit_tests {
         fn queue_max_sizes(&self) -> &[u16] {
             QUEUE_SIZES
         }
-        fn activate(
-            &mut self,
-            _mem: GuestMemoryAtomic<GuestMemoryMmap>,
-            _interrupt_evt: Arc<dyn VirtioInterrupt>,
-            _queues: Vec<(usize, Queue, EventFd)>,
-        ) -> ActivateResult {
+        fn activate(&mut self, _context: ActivationContext) -> ActivateResult {
             Ok(())
         }
 
