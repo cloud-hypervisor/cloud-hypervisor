@@ -2850,6 +2850,8 @@ impl Vm {
         Ok(())
     }
 
+    /// Writes the contents of the given guest memory regions to the provided sink.
+    /// Used, for example, during VM live migration to transfer memory to a socket.
     pub fn send_memory_regions<F>(
         &mut self,
         ranges: &MemoryRangeTable,
