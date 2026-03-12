@@ -328,6 +328,28 @@ impl disk_file::Resizable for QcowDiskSync {
 
 impl disk_file::DiskFile for QcowDiskSync {}
 
+impl disk_file::AsyncDiskFile for QcowDiskSync {
+    fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
+        Ok(Box::new(QcowDiskSync {
+            metadata: Arc::clone(&self.metadata),
+            backing_file: self.backing_file.as_ref().map(Arc::clone),
+            sparse: self.sparse,
+            data_raw_file: self.data_raw_file.clone(),
+        }))
+    }
+
+    // ring_depth is unused - this sync backend performs blocking I/O
+    // instead of submitting to an async ring.
+    fn new_async_io(&self, _ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
+        Ok(Box::new(QcowSync::new(
+            Arc::clone(&self.metadata),
+            self.data_raw_file.clone(),
+            self.backing_file.as_ref().map(Arc::clone),
+            self.sparse,
+        )))
+    }
+}
+
 pub struct QcowSync {
     metadata: Arc<QcowMetadata>,
     data_file: QcowRawFile,
