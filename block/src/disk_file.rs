@@ -34,8 +34,10 @@
 //! `&mut self`. Errors are returned as [`BlockResult`].
 
 use std::fmt::Debug;
+use std::io;
 
-use crate::async_io::{AsyncIo, BorrowedDiskFd};
+use crate::async_io::{self, AsyncIo, BorrowedDiskFd};
+use crate::error::{BlockError, BlockErrorKind};
 use crate::{BlockResult, DiskTopology};
 
 /// Reported capacity of a disk image.
@@ -156,3 +158,82 @@ pub trait AsyncFullDiskFile: FullDiskFile + AsyncDiskFile {}
 /// Blanket implementation: any type implementing both [`FullDiskFile`]
 /// and [`AsyncDiskFile`] automatically satisfies [`AsyncFullDiskFile`].
 impl<T: FullDiskFile + AsyncDiskFile> AsyncFullDiskFile for T {}
+
+/// A disk backend that dispatches to either the existing [`async_io::DiskFile`]
+/// trait or the next-generation [`AsyncFullDiskFile`] trait.
+pub enum DiskBackend {
+    /// Existing disk file backend (raw, vhd, vhdx, etc.).
+    Legacy(Box<dyn async_io::DiskFile>),
+    /// Next-generation disk file backend (qcow2, and more formats as they migrate).
+    Next(Box<dyn AsyncFullDiskFile>),
+}
+
+impl DiskBackend {
+    pub fn logical_size(&mut self) -> BlockResult<u64> {
+        match self {
+            Self::Legacy(d) => d
+                .logical_size()
+                .map_err(|e| BlockError::new(BlockErrorKind::Io, io::Error::other(e))),
+            Self::Next(d) => d.logical_size(),
+        }
+    }
+
+    pub fn physical_size(&mut self) -> BlockResult<u64> {
+        match self {
+            Self::Legacy(d) => d
+                .physical_size()
+                .map_err(|e| BlockError::new(BlockErrorKind::Io, io::Error::other(e))),
+            Self::Next(d) => d.physical_size(),
+        }
+    }
+
+    pub fn topology(&mut self) -> DiskTopology {
+        match self {
+            Self::Legacy(d) => d.topology(),
+            Self::Next(d) => d.topology(),
+        }
+    }
+
+    pub fn supports_sparse_operations(&self) -> bool {
+        match self {
+            Self::Legacy(d) => d.supports_sparse_operations(),
+            Self::Next(d) => d.supports_sparse_operations(),
+        }
+    }
+
+    pub fn supports_zero_flag(&self) -> bool {
+        match self {
+            Self::Legacy(d) => d.supports_zero_flag(),
+            Self::Next(d) => d.supports_zero_flag(),
+        }
+    }
+
+    pub fn fd(&mut self) -> BorrowedDiskFd<'_> {
+        match self {
+            Self::Legacy(d) => d.fd(),
+            Self::Next(d) => d.fd(),
+        }
+    }
+
+    pub fn new_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
+        match self {
+            Self::Legacy(d) => d
+                .new_async_io(ring_depth)
+                .map_err(|e| BlockError::new(BlockErrorKind::Io, io::Error::other(e))),
+            Self::Next(d) => d.new_async_io(ring_depth),
+        }
+    }
+
+    pub fn resize(&mut self, new_size: u64) -> BlockResult<()> {
+        match self {
+            Self::Legacy(d) => d.resize(new_size).map_err(|e| match e {
+                async_io::DiskFileError::Unsupported => BlockError::new(
+                    BlockErrorKind::UnsupportedFeature,
+                    io::Error::other("resize not supported"),
+                ),
+                _ => BlockError::new(BlockErrorKind::Io, io::Error::other(e)),
+            }),
+            Self::Next(d) => d.resize(new_size),
+        }
+    }
+}
