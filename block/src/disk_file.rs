@@ -98,6 +98,18 @@ pub trait Resizable: Send + Debug {
 /// across threads for concurrent readonly access.
 pub trait DiskFile: DiskSize + Geometry + Sync {}
 
+/// Full capability disk file trait.
+///
+/// Bundles all optional capabilities on top of [`DiskFile`]:
+/// file descriptor access, physical size, sparse operations, and resize.
+/// Used by consumers that need feature negotiation without async I/O
+/// (e.g. vhost user block).
+pub trait FullDiskFile: DiskFile + PhysicalSize + DiskFd + SparseCapable + Resizable {}
+
+/// Blanket implementation: any type implementing all constituent traits
+/// automatically satisfies [`FullDiskFile`].
+impl<T: DiskFile + PhysicalSize + DiskFd + SparseCapable + Resizable> FullDiskFile for T {}
+
 /// Extended disk file trait for virtio queue workers.
 ///
 /// Adds cloning and async I/O construction on top of [`DiskFile`].
