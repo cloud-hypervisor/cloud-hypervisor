@@ -95,15 +95,15 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     reporting_queue_evt.write(1).unwrap();
 
     balloon
-        .activate(
-            guest_memory,
-            Arc::new(NoopVirtioInterrupt {}),
-            vec![
+        .activate(virtio_devices::ActivationContext {
+            mem: guest_memory,
+            interrupt_cb: Arc::new(NoopVirtioInterrupt {}),
+            queues: vec![
                 (0, inflate_q, inflate_evt),
                 (1, deflate_q, deflate_evt),
                 (2, reporting_q, reporting_evt),
             ],
-        )
+        })
         .ok();
 
     // Wait for the events to finish and balloon device worker thread to return
