@@ -1,0 +1,34 @@
+// Copyright 2026 The Cloud Hypervisor Authors. All rights reserved.
+//
+// SPDX-License-Identifier: Apache-2.0
+
+//! Composable disk capability traits for the block crate.
+//!
+//! Small traits define individual capabilities:
+//!
+//! - [`DiskSize`] - reported capacity (logical size)
+//! - [`PhysicalSize`] - host allocation size
+//! - [`DiskFd`] - backing file descriptor access
+//! - [`HasTopology`] - sector/cluster geometry (default 512B)
+//! - [`SparseCapable`] - sparse and zero flag support
+//! - [`Resizable`] - online resize
+//!
+//! [`DiskFile`] is a supertrait that bundles the universal capabilities
+//! (`DiskSize` + `HasTopology`). [`FullDiskFile`] adds all optional
+//! capabilities. [`AsyncDiskFile`] extends `DiskFile` with async I/O
+//! construction for virtio queue workers. [`AsyncFullDiskFile`]
+//! combines both axes.
+//!
+//! ```text
+//!         DiskFile: DiskSize + HasTopology + Sync
+//!         /                                     \
+//! FullDiskFile:                           AsyncDiskFile:
+//!   DiskFile + PhysicalSize +               DiskFile + Unpin
+//!   DiskFd + SparseCapable +               try_clone, new_async_io
+//!   Resizable
+//!         \                                     /
+//!          AsyncFullDiskFile: FullDiskFile + AsyncDiskFile
+//! ```
+//!
+//! Readonly accessors take `&self`. Only [`Resizable::resize`] requires
+//! `&mut self`. Errors are returned as [`BlockResult`].

@@ -9,6 +9,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 pub mod async_io;
+pub mod disk_file;
 pub mod error;
 pub mod fcntl;
 pub mod fixed_vhd;
