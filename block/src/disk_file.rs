@@ -78,3 +78,9 @@ pub trait SparseCapable: Send + Debug {
         false
     }
 }
+
+/// Online resize support for disk images.
+pub trait Resizable: Send + Debug {
+    /// Resizes the disk image to the given size in bytes.
+    fn resize(&mut self, size: u64) -> BlockResult<()>;
+}
