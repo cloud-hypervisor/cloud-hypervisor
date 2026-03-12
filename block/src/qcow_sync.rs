@@ -298,6 +298,16 @@ impl disk_file::DiskFd for QcowDiskSync {
 
 impl disk_file::HasTopology for QcowDiskSync {}
 
+impl disk_file::SparseCapable for QcowDiskSync {
+    fn supports_sparse_operations(&self) -> bool {
+        true
+    }
+
+    fn supports_zero_flag(&self) -> bool {
+        true
+    }
+}
+
 pub struct QcowSync {
     metadata: Arc<QcowMetadata>,
     data_file: QcowRawFile,
