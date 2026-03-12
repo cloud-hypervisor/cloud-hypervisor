@@ -42,3 +42,9 @@ pub trait DiskSize: Send + Debug {
     /// Virtual size of the disk image in bytes (reported capacity).
     fn logical_size(&self) -> BlockResult<u64>;
 }
+
+/// Host allocation size of a file-backed disk image.
+pub trait PhysicalSize: Send + Debug {
+    /// Actual bytes occupied on the host filesystem.
+    fn physical_size(&self) -> BlockResult<u64>;
+}
