@@ -103,6 +103,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
                 (1, deflate_q, deflate_evt),
                 (2, reporting_q, reporting_evt),
             ],
+            device_status: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         })
         .ok();
 
