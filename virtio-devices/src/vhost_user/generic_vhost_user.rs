@@ -14,7 +14,6 @@ use vhost::vhost_user::message::{
     VhostUserConfigFlags, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler};
-use virtio_queue::Queue;
 use vm_device::UserspaceMapping;
 use vm_memory::GuestMemoryAtomic;
 use vm_migration::protocol::MemoryRangeTable;
@@ -277,12 +276,13 @@ impl VirtioDevice for GenericVhostUser {
         }
     }
 
-    fn activate(
-        &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
-        interrupt_cb: Arc<dyn VirtioInterrupt>,
-        queues: Vec<(usize, Queue, EventFd)>,
-    ) -> ActivateResult {
+    fn activate(&mut self, context: crate::device::ActivationContext) -> ActivateResult {
+        let crate::device::ActivationContext {
+            mem,
+            interrupt_cb,
+            queues,
+            ..
+        } = context;
         self.common.activate(&queues, interrupt_cb.clone())?;
         self.guest_memory = Some(mem.clone());
 

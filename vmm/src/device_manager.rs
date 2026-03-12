@@ -4543,7 +4543,7 @@ impl DeviceManager {
     }
 
     pub fn activate_virtio_devices(&self) -> DeviceManagerResult<()> {
-        for mut activator in self.pending_activations.lock().unwrap().drain(..) {
+        for activator in self.pending_activations.lock().unwrap().drain(..) {
             activator
                 .activate()
                 .map_err(DeviceManagerError::VirtioActivate)?;

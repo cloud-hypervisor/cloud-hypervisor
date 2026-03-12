@@ -428,12 +428,13 @@ impl VirtioDevice for Vdpa {
         }
     }
 
-    fn activate(
-        &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
-        virtio_interrupt: Arc<dyn VirtioInterrupt>,
-        queues: Vec<(usize, Queue, EventFd)>,
-    ) -> ActivateResult {
+    fn activate(&mut self, context: crate::device::ActivationContext) -> ActivateResult {
+        let crate::device::ActivationContext {
+            mem,
+            interrupt_cb: virtio_interrupt,
+            queues,
+            ..
+        } = context;
         self.activate_vdpa(&mem.memory(), virtio_interrupt.as_ref(), &queues)
             .map_err(ActivateError::ActivateVdpa)?;
 

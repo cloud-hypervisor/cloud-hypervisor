@@ -143,11 +143,11 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     input_queue_evt.write(1).unwrap();
     output_queue_evt.write(1).unwrap();
 
-    net.activate(
-        guest_memory,
-        Arc::new(NoopVirtioInterrupt {}),
-        vec![(0, input_queue, input_evt), (1, output_queue, output_evt)],
-    )
+    net.activate(virtio_devices::ActivationContext {
+        mem: guest_memory,
+        interrupt_cb: Arc::new(NoopVirtioInterrupt {}),
+        queues: vec![(0, input_queue, input_evt), (1, output_queue, output_evt)],
+    })
     .unwrap();
 
     // Wait for the events to finish and net device worker thread to return

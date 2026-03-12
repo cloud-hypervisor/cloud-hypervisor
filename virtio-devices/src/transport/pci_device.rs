@@ -309,12 +309,13 @@ pub struct VirtioPciDeviceActivator {
 }
 
 impl VirtioPciDeviceActivator {
-    pub fn activate(&mut self) -> ActivateResult {
-        self.device.lock().unwrap().activate(
-            self.memory.take().unwrap(),
-            self.interrupt.take().unwrap(),
-            self.queues.take().unwrap(),
-        )?;
+    pub fn activate(mut self) -> ActivateResult {
+        let mut locked_device = self.device.lock().unwrap();
+        locked_device.activate(crate::device::ActivationContext {
+            mem: self.memory.take().unwrap(),
+            interrupt_cb: self.interrupt.take().unwrap(),
+            queues: self.queues.take().unwrap(),
+        })?;
         self.device_activated.store(true, Ordering::SeqCst);
 
         if let Some(barrier) = self.barrier.take() {
