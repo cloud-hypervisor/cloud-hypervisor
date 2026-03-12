@@ -208,6 +208,9 @@ pub enum Error {
     /// Failed Parsing FwCfgItem config
     #[error("Error parsing --fw-cfg-config items")]
     ParseFwCfgItem(#[source] OptionParserError),
+    /// Failed parsing addr option
+    #[error("Error parsing --addr")]
+    ParsePciAddr(#[source] OptionParserError),
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]
@@ -1159,7 +1162,7 @@ impl DiskConfig {
          id=<device_id>,pci_segment=<segment_id>,rate_limit_group=<group_id>,\
          queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>,\
          serial=<serial_number>,backing_files=on|off,sparse=on|off,\
-         image_type=<raw,qcow2,vhd,vhdx>";
+         image_type=<raw,qcow2,vhd,vhdx>,addr=<DD.F>";
 
     pub fn parse(disk: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1187,8 +1190,8 @@ impl DiskConfig {
             .add("queue_affinity")
             .add("backing_files")
             .add("sparse")
-            .add("image_type");
-
+            .add("image_type")
+            .add("addr");
         parser.parse(disk).map_err(Error::ParseDisk)?;
 
         let path = parser.get("path").map(PathBuf::from);
@@ -1321,6 +1324,10 @@ impl DiskConfig {
             .unwrap_or_else(|| Toggle(default_diskconfig_sparse()))
             .0;
 
+        let (bdf_device, _bdf_function) = parser
+            .get_pci_device_function()
+            .map_err(Error::ParsePciAddr)?;
+
         Ok(DiskConfig {
             path,
             readonly,
@@ -1341,7 +1348,7 @@ impl DiskConfig {
             backing_files,
             sparse,
             image_type,
-            bdf_device: None,
+            bdf_device,
         })
     }
 
@@ -1416,7 +1423,7 @@ impl NetConfig {
     vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,vhost_mode=client|server,\
     bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
     ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,pci_segment=<segment_id>,\
-    offload_tso=on|off,offload_ufo=on|off,offload_csum=on|off\"";
+    offload_tso=on|off,offload_ufo=on|off,offload_csum=on|off,addr=DD.F\"";
 
     pub fn parse(net: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1445,7 +1452,8 @@ impl NetConfig {
             .add("ops_size")
             .add("ops_one_time_burst")
             .add("ops_refill_time")
-            .add("pci_segment");
+            .add("pci_segment")
+            .add("addr");
         parser.parse(net).map_err(Error::ParseNetwork)?;
 
         let tap = parser.get("tap");
@@ -1556,6 +1564,10 @@ impl NetConfig {
             None
         };
 
+        let (bdf_device, _bdf_function) = parser
+            .get_pci_device_function()
+            .map_err(Error::ParsePciAddr)?;
+
         let config = NetConfig {
             tap,
             ip,
@@ -1576,7 +1588,7 @@ impl NetConfig {
             offload_tso,
             offload_ufo,
             offload_csum,
-            bdf_device: None,
+            bdf_device,
         };
         Ok(config)
     }
@@ -1651,7 +1663,7 @@ impl NetConfig {
 impl RngConfig {
     pub fn parse(rng: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("src").add("iommu");
+        parser.add("src").add("iommu").add("addr");
         parser.parse(rng).map_err(Error::ParseRng)?;
 
         let src = PathBuf::from(
@@ -1665,23 +1677,27 @@ impl RngConfig {
             .unwrap_or(Toggle(false))
             .0;
 
+        let (bdf_device, _bdf_function) = parser
+            .get_pci_device_function()
+            .map_err(Error::ParsePciAddr)?;
+
         Ok(RngConfig {
             src,
             iommu,
-            bdf_device: None,
+            bdf_device,
         })
     }
 }
 
 impl BalloonConfig {
     pub const SYNTAX: &'static str = "Balloon parameters \"size=<balloon_size>,deflate_on_oom=on|off,\
-        free_page_reporting=on|off\"";
+        free_page_reporting=on|off,addr=<DD.F>\"";
 
     pub fn parse(balloon: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser.add("size");
         parser.add("deflate_on_oom");
-        parser.add("free_page_reporting");
+        parser.add("free_page_reporting").add("addr");
         parser.parse(balloon).map_err(Error::ParseBalloon)?;
 
         let size = parser
@@ -1701,11 +1717,15 @@ impl BalloonConfig {
             .unwrap_or(Toggle(false))
             .0;
 
+        let (bdf_device, _bdf_function) = parser
+            .get_pci_device_function()
+            .map_err(Error::ParsePciAddr)?;
+
         Ok(BalloonConfig {
             size,
             deflate_on_oom,
             free_page_reporting,
-            bdf_device: None,
+            bdf_device,
         })
     }
 }
@@ -1715,7 +1735,7 @@ impl GenericVhostUserConfig {
     \"virtio_id=<ID number for virtio device type (FS, block, net, etc) or symbolic name>,\
     socket=<socket_path>,\
     queue_sizes=<list of queue sizes>,\
-    id=<device_id>,pci_segment=<segment_id>\"";
+    id=<device_id>,pci_segment=<segment_id>,addr=DD.F\"";
 
     pub fn parse(vhost_user: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1724,7 +1744,8 @@ impl GenericVhostUserConfig {
             .add("queue_sizes")
             .add("socket")
             .add("id")
-            .add("pci_segment");
+            .add("pci_segment")
+            .add("addr");
         parser
             .parse(vhost_user)
             .map_err(Error::ParseGenericVhostUser)?;
@@ -1824,13 +1845,17 @@ impl GenericVhostUserConfig {
             }
         }
 
+        let (bdf_device, _bdf_function) = parser
+            .get_pci_device_function()
+            .map_err(Error::ParsePciAddr)?;
+
         Ok(GenericVhostUserConfig {
             socket: socket.into(),
             device_type,
             id,
             pci_segment,
             queue_sizes: converted_queue_sizes,
-            bdf_device: None,
+            bdf_device,
         })
     }
 
@@ -1856,7 +1881,8 @@ impl GenericVhostUserConfig {
 impl FsConfig {
     pub const SYNTAX: &'static str = "virtio-fs parameters \
     \"tag=<tag_name>,socket=<socket_path>,num_queues=<number_of_queues>,\
-    queue_size=<size_of_each_queue>,id=<device_id>,pci_segment=<segment_id>\"";
+    queue_size=<size_of_each_queue>,id=<device_id>,pci_segment=<segment_id>,\
+    addr=<DD.F>\"";
 
     pub fn parse(fs: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1866,7 +1892,8 @@ impl FsConfig {
             .add("num_queues")
             .add("socket")
             .add("id")
-            .add("pci_segment");
+            .add("pci_segment")
+            .add("addr");
         parser.parse(fs).map_err(Error::ParseFileSystem)?;
 
         let tag = parser.get("tag").ok_or(Error::ParseFsTagMissing)?;
@@ -1891,6 +1918,10 @@ impl FsConfig {
             .map_err(Error::ParseFileSystem)?
             .unwrap_or_default();
 
+        let (bdf_device, _bdf_function) = parser
+            .get_pci_device_function()
+            .map_err(Error::ParsePciAddr)?;
+
         Ok(FsConfig {
             tag,
             socket,
@@ -1898,7 +1929,7 @@ impl FsConfig {
             queue_size,
             id,
             pci_segment,
-            bdf_device: None,
+            bdf_device,
         })
     }
 
@@ -2027,7 +2058,7 @@ impl FwCfgItem {
 impl PmemConfig {
     pub const SYNTAX: &'static str = "Persistent memory parameters \
     \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
-    discard_writes=on|off,id=<device_id>,pci_segment=<segment_id>\"";
+    discard_writes=on|off,id=<device_id>,pci_segment=<segment_id>,addr=<DD.F>\"";
 
     pub fn parse(pmem: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2037,7 +2068,8 @@ impl PmemConfig {
             .add("iommu")
             .add("discard_writes")
             .add("id")
-            .add("pci_segment");
+            .add("pci_segment")
+            .add("addr");
         parser.parse(pmem).map_err(Error::ParsePersistentMemory)?;
 
         let file = PathBuf::from(parser.get("file").ok_or(Error::ParsePmemFileMissing)?);
@@ -2061,6 +2093,10 @@ impl PmemConfig {
             .map_err(Error::ParsePersistentMemory)?
             .unwrap_or_default();
 
+        let (bdf_device, _bdf_function) = parser
+            .get_pci_device_function()
+            .map_err(Error::ParsePciAddr)?;
+
         Ok(PmemConfig {
             file,
             size,
@@ -2068,7 +2104,7 @@ impl PmemConfig {
             discard_writes,
             id,
             pci_segment,
-            bdf_device: None,
+            bdf_device,
         })
     }
 
@@ -2100,7 +2136,8 @@ impl ConsoleConfig {
             .add_valueless("null")
             .add("file")
             .add("iommu")
-            .add("socket");
+            .add("socket")
+            .add("addr");
         parser.parse(console).map_err(Error::ParseConsole)?;
 
         let mut file: Option<PathBuf> = default_consoleconfig_file();
@@ -2134,12 +2171,16 @@ impl ConsoleConfig {
             .unwrap_or(Toggle(false))
             .0;
 
+        let (bdf_device, _bdf_function) = parser
+            .get_pci_device_function()
+            .map_err(Error::ParsePciAddr)?;
+
         Ok(Self {
             file,
             mode,
             iommu,
             socket,
-            bdf_device: None,
+            bdf_device,
         })
     }
 }
@@ -2199,7 +2240,8 @@ impl DebugConsoleConfig {
 }
 
 impl DeviceConfig {
-    pub const SYNTAX: &'static str = "Direct device assignment parameters \"path=<device_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>\"";
+    pub const SYNTAX: &'static str = "Direct device assignment parameters \"\
+    path=<device_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>,addr=DD.F\"";
 
     pub fn parse(device: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2208,7 +2250,8 @@ impl DeviceConfig {
             .add("id")
             .add("iommu")
             .add("pci_segment")
-            .add("x_nv_gpudirect_clique");
+            .add("x_nv_gpudirect_clique")
+            .add("addr");
         parser.parse(device).map_err(Error::ParseDevice)?;
 
         let path = parser
@@ -2228,13 +2271,18 @@ impl DeviceConfig {
         let x_nv_gpudirect_clique = parser
             .convert::<u8>("x_nv_gpudirect_clique")
             .map_err(Error::ParseDevice)?;
+
+        let (bdf_device, _bdf_function) = parser
+            .get_pci_device_function()
+            .map_err(Error::ParsePciAddr)?;
+
         Ok(DeviceConfig {
             path,
             iommu,
             id,
             pci_segment,
             x_nv_gpudirect_clique,
-            bdf_device: None,
+            bdf_device,
         })
     }
 
@@ -2258,11 +2306,15 @@ impl DeviceConfig {
 
 impl UserDeviceConfig {
     pub const SYNTAX: &'static str =
-        "Userspace device socket=<socket_path>,id=<device_id>,pci_segment=<segment_id>\"";
+        "Userspace device socket=<socket_path>,id=<device_id>,pci_segment=<segment_id>,addr=DD.F\"";
 
     pub fn parse(user_device: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("socket").add("id").add("pci_segment");
+        parser
+            .add("socket")
+            .add("id")
+            .add("pci_segment")
+            .add("addr");
         parser.parse(user_device).map_err(Error::ParseUserDevice)?;
 
         let socket = parser
@@ -2275,11 +2327,15 @@ impl UserDeviceConfig {
             .map_err(Error::ParseUserDevice)?
             .unwrap_or_default();
 
+        let (bdf_device, _bdf_function) = parser
+            .get_pci_device_function()
+            .map_err(Error::ParsePciAddr)?;
+
         Ok(UserDeviceConfig {
             socket,
             id,
             pci_segment,
-            bdf_device: None,
+            bdf_device,
         })
     }
 
@@ -2305,7 +2361,7 @@ impl UserDeviceConfig {
 impl VdpaConfig {
     pub const SYNTAX: &'static str = "vDPA device \
         \"path=<device_path>,num_queues=<number_of_queues>,iommu=on|off,\
-        id=<device_id>,pci_segment=<segment_id>\"";
+        id=<device_id>,pci_segment=<segment_id>,addr=<DD.F>\"";
 
     pub fn parse(vdpa: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2314,7 +2370,8 @@ impl VdpaConfig {
             .add("num_queues")
             .add("iommu")
             .add("id")
-            .add("pci_segment");
+            .add("pci_segment")
+            .add("addr");
         parser.parse(vdpa).map_err(Error::ParseVdpa)?;
 
         let path = parser
@@ -2336,13 +2393,17 @@ impl VdpaConfig {
             .map_err(Error::ParseVdpa)?
             .unwrap_or_default();
 
+        let (bdf_device, _bdf_function) = parser
+            .get_pci_device_function()
+            .map_err(Error::ParsePciAddr)?;
+
         Ok(VdpaConfig {
             path,
             num_queues,
             iommu,
             id,
             pci_segment,
-            bdf_device: None,
+            bdf_device,
         })
     }
 
@@ -2366,7 +2427,8 @@ impl VdpaConfig {
 
 impl VsockConfig {
     pub const SYNTAX: &'static str = "Virtio VSOCK parameters \
-        \"cid=<context_id>,socket=<socket_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>\"";
+        \"cid=<context_id>,socket=<socket_path>,iommu=on|off,id=<device_id>,\
+        pci_segment=<segment_id>,addr=<DD.F>\"";
 
     pub fn parse(vsock: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2375,7 +2437,8 @@ impl VsockConfig {
             .add("cid")
             .add("iommu")
             .add("id")
-            .add("pci_segment");
+            .add("pci_segment")
+            .add("addr");
         parser.parse(vsock).map_err(Error::ParseVsock)?;
 
         let socket = parser
@@ -2397,13 +2460,17 @@ impl VsockConfig {
             .map_err(Error::ParseVsock)?
             .unwrap_or_default();
 
+        let (bdf_device, _bdf_function) = parser
+            .get_pci_device_function()
+            .map_err(Error::ParsePciAddr)?;
+
         Ok(VsockConfig {
             cid,
             socket,
             iommu,
             id,
             pci_segment,
-            bdf_device: None,
+            bdf_device,
         })
     }
 
@@ -4079,12 +4146,13 @@ mod unit_tests {
         id: &str,
         pci_segment: u64,
         queue_sizes: &IntegerList,
+        device_bdf: u8,
     ) {
         assert!(!socket.contains(",[]\n\r\0\""));
         assert!(!id.contains(",[]\n\r\0\""));
         let config = GenericVhostUserConfig::parse(&format!(
             "virtio_id={virtio_id},socket=\"{socket}\",\
-id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
+            id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes},addr={device_bdf:x}.0"
         ));
         if pci_segment <= u16::MAX.into()
             && virtio_id <= u32::MAX.into()
@@ -4105,7 +4173,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                         .iter()
                         .map(|&f| u16::try_from(f).unwrap())
                         .collect(),
-                    bdf_device: None,
+                    bdf_device: Some(device_bdf),
                 }
             );
         } else {
@@ -4115,7 +4183,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     #[test]
     fn test_parse_vhost_user() -> Result<()> {
-        // all parameters must be supplied, except pci_segment
+        // all parameters must be supplied, except pci_segment and addr
         GenericVhostUserConfig::parse("").unwrap_err();
         GenericVhostUserConfig::parse("virtio_id=1").unwrap_err();
         GenericVhostUserConfig::parse("queue_size=1").unwrap_err();
@@ -4127,6 +4195,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             "Something",
             10,
             &IntegerList(vec![u16::MAX.into(), 20u16.into()]),
+            12,
         );
         make_vhost_user_config(
             "/dev/null/doesnotexist",
@@ -4134,6 +4203,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             "Something",
             10,
             &IntegerList(vec![u16::MAX.into()]),
+            12,
         );
         make_vhost_user_config(
             "/dev/null/doesnotexist",
@@ -4141,6 +4211,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             "Something",
             10,
             &IntegerList(vec![20u64]),
+            12,
         );
         make_vhost_user_config(
             "/dev/null/doesnotexist",
@@ -4148,6 +4219,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             "Something",
             10,
             &IntegerList(vec![20u64]),
+            12,
         );
         make_vhost_user_config(
             "/dev/null/doesnotexist",
@@ -4155,6 +4227,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             "Something",
             10,
             &IntegerList(vec![20u64]),
+            12,
         );
         Ok(())
     }
