@@ -35,7 +35,7 @@
 
 use std::fmt::Debug;
 
-use crate::async_io::BorrowedDiskFd;
+use crate::async_io::{AsyncIo, BorrowedDiskFd};
 use crate::{BlockResult, DiskTopology};
 
 /// Reported capacity of a disk image.
@@ -91,3 +91,15 @@ pub trait Resizable: Send + Debug {
 /// `Sync` is required so that `Arc<dyn DiskFile>` can be shared
 /// across threads for concurrent readonly access.
 pub trait DiskFile: DiskSize + HasTopology + Sync {}
+
+/// Extended disk file trait for virtio queue workers.
+///
+/// Adds cloning and async I/O construction on top of [`DiskFile`].
+/// `Unpin` is required so trait objects can be moved freely.
+pub trait AsyncDiskFile: DiskFile + Unpin {
+    /// Creates an independent handle to the same backing storage.
+    fn try_clone(&self) -> BlockResult<Box<dyn AsyncDiskFile>>;
+
+    /// Constructs an async I/O engine for the given ring depth.
+    fn new_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>>;
+}
