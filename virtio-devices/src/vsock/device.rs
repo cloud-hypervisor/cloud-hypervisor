@@ -598,6 +598,7 @@ mod unit_tests {
             mem: memory.clone(),
             interrupt_cb: Arc::new(NoopVirtioInterrupt {}),
             queues: Vec::new(),
+            device_status: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         });
         match bad_activate {
             Err(ActivateError::BadActivate) => (),
@@ -626,6 +627,7 @@ mod unit_tests {
                         EventFd::new(EFD_NONBLOCK).unwrap(),
                     ),
                 ],
+                device_status: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             })
             .unwrap();
     }
