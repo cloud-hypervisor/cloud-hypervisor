@@ -19,7 +19,7 @@ use vm_memory::{
     Bytes, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, ReadVolatile, VolatileMemoryError,
     VolatileSlice, WriteVolatile,
 };
-use vm_migration::protocol::{MemoryRangeTable, Request, Response};
+use vm_migration::protocol::{Command, MemoryRangeTable, Request, Response};
 use vm_migration::{MigratableError, Snapshot};
 
 use crate::{GuestMemoryMmap, VmMigrationConfig};
@@ -366,12 +366,17 @@ pub(crate) fn send_memory_ranges(
     )
 }
 
-/// Receive memory contents for the given range table into guest memory.
+/// Receive memory contents for the given request and copy it into guest memory.
 pub(crate) fn receive_memory_ranges(
     guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
-    ranges: &MemoryRangeTable,
+    req: &Request,
     socket: &mut SocketStream,
 ) -> Result<(), MigratableError> {
+    debug_assert_eq!(req.command(), Command::Memory);
+    // Read the memory table
+    let ranges = MemoryRangeTable::read_from(socket, req.length())?;
+
+    // And then the memory itself
     let mem = guest_memory.memory();
 
     for range in ranges.regions() {
