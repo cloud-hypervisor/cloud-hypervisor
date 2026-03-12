@@ -660,13 +660,13 @@ impl VirtioPciDevice {
     fn is_driver_ready(&self) -> bool {
         let ready_bits =
             (DEVICE_ACKNOWLEDGE | DEVICE_DRIVER | DEVICE_DRIVER_OK | DEVICE_FEATURES_OK) as u8;
-        self.common_config.driver_status == ready_bits
-            && self.common_config.driver_status & DEVICE_FAILED as u8 == 0
+        let driver_status = self.common_config.driver_status.load(Ordering::SeqCst);
+        driver_status == ready_bits && (driver_status & DEVICE_FAILED as u8) == 0
     }
 
     /// Determines if the driver has requested the device (re)init / reset itself
     fn is_driver_init(&self) -> bool {
-        self.common_config.driver_status == DEVICE_INIT as u8
+        self.common_config.driver_status.load(Ordering::SeqCst) == DEVICE_INIT as u8
     }
 
     pub fn config_bar_addr(&self) -> u64 {
@@ -1238,7 +1238,9 @@ impl PciDevice for VirtioPciDevice {
                 self.common_config.queue_select = 0;
             } else {
                 error!("Attempt to reset device when not implemented in underlying device");
-                self.common_config.driver_status = crate::DEVICE_FAILED as u8;
+                self.common_config
+                    .driver_status
+                    .store(crate::DEVICE_FAILED as u8, Ordering::SeqCst);
             }
         }
 
