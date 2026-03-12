@@ -26,7 +26,7 @@ build_virtiofsd() {
 }
 
 update_workloads() {
-    cp scripts/sha1sums-aarch64 "$WORKLOADS_DIR"
+    cp scripts/sha1sums-aarch64-common "$WORKLOADS_DIR"
 
     FOCAL_OS_RAW_IMAGE_NAME="focal-server-cloudimg-arm64-custom-20210929-0.raw"
     FOCAL_OS_RAW_IMAGE_DOWNLOAD_URL="https://ch-images.azureedge.net/$FOCAL_OS_RAW_IMAGE_NAME"
@@ -138,7 +138,7 @@ update_workloads() {
 
     pushd "$WORKLOADS_DIR" || exit
 
-    if ! sha1sum sha1sums-aarch64 --check; then
+    if ! sha1sum sha1sums-aarch64-common --check; then
         echo "sha1sum validation of images failed, remove invalid images to fix the issue."
         exit 1
     fi
