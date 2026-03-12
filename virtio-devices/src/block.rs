@@ -161,7 +161,6 @@ struct BlockEpollHandler {
     host_cpus: Option<Vec<usize>>,
     acked_features: u64,
     disable_sector0_writes: bool,
-    #[allow(unused)]
     device_status: Arc<AtomicU8>,
 }
 
@@ -170,6 +169,10 @@ fn has_feature(features: u64, feature_flag: u64) -> bool {
 }
 
 impl BlockEpollHandler {
+    fn needs_reset(&self) -> bool {
+        (self.device_status.load(Ordering::Acquire) & crate::DEVICE_NEEDS_RESET as u8) != 0
+    }
+
     fn check_request(
         features: u64,
         request: &Request,
@@ -200,12 +203,48 @@ impl BlockEpollHandler {
         Ok(())
     }
 
+    fn handle_queue_iterator_error(&mut self, err: &virtio_queue::Error) {
+        // The guest submitted a corrupted VirtQ request, and the error
+        // was logged during queue processing. We cannot just ignore the
+        // error, as the guest could continue spamming the VMM with bad
+        // requests, triggering excessive error logging. So we mark
+        // the device "NEEDS_RESET", effectively stopping all request
+        // processing (see self.needs_reset() usage) until the guest
+        // resets and reactivates the device.
+
+        warn!(
+            "Corrupted request detected (virtqueue error: {err:?}). \
+Setting device status to 'NEEDS_RESET' and stopping processing queues until reset."
+        );
+
+        self.device_status
+            .fetch_or(crate::DEVICE_NEEDS_RESET as u8, Ordering::SeqCst);
+
+        // Let the guest know that the device status has changed.
+        if let Err(e) = self.interrupt_cb.trigger(VirtioInterruptType::Config) {
+            error!("Failed to signal config interrupt: {e:?}");
+        }
+    }
+
     fn process_queue_submit(&mut self) -> Result<()> {
+        if self.needs_reset() {
+            return Ok(());
+        }
         let queue = &mut self.queue;
         let mut batch_requests = Vec::new();
         let mut batch_inflight_requests = Vec::new();
 
-        while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
+        loop {
+            let mut desc_chain = match queue.iter(self.mem.memory()) {
+                Ok(mut iter) => match iter.next() {
+                    Some(c) => c,
+                    None => break,
+                },
+                Err(err) => {
+                    self.handle_queue_iterator_error(&err);
+                    return Ok(());
+                }
+            };
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_deref())
                 .map_err(Error::RequestParsing)?;
 
@@ -388,6 +427,9 @@ impl BlockEpollHandler {
     }
 
     fn process_queue_complete(&mut self) -> Result<()> {
+        if self.needs_reset() {
+            return Ok(());
+        }
         let mem = self.mem.memory();
         let mut read_bytes = Wrapping(0);
         let mut write_bytes = Wrapping(0);
