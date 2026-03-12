@@ -290,6 +290,12 @@ impl disk_file::PhysicalSize for QcowDiskSync {
     }
 }
 
+impl disk_file::DiskFd for QcowDiskSync {
+    fn fd(&self) -> BorrowedDiskFd<'_> {
+        BorrowedDiskFd::new(self.data_raw_file.as_fd().as_raw_fd())
+    }
+}
+
 pub struct QcowSync {
     metadata: Arc<QcowMetadata>,
     data_file: QcowRawFile,
