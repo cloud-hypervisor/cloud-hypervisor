@@ -90,6 +90,7 @@ mod pci_segment;
 pub mod seccomp_filters;
 mod serial_manager;
 mod sigwinch_listener;
+mod sync_utils;
 mod uffd;
 mod userfaultfd;
 pub mod vm;
