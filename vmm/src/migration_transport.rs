@@ -5,6 +5,7 @@
 
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
@@ -44,6 +45,27 @@ impl ReceiveListener {
                 .map(|(socket, _)| SocketStream::Unix(socket))
                 .context("Failed to accept Unix migration connection")
                 .map_err(MigratableError::MigrateReceive),
+        }
+    }
+
+    /// Same as [`Self::accept`], but returns `None` if the abort event was signaled.
+    fn abortable_accept(
+        &mut self,
+        abort_event: &impl AsRawFd,
+    ) -> Result<Option<SocketStream>, MigratableError> {
+        wait_for_readable(&self, abort_event)
+            .context("Error while waiting for socket to become readable")
+            .map_err(MigratableError::MigrateReceive)?
+            .then(|| self.accept())
+            .transpose()
+    }
+}
+
+impl AsFd for ReceiveListener {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        match self {
+            ReceiveListener::Tcp(listener) => listener.as_fd(),
+            ReceiveListener::Unix(listener) => listener.as_fd(),
         }
     }
 }
@@ -130,6 +152,45 @@ impl WriteVolatile for SocketStream {
             SocketStream::Tcp(s) => s.write_all_volatile(buf),
         }
     }
+}
+
+// Wait for `fd` to become readable. In this case, we return true. In case
+// `abort_event` was signaled, return false.
+fn wait_for_readable(fd: &impl AsFd, abort_event: &impl AsRawFd) -> Result<bool, io::Error> {
+    let fd = fd.as_fd().as_raw_fd();
+    let abort_event = abort_event.as_raw_fd();
+
+    let mut poll_fds = [
+        libc::pollfd {
+            fd: abort_event,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+        libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        },
+    ];
+
+    // SAFETY: This is safe, because the file descriptors are valid and the
+    // poll_fds array is properly initialized.
+    let ret = unsafe { libc::poll(poll_fds.as_mut_ptr(), poll_fds.len() as libc::nfds_t, -1) };
+
+    if ret < 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    if poll_fds[0].revents & libc::POLLIN != 0 {
+        return Ok(false);
+    }
+    if poll_fds[1].revents & libc::POLLIN != 0 {
+        return Ok(true);
+    }
+
+    Err(io::Error::other(
+        "Poll returned, but neither file descriptor is readable?",
+    ))
 }
 
 /// Extract a UNIX socket path from a "unix:" migration URL.
