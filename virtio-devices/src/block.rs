@@ -1008,12 +1008,12 @@ impl VirtioDevice for Block {
         self.update_writeback();
     }
 
-    fn activate(
-        &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
-        interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<(usize, Queue, EventFd)>,
-    ) -> ActivateResult {
+    fn activate(&mut self, context: crate::device::ActivationContext) -> ActivateResult {
+        let crate::device::ActivationContext {
+            mem,
+            interrupt_cb,
+            mut queues,
+        } = context;
         // See if the guest didn't ack the device being read-only.
         // If so, warn and pretend it did.
         let original_acked_features = self.common.acked_features;

@@ -53,6 +53,12 @@ pub struct VirtioSharedMemoryList {
     pub region_list: Vec<VirtioSharedMemory>,
 }
 
+pub struct ActivationContext {
+    pub mem: GuestMemoryAtomic<GuestMemoryMmap>,
+    pub interrupt_cb: Arc<dyn VirtioInterrupt>,
+    pub queues: Vec<(usize, Queue, EventFd)>,
+}
+
 /// Trait for virtio devices to be driven by a virtio transport.
 ///
 /// The lifecycle of a virtio device is to be moved to a virtio transport, which will then query the
@@ -94,12 +100,7 @@ pub trait VirtioDevice: Send {
     }
 
     /// Activates this device for real usage.
-    fn activate(
-        &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
-        interrupt_evt: Arc<dyn VirtioInterrupt>,
-        queues: Vec<(usize, Queue, EventFd)>,
-    ) -> ActivateResult;
+    fn activate(&mut self, context: ActivationContext) -> ActivateResult;
 
     /// Optionally deactivates this device and returns ownership of the guest memory map, interrupt
     /// event, and queue events.

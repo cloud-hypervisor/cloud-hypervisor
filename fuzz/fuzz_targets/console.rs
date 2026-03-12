@@ -128,11 +128,11 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     pipe_tx.write_all(console_input_bytes).unwrap(); // To use fuzzed data;
 
     console
-        .activate(
-            guest_memory,
-            Arc::new(NoopVirtioInterrupt {}),
-            vec![(0, input_queue, input_evt), (1, output_queue, output_evt)],
-        )
+        .activate(virtio_devices::ActivationContext {
+            mem: guest_memory,
+            interrupt_cb: Arc::new(NoopVirtioInterrupt {}),
+            queues: vec![(0, input_queue, input_evt), (1, output_queue, output_evt)],
+        })
         .unwrap();
 
     // Wait for the events to finish and console device worker thread to return

@@ -693,12 +693,12 @@ impl VirtioDevice for Net {
         self.read_config_from_slice(self.config.as_slice(), offset, data);
     }
 
-    fn activate(
-        &mut self,
-        mem: GuestMemoryAtomic<GuestMemoryMmap>,
-        interrupt_cb: Arc<dyn VirtioInterrupt>,
-        mut queues: Vec<(usize, Queue, EventFd)>,
-    ) -> ActivateResult {
+    fn activate(&mut self, context: crate::device::ActivationContext) -> ActivateResult {
+        let crate::device::ActivationContext {
+            mem,
+            interrupt_cb,
+            mut queues,
+        } = context;
         self.common.activate(&queues, interrupt_cb.clone())?;
 
         let num_queues = queues.len();
