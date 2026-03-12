@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write, stdout};
+use std::num::NonZero;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::panic::AssertUnwindSafe;
 #[cfg(feature = "guest_debug")]
@@ -59,7 +60,9 @@ use crate::memory_manager::MemoryManager;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
 use crate::migration::{recv_vm_config, recv_vm_state};
-use crate::migration_transport::SocketStream;
+use crate::migration_transport::{
+    ReceiveAdditionalConnections, ReceiveListener, SendAdditionalConnections, SocketStream,
+};
 use crate::seccomp_filters::{Thread, get_seccomp_filter};
 use crate::vm::{Error as VmError, Vm, VmState};
 use crate::vm_config::{
@@ -613,6 +616,13 @@ pub struct Vmm {
     console_info: Option<ConsoleInfo>,
 }
 
+/// Just a wrapper for the data that goes into
+/// [`ReceiveMigrationState::Configured`]
+struct ReceiveMigrationConfiguredData {
+    memory_manager: Arc<Mutex<MemoryManager>>,
+    guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    connections: ReceiveAdditionalConnections,
+}
 /// The receiver's state machine behind the migration protocol.
 enum ReceiveMigrationState {
     /// The connection is established and we haven't received any commands yet.
@@ -630,10 +640,7 @@ enum ReceiveMigrationState {
     ///
     /// We keep the memory manager around to pass it into the next state. From this point
     /// on, the sender can start sending memory updates.
-    Configured(
-        Arc<Mutex<MemoryManager>>,
-        GuestMemoryAtomic<GuestMemoryMmap>,
-    ),
+    Configured(ReceiveMigrationConfiguredData),
 
     /// Memory is populated and we received the state. The VM is ready to go.
     StateReceived,
@@ -833,6 +840,7 @@ impl Vmm {
     fn vm_receive_migration_step(
         &mut self,
         socket: &mut SocketStream,
+        listener: &ReceiveListener,
         state: ReceiveMigrationState,
         req: &Request,
         _receive_data_migration: &VmReceiveMigrationData,
@@ -845,19 +853,25 @@ impl Vmm {
             )))
         };
 
-        let mut configure_vm = |socket: &mut SocketStream,
-                                memory_files: HashMap<u32, File>|
-         -> std::result::Result<
-            (
-                Arc<Mutex<MemoryManager>>,
-                GuestMemoryAtomic<GuestMemoryMmap>,
-            ),
-            MigratableError,
-        > {
-            let memory_manager = self.vm_receive_config(req, socket, memory_files)?;
-            let guest_memory = memory_manager.lock().unwrap().guest_memory();
-            Ok((memory_manager, guest_memory))
-        };
+        let mut configure_vm =
+            |socket: &mut SocketStream,
+             memory_files: HashMap<u32, File>|
+             -> std::result::Result<ReceiveMigrationConfiguredData, MigratableError> {
+                let memory_manager = self.vm_receive_config(req, socket, memory_files)?;
+                let guest_memory = memory_manager.lock().unwrap().guest_memory();
+                // Create the additional-connection receiver even in the single-connection case.
+                // At this point the receiver does not know whether the sender will use extra TCP
+                // connections. If it does not, no worker connections are accepted and memory
+                // requests continue to arrive on the main connection.
+                let connections = listener
+                    .try_clone()
+                    .and_then(|l| ReceiveAdditionalConnections::new(l, guest_memory.clone()))?;
+                Ok(ReceiveMigrationConfiguredData {
+                    memory_manager,
+                    guest_memory,
+                    connections,
+                })
+            };
 
         let recv_memory_fd = |socket: &mut SocketStream,
                               mut memory_files: Vec<(u32, File)>|
@@ -880,24 +894,42 @@ impl Vmm {
             },
             Started => match req.command() {
                 Command::MemoryFd => recv_memory_fd(socket, Vec::new()).map(MemoryFdsReceived),
-                Command::Config => {
-                    configure_vm(socket, Default::default()).map(|res| Configured(res.0, res.1))
-                }
+                Command::Config => configure_vm(socket, Default::default()).map(Configured),
                 _ => invalid_command(),
             },
             MemoryFdsReceived(memory_files) => match req.command() {
                 Command::MemoryFd => recv_memory_fd(socket, memory_files).map(MemoryFdsReceived),
-                Command::Config => configure_vm(socket, HashMap::from_iter(memory_files))
-                    .map(|res| Configured(res.0, res.1)),
+                Command::Config => {
+                    configure_vm(socket, HashMap::from_iter(memory_files)).map(Configured)
+                }
                 _ => invalid_command(),
             },
-            Configured(memory_manager, guest_memory) => match req.command() {
+            Configured(mut config_data) => match req.command() {
+                // Memory commands use the main connection only in the single-connection case.
+                // When multiple TCP connections are configured, the worker connections carry
+                // all memory commands and the main connection is used only for control traffic.
                 Command::Memory => {
-                    migration_transport::receive_memory_ranges(&guest_memory, req, socket)?;
-                    Ok(Configured(memory_manager, guest_memory))
+                    migration_transport::receive_memory_ranges(
+                        &config_data.guest_memory,
+                        req,
+                        socket,
+                    )
+                    .inspect_err(|_| {
+                        // connections.cleanup() already logs all errors that occurred in one of the
+                        // threads. Furthermore, this path is only taken in the single-connection case,
+                        // thus we do not expect any errors during this cleanup. The warning should
+                        // reflect that.
+                        if let Err(e) = config_data.connections.cleanup() {
+                            warn!(
+                                "Unexpected error while cleaning up migration connections after a main-connection memory receive failure: {e}"
+                            );
+                        }
+                    })?;
+                    Ok(Configured(config_data))
                 }
                 Command::State => {
-                    self.vm_receive_state(req, socket, memory_manager)?;
+                    config_data.connections.cleanup()?;
+                    self.vm_receive_state(req, socket, config_data.memory_manager)?;
                     Ok(StateReceived)
                 }
                 _ => invalid_command(),
@@ -1082,6 +1114,7 @@ impl Vmm {
         socket: &mut SocketStream,
         ctx: &mut MemoryMigrationContext,
         is_converged: impl Fn(&MemoryMigrationContext) -> result::Result<bool, MigratableError>,
+        mem_send: &mut SendAdditionalConnections,
     ) -> result::Result<MemoryRangeTable /* remaining */, MigratableError> {
         loop {
             let iteration_begin = Instant::now();
@@ -1101,7 +1134,7 @@ impl Vmm {
 
             // Send the current dirty pages
             let transfer_begin = Instant::now();
-            migration_transport::send_memory_ranges(&vm.guest_memory(), &iteration_table, socket)?;
+            mem_send.send_memory(iteration_table, socket)?;
             let transfer_duration = transfer_begin.elapsed();
             ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
 
@@ -1221,6 +1254,7 @@ impl Vmm {
         vm: &mut Vm,
         socket: &mut SocketStream,
         send_data_migration: &VmSendMigrationData,
+        mem_send: &mut SendAdditionalConnections,
     ) -> result::Result<(), MigratableError> {
         let mut ctx = MemoryMigrationContext::new();
 
@@ -1231,6 +1265,7 @@ impl Vmm {
             &mut ctx,
             // We bind send_data_migration to the callback
             |ctx| Self::is_precopy_converged(ctx, send_data_migration),
+            mem_send,
         )?;
         vm.pause()?;
 
@@ -1243,7 +1278,7 @@ impl Vmm {
 
             ctx.update_metrics_before_transfer(iteration_begin, &final_table);
             let transfer_begin = Instant::now();
-            migration_transport::send_memory_ranges(&vm.guest_memory(), &final_table, socket)?;
+            mem_send.send_memory(final_table, socket)?;
             let transfer_duration = transfer_begin.elapsed();
             ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
             ctx.iteration += 1;
@@ -1330,7 +1365,22 @@ impl Vmm {
             // Now pause VM
             vm.pause()?;
         } else {
-            Self::do_memory_migration(vm, &mut socket, send_data_migration)?;
+            let mut mem_send = migration_transport::SendAdditionalConnections::new(
+                &send_data_migration.destination_url,
+                NonZero::new(1).unwrap(),
+                &vm.guest_memory(),
+            )?;
+
+            Self::do_memory_migration(vm, &mut socket, send_data_migration, &mut mem_send)
+                .inspect_err(|_| {
+                    // Calling cleanup multiple times is fine, thus here we just make sure
+                    // that it is called.
+                    if let Err(e) = mem_send.cleanup() {
+                        warn!("Error cleaning up migration connections: {e}");
+                    }
+                })?;
+
+            mem_send.cleanup()?;
         }
 
         // We release the locks early to enable locking them on the destination host.
@@ -2302,6 +2352,7 @@ impl RequestHandler for Vmm {
 
             let (response, new_state) = match self.vm_receive_migration_step(
                 &mut socket,
+                &listener,
                 state,
                 &req,
                 &receive_data_migration,
