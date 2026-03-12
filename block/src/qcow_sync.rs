@@ -308,6 +308,24 @@ impl disk_file::SparseCapable for QcowDiskSync {
     }
 }
 
+impl disk_file::Resizable for QcowDiskSync {
+    fn resize(&mut self, size: u64) -> BlockResult<()> {
+        if self.backing_file.is_some() {
+            return Err(BlockError::new(
+                BlockErrorKind::UnsupportedFeature,
+                DiskFileError::ResizeError(io::Error::other(
+                    "resize not supported with backing file",
+                )),
+            )
+            .with_op(ErrorOp::Resize));
+        }
+        self.metadata.resize(size).map_err(|e| {
+            BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e))
+                .with_op(ErrorOp::Resize)
+        })
+    }
+}
+
 pub struct QcowSync {
     metadata: Arc<QcowMetadata>,
     data_file: QcowRawFile,
