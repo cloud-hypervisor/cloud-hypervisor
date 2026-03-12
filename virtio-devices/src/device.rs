@@ -183,6 +183,10 @@ pub trait VirtioDevice: Send {
     /// This is checked at runtime and a panic will happen if the
     /// rule is not followed.
     ///
+    /// The callback must unregister the provided eventfd from the old
+    /// address and register it with the new one.  It must return Err
+    /// iff this fails.
+    ///
     /// Most devices should use the default implementation.
     #[allow(unused_variables)]
     fn ioeventfds(
@@ -193,6 +197,21 @@ pub trait VirtioDevice: Send {
     ) -> Result<(), transport::IoeventfdError> {
         Ok(())
     }
+
+    /// Sets the device's config address base. This is only necessary for
+    /// devices that need to know the guest physical address of the PCI BARs
+    /// they use. Therefore, it is only meaningful for PCIe devices.
+    /// Most devices won't implement this method.
+    ///
+    /// One valid use of this method is to set the address at which the
+    /// device should register custom ioeventfds.
+    ///
+    /// This method will be called *before* [`VirtioDevice::activate`] and
+    /// implementations must be prepared for this.
+    ///
+    /// Calls after [`VirtioDevice::activate`] must not affect ioeventfd
+    /// registration.  This is the job of [`VirtioDevice::ioeventfds`].
+    fn set_config_address_base(&mut self, _base: u64) {}
 
     /// Returns the list of userspace mappings associated with this device.
     fn userspace_mappings(&self) -> Vec<UserspaceMapping> {
