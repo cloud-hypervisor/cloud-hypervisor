@@ -3,16 +3,17 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-use std::io::{self, Read, Write};
+use std::io::{self, ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::result::Result;
+use std::thread;
 
 use anyhow::{Context, anyhow};
-use log::info;
+use log::{debug, error, info};
 use serde_json;
 use vm_memory::bitmap::BitmapSlice;
 use vm_memory::{
@@ -21,6 +22,7 @@ use vm_memory::{
 };
 use vm_migration::protocol::{Command, MemoryRangeTable, Request, Response};
 use vm_migration::{MigratableError, Snapshot};
+use vmm_sys_util::eventfd::EventFd;
 
 use crate::{GuestMemoryMmap, VmMigrationConfig};
 
@@ -110,6 +112,15 @@ impl AsRawFd for SocketStream {
     }
 }
 
+impl AsFd for SocketStream {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        match self {
+            SocketStream::Unix(s) => s.as_fd(),
+            SocketStream::Tcp(s) => s.as_fd(),
+        }
+    }
+}
+
 impl ReadVolatile for SocketStream {
     fn read_volatile<B: BitmapSlice>(
         &mut self,
@@ -191,6 +202,172 @@ fn wait_for_readable(fd: &impl AsFd, abort_event: &impl AsRawFd) -> Result<bool,
     Err(io::Error::other(
         "Poll returned, but neither file descriptor is readable?",
     ))
+}
+
+/// Struct to keep track of additional connections for receiving VM migration data.
+#[derive(Debug)]
+pub(crate) struct ReceiveAdditionalConnections {
+    /// This thread accepts incoming connections and spawns a new worker for
+    /// each connection that handles receiving memory.
+    accept_thread: Option<thread::JoinHandle<Result<(), MigratableError>>>,
+
+    /// This fd gets signaled when the migration stops, and will then stop
+    /// the [`Self::accept_thread`].
+    terminate_fd: EventFd,
+}
+
+impl ReceiveAdditionalConnections {
+    /// Starts a thread to accept incoming connections and handle them. These
+    /// additional connections are used to receive additional memory regions
+    /// during VM migration.
+    pub(crate) fn new(
+        listener: ReceiveListener,
+        guest_memory: GuestMemoryAtomic<GuestMemoryMmap>,
+    ) -> Result<Self, MigratableError> {
+        let event_fd = EventFd::new(0)
+            .context("Error creating terminate fd")
+            .map_err(MigratableError::MigrateReceive)?;
+
+        let terminate_fd = event_fd
+            .try_clone()
+            .context("Error cloning terminate fd")
+            .map_err(MigratableError::MigrateReceive)?;
+
+        let accept_thread = thread::Builder::new()
+            .name("migrate-receive-accept-connections".to_owned())
+            .spawn(move || Self::accept_connections(listener, &terminate_fd, &guest_memory))
+            .context("Error creating connection accept thread")
+            .map_err(MigratableError::MigrateReceive)?;
+
+        Ok(Self {
+            accept_thread: Some(accept_thread),
+            terminate_fd: event_fd,
+        })
+    }
+
+    fn accept_connections(
+        mut listener: ReceiveListener,
+        terminate_fd: &EventFd,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    ) -> Result<(), MigratableError> {
+        let mut threads: Vec<thread::JoinHandle<Result<(), MigratableError>>> = Vec::new();
+        while let Some(mut socket) = listener.abortable_accept(terminate_fd)? {
+            let guest_memory = guest_memory.clone();
+            let terminate_fd = terminate_fd
+                .try_clone()
+                .context("Error cloning terminate fd")
+                .map_err(MigratableError::MigrateReceive)?;
+
+            match thread::Builder::new()
+                .name(format!("migrate-receive-memory-{}", threads.len()).to_owned())
+                .spawn(move || {
+                    Self::worker_receive_memory(&mut socket, &terminate_fd, &guest_memory)
+                }) {
+                Ok(t) => threads.push(t),
+                Err(e) => {
+                    error!("Error spawning receive-memory thread: {e}");
+                    break;
+                }
+            }
+        }
+
+        info!("Stopped accepting additional connections. Cleaning up threads.");
+
+        // We only return the first error we encounter here.
+        let mut first_err = Ok(());
+        for thread in threads {
+            let err = match thread.join() {
+                Ok(Ok(())) => None,
+                Ok(Err(e)) => Some(e),
+                Err(panic) => Some(MigratableError::MigrateReceive(anyhow!(
+                    "receive-memory thread panicked: {panic:?}"
+                ))),
+            };
+
+            if let Some(e) = err
+                && first_err.is_ok()
+            {
+                first_err = Err(e);
+            }
+        }
+
+        first_err
+    }
+
+    // Handles a `Memory` request by writing its payload to the VM memory.
+    fn worker_receive_memory(
+        mut socket: &mut SocketStream,
+        terminate_fd: &EventFd,
+        guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
+    ) -> Result<(), MigratableError> {
+        loop {
+            if !wait_for_readable(socket, terminate_fd)
+                .context("Failed to poll fds")
+                .map_err(MigratableError::MigrateReceive)?
+            {
+                info!("Got signal to tear down connection.");
+                return Ok(());
+            }
+
+            // We only check whether we should abort when waiting for a new request. If the
+            // sender stops sending data mid-request, we will hang forever.
+
+            let req = match Request::read_from(&mut socket) {
+                Ok(req) => req,
+                Err(MigratableError::MigrateSocket(io_error))
+                    if io_error.kind() == ErrorKind::UnexpectedEof =>
+                {
+                    debug!("Connection closed by peer");
+                    return Ok(());
+                }
+                Err(e) => return Err(e),
+            };
+
+            if req.command() != Command::Memory {
+                error!(
+                    "Dropping connection. Only Memory commands are allowed on additional connections."
+                );
+                return Err(MigratableError::MigrateReceive(anyhow!(
+                    "Received non memory command on migration receive worker: {:?}",
+                    req.command()
+                )));
+            }
+
+            receive_memory_regions(guest_memory, &req, socket)?;
+            Response::ok().write_to(socket)?;
+        }
+    }
+
+    /// Signals to the worker threads that the migration is finished and joins them.
+    /// If any thread encountered an error, this error is returned by this function.
+    pub(crate) fn cleanup(&mut self) -> Result<(), MigratableError> {
+        self.terminate_fd
+            .write(1)
+            .context("Failed to signal termination to worker threads.")
+            .map_err(MigratableError::MigrateReceive)?;
+        let _accept_thread = self
+            .accept_thread
+            .take()
+            .context("Accept thread isn't there?")
+            .map_err(MigratableError::MigrateReceive)?;
+        _accept_thread
+            .join()
+            .map_err(|panic| {
+                MigratableError::MigrateReceive(anyhow!(
+                    "Accept connections thread panicked: {panic:?}"
+                ))
+            })
+            .flatten()
+    }
+}
+
+impl Drop for ReceiveAdditionalConnections {
+    fn drop(&mut self) {
+        if self.accept_thread.is_some() {
+            error!("ReceiveAdditionalConnections did no cleanup!");
+            let _ = self.cleanup();
+        }
+    }
 }
 
 /// Extract a UNIX socket path from a "unix:" migration URL.
