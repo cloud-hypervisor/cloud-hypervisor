@@ -21,6 +21,7 @@ members = [
   "cloud-hypervisor",
   "devices",
   "event_monitor",
+  "eventfd-checker",
   "hypervisor",
   "net_gen",
   "net_util",
@@ -86,6 +87,10 @@ flume = "0.12.0"
 itertools = "0.14.0"
 libc = "0.2.183"
 log = "0.4.29"
+rustix = { version = "1.1.4", default-features = false, features = [
+  "fs",
+  "std",
+] }
 signal-hook = "0.4.3"
 thiserror = "2.0.18"
 uuid = { version = "1.22.0" }

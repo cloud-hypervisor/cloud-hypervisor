@@ -104,12 +104,20 @@ pub use x86_64::{
     initramfs_load_addr, layout, layout::CMDLINE_MAX_SIZE, layout::CMDLINE_START, regs,
 };
 
-/// Safe wrapper for `sysconf(_SC_PAGESIZE)`.
-#[cfg(target_arch = "x86_64")]
-#[inline(always)]
-fn pagesize() -> usize {
+/// Safe wrapper for `sysconf(_SC_PAGE_SIZE)`.
+#[inline(never)] // avoid bloat
+pub fn pagesize() -> usize {
     // SAFETY: Trivially safe
-    unsafe { libc::sysconf(libc::_SC_PAGESIZE) as usize }
+    let size = unsafe { libc::sysconf(libc::_SC_PAGE_SIZE) };
+    // save some code size by only having one panic site
+    match usize::try_from(size) {
+        Ok(size) if size > 0 && (size & (size - 1)) == 0 => size,
+        _ if size == -1 => panic!(
+            "sysconf(_SC_PAGE_SIZE) failed: {}",
+            std::io::Error::last_os_error()
+        ),
+        _ => panic!("Bad return value from sysconf(_SC_PAGE_SIZE): {size}"),
+    }
 }
 
 #[derive(Clone, Default)]
