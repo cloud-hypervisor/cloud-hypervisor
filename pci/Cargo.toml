@@ -2,6 +2,7 @@
 authors = ["Samuel Ortiz <sameo@linux.intel.com>"]
 edition.workspace = true
 name = "pci"
+rust-version.workspace = true
 version = "0.1.0"
 
 [features]

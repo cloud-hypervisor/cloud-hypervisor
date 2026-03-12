@@ -3,6 +3,7 @@ authors = ["The Cloud Hypervisor Authors"]
 edition.workspace = true
 license = "Apache-2.0"
 name = "api_client"
+rust-version.workspace = true
 version = "0.1.0"
 
 [dependencies]

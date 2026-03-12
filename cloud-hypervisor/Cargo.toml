@@ -7,15 +7,8 @@ edition = "2024"
 homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
 license = "Apache-2.0 AND BSD-3-Clause"
 name = "cloud-hypervisor"
+rust-version.workspace = true
 version = "51.0.0"
-# Minimum buildable version:
-# Keep in sync with version in .github/workflows/build.yaml
-# Policy on MSRV (see #4318):
-# Can only be bumped if satisfying any of the following:
-# a.) A dependency requires it,
-# b.) If we want to use a new feature and that MSRV is at least 6 months old,
-# c.) There is a security issue that is addressed by the toolchain update.
-rust-version = "1.89.0"
 
 [dependencies]
 anyhow = { workspace = true }

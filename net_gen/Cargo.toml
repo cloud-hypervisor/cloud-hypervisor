@@ -3,6 +3,7 @@ authors = ["The Chromium OS Authors"]
 edition = "2021"
 #edition.workspace = true
 name = "net_gen"
+rust-version.workspace = true
 version = "0.1.0"
 
 [dependencies]

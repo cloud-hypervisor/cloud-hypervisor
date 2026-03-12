@@ -3,6 +3,7 @@ authors = ["Microsoft Authors"]
 edition.workspace = true
 license = "Apache-2.0 OR BSD-3-Clause"
 name = "hypervisor"
+rust-version.workspace = true
 version = "0.1.0"
 
 [features]
