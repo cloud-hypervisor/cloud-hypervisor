@@ -2286,8 +2286,7 @@ pub fn convert(
     dst_type: ImageType,
     src_max_nesting_depth: u32,
 ) -> BlockResult<()> {
-    let src_type =
-        detect_image_type(&mut src_file).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+    let src_type = detect_image_type(&mut src_file)?;
     match src_type {
         ImageType::Qcow2 => {
             let mut src_reader =
@@ -2304,17 +2303,21 @@ pub fn convert(
 }
 
 /// Detect the type of an image file by checking for a valid qcow2 header.
-pub fn detect_image_type(file: &mut RawFile) -> Result<ImageType> {
-    let orig_seek = file.stream_position().map_err(Error::SeekingFile)?;
-    file.rewind().map_err(Error::SeekingFile)?;
-    let magic = u32::read_be(file).map_err(Error::ReadingHeader)?;
+pub fn detect_image_type(file: &mut RawFile) -> BlockResult<ImageType> {
+    let orig_seek = file
+        .stream_position()
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
+    file.rewind()
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
+    let magic = u32::read_be(file)
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?;
     let image_type = if magic == QCOW_MAGIC {
         ImageType::Qcow2
     } else {
         ImageType::Raw
     };
     file.seek(SeekFrom::Start(orig_seek))
-        .map_err(Error::SeekingFile)?;
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
     Ok(image_type)
 }
 
