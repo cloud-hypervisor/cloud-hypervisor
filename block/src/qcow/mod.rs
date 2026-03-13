@@ -1011,7 +1011,7 @@ impl QcowFile {
     }
 
     /// Rebuild the reference count tables.
-    fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> Result<()> {
+    fn rebuild_refcounts(raw_file: &mut QcowRawFile, header: QcowHeader) -> BlockResult<()> {
         fn add_ref(
             refcounts: &mut [u64],
             cluster_size: u64,
@@ -1234,7 +1234,7 @@ impl QcowFile {
         let file_size = raw_file
             .file_mut()
             .metadata()
-            .map_err(Error::GettingFileSize)?
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingFileSize(e)))?
             .len();
 
         let refcount_bits = 1u64 << header.refcount_order;
@@ -1264,25 +1264,33 @@ impl QcowFile {
         max_valid_cluster_index += refblocks_for_refs + reftable_clusters_for_refs;
 
         if max_valid_cluster_index > MAX_RAM_POINTER_TABLE_SIZE {
-            return Err(Error::InvalidRefcountTableSize(max_valid_cluster_index));
+            return Err(BlockError::new(
+                BlockErrorKind::CorruptImage,
+                Error::InvalidRefcountTableSize(max_valid_cluster_index),
+            ));
         }
 
         let max_valid_cluster_offset = max_valid_cluster_index * cluster_size;
         if max_valid_cluster_offset < file_size - cluster_size {
-            return Err(Error::InvalidRefcountTableSize(max_valid_cluster_offset));
+            return Err(BlockError::new(
+                BlockErrorKind::CorruptImage,
+                Error::InvalidRefcountTableSize(max_valid_cluster_offset),
+            ));
         }
 
         let mut refcounts = vec![0; max_valid_cluster_index as usize];
 
         // Find all references clusters and rebuild refcounts.
-        set_header_refcount(&mut refcounts, cluster_size, max_refcount, refcount_bits)?;
+        set_header_refcount(&mut refcounts, cluster_size, max_refcount, refcount_bits)
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
         set_l1_refcounts(
             &mut refcounts,
             &header,
             cluster_size,
             max_refcount,
             refcount_bits,
-        )?;
+        )
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
         set_data_refcounts(
             &mut refcounts,
             &header,
@@ -1290,14 +1298,16 @@ impl QcowFile {
             raw_file,
             max_refcount,
             refcount_bits,
-        )?;
+        )
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
         set_refcount_table_refcounts(
             &mut refcounts,
             &header,
             cluster_size,
             max_refcount,
             refcount_bits,
-        )?;
+        )
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
 
         // Allocate clusters to store the new reference count blocks.
         let ref_table = alloc_refblocks(
@@ -1306,7 +1316,8 @@ impl QcowFile {
             refblock_clusters,
             max_refcount,
             refcount_bits,
-        )?;
+        )
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
 
         // Write updated reference counts and point the reftable at them.
         write_refblocks(
@@ -1316,6 +1327,7 @@ impl QcowFile {
             raw_file,
             refcount_block_entries,
         )
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, e))
     }
 
     // Limits the range so that it doesn't exceed the virtual size of the file.
