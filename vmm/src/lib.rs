@@ -13,6 +13,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
 use std::{io, result, thread};
@@ -48,8 +49,8 @@ use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 use crate::api::{
-    ApiRequest, ApiResponse, RequestHandler, VmInfoResponse, VmReceiveMigrationData,
-    VmSendMigrationData, VmmPingResponse,
+    ApiRequest, ApiResponse, RequestHandler, TimeoutStrategy, VmInfoResponse,
+    VmReceiveMigrationData, VmSendMigrationData, VmmPingResponse,
 };
 use crate::config::{MemoryRestoreMode, RestoreConfig, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -1258,7 +1259,7 @@ impl Vmm {
         vm: &mut Vm,
         socket: &mut SocketStream,
         ctx: &mut MemoryMigrationContext,
-        is_converged: impl Fn(&MemoryMigrationContext) -> bool,
+        is_converged: impl Fn(&MemoryMigrationContext) -> result::Result<bool, MigratableError>,
     ) -> result::Result<MemoryRangeTable /* remaining */, MigratableError> {
         loop {
             let iteration_begin = Instant::now();
@@ -1271,7 +1272,7 @@ impl Vmm {
             };
 
             ctx.update_metrics_before_transfer(iteration_begin, &iteration_table);
-            if is_converged(ctx) {
+            if is_converged(ctx)? {
                 debug!("Precopy converged: {ctx}");
                 break Ok(iteration_table);
             }
@@ -1299,6 +1300,95 @@ impl Vmm {
         }
     }
 
+    /// Checks whether the precopy memory migration has converged and it is safe
+    /// to proceed to the final (paused) memory iteration.
+    ///
+    /// Once this returns, the VM is expected to stop as soon as possible.
+    ///
+    /// Convergence is reached when any of the following criteria is met:
+    ///
+    /// 1. **No dirty pages remain** – the current iteration would transfer zero
+    ///    bytes.
+    /// 2. **Downtime budget is met** – the estimated downtime for the final
+    ///    (paused) iteration is within the caller-specified
+    ///    [`VmSendMigrationData::downtime`] budget.
+    /// 3. **Timeout** – the precopy phase has been running for at least
+    ///    [`VmSendMigrationData::timeout`]. The outcome depends on
+    ///    [`VmSendMigrationData::timeout_strategy`]:
+    ///    - [`TimeoutStrategy::Cancel`] – returns
+    ///    - [`TimeoutStrategy::Ignore`] – the migration completes despite not
+    ///      meeting the downtime budget.
+    ///      [`MigratableError::MigrateSend`] so the caller can abort the
+    ///      migration cleanly.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` – convergence criterion met; the caller should stop precopy
+    ///   iterations.
+    /// * `Ok(false)` – not yet converged; the caller should run another
+    ///   dirty-page iteration.
+    /// * `Err(_)` – the timeout was reached and [`TimeoutStrategy::Cancel`]
+    ///   is in effect.
+    fn is_precopy_converged(
+        ctx: &MemoryMigrationContext,
+        send_data_migration: &VmSendMigrationData,
+    ) -> result::Result<bool, MigratableError> {
+        if ctx.current_iteration_total_bytes == 0 {
+            debug!("Precopy: No more memory to transfer");
+            return Ok(true);
+        }
+
+        // We currently ignore the time required to transfer the final
+        // VM state (device state and vCPUs) and the time needed on the
+        // receiver to create the VM and initialize its data structures
+        // before execution can resume.
+        //
+        // Manual testing showed that migrating an idle VM on a modern
+        // AMD CPU (CHV release build) adds ~5 ms of overhead when
+        // scaling from 1 to 200 vCPUs. Given this small cost, we
+        // deliberately avoid additional heuristics to estimate the
+        // downtime more precisely - for now. Instead, we approximate
+        // the downtime just by the transfer time of the final memory
+        // delta.
+        if let Some(memory_downtime) = ctx.estimated_downtime
+            && memory_downtime <= send_data_migration.downtime()
+        {
+            debug!(
+                "Precopy: Target downtime can be met: {}ms <= {}ms",
+                memory_downtime.as_millis(),
+                send_data_migration.downtime().as_millis()
+            );
+            return Ok(true);
+        }
+
+        // We check the beginning of the precopy migration and not the overall migration, and
+        // this is fine: precopy takes the longest and the earlier steps are negligible.
+        if ctx.migration_begin.elapsed() >= send_data_migration.timeout() {
+            return match send_data_migration.timeout_strategy {
+                TimeoutStrategy::Cancel => {
+                    let msg = format!(
+                        "Precopy: Timeout reached: {}s: migration didn't converge in time",
+                        send_data_migration.timeout().as_secs()
+                    );
+                    Err(MigratableError::MigrateSend(anyhow!("{msg}")))
+                }
+                TimeoutStrategy::Ignore => {
+                    info!(
+                        "Precopy: Pausing VM, ignoring target downtime ({}ms) due to timeout ({}s): Estimated downtime: {}ms",
+                        send_data_migration.downtime().as_millis(),
+                        send_data_migration.timeout().as_secs(),
+                        ctx.estimated_downtime
+                            .unwrap_or(Duration::from_secs(0))
+                            .as_millis()
+                    );
+                    Ok(true)
+                }
+            };
+        }
+
+        Ok(false)
+    }
+
     /// Performs the memory migration including multiple iterations.
     ///
     /// This includes:
@@ -1308,19 +1398,18 @@ impl Vmm {
     fn do_memory_migration(
         vm: &mut Vm,
         socket: &mut SocketStream,
-        // Used in next commit
-        _send_data_migration: &VmSendMigrationData,
+        send_data_migration: &VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
-        const MAX_ITERATIONS: usize = 5;
-
         let mut ctx = MemoryMigrationContext::new();
-        let is_converged = |ctx: &MemoryMigrationContext| {
-            // TODO: Add check for configurable downtime and max migration time #7111
-            ctx.iteration >= MAX_ITERATIONS || ctx.current_iteration_total_bytes == 0
-        };
 
         vm.start_dirty_log()?;
-        let remaining = Self::do_memory_iterations(vm, socket, &mut ctx, is_converged)?;
+        let remaining = Self::do_memory_iterations(
+            vm,
+            socket,
+            &mut ctx,
+            // We bind send_data_migration to the callback
+            |ctx| Self::is_precopy_converged(ctx, send_data_migration),
+        )?;
         vm.pause()?;
 
         // Send last batch of dirty pages: final iteration

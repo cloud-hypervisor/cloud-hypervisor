@@ -40,9 +40,9 @@ pub struct MemoryMigrationContext {
     ///
     /// Please note that this ignores any additional migration overhead and
     /// only looks at the memory transfer itself.
-    estimated_downtime: Option<Duration>,
+    pub estimated_downtime: Option<Duration>,
     /// Begin of the memory migration.
-    migration_begin: Instant,
+    pub migration_begin: Instant,
     /// Duration of the memory migration.
     ///
     /// This is only `None` until the last iteration is finished.
