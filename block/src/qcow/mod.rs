@@ -868,7 +868,7 @@ impl QcowFile {
     /// if needed. Shrinking is not supported, as it could lead to data
     /// loss. Not supported when a backing file is present in that case
     /// an error is returned.
-    pub fn resize(&mut self, new_size: u64) -> Result<()> {
+    pub fn resize(&mut self, new_size: u64) -> BlockResult<()> {
         let current_size = self.virtual_size();
 
         if new_size == current_size {
@@ -876,11 +876,17 @@ impl QcowFile {
         }
 
         if new_size < current_size {
-            return Err(Error::ShrinkNotSupported);
+            return Err(BlockError::new(
+                BlockErrorKind::UnsupportedFeature,
+                Error::ShrinkNotSupported,
+            ));
         }
 
         if self.backing_file.is_some() {
-            return Err(Error::ResizeWithBackingFile);
+            return Err(BlockError::new(
+                BlockErrorKind::UnsupportedFeature,
+                Error::ResizeWithBackingFile,
+            ));
         }
 
         // Grow the L1 table if needed
@@ -898,18 +904,20 @@ impl QcowFile {
         self.raw_file
             .file_mut()
             .rewind()
-            .map_err(Error::SeekingFile)?;
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
         self.header
             .write_to(self.raw_file.file_mut())
             .map_err(|e| match e {
-                Error::WritingHeader(io_err) => Error::ResizeIo(io_err),
-                other => other,
+                Error::WritingHeader(io_err) => {
+                    BlockError::new(BlockErrorKind::Io, Error::ResizeIo(io_err))
+                }
+                other => BlockError::new(BlockErrorKind::Io, other),
             })?;
 
         self.raw_file
             .file_mut()
             .sync_all()
-            .map_err(Error::SyncingHeader)?;
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SyncingHeader(e)))?;
 
         Ok(())
     }
@@ -919,7 +927,7 @@ impl QcowFile {
     /// This allocates a new L1 table at file end (guaranteeing contiguity),
     /// copies existing entries, updates refcounts, and atomically switches
     /// to the new table.
-    fn grow_l1_table(&mut self, new_l1_size: u32) -> Result<()> {
+    fn grow_l1_table(&mut self, new_l1_size: u32) -> BlockResult<()> {
         let old_l1_size = self.header.l1_size;
         let old_l1_offset = self.header.l1_table_offset;
         let cluster_size = self.raw_file.cluster_size();
@@ -932,7 +940,7 @@ impl QcowFile {
             .raw_file
             .file_mut()
             .seek(SeekFrom::End(0))
-            .map_err(Error::ResizeIo)?;
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ResizeIo(e)))?;
         let new_l1_offset = self.raw_file.cluster_address(file_size + cluster_size - 1);
 
         // Extend file to fit all L1 clusters
@@ -940,12 +948,12 @@ impl QcowFile {
         self.raw_file
             .file_mut()
             .set_len(new_file_end)
-            .map_err(Error::SettingFileSize)?;
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SettingFileSize(e)))?;
 
         // Set refcounts for the contiguous range
         for i in 0..new_l1_clusters {
             self.set_cluster_refcount(new_l1_offset + i * cluster_size, 1)
-                .map_err(Error::ResizeIo)?;
+                .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ResizeIo(e)))?;
         }
 
         let mut new_l1_data = vec![0u64; new_l1_size as usize];
@@ -957,7 +965,7 @@ impl QcowFile {
                 let refcount = self
                     .refcounts
                     .get_cluster_refcount(&mut self.raw_file, *l2_addr)
-                    .map_err(Error::GettingRefcount)?;
+                    .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingRefcount(e)))?;
                 *l2_addr = l1_entry_make(*l2_addr, refcount == 1);
             }
         }
@@ -965,12 +973,12 @@ impl QcowFile {
         // Write the new L1 table to the file.
         self.raw_file
             .write_pointer_table_direct(new_l1_offset, new_l1_data.iter())
-            .map_err(Error::ResizeIo)?;
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ResizeIo(e)))?;
 
         self.raw_file
             .file_mut()
             .sync_all()
-            .map_err(Error::SyncingHeader)?;
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SyncingHeader(e)))?;
 
         self.header.l1_size = new_l1_size;
         self.header.l1_table_offset = new_l1_offset;
@@ -978,13 +986,15 @@ impl QcowFile {
         self.raw_file
             .file_mut()
             .rewind()
-            .map_err(Error::SeekingFile)?;
-        self.header.write_to(self.raw_file.file_mut())?;
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
+        self.header
+            .write_to(self.raw_file.file_mut())
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
 
         self.raw_file
             .file_mut()
             .sync_all()
-            .map_err(Error::SyncingHeader)?;
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SyncingHeader(e)))?;
 
         // Free old L1 table clusters
         let old_l1_bytes = old_l1_size as u64 * size_of::<u64>() as u64;
@@ -3141,7 +3151,12 @@ mod unit_tests {
 
             let result = q.resize(smaller_size);
             assert!(result.is_err());
-            assert!(matches!(result.unwrap_err(), Error::ShrinkNotSupported));
+            let err = result.unwrap_err();
+            assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
+            assert!(matches!(
+                err.downcast_ref::<Error>(),
+                Some(Error::ShrinkNotSupported)
+            ));
 
             assert_eq!(q.virtual_size(), original_size);
         });
@@ -3172,7 +3187,12 @@ mod unit_tests {
 
         let result = overlay.resize(backing_size * 2);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), Error::ResizeWithBackingFile));
+        let err = result.unwrap_err();
+        assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
+        assert!(matches!(
+            err.downcast_ref::<Error>(),
+            Some(Error::ResizeWithBackingFile)
+        ));
 
         assert_eq!(overlay.virtual_size(), backing_size);
     }
