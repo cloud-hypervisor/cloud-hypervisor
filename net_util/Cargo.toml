@@ -10,7 +10,6 @@ epoll = { workspace = true }
 getrandom = "0.4.2"
 libc = { workspace = true }
 log = { workspace = true }
-net_gen = { path = "../net_gen" }
 rate_limiter = { path = "../rate_limiter" }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }

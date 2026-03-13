@@ -64,7 +64,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     }
 
     let (dummy_tap_frontend, dummy_tap_backend) = create_socketpair().unwrap();
-    let if_name = "fuzzer_tap_name".as_bytes().to_vec();
+    let if_name = "fuzzer_tap_name";
     let tap = net_util::Tap::new_for_fuzzing(dummy_tap_frontend, if_name);
 
     let mut net = virtio_devices::Net::new_with_tap(
