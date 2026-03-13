@@ -11,5 +11,10 @@ pub use pci_device::{
 };
 
 pub trait VirtioTransport {
-    fn ioeventfds(&self, base_addr: u64) -> impl Iterator<Item = (&EventFd, u64)>;
+    fn ioeventfds<T>(
+        &self,
+        old_base_addr: u64,
+        new_base_addr: u64,
+        cb: &mut dyn FnMut(&EventFd, u64, u64) -> core::result::Result<(), T>,
+    ) -> core::result::Result<(), T>;
 }
