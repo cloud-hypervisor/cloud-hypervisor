@@ -1342,6 +1342,11 @@ components:
         destination_url:
           type: string
 
+    MemoryRestoreMode:
+      type: string
+      enum: [Copy, OnDemand]
+      default: Copy
+
     RestoreConfig:
       required:
         - source_url
@@ -1351,6 +1356,8 @@ components:
           type: string
         prefault:
           type: boolean
+        memory_restore_mode:
+          $ref: "#/components/schemas/MemoryRestoreMode"
 
     ReceiveMigrationData:
       required:
