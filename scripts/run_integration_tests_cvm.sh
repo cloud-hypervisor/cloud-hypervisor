@@ -27,7 +27,7 @@ popd || exit
 cargo build --features $build_features --all --release --target "$BUILD_TARGET"
 
 export RUST_BACKTRACE=1
-cargo nextest run $test_features "common_cvm::$test_filter" -- ${test_binary_args[*]}
+time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "common_cvm::$test_filter" -- ${test_binary_args[*]}
 RES=$?
 
 exit $RES
