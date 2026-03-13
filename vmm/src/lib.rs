@@ -48,7 +48,7 @@ use crate::api::{
     ApiRequest, ApiResponse, RequestHandler, VmInfoResponse, VmReceiveMigrationData,
     VmSendMigrationData, VmmPingResponse,
 };
-use crate::config::{RestoreConfig, add_to_config};
+use crate::config::{MemoryRestoreMode, RestoreConfig, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggable;
 use crate::landlock::Landlock;
@@ -85,6 +85,8 @@ mod pci_segment;
 pub mod seccomp_filters;
 mod serial_manager;
 mod sigwinch_listener;
+mod uffd;
+mod userfaultfd;
 pub mod vm;
 pub mod vm_config;
 
@@ -1436,6 +1438,7 @@ impl Vmm {
         source_url: &str,
         vm_config: Arc<Mutex<VmConfig>>,
         prefault: bool,
+        memory_restore_mode: MemoryRestoreMode,
     ) -> std::result::Result<(), VmError> {
         let snapshot = recv_vm_state(source_url).map_err(VmError::Restore)?;
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -1478,6 +1481,7 @@ impl Vmm {
             Some(&snapshot),
             Some(source_url),
             Some(prefault),
+            Some(memory_restore_mode),
         )?;
         self.vm = Some(vm);
 
@@ -1684,6 +1688,7 @@ impl RequestHandler for Vmm {
                         None,
                         None,
                         None,
+                        None,
                     )?;
 
                     self.vm = Some(vm);
@@ -1768,17 +1773,22 @@ impl RequestHandler for Vmm {
             }
         }
 
-        self.vm_restore(source_url, vm_config, restore_cfg.prefault)
-            .map_err(|vm_restore_err| {
-                error!("VM Restore failed: {vm_restore_err:?}");
+        self.vm_restore(
+            source_url,
+            vm_config,
+            restore_cfg.prefault,
+            restore_cfg.memory_restore_mode,
+        )
+        .map_err(|vm_restore_err| {
+            error!("VM Restore failed: {vm_restore_err:?}");
 
-                // Cleanup the VM being created while vm restore
-                if let Err(e) = self.vm_delete() {
-                    return e;
-                }
+            // Cleanup the VM being created while vm restore
+            if let Err(e) = self.vm_delete() {
+                return e;
+            }
 
-                vm_restore_err
-            })
+            vm_restore_err
+        })
     }
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -1857,6 +1867,7 @@ impl RequestHandler for Vmm {
             self.console_info.clone(),
             self.console_resize_pipe.clone(),
             Arc::clone(&self.original_termios_opt),
+            None,
             None,
             None,
             None,
