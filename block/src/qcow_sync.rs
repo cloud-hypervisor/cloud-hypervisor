@@ -197,25 +197,14 @@ impl QcowDiskSync {
     ) -> BlockResult<Self> {
         let max_nesting_depth = if backing_files { MAX_NESTING_DEPTH } else { 0 };
         let (inner, backing_file, sparse) =
-            parse_qcow(RawFile::new(file, direct_io), max_nesting_depth, sparse)
-                .map_err(|e| match e {
-                    QcowError::MaxNestingDepthExceeded if !backing_files => {
-                        QcowError::BackingFilesDisabled
-                    }
-                    other => other,
-                })
-                .map_err(|e| {
-                    let kind = match &e {
-                        QcowError::InvalidMagic | QcowError::UnsupportedVersion(_) => {
-                            BlockErrorKind::InvalidFormat
-                        }
-                        QcowError::UnsupportedFeature(_) | QcowError::BackingFilesDisabled => {
-                            BlockErrorKind::UnsupportedFeature
-                        }
-                        _ => BlockErrorKind::Io,
-                    };
-                    BlockError::new(kind, e).with_op(ErrorOp::Open)
-                })?;
+            parse_qcow(RawFile::new(file, direct_io), max_nesting_depth, sparse).map_err(|e| {
+                let e = if !backing_files && matches!(e.kind(), BlockErrorKind::Overflow) {
+                    e.with_kind(BlockErrorKind::UnsupportedFeature)
+                } else {
+                    e
+                };
+                e.with_op(ErrorOp::Open)
+            })?;
         let data_raw_file = inner.raw_file.clone();
         Ok(QcowDiskSync {
             metadata: Arc::new(QcowMetadata::new(inner)),

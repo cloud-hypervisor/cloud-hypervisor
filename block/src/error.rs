@@ -167,6 +167,12 @@ impl BlockError {
         self
     }
 
+    /// Replace the error classification (builder-style).
+    pub fn with_kind(mut self, kind: BlockErrorKind) -> Self {
+        self.kind = kind;
+        self
+    }
+
     /// Shorthand: attach an operation name.
     pub fn with_op(mut self, op: ErrorOp) -> Self {
         self.ctx.get_or_insert_with(ErrorContext::default).op = Some(op);
@@ -203,6 +209,11 @@ impl BlockError {
     /// Try to downcast the source to a concrete type.
     pub fn downcast_ref<T: StdError + 'static>(&self) -> Option<&T> {
         self.source.as_ref()?.downcast_ref::<T>()
+    }
+
+    /// Consume the error and return the boxed source, if any.
+    pub fn into_source(self) -> Option<Box<dyn StdError + Send + Sync + 'static>> {
+        self.source
     }
 }
 
