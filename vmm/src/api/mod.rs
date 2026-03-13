@@ -33,6 +33,7 @@
 pub mod dbus;
 pub mod http;
 
+use std::fmt::{Display, Formatter};
 use std::io;
 use std::num::NonZeroU64;
 use std::sync::mpsc::{RecvError, SendError, Sender, channel};
@@ -267,7 +268,7 @@ pub struct VmReceiveMigrationData {
     pub receiver_url: String,
 }
 
-#[derive(Copy, Clone, Default, Deserialize, Serialize, Debug)]
+#[derive(Copy, Clone, Default, Deserialize, Serialize, Debug, clap::ValueEnum)]
 /// The migration timeout strategy.
 pub enum TimeoutStrategy {
     #[default]
@@ -275,6 +276,15 @@ pub enum TimeoutStrategy {
     Cancel,
     /// Force the migration and ignore any downtime requirement.
     Force,
+}
+
+impl Display for TimeoutStrategy {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TimeoutStrategy::Cancel => write!(f, "cancel"),
+            TimeoutStrategy::Force => write!(f, "force"),
+        }
+    }
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug)]
