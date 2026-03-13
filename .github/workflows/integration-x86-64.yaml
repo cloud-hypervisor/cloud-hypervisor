@@ -6,7 +6,7 @@ concurrency:
 
 jobs:
   build:
-    timeout-minutes: 60
+    timeout-minutes: 80
     strategy:
       fail-fast: false
       matrix:
@@ -41,7 +41,7 @@ jobs:
         run: sudo modprobe openvswitch
       - name: Run integration tests
         if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
-        timeout-minutes: 40
+        timeout-minutes: 60
         run: scripts/dev_cli.sh tests --integration --libc ${{ matrix.libc }}
       - name: Run live-migration integration tests
         if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
