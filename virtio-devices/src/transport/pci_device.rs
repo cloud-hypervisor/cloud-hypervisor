@@ -914,6 +914,15 @@ impl VirtioInterrupt for VirtioInterruptMsix {
         self.interrupt_source_group
             .notifier(vector as InterruptIndex)
     }
+
+    fn set_notifier(
+        &self,
+        _interrupt: u32,
+        _eventfd: Option<EventFd>,
+        _vm: &dyn hypervisor::Vm,
+    ) -> std::io::Result<()> {
+        unimplemented!()
+    }
 }
 
 impl PciDevice for VirtioPciDevice {
