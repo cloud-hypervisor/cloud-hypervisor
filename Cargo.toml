@@ -22,7 +22,6 @@ members = [
   "devices",
   "event_monitor",
   "hypervisor",
-  "net_gen",
   "net_util",
   "option_parser",
   "pci",
