@@ -48,11 +48,11 @@ fn check_mq_support(if_name: &Option<&str>, queue_pairs: usize) -> Result<()> {
             return Ok(());
         }
         let tun_flags_str = fs::read_to_string(path).map_err(Error::ReadSysfsTunFlags)?;
-        let tun_flags = u32::from_str_radix(tun_flags_str.trim().trim_start_matches("0x"), 16)
+        let tun_flags = i32::from_str_radix(tun_flags_str.trim().trim_start_matches("0x"), 16)
             .map_err(Error::ConvertHexStringToInt)?;
-        if (tun_flags & net_gen::IFF_MULTI_QUEUE != 0) && !mq {
+        if (tun_flags & libc::IFF_MULTI_QUEUE != 0) && !mq {
             return Err(Error::MultiQueueNoDeviceSupport);
-        } else if (tun_flags & net_gen::IFF_MULTI_QUEUE == 0) && mq {
+        } else if (tun_flags & libc::IFF_MULTI_QUEUE == 0) && mq {
             return Err(Error::MultiQueueNoTapSupport);
         }
     }

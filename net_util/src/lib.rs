@@ -59,15 +59,15 @@ unsafe impl ByteValued for VirtioNetConfig {}
 
 /// Create a sockaddr_in from an IPv4 address, and expose it as
 /// an opaque sockaddr suitable for usage by socket ioctls.
-fn create_sockaddr(ip_addr: net::Ipv4Addr) -> net_gen::sockaddr {
-    // IPv4 addresses big-endian (network order), but Ipv4Addr will give us
-    // a view of those bytes directly so we can avoid any endian trickiness.
-    let addr_in = net_gen::sockaddr_in {
-        sin_family: net_gen::AF_INET as u16,
+fn create_sockaddr(ip_addr: net::Ipv4Addr) -> libc::sockaddr {
+    let addr_in = libc::sockaddr_in {
+        sin_family: libc::AF_INET as u16,
         sin_port: 0,
-        // SAFETY: ip_addr can be safely transmute to in_addr
-        sin_addr: unsafe { mem::transmute::<[u8; 4], net_gen::inn::in_addr>(ip_addr.octets()) },
-        __pad: [0; 8usize],
+        sin_addr: libc::in_addr {
+            // Use network byte order (big endian).
+            s_addr: ip_addr.to_bits().to_be(),
+        },
+        sin_zero: [0; 8],
     };
 
     // SAFETY: addr_in can be safely transmute to sockaddr
@@ -167,19 +167,19 @@ pub fn build_net_config_space_with_mq(
 pub fn virtio_features_to_tap_offload(features: u64) -> c_uint {
     let mut tap_offloads: c_uint = 0;
     if features & (1 << VIRTIO_NET_F_GUEST_CSUM) != 0 {
-        tap_offloads |= net_gen::TUN_F_CSUM;
+        tap_offloads |= libc::TUN_F_CSUM;
     }
     if features & (1 << VIRTIO_NET_F_GUEST_TSO4) != 0 {
-        tap_offloads |= net_gen::TUN_F_TSO4;
+        tap_offloads |= libc::TUN_F_TSO4;
     }
     if features & (1 << VIRTIO_NET_F_GUEST_TSO6) != 0 {
-        tap_offloads |= net_gen::TUN_F_TSO6;
+        tap_offloads |= libc::TUN_F_TSO6;
     }
     if features & (1 << VIRTIO_NET_F_GUEST_ECN) != 0 {
-        tap_offloads |= net_gen::TUN_F_TSO_ECN;
+        tap_offloads |= libc::TUN_F_TSO_ECN;
     }
     if features & (1 << VIRTIO_NET_F_GUEST_UFO) != 0 {
-        tap_offloads |= net_gen::TUN_F_UFO;
+        tap_offloads |= libc::TUN_F_UFO;
     }
 
     tap_offloads
@@ -194,7 +194,7 @@ mod unit_tests {
         let addr: net::Ipv4Addr = "10.0.0.1".parse().unwrap();
         let sockaddr = create_sockaddr(addr);
 
-        assert_eq!(sockaddr.sa_family, net_gen::AF_INET as u16);
+        assert_eq!(sockaddr.sa_family, libc::AF_INET as u16);
 
         let data = &sockaddr.sa_data[..];
 
