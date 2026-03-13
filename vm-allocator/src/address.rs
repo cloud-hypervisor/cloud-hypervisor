@@ -174,7 +174,7 @@ impl AddressAllocator {
         }
 
         let alignment = align_size.unwrap_or(4);
-        if !alignment.is_power_of_two() || alignment == 0 {
+        if !alignment.is_power_of_two() {
             return None;
         }
 
