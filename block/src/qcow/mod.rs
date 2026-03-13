@@ -189,14 +189,17 @@ impl BackingFile {
         direct_io: bool,
         max_nesting_depth: u32,
         sparse: bool,
-    ) -> Result<Option<Self>> {
+    ) -> BlockResult<Option<Self>> {
         let Some(config) = backing_file_config else {
             return Ok(None);
         };
 
         // Check nesting depth - applies to any backing file
         if max_nesting_depth == 0 {
-            return Err(Error::MaxNestingDepthExceeded);
+            return Err(BlockError::new(
+                BlockErrorKind::Overflow,
+                Error::MaxNestingDepthExceeded,
+            ));
         }
 
         let backing_raw_file = OpenOptions::new()
@@ -224,8 +227,17 @@ impl BackingFile {
             }
             ImageType::Qcow2 => {
                 let (inner, nested_backing, _sparse) =
-                    parse_qcow(raw_file, max_nesting_depth - 1, sparse)
-                        .map_err(|e| Error::BackingFileOpen(config.path.clone(), Box::new(e)))?;
+                    parse_qcow(raw_file, max_nesting_depth - 1, sparse).map_err(|e| {
+                        let kind = e.kind();
+                        let source = e
+                            .into_source()
+                            .and_then(|s| s.downcast::<Error>().ok())
+                            .map(|qcow_err| Error::BackingFileOpen(config.path.clone(), qcow_err));
+                        match source {
+                            Some(err) => BlockError::new(kind, err),
+                            None => BlockError::from_kind(kind),
+                        }
+                    })?;
                 let size = inner.header.size;
                 (
                     BackingKind::Qcow {
@@ -335,28 +347,51 @@ pub(crate) fn parse_qcow(
     mut file: RawFile,
     max_nesting_depth: u32,
     sparse: bool,
-) -> Result<(metadata::QcowState, Option<BackingFile>, bool)> {
-    let mut header = QcowHeader::new(&mut file)?;
+) -> BlockResult<(metadata::QcowState, Option<BackingFile>, bool)> {
+    let mut header = QcowHeader::new(&mut file).map_err(|e| {
+        let kind = match &e {
+            Error::InvalidMagic
+            | Error::BackingFileTooLong(_)
+            | Error::InvalidBackingFileName(_) => BlockErrorKind::InvalidFormat,
+            Error::UnsupportedFeature(_) | Error::UnsupportedCompressionType => {
+                BlockErrorKind::UnsupportedFeature
+            }
+            _ => BlockErrorKind::Io,
+        };
+        BlockError::new(kind, e)
+    })?;
 
     // Only v2 and v3 files are supported.
     if header.version != 2 && header.version != 3 {
-        return Err(Error::UnsupportedVersion(header.version));
+        return Err(BlockError::new(
+            BlockErrorKind::UnsupportedFeature,
+            Error::UnsupportedVersion(header.version),
+        ));
     }
 
     // Make sure that the L1 table fits in RAM.
     if u64::from(header.l1_size) > MAX_RAM_POINTER_TABLE_SIZE {
-        return Err(Error::InvalidL1TableSize(header.l1_size));
+        return Err(BlockError::new(
+            BlockErrorKind::InvalidFormat,
+            Error::InvalidL1TableSize(header.l1_size),
+        ));
     }
 
     let cluster_bits: u32 = header.cluster_bits;
     if !(MIN_CLUSTER_BITS..=MAX_CLUSTER_BITS).contains(&cluster_bits) {
-        return Err(Error::InvalidClusterSize);
+        return Err(BlockError::new(
+            BlockErrorKind::InvalidFormat,
+            Error::InvalidClusterSize,
+        ));
     }
     let cluster_size = 0x01u64 << cluster_bits;
 
     // Limit the total size of the disk.
     if header.size > MAX_QCOW_FILE_SIZE {
-        return Err(Error::FileTooBig(header.size));
+        return Err(BlockError::new(
+            BlockErrorKind::InvalidFormat,
+            Error::FileTooBig(header.size),
+        ));
     }
 
     let direct_io = file.is_direct();
@@ -373,12 +408,18 @@ pub(crate) fn parse_qcow(
         .checked_shl(header.refcount_order)
         .ok_or(Error::UnsupportedRefcountOrder)?;
     if refcount_bits > 64 {
-        return Err(Error::UnsupportedRefcountOrder);
+        return Err(BlockError::new(
+            BlockErrorKind::UnsupportedFeature,
+            Error::UnsupportedRefcountOrder,
+        ));
     }
 
     // Need at least one refcount cluster
     if header.refcount_table_clusters == 0 {
-        return Err(Error::NoRefcountClusters);
+        return Err(BlockError::new(
+            BlockErrorKind::InvalidFormat,
+            Error::NoRefcountClusters,
+        ));
     }
     offset_is_cluster_boundary(header.l1_table_offset, header.cluster_bits)?;
     offset_is_cluster_boundary(header.snapshots_offset, header.cluster_bits)?;
@@ -386,7 +427,10 @@ pub(crate) fn parse_qcow(
     offset_is_cluster_boundary(header.refcount_table_offset, header.cluster_bits)?;
     let file_size = file.metadata().map_err(Error::GettingFileSize)?.len();
     if header.refcount_table_offset > max(file_size, header.size) {
-        return Err(Error::RefcountTableOffEnd);
+        return Err(BlockError::new(
+            BlockErrorKind::CorruptImage,
+            Error::RefcountTableOffEnd,
+        ));
     }
 
     // The first cluster should always have a non-zero refcount, so if it is 0,
@@ -414,7 +458,10 @@ pub(crate) fn parse_qcow(
 
     if header.is_corrupt() {
         if is_writable {
-            return Err(Error::CorruptImage);
+            return Err(BlockError::new(
+                BlockErrorKind::CorruptImage,
+                Error::CorruptImage,
+            ));
         }
         let path = read_link(format!("/proc/self/fd/{}", raw_file.file().as_raw_fd()))
             .map_or_else(|_| "<unknown>".to_string(), |p| p.display().to_string());
@@ -440,7 +487,10 @@ pub(crate) fn parse_qcow(
     let l1_clusters = div_round_up_u64(num_l2_clusters, entries_per_cluster);
     let header_clusters = div_round_up_u64(size_of::<QcowHeader>() as u64, cluster_size);
     if num_l2_clusters > MAX_RAM_POINTER_TABLE_SIZE {
-        return Err(Error::TooManyL1Entries(num_l2_clusters));
+        return Err(BlockError::new(
+            BlockErrorKind::CorruptImage,
+            Error::TooManyL1Entries(num_l2_clusters),
+        ));
     }
     let l1_table = VecCache::from_vec(
         raw_file
@@ -460,10 +510,16 @@ pub(crate) fn parse_qcow(
     );
     // Check that the given header doesn't have a suspiciously sized refcount table.
     if u64::from(header.refcount_table_clusters) > 2 * refcount_clusters {
-        return Err(Error::RefcountTableTooLarge);
+        return Err(BlockError::new(
+            BlockErrorKind::CorruptImage,
+            Error::RefcountTableTooLarge,
+        ));
     }
     if l1_clusters + refcount_clusters > MAX_RAM_POINTER_TABLE_SIZE {
-        return Err(Error::TooManyRefcounts(refcount_clusters));
+        return Err(BlockError::new(
+            BlockErrorKind::InvalidFormat,
+            Error::TooManyRefcounts(refcount_clusters),
+        ));
     }
     let refcount_block_entries = cluster_size * 8 / refcount_bits;
     let mut refcounts = RefCount::new(
