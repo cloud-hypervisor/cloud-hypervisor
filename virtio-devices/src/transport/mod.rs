@@ -6,5 +6,6 @@ mod pci_common_config;
 mod pci_device;
 pub use pci_common_config::{VIRTIO_PCI_COMMON_CONFIG_ID, VirtioPciCommonConfig};
 pub use pci_device::{
-    VirtioPciDevice, VirtioPciDeviceActivator, VirtioPciDeviceError, doorbell_addr,
+    PrivatelyConstructableError, VirtioPciDevice, VirtioPciDeviceActivator, VirtioPciDeviceError,
+    doorbell_addr,
 };

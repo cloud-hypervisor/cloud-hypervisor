@@ -9,6 +9,7 @@
 use std::any::Any;
 use std::cmp;
 use std::io::Write;
+use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
@@ -880,8 +881,10 @@ impl VirtioPciDevice {
     }
 }
 
+pub struct PrivatelyConstructableError<'a>(PhantomData<&'a ()>);
+
 impl VirtioPciDevice {
-    pub fn ioeventfds<T>(
+    pub fn ioeventfds<T: core::fmt::Debug>(
         &self,
         base_addr: u64,
         cb: &mut dyn FnMut(&EventFd, u64) -> core::result::Result<(), T>,
@@ -893,7 +896,23 @@ impl VirtioPciDevice {
                 notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
             )?;
         }
-        Ok(())
+        let mut err = Ok(());
+        match self
+            .device
+            .lock()
+            .unwrap()
+            .ioeventfds(&mut |eventfd, addr| {
+                cb(eventfd, addr).map_err(|e| {
+                    err = Err(e);
+                    PrivatelyConstructableError(PhantomData)
+                })
+            }) {
+            Ok(()) => {
+                err.unwrap();
+                Ok(())
+            }
+            Err(PrivatelyConstructableError(PhantomData)) => Err(err.unwrap_err()),
+        }
     }
 }
 

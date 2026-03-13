@@ -22,6 +22,7 @@ use vm_migration::{MigratableError, Pausable};
 use vm_virtio::{AccessPlatform, VirtioDeviceType};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::transport::PrivatelyConstructableError;
 use crate::{
     ActivateError, ActivateResult, Error, GuestMemoryMmap, GuestRegionMmap, MmapRegion,
     VIRTIO_F_RING_INDIRECT_DESC,
@@ -157,9 +158,17 @@ pub trait VirtioDevice: Send {
     /// relocates the device's configuration space.
     ///
     /// Most devices do not need this and should use the default
-    /// implementation, which returns None.
-    fn ioeventfds(&self) -> Option<Box<dyn Iterator<Item = (&EventFd, u64)>>> {
-        None
+    /// implementation, which does not call the callback.
+    ///
+    /// Implementations must return Err the first time the callback
+    /// returns Err, and Ok iff the callback never returns Err.
+    /// This is checked at runtime and a panic will happen if the
+    /// rule is not followed.
+    fn ioeventfds<'a>(
+        &self,
+        _cb: &mut dyn FnMut(&EventFd, u64) -> Result<(), PrivatelyConstructableError<'a>>,
+    ) -> Result<(), PrivatelyConstructableError<'a>> {
+        Ok(())
     }
 
     /// Returns the list of userspace mappings associated with this device.
