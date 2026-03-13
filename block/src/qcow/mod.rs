@@ -205,7 +205,12 @@ impl BackingFile {
         let backing_raw_file = OpenOptions::new()
             .read(true)
             .open(&config.path)
-            .map_err(|e| Error::BackingFileIo(config.path.clone(), e))?;
+            .map_err(|e| {
+                BlockError::new(
+                    BlockErrorKind::Io,
+                    Error::BackingFileIo(config.path.clone(), e),
+                )
+            })?;
 
         let mut raw_file = RawFile::new(backing_raw_file, direct_io);
 
@@ -217,12 +222,18 @@ impl BackingFile {
 
         let (kind, virtual_size) = match backing_format {
             ImageType::Raw => {
-                let size = raw_file
-                    .seek(SeekFrom::End(0))
-                    .map_err(|e| Error::BackingFileIo(config.path.clone(), e))?;
-                raw_file
-                    .rewind()
-                    .map_err(|e| Error::BackingFileIo(config.path.clone(), e))?;
+                let size = raw_file.seek(SeekFrom::End(0)).map_err(|e| {
+                    BlockError::new(
+                        BlockErrorKind::Io,
+                        Error::BackingFileIo(config.path.clone(), e),
+                    )
+                })?;
+                raw_file.rewind().map_err(|e| {
+                    BlockError::new(
+                        BlockErrorKind::Io,
+                        Error::BackingFileIo(config.path.clone(), e),
+                    )
+                })?;
                 (BackingKind::Raw(raw_file), size)
             }
             ImageType::Qcow2 => {
@@ -404,9 +415,12 @@ pub(crate) fn parse_qcow(
     )?;
 
     // Validate refcount order to be 0..6
-    let refcount_bits: u64 = 0x01u64
-        .checked_shl(header.refcount_order)
-        .ok_or(Error::UnsupportedRefcountOrder)?;
+    let refcount_bits: u64 = 0x01u64.checked_shl(header.refcount_order).ok_or_else(|| {
+        BlockError::new(
+            BlockErrorKind::UnsupportedFeature,
+            Error::UnsupportedRefcountOrder,
+        )
+    })?;
     if refcount_bits > 64 {
         return Err(BlockError::new(
             BlockErrorKind::UnsupportedFeature,
@@ -421,11 +435,17 @@ pub(crate) fn parse_qcow(
             Error::NoRefcountClusters,
         ));
     }
-    offset_is_cluster_boundary(header.l1_table_offset, header.cluster_bits)?;
-    offset_is_cluster_boundary(header.snapshots_offset, header.cluster_bits)?;
+    offset_is_cluster_boundary(header.l1_table_offset, header.cluster_bits)
+        .map_err(|e| BlockError::new(BlockErrorKind::CorruptImage, e))?;
+    offset_is_cluster_boundary(header.snapshots_offset, header.cluster_bits)
+        .map_err(|e| BlockError::new(BlockErrorKind::CorruptImage, e))?;
     // refcount table must be a cluster boundary, and within the file's virtual or actual size.
-    offset_is_cluster_boundary(header.refcount_table_offset, header.cluster_bits)?;
-    let file_size = file.metadata().map_err(Error::GettingFileSize)?.len();
+    offset_is_cluster_boundary(header.refcount_table_offset, header.cluster_bits)
+        .map_err(|e| BlockError::new(BlockErrorKind::CorruptImage, e))?;
+    let file_size = file
+        .metadata()
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingFileSize(e)))?
+        .len();
     if header.refcount_table_offset > max(file_size, header.size) {
         return Err(BlockError::new(
             BlockErrorKind::CorruptImage,
@@ -437,12 +457,14 @@ pub(crate) fn parse_qcow(
     // this is an old file with broken refcounts, which requires a rebuild.
     let mut refcount_rebuild_required = true;
     file.seek(SeekFrom::Start(header.refcount_table_offset))
-        .map_err(Error::SeekingFile)?;
-    let first_refblock_addr = u64::read_be(&mut file).map_err(Error::ReadingHeader)?;
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
+    let first_refblock_addr = u64::read_be(&mut file)
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?;
     if first_refblock_addr != 0 {
         file.seek(SeekFrom::Start(first_refblock_addr))
-            .map_err(Error::SeekingFile)?;
-        let first_cluster_refcount = u16::read_be(&mut file).map_err(Error::ReadingHeader)?;
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
+        let first_cluster_refcount = u16::read_be(&mut file)
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?;
         if first_cluster_refcount != 0 {
             refcount_rebuild_required = false;
         }
@@ -452,8 +474,8 @@ pub(crate) fn parse_qcow(
         refcount_rebuild_required = true;
     }
 
-    let mut raw_file =
-        QcowRawFile::from(file, cluster_size, refcount_bits).ok_or(Error::InvalidClusterSize)?;
+    let mut raw_file = QcowRawFile::from(file, cluster_size, refcount_bits)
+        .ok_or_else(|| BlockError::new(BlockErrorKind::InvalidFormat, Error::InvalidClusterSize))?;
     let is_writable = raw_file.file().is_writable();
 
     if header.is_corrupt() {
@@ -499,7 +521,7 @@ pub(crate) fn parse_qcow(
                 num_l2_clusters,
                 Some(L1_TABLE_OFFSET_MASK),
             )
-            .map_err(Error::ReadingHeader)?,
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingHeader(e)))?,
     );
 
     let num_clusters = div_round_up_u64(header.size, cluster_size);
@@ -530,7 +552,7 @@ pub(crate) fn parse_qcow(
         cluster_size,
         refcount_bits,
     )
-    .map_err(Error::ReadingRefCounts)?;
+    .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::ReadingRefCounts(e)))?;
 
     let l2_entries = cluster_size / size_of::<u64>() as u64;
 
@@ -539,23 +561,30 @@ pub(crate) fn parse_qcow(
     header
         .l1_table_offset
         .checked_add(l1_index * size_of::<u64>() as u64)
-        .ok_or(Error::InvalidL1TableOffset)?;
+        .ok_or_else(|| {
+            BlockError::new(BlockErrorKind::CorruptImage, Error::InvalidL1TableOffset)
+        })?;
     header
         .refcount_table_offset
         .checked_add(u64::from(header.refcount_table_clusters) * cluster_size)
-        .ok_or(Error::InvalidRefcountTableOffset)?;
+        .ok_or_else(|| {
+            BlockError::new(
+                BlockErrorKind::CorruptImage,
+                Error::InvalidRefcountTableOffset,
+            )
+        })?;
 
     // Find available (refcount == 0) clusters for the free list.
     let file_size = raw_file
         .file_mut()
         .metadata()
-        .map_err(Error::GettingFileSize)?
+        .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingFileSize(e)))?
         .len();
     let mut avail_clusters = Vec::new();
     for i in (0..file_size).step_by(cluster_size as usize) {
         let refcount = refcounts
             .get_cluster_refcount(&mut raw_file, i)
-            .map_err(Error::GettingRefcount)?;
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::GettingRefcount(e)))?;
         if refcount == 0 {
             avail_clusters.push(i);
         }
@@ -567,10 +596,17 @@ pub(crate) fn parse_qcow(
         {
             header
                 .set_dirty_bit(raw_file.file_mut(), true)
-                .map_err(|e| Error::WritingHeader(io::Error::other(e)))?;
+                .map_err(|e| {
+                    BlockError::new(
+                        BlockErrorKind::Io,
+                        Error::WritingHeader(io::Error::other(e)),
+                    )
+                })?;
         }
 
-        header.clear_autoclear_features(raw_file.file_mut())?;
+        header
+            .clear_autoclear_features(raw_file.file_mut())
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
     }
 
     let inner = metadata::QcowState {
