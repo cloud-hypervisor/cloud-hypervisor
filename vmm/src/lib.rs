@@ -1308,6 +1308,8 @@ impl Vmm {
     fn do_memory_migration(
         vm: &mut Vm,
         socket: &mut SocketStream,
+        // Used in next commit
+        _send_data_migration: &VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
         const MAX_ITERATIONS: usize = 5;
 
@@ -1424,7 +1426,7 @@ impl Vmm {
             // Now pause VM
             vm.pause()?;
         } else {
-            Self::do_memory_migration(vm, &mut socket)?;
+            Self::do_memory_migration(vm, &mut socket, send_data_migration)?;
         }
 
         // We release the locks early to enable locking them on the destination host.
@@ -2438,8 +2440,12 @@ impl RequestHandler for Vmm {
         send_data_migration: VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
         info!(
-            "Sending migration: destination_url = {}, local = {}",
-            send_data_migration.destination_url, send_data_migration.local
+            "Sending migration: destination_url={},local={},downtime={}ms,timeout={}s,timeout_strategy={:?}",
+            send_data_migration.destination_url,
+            send_data_migration.local,
+            send_data_migration.downtime().as_millis(),
+            send_data_migration.timeout().as_secs(),
+            send_data_migration.timeout_strategy
         );
 
         if !self
