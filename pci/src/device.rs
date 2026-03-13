@@ -113,5 +113,5 @@ pub trait DeviceRelocation: Send + Sync {
         len: u64,
         pci_dev: &mut dyn PciDevice,
         region_type: PciBarRegionType,
-    ) -> result::Result<(), io::Error>;
+    ) -> result::Result<(), anyhow::Error>;
 }

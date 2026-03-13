@@ -892,14 +892,26 @@ impl VirtioPciDevice {
 }
 
 impl VirtioTransport for VirtioPciDevice {
-    fn ioeventfds(&self, base_addr: u64) -> impl Iterator<Item = (&EventFd, u64)> {
-        let notify_base = base_addr + NOTIFICATION_BAR_OFFSET;
-        self.queue_evts().iter().enumerate().map(move |(i, event)| {
-            (
+    fn ioeventfds(
+        &self,
+        old_base_addr: u64,
+        new_base_addr: u64,
+        cb: &mut dyn for<'a> FnMut(
+            &'a vmm_sys_util::eventfd::EventFd,
+            u64,
+            u64,
+        ) -> std::result::Result<(), super::IoeventfdError>,
+    ) -> std::result::Result<(), super::IoeventfdError> {
+        let old_notify_base = old_base_addr + NOTIFICATION_BAR_OFFSET;
+        let new_notify_base = new_base_addr + NOTIFICATION_BAR_OFFSET;
+        for (i, event) in self.queue_evts().iter().enumerate() {
+            cb(
                 event,
-                notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
-            )
-        })
+                old_notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
+                new_notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -1257,22 +1269,26 @@ impl PciDevice for VirtioPciDevice {
                 .contains(&o) =>
             {
                 #[cfg(feature = "sev_snp")]
-                for (event, addr) in self.ioeventfds(_base) {
+                self.ioeventfds(_base, _base, &mut |event, addr, _| {
                     if addr == _base + offset {
                         event.write(1).unwrap();
                     }
-                }
+                    Result::Ok(())
+                })
+                .unwrap();
                 // Handled with ioeventfds.
                 #[cfg(not(feature = "sev_snp"))]
                 error!("Unexpected write to notification BAR: offset = 0x{o:x}");
             }
             o if (DOORBELL_BAR_OFFSET..DOORBELL_BAR_OFFSET + DOORBELL_BAR_SIZE).contains(&o) => {
                 #[cfg(feature = "sev_snp")]
-                for (event, addr) in self.ioeventfds(_base) {
+                self.ioeventfds(_base, _base, &mut |event, addr, _| {
                     if addr == _base + offset {
                         event.write(1).unwrap();
                     }
-                }
+                    Result::Ok(())
+                })
+                .unwrap();
                 // Handled with ioeventfds.
                 #[cfg(not(feature = "sev_snp"))]
                 error!("Unexpected write to doorbell BAR: offset = 0x{o:x}");
