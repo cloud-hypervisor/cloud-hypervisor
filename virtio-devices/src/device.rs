@@ -24,7 +24,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::{
     ActivateError, ActivateResult, Error, GuestMemoryMmap, GuestRegionMmap, MmapRegion,
-    VIRTIO_F_RING_INDIRECT_DESC,
+    VIRTIO_F_RING_INDIRECT_DESC, transport,
 };
 
 pub enum VirtioInterruptType {
@@ -165,6 +165,31 @@ pub trait VirtioDevice: Send {
         &mut self,
         _region: &Arc<GuestRegionMmap>,
     ) -> std::result::Result<(), Error> {
+        Ok(())
+    }
+
+    /// Tell the device to call the provided callback with each ioeventfd
+    /// it has registered, along with the corresponding old and new base
+    /// addresses.  Core code uses this to unregister and reregister ioeventfds.
+    /// when a device's base address changes.  If new_base_addr does not
+    /// equal old_base_addr, this means the base address is being moved.
+    ///
+    /// The provided base address must be used for subsequent ioeventfd
+    /// registrations.
+    ///
+    /// Implementations must return Err the first time the callback
+    /// returns Err, and Ok iff the callback never returns Err.
+    /// This is checked at runtime and a panic will happen if the
+    /// rule is not followed.
+    ///
+    /// Most devices should use the default implementation.
+    #[allow(unused_variables)]
+    fn ioeventfds(
+        &self,
+        old_base_addr: u64,
+        new_base_addr: u64,
+        cb: &mut dyn FnMut(&EventFd, u64, u64) -> Result<(), transport::IoeventfdError>,
+    ) -> Result<(), transport::IoeventfdError> {
         Ok(())
     }
 

@@ -16,6 +16,12 @@ pub enum IoeventfdError {
 }
 
 pub trait VirtioTransport {
+    // Function to call whenever a BAR is moved.
+    // Pass the old and new base addresses of the BAR.
+    // The device will invoke the callback with each
+    // each ioeventfd that needs to be unregistered
+    // from the old address (second argument to the callback)
+    // and registered at the new address (third argument).
     fn ioeventfds(
         &self,
         old_base_addr: u64,

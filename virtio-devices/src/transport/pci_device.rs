@@ -911,7 +911,10 @@ impl VirtioTransport for VirtioPciDevice {
                 new_notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
             )?;
         }
-        Ok(())
+        self.device
+            .lock()
+            .unwrap()
+            .ioeventfds(old_base_addr, new_base_addr, cb)
     }
 }
 
