@@ -118,6 +118,15 @@ impl VirtioInterrupt for NoopVirtioInterrupt {
     fn trigger(&self, _int_type: VirtioInterruptType) -> std::result::Result<(), std::io::Error> {
         Ok(())
     }
+
+    fn set_notifier(
+        &self,
+        _interrupt: u32,
+        _eventfd: Option<EventFd>,
+        _vm: &dyn hypervisor::Vm,
+    ) -> std::io::Result<()> {
+        unimplemented!()
+    }
 }
 
 macro_rules! align {

@@ -188,6 +188,15 @@ pub mod unit_tests {
         ) -> std::result::Result<(), std::io::Error> {
             Ok(())
         }
+
+        fn set_notifier(
+            &self,
+            _interrupt: u32,
+            _eventfd: Option<EventFd>,
+            _vm: &dyn hypervisor::Vm,
+        ) -> std::io::Result<()> {
+            unimplemented!()
+        }
     }
 
     pub struct TestBackend {
