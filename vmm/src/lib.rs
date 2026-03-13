@@ -13,6 +13,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, RecvError, SendError, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 #[cfg(not(target_arch = "riscv64"))]
 use std::time::Instant;
 use std::{io, result, thread};
@@ -48,8 +49,8 @@ use vmm_sys_util::signal::unblock_signal;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket;
 
 use crate::api::{
-    ApiRequest, ApiResponse, RequestHandler, VmInfoResponse, VmReceiveMigrationData,
-    VmSendMigrationData, VmmPingResponse,
+    ApiRequest, ApiResponse, RequestHandler, TimeoutStrategy, VmInfoResponse,
+    VmReceiveMigrationData, VmSendMigrationData, VmmPingResponse,
 };
 use crate::config::{RestoreConfig, add_to_config};
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -1256,7 +1257,7 @@ impl Vmm {
         vm: &mut Vm,
         socket: &mut SocketStream,
         ctx: &mut MemoryMigrationContext,
-        is_converged: impl Fn(&MemoryMigrationContext) -> bool,
+        is_converged: impl Fn(&MemoryMigrationContext) -> result::Result<bool, MigratableError>,
     ) -> result::Result<MemoryRangeTable /* remaining */, MigratableError> {
         loop {
             let iteration_begin = Instant::now();
@@ -1269,7 +1270,7 @@ impl Vmm {
             };
 
             ctx.update_metrics_before_transfer(iteration_begin, &iteration_table);
-            if is_converged(ctx) {
+            if is_converged(ctx)? {
                 debug!("Precopy converged: {ctx}");
                 break Ok(iteration_table);
             }
@@ -1306,14 +1307,62 @@ impl Vmm {
     fn do_memory_migration(
         vm: &mut Vm,
         socket: &mut SocketStream,
-        _send_data_migration: &VmSendMigrationData,
+        send_data_migration: &VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
-        const MAX_ITERATIONS: usize = 5;
-
         let mut ctx = MemoryMigrationContext::new();
+
+        // Closure checking all convergence criteria:
         let is_converged = |ctx: &MemoryMigrationContext| {
-            // TODO: Add check for configurable downtime and max migration time #7111
-            ctx.iteration >= MAX_ITERATIONS || ctx.current_iteration_total_bytes == 0
+            if ctx.current_iteration_total_bytes == 0 {
+                debug!("Precopy: No more memory to transfer");
+                return Ok(true);
+            }
+
+            // We currently ignore the time required to transfer the final
+            // VM state (device state and vCPUs) and the time needed on the
+            // receiver to create the VM and initialize its data structures
+            // before execution can resume.
+            //
+            // Manual testing showed that migrating an idle VM on a modern
+            // AMD CPU (CHV release build) adds ~5 ms of overhead when
+            // scaling from 1 to 200 vCPUs. Given this small cost, we
+            // deliberately avoid additional heuristics to estimate the
+            // downtime more precisely - for now. Instead, we approximate
+            // the downtime just by the transfer time of the final memory
+            // delta.
+            if let Some(memory_downtime) = ctx.estimated_downtime
+                && memory_downtime.as_millis() as u64 <= send_data_migration.downtime_ms.get()
+            {
+                debug!(
+                    "Precopy: Target downtime can be met! {}ms <= {}ms",
+                    memory_downtime.as_millis(),
+                    send_data_migration.downtime_ms.get()
+                );
+                return Ok(true);
+            }
+
+            // We check the beginning of the precopy migration and not the overall migration, and
+            // this is fine: precopy takes the longest and the earlier steps are negligible.
+            if ctx.migration_begin.elapsed().as_secs() >= send_data_migration.timeout_s.get() {
+                return match send_data_migration.timeout_strategy {
+                    TimeoutStrategy::Cancel => Err(MigratableError::MigrateSend(anyhow!(
+                        "Timeout reached: migration didn't converge in {}s",
+                        send_data_migration.timeout_s.get()
+                    ))),
+                    TimeoutStrategy::Force => {
+                        info!(
+                            "Precopy: Timeout reached: {}s. Forcing migration as specified. estimated downtime={}ms",
+                            send_data_migration.timeout_s.get(),
+                            ctx.estimated_downtime
+                                .unwrap_or(Duration::from_secs(0))
+                                .as_millis()
+                        );
+                        Ok(true)
+                    }
+                };
+            }
+
+            Ok(false)
         };
 
         vm.start_dirty_log()?;
