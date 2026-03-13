@@ -570,7 +570,7 @@ mod unit_tests {
             _len: u64,
             _pci_dev: &mut dyn pci::PciDevice,
             _region_type: pci::PciBarRegionType,
-        ) -> Result<(), std::io::Error> {
+        ) -> Result<(), anyhow::Error> {
             Ok(())
         }
     }
