@@ -36,7 +36,7 @@ use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
 
 use super::pci_common_config::VirtioPciCommonConfigState;
-use crate::transport::{VIRTIO_PCI_COMMON_CONFIG_ID, VirtioPciCommonConfig, VirtioTransport};
+use crate::transport::{VIRTIO_PCI_COMMON_CONFIG_ID, VirtioPciCommonConfig};
 use crate::{
     ActivateResult, DEVICE_ACKNOWLEDGE, DEVICE_DRIVER, DEVICE_DRIVER_OK, DEVICE_FAILED,
     DEVICE_FEATURES_OK, DEVICE_INIT, GuestMemoryMmap, VirtioDevice, VirtioDeviceType,
@@ -880,8 +880,8 @@ impl VirtioPciDevice {
     }
 }
 
-impl VirtioTransport for VirtioPciDevice {
-    fn ioeventfds(&self, base_addr: u64) -> impl Iterator<Item = (&EventFd, u64)> {
+impl VirtioPciDevice {
+    pub fn ioeventfds(&self, base_addr: u64) -> impl Iterator<Item = (&EventFd, u64)> {
         let notify_base = base_addr + NOTIFICATION_BAR_OFFSET;
         self.queue_evts().iter().enumerate().map(move |(i, event)| {
             (
