@@ -14402,11 +14402,11 @@ mod rate_limiter {
 
         let test_blk_params = if bandwidth {
             format!(
-                "path={blk_rate_limiter_test_img},num_queues={num_queues},bw_size={bw_size},bw_refill_time={bw_refill_time}"
+                "path={blk_rate_limiter_test_img},num_queues={num_queues},bw_size={bw_size},bw_refill_time={bw_refill_time},image_type=raw"
             )
         } else {
             format!(
-                "path={blk_rate_limiter_test_img},num_queues={num_queues},ops_size={bw_size},ops_refill_time={bw_refill_time}"
+                "path={blk_rate_limiter_test_img},num_queues={num_queues},ops_size={bw_size},ops_refill_time={bw_refill_time},image_type=raw"
             )
         };
 
@@ -14512,7 +14512,7 @@ mod rate_limiter {
             );
 
             disk_args.push(format!(
-                "path={test_img_path},num_queues={num_queues},rate_limit_group=group0"
+                "path={test_img_path},num_queues={num_queues},rate_limit_group=group0,image_type=raw"
             ));
         }
 
