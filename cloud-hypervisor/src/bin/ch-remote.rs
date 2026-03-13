@@ -957,6 +957,9 @@ fn send_migration_data(url: &str, local: bool) -> String {
     let send_migration_data = vmm::api::VmSendMigrationData {
         destination_url: url.to_owned(),
         local,
+        downtime_ms: vmm::api::VmSendMigrationData::DEFAULT_DOWNTIME_MS,
+        timeout_s: vmm::api::VmSendMigrationData::DEFAULT_TIMEOUT_S,
+        timeout_strategy: Default::default(),
     };
 
     serde_json::to_string(&send_migration_data).unwrap()
