@@ -881,14 +881,19 @@ impl VirtioPciDevice {
 }
 
 impl VirtioPciDevice {
-    pub fn ioeventfds(&self, base_addr: u64) -> impl Iterator<Item = (&EventFd, u64)> {
+    pub fn ioeventfds<T>(
+        &self,
+        base_addr: u64,
+        cb: &mut dyn FnMut(&EventFd, u64) -> core::result::Result<(), T>,
+    ) -> core::result::Result<(), T> {
         let notify_base = base_addr + NOTIFICATION_BAR_OFFSET;
-        self.queue_evts().iter().enumerate().map(move |(i, event)| {
-            (
+        for (i, event) in self.queue_evts().iter().enumerate() {
+            cb(
                 event,
                 notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
-            )
-        })
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -1243,22 +1248,26 @@ impl PciDevice for VirtioPciDevice {
                 .contains(&o) =>
             {
                 #[cfg(feature = "sev_snp")]
-                for (event, addr) in self.ioeventfds(_base) {
+                self.ioeventfds(_base, &mut |event, addr| {
                     if addr == _base + offset {
                         event.write(1).unwrap();
                     }
-                }
+                    Result::Ok(())
+                })
+                .unwrap();
                 // Handled with ioeventfds.
                 #[cfg(not(feature = "sev_snp"))]
                 error!("Unexpected write to notification BAR: offset = 0x{o:x}");
             }
             o if (DOORBELL_BAR_OFFSET..DOORBELL_BAR_OFFSET + DOORBELL_BAR_SIZE).contains(&o) => {
                 #[cfg(feature = "sev_snp")]
-                for (event, addr) in self.ioeventfds(_base) {
+                self.ioeventfds(_base, &mut |event, addr| {
                     if addr == _base + offset {
                         event.write(1).unwrap();
                     }
-                }
+                    Result::Ok(())
+                })
+                .unwrap();
                 // Handled with ioeventfds.
                 #[cfg(not(feature = "sev_snp"))]
                 error!("Unexpected write to doorbell BAR: offset = 0x{o:x}");

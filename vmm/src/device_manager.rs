@@ -818,20 +818,18 @@ impl DeviceRelocation for AddressManager {
         if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
             let bar_addr = virtio_pci_dev.config_bar_addr();
             if bar_addr == new_base {
-                for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
+                virtio_pci_dev.ioeventfds(old_base, &mut |event, addr| {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.vm.unregister_ioevent(event, &io_addr).map_err(|e| {
                         io::Error::other(format!("failed to unregister ioevent: {e:?}"))
-                    })?;
-                }
-                for (event, addr) in virtio_pci_dev.ioeventfds(new_base) {
+                    })
+                })?;
+                virtio_pci_dev.ioeventfds(new_base, &mut |event, addr| {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.vm
                         .register_ioevent(event, &io_addr, None)
-                        .map_err(|e| {
-                            io::Error::other(format!("failed to register ioevent: {e:?}"))
-                        })?;
-                }
+                        .map_err(|e| io::Error::other(format!("failed to register ioevent: {e:?}")))
+                })?;
             } else {
                 let virtio_dev = virtio_pci_dev.virtio_device();
                 let mut virtio_dev = virtio_dev.lock().unwrap();
@@ -4314,13 +4312,16 @@ impl DeviceManager {
         )?;
 
         let bar_addr = virtio_pci_device.lock().unwrap().config_bar_addr();
-        for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
-            let io_addr = IoEventAddress::Mmio(addr);
-            self.address_manager
-                .vm
-                .register_ioevent(event, &io_addr, None)
-                .map_err(|e| DeviceManagerError::RegisterIoevent(e.into()))?;
-        }
+        virtio_pci_device
+            .lock()
+            .unwrap()
+            .ioeventfds(bar_addr, &mut |event, addr| {
+                let io_addr = IoEventAddress::Mmio(addr);
+                self.address_manager
+                    .vm
+                    .register_ioevent(event, &io_addr, None)
+                    .map_err(|e| DeviceManagerError::RegisterIoevent(e.into()))
+            })?;
 
         // Update the device tree with correct resource information.
         node.resources = new_resources;
@@ -4791,13 +4792,13 @@ impl DeviceManager {
             PciDeviceHandle::Virtio(virtio_pci_device) => {
                 let dev = virtio_pci_device.lock().unwrap();
                 let bar_addr = dev.config_bar_addr();
-                for (event, addr) in dev.ioeventfds(bar_addr) {
+                dev.ioeventfds(bar_addr, &mut |event, addr| {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.address_manager
                         .vm
                         .unregister_ioevent(event, &io_addr)
-                        .map_err(|e| DeviceManagerError::UnRegisterIoevent(e.into()))?;
-                }
+                        .map_err(|e| DeviceManagerError::UnRegisterIoevent(e.into()))
+                })?;
 
                 if let Some(dma_handler) = dev.dma_handler()
                     && !iommu_attached
