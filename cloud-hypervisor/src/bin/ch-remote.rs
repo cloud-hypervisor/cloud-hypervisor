@@ -9,6 +9,7 @@ mod test_util;
 
 use std::io::Read;
 use std::marker::PhantomData;
+use std::num::NonZeroU64;
 use std::os::unix::net::UnixStream;
 use std::process;
 
@@ -523,6 +524,23 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                     .subcommand_matches("send-migration")
                     .unwrap()
                     .get_flag("send_migration_local"),
+                matches
+                    .subcommand_matches("send-migration")
+                    .unwrap()
+                    .get_one::<u64>("downtime-ms")
+                    .and_then(|&d| NonZeroU64::new(d))
+                    .unwrap(),
+                matches
+                    .subcommand_matches("send-migration")
+                    .unwrap()
+                    .get_one::<u64>("timeout-s")
+                    .and_then(|&d| NonZeroU64::new(d))
+                    .unwrap(),
+                *matches
+                    .subcommand_matches("send-migration")
+                    .unwrap()
+                    .get_one::<vmm::api::TimeoutStrategy>("timeout-strategy")
+                    .unwrap(),
             );
             simple_api_command(socket, "PUT", "send-migration", Some(&send_migration_data))
                 .map_err(Error::HttpApiClient)
@@ -747,6 +765,23 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
                     .subcommand_matches("send-migration")
                     .unwrap()
                     .get_flag("send_migration_local"),
+                matches
+                    .subcommand_matches("send-migration")
+                    .unwrap()
+                    .get_one::<u64>("downtime-ms")
+                    .and_then(|&d| NonZeroU64::new(d))
+                    .unwrap(),
+                matches
+                    .subcommand_matches("send-migration")
+                    .unwrap()
+                    .get_one::<u64>("timeout-s")
+                    .and_then(|&d| NonZeroU64::new(d))
+                    .unwrap(),
+                *matches
+                    .subcommand_matches("send-migration")
+                    .unwrap()
+                    .get_one::<vmm::api::TimeoutStrategy>("timeout-strategy")
+                    .unwrap(),
             );
             proxy.api_vm_send_migration(&send_migration_data)
         }
@@ -953,13 +988,19 @@ fn receive_migration_data(url: &str) -> String {
     serde_json::to_string(&receive_migration_data).unwrap()
 }
 
-fn send_migration_data(url: &str, local: bool) -> String {
+fn send_migration_data(
+    url: &str,
+    local: bool,
+    downtime_ms: NonZeroU64,
+    timeout_s: NonZeroU64,
+    timeout_strategy: vmm::api::TimeoutStrategy,
+) -> String {
     let send_migration_data = vmm::api::VmSendMigrationData {
         destination_url: url.to_owned(),
         local,
-        downtime_ms: vmm::api::VmSendMigrationData::DEFAULT_DOWNTIME_MS,
-        timeout_s: vmm::api::VmSendMigrationData::DEFAULT_TIMEOUT_S,
-        timeout_strategy: Default::default(),
+        downtime_ms,
+        timeout_s,
+        timeout_strategy,
     };
 
     serde_json::to_string(&send_migration_data).unwrap()
@@ -1142,6 +1183,17 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
         Command::new("send-migration")
             .about("Initiate a VM migration")
             .arg(
+                Arg::new("downtime-ms")
+                    .long("downtime-ms")
+                    .help("The maximum downtime the migration aims for, in milliseconds.")
+                    .num_args(1)
+                    .value_parser(clap::value_parser!(u64))
+                    .default_value(format!(
+                        "{}",
+                        vmm::api::VmSendMigrationData::DEFAULT_DOWNTIME_MS
+                    )),
+            )
+            .arg(
                 Arg::new("send_migration_config")
                     .index(1)
                     .help("<destination_url>"),
@@ -1149,8 +1201,28 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .arg(
                 Arg::new("send_migration_local")
                     .long("local")
+                    .help("Perform a same-host non-TCP migration.")
                     .num_args(0)
                     .action(ArgAction::SetTrue),
+            )
+            .arg(
+                Arg::new("timeout-s")
+                    .long("timeout-s")
+                    .help("The timeout for the migration (maximum total duration), in seconds.")
+                    .num_args(1)
+                    .value_parser(clap::value_parser!(u64))
+                    .default_value(format!(
+                        "{}",
+                        vmm::api::VmSendMigrationData::DEFAULT_TIMEOUT_S
+                    )),
+            )
+            .arg(
+                Arg::new("timeout-strategy")
+                    .long("timeout-strategy")
+                    .help("The strategy to apply when the migration timeout is reached.")
+                    .num_args(1)
+                    .value_parser(clap::value_parser!(vmm::api::TimeoutStrategy))
+                    .default_value(format!("{}", vmm::api::TimeoutStrategy::default())),
             ),
         Command::new("shutdown").about("Shutdown the VM"),
         Command::new("shutdown-vmm").about("Shutdown the VMM"),
