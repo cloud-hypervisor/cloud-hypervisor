@@ -899,9 +899,12 @@ fn create_acpi_tables_internal(
     {
         let pptt = cpu_manager.lock().unwrap().create_pptt();
         let pptt_addr = prev_tbl_addr.checked_add(prev_tbl_len).unwrap();
-        tables_bytes.extend_from_slice(pptt.as_slice());
+        let mut pptt_bytes = Vec::new();
+
+        pptt.to_aml_bytes(&mut pptt_bytes);
+        tables_bytes.extend_from_slice(&pptt_bytes);
         xsdt_table_pointers.push(pptt_addr.0);
-        prev_tbl_len = pptt.len() as u64;
+        prev_tbl_len = pptt_bytes.len() as u64;
         prev_tbl_addr = pptt_addr;
     }
 
