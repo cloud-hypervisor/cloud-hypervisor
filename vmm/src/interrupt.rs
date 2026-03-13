@@ -21,13 +21,16 @@ pub type Result<T> = std::io::Result<T>;
 
 struct InterruptRoute {
     gsi: u32,
-    irq_fd: EventFd,
+    irq_fd: Option<EventFd>,
     registered: bool,
 }
 
 impl InterruptRoute {
     pub fn new(allocator: &mut SystemAllocator) -> Result<Self> {
-        let irq_fd = EventFd::new(libc::EFD_NONBLOCK)?;
+        Self::new_with_fd(allocator, Some(EventFd::new(libc::EFD_NONBLOCK)?))
+    }
+
+    pub fn new_with_fd(allocator: &mut SystemAllocator, irq_fd: Option<EventFd>) -> Result<Self> {
         let gsi = allocator
             .allocate_gsi()
             .ok_or_else(|| io::Error::other("Failed allocating new GSI"))?;
@@ -41,8 +44,10 @@ impl InterruptRoute {
 
     pub fn enable(&mut self, vm: &dyn hypervisor::Vm) -> Result<()> {
         if !self.registered {
-            vm.register_irqfd(&self.irq_fd, self.gsi)
-                .map_err(|e| io::Error::other(format!("Failed registering irq_fd: {e}")))?;
+            if let Some(ref irq_fd) = self.irq_fd {
+                vm.register_irqfd(irq_fd, self.gsi)
+                    .map_err(|e| io::Error::other(format!("Failed registering irq_fd: {e}")))?;
+            }
 
             // Update internals to track the irq_fd as "registered".
             self.registered = true;
@@ -53,8 +58,10 @@ impl InterruptRoute {
 
     pub fn disable(&mut self, vm: &dyn hypervisor::Vm) -> Result<()> {
         if self.registered {
-            vm.unregister_irqfd(&self.irq_fd, self.gsi)
-                .map_err(|e| io::Error::other(format!("Failed unregistering irq_fd: {e}")))?;
+            if let Some(ref irq_fd) = self.irq_fd {
+                vm.unregister_irqfd(irq_fd, self.gsi)
+                    .map_err(|e| io::Error::other(format!("Failed unregistering irq_fd: {e}")))?;
+            }
 
             // Update internals to track the irq_fd as "unregistered".
             self.registered = false;
@@ -64,15 +71,43 @@ impl InterruptRoute {
     }
 
     pub fn trigger(&mut self) -> Result<()> {
-        self.irq_fd.write(1)
+        match self.irq_fd {
+            Some(ref fd) => fd.write(1),
+            None => Ok(()),
+        }
     }
 
     pub fn notifier(&mut self) -> Option<EventFd> {
         Some(
             self.irq_fd
+                .as_ref()?
                 .try_clone()
                 .expect("Failed cloning interrupt's EventFd"),
         )
+    }
+
+    #[allow(dead_code)]
+    pub fn set_notifier(
+        &mut self,
+        eventfd: Option<EventFd>,
+        vm: &dyn hypervisor::Vm,
+    ) -> Result<()> {
+        let old_irqfd = core::mem::replace(&mut self.irq_fd, eventfd);
+        if self.registered {
+            if let Some(ref irq_fd) = self.irq_fd {
+                vm.register_irqfd(irq_fd, self.gsi)
+                    .map_err(|e| io::Error::other(format!("Failed registering irq_fd: {e}")))?
+            }
+            // If the irqfd cannot be unregistered, what to do?  Spin?
+            // Returning an error isn't helpful as the new irqfd is already registered.
+            if let Some(old_irq_fd) = old_irqfd {
+                match vm.unregister_irqfd(&old_irq_fd, self.gsi) {
+                    Ok(()) => {}
+                    Err(e) => log::warn!("Failed unregistering old irqfd: {e}"),
+                }
+            }
+        }
+        Ok(())
     }
 }
 
