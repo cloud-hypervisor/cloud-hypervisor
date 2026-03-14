@@ -24,6 +24,8 @@ pub mod qcow_sync;
 /// Enabled with the `"io_uring"` feature
 pub mod raw_async;
 pub mod raw_async_aio;
+#[cfg(test)]
+mod raw_async_io_tests;
 pub mod raw_sync;
 pub mod vhd;
 pub mod vhdx;
