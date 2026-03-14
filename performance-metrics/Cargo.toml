@@ -5,8 +5,10 @@ name = "performance-metrics"
 version = "0.1.0"
 
 [dependencies]
+block = { path = "../block" }
 clap = { workspace = true, features = ["wrap_help"] }
 dirs = { workspace = true }
+libc = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 test_infra = { path = "../test_infra" }
