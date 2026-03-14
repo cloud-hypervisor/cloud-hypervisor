@@ -3,8 +3,9 @@
 This document gives examples of how to use the live migration support
 in Cloud Hypervisor:
 
-1. local migration - migrating a VM from one Cloud Hypervisor instance to another on the same machine;
-1. remote migration - migrating a VM between two machines;
+1. **local migration**: Migrating a VM from one Cloud Hypervisor instance to another on the same machine; also called
+  UNIX socket migration.
+1. **TCP migration**: migrating a VM between two TCP/IP hosts.
 
 > :warning: These examples place sockets in /tmp. This is done for
 > simplicity and should not be done in production.
@@ -28,7 +29,8 @@ Launch the destination VM from the same directory (on the host machine):
 $ target/release/cloud-hypervisor --api-socket=/tmp/api2
 ```
 
-Get ready for receiving migration for the destination VM (on the host machine):
+Get ready for receiving migration for the destination VM (on the host
+machine):
 
 ```console
 $ target/release/ch-remote --api-socket=/tmp/api2 receive-migration unix:/tmp/sock
@@ -44,7 +46,9 @@ When the above commands completed, the source VM should be successfully
 migrated to the destination VM. Now the destination VM is running while
 the source VM is terminated gracefully.
 
-## Remote Migration
+## TCP Migration (Remote Migration)
+
+_Hint: For developing purposes, same-host TCP migrations are also supported._
 
 In this example, we will migrate a VM from one machine (`src`) to
 another (`dst`) across the network. To keep it simple, we will use a
@@ -171,7 +175,13 @@ After a few seconds the VM should be up and you can interact with it.
 Initiate the Migration over TCP:
 
 ```console
-src $ ch-remote --api-socket=/tmp/api send-migration  tcp:{dst}:{port}
+src $ ch-remote --api-socket=/tmp/api send-migration tcp:{dst}:{port}
+```
+
+With migration parameters:
+
+```console
+src $ ch-remote --api-socket=/tmp/api send-migration tcp:{dst}:{port} --downtime-ms 300 --timeout-s 60 --timeout-strategy cancel 
 ```
 
 > Replace {dst}:{port} with the actual IP address and port of your destination host.
@@ -180,3 +190,20 @@ After completing the above commands, the source VM will be migrated to
 the destination host and continue running there. The source VM instance
 will terminate normally. All ongoing processes and connections within
 the VM should remain intact after the migration.
+
+#### Migration Parameters
+
+Cloud Hypervisor supports additional parameters to control the
+migration process. Via the API or `ch-remote`, you may specify:
+
+- `downtime-ms <milliseconds>`: \
+  The maximum downtime the migration aims for, in milliseconds.
+  Defaults to `300ms`.
+- `timeout-s <seconds>`: \
+  The timeout for the migration (maximum total duration), in seconds.
+  Defaults to `3600s` (one hour).
+- `timeout-strategy <strategy>` (`[cancel, force]`): \
+  The strategy to apply when the migration timeout is reached.
+  Cancel will abort the migration and keep the VM running on the source.
+  Force will proceed with the migration regardless of the downtime requirement.
+  Defaults to `cancel`.

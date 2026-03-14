@@ -1367,6 +1367,15 @@ components:
         receiver_url:
           type: string
 
+    TimeoutStrategy:
+      type: string
+      enum: ["Cancel", "Force"]
+      default: "Cancel"
+      description: >
+        The strategy to apply when the migration timeout is reached.
+        Cancel will abort the migration and keep the VM running on the source.
+        Force will proceed with the migration regardless of the downtime requirement.
+
     SendMigrationData:
       required:
         - destination_url
@@ -1376,6 +1385,24 @@ components:
           type: string
         local:
           type: boolean
+        downtime_ms:
+          type: integer
+          format: int64
+          minimum: 1
+          default: 300
+          description: >
+            The maximum downtime the migration aims for, in milliseconds.
+            Defaults to 300ms.
+        timeout_s:
+          type: integer
+          format: int64
+          minimum: 1
+          default: 3600
+          description: >
+            The timeout for the migration (maximum total duration), in seconds.
+            Defaults to 3600s (one hour).
+        timeout_strategy:
+          $ref: "#/components/schemas/TimeoutStrategy"
 
     VmAddUserDevice:
       required:

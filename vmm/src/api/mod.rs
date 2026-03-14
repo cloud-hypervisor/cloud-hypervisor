@@ -33,7 +33,9 @@
 pub mod dbus;
 pub mod http;
 
+use std::fmt::{Display, Formatter};
 use std::io;
+use std::num::NonZeroU64;
 use std::sync::mpsc::{RecvError, SendError, Sender, channel};
 
 use log::info;
@@ -266,13 +268,55 @@ pub struct VmReceiveMigrationData {
     pub receiver_url: String,
 }
 
-#[derive(Clone, Deserialize, Serialize, Default, Debug)]
+#[derive(Copy, Clone, Default, Deserialize, Serialize, Debug, clap::ValueEnum)]
+/// The migration timeout strategy.
+pub enum TimeoutStrategy {
+    #[default]
+    /// Cancel the migration and keep the VM running on the source.
+    Cancel,
+    /// Force the migration and ignore any downtime requirement.
+    Force,
+}
+
+impl Display for TimeoutStrategy {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TimeoutStrategy::Cancel => write!(f, "cancel"),
+            TimeoutStrategy::Force => write!(f, "force"),
+        }
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct VmSendMigrationData {
     /// URL to migrate the VM to
     pub destination_url: String,
     /// Send memory across socket without copying
     #[serde(default)]
     pub local: bool,
+    /// The maximum downtime the migration aims for.
+    #[serde(default = "VmSendMigrationData::default_downtime_ms")]
+    pub downtime_ms: NonZeroU64,
+    /// The timeout for the migration, i.e., the maximum duration.
+    #[serde(default = "VmSendMigrationData::default_timeout_s")]
+    pub timeout_s: NonZeroU64,
+    /// The timeout strategy for the migration.
+    #[serde(default)]
+    pub timeout_strategy: TimeoutStrategy,
+}
+
+impl VmSendMigrationData {
+    // Same as QEMU.
+    pub const DEFAULT_DOWNTIME_MS: NonZeroU64 = NonZeroU64::new(300).unwrap();
+    pub const DEFAULT_TIMEOUT_S: NonZeroU64 = NonZeroU64::new(60 * 60 /* one hour */).unwrap();
+
+    fn default_downtime_ms() -> NonZeroU64 {
+        Self::DEFAULT_DOWNTIME_MS
+    }
+
+    fn default_timeout_s() -> NonZeroU64 {
+        Self::DEFAULT_TIMEOUT_S
+    }
 }
 
 pub enum ApiResponsePayload {

@@ -42,7 +42,7 @@ bitflags = { workspace = true }
 block = { path = "../block" }
 blocking = { version = "1.6.2", optional = true }
 cfg-if = { workspace = true }
-clap = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
 devices = { path = "../devices" }
 dhat = { workspace = true, optional = true }
 epoll = { workspace = true }
