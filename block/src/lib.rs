@@ -45,7 +45,9 @@ use std::{cmp, mem, result};
 
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
-use libc::{S_IFBLK, S_IFMT, ioctl};
+use libc::{
+    FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE, S_IFBLK, S_IFMT, ioctl,
+};
 use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
@@ -807,10 +809,6 @@ pub fn probe_sparse_support(file: &File) -> bool {
 
 /// Probe sparse support for a regular file using fallocate().
 fn probe_file_sparse_support(fd: libc::c_int) -> bool {
-    const FALLOC_FL_KEEP_SIZE: libc::c_int = 0x01;
-    const FALLOC_FL_PUNCH_HOLE: libc::c_int = 0x02;
-    const FALLOC_FL_ZERO_RANGE: libc::c_int = 0x10;
-
     // SAFETY: FFI call with valid fd
     let file_size = unsafe { libc::lseek(fd, 0, libc::SEEK_END) };
     if file_size < 0 {
