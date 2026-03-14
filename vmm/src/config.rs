@@ -1925,7 +1925,7 @@ impl FsConfig {
 impl FwCfgConfig {
     pub const SYNTAX: &'static str = "Boot params to pass to FW CFG device \
     \"e820=on|off,kernel=on|off,cmdline=on|off,initramfs=on|off,acpi_table=on|off, \
-    items=[name0=<backing_file_path>,file0=<file_path>:name1=<backing_file_path>,file1=<file_path>]\"";
+    items=[name=<item_name>,file=<file_path>:name=<item_name>,string=<string_value>]\"";
     pub fn parse(fw_cfg_config: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
@@ -1998,7 +1998,7 @@ impl FwCfgConfig {
 impl FwCfgItem {
     pub fn parse(fw_cfg: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("name").add("file");
+        parser.add("name").add("file").add("string");
         parser.parse(fw_cfg).map_err(Error::ParseFwCfgItem)?;
 
         let name =
@@ -2007,13 +2007,19 @@ impl FwCfgItem {
                 .ok_or(Error::ParseFwCfgItem(OptionParserError::InvalidValue(
                     "missing FwCfgItem name".to_string(),
                 )))?;
-        let file = parser
-            .get("file")
-            .map(PathBuf::from)
-            .ok_or(Error::ParseFwCfgItem(OptionParserError::InvalidValue(
-                "missing FwCfgItem file path".to_string(),
-            )))?;
-        Ok(FwCfgItem { name, file })
+        let file = parser.get("file").map(PathBuf::from);
+        let string = parser.get("string");
+        if file.is_none() && string.is_none() {
+            return Err(Error::ParseFwCfgItem(OptionParserError::InvalidValue(
+                "FwCfgItem requires either 'file' or 'string'".to_string(),
+            )));
+        }
+        if file.is_some() && string.is_some() {
+            return Err(Error::ParseFwCfgItem(OptionParserError::InvalidValue(
+                "FwCfgItem cannot have both 'file' and 'string'".to_string(),
+            )));
+        }
+        Ok(FwCfgItem { name, file, string })
     }
 }
 
@@ -3101,6 +3107,31 @@ impl VmConfig {
                 self.iommu |= device.iommu;
 
                 Self::validate_identifier(&mut id_list, &device.id)?;
+            }
+
+            // Hint: when passthrough devices are used with SEV-SNP (e.g. GPU
+            // confidential computing), OVMF may need a large MMIO64 window.
+            // Suggest the fw_cfg opt/ovmf/X-PciMmio64Mb item if not set.
+            #[cfg(feature = "fw_cfg")]
+            if !devices.is_empty() {
+                let has_mmio64_cfg = self
+                    .payload
+                    .as_ref()
+                    .and_then(|p| p.fw_cfg_config.as_ref())
+                    .and_then(|c| c.items.as_ref())
+                    .is_some_and(|items| {
+                        items
+                            .item_list
+                            .iter()
+                            .any(|i| i.name.contains("X-PciMmio64Mb"))
+                    });
+                if !has_mmio64_cfg {
+                    debug!(
+                        "Hint: for large-BAR VFIO devices (e.g. GPUs), consider \
+                         setting --fw-cfg-config items=[name=opt/ovmf/X-PciMmio64Mb,\
+                         string=262144] to allocate a 256 GiB MMIO64 window in OVMF."
+                    );
+                }
             }
         }
 
@@ -5545,7 +5576,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         // Missing closing bracket
         FwCfgConfig::parse("items=[name=opt/org.test/fw_cfg_test_item,file=/tmp/fw_cfg_test_item")
             .unwrap_err();
-        // Single Item
+        // Single file Item
         assert_eq!(
             FwCfgConfig::parse(
                 "items=[name=opt/org.test/fw_cfg_test_item,file=/tmp/fw_cfg_test_item]"
@@ -5554,13 +5585,14 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 items: Some(FwCfgItemList {
                     item_list: vec![FwCfgItem {
                         name: "opt/org.test/fw_cfg_test_item".to_string(),
-                        file: PathBuf::from("/tmp/fw_cfg_test_item"),
+                        file: Some(PathBuf::from("/tmp/fw_cfg_test_item")),
+                        string: None,
                     }]
                 }),
                 ..Default::default()
             },
         );
-        // Multiple Items
+        // Multiple file Items
         assert_eq!(
             FwCfgConfig::parse(
                 "items=[name=opt/org.test/fw_cfg_test_item,file=/tmp/fw_cfg_test_item:name=opt/org.test/fw_cfg_test_item2,file=/tmp/fw_cfg_test_item2]"
@@ -5570,17 +5602,61 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                     item_list: vec![
                         FwCfgItem {
                             name: "opt/org.test/fw_cfg_test_item".to_string(),
-                            file: PathBuf::from("/tmp/fw_cfg_test_item"),
+                            file: Some(PathBuf::from("/tmp/fw_cfg_test_item")),
+                            string: None,
                         },
                         FwCfgItem {
                             name: "opt/org.test/fw_cfg_test_item2".to_string(),
-                            file: PathBuf::from("/tmp/fw_cfg_test_item2"),
+                            file: Some(PathBuf::from("/tmp/fw_cfg_test_item2")),
+                            string: None,
                         }
                     ]
                 }),
                 ..Default::default()
             },
         );
+        // Single string Item (for OVMF MMIO64 config, GPU CC passthrough, etc.)
+        assert_eq!(
+            FwCfgConfig::parse("items=[name=opt/ovmf/X-PciMmio64Mb,string=262144]")?,
+            FwCfgConfig {
+                items: Some(FwCfgItemList {
+                    item_list: vec![FwCfgItem {
+                        name: "opt/ovmf/X-PciMmio64Mb".to_string(),
+                        file: None,
+                        string: Some("262144".to_string()),
+                    }]
+                }),
+                ..Default::default()
+            },
+        );
+        // Mixed file and string Items
+        assert_eq!(
+            FwCfgConfig::parse(
+                "items=[name=opt/org.test/fw_cfg_test_item,file=/tmp/fw_cfg_test_item:name=opt/ovmf/X-PciMmio64Mb,string=262144]"
+            )?,
+            FwCfgConfig {
+                items: Some(FwCfgItemList {
+                    item_list: vec![
+                        FwCfgItem {
+                            name: "opt/org.test/fw_cfg_test_item".to_string(),
+                            file: Some(PathBuf::from("/tmp/fw_cfg_test_item")),
+                            string: None,
+                        },
+                        FwCfgItem {
+                            name: "opt/ovmf/X-PciMmio64Mb".to_string(),
+                            file: None,
+                            string: Some("262144".to_string()),
+                        }
+                    ]
+                }),
+                ..Default::default()
+            },
+        );
+        // Missing both file and string should fail
+        FwCfgConfig::parse("items=[name=opt/org.test/missing_content]").unwrap_err();
+        // Both file and string should fail
+        FwCfgConfig::parse("items=[name=opt/org.test/both,file=/tmp/test,string=test]")
+            .unwrap_err();
         Ok(())
     }
 }

@@ -1146,12 +1146,22 @@ impl Vm {
         if let Some(fw_cfg_files) = &fw_cfg_config.items {
             let mut fw_cfg_item_list = vec![];
             for fw_cfg_file in fw_cfg_files.item_list.clone() {
+                let content = if let Some(string_val) = fw_cfg_file.string {
+                    devices::legacy::fw_cfg::FwCfgContent::Bytes(string_val.into_bytes())
+                } else if let Some(file_path) = fw_cfg_file.file {
+                    devices::legacy::fw_cfg::FwCfgContent::File(
+                        0,
+                        File::open(file_path).map_err(Error::AddingFwCfgItem)?,
+                    )
+                } else {
+                    return Err(Error::AddingFwCfgItem(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "FwCfgItem requires either 'file' or 'string'",
+                    )));
+                };
                 fw_cfg_item_list.push(FwCfgItem {
                     name: fw_cfg_file.name,
-                    content: devices::legacy::fw_cfg::FwCfgContent::File(
-                        0,
-                        File::open(fw_cfg_file.file).map_err(Error::AddingFwCfgItem)?,
-                    ),
+                    content,
                 });
             }
             fw_cfg_item_list_option = Some(fw_cfg_item_list);
