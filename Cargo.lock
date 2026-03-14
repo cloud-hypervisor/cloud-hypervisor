@@ -1596,8 +1596,10 @@ dependencies = [
 name = "performance-metrics"
 version = "0.1.0"
 dependencies = [
+ "block",
  "clap",
  "dirs",
+ "libc",
  "serde",
  "serde_json",
  "test_infra",

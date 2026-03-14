@@ -4,6 +4,7 @@
 //
 
 // Custom harness to run performance tests
+mod micro_bench_block;
 mod performance_tests;
 mod util;
 
@@ -336,6 +337,10 @@ mod adjuster {
         v * 1000.0
     }
 
+    pub fn s_to_us(v: f64) -> f64 {
+        v * 1_000_000.0
+    }
+
     pub fn bps_to_gbps(v: f64) -> f64 {
         v / (1_000_000_000_f64)
     }
@@ -346,7 +351,7 @@ mod adjuster {
     }
 }
 
-const TEST_LIST: [PerformanceTest; 60] = [
+const TEST_LIST: [PerformanceTest; 62] = [
     PerformanceTest {
         name: "boot_time_ms",
         func_ptr: performance_boot_time,
@@ -1196,6 +1201,30 @@ const TEST_LIST: [PerformanceTest; 60] = [
             ..PerformanceTestControl::default()
         },
         unit_adjuster: adjuster::Bps_to_MiBps,
+    },
+    PerformanceTest {
+        name: "micro_block_raw_aio_drain_128_us",
+        func_ptr: micro_bench_block::micro_bench_aio_drain,
+        control: PerformanceTestControl {
+            test_timeout: 5,
+            test_iterations: 20,
+            warmup_iterations: 5,
+            num_ops: Some(128),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::s_to_us,
+    },
+    PerformanceTest {
+        name: "micro_block_raw_aio_drain_256_us",
+        func_ptr: micro_bench_block::micro_bench_aio_drain,
+        control: PerformanceTestControl {
+            test_timeout: 5,
+            test_iterations: 20,
+            warmup_iterations: 5,
+            num_ops: Some(256),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::s_to_us,
     },
 ];
 
