@@ -28,7 +28,11 @@ build_fio() {
 
 process_common_args "$@"
 
-cp scripts/sha1sums-"${TEST_ARCH}"-common "$WORKLOADS_DIR"
+if [ "${TEST_ARCH}" == "aarch64" ]; then
+    cp scripts/sha1sums-aarch64 "$WORKLOADS_DIR"
+else
+    cp scripts/sha1sums-"${TEST_ARCH}"-common "$WORKLOADS_DIR"
+fi
 
 if [ "${TEST_ARCH}" == "aarch64" ]; then
     FOCAL_OS_IMAGE_NAME="focal-server-cloudimg-arm64-custom-20210929-0.qcow2"
@@ -58,9 +62,16 @@ if [ ! -f "$FOCAL_OS_RAW_IMAGE" ]; then
 fi
 
 pushd "$WORKLOADS_DIR" || exit
-if ! grep focal sha1sums-"${TEST_ARCH}"-common | sha1sum --check; then
-    echo "sha1sum validation of images failed, remove invalid images to fix the issue."
-    exit 1
+if [ "${TEST_ARCH}" == "aarch64" ]; then
+    if ! grep focal sha1sums-aarch64 | sha1sum --check; then
+        echo "sha1sum validation of images failed, remove invalid images to fix the issue."
+        exit 1
+    fi
+else
+    if ! grep focal sha1sums-"${TEST_ARCH}"-common | sha1sum --check; then
+        echo "sha1sum validation of images failed, remove invalid images to fix the issue."
+        exit 1
+    fi
 fi
 
 popd || exit
