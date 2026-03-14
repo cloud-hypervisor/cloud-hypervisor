@@ -1338,24 +1338,35 @@ fn main() {
             .unwrap_or_default(),
     });
 
-    init_tests(&overrides);
+    // Determine which tests will actually run.
+    let tests_to_run: Vec<&&PerformanceTest> = test_list
+        .iter()
+        .filter(|t| test_filter.is_empty() || test_filter.iter().any(|&s| t.name.contains(s)))
+        .collect();
 
-    for test in test_list.iter() {
-        if test_filter.is_empty() || test_filter.iter().any(|&s| test.name.contains(s)) {
-            settle_host();
-            match run_test_with_timeout(test, &overrides) {
-                Ok(r) => {
-                    metrics_report.results.push(r);
-                }
-                Err(e) => {
-                    eprintln!("Aborting test due to error: '{e:?}'");
-                    std::process::exit(1);
-                }
+    // Skip heavy VM level init/cleanup when only micro benchmarks are selected.
+    let needs_vm_tests = tests_to_run.iter().any(|t| !t.name.starts_with("micro_"));
+
+    if needs_vm_tests {
+        init_tests(&overrides);
+    }
+
+    for test in tests_to_run {
+        settle_host();
+        match run_test_with_timeout(test, &overrides) {
+            Ok(r) => {
+                metrics_report.results.push(r);
+            }
+            Err(e) => {
+                eprintln!("Aborting test due to error: '{e:?}'");
+                std::process::exit(1);
             }
         }
     }
 
-    cleanup_tests();
+    if needs_vm_tests {
+        cleanup_tests();
+    }
 
     let mut report_file: Box<dyn std::io::Write + Send> =
         if let Some(file) = cmd_arguments.get_one::<String>("report-file") {
