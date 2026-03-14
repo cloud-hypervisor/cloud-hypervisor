@@ -68,6 +68,8 @@ pub enum ErrorOp {
     DetectImageType,
     /// Duplicating a backing-file descriptor.
     DupBackingFd,
+    /// Resizing a disk image.
+    Resize,
 }
 
 impl Display for ErrorOp {
@@ -76,6 +78,7 @@ impl Display for ErrorOp {
             Self::Open => write!(f, "open"),
             Self::DetectImageType => write!(f, "detect_image_type"),
             Self::DupBackingFd => write!(f, "dup_backing_fd"),
+            Self::Resize => write!(f, "resize"),
         }
     }
 }

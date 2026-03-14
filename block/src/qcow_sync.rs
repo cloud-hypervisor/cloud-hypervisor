@@ -7,14 +7,13 @@ use std::collections::VecDeque;
 use std::fs::File;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
 use std::sync::Arc;
-use std::{io, ptr, slice};
+use std::{fmt, io, ptr, slice};
 
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
-};
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
+use crate::disk_file;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
@@ -180,6 +179,15 @@ pub struct QcowDiskSync {
     data_raw_file: QcowRawFile,
 }
 
+impl fmt::Debug for QcowDiskSync {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("QcowDiskSync")
+            .field("sparse", &self.sparse)
+            .field("has_backing", &self.backing_file.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 impl QcowDiskSync {
     pub fn new(
         file: File,
@@ -218,37 +226,33 @@ impl QcowDiskSync {
     }
 }
 
-impl DiskFile for QcowDiskSync {
-    fn logical_size(&mut self) -> DiskFileResult<u64> {
+impl Drop for QcowDiskSync {
+    fn drop(&mut self) {
+        self.metadata.shutdown();
+    }
+}
+
+impl disk_file::DiskSize for QcowDiskSync {
+    fn logical_size(&self) -> BlockResult<u64> {
         Ok(self.metadata.virtual_size())
     }
+}
 
-    fn physical_size(&mut self) -> DiskFileResult<u64> {
-        self.data_raw_file
-            .physical_size()
-            .map_err(DiskFileError::Size)
+impl disk_file::PhysicalSize for QcowDiskSync {
+    fn physical_size(&self) -> BlockResult<u64> {
+        Ok(self.data_raw_file.physical_size()?)
     }
+}
 
-    fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
-        Ok(Box::new(QcowSync::new(
-            Arc::clone(&self.metadata),
-            self.data_raw_file.clone(),
-            self.backing_file.as_ref().map(Arc::clone),
-            self.sparse,
-        )) as Box<dyn AsyncIo>)
+impl disk_file::DiskFd for QcowDiskSync {
+    fn fd(&self) -> BorrowedDiskFd<'_> {
+        BorrowedDiskFd::new(self.data_raw_file.as_fd().as_raw_fd())
     }
+}
 
-    fn resize(&mut self, size: u64) -> DiskFileResult<()> {
-        if self.backing_file.is_some() {
-            return Err(DiskFileError::ResizeError(io::Error::other(
-                "resize not supported with backing file",
-            )));
-        }
-        self.metadata
-            .resize(size)
-            .map_err(DiskFileError::ResizeError)
-    }
+impl disk_file::HasTopology for QcowDiskSync {}
 
+impl disk_file::SparseCapable for QcowDiskSync {
     fn supports_sparse_operations(&self) -> bool {
         true
     }
@@ -256,15 +260,45 @@ impl DiskFile for QcowDiskSync {
     fn supports_zero_flag(&self) -> bool {
         true
     }
+}
 
-    fn fd(&mut self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.data_raw_file.as_raw_fd())
+impl disk_file::Resizable for QcowDiskSync {
+    fn resize(&mut self, size: u64) -> BlockResult<()> {
+        if self.backing_file.is_some() {
+            return Err(BlockError::new(
+                BlockErrorKind::UnsupportedFeature,
+                DiskFileError::ResizeError(io::Error::other(
+                    "resize not supported with backing file",
+                )),
+            )
+            .with_op(ErrorOp::Resize));
+        }
+        self.metadata.resize(size).map_err(|e| {
+            BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e))
+                .with_op(ErrorOp::Resize)
+        })
     }
 }
 
-impl Drop for QcowDiskSync {
-    fn drop(&mut self) {
-        self.metadata.shutdown();
+impl disk_file::DiskFile for QcowDiskSync {}
+
+impl disk_file::AsyncDiskFile for QcowDiskSync {
+    fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
+        Ok(Box::new(QcowDiskSync {
+            metadata: Arc::clone(&self.metadata),
+            backing_file: self.backing_file.as_ref().map(Arc::clone),
+            sparse: self.sparse,
+            data_raw_file: self.data_raw_file.clone(),
+        }))
+    }
+
+    fn new_async_io(&self, _ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
+        Ok(Box::new(QcowSync::new(
+            Arc::clone(&self.metadata),
+            self.data_raw_file.clone(),
+            self.backing_file.as_ref().map(Arc::clone),
+            self.sparse,
+        )))
     }
 }
 
@@ -652,7 +686,7 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
-    use crate::async_io::DiskFile;
+    use crate::disk_file::{AsyncDiskFile, DiskSize, Resizable};
     use crate::qcow::{BackingFileConfig, ImageType, QcowFile, RawFile};
 
     fn create_disk_with_data(
