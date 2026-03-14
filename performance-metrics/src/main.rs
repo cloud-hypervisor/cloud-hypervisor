@@ -5,6 +5,7 @@
 
 // Custom harness to run performance tests
 mod performance_tests;
+mod util;
 
 use std::process::Command;
 use std::sync::Arc;
