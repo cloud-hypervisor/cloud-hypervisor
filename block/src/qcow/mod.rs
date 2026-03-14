@@ -569,7 +569,7 @@ impl QcowFile {
     /// Creates a QcowFile from `file`. File must be a valid qcow2 image.
     ///
     /// Additionally, max nesting depth of this qcow2 image will be set to default value 10.
-    pub fn from(file: RawFile) -> Result<QcowFile> {
+    pub fn from(file: RawFile) -> BlockResult<QcowFile> {
         Self::from_with_nesting_depth(file, MAX_NESTING_DEPTH, true)
     }
 
@@ -579,7 +579,7 @@ impl QcowFile {
         file: RawFile,
         max_nesting_depth: u32,
         sparse: bool,
-    ) -> Result<QcowFile> {
+    ) -> BlockResult<QcowFile> {
         let (inner, backing_file, sparse) = parse_qcow(file, max_nesting_depth, sparse)?;
         let metadata::QcowState {
             raw_file,
@@ -607,8 +607,20 @@ impl QcowFile {
     }
 
     /// Creates a new QcowFile at the given path.
-    pub fn new(file: RawFile, version: u32, virtual_size: u64, sparse: bool) -> Result<QcowFile> {
-        let header = QcowHeader::create_for_size_and_path(version, virtual_size, None)?;
+    pub fn new(
+        file: RawFile,
+        version: u32,
+        virtual_size: u64,
+        sparse: bool,
+    ) -> BlockResult<QcowFile> {
+        let header =
+            QcowHeader::create_for_size_and_path(version, virtual_size, None).map_err(|e| {
+                let kind = match &e {
+                    Error::BackingFileTooLong(_) => BlockErrorKind::InvalidFormat,
+                    _ => BlockErrorKind::Io,
+                };
+                BlockError::new(kind, e)
+            })?;
         QcowFile::new_from_header(file, &header, sparse)
     }
 
@@ -619,12 +631,19 @@ impl QcowFile {
         backing_file_size: u64,
         backing_config: &BackingFileConfig,
         sparse: bool,
-    ) -> Result<QcowFile> {
+    ) -> BlockResult<QcowFile> {
         let mut header = QcowHeader::create_for_size_and_path(
             version,
             backing_file_size,
             Some(&backing_config.path),
-        )?;
+        )
+        .map_err(|e| {
+            let kind = match &e {
+                Error::BackingFileTooLong(_) => BlockErrorKind::InvalidFormat,
+                _ => BlockErrorKind::Io,
+            };
+            BlockError::new(kind, e)
+        })?;
         if let Some(backing_file) = &mut header.backing_file {
             backing_file.format = backing_config.format;
         }
@@ -632,9 +651,16 @@ impl QcowFile {
         // backing_file is loaded by new_from_header -> Self::from() based on the header
     }
 
-    fn new_from_header(mut file: RawFile, header: &QcowHeader, sparse: bool) -> Result<QcowFile> {
-        file.rewind().map_err(Error::SeekingFile)?;
-        header.write_to(&mut file)?;
+    fn new_from_header(
+        mut file: RawFile,
+        header: &QcowHeader,
+        sparse: bool,
+    ) -> BlockResult<QcowFile> {
+        file.rewind()
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, Error::SeekingFile(e)))?;
+        header
+            .write_to(&mut file)
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
 
         let mut qcow = Self::from_with_nesting_depth(file, MAX_NESTING_DEPTH, sparse)?;
 
@@ -646,9 +672,9 @@ impl QcowFile {
 
         let mut cluster_addr = 0;
         while cluster_addr < end_cluster_addr {
-            let mut unref_clusters = qcow
-                .set_cluster_refcount(cluster_addr, 1)
-                .map_err(Error::SettingRefcountRefcount)?;
+            let mut unref_clusters = qcow.set_cluster_refcount(cluster_addr, 1).map_err(|e| {
+                BlockError::new(BlockErrorKind::Io, Error::SettingRefcountRefcount(e))
+            })?;
             qcow.unref_clusters.append(&mut unref_clusters);
             cluster_addr += cluster_size;
         }
@@ -2180,6 +2206,7 @@ pub fn detect_image_type(file: &mut RawFile) -> Result<ImageType> {
 
 #[cfg(test)]
 mod unit_tests {
+    use std::error::Error as StdError;
     use std::fs::File;
     use std::path::Path;
 
@@ -2531,7 +2558,11 @@ mod unit_tests {
         disk_file.rewind().unwrap();
         // The maximum nesting depth is 0, which means backing file is not allowed.
         let res = QcowFile::from_with_nesting_depth(disk_file, 0, true);
-        assert!(matches!(res.unwrap_err(), Error::MaxNestingDepthExceeded));
+        let err = res.unwrap_err();
+        assert!(matches!(err.kind(), BlockErrorKind::Overflow));
+        let source = StdError::source(&err).unwrap();
+        let qcow_err = source.downcast_ref::<Error>().unwrap();
+        assert!(matches!(qcow_err, Error::MaxNestingDepthExceeded));
     }
 
     /// Create a qcow2 file with itself as its backing file.
@@ -3839,7 +3870,7 @@ mod unit_tests {
             assert!(result.is_err());
             let err = result.unwrap_err();
             assert!(
-                matches!(err, Error::CorruptImage),
+                matches!(err.kind(), BlockErrorKind::CorruptImage),
                 "Expected CorruptImage error, got: {err:?}"
             );
         });
@@ -3853,8 +3884,11 @@ mod unit_tests {
             let result = QcowFile::from(disk_file);
             assert!(result.is_err());
             let err = result.unwrap_err();
+            assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
+            let source = StdError::source(&err).unwrap();
+            let qcow_err = source.downcast_ref::<Error>().unwrap();
             assert!(
-                matches!(err, Error::UnsupportedFeature(ref v) if v.to_string().contains("external")),
+                matches!(qcow_err, Error::UnsupportedFeature(v) if v.to_string().contains("external")),
                 "Expected UnsupportedFeature error mentioning external, got: {err:?}"
             );
         });
@@ -3868,8 +3902,11 @@ mod unit_tests {
             let result = QcowFile::from(disk_file);
             assert!(result.is_err());
             let err = result.unwrap_err();
+            assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
+            let source = StdError::source(&err).unwrap();
+            let qcow_err = source.downcast_ref::<Error>().unwrap();
             assert!(
-                matches!(err, Error::UnsupportedFeature(ref v) if v.to_string().contains("extended")),
+                matches!(qcow_err, Error::UnsupportedFeature(v) if v.to_string().contains("extended")),
                 "Expected UnsupportedFeature error mentioning extended, got: {err:?}"
             );
         });
@@ -3882,7 +3919,10 @@ mod unit_tests {
         with_basic_file(&header, |disk_file: RawFile| {
             let result = QcowFile::from(disk_file);
             assert!(result.is_err());
-            assert!(matches!(result.unwrap_err(), Error::UnsupportedFeature(_)));
+            assert!(matches!(
+                result.unwrap_err().kind(),
+                BlockErrorKind::UnsupportedFeature
+            ));
         });
     }
 
@@ -3894,8 +3934,11 @@ mod unit_tests {
             let result = QcowFile::from(disk_file);
             assert!(result.is_err());
             let err = result.unwrap_err();
+            assert!(matches!(err.kind(), BlockErrorKind::UnsupportedFeature));
+            let source = StdError::source(&err).unwrap();
+            let qcow_err = source.downcast_ref::<Error>().unwrap();
             assert!(
-                matches!(err, Error::UnsupportedFeature(ref v) if v.to_string().contains("unknown")),
+                matches!(qcow_err, Error::UnsupportedFeature(v) if v.to_string().contains("unknown")),
                 "Expected UnsupportedFeature error mentioning unknown, got: {err:?}"
             );
         });
@@ -4095,7 +4138,7 @@ mod unit_tests {
             assert!(result.is_err());
             let err = result.unwrap_err();
             assert!(
-                matches!(err, Error::CorruptImage),
+                matches!(err.kind(), BlockErrorKind::CorruptImage),
                 "Expected CorruptImage error, got: {err:?}"
             );
         });
