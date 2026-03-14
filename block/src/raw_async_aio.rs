@@ -10,6 +10,7 @@ use std::fs::File;
 use std::io::{Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 
+use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE};
 use log::warn;
 use vmm_sys_util::aio;
 use vmm_sys_util::eventfd::EventFd;
@@ -189,8 +190,6 @@ impl AsyncIo for RawFileAsyncAio {
         // Linux AIO has no IOCB command for fallocate, so perform the operation
         // synchronously and signal completion via the completion list, matching
         // the pattern used by the sync backend (RawFileSync).
-        const FALLOC_FL_PUNCH_HOLE: i32 = 0x02;
-        const FALLOC_FL_KEEP_SIZE: i32 = 0x01;
         let mode = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
 
         // SAFETY: FFI call with valid arguments
@@ -216,8 +215,6 @@ impl AsyncIo for RawFileAsyncAio {
         // Linux AIO has no IOCB command for fallocate, so perform the operation
         // synchronously and signal completion via the completion list, matching
         // the pattern used by the sync backend (RawFileSync).
-        const FALLOC_FL_ZERO_RANGE: i32 = 0x10;
-        const FALLOC_FL_KEEP_SIZE: i32 = 0x01;
         let mode = FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE;
 
         // SAFETY: FFI call with valid arguments
