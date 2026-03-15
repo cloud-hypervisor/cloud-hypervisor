@@ -643,7 +643,7 @@ impl PciConfiguration {
 
     /// Writes a 32bit register to `reg_idx` in the register map.
     pub fn write_reg(&mut self, reg_idx: usize, value: u32) {
-        let mut mask = self.writable_bits[reg_idx];
+        let mut mask: u32 = self.writable_bits[reg_idx];
 
         if (BAR0_REG..BAR0_REG + NUM_BAR_REGS).contains(&reg_idx) {
             // Handle very specific case where the BAR is being written with
@@ -980,7 +980,7 @@ impl PciConfiguration {
                 return None;
             }
 
-            let bar_idx = reg_idx - 4;
+            let bar_idx = reg_idx - BAR0_REG;
             // Handle special case where the address being written is
             // different from the address initially provided. This is a
             // BAR reprogramming case which needs to be properly caught.
@@ -1018,7 +1018,7 @@ impl PciConfiguration {
                     len,
                     region_type,
                 });
-            } else if (reg_idx > BAR0_REG)
+            } else if (bar_idx > 0)
                 && ((self.registers[reg_idx - 1] & self.writable_bits[reg_idx - 1])
                     != (self.bars[bar_idx - 1].addr & self.writable_bits[reg_idx - 1])
                     || (value & mask) != (self.bars[bar_idx].addr & mask))

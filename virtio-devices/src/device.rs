@@ -22,6 +22,7 @@ use vm_migration::{MigratableError, Pausable};
 use vm_virtio::{AccessPlatform, VirtioDeviceType};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::transport::PrivatelyConstructableError;
 use crate::{
     ActivateError, ActivateResult, Error, GuestMemoryMmap, GuestRegionMmap, MmapRegion,
     VIRTIO_F_RING_INDIRECT_DESC,
@@ -70,6 +71,13 @@ pub struct ActivationContext {
 pub trait VirtioDevice: Send {
     /// The virtio device type.
     fn device_type(&self) -> u32;
+
+    /// The maximum number of doorbells the device supports.
+    /// Most devices don't support any.
+    /// Limited to 511 doorbells.
+    fn doorbells_max(&self) -> u16 {
+        0
+    }
 
     /// The maximum size of each queue that this device supports.
     fn queue_max_sizes(&self) -> &[u16];
@@ -132,6 +140,36 @@ pub trait VirtioDevice: Send {
         &mut self,
         _region: &Arc<GuestRegionMmap>,
     ) -> std::result::Result<(), Error> {
+        Ok(())
+    }
+
+    /// Sets the device's config address base. This is only necessary for
+    /// devices that need to know the guest physical address of the PCI BARs
+    /// they use. Therefore, it is only meaningful for PCIe devices.
+    /// Most devices won't implement this method.
+    ///
+    /// One valid use of this method is to set the address at which the
+    /// device should register custom ioeventfds.
+    ///
+    /// This method will be called *before* [`Self::activate`] and
+    /// implementations must be prepared for this.
+    fn set_config_address_base(&mut self, _base: u64) {}
+
+    /// Returns any custom ioeventfds the device has registered.
+    /// The device manager uses this to relocate them when it
+    /// relocates the device's configuration space.
+    ///
+    /// Most devices do not need this and should use the default
+    /// implementation, which does not call the callback.
+    ///
+    /// Implementations must return Err the first time the callback
+    /// returns Err, and Ok iff the callback never returns Err.
+    /// This is checked at runtime and a panic will happen if the
+    /// rule is not followed.
+    fn ioeventfds<'a>(
+        &self,
+        _cb: &mut dyn FnMut(&EventFd, u64) -> Result<(), PrivatelyConstructableError<'a>>,
+    ) -> Result<(), PrivatelyConstructableError<'a>> {
         Ok(())
     }
 
