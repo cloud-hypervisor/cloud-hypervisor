@@ -6762,11 +6762,9 @@ mod common_parallel {
 
         // Create a disk image that we can write to
         assert!(
-            exec_host_command_output(
-                &"sudo dd if=/dev/zero of=/tmp/resize.img bs=1M count=16".to_string()
-            )
-            .status
-            .success()
+            exec_host_command_output("sudo dd if=/dev/zero of=/tmp/resize.img bs=1M count=16")
+                .status
+                .success()
         );
 
         let mut cmd = GuestCommand::new(&guest);
