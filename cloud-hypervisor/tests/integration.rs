@@ -7673,7 +7673,7 @@ mod common_parallel {
                 guest.ssh_command("sync").unwrap();
 
                 // Verify VM sees zeros in discarded regions
-                for (_i, (offset, length)) in discard_operations.iter().enumerate() {
+                for (offset, length) in discard_operations.iter() {
                     assert_guest_disk_region_is_zero(&guest, "/dev/vdc", *offset, *length);
                 }
 
