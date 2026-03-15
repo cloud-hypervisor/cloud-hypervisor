@@ -1013,6 +1013,11 @@ impl Guest {
         self
     }
 
+    pub fn with_kernel_path(mut self, kernel_path: &str) -> Self {
+        self.kernel_path = Some(kernel_path.to_string());
+        self
+    }
+
     pub fn default_net_string(&self) -> String {
         format!(
             "tap=,mac={},ip={},mask=255.255.255.128",
@@ -1436,6 +1441,13 @@ impl Guest {
             if self.nested { "" } else { ",nested=off" }
         )
     }
+    pub fn default_cpus_with_affinity_string(&self) -> String {
+        format!(
+            "boot={},affinity=[0@[0,2],1@[1,3]]{}",
+            self.num_cpu,
+            if self.nested { "" } else { ",nested=off" }
+        )
+    }
 
     pub fn default_memory_string(&self) -> String {
         format!("size={}", self.mem_size_str)
@@ -1681,7 +1693,7 @@ impl<'a> GuestCommand<'a> {
         self.args(["--net", self.guest.default_net_string().as_str()])
     }
 
-    pub fn default_kernel_cmdline(&mut self) -> &mut Self {
+    pub fn default_kernel_cmdline_with_platform(&mut self, platform: Option<&str>) -> &mut Self {
         if self.guest.vm_type == GuestVmType::Confidential {
             let console_str = if let Some(c) = &self.guest.console_type {
                 c.as_str()
@@ -1696,19 +1708,43 @@ impl<'a> GuestCommand<'a> {
             ]);
             self.command
                 .args(["--host-data", generate_host_data().as_str()]);
-            self.command.args(["--platform", "sev_snp=on"]);
+            self.command.args([
+                "--platform",
+                &format!(
+                    "{}sev_snp=on",
+                    if let Some(p) = platform {
+                        format!("{p},")
+                    } else {
+                        String::new()
+                    }
+                ),
+            ]);
         } else if let Some(kernel) = &self.guest.kernel_path {
             self.command.args(["--kernel", kernel.as_str()]);
             if let Some(cmdline) = &self.guest.kernel_cmdline {
                 self.command.args(["--cmdline", cmdline]);
+            }
+            if let Some(platform_arg) = platform {
+                self.command.args(["--platform", platform_arg]);
             }
         }
 
         self
     }
 
+    pub fn default_kernel_cmdline(&mut self) -> &mut Self {
+        self.default_kernel_cmdline_with_platform(None)
+    }
+
     pub fn default_cpus(&mut self) -> &mut Self {
         self.args(["--cpus", self.guest.default_cpus_string().as_str()])
+    }
+
+    pub fn default_cpus_with_affinity(&mut self) -> &mut Self {
+        self.args([
+            "--cpus",
+            self.guest.default_cpus_with_affinity_string().as_str(),
+        ])
     }
 
     pub fn default_memory(&mut self) -> &mut Self {
