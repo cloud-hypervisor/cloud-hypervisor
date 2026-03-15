@@ -8507,7 +8507,7 @@ mod common_parallel {
             "Expected zero-flagged regions to increase with sparse=off: before={zero_regions_before}, after={zero_regions_after}"
         );
 
-        disk_check_consistency(&test_disk_path, None);
+        disk_check_consistency(test_disk_path, None);
     }
 
     #[test]
