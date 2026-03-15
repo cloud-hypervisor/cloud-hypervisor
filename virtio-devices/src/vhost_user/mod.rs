@@ -302,6 +302,7 @@ pub struct VhostUserCommon {
     pub vu_num_queues: usize,
     pub migration_started: bool,
     pub server: bool,
+    pub interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
 }
 
 impl VhostUserCommon {
@@ -344,6 +345,8 @@ impl VhostUserCommon {
                 inflight.as_mut(),
             )
             .map_err(ActivateError::VhostUserSetup)?;
+
+        self.interrupt_cb = Some(interrupt_cb.clone());
 
         Ok(VhostUserEpollHandler {
             vu: vu.clone(),
@@ -425,10 +428,16 @@ impl VhostUserCommon {
         if let Some(vu) = &self.vu {
             vu.lock().unwrap().resume_vhost_user().map_err(|e| {
                 MigratableError::Resume(anyhow!("Error resuming vhost-user backend: {e:?}"))
-            })
-        } else {
-            Ok(())
+            })?;
         }
+        if let Some(interrupt_cb) = &self.interrupt_cb {
+            for i in 0..self.vu_num_queues {
+                interrupt_cb
+                    .trigger(crate::VirtioInterruptType::Queue(i as u16))
+                    .ok();
+            }
+        }
+        Ok(())
     }
 
     pub fn snapshot<'a, T>(&mut self, state: &T) -> std::result::Result<Snapshot, MigratableError>
