@@ -3782,7 +3782,7 @@ mod common_parallel {
     ///
     /// Creates a VM with multiple virtio queues on the test disk, then runs the
     /// provided test closure. Handles VM lifecycle and consistency checks.
-    fn run_multiqueue_qcow2_test<F>(image_config: QcowTestImageConfig, test_fn: F)
+    fn run_multiqueue_qcow2_test<F>(image_config: &QcowTestImageConfig, test_fn: F)
     where
         F: FnOnce(&Guest) + std::panic::UnwindSafe,
     {
@@ -3793,7 +3793,7 @@ mod common_parallel {
         let test_image_path = guest.tmp_dir.as_path().join("test.qcow2");
 
         // Create test image based on configuration and capture backing checksum if applicable
-        let initial_backing_checksum = match image_config {
+        let initial_backing_checksum = match *image_config {
             QcowTestImageConfig::Simple(size) => {
                 Command::new("qemu-img")
                     .arg("create")
@@ -3876,7 +3876,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_multiqueue_writes() {
-        run_multiqueue_qcow2_test(QcowTestImageConfig::Simple("256M"), |guest| {
+        run_multiqueue_qcow2_test(&QcowTestImageConfig::Simple("256M"), |guest| {
             assert_eq!(
                 guest
                     .ssh_command("ls -ll /sys/block/vdc/mq | grep ^d | wc -l")
@@ -3946,7 +3946,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_multiqueue_mixed_rw() {
-        run_multiqueue_qcow2_test(QcowTestImageConfig::Simple("512M"), |guest| {
+        run_multiqueue_qcow2_test(&QcowTestImageConfig::Simple("512M"), |guest| {
             guest
                 .ssh_command("sudo mkfs.ext4 -F /dev/vdc")
                 .expect("Failed to format disk");
@@ -3997,7 +3997,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_multiqueue_backing() {
-        run_multiqueue_qcow2_test(QcowTestImageConfig::WithBacking, |guest| {
+        run_multiqueue_qcow2_test(&QcowTestImageConfig::WithBacking, |guest| {
             guest
                 .ssh_command("sudo mkfs.ext4 -F /dev/vdc")
                 .expect("Failed to format disk");
@@ -4041,7 +4041,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_multiqueue_random_4k() {
-        run_multiqueue_qcow2_test(QcowTestImageConfig::Simple("256M"), |guest| {
+        run_multiqueue_qcow2_test(&QcowTestImageConfig::Simple("256M"), |guest| {
             guest
                 .ssh_command(
                     "for i in $(seq 1 8); do \
@@ -4071,7 +4071,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_multiqueue_fsync() {
-        run_multiqueue_qcow2_test(QcowTestImageConfig::Simple("256M"), |guest| {
+        run_multiqueue_qcow2_test(&QcowTestImageConfig::Simple("256M"), |guest| {
             guest
                 .ssh_command("sudo mkfs.ext4 -F /dev/vdc")
                 .expect("Failed to format disk");
@@ -4118,7 +4118,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_multiqueue_metadata() {
-        run_multiqueue_qcow2_test(QcowTestImageConfig::Simple("256M"), |guest| {
+        run_multiqueue_qcow2_test(&QcowTestImageConfig::Simple("256M"), |guest| {
             guest
                 .ssh_command("sudo mkfs.ext4 -F /dev/vdc")
                 .expect("Failed to format disk");
@@ -4197,7 +4197,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_multiqueue_discard_mount() {
-        run_multiqueue_qcow2_test(QcowTestImageConfig::Simple("256M"), |guest| {
+        run_multiqueue_qcow2_test(&QcowTestImageConfig::Simple("256M"), |guest| {
             guest
                 .ssh_command("sudo mkfs.ext4 -F /dev/vdc")
                 .expect("Failed to format disk");
@@ -4260,7 +4260,7 @@ mod common_parallel {
     }
     #[test]
     fn test_virtio_block_qcow2_multiqueue_wide_writes() {
-        run_multiqueue_qcow2_test(QcowTestImageConfig::Simple("1G"), |guest| {
+        run_multiqueue_qcow2_test(&QcowTestImageConfig::Simple("1G"), |guest| {
             // Scattered write pattern - write to widely separated offsets in parallel.
             // This should initiate many L2 table allocations simultaneously across different queues.
             guest
@@ -4300,7 +4300,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_qcow2_multiqueue_discard_stress() {
-        run_multiqueue_qcow2_test(QcowTestImageConfig::Simple("512M"), |guest| {
+        run_multiqueue_qcow2_test(&QcowTestImageConfig::Simple("512M"), |guest| {
             guest
                 .ssh_command("sudo mkfs.ext4 -F /dev/vdc")
                 .expect("Failed to format disk");
