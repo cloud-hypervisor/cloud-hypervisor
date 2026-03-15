@@ -663,7 +663,7 @@ mod unit_tests {
     }
 
     // Sends a test packet on the interface named "ifname".
-    fn pnet_send_packet(ifname: String) {
+    fn pnet_send_packet(ifname: &str) {
         let payload = DATA_STRING.as_bytes();
 
         // eth hdr + ip hdr + udp hdr + payload len
@@ -682,7 +682,7 @@ mod unit_tests {
     // interface, an object that can be used to send Ethernet frames, and a receiver of
     // Ethernet frames arriving at the specified interface.
     fn pnet_get_mac_tx_rx(
-        ifname: String,
+        ifname: &str,
     ) -> (MacAddr, Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>) {
         let interface_name_matches = |iface: &NetworkInterface| iface.name == ifname;
 
@@ -778,7 +778,7 @@ mod unit_tests {
         tap.enable().unwrap();
 
         // Send a packet to the interface. We expect to be able to receive it on the associated fd.
-        pnet_send_packet(tap.if_name_as_str().to_owned());
+        pnet_send_packet(tap.if_name_as_str());
 
         let mut buf = [0u8; 4096];
 
@@ -836,7 +836,7 @@ mod unit_tests {
         tap.set_ip_addr(ip_addr, Some(netmask)).unwrap();
         tap.enable().unwrap();
 
-        let (mac, _, mut rx) = pnet_get_mac_tx_rx(tap.if_name_as_str().to_owned());
+        let (mac, _, mut rx) = pnet_get_mac_tx_rx(tap.if_name_as_str());
 
         let payload = DATA_STRING.as_bytes();
 
