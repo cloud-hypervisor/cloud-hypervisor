@@ -179,6 +179,7 @@ pub struct PerformanceTestControl {
     net_control: Option<(bool, bool)>, // First bool is for RX(true)/TX(false), second bool is for bandwidth or PPS
     block_control: Option<BlockControl>,
     num_boot_vcpus: Option<u8>,
+    num_ops: Option<u32>, // Workload size for micro benchmarks
 }
 
 impl fmt::Display for PerformanceTestControl {
@@ -203,6 +204,9 @@ impl fmt::Display for PerformanceTestControl {
                 o.fio_ops, o.bandwidth, o.test_file
             );
         }
+        if let Some(o) = self.num_ops {
+            output = format!("{output}, num_ops = {o}");
+        }
 
         write!(f, "{output}")
     }
@@ -219,6 +223,7 @@ impl PerformanceTestControl {
             net_control: None,
             block_control: None,
             num_boot_vcpus: Some(1),
+            num_ops: None,
         }
     }
 }
@@ -235,6 +240,13 @@ struct PerformanceTest {
 
 impl PerformanceTest {
     pub fn run(&self, overrides: &PerformanceTestOverrides) -> PerformanceTestResult {
+        if self.control.num_ops.is_some() && !self.name.starts_with("micro_") {
+            eprintln!(
+                "Warning: num_ops is set on '{}' but has no effect on non micro benchmarks",
+                self.name
+            );
+        }
+
         // Run warmup iterations if configured (results discarded)
         for _ in 0..self.control.warmup_iterations {
             if let Some(test_timeout) = overrides.test_timeout {
