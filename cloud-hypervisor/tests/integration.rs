@@ -4599,15 +4599,14 @@ mod common_parallel {
                 let output = child.wait_with_output().unwrap();
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 panic!(
-                    "VM should not have exited when opening corrupt image as readonly. Exit status: {}, stderr: {}",
-                    status, stderr
+                    "VM should not have exited when opening corrupt image as readonly. Exit status: {status}, stderr: {stderr}"
                 );
             }
             Ok(None) => {
                 // VM is still running as expected
             }
             Err(e) => {
-                panic!("Error checking process status: {}", e);
+                panic!("Error checking process status: {e}");
             }
         }
 
@@ -4617,8 +4616,7 @@ mod common_parallel {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             stderr.contains("QCOW2 image is marked corrupt, opening read-only"),
-            "Expected warning about corrupt image being opened read-only. stderr: {}",
-            stderr
+            "Expected warning about corrupt image being opened read-only. stderr: {stderr}"
         );
 
         assert_eq!(
@@ -6764,9 +6762,9 @@ mod common_parallel {
 
         // Create a disk image that we can write to
         assert!(
-            exec_host_command_output(&format!(
-                "sudo dd if=/dev/zero of=/tmp/resize.img bs=1M count=16"
-            ))
+            exec_host_command_output(
+                &"sudo dd if=/dev/zero of=/tmp/resize.img bs=1M count=16".to_string()
+            )
             .status
             .success()
         );
@@ -7416,7 +7414,7 @@ mod common_parallel {
 
     // Helper function to verify sparse file
     fn verify_sparse_file(test_disk_path: &str, expected_ratio: f64) {
-        let res = exec_host_command_output(&format!("ls -s --block-size=1 {}", test_disk_path));
+        let res = exec_host_command_output(&format!("ls -s --block-size=1 {test_disk_path}"));
         assert!(res.status.success(), "ls -s command failed");
         let out = String::from_utf8_lossy(&res.stdout);
         let actual_bytes: u64 = out
@@ -7425,7 +7423,7 @@ mod common_parallel {
             .and_then(|s| s.parse().ok())
             .expect("Failed to parse ls -s output");
 
-        let res = exec_host_command_output(&format!("ls -l {}", test_disk_path));
+        let res = exec_host_command_output(&format!("ls -l {test_disk_path}"));
         assert!(res.status.success(), "ls -l command failed");
         let out = String::from_utf8_lossy(&res.stdout);
         let apparent_size: u64 = out
@@ -7437,17 +7435,14 @@ mod common_parallel {
         let threshold = (apparent_size as f64 * expected_ratio) as u64;
         assert!(
             actual_bytes < threshold,
-            "Expected file to be sparse: apparent_size={} bytes, actual_disk_usage={} bytes (threshold={})",
-            apparent_size,
-            actual_bytes,
-            threshold
+            "Expected file to be sparse: apparent_size={apparent_size} bytes, actual_disk_usage={actual_bytes} bytes (threshold={threshold})"
         );
     }
 
     // Helper function to count zero flagged regions in QCOW2 image
     fn count_qcow2_zero_regions(test_disk_path: &str) -> Option<usize> {
         let res =
-            exec_host_command_output(&format!("qemu-img map --output=json -U {}", test_disk_path));
+            exec_host_command_output(&format!("qemu-img map --output=json -U {test_disk_path}"));
         if !res.status.success() {
             return None;
         }
@@ -7476,8 +7471,7 @@ mod common_parallel {
     //   - RAW: Verify actual holes (unallocated extents) exist in sparse regions
     //   - Could parse extent output to count holes vs allocated regions
     fn verify_fiemap_extents(test_disk_path: &str, format_type: &str) {
-        let blocksize_output =
-            exec_host_command_output(&format!("stat -f -c %S {}", test_disk_path));
+        let blocksize_output = exec_host_command_output(&format!("stat -f -c %S {test_disk_path}"));
         let blocksize = if blocksize_output.status.success() {
             String::from_utf8_lossy(&blocksize_output.stdout)
                 .trim()
@@ -7488,7 +7482,7 @@ mod common_parallel {
         };
 
         let fiemap_output =
-            exec_host_command_output(&format!("filefrag -b {} -v {}", blocksize, test_disk_path));
+            exec_host_command_output(&format!("filefrag -b {blocksize} -v {test_disk_path}"));
         if fiemap_output.status.success() {
             let fiemap_str = String::from_utf8_lossy(&fiemap_output.stdout);
 
@@ -7498,8 +7492,7 @@ mod common_parallel {
 
             assert!(
                 has_extents || has_holes,
-                "FIEMAP should show extent information or holes for {} file",
-                format_type
+                "FIEMAP should show extent information or holes for {format_type} file"
             );
         }
     }
@@ -7508,8 +7501,7 @@ mod common_parallel {
     fn assert_guest_disk_region_is_zero(guest: &Guest, device: &str, offset: u64, length: u64) {
         let result = guest
             .ssh_command(&format!(
-                "sudo hexdump -v -s {} -n {} -e '1/1 \"%02x\"' {} | grep -qv '^00*$' && echo 'NONZERO' || echo 'ZEROS'",
-                offset, length, device
+                "sudo hexdump -v -s {offset} -n {length} -e '1/1 \"%02x\"' {device} | grep -qv '^00*$' && echo 'NONZERO' || echo 'ZEROS'"
             ))
             .unwrap();
 
@@ -7560,7 +7552,7 @@ mod common_parallel {
             .as_path()
             .join(format!("discard_test.{}", format_name.to_lowercase()));
 
-        let mut cmd = format!("qemu-img create -f {} ", qemu_img_format);
+        let mut cmd = format!("qemu-img create -f {qemu_img_format} ");
         if !extra_create_args.is_empty() {
             cmd.push_str(&extra_create_args.join(" "));
             cmd.push(' ');
@@ -7570,8 +7562,7 @@ mod common_parallel {
         let res = exec_host_command_output(&cmd);
         assert!(
             res.status.success(),
-            "Failed to create {} test image",
-            format_name
+            "Failed to create {format_name} test image"
         );
 
         let mut child = GuestCommand::new(&guest)
@@ -7641,8 +7632,7 @@ mod common_parallel {
             // Write one 4MB block at offset 1MB
             guest
                 .ssh_command(&format!(
-                    "sudo dd if=/dev/zero of=/dev/vdc bs=1M count={} seek={} oflag=direct",
-                    WRITE_SIZE_MB, WRITE_OFFSET_MB
+                    "sudo dd if=/dev/zero of=/dev/vdc bs=1M count={WRITE_SIZE_MB} seek={WRITE_OFFSET_MB} oflag=direct"
                 ))
                 .unwrap();
             guest.ssh_command("sync").unwrap();
@@ -7668,19 +7658,14 @@ mod common_parallel {
                 for (i, (offset, length)) in discard_operations.iter().enumerate() {
                     let result = guest
                         .ssh_command(&format!(
-                            "sudo blkdiscard -v -o {} -l {} /dev/vdc 2>&1 || true",
-                            offset, length
+                            "sudo blkdiscard -v -o {offset} -l {length} /dev/vdc 2>&1 || true"
                         ))
                         .unwrap();
 
                     assert!(
                         !result.contains("Operation not supported")
                             && !result.contains("BLKDISCARD"),
-                        "blkdiscard #{} at offset {} length {} failed: {}",
-                        i,
-                        offset,
-                        length,
-                        result
+                        "blkdiscard #{i} at offset {offset} length {length} failed: {result}"
                     );
                 }
 
@@ -7746,8 +7731,7 @@ mod common_parallel {
                         let all_zeros = buffer.iter().all(|&b| b == 0);
                         assert!(
                             all_zeros,
-                            "Expected discarded region at offset {} length {} to contain all zeros",
-                            offset, length
+                            "Expected discarded region at offset {offset} length {length} to contain all zeros"
                         );
                     }
 
@@ -8112,7 +8096,7 @@ mod common_parallel {
             .as_path()
             .join(format!("fstrim_test.{}", format_name.to_lowercase()));
 
-        let mut cmd = format!("qemu-img create -f {} ", qemu_img_format);
+        let mut cmd = format!("qemu-img create -f {qemu_img_format} ");
         if !extra_create_args.is_empty() {
             cmd.push_str(&extra_create_args.join(" "));
             cmd.push(' ');
@@ -8122,8 +8106,7 @@ mod common_parallel {
         let res = exec_host_command_output(&cmd);
         assert!(
             res.status.success(),
-            "Failed to create {} test image",
-            format_name
+            "Failed to create {format_name} test image"
         );
 
         const WRITE_SIZE_MB: u64 = 4;
@@ -8187,8 +8170,7 @@ mod common_parallel {
             for (iteration, &write_size_kb) in BLOCK_DISCARD_TEST_SIZES_KB.iter().enumerate() {
                 guest
                     .ssh_command(&format!(
-                        "sudo dd if=/dev/zero of=/mnt/test/testfile{} bs=1K count={}",
-                        iteration, write_size_kb
+                        "sudo dd if=/dev/zero of=/mnt/test/testfile{iteration} bs=1K count={write_size_kb}"
                     ))
                     .unwrap();
 
@@ -8200,20 +8182,19 @@ mod common_parallel {
                         "ls -s --block-size=1 {}",
                         test_disk_path.to_str().unwrap()
                     ));
-                    if res.status.success() {
-                        if let Some(size) = String::from_utf8_lossy(&res.stdout)
+                    if res.status.success()
+                        && let Some(size) = String::from_utf8_lossy(&res.stdout)
                             .split_whitespace()
                             .next()
                             .and_then(|s| s.parse::<u64>().ok())
-                        {
-                            max_size_during_writes.set(max_size_during_writes.get().max(size));
-                        }
+                    {
+                        max_size_during_writes.set(max_size_during_writes.get().max(size));
                     }
                 }
 
                 // Make blocks available for discard
                 guest
-                    .ssh_command(&format!("sudo rm /mnt/test/testfile{}", iteration))
+                    .ssh_command(&format!("sudo rm /mnt/test/testfile{iteration}"))
                     .unwrap();
 
                 guest.ssh_command("sync").unwrap();
@@ -8224,10 +8205,7 @@ mod common_parallel {
                     // Would output like "/mnt/test: X bytes (Y MB) trimmed"
                     assert!(
                         fstrim_result.contains("trimmed") || fstrim_result.contains("bytes"),
-                        "fstrim iteration {} ({}KB) should report trimmed bytes: {}",
-                        iteration,
-                        write_size_kb,
-                        fstrim_result
+                        "fstrim iteration {iteration} ({write_size_kb}KB) should report trimmed bytes: {fstrim_result}"
                     );
                 } else {
                     // For unsupported formats, expect fstrim to fail
@@ -8322,13 +8300,11 @@ mod common_parallel {
         let test_disk_path = guest.tmp_dir.as_path().join("sparse_off_test.raw");
         let test_disk_path = test_disk_path.to_str().unwrap();
 
-        let res = exec_host_command_output(&format!(
-            "truncate -s {} {}",
-            TEST_DISK_SIZE, test_disk_path
-        ));
+        let res =
+            exec_host_command_output(&format!("truncate -s {TEST_DISK_SIZE} {test_disk_path}"));
         assert!(res.status.success(), "Failed to create sparse test file");
 
-        let res = exec_host_command_output(&format!("ls -s --block-size=1 {}", test_disk_path));
+        let res = exec_host_command_output(&format!("ls -s --block-size=1 {test_disk_path}"));
         assert!(res.status.success());
         let initial_bytes: u64 = String::from_utf8_lossy(&res.stdout)
             .split_whitespace()
@@ -8337,8 +8313,7 @@ mod common_parallel {
             .expect("Failed to parse initial disk usage");
         assert!(
             initial_bytes < INITIAL_ALLOCATION_THRESHOLD,
-            "File should be initially sparse: {} bytes allocated",
-            initial_bytes
+            "File should be initially sparse: {initial_bytes} bytes allocated"
         );
 
         let mut child = GuestCommand::new(&guest)
@@ -8358,7 +8333,7 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                format!("path={},sparse=off", test_disk_path).as_str(),
+                format!("path={test_disk_path},sparse=off").as_str(),
             ])
             .default_net()
             .capture_output()
@@ -8388,7 +8363,7 @@ mod common_parallel {
         // - physical >= logical is fully allocated, modulo block alignment
         // - physical < logical is still sparse
 
-        let res = exec_host_command_output(&format!("ls -l {}", test_disk_path));
+        let res = exec_host_command_output(&format!("ls -l {test_disk_path}"));
         assert!(res.status.success());
         let logical_size: u64 = String::from_utf8_lossy(&res.stdout)
             .split_whitespace()
@@ -8396,7 +8371,7 @@ mod common_parallel {
             .and_then(|s| s.parse().ok())
             .expect("Failed to parse logical size");
 
-        let res = exec_host_command_output(&format!("ls -s --block-size=1 {}", test_disk_path));
+        let res = exec_host_command_output(&format!("ls -s --block-size=1 {test_disk_path}"));
         assert!(res.status.success());
         let physical_size: u64 = String::from_utf8_lossy(&res.stdout)
             .split_whitespace()
@@ -8406,33 +8381,26 @@ mod common_parallel {
 
         assert_eq!(
             logical_size, TEST_DISK_SIZE_BYTES,
-            "Logical size should be exactly {} bytes, got {}",
-            TEST_DISK_SIZE_BYTES, logical_size
+            "Logical size should be exactly {TEST_DISK_SIZE_BYTES} bytes, got {logical_size}"
         );
 
-        let res = exec_host_command_output(&format!("stat -c '%o' {}", test_disk_path));
+        let res = exec_host_command_output(&format!("stat -c '%o' {test_disk_path}"));
         assert!(res.status.success());
         let block_size: u64 = String::from_utf8_lossy(&res.stdout)
             .trim()
             .parse()
             .expect("Failed to parse block size from stat");
 
-        let expected_max = ((logical_size + block_size - 1) / block_size) * block_size;
+        let expected_max = logical_size.div_ceil(block_size) * block_size;
 
         assert!(
             physical_size >= logical_size,
-            "File should be fully allocated with sparse=off: logical={} bytes, physical={} bytes (physical < logical means still sparse)",
-            logical_size,
-            physical_size
+            "File should be fully allocated with sparse=off: logical={logical_size} bytes, physical={physical_size} bytes (physical < logical means still sparse)"
         );
 
         assert!(
             physical_size <= expected_max,
-            "Physical size seems too large: logical={} bytes, physical={} bytes, expected_max={} bytes (block_size={})",
-            logical_size,
-            physical_size,
-            expected_max,
-            block_size
+            "Physical size seems too large: logical={logical_size} bytes, physical={physical_size} bytes, expected_max={expected_max} bytes (block_size={block_size})"
         );
     }
 
@@ -8449,8 +8417,7 @@ mod common_parallel {
         let test_disk_path = test_disk_path.to_str().unwrap();
 
         let res = exec_host_command_output(&format!(
-            "qemu-img create -f qcow2 {} {}",
-            test_disk_path, TEST_DISK_SIZE
+            "qemu-img create -f qcow2 {test_disk_path} {TEST_DISK_SIZE}"
         ));
         assert!(res.status.success(), "Failed to create QCOW2 test image");
 
@@ -8474,7 +8441,7 @@ mod common_parallel {
                     guest.disk_config.disk(DiskType::CloudInit).unwrap()
                 )
                 .as_str(),
-                format!("path={},sparse=off,num_queues=4", test_disk_path).as_str(),
+                format!("path={test_disk_path},sparse=off,num_queues=4").as_str(),
             ])
             .default_net()
             .capture_output()
@@ -8496,11 +8463,10 @@ mod common_parallel {
 
             let mut current_offset_kb = 1024;
 
-            for (_iteration, &size_kb) in BLOCK_DISCARD_TEST_SIZES_KB.iter().enumerate() {
+            for &size_kb in BLOCK_DISCARD_TEST_SIZES_KB.iter() {
                 guest
                     .ssh_command(&format!(
-                        "sudo dd if=/dev/urandom of=/dev/vdc bs=1K count={} seek={} oflag=direct",
-                        size_kb, current_offset_kb
+                        "sudo dd if=/dev/urandom of=/dev/vdc bs=1K count={size_kb} seek={current_offset_kb} oflag=direct"
                     ))
                     .unwrap();
 
@@ -8538,9 +8504,7 @@ mod common_parallel {
 
         assert!(
             zero_regions_after > zero_regions_before,
-            "Expected zero-flagged regions to increase with sparse=off: before={}, after={}",
-            zero_regions_before,
-            zero_regions_after
+            "Expected zero-flagged regions to increase with sparse=off: before={zero_regions_before}, after={zero_regions_after}"
         );
 
         disk_check_consistency(&test_disk_path, None);
@@ -12762,26 +12726,22 @@ mod vfio {
     fn test_nvidia_guest_numa_generic_initiator() {
         // Skip test if VFIO device is not available or not ready
         if !std::path::Path::new(NVIDIA_VFIO_DEVICE).exists() {
-            println!("SKIPPED: VFIO device {} not found", NVIDIA_VFIO_DEVICE);
+            println!("SKIPPED: VFIO device {NVIDIA_VFIO_DEVICE} not found");
             return;
         }
 
         // Check if device is bound to vfio-pci driver
-        let driver_path = format!("{}/driver", NVIDIA_VFIO_DEVICE);
+        let driver_path = format!("{NVIDIA_VFIO_DEVICE}/driver");
         if let Ok(driver) = std::fs::read_link(&driver_path) {
             let driver_name = driver.file_name().unwrap_or_default().to_string_lossy();
             if driver_name != "vfio-pci" {
                 println!(
-                    "SKIPPED: VFIO device {} bound to {}, not vfio-pci",
-                    NVIDIA_VFIO_DEVICE, driver_name
+                    "SKIPPED: VFIO device {NVIDIA_VFIO_DEVICE} bound to {driver_name}, not vfio-pci"
                 );
                 return;
             }
         } else {
-            println!(
-                "SKIPPED: VFIO device {} not bound to any driver",
-                NVIDIA_VFIO_DEVICE
-            );
+            println!("SKIPPED: VFIO device {NVIDIA_VFIO_DEVICE} not bound to any driver");
             return;
         }
 
@@ -12802,7 +12762,7 @@ mod vfio {
             ])
             .args([
                 "--device",
-                &format!("id=vfio0,path={},iommu=on", NVIDIA_VFIO_DEVICE),
+                &format!("id=vfio0,path={NVIDIA_VFIO_DEVICE},iommu=on"),
             ])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
