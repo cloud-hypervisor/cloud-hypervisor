@@ -132,3 +132,33 @@ pub fn micro_bench_qcow_punch_hole(control: &PerformanceTestControl) -> f64 {
 
     elapsed
 }
+
+/// Write num_ops clusters into an empty qcow2 image to dirty L2 and
+/// refcount metadata, then time a single fsync that flushes all dirty
+/// tables to disk.
+///
+/// This isolates the metadata flush cost which scales with the number
+/// of dirty L2 table entries and refcount blocks.
+///
+/// Returns the fsync wall clock time in seconds.
+pub fn micro_bench_qcow_fsync(control: &PerformanceTestControl) -> f64 {
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_tmp, disk) = util::empty_qcow_tempfile(num_ops);
+    let mut async_io = disk.new_async_io(1).expect("new_async_io failed");
+
+    // Write num_ops clusters to dirty L2 and refcount metadata.
+    let buf = vec![0xA5u8; QCOW_CLUSTER_SIZE as usize];
+    let iovec = write_iovec(&buf);
+    submit_writes(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &[iovec]);
+    // Drain write completions.
+    drain_completions(async_io.as_mut(), num_ops);
+
+    // Time the flush.
+    let start = Instant::now();
+    async_io.fsync(Some(num_ops as u64)).expect("fsync failed");
+    let elapsed = start.elapsed().as_secs_f64();
+
+    drain_completions(async_io.as_mut(), 1);
+
+    elapsed
+}
