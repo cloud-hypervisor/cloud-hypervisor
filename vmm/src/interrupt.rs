@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use devices::interrupt_controller::InterruptController;
@@ -22,13 +21,18 @@ pub type Result<T> = std::io::Result<T>;
 
 struct InterruptRoute {
     gsi: u32,
-    irq_fd: EventFd,
-    registered: AtomicBool,
+    irq_fd: Option<EventFd>,
+    registered: bool,
 }
 
 impl InterruptRoute {
+    // TODO(DemiMarie,vvu): do not create an EventFd directly.
+    // Leave the irqfd at `None` for registration later.
     pub fn new(allocator: &mut SystemAllocator) -> Result<Self> {
-        let irq_fd = EventFd::new(libc::EFD_NONBLOCK)?;
+        Self::new_with_fd(allocator, Some(EventFd::new(libc::EFD_NONBLOCK)?))
+    }
+
+    pub fn new_with_fd(allocator: &mut SystemAllocator, irq_fd: Option<EventFd>) -> Result<Self> {
         let gsi = allocator
             .allocate_gsi()
             .ok_or_else(|| io::Error::other("Failed allocating new GSI"))?;
@@ -36,44 +40,76 @@ impl InterruptRoute {
         Ok(InterruptRoute {
             gsi,
             irq_fd,
-            registered: AtomicBool::new(false),
+            registered: false,
         })
     }
 
-    pub fn enable(&self, vm: &dyn hypervisor::Vm) -> Result<()> {
-        if !self.registered.load(Ordering::Acquire) {
-            vm.register_irqfd(&self.irq_fd, self.gsi)
-                .map_err(|e| io::Error::other(format!("Failed registering irq_fd: {e}")))?;
+    pub fn enable(&mut self, vm: &dyn hypervisor::Vm) -> Result<()> {
+        if !self.registered {
+            if let Some(ref irq_fd) = self.irq_fd {
+                vm.register_irqfd(irq_fd, self.gsi)
+                    .map_err(|e| io::Error::other(format!("Failed registering irq_fd: {e}")))?;
+            }
 
             // Update internals to track the irq_fd as "registered".
-            self.registered.store(true, Ordering::Release);
+            self.registered = true;
         }
 
         Ok(())
     }
 
-    pub fn disable(&self, vm: &dyn hypervisor::Vm) -> Result<()> {
-        if self.registered.load(Ordering::Acquire) {
-            vm.unregister_irqfd(&self.irq_fd, self.gsi)
-                .map_err(|e| io::Error::other(format!("Failed unregistering irq_fd: {e}")))?;
+    pub fn disable(&mut self, vm: &dyn hypervisor::Vm) -> Result<()> {
+        if self.registered {
+            if let Some(ref irq_fd) = self.irq_fd {
+                vm.unregister_irqfd(irq_fd, self.gsi)
+                    .map_err(|e| io::Error::other(format!("Failed unregistering irq_fd: {e}")))?;
+            }
 
             // Update internals to track the irq_fd as "unregistered".
-            self.registered.store(false, Ordering::Release);
+            self.registered = false;
         }
 
         Ok(())
     }
 
-    pub fn trigger(&self) -> Result<()> {
-        self.irq_fd.write(1)
+    pub fn trigger(&mut self) -> Result<()> {
+        match self.irq_fd {
+            Some(ref fd) => fd.write(1),
+            None => Ok(()),
+        }
     }
 
-    pub fn notifier(&self) -> Option<EventFd> {
+    pub fn notifier(&mut self) -> Option<EventFd> {
         Some(
             self.irq_fd
+                .as_ref()?
                 .try_clone()
                 .expect("Failed cloning interrupt's EventFd"),
         )
+    }
+
+    #[allow(dead_code)]
+    pub fn set_notifier(
+        &mut self,
+        eventfd: Option<EventFd>,
+        vm: &dyn hypervisor::Vm,
+    ) -> Result<()> {
+        let old_irqfd = core::mem::replace(&mut self.irq_fd, eventfd);
+        if self.registered {
+            if let Some(ref irq_fd) = self.irq_fd {
+                vm.register_irqfd(irq_fd, self.gsi)
+                    .map_err(|e| io::Error::other(format!("Failed registering irq_fd: {e}")))?;
+            }
+            // If the irqfd cannot be unregistered, what to do?  Spin?
+            // Returning an error isn't helpful as the new irqfd is already registered.
+            if let Some(old_irq_fd) = old_irqfd {
+                match vm.unregister_irqfd(&old_irq_fd, self.gsi) {
+                    Ok(()) => {}
+                    Err(e) => log::warn!("Failed unregistering old irqfd: {e}"),
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -85,7 +121,7 @@ pub struct RoutingEntry {
 pub struct MsiInterruptGroup {
     vm: Arc<dyn hypervisor::Vm>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry>>>,
-    irq_routes: HashMap<InterruptIndex, InterruptRoute>,
+    irq_routes: HashMap<InterruptIndex, Mutex<InterruptRoute>>,
 }
 
 impl MsiInterruptGroup {
@@ -109,7 +145,7 @@ impl MsiInterruptGroup {
     fn new(
         vm: Arc<dyn hypervisor::Vm>,
         gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry>>>,
-        irq_routes: HashMap<InterruptIndex, InterruptRoute>,
+        irq_routes: HashMap<InterruptIndex, Mutex<InterruptRoute>>,
     ) -> Self {
         MsiInterruptGroup {
             vm,
@@ -122,7 +158,7 @@ impl MsiInterruptGroup {
 impl InterruptSourceGroup for MsiInterruptGroup {
     fn enable(&self) -> Result<()> {
         for (_, route) in self.irq_routes.iter() {
-            route.enable(self.vm.as_ref())?;
+            route.lock().unwrap().enable(self.vm.as_ref())?;
         }
 
         Ok(())
@@ -130,7 +166,7 @@ impl InterruptSourceGroup for MsiInterruptGroup {
 
     fn disable(&self) -> Result<()> {
         for (_, route) in self.irq_routes.iter() {
-            route.disable(self.vm.as_ref())?;
+            route.lock().unwrap().disable(self.vm.as_ref())?;
         }
 
         Ok(())
@@ -138,7 +174,7 @@ impl InterruptSourceGroup for MsiInterruptGroup {
 
     fn trigger(&self, index: InterruptIndex) -> Result<()> {
         if let Some(route) = self.irq_routes.get(&index) {
-            return route.trigger();
+            return route.lock().unwrap().trigger();
         }
 
         Err(io::Error::other(format!(
@@ -148,7 +184,7 @@ impl InterruptSourceGroup for MsiInterruptGroup {
 
     fn notifier(&self, index: InterruptIndex) -> Option<EventFd> {
         if let Some(route) = self.irq_routes.get(&index) {
-            return route.notifier();
+            return route.lock().unwrap().notifier();
         }
 
         None
@@ -162,6 +198,7 @@ impl InterruptSourceGroup for MsiInterruptGroup {
         set_gsi: bool,
     ) -> Result<()> {
         if let Some(route) = self.irq_routes.get(&index) {
+            let mut route = route.lock().unwrap();
             let entry = RoutingEntry {
                 route: self.vm.make_routing_entry(route.gsi, &config),
                 masked,
@@ -199,6 +236,19 @@ impl InterruptSourceGroup for MsiInterruptGroup {
     fn set_gsi(&self) -> Result<()> {
         let routes = self.gsi_msi_routes.lock().unwrap();
         self.set_gsi_routes(&routes)
+    }
+
+    fn set_notifier(
+        &mut self,
+        index: InterruptIndex,
+        eventfd: Option<EventFd>,
+        vm: &dyn hypervisor::Vm,
+    ) -> Result<()> {
+        if let Some(route) = self.irq_routes.get(&index) {
+            return route.lock().unwrap().set_notifier(eventfd, vm);
+        }
+
+        Ok(())
     }
 }
 
@@ -288,15 +338,35 @@ impl InterruptManager for LegacyUserspaceInterruptManager {
     }
 }
 
+impl MsiInterruptManager {
+    fn create_group_raw(
+        &self,
+        config: <Self as InterruptManager>::GroupConfig,
+    ) -> Result<MsiInterruptGroup> {
+        let mut allocator = self.allocator.lock().unwrap();
+        let mut irq_routes: HashMap<InterruptIndex, Mutex<InterruptRoute>> =
+            HashMap::with_capacity(config.count as usize);
+        for i in config.base..config.base + config.count {
+            irq_routes.insert(i, Mutex::new(InterruptRoute::new(&mut allocator)?));
+        }
+
+        Ok(MsiInterruptGroup::new(
+            self.vm.clone(),
+            self.gsi_msi_routes.clone(),
+            irq_routes,
+        ))
+    }
+}
+
 impl InterruptManager for MsiInterruptManager {
     type GroupConfig = MsiIrqGroupConfig;
 
     fn create_group(&self, config: Self::GroupConfig) -> Result<Arc<dyn InterruptSourceGroup>> {
         let mut allocator = self.allocator.lock().unwrap();
-        let mut irq_routes: HashMap<InterruptIndex, InterruptRoute> =
+        let mut irq_routes: HashMap<InterruptIndex, Mutex<InterruptRoute>> =
             HashMap::with_capacity(config.count as usize);
         for i in config.base..config.base + config.count {
-            irq_routes.insert(i, InterruptRoute::new(&mut allocator)?);
+            irq_routes.insert(i, Mutex::new(InterruptRoute::new(&mut allocator)?));
         }
 
         Ok(Arc::new(MsiInterruptGroup::new(
@@ -304,6 +374,14 @@ impl InterruptManager for MsiInterruptManager {
             self.gsi_msi_routes.clone(),
             irq_routes,
         )))
+    }
+
+    fn create_group_mut(
+        &self,
+        config: Self::GroupConfig,
+    ) -> vm_device::interrupt::Result<Arc<Mutex<dyn InterruptSourceGroup>>> {
+        let r = self.create_group_raw(config)?;
+        Ok(Arc::new(Mutex::new(r)))
     }
 
     fn destroy_group(&self, _group: Arc<dyn InterruptSourceGroup>) -> Result<()> {
