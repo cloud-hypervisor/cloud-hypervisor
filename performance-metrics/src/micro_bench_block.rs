@@ -106,3 +106,29 @@ pub fn micro_bench_qcow_write(control: &PerformanceTestControl) -> f64 {
 
     elapsed
 }
+
+/// Punch holes for num_ops clusters in a prepopulated qcow2 image through
+/// the QcowSync async_io path and time the total punch_hole wall clock.
+///
+/// This exercises the discard path: deallocate_bytes decrements refcounts,
+/// frees clusters and issues fallocate punch_hole on the host file.
+///
+/// Returns the total punch_hole wall clock time in seconds.
+pub fn micro_bench_qcow_punch_hole(control: &PerformanceTestControl) -> f64 {
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_tmp, disk) = util::qcow_tempfile(num_ops);
+    let mut async_io = disk.new_async_io(1).expect("new_async_io failed");
+
+    let start = Instant::now();
+    for i in 0..num_ops {
+        async_io
+            .punch_hole(i as u64 * QCOW_CLUSTER_SIZE, QCOW_CLUSTER_SIZE, i as u64)
+            .expect("punch_hole failed");
+    }
+    let elapsed = start.elapsed().as_secs_f64();
+
+    // Drain completions so Drop is clean.
+    drain_completions(async_io.as_mut(), num_ops);
+
+    elapsed
+}
