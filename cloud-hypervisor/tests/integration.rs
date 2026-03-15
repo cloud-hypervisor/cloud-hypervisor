@@ -3485,7 +3485,7 @@ mod common_parallel {
     fn get_image_info(path: &std::path::Path) -> Option<serde_json::Value> {
         let output = run_qemu_img(path, &["info", "-U", "--output=json"], None);
 
-        output.status.success().then(|| ())?;
+        output.status.success().then_some(())?;
         serde_json::from_slice(&output.stdout).ok()
     }
 
