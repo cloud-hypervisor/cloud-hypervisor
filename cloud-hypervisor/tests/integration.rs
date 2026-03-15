@@ -2513,7 +2513,7 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let mut guest = Guest::new(Box::new(disk_config));
         guest.kernel_path = Some(fw_path(FwType::RustHypervisorFirmware));
-        _test_simple_launch(&guest)
+        _test_simple_launch(&guest);
     }
 
     #[test]
@@ -2522,7 +2522,7 @@ mod common_parallel {
         let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let mut guest = Guest::new(Box::new(disk_config));
         guest.kernel_path = Some(fw_path(FwType::Ovmf));
-        _test_simple_launch(&guest)
+        _test_simple_launch(&guest);
     }
 
     #[test]
@@ -14787,7 +14787,7 @@ mod common_cvm {
         let guest =
             GuestFactory::new_confidential_guest_factory().create_guest(Box::new(disk_config));
 
-        _test_simple_launch(&guest)
+        _test_simple_launch(&guest);
     }
 
     #[test]
