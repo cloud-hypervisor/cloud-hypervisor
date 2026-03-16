@@ -17,6 +17,8 @@ use std::sync::Mutex;
 
 #[cfg(feature = "sev_snp")]
 use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
+#[cfg(feature = "sev_snp")]
+use igvm_defs::SnpPolicy;
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -392,9 +394,7 @@ pub trait Vm: Send + Sync + Any {
     fn get_dirty_log(&self, slot: u32, base_gpa: u64, memory_size: u64) -> Result<Vec<u64>>;
     #[cfg(feature = "sev_snp")]
     /// Initialize SEV-SNP on this VM
-    fn sev_snp_init(&self) -> Result<()> {
-        unimplemented!()
-    }
+    fn sev_snp_init(&self, guest_policy: SnpPolicy) -> Result<()>;
     #[cfg(feature = "tdx")]
     /// Initialize TDX on this VM
     fn tdx_init(&self, _cpuid: &[CpuIdEntry], _max_vcpus: u32) -> Result<()> {
@@ -429,6 +429,7 @@ pub trait Vm: Send + Sync + Any {
         _page_type: u32,
         _page_size: u32,
         _pages: &[u64],
+        _uaddrs: &[u64],
     ) -> Result<()> {
         unimplemented!()
     }
