@@ -777,10 +777,12 @@ impl Block {
                 // - Always advertise WRITE_ZEROES
                 // - Advertise DISCARD only if sparse=true OR format supports marking
                 //   clusters as zero without deallocating
+                let mut discard_supported = false;
                 if disk_image.supports_sparse_operations() {
                     avail_features |= 1u64 << VIRTIO_BLK_F_WRITE_ZEROES;
                     if sparse || disk_image.supports_zero_flag() {
                         avail_features |= 1u64 << VIRTIO_BLK_F_DISCARD;
+                        discard_supported = true;
                     }
                 } else if sparse {
                     warn!("sparse=on requested but backend does not support sparse operations");
@@ -822,6 +824,17 @@ impl Block {
                     seg_max: (queue_size - MINIMUM_BLOCK_QUEUE_SIZE) as u32,
                     ..Default::default()
                 };
+
+                if avail_features & (1u64 << VIRTIO_BLK_F_WRITE_ZEROES) != 0 {
+                    config.max_write_zeroes_sectors = u32::MAX;
+                    config.max_write_zeroes_seg = 1;
+                    config.write_zeroes_may_unmap = if discard_supported { 1 } else { 0 };
+                }
+                if avail_features & (1u64 << VIRTIO_BLK_F_DISCARD) != 0 {
+                    config.max_discard_sectors = u32::MAX;
+                    config.max_discard_seg = 1;
+                    config.discard_sector_alignment = 1;
+                }
 
                 if num_queues > 1 {
                     avail_features |= 1u64 << VIRTIO_BLK_F_MQ;
