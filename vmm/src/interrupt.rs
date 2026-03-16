@@ -17,7 +17,7 @@ use vm_device::interrupt::{
 use vmm_sys_util::eventfd::EventFd;
 
 /// Reuse std::io::Result to simplify interoperability among crates.
-pub type Result<T> = std::io::Result<T>;
+type Result<T> = std::io::Result<T>;
 
 struct InterruptRoute {
     gsi: u32,
@@ -26,11 +26,11 @@ struct InterruptRoute {
 }
 
 impl InterruptRoute {
-    pub fn new(allocator: &mut SystemAllocator) -> Result<Self> {
+    fn new(allocator: &mut SystemAllocator) -> Result<Self> {
         Self::new_with_fd(allocator, Some(EventFd::new(libc::EFD_NONBLOCK)?))
     }
 
-    pub fn new_with_fd(allocator: &mut SystemAllocator, irq_fd: Option<EventFd>) -> Result<Self> {
+    fn new_with_fd(allocator: &mut SystemAllocator, irq_fd: Option<EventFd>) -> Result<Self> {
         let gsi = allocator
             .allocate_gsi()
             .ok_or_else(|| io::Error::other("Failed allocating new GSI"))?;
@@ -42,7 +42,7 @@ impl InterruptRoute {
         })
     }
 
-    pub fn enable(&mut self, vm: &dyn hypervisor::Vm) -> Result<()> {
+    fn enable(&mut self, vm: &dyn hypervisor::Vm) -> Result<()> {
         if !self.registered {
             if let Some(ref irq_fd) = self.irq_fd {
                 vm.register_irqfd(irq_fd, self.gsi)
@@ -56,7 +56,7 @@ impl InterruptRoute {
         Ok(())
     }
 
-    pub fn disable(&mut self, vm: &dyn hypervisor::Vm) -> Result<()> {
+    fn disable(&mut self, vm: &dyn hypervisor::Vm) -> Result<()> {
         if self.registered {
             if let Some(ref irq_fd) = self.irq_fd {
                 vm.unregister_irqfd(irq_fd, self.gsi)
@@ -70,14 +70,14 @@ impl InterruptRoute {
         Ok(())
     }
 
-    pub fn trigger(&mut self) -> Result<()> {
+    fn trigger(&mut self) -> Result<()> {
         match self.irq_fd {
             Some(ref fd) => fd.write(1),
             None => Ok(()),
         }
     }
 
-    pub fn notifier(&mut self) -> Option<EventFd> {
+    fn notifier(&mut self) -> Option<EventFd> {
         Some(
             self.irq_fd
                 .as_ref()?
@@ -90,11 +90,7 @@ impl InterruptRoute {
     // will use it. Use #[allow(dead_code)] to suppress a compiler
     // warning.
     #[allow(dead_code)]
-    pub fn set_notifier(
-        &mut self,
-        eventfd: Option<EventFd>,
-        vm: &dyn hypervisor::Vm,
-    ) -> Result<()> {
+    fn set_notifier(&mut self, eventfd: Option<EventFd>, vm: &dyn hypervisor::Vm) -> Result<()> {
         let old_irqfd = core::mem::replace(&mut self.irq_fd, eventfd);
         if self.registered {
             if let Some(ref irq_fd) = self.irq_fd {
@@ -114,32 +110,15 @@ impl InterruptRoute {
     }
 }
 
-pub struct RoutingEntry {
+struct RoutingEntry {
     route: IrqRoutingEntry,
     masked: bool,
 }
 
-pub struct MsiInterruptGroup {
+struct MsiInterruptGroup {
     vm: Arc<dyn hypervisor::Vm>,
     gsi_msi_routes: Arc<Mutex<HashMap<u32, RoutingEntry>>>,
     irq_routes: HashMap<InterruptIndex, Mutex<InterruptRoute>>,
-}
-
-impl MsiInterruptGroup {
-    fn set_gsi_routes(&self, routes: &HashMap<u32, RoutingEntry>) -> Result<()> {
-        let mut entry_vec: Vec<IrqRoutingEntry> = Vec::new();
-        for (_, entry) in routes.iter() {
-            if entry.masked {
-                continue;
-            }
-
-            entry_vec.push(entry.route);
-        }
-
-        self.vm
-            .set_gsi_routing(&entry_vec)
-            .map_err(|e| io::Error::other(format!("Failed setting GSI routing: {e}")))
-    }
 }
 
 impl MsiInterruptGroup {
@@ -153,6 +132,21 @@ impl MsiInterruptGroup {
             gsi_msi_routes,
             irq_routes,
         }
+    }
+
+    fn set_gsi_routes(&self, routes: &HashMap<u32, RoutingEntry>) -> Result<()> {
+        let mut entry_vec: Vec<IrqRoutingEntry> = Vec::new();
+        for (_, entry) in routes.iter() {
+            if entry.masked {
+                continue;
+            }
+
+            entry_vec.push(entry.route);
+        }
+
+        self.vm
+            .set_gsi_routing(&entry_vec)
+            .map_err(|e| io::Error::other(format!("Failed setting GSI routing: {e}")))
     }
 }
 
@@ -253,7 +247,7 @@ impl InterruptSourceGroup for MsiInterruptGroup {
     }
 }
 
-pub struct LegacyUserspaceInterruptGroup {
+struct LegacyUserspaceInterruptGroup {
     ioapic: Arc<Mutex<dyn InterruptController>>,
     irq: u32,
 }
