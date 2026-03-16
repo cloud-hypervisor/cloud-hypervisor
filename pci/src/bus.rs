@@ -20,9 +20,13 @@ use crate::configuration::{
 };
 use crate::device::{BarReprogrammingParams, DeviceRelocation, Error as PciDeviceError, PciDevice};
 
+/// Denotes the PCI device ID of a bus' root bridge device.
+pub const PCI_ROOT_DEVICE_ID: u8 = 0;
+/// Denotes the maximum number of PCI devices allowed on a bus. 32 per PCI spec.
+pub const NUM_DEVICE_IDS: u8 = 32;
+
 const VENDOR_ID_INTEL: u16 = 0x8086;
 const DEVICE_ID_INTEL_VIRT_PCIE_HOST: u16 = 0x0d57;
-const NUM_DEVICE_IDS: usize = 32;
 
 /// Errors for device manager.
 #[derive(Error, Debug)]
@@ -113,18 +117,18 @@ impl PciDevice for PciRoot {
 pub struct PciBus {
     /// Devices attached to this bus.
     /// Device 0 is host bridge.
-    devices: HashMap<u32, Arc<Mutex<dyn PciDevice>>>,
+    devices: HashMap<u8, Arc<Mutex<dyn PciDevice>>>,
     device_reloc: Arc<dyn DeviceRelocation>,
-    device_ids: Vec<bool>,
+    device_ids: [bool; NUM_DEVICE_IDS as usize],
 }
 
 impl PciBus {
     pub fn new(pci_root: PciRoot, device_reloc: Arc<dyn DeviceRelocation>) -> Self {
-        let mut devices: HashMap<u32, Arc<Mutex<dyn PciDevice>>> = HashMap::new();
-        let mut device_ids: Vec<bool> = vec![false; NUM_DEVICE_IDS];
+        let mut devices: HashMap<u8, Arc<Mutex<dyn PciDevice>>> = HashMap::new();
+        let mut device_ids = [false; NUM_DEVICE_IDS as usize];
 
-        devices.insert(0, Arc::new(Mutex::new(pci_root)));
-        device_ids[0] = true;
+        devices.insert(PCI_ROOT_DEVICE_ID, Arc::new(Mutex::new(pci_root)));
+        device_ids[PCI_ROOT_DEVICE_ID as usize] = true;
 
         PciBus {
             devices,
@@ -158,7 +162,7 @@ impl PciBus {
         Ok(())
     }
 
-    pub fn add_device(&mut self, device_id: u32, device: Arc<Mutex<dyn PciDevice>>) -> Result<()> {
+    pub fn add_device(&mut self, device_id: u8, device: Arc<Mutex<dyn PciDevice>>) -> Result<()> {
         self.devices.insert(device_id, device);
         Ok(())
     }
@@ -180,7 +184,7 @@ impl PciBus {
     }
 
     pub fn get_device_id(&mut self, id: usize) -> Result<()> {
-        if id < NUM_DEVICE_IDS {
+        if id < NUM_DEVICE_IDS as usize {
             if self.device_ids[id] {
                 Err(PciRootError::AlreadyInUsePciDeviceSlot(id))
             } else {
@@ -193,7 +197,7 @@ impl PciBus {
     }
 
     pub fn put_device_id(&mut self, id: usize) -> Result<()> {
-        if id < NUM_DEVICE_IDS {
+        if id < NUM_DEVICE_IDS as usize {
             self.device_ids[id] = false;
             Ok(())
         } else {
@@ -240,7 +244,7 @@ impl PciConfigIo {
             .lock()
             .unwrap()
             .devices
-            .get(&(device as u32))
+            .get(&(device as u8))
             .map_or(0xffff_ffff, |d| {
                 d.lock().unwrap().read_config_register(register)
             })
@@ -265,7 +269,7 @@ impl PciConfigIo {
         }
 
         let pci_bus = self.pci_bus.as_ref().lock().unwrap();
-        if let Some(d) = pci_bus.devices.get(&(device as u32)) {
+        if let Some(d) = pci_bus.devices.get(&(device as u8)) {
             let mut device = d.lock().unwrap();
 
             // Update the register value
@@ -376,7 +380,7 @@ impl PciConfigMmio {
             .lock()
             .unwrap()
             .devices
-            .get(&(device as u32))
+            .get(&(device as u8))
             .map_or(0xffff_ffff, |d| {
                 d.lock().unwrap().read_config_register(register)
             })
@@ -395,7 +399,7 @@ impl PciConfigMmio {
         }
 
         let pci_bus = self.pci_bus.lock().unwrap();
-        if let Some(d) = pci_bus.devices.get(&(device as u32)) {
+        if let Some(d) = pci_bus.devices.get(&(device as u8)) {
             let mut device = d.lock().unwrap();
 
             // Update the register value

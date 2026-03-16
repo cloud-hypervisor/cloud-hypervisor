@@ -4125,7 +4125,7 @@ impl DeviceManager {
             .unwrap();
 
         pci_bus
-            .add_device(bdf.device() as u32, pci_device)
+            .add_device(bdf.device(), pci_device)
             .map_err(DeviceManagerError::AddPciDevice)?;
 
         self.bus_devices.push(Arc::clone(&bus_device));
