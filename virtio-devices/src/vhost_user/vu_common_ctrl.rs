@@ -11,7 +11,6 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use log::{error, info};
-use vhost::vhost_kern::vhost_binding::{VHOST_F_LOG_ALL, VHOST_VRING_F_LOG};
 use vhost::vhost_user::message::{
     VhostUserHeaderFlag, VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
@@ -45,19 +44,11 @@ pub struct VhostUserConfig {
 }
 
 #[derive(Clone)]
-struct VringInfo {
-    config_data: VringConfigData,
-    used_guest_addr: u64,
-}
-
-#[derive(Clone)]
 pub struct VhostUserHandle {
     vu: Frontend,
     ready: bool,
-    supports_migration: bool,
     shm_log: Option<Arc<MmapRegion>>,
     acked_features: u64,
-    vrings_info: Option<Vec<VringInfo>>,
     queue_indexes: Vec<usize>,
 }
 
@@ -147,8 +138,6 @@ impl VhostUserHandle {
             self.vu.set_hdr_flags(VhostUserHeaderFlag::NEED_REPLY);
         }
 
-        self.update_supports_migration(acked_features, acked_protocol_features.bits());
-
         Ok((acked_features, acked_protocol_features.bits()))
     }
 
@@ -203,7 +192,6 @@ impl VhostUserHandle {
                 .map_err(Error::VhostUserSetInflight)?;
         }
 
-        let mut vrings_info = Vec::new();
         for (queue_index, queue, queue_evt) in queues.iter() {
             let actual_size: usize = queue.size().into();
 
@@ -235,11 +223,6 @@ impl VhostUserHandle {
                 .ok_or(Error::AvailAddress)? as u64,
                 log_addr: None,
             };
-
-            vrings_info.push(VringInfo {
-                config_data,
-                used_guest_addr: queue.used_ring(),
-            });
 
             self.vu
                 .set_vring_addr(*queue_index, &config_data)
@@ -277,7 +260,6 @@ impl VhostUserHandle {
                 .map_err(Error::VhostUserSetBackendRequestFd)?;
         }
 
-        self.vrings_info = Some(vrings_info);
         self.ready = true;
 
         Ok(())
@@ -331,8 +313,6 @@ impl VhostUserHandle {
             }
         }
 
-        self.update_supports_migration(acked_features, acked_protocol_features);
-
         Ok(())
     }
 
@@ -378,10 +358,8 @@ impl VhostUserHandle {
             Ok(VhostUserHandle {
                 vu: Frontend::from_stream(stream, num_queues),
                 ready: false,
-                supports_migration: false,
                 shm_log: None,
                 acked_features: 0,
-                vrings_info: None,
                 queue_indexes: Vec::new(),
             })
         } else {
@@ -394,10 +372,8 @@ impl VhostUserHandle {
                         return Ok(VhostUserHandle {
                             vu: m,
                             ready: false,
-                            supports_migration: false,
                             shm_log: None,
                             acked_features: 0,
-                            vrings_info: None,
                             queue_indexes: Vec::new(),
                         });
                     }
@@ -433,14 +409,6 @@ impl VhostUserHandle {
         }
 
         Ok(())
-    }
-
-    fn update_supports_migration(&mut self, acked_features: u64, acked_protocol_features: u64) {
-        if (acked_features & u64::from(vhost::vhost_kern::vhost_binding::VHOST_F_LOG_ALL) != 0)
-            && (acked_protocol_features & VhostUserProtocolFeatures::LOG_SHMFD.bits() != 0)
-        {
-            self.supports_migration = true;
-        }
     }
 
     fn update_log_base(&mut self, last_ram_addr: u64) -> Result<Option<Arc<MmapRegion>>> {
@@ -503,62 +471,12 @@ impl VhostUserHandle {
         Ok(old_region)
     }
 
-    fn set_vring_logging(&mut self, enable: bool) -> Result<()> {
-        if let Some(vrings_info) = &self.vrings_info {
-            for (i, vring_info) in vrings_info.iter().enumerate() {
-                let mut config_data = vring_info.config_data;
-                config_data.flags = if enable { 1 << VHOST_VRING_F_LOG } else { 0 };
-                config_data.log_addr = if enable {
-                    Some(vring_info.used_guest_addr)
-                } else {
-                    None
-                };
-
-                self.vu
-                    .set_vring_addr(i, &config_data)
-                    .map_err(Error::VhostUserSetVringAddr)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn start_dirty_log(&mut self, last_ram_addr: u64) -> Result<()> {
-        if !self.supports_migration {
-            return Err(Error::MigrationNotSupported);
-        }
-
-        // Set the shm log region
-        self.update_log_base(last_ram_addr)?;
-
-        // Enable VHOST_F_LOG_ALL feature
-        let features = self.acked_features | (1 << VHOST_F_LOG_ALL);
-        self.vu
-            .set_features(features)
-            .map_err(Error::VhostUserSetFeatures)?;
-
-        // Enable dirty page logging of used ring for all queues
-        self.set_vring_logging(true)
+    pub fn start_dirty_log(&mut self, _last_ram_addr: u64) -> Result<()> {
+        Err(Error::MigrationNotSupported)
     }
 
     pub fn stop_dirty_log(&mut self) -> Result<()> {
-        if !self.supports_migration {
-            return Err(Error::MigrationNotSupported);
-        }
-
-        // Disable dirty page logging of used ring for all queues
-        self.set_vring_logging(false)?;
-
-        // Disable VHOST_F_LOG_ALL feature
-        self.vu
-            .set_features(self.acked_features)
-            .map_err(Error::VhostUserSetFeatures)?;
-
-        // This is important here since the log region goes out of scope,
-        // invoking the Drop trait, hence unmapping the memory.
-        self.shm_log = None;
-
-        Ok(())
+        Err(Error::MigrationNotSupported)
     }
 
     pub fn dirty_log(&mut self, last_ram_addr: u64) -> Result<MemoryRangeTable> {
