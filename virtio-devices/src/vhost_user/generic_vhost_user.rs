@@ -121,7 +121,7 @@ since the backend only supports {backend_num_queues}\n",
                     );
                     return Err(Error::BadQueueNum);
                 }
-                // Create virtio-vhost-user device configuration.
+
                 (
                     acked_features,
                     // If part of the available features that have been acked, the
