@@ -61,22 +61,31 @@ commit you make.
 In order to get a clear contribution chain of trust we use the [signed-off-by language](https://www.kernel.org/doc/Documentation/process/submitting-patches.rst)
 used by the Linux kernel project.
 
-## Patch format
+## Patch format & Git Commit Hygiene
 
-Beside the signed-off-by footer, we expect each patch to comply with the following format:
+_We use **Patch** as synonym for **Commit**._
 
-```
-<component>: Change summary
+We require patches to:
 
-More detailed explanation of your changes: Why and how.
-Wrap it to 72 characters.
-See http://chris.beams.io/posts/git-commit/
-for some more good pieces of advice.
+- Have a `Signed-off-by: Name <email>` footer
+- Follow the pattern: \
+  ```
+   <component>: Change summary
+   
+   More detailed explanation of your changes: Why and how.
+   Wrap it to 72 characters.
+   See http://chris.beams.io/posts/git-commit/
+   for some more good pieces of advice.
+   
+   Signed-off-by: <contributor@foo.com>
+   ```
+  
 
-Signed-off-by: <contributor@foo.com>
-```
+Valid components are listed in `TitleStartsWithComponent.py`. In short, each
+cargo workspace member is a valid component as well as `build`, `ci`, `docs` and 
+`misc`.
 
-For example:
+Example patch:
 
 ```
 vm-virtio: Reset underlying device on driver request
@@ -94,6 +103,20 @@ configure it anyway.
 Signed-off-by: Rob Bradford <robert.bradford@intel.com>
 ```
 
+### Git Commit History
+
+We value a clean, **reviewable** commit history. Each commit should represent
+a self-contained, logical step that guides reviewers clearly from A to B.
+
+Avoid patterns like `init A -> init B -> fix A` or \
+`init design A -> revert A -> use design B`. Commits must be independently 
+reviewable - don't leave "fix previous commit" or earlier design attempts in
+the history.
+
+Intermediate work-in-progress changes are acceptable only if a subsequent 
+commit in the same series cleans them up (e.g. a temporary `#[allow(unused)]`
+removed in the next commit).
+
 ## Pull requests
 
 Cloud Hypervisor uses the “fork-and-pull” development model. Follow these steps if
@@ -104,9 +127,13 @@ you want to merge your changes to `cloud-hypervisor`:
 1. Within your fork, create a branch for your contribution.
 1. [Create a pull request](https://help.github.com/articles/creating-a-pull-request-from-a-fork/)
    against the main branch of the Cloud Hypervisor repository.
-1. To update your pull request amend existing commits whenever applicable and
-   then push the new changes to your pull request branch.
+1. Each commit must comply with the Commit Hygiene guidelines above.
+1. A pull request should address a single component or concern to keep review
+   focused and approvals straightforward.
 1. Once the pull request is approved it can be integrated.
+
+Please squash any changes done during review already into the corresponding
+commits instead of pushing `<component>: addressing review for A`-style commits.
 
 ## Issue tracking
 
