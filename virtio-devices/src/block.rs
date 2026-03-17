@@ -833,7 +833,7 @@ impl Block {
                 if avail_features & (1u64 << VIRTIO_BLK_F_DISCARD) != 0 {
                     config.max_discard_sectors = u32::MAX;
                     config.max_discard_seg = 1;
-                    config.discard_sector_alignment = 1;
+                    config.discard_sector_alignment = (logical_block_size / SECTOR_SIZE) as u32;
                 }
 
                 if num_queues > 1 {
