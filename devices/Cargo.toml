@@ -21,7 +21,7 @@ linux-loader = { workspace = true, features = [
   "pe",
 ], optional = true }
 log = { workspace = true }
-num_enum = "0.7.5"
+num_enum = "0.7.6"
 pci = { path = "../pci" }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
