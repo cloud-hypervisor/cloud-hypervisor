@@ -7765,6 +7765,94 @@ mod common_parallel {
     }
 
     #[test]
+    fn test_virtio_block_write_zeroes_unmap_raw() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+
+        let test_disk_path = guest.tmp_dir.as_path().join("write_zeroes_unmap_test.raw");
+
+        let res = exec_host_command_output(&format!(
+            "dd if=/dev/zero of={} bs=1M count=128",
+            test_disk_path.to_str().unwrap()
+        ));
+        assert!(res.status.success(), "Failed to create raw test image");
+
+        let mut child = GuestCommand::new(&guest)
+            .default_cpus()
+            .default_memory()
+            .default_kernel_cmdline()
+            .args([
+                "--disk",
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                )
+                .as_str(),
+                format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                )
+                .as_str(),
+                format!("path={},image_type=raw", test_disk_path.to_str().unwrap()).as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vdc")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            let wz_max = guest
+                .ssh_command("cat /sys/block/vdc/queue/write_zeroes_max_bytes")
+                .unwrap()
+                .trim()
+                .parse::<u64>()
+                .unwrap_or_default();
+            assert!(
+                wz_max > 0,
+                "write_zeroes_max_bytes={wz_max}, VIRTIO_BLK_F_WRITE_ZEROES not negotiated"
+            );
+
+            guest
+                .ssh_command("sudo dd if=/dev/urandom of=/dev/vdc bs=1M count=64 oflag=direct")
+                .unwrap();
+            guest.ssh_command("sync").unwrap();
+
+            // fallocate --punch-hole on a block device sends
+            // WRITE_ZEROES with VIRTIO_BLK_WRITE_ZEROES_FLAG_UNMAP set.
+            let result = guest
+                .ssh_command("sudo fallocate -p -o 0 -l 67108864 /dev/vdc 2>&1 || true")
+                .unwrap();
+            assert!(
+                !result.contains("Operation not supported") && !result.contains("not supported"),
+                "fallocate --punch-hole failed: {result}"
+            );
+            guest.ssh_command("sync").unwrap();
+
+            assert_guest_disk_region_is_zero(&guest, "/dev/vdc", 0, 4096 * 256);
+
+            let test_disk_str = test_disk_path.to_str().unwrap();
+            verify_sparse_file(test_disk_str, 1.0);
+            verify_fiemap_extents(test_disk_str, "raw");
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_virtio_block_discard_unsupported_vhd() {
         _test_virtio_block_discard("vhd", "vpc", &["-o", "subformat=fixed"], false, false);
     }
