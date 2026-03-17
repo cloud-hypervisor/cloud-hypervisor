@@ -1302,6 +1302,13 @@ fn main() {
                 .required(false),
         )
         .arg(
+            Arg::new("test-exclude")
+                .long("test-exclude")
+                .help("Exclude metrics tests matching the provided keywords")
+                .num_args(1)
+                .required(false),
+        )
+        .arg(
             Arg::new("list-tests")
                 .long("list-tests")
                 .help("Print the list of available metrics tests")
@@ -1346,18 +1353,30 @@ fn main() {
         .filter(|t| !(cfg!(target_arch = "aarch64") && t.name == "virtio_net_latency_us"))
         .collect();
 
+    let test_filter = match cmd_arguments.get_many::<String>("test-filter") {
+        Some(s) => s.collect(),
+        None => Vec::new(),
+    };
+
+    let test_exclude = match cmd_arguments.get_many::<String>("test-exclude") {
+        Some(s) => s.collect(),
+        None => Vec::new(),
+    };
+
+    // Determine which tests will actually run.
+    let tests_to_run: Vec<&&PerformanceTest> = test_list
+        .iter()
+        .filter(|t| test_filter.is_empty() || test_filter.iter().any(|&s| t.name.contains(s)))
+        .filter(|t| !test_exclude.iter().any(|&s| t.name.contains(s)))
+        .collect();
+
     if cmd_arguments.get_flag("list-tests") {
-        for test in test_list.iter() {
+        for test in tests_to_run.iter() {
             println!("\"{}\" ({})", test.name, test.control);
         }
 
         return;
     }
-
-    let test_filter = match cmd_arguments.get_many::<String>("test-filter") {
-        Some(s) => s.collect(),
-        None => Vec::new(),
-    };
 
     // Run performance tests sequentially and report results (in both readable/json format)
     let mut metrics_report: MetricsReport = Default::default();
@@ -1379,12 +1398,6 @@ fn main() {
             .transpose()
             .unwrap_or_default(),
     });
-
-    // Determine which tests will actually run.
-    let tests_to_run: Vec<&&PerformanceTest> = test_list
-        .iter()
-        .filter(|t| test_filter.is_empty() || test_filter.iter().any(|&s| t.name.contains(s)))
-        .collect();
 
     // Skip heavy VM level init/cleanup when only micro benchmarks are selected.
     let needs_vm_tests = tests_to_run.iter().any(|t| !t.name.starts_with("micro_"));
