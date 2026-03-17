@@ -90,6 +90,15 @@ start using it.
 ./ch-remote --api-socket=/tmp/cloud-hypervisor.sock resume
 ```
 
+Alternatively, the `resume` option can be used to automatically resume the VM
+after restore completes:
+
+```bash
+./cloud-hypervisor \
+    --api-socket /tmp/cloud-hypervisor.sock \
+    --restore source_url=file:///home/foo/snapshot,resume=true
+```
+
 At this point, the VM is fully restored and is identical to the VM which was
 snapshot earlier.
 

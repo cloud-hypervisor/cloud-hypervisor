@@ -10726,16 +10726,22 @@ mod common_sequential {
     #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_hotplug_virtiomem() {
-        _test_snapshot_restore(true);
+        _test_snapshot_restore(true, false);
     }
 
     #[test]
     #[cfg(not(feature = "mshv"))] // See issue #7437
     fn test_snapshot_restore_basic() {
-        _test_snapshot_restore(false);
+        _test_snapshot_restore(false, false);
     }
 
-    fn _test_snapshot_restore(use_hotplug: bool) {
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_with_resume() {
+        _test_snapshot_restore(false, true);
+    }
+
+    fn _test_snapshot_restore(use_hotplug: bool, use_resume_option: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
@@ -10887,7 +10893,7 @@ mod common_sequential {
             ])
             .args([
                 "--restore",
-                format!("source_url=file://{snapshot_dir}").as_str(),
+                format!("source_url=file://{snapshot_dir},resume={use_resume_option}").as_str(),
             ])
             .capture_output()
             .spawn()
@@ -10917,28 +10923,12 @@ mod common_sequential {
             &expected_events,
             &event_path_restored
         ));
-        let latest_events = [&MetaEvent {
-            event: "restored".to_string(),
-            device_id: None,
-        }];
-        assert!(check_latest_events_exact(
-            &latest_events,
-            &event_path_restored
-        ));
-
-        // Remove the snapshot dir
-        let _ = remove_dir_all(snapshot_dir.as_str());
-
-        let r = std::panic::catch_unwind(|| {
-            // Resume the VM
-            assert!(remote_command(&api_socket_restored, "resume", None));
-            // There is no way that we can ensure the 'write()' to the
-            // event file is completed when the 'resume' request is
-            // returned successfully, because the 'write()' was done
-            // asynchronously from a different thread of Cloud
-            // Hypervisor (e.g. the event-monitor thread).
-            thread::sleep(std::time::Duration::new(1, 0));
+        if use_resume_option {
             let latest_events = [
+                &MetaEvent {
+                    event: "restored".to_string(),
+                    device_id: None,
+                },
                 &MetaEvent {
                     event: "resuming".to_string(),
                     device_id: None,
@@ -10952,6 +10942,49 @@ mod common_sequential {
                 &latest_events,
                 &event_path_restored
             ));
+        } else {
+            let latest_events = [&MetaEvent {
+                event: "restored".to_string(),
+                device_id: None,
+            }];
+            assert!(check_latest_events_exact(
+                &latest_events,
+                &event_path_restored
+            ));
+        }
+
+        // Remove the snapshot dir
+        let _ = remove_dir_all(snapshot_dir.as_str());
+
+        let r = std::panic::catch_unwind(|| {
+            if use_resume_option {
+                // VM was automatically resumed via restore option, just wait for events
+                thread::sleep(std::time::Duration::new(1, 0));
+            } else {
+                // Resume the VM manually
+                assert!(remote_command(&api_socket_restored, "resume", None));
+                // There is no way that we can ensure the 'write()' to the
+                // event file is completed when the 'resume' request is
+                // returned successfully, because the 'write()' was done
+                // asynchronously from a different thread of Cloud
+                // Hypervisor (e.g. the event-monitor thread).
+                thread::sleep(std::time::Duration::new(1, 0));
+
+                let latest_events = [
+                    &MetaEvent {
+                        event: "resuming".to_string(),
+                        device_id: None,
+                    },
+                    &MetaEvent {
+                        event: "resumed".to_string(),
+                        device_id: None,
+                    },
+                ];
+                assert!(check_latest_events_exact(
+                    &latest_events,
+                    &event_path_restored
+                ));
+            }
 
             // Perform same checks to validate VM has been properly restored
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
