@@ -108,6 +108,10 @@ if [ -n "$test_filter" ]; then
     test_binary_args+=("--test-filter $test_filter")
 fi
 
+if [ -n "$test_exclude" ]; then
+    test_binary_args+=("--test-exclude $test_exclude")
+fi
+
 # Ensure that git commands can be run in this directory (for metrics report)
 git config --global --add safe.directory "$PWD"
 

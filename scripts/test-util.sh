@@ -122,6 +122,10 @@ process_common_args() {
             shift
             test_filter="$1"
             ;;
+        "--test-exclude")
+            shift
+            test_exclude="$1"
+            ;;
         "--build-guest-kernel")
             build_kernel=true
             ;;
