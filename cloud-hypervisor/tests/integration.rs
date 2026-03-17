@@ -9891,16 +9891,15 @@ mod live_migration {
         thread::sleep(std::time::Duration::new(1, 0));
         // Start to send migration from the source VM
 
-        let mut args = [
+        let args = [
             format!("--api-socket={}", &src_api_socket),
             "send-migration".to_string(),
-            format! {"unix:{migration_socket}"},
+            format!(
+                "destination_url=unix:{migration_socket},local={}",
+                if local { "on" } else { "off" }
+            ),
         ]
         .to_vec();
-
-        if local {
-            args.insert(2, "--local".to_string());
-        }
 
         let mut send_migration = Command::new(clh_command("ch-remote"))
             .args(&args)
@@ -11066,7 +11065,7 @@ mod live_migration {
             .args([
                 &format!("--api-socket={src_api_socket}"),
                 "send-migration",
-                &format!("tcp:{host_ip}:{migration_port}"),
+                &format!("destination_url=tcp:{host_ip}:{migration_port}"),
             ])
             .stdin(Stdio::null())
             .stderr(Stdio::piped())

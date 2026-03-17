@@ -38,6 +38,7 @@ use std::sync::mpsc::{RecvError, SendError, Sender, channel};
 
 use log::info;
 use micro_http::Body;
+use option_parser::{OptionParser, OptionParserError, Toggle};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_migration::MigratableError;
@@ -266,13 +267,45 @@ pub struct VmReceiveMigrationData {
     pub receiver_url: String,
 }
 
-#[derive(Clone, Deserialize, Serialize, Default, Debug)]
+#[derive(Debug, Error)]
+#[error("Error parsing send migration parameters")]
+pub struct VmSendMigrationParseError(#[source] OptionParserError);
+
+/// Configuration for an outgoing migration.
+#[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct VmSendMigrationData {
     /// URL to migrate the VM to
     pub destination_url: String,
     /// Send memory across socket without copying
     #[serde(default)]
     pub local: bool,
+}
+
+impl VmSendMigrationData {
+    pub const SYNTAX: &'static str = "VM send migration parameters \
+        \"destination_url=<url>[,local=on|off]\"";
+
+    pub fn parse(migration: &str) -> Result<Self, VmSendMigrationParseError> {
+        let mut parser = OptionParser::new();
+        parser.add("destination_url").add("local");
+        parser.parse(migration).map_err(VmSendMigrationParseError)?;
+
+        let destination_url = parser.get("destination_url").ok_or_else(|| {
+            VmSendMigrationParseError(OptionParserError::InvalidSyntax(
+                "destination_url is required".to_string(),
+            ))
+        })?;
+        let local = parser
+            .convert::<Toggle>("local")
+            .map_err(VmSendMigrationParseError)?
+            .unwrap_or(Toggle(false))
+            .0;
+
+        Ok(Self {
+            destination_url,
+            local,
+        })
+    }
 }
 
 pub enum ApiResponsePayload {
@@ -1539,5 +1572,25 @@ impl ApiAction for VmNmi {
         data: Self::RequestBody,
     ) -> ApiResult<Self::ResponseBody> {
         get_response_body(self, api_evt, api_sender, data)
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    #[test]
+    fn test_vm_send_migration_data_parse() {
+        // Fully specified
+        let data = VmSendMigrationData::parse("destination_url=tcp://192.168.1.1:8080,local=on")
+            .expect("valid migration string should parse");
+        assert_eq!(data.destination_url, "tcp://192.168.1.1:8080");
+        assert!(data.local);
+
+        // Unknown option is an error
+        VmSendMigrationData::parse("destination_url=unix:/tmp/sock,unknown_field=foo").unwrap_err();
+
+        // Invalid toggle value is an error
+        VmSendMigrationData::parse("destination_url=unix:/tmp/sock,local=yes").unwrap_err();
     }
 }
