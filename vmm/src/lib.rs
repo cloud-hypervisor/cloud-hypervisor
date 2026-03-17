@@ -1849,16 +1849,22 @@ impl RequestHandler for Vmm {
             restore_cfg.prefault,
             restore_cfg.memory_restore_mode,
         )
-        .map_err(|vm_restore_err| {
-            error!("VM Restore failed: {vm_restore_err:?}");
-
-            // Cleanup the VM being created while vm restore
+        .and_then(|()| {
+            if restore_cfg.resume {
+                self.vm_resume()
+            } else {
+                Ok(())
+            }
+        })
+        .map_err(|e| {
+            error!("VM Restore failed: {e:?}");
             if let Err(e) = self.vm_delete() {
                 return e;
             }
+            e
+        })?;
 
-            vm_restore_err
-        })
+        Ok(())
     }
 
     #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
