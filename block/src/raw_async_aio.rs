@@ -172,18 +172,16 @@ impl AsyncIo for RawFileAsyncAio {
     }
 
     fn next_completed_request(&mut self) -> Option<(u64, i32)> {
-        // Drain synchronous completions first (from punch_hole/write_zeroes).
-        if let Some(completed) = self.completion_list.pop_front() {
-            return Some(completed);
+        if self.completion_list.is_empty() {
+            // Drain pending AIO completions batched into the same queue.
+            let mut events = [aio::IoEvent::default(); 32];
+            let rc = self.ctx.get_events(0, &mut events, None).unwrap();
+            for event in &events[..rc] {
+                self.completion_list
+                    .push_back((event.data, event.res as i32));
+            }
         }
-
-        let mut events: [aio::IoEvent; 1] = [aio::IoEvent::default()];
-        let rc = self.ctx.get_events(0, &mut events, None).unwrap();
-        if rc == 0 {
-            None
-        } else {
-            Some((events[0].data, events[0].res as i32))
-        }
+        self.completion_list.pop_front()
     }
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
