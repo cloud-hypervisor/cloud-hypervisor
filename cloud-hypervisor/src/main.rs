@@ -880,6 +880,11 @@ fn main() {
 
     if cmd_arguments.get_flag("version") {
         println!("{} {}", env!("CARGO_BIN_NAME"), env!("BUILD_VERSION"));
+        let migration_protocol_versions = vm_migration::protocol::supported_protocol_versions()
+            .map(|version| version.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("Migration Protocol Versions: {migration_protocol_versions}");
 
         if cmd_arguments.get_count("v") != 0 {
             println!("Enabled features: {:?}", vmm::feature_list());
