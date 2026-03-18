@@ -46,7 +46,6 @@ class TitleStartsWithComponent(LineRule):
             'hypervisor',
             'main',
             'misc',
-            'net_gen',
             'net_util',
             'openapi',
             'option_parser',
