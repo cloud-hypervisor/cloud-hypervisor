@@ -69,6 +69,13 @@ use crate::vhdx::VhdxError;
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
 
+/// Field offsets within `struct virtio_blk_discard_write_zeroes`.
+const DISCARD_WZ_SECTOR_OFFSET: u64 =
+    mem::offset_of!(virtio_blk_discard_write_zeroes, sector) as u64;
+const DISCARD_WZ_NUM_SECTORS_OFFSET: u64 =
+    mem::offset_of!(virtio_blk_discard_write_zeroes, num_sectors) as u64;
+const DISCARD_WZ_FLAGS_OFFSET: u64 = mem::offset_of!(virtio_blk_discard_write_zeroes, flags) as u64;
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Guest gave us bad memory addresses")]
@@ -589,9 +596,15 @@ impl Request {
 
                 let mut discard_sector = [0u8; 8];
                 let mut discard_num_sectors = [0u8; 4];
-                mem.read_slice(&mut discard_sector, data_addr)
+
+                let sector_addr = data_addr.checked_add(DISCARD_WZ_SECTOR_OFFSET).unwrap();
+                mem.read_slice(&mut discard_sector, sector_addr)
                     .map_err(ExecuteError::Read)?;
-                mem.read_slice(&mut discard_num_sectors, data_addr.checked_add(8).unwrap())
+
+                let num_sectors_addr = data_addr
+                    .checked_add(DISCARD_WZ_NUM_SECTORS_OFFSET)
+                    .unwrap();
+                mem.read_slice(&mut discard_num_sectors, num_sectors_addr)
                     .map_err(ExecuteError::Read)?;
 
                 let discard_sector = u64::from_le_bytes(discard_sector);
@@ -623,11 +636,19 @@ impl Request {
                 let mut wz_sector = [0u8; 8];
                 let mut wz_num_sectors = [0u8; 4];
                 let mut wz_flags = [0u8; 4];
-                mem.read_slice(&mut wz_sector, data_addr)
+
+                let sector_addr = data_addr.checked_add(DISCARD_WZ_SECTOR_OFFSET).unwrap();
+                mem.read_slice(&mut wz_sector, sector_addr)
                     .map_err(ExecuteError::Read)?;
-                mem.read_slice(&mut wz_num_sectors, data_addr.checked_add(8).unwrap())
+
+                let num_sectors_addr = data_addr
+                    .checked_add(DISCARD_WZ_NUM_SECTORS_OFFSET)
+                    .unwrap();
+                mem.read_slice(&mut wz_num_sectors, num_sectors_addr)
                     .map_err(ExecuteError::Read)?;
-                mem.read_slice(&mut wz_flags, data_addr.checked_add(12).unwrap())
+
+                let flags_addr = data_addr.checked_add(DISCARD_WZ_FLAGS_OFFSET).unwrap();
+                mem.read_slice(&mut wz_flags, flags_addr)
                     .map_err(ExecuteError::Read)?;
 
                 let wz_sector = u64::from_le_bytes(wz_sector);
