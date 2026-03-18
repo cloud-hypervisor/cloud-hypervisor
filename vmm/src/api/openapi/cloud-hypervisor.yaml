@@ -1358,6 +1358,8 @@ components:
           type: boolean
         memory_restore_mode:
           $ref: "#/components/schemas/MemoryRestoreMode"
+        resume:
+          type: boolean
 
     ReceiveMigrationData:
       required:
