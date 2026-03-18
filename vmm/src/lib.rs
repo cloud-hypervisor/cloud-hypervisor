@@ -937,7 +937,11 @@ impl Vmm {
         let state_name = state.variant_name();
         match state {
             Established => match req.command() {
-                Command::Start => Ok(Started),
+                Command::Start => {
+                    let migration_protocol_version = req.sender_protocol_version()?;
+                    debug!("Using migration protocol {migration_protocol_version}");
+                    Ok(Started)
+                }
                 c => invalid_command(state_name, c),
             },
             Started => match req.command() {
@@ -1420,6 +1424,7 @@ impl Vmm {
             Request::start(),
             MigratableError::MigrateSend(anyhow!("Error starting migration")),
         )?;
+        debug!("Using migration protocol {CURRENT_PROTOCOL_VERSION}");
 
         // Send config
         let vm_config = vm.get_config();

@@ -91,6 +91,7 @@ use std::mem::size_of;
 use std::ops::RangeInclusive;
 use std::{mem, slice};
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use vm_memory::ByteValued;
@@ -224,6 +225,26 @@ impl Request {
 
     pub fn command_headers(&self) -> &[u8; 6] {
         &self.command_headers
+    }
+
+    /// Returns the sender protocol version from a `Start` request if it is supported.
+    pub fn sender_protocol_version(&self) -> Result<u16, MigratableError> {
+        assert_eq!(
+            self.command(),
+            Command::Start,
+            "sender_protocol_version() must only be called for Start requests",
+        );
+
+        // The protocol version is stored in the first two header bytes, the remaining bytes are ignored.
+        let sender_version = u16::from_le_bytes([self.command_headers[0], self.command_headers[1]]);
+        if !supported_protocol_versions().any(|version| version == sender_version) {
+            let supported_versions = supported_protocol_versions().join(", ");
+            return Err(MigratableError::MigrateReceive(anyhow!(
+                "Migration protocol version {sender_version} doesn't match supported versions: {supported_versions}"
+            )));
+        }
+
+        Ok(sender_version)
     }
 
     pub fn read_from(fd: &mut dyn Read) -> Result<Request, MigratableError> {
@@ -522,7 +543,9 @@ impl MemoryRangeTable {
 
 #[cfg(test)]
 mod unit_tests {
-    use crate::protocol::{Command, MemoryRange, MemoryRangeTable, Request};
+    use crate::protocol::{
+        CURRENT_PROTOCOL_VERSION, Command, MemoryRange, MemoryRangeTable, Request,
+    };
 
     #[test]
     fn test_start_request_ignores_residual_command_headers_bytes() {
@@ -536,6 +559,18 @@ mod unit_tests {
             u16::from_le_bytes([request.command_headers()[0], request.command_headers()[1]]),
             1
         );
+    }
+
+    #[test]
+    fn test_sender_protocol_version_rejects_unsupported_version() {
+        let request = Request {
+            command: Command::Start,
+            command_headers: [255, 0, 0, 0, 0, 0],
+            length: 0,
+        };
+
+        const { assert!(CURRENT_PROTOCOL_VERSION < 255) };
+        request.sender_protocol_version().unwrap_err();
     }
 
     #[test]
