@@ -11627,6 +11627,52 @@ mod aarch64_acpi {
     fn test_virtio_iommu() {
         _test_virtio_iommu(true);
     }
+
+    #[test]
+    fn test_cache_topology() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+
+        vec![Box::new(focal)].drain(..).for_each(|disk_config| {
+            let guest = Guest::new(disk_config);
+
+            let mut child = GuestCommand::new(&guest)
+                .default_cpus()
+                .default_memory()
+                .args(["--kernel", edk2_path().to_str().unwrap()])
+                .default_disks()
+                .default_net()
+                .args(["--serial", "tty", "--console", "off"])
+                .capture_output()
+                .spawn()
+                .unwrap();
+
+            let r = std::panic::catch_unwind(|| {
+                guest.wait_vm_boot().unwrap();
+
+                let cache_levels = vec!["L1d", "L1i", "L2", "L3"];
+                for level in cache_levels {
+                    let host_sz = exec_host_command_output(&format!(
+                        "lscpu -C=NAME,ONE-SIZE | grep \"{level}\" | awk '{{print $2}}'"
+                    ));
+                    let guest_sz = guest
+                        .ssh_command(&format!(
+                            "lscpu -C=NAME,ONE-SIZE | grep \"{level}\" | awk '{{print $2}}'"
+                        ))
+                        .unwrap();
+                    assert_eq!(
+                        String::from_utf8_lossy(&host_sz.stdout).trim(),
+                        guest_sz.trim(),
+                        "Cache size mismatch for {level}"
+                    );
+                }
+            });
+
+            let _ = child.kill();
+            let output = child.wait_with_output().unwrap();
+
+            handle_child_output(r, &output);
+        });
+    }
 }
 
 mod rate_limiter {
