@@ -164,15 +164,22 @@ impl PciSegment {
         )
     }
 
-    pub(crate) fn next_device_bdf(&self) -> DeviceManagerResult<PciBdf> {
+    /// Allocates a device BDF on this PCI segment
+    ///
+    /// - `device_id`: Device ID to request for BDF allocation
+    ///
+    /// ## Errors
+    /// * [`DeviceManagerError::AllocatePciDeviceId`] if device ID
+    ///   allocation on the bus fails.
+    pub(crate) fn allocate_device_bdf(&self, device_id: Option<u8>) -> DeviceManagerResult<PciBdf> {
         Ok(PciBdf::new(
             self.id,
             0,
             self.pci_bus
                 .lock()
                 .unwrap()
-                .next_device_id()
-                .map_err(DeviceManagerError::NextPciDeviceId)? as u8,
+                .allocate_device_id(device_id)
+                .map_err(DeviceManagerError::AllocatePciDeviceId)?,
             0,
         ))
     }
