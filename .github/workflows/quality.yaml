@@ -157,6 +157,25 @@ jobs:
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "tdx,kvm" -- -D warnings
 
+      - name: Clippy (kvm + sev_snp + igvm + fw_cfg)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "kvm,sev_snp,igvm,fw_cfg" -- -D warnings
+
+      - name: Clippy (default features + sev_snp + igvm + fw_cfg)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets -tests --examples --features "sev_snp,igvm,fw_cfg" -- -D warnings
       - name: Check build did not modify any files
         run: test -z "$(git status --porcelain)"
 
