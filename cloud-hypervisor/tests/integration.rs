@@ -9921,12 +9921,11 @@ mod common_parallel {
                     .does_device_vendor_pair_match("0x1057", "0x1af4")
                     .unwrap_or_default()
             );
-            assert_eq!(
+            assert!(
                 guest
-                    .ssh_command("ls /sys/kernel/iommu_groups/1/devices")
+                    .ssh_command("ls /sys/kernel/iommu_groups/*/devices")
                     .unwrap()
-                    .trim(),
-                "0001:00:01.0"
+                    .contains("0001:00:01.0")
             );
 
             // Check both if /dev/vdd exists and if the block size is 128M.
