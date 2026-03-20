@@ -752,7 +752,15 @@ impl VirtioDevice for Net {
 
         let num_queues = queues.len();
         let event_idx = self.common.feature_acked(VIRTIO_RING_F_EVENT_IDX.into());
-        if self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && !num_queues.is_multiple_of(2) {
+
+        // Recompute the barrier size from the queues that are actually activated.
+        let has_ctrl_queue =
+            self.common.feature_acked(VIRTIO_NET_F_CTRL_VQ.into()) && !num_queues.is_multiple_of(2);
+        let ctrl_threads = if has_ctrl_queue { 1 } else { 0 };
+        let qp_threads = (num_queues - ctrl_threads) / 2;
+        self.common.paused_sync = Some(Arc::new(Barrier::new(1 + qp_threads + ctrl_threads)));
+
+        if has_ctrl_queue {
             let ctrl_queue_index = num_queues - 1;
             let (_, mut ctrl_queue, ctrl_queue_evt) = queues.remove(ctrl_queue_index);
 
@@ -772,10 +780,6 @@ impl VirtioDevice for Net {
             };
 
             let paused = self.common.paused.clone();
-            // Let's update the barrier as we need 1 for each RX/TX pair +
-            // 1 for the control queue + 1 for the main thread signalling
-            // the pause.
-            self.common.paused_sync = Some(Arc::new(Barrier::new(self.taps.len() + 2)));
             let paused_sync = self.common.paused_sync.clone();
 
             let mut epoll_threads = Vec::new();
