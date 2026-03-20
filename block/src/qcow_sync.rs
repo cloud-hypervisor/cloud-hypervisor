@@ -5,7 +5,7 @@
 use std::cmp::min;
 use std::collections::VecDeque;
 use std::fs::File;
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd};
 use std::sync::Arc;
 use std::{fmt, io};
 
@@ -15,51 +15,15 @@ use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
 use crate::disk_file;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::qcow::backing::{Qcow2MetadataBacking, RawBacking};
+use crate::qcow::backing::shared_backing_from;
 use crate::qcow::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
 use crate::qcow::qcow_raw_file::QcowRawFile;
-use crate::qcow::{
-    BackingFile, BackingKind, Error as QcowError, MAX_NESTING_DEPTH, RawFile, parse_qcow,
-};
+use crate::qcow::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
 use crate::qcow_common::{
     gather_from_iovecs, pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
 };
-
-/// Construct a thread safe backing file reader.
-fn shared_backing_from(bf: BackingFile) -> BlockResult<Arc<dyn BackingRead>> {
-    let (kind, virtual_size) = bf.into_kind();
-
-    let dup_fd = |fd: BorrowedFd<'_>| -> BlockResult<OwnedFd> {
-        fd.try_clone_to_owned().map_err(|e| {
-            BlockError::new(
-                BlockErrorKind::Io,
-                QcowError::BackingFileIo(String::new(), e),
-            )
-            .with_op(ErrorOp::DupBackingFd)
-        })
-    };
-
-    match kind {
-        BackingKind::Raw(raw_file) => {
-            let fd = dup_fd(raw_file.as_fd())?;
-            Ok(Arc::new(RawBacking { fd, virtual_size }))
-        }
-        BackingKind::Qcow { inner, backing } => {
-            let data_fd = dup_fd(inner.raw_file.as_fd())?;
-            Ok(Arc::new(Qcow2MetadataBacking {
-                metadata: Arc::new(QcowMetadata::new(*inner)),
-                data_fd,
-                backing_file: backing.map(|bf| shared_backing_from(*bf)).transpose()?,
-            }))
-        }
-        #[cfg(test)]
-        BackingKind::QcowFile(_) => {
-            unreachable!("QcowFile variant is only used by set_backing_file() in tests")
-        }
-    }
-}
 
 pub struct QcowDiskSync {
     metadata: Arc<QcowMetadata>,
