@@ -6,14 +6,14 @@
 
 //! QCOW2 async disk backend.
 
-use std::fmt;
 use std::fs::File;
 use std::os::fd::{AsFd, AsRawFd};
 use std::sync::Arc;
+use std::{fmt, io};
 
-use crate::async_io::BorrowedDiskFd;
+use crate::async_io::{BorrowedDiskFd, DiskFileError};
 use crate::disk_file;
-use crate::error::{BlockErrorKind, BlockResult, ErrorOp};
+use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::backing::shared_backing_from;
 use crate::qcow::metadata::{BackingRead, QcowMetadata};
 use crate::qcow::qcow_raw_file::QcowRawFile;
@@ -99,5 +99,23 @@ impl disk_file::SparseCapable for QcowDiskAsync {
 
     fn supports_zero_flag(&self) -> bool {
         true
+    }
+}
+
+impl disk_file::Resizable for QcowDiskAsync {
+    fn resize(&mut self, size: u64) -> BlockResult<()> {
+        if self.backing_file.is_some() {
+            return Err(BlockError::new(
+                BlockErrorKind::UnsupportedFeature,
+                DiskFileError::ResizeError(io::Error::other(
+                    "resize not supported with backing file",
+                )),
+            )
+            .with_op(ErrorOp::Resize));
+        }
+        self.metadata.resize(size).map_err(|e| {
+            BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e))
+                .with_op(ErrorOp::Resize)
+        })
     }
 }
