@@ -10,6 +10,7 @@ use std::fmt;
 use std::fs::File;
 use std::sync::Arc;
 
+use crate::disk_file;
 use crate::error::{BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::backing::shared_backing_from;
 use crate::qcow::metadata::{BackingRead, QcowMetadata};
@@ -66,5 +67,11 @@ impl QcowDiskAsync {
 impl Drop for QcowDiskAsync {
     fn drop(&mut self) {
         self.metadata.shutdown();
+    }
+}
+
+impl disk_file::DiskSize for QcowDiskAsync {
+    fn logical_size(&self) -> BlockResult<u64> {
+        Ok(self.metadata.virtual_size())
     }
 }
