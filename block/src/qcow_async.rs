@@ -134,6 +134,30 @@ impl disk_file::Resizable for QcowDiskAsync {
 
 impl disk_file::DiskFile for QcowDiskAsync {}
 
+impl disk_file::AsyncDiskFile for QcowDiskAsync {
+    fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
+        Ok(Box::new(QcowDiskAsync {
+            metadata: Arc::clone(&self.metadata),
+            backing_file: self.backing_file.as_ref().map(Arc::clone),
+            sparse: self.sparse,
+            data_raw_file: self.data_raw_file.clone(),
+        }))
+    }
+
+    fn new_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
+        Ok(Box::new(
+            QcowAsync::new(
+                Arc::clone(&self.metadata),
+                self.data_raw_file.clone(),
+                self.backing_file.as_ref().map(Arc::clone),
+                self.sparse,
+                ring_depth,
+            )
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::NewAsyncIo(e)))?,
+        ))
+    }
+}
+
 /// Per queue QCOW2 I/O worker using io_uring.
 ///
 /// Reads against fully allocated single mapping clusters are submitted
