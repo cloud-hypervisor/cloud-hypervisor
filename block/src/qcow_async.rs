@@ -119,3 +119,5 @@ impl disk_file::Resizable for QcowDiskAsync {
         })
     }
 }
+
+impl disk_file::DiskFile for QcowDiskAsync {}
