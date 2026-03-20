@@ -75,3 +75,9 @@ impl disk_file::DiskSize for QcowDiskAsync {
         Ok(self.metadata.virtual_size())
     }
 }
+
+impl disk_file::PhysicalSize for QcowDiskAsync {
+    fn physical_size(&self) -> BlockResult<u64> {
+        Ok(self.data_raw_file.physical_size()?)
+    }
+}
