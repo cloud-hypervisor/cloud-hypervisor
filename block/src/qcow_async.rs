@@ -89,3 +89,5 @@ impl disk_file::DiskFd for QcowDiskAsync {
         BorrowedDiskFd::new(self.data_raw_file.as_fd().as_raw_fd())
     }
 }
+
+impl disk_file::Geometry for QcowDiskAsync {}
