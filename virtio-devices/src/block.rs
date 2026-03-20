@@ -1087,6 +1087,9 @@ impl VirtioDevice for Block {
         }
         self.common.activate(&queues, interrupt_cb.clone())?;
 
+        // Recompute the barrier size from the queues that are actually activated.
+        self.common.paused_sync = Some(Arc::new(Barrier::new(queues.len() + 1)));
+
         self.update_writeback();
 
         let mut epoll_threads = Vec::new();
