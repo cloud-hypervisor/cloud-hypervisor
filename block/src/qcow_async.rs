@@ -248,7 +248,12 @@ impl AsyncIo for QcowAsync {
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
-        unimplemented!()
+        self.metadata.flush().map_err(AsyncIoError::Fsync)?;
+        if let Some(user_data) = user_data {
+            self.completion_list.push_back((user_data, 0));
+            self.eventfd.write(1).unwrap();
+        }
+        Ok(())
     }
 
     fn next_completed_request(&mut self) -> Option<(u64, i32)> {
