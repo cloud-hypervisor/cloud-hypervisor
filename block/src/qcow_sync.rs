@@ -15,7 +15,7 @@ use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
 use crate::disk_file;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::qcow::backing::RawBacking;
+use crate::qcow::backing::{Qcow2MetadataBacking, RawBacking};
 use crate::qcow::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
@@ -26,93 +26,6 @@ use crate::qcow::{
 use crate::qcow_common::{
     gather_from_iovecs, pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
 };
-
-/// QCOW2 backing file with RwLock metadata and pread64 data reads.
-///
-/// Read only because backing files never receive writes. Nested backing
-/// files are handled recursively.
-struct Qcow2MetadataBacking {
-    metadata: Arc<QcowMetadata>,
-    data_fd: OwnedFd,
-    backing_file: Option<Arc<dyn BackingRead>>,
-}
-
-// SAFETY: All reads go through QcowMetadata which uses RwLock
-// and pread64 which is position independent and thread safe.
-unsafe impl Sync for Qcow2MetadataBacking {}
-
-impl BackingRead for Qcow2MetadataBacking {
-    fn read_at(&self, address: u64, buf: &mut [u8]) -> io::Result<()> {
-        let virtual_size = self.metadata.virtual_size();
-        if address >= virtual_size {
-            buf.fill(0);
-            return Ok(());
-        }
-        let available = (virtual_size - address) as usize;
-        if available < buf.len() {
-            self.read_clusters(address, &mut buf[..available])?;
-            buf[available..].fill(0);
-            return Ok(());
-        }
-        self.read_clusters(address, buf)
-    }
-}
-
-impl Qcow2MetadataBacking {
-    /// Resolve cluster mappings via metadata then read allocated clusters
-    /// with pread64.
-    fn read_clusters(&self, address: u64, buf: &mut [u8]) -> io::Result<()> {
-        let total_len = buf.len();
-        let has_backing = self.backing_file.is_some();
-
-        let mappings = self
-            .metadata
-            .map_clusters_for_read(address, total_len, has_backing)?;
-
-        let mut buf_offset = 0usize;
-        for mapping in mappings {
-            match mapping {
-                ClusterReadMapping::Zero { length } => {
-                    buf[buf_offset..buf_offset + length as usize].fill(0);
-                    buf_offset += length as usize;
-                }
-                ClusterReadMapping::Allocated {
-                    offset: host_offset,
-                    length,
-                } => {
-                    pread_exact(
-                        self.data_fd.as_raw_fd(),
-                        &mut buf[buf_offset..buf_offset + length as usize],
-                        host_offset,
-                    )?;
-                    buf_offset += length as usize;
-                }
-                ClusterReadMapping::Compressed { data } => {
-                    let len = data.len();
-                    buf[buf_offset..buf_offset + len].copy_from_slice(&data);
-                    buf_offset += len;
-                }
-                ClusterReadMapping::Backing {
-                    offset: backing_offset,
-                    length,
-                } => {
-                    self.backing_file.as_ref().unwrap().read_at(
-                        backing_offset,
-                        &mut buf[buf_offset..buf_offset + length as usize],
-                    )?;
-                    buf_offset += length as usize;
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-impl Drop for Qcow2MetadataBacking {
-    fn drop(&mut self) {
-        self.metadata.shutdown();
-    }
-}
 
 /// Construct a thread safe backing file reader.
 fn shared_backing_from(bf: BackingFile) -> BlockResult<Arc<dyn BackingRead>> {
