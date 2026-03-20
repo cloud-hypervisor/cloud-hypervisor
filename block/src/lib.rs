@@ -625,6 +625,13 @@ impl Request {
 
                 let discard_num_sectors = u32::from_le_bytes(discard_num_sectors);
 
+                let top = discard_sector
+                    .checked_add(discard_num_sectors as u64)
+                    .ok_or(ExecuteError::BadRequest(Error::InvalidOffset))?;
+                if top > disk_nsectors {
+                    return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+                }
+
                 let discard_offset = discard_sector * SECTOR_SIZE;
                 let discard_length = (discard_num_sectors as u64) * SECTOR_SIZE;
 
@@ -672,6 +679,14 @@ impl Request {
                 if wz_offset == 0 && disable_sector0_writes {
                     return Err(ExecuteError::BadRequest(Error::InvalidOffset));
                 }
+
+                let top = wz_sector
+                    .checked_add(wz_num_sectors as u64)
+                    .ok_or(ExecuteError::BadRequest(Error::InvalidOffset))?;
+                if top > disk_nsectors {
+                    return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+                }
+
                 let wz_length = (wz_num_sectors as u64) * SECTOR_SIZE;
 
                 if wz_flags & VIRTIO_BLK_WRITE_ZEROES_FLAG_UNMAP != 0 {
