@@ -16,12 +16,15 @@ use std::{fmt, io};
 
 use io_uring::{IoUring, opcode, types};
 use vmm_sys_util::eventfd::EventFd;
+use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
 use crate::disk_file;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::backing::shared_backing_from;
-use crate::qcow::metadata::{BackingRead, ClusterReadMapping, ClusterWriteMapping, QcowMetadata};
+use crate::qcow::metadata::{
+    BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
+};
 use crate::qcow::qcow_raw_file::QcowRawFile;
 use crate::qcow::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
 use crate::qcow_common::{
@@ -172,6 +175,26 @@ impl QcowAsync {
             completion_list: VecDeque::new(),
         })
     }
+
+    fn apply_dealloc_action(&mut self, action: &DeallocAction) {
+        match action {
+            DeallocAction::PunchHole {
+                host_offset,
+                length,
+            } => {
+                let _ = self.data_file.file_mut().punch_hole(*host_offset, *length);
+            }
+            DeallocAction::WriteZeroes {
+                host_offset,
+                length,
+            } => {
+                let _ = self
+                    .data_file
+                    .file_mut()
+                    .write_zeroes_at(*host_offset, *length);
+            }
+        }
+    }
 }
 
 impl AsyncIo for QcowAsync {
@@ -266,11 +289,47 @@ impl AsyncIo for QcowAsync {
     }
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        unimplemented!()
+        let virtual_size = self.metadata.virtual_size();
+        let cluster_size = self.metadata.cluster_size();
+
+        let result = self
+            .metadata
+            .deallocate_bytes(
+                offset,
+                length as usize,
+                self.sparse,
+                virtual_size,
+                cluster_size,
+                self.backing_file.as_deref(),
+            )
+            .map_err(AsyncIoError::PunchHole);
+
+        match result {
+            Ok(actions) => {
+                for action in &actions {
+                    self.apply_dealloc_action(action);
+                }
+                self.completion_list.push_back((user_data, 0));
+                self.eventfd.write(1).unwrap();
+                Ok(())
+            }
+            Err(e) => {
+                let errno = if let AsyncIoError::PunchHole(ref io_err) = e {
+                    -io_err.raw_os_error().unwrap_or(libc::EIO)
+                } else {
+                    -libc::EIO
+                };
+                self.completion_list.push_back((user_data, errno));
+                self.eventfd.write(1).unwrap();
+                Ok(())
+            }
+        }
     }
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
-        unimplemented!()
+        // For QCOW2, zeroing and hole punching are the same operation.
+        // Both discard guest data so the range reads back as zero.
+        self.punch_hole(offset, length, user_data)
     }
 }
 
