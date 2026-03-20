@@ -802,13 +802,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "net_gen"
-version = "0.1.0"
-dependencies = [
- "vmm-sys-util",
-]
-
-[[package]]
 name = "net_util"
 version = "0.1.0"
 dependencies = [
@@ -816,7 +809,6 @@ dependencies = [
  "getrandom 0.4.2",
  "libc",
  "log",
- "net_gen",
  "rate_limiter",
  "serde",
  "thiserror 2.0.18",
@@ -1255,7 +1247,6 @@ dependencies = [
  "anyhow",
  "libc",
  "log",
- "net_gen",
  "thiserror 2.0.18",
  "vmm-sys-util",
 ]

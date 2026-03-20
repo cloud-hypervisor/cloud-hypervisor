@@ -150,16 +150,16 @@ impl Emulator {
 
         // SAFETY: FFI calls and return value of the unsafe call is checked
         unsafe {
-            let tv = net_gen::iff::timeval {
+            let tv = libc::timeval {
                 tv_sec: 0,
                 tv_usec: 100000, // Set recv timeout to 100ms
             };
-            let ret = net_gen::setsockopt(
+            let ret = libc::setsockopt(
                 fds[0],
-                net_gen::iff::SOL_SOCKET as i32,
-                net_gen::iff::SO_RCVTIMEO as i32,
+                libc::SOL_SOCKET,
+                libc::SO_RCVTIMEO,
                 &tv as *const _ as *const libc::c_void,
-                std::mem::size_of::<net_gen::iff::timeval>() as u32,
+                std::mem::size_of::<libc::timeval>() as u32,
             );
             if ret == -1 {
                 return Err(Error::PrepareDataFd(anyhow!(

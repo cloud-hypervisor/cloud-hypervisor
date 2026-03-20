@@ -10,7 +10,6 @@ version = "0.1.0"
 anyhow = { workspace = true }
 libc = { workspace = true }
 log = { workspace = true }
-net_gen = { path = "../net_gen" }
 thiserror = { workspace = true }
 vmm-sys-util = { workspace = true }
 
