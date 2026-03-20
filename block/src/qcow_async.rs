@@ -91,3 +91,13 @@ impl disk_file::DiskFd for QcowDiskAsync {
 }
 
 impl disk_file::Geometry for QcowDiskAsync {}
+
+impl disk_file::SparseCapable for QcowDiskAsync {
+    fn supports_sparse_operations(&self) -> bool {
+        true
+    }
+
+    fn supports_zero_flag(&self) -> bool {
+        true
+    }
+}
