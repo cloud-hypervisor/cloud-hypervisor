@@ -7,6 +7,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE-BSD-3-Clause file.
 
+// This is currently only utilized by the x86_64 module, but there is nothing x86_64 specific
+// about this.
+mod general_purpose_helper_fns;
+
 pub mod interrupts;
 pub mod layout;
 pub mod regs;
@@ -21,6 +25,7 @@ mod smbios;
 use std::arch::x86_64;
 use std::mem;
 
+use general_purpose_helper_fns::{deserialize_u32_hex, serialize_u32_hex};
 use hypervisor::arch::x86::{CPUID_FLAG_VALID_INDEX, CpuIdEntry};
 use hypervisor::{CpuVendor, HypervisorCpuError, HypervisorError};
 use linux_loader::loader::bootparam::{boot_params, setup_header};
