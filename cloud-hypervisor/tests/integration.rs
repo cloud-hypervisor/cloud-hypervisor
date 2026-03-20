@@ -9868,6 +9868,8 @@ mod vfio {
 }
 
 mod live_migration {
+    use vmm::api::TimeoutStrategy;
+
     use crate::*;
 
     pub fn start_live_migration(
@@ -11244,7 +11246,168 @@ mod live_migration {
         handle_child_output(r, &dest_output);
     }
 
+    fn _test_live_migration_tcp_timeout(timeout_strategy: TimeoutStrategy) {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+        let net_id = "net1337";
+        let net_params = format!(
+            "id={},tap=,mac={},ip={},mask=255.255.255.128",
+            net_id, guest.network.guest_mac0, guest.network.host_ip0
+        );
+        let memory_param: &[&str] = &["--memory", "size=2G,shared=on"];
+        let boot_vcpus = 2;
+
+        let src_vm_path = clh_command("cloud-hypervisor");
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+        let mut src_vm_cmd = GuestCommand::new_with_binary_path(&guest, &src_vm_path);
+        src_vm_cmd
+            .args(["--cpus", format!("boot={boot_vcpus}").as_str()])
+            .args(memory_param)
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .args(["--net", net_params.as_str()])
+            .args(["--api-socket", &src_api_socket])
+            .capture_output();
+        let mut src_child = src_vm_cmd.spawn().unwrap();
+
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+            assert!(guest.get_total_memory().unwrap_or_default() > 2_000_000);
+
+            // Start a memory stressor in the background to keep pages dirty,
+            // ensuring the precopy loop cannot converge within the 1s timeout.
+            guest
+                .ssh_command("nohup stress --vm 1 --vm-bytes 1G --vm-keep &>/dev/null &")
+                .unwrap();
+            // Give stress a moment to actually start dirtying memory
+            thread::sleep(Duration::from_secs(3));
+
+            let migration_port = get_available_port();
+            let host_ip = "127.0.0.1";
+
+            let mut receive_migration = Command::new(clh_command("ch-remote"))
+                .args([
+                    &format!("--api-socket={dest_api_socket}"),
+                    "receive-migration",
+                    &format!("tcp:0.0.0.0:{migration_port}"),
+                ])
+                .stdin(Stdio::null())
+                .stderr(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+
+            thread::sleep(Duration::from_secs(1));
+
+            // Use a tight downtime budget (50ms) combined with a 1s timeout so the
+            // migration cannot converge regardless of strategy.
+            let mut send_migration = Command::new(clh_command("ch-remote"))
+                .args([
+                    &format!("--api-socket={src_api_socket}"),
+                    "send-migration",
+                    &format!(
+                        "destination_url=tcp:{host_ip}:{migration_port},downtime_ms=50,timeout_s=1,timeout_strategy={timeout_strategy:?}"
+                    ),
+                ])
+                .stdin(Stdio::null())
+                .stderr(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+
+            let send_status = send_migration
+                .wait_timeout(Duration::from_secs(60))
+                .unwrap();
+            let receive_status = receive_migration
+                .wait_timeout(Duration::from_secs(60))
+                .unwrap();
+
+            // Clean up receive-migration regardless of its outcome
+            if receive_status.is_none() {
+                let _ = receive_migration.kill();
+            }
+
+            match timeout_strategy {
+                TimeoutStrategy::Cancel => {
+                    // With cancel strategy the send must fail and the source VM
+                    // must keep running.
+                    let send_failed = match send_status {
+                        Some(status) => !status.success(),
+                        None => {
+                            let _ = send_migration.kill();
+                            false
+                        }
+                    };
+                    assert!(
+                        send_failed,
+                        "send-migration should have failed due to 1s timeout with cancel strategy"
+                    );
+
+                    thread::sleep(Duration::from_secs(2));
+                    assert!(
+                        src_child.try_wait().unwrap().is_none(),
+                        "Source VM should still be running after a cancelled migration"
+                    );
+
+                    // Confirm the source VM is still responsive over SSH
+                    assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+                    assert!(guest.get_total_memory().unwrap_or_default() >= 2_000_000);
+                }
+                TimeoutStrategy::Force => {
+                    // Kill the stressor now that migration has completed or aborted,
+                    // to reduce system load during post-migration checks.
+                    let _ = guest.ssh_command("pkill -f 'stress --vm'");
+
+                    // With force strategy the send must succeed despite the timeout
+                    // being reached, and the source VM must have terminated.
+                    let send_succeeded = match send_status {
+                        Some(status) => status.success(),
+                        None => {
+                            let _ = send_migration.kill();
+                            false
+                        }
+                    };
+                    assert!(
+                        send_succeeded,
+                        "send-migration should have succeeded with force strategy"
+                    );
+
+                    thread::sleep(Duration::from_secs(3));
+                    assert!(
+                        src_child.try_wait().unwrap().is_some(),
+                        "Source VM should have terminated after a forced migration"
+                    );
+
+                    // Confirm the VM is still responsive over SSH on the new host
+                    assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
+                    assert!(guest.get_total_memory().unwrap_or_default() >= 2_000_000);
+                }
+            }
+        }));
+
+        let _ = src_child.kill();
+        let src_output = src_child.wait_with_output().unwrap();
+        let _ = dest_child.kill();
+        let _dest_output = dest_child.wait_with_output().unwrap();
+
+        handle_child_output(r, &src_output);
+    }
+
     mod live_migration_parallel {
+        use vmm::api::TimeoutStrategy;
+
         use super::*;
         #[test]
         fn test_live_migration_basic() {
@@ -11259,6 +11422,16 @@ mod live_migration {
         #[test]
         fn test_live_migration_tcp() {
             _test_live_migration_tcp();
+        }
+
+        #[test]
+        fn test_live_migration_tcp_timeout_cancel() {
+            _test_live_migration_tcp_timeout(TimeoutStrategy::Cancel);
+        }
+
+        #[test]
+        fn test_live_migration_tcp_timeout_force() {
+            _test_live_migration_tcp_timeout(TimeoutStrategy::Force);
         }
 
         #[test]
