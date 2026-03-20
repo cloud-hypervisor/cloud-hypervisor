@@ -12,6 +12,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::ops::{Deref, DerefMut};
 use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
@@ -34,6 +35,7 @@ use virtio_bindings::virtio_ring::VIRTIO_RING_F_EVENT_IDX;
 use virtio_queue::QueueT;
 use vm_memory::{ByteValued, Bytes, GuestAddressSpace, GuestMemoryAtomic};
 use vmm_sys_util::epoll::EventSet;
+use vmm_sys_util::event::{EventConsumer, EventNotifier};
 use vmm_sys_util::eventfd::EventFd;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<BitmapMmapRegion>;
@@ -423,15 +425,15 @@ impl VhostUserBackendMut for VhostUserBlkBackend {
         Ok(())
     }
 
-    fn exit_event(&self, thread_index: usize) -> Option<EventFd> {
-        Some(
-            self.threads[thread_index]
-                .lock()
-                .unwrap()
-                .kill_evt
-                .try_clone()
-                .unwrap(),
-        )
+    fn exit_event(&self, thread_index: usize) -> Option<(EventConsumer, EventNotifier)> {
+        let kill_evt = &self.threads[thread_index].lock().unwrap().kill_evt;
+        // SAFETY: kill_evt is a valid eventfd
+        unsafe {
+            Some((
+                EventConsumer::from_raw_fd(kill_evt.try_clone().unwrap().into_raw_fd()),
+                EventNotifier::from_raw_fd(kill_evt.try_clone().unwrap().into_raw_fd()),
+            ))
+        }
     }
 
     fn queues_per_thread(&self) -> Vec<u64> {
@@ -533,14 +535,14 @@ pub fn start_block_backend(backend_command: &str) {
 
     debug!("blk_backend is created!\n");
 
-    let listener = Listener::new(&backend_config.socket, true).unwrap();
+    let mut listener = Listener::new(&backend_config.socket, true).unwrap();
 
     let name = "vhost-user-blk-backend";
     let mut blk_daemon = VhostUserDaemon::new(name.to_string(), blk_backend.clone(), mem).unwrap();
 
     debug!("blk_daemon is created!\n");
 
-    if let Err(e) = blk_daemon.start(listener) {
+    if let Err(e) = blk_daemon.start(&mut listener) {
         error!("Failed to start daemon for vhost-user-block with error: {e:?}\n");
         process::exit(1);
     }

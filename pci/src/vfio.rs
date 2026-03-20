@@ -1709,10 +1709,8 @@ impl VfioPciDevice {
                         unsafe {
                             self.container.vfio_dma_map(
                                 user_memory_region.start,
-                                user_memory_region.mapping.len().try_into().unwrap(),
-                                (user_memory_region.mapping.addr() as usize)
-                                    .try_into()
-                                    .unwrap(),
+                                user_memory_region.mapping.len(),
+                                user_memory_region.mapping.addr(),
                             )
                         }
                         .map_err(|e| VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf))?;
@@ -1734,7 +1732,7 @@ impl VfioPciDevice {
                 if !self.iommu_attached
                     && let Err(e) = self
                         .container
-                        .vfio_dma_unmap(user_memory_region.start, len.try_into().unwrap())
+                        .vfio_dma_unmap(user_memory_region.start, len)
                         .map_err(|e| VfioPciError::DmaUnmap(e, self.device_path.clone(), self.bdf))
                 {
                     error!(
@@ -1892,7 +1890,7 @@ impl PciDevice for VfioPciDevice {
                     if !self.iommu_attached
                         && let Err(e) = self
                             .container
-                            .vfio_dma_unmap(user_memory_region.start, len.try_into().unwrap())
+                            .vfio_dma_unmap(user_memory_region.start, len)
                             .map_err(|e| {
                                 VfioPciError::DmaUnmap(e, self.device_path.clone(), self.bdf)
                             })
@@ -1950,11 +1948,8 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                         // host_addr points to len bytes of
                         // valid memory that will only be unmapped with munmap().
                         unsafe {
-                            self.container.vfio_dma_map(
-                                user_memory_region.start,
-                                len.try_into().unwrap(),
-                                (host_addr as usize).try_into().unwrap(),
-                            )
+                            self.container
+                                .vfio_dma_map(user_memory_region.start, len, host_addr)
                         }
                         .map_err(|e| VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf))
                         .map_err(|e| {
@@ -2069,11 +2064,7 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
         // SAFETY: find_user_address and GuestMemory::get_slice() guarantee that
         // the returned pointer is valid for up to `usize_size` bytes.
         // `usize_size` is always equal to `size` due to the above `try_into()` call.
-        unsafe {
-            self.container
-                .vfio_dma_map(iova, size, (user_addr as usize).try_into().unwrap())
-        }
-        .map_err(|e| {
+        unsafe { self.container.vfio_dma_map(iova, size as usize, user_addr) }.map_err(|e| {
             io::Error::other(format!(
                 "failed to map memory for VFIO container, \
                          iova 0x{iova:x}, gpa 0x{gpa:x}, size 0x{size:x}: {e:?}"
@@ -2082,11 +2073,13 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
     }
 
     fn unmap(&self, iova: u64, size: u64) -> std::result::Result<(), io::Error> {
-        self.container.vfio_dma_unmap(iova, size).map_err(|e| {
-            io::Error::other(format!(
-                "failed to unmap memory for VFIO container, \
+        self.container
+            .vfio_dma_unmap(iova, size as usize)
+            .map_err(|e| {
+                io::Error::other(format!(
+                    "failed to unmap memory for VFIO container, \
                      iova 0x{iova:x}, size 0x{size:x}: {e:?}"
-            ))
-        })
+                ))
+            })
     }
 }
