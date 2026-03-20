@@ -121,6 +121,7 @@ dependencies = [
  "log",
  "proptest",
  "serde",
+ "serde_json",
  "thiserror",
  "uuid",
  "vm-fdt",
