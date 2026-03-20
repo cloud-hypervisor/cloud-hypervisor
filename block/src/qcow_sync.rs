@@ -15,6 +15,7 @@ use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
 use crate::disk_file;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
+use crate::qcow::backing::RawBacking;
 use crate::qcow::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
@@ -25,33 +26,6 @@ use crate::qcow::{
 use crate::qcow_common::{
     gather_from_iovecs, pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
 };
-
-/// Raw backing file using pread64 on a duplicated fd.
-struct RawBacking {
-    fd: OwnedFd,
-    virtual_size: u64,
-}
-
-// SAFETY: The only I/O operation is pread64 which is position independent
-// and safe for concurrent use from multiple threads.
-unsafe impl Sync for RawBacking {}
-
-impl BackingRead for RawBacking {
-    fn read_at(&self, address: u64, buf: &mut [u8]) -> io::Result<()> {
-        if address >= self.virtual_size {
-            buf.fill(0);
-            return Ok(());
-        }
-        let available = (self.virtual_size - address) as usize;
-        if available >= buf.len() {
-            pread_exact(self.fd.as_raw_fd(), buf, address)
-        } else {
-            pread_exact(self.fd.as_raw_fd(), &mut buf[..available], address)?;
-            buf[available..].fill(0);
-            Ok(())
-        }
-    }
-}
 
 /// QCOW2 backing file with RwLock metadata and pread64 data reads.
 ///
