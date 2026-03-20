@@ -9,8 +9,8 @@
 
 // This is currently only utilized by the x86_64 module, but there is nothing x86_64 specific
 // about this.
+pub mod cpu_profile;
 mod general_purpose_helper_fns;
-
 pub mod interrupts;
 pub mod layout;
 pub mod regs;
