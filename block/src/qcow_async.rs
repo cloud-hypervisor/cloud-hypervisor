@@ -6,10 +6,14 @@
 
 //! QCOW2 async disk backend.
 
+use std::collections::VecDeque;
 use std::fs::File;
 use std::os::fd::{AsFd, AsRawFd};
 use std::sync::Arc;
 use std::{fmt, io};
+
+use io_uring::IoUring;
+use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{BorrowedDiskFd, DiskFileError};
 use crate::disk_file;
@@ -121,3 +125,46 @@ impl disk_file::Resizable for QcowDiskAsync {
 }
 
 impl disk_file::DiskFile for QcowDiskAsync {}
+
+/// Per queue QCOW2 I/O worker using io_uring.
+///
+/// Reads against fully allocated single mapping clusters are submitted
+/// to io_uring for true asynchronous completion. All other cluster
+/// types (zero, compressed, backing) and multi mapping reads fall back
+/// to synchronous I/O with synthetic completions.
+///
+/// Writes are synchronous because metadata allocation must complete
+/// before the host offset is known.
+pub struct QcowAsync {
+    metadata: Arc<QcowMetadata>,
+    data_file: QcowRawFile,
+    backing_file: Option<Arc<dyn BackingRead>>,
+    sparse: bool,
+    io_uring: IoUring,
+    eventfd: EventFd,
+    completion_list: VecDeque<(u64, i32)>,
+}
+
+impl QcowAsync {
+    fn new(
+        metadata: Arc<QcowMetadata>,
+        data_file: QcowRawFile,
+        backing_file: Option<Arc<dyn BackingRead>>,
+        sparse: bool,
+        ring_depth: u32,
+    ) -> io::Result<Self> {
+        let io_uring = IoUring::new(ring_depth)?;
+        let eventfd = EventFd::new(libc::EFD_NONBLOCK)?;
+        io_uring.submitter().register_eventfd(eventfd.as_raw_fd())?;
+
+        Ok(QcowAsync {
+            metadata,
+            data_file,
+            backing_file,
+            sparse,
+            io_uring,
+            eventfd,
+            completion_list: VecDeque::new(),
+        })
+    }
+}
