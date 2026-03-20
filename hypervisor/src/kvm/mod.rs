@@ -2991,7 +2991,7 @@ impl KvmVcpu {
 
         let maybe_size = self
             .fd
-            .get_nested_state(&mut buffer)
+            .nested_state(&mut buffer)
             .map_err(|e| cpu::HypervisorCpuError::GetNestedState(e.into()))?;
 
         if let Some(_size) = maybe_size {

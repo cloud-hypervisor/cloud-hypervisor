@@ -168,9 +168,7 @@ pub fn get_host_address_range<M: GuestMemory + ?Sized>(
     if mem.check_range(addr, size) {
         let slice = mem.get_slice(addr, size).unwrap();
         assert!(slice.len() >= size);
-        // TODO: return a VolatileSlice and fix all callers.
-        #[allow(deprecated)]
-        Some(slice.as_ptr())
+        Some(slice.ptr_guard_mut().as_ptr())
     } else {
         None
     }
