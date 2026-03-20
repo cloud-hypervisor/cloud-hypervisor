@@ -28,6 +28,36 @@ pub mod msr_index;
 // MTRR constants
 pub const MTRR_ENABLE: u64 = 0x800; // IA32_MTRR_DEF_TYPE MSR: E (MTRRs enabled) flag, bit 11
 pub const MTRR_MEM_TYPE_WB: u64 = 0x6;
+pub const MTRR_MSR_INDICES: [u32; 28] = [
+    msr_index::MSR_MTRRdefType,
+    msr_index::MSR_IA32_MTRR_PHYSBASE0,
+    msr_index::MSR_IA32_MTRR_PHYSMASK0,
+    msr_index::MSR_IA32_MTRR_PHYSBASE1,
+    msr_index::MSR_IA32_MTRR_PHYSMASK1,
+    msr_index::MSR_IA32_MTRR_PHYSBASE2,
+    msr_index::MSR_IA32_MTRR_PHYSMASK2,
+    msr_index::MSR_IA32_MTRR_PHYSBASE3,
+    msr_index::MSR_IA32_MTRR_PHYSMASK3,
+    msr_index::MSR_IA32_MTRR_PHYSBASE4,
+    msr_index::MSR_IA32_MTRR_PHYSMASK4,
+    msr_index::MSR_IA32_MTRR_PHYSBASE5,
+    msr_index::MSR_IA32_MTRR_PHYSMASK5,
+    msr_index::MSR_IA32_MTRR_PHYSBASE6,
+    msr_index::MSR_IA32_MTRR_PHYSMASK6,
+    msr_index::MSR_IA32_MTRR_PHYSBASE7,
+    msr_index::MSR_IA32_MTRR_PHYSMASK7,
+    msr_index::MSR_MTRRfix64K_00000,
+    msr_index::MSR_MTRRfix16K_80000,
+    msr_index::MSR_MTRRfix16K_A0000,
+    msr_index::MSR_MTRRfix4K_C0000,
+    msr_index::MSR_MTRRfix4K_C8000,
+    msr_index::MSR_MTRRfix4K_D0000,
+    msr_index::MSR_MTRRfix4K_D8000,
+    msr_index::MSR_MTRRfix4K_E0000,
+    msr_index::MSR_MTRRfix4K_E8000,
+    msr_index::MSR_MTRRfix4K_F0000,
+    msr_index::MSR_MTRRfix4K_F8000,
+];
 
 // IOAPIC pins
 pub const NUM_IOAPIC_PINS: usize = 24;
