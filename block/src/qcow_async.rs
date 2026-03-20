@@ -8,20 +8,22 @@
 
 use std::collections::VecDeque;
 use std::fs::File;
+use std::io::Error;
 use std::os::fd::{AsFd, AsRawFd};
 use std::sync::Arc;
 use std::{fmt, io};
 
-use io_uring::IoUring;
+use io_uring::{IoUring, opcode, types};
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::async_io::{AsyncIo, AsyncIoResult, BorrowedDiskFd, DiskFileError};
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
 use crate::disk_file;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::backing::shared_backing_from;
-use crate::qcow::metadata::{BackingRead, QcowMetadata};
+use crate::qcow::metadata::{BackingRead, ClusterReadMapping, QcowMetadata};
 use crate::qcow::qcow_raw_file::QcowRawFile;
 use crate::qcow::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
+use crate::qcow_common::{pread_exact, scatter_to_iovecs, zero_fill_iovecs};
 
 /// Device level handle for a QCOW2 image.
 ///
@@ -180,7 +182,40 @@ impl AsyncIo for QcowAsync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        unimplemented!()
+        let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
+
+        if let Some(host_offset) = Self::resolve_read(
+            &self.metadata,
+            &self.data_file,
+            &self.backing_file,
+            offset as u64,
+            iovecs,
+            total_len,
+        )? {
+            let fd = self.data_file.as_raw_fd();
+            let (submitter, mut sq, _) = self.io_uring.split();
+
+            // SAFETY: fd is valid and iovecs point to valid guest memory.
+            unsafe {
+                sq.push(
+                    &opcode::Readv::new(types::Fd(fd), iovecs.as_ptr(), iovecs.len() as u32)
+                        .offset(host_offset)
+                        .build()
+                        .user_data(user_data),
+                )
+                .map_err(|_| {
+                    AsyncIoError::ReadVectored(Error::other("Submission queue is full"))
+                })?;
+            };
+
+            sq.sync();
+            submitter.submit().map_err(AsyncIoError::ReadVectored)?;
+        } else {
+            self.completion_list
+                .push_back((user_data, total_len as i32));
+            self.eventfd.write(1).unwrap();
+        }
+        Ok(())
     }
 
     fn write_vectored(
@@ -211,5 +246,94 @@ impl AsyncIo for QcowAsync {
 
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
         unimplemented!()
+    }
+}
+
+impl QcowAsync {
+    /// Resolves read mappings for a guest read request.
+    ///
+    /// Returns `Some(host_offset)` if the entire read falls within a single
+    /// allocated cluster (fast path). Otherwise handles the read
+    /// synchronously via `scatter_read_sync` and returns `None`.
+    #[inline]
+    fn resolve_read(
+        metadata: &QcowMetadata,
+        data_file: &QcowRawFile,
+        backing_file: &Option<Arc<dyn BackingRead>>,
+        address: u64,
+        iovecs: &[libc::iovec],
+        total_len: usize,
+    ) -> AsyncIoResult<Option<u64>> {
+        let has_backing = backing_file.is_some();
+        let mappings = metadata
+            .map_clusters_for_read(address, total_len, has_backing)
+            .map_err(AsyncIoError::ReadVectored)?;
+
+        if mappings.len() == 1
+            && let ClusterReadMapping::Allocated {
+                offset: host_offset,
+                length,
+            } = &mappings[0]
+            && *length as usize == total_len
+        {
+            return Ok(Some(*host_offset));
+        }
+
+        Self::scatter_read_sync(mappings, iovecs, data_file, backing_file)?;
+        Ok(None)
+    }
+
+    /// Scatter-read cluster mappings synchronously into iovec buffers.
+    #[inline]
+    fn scatter_read_sync(
+        mappings: Vec<ClusterReadMapping>,
+        iovecs: &[libc::iovec],
+        data_file: &QcowRawFile,
+        backing_file: &Option<Arc<dyn BackingRead>>,
+    ) -> AsyncIoResult<()> {
+        let mut buf_offset = 0usize;
+        for mapping in mappings {
+            match mapping {
+                ClusterReadMapping::Zero { length } => {
+                    // SAFETY: iovecs point to valid guest memory buffers.
+                    unsafe {
+                        zero_fill_iovecs(iovecs, buf_offset, length as usize);
+                    }
+                    buf_offset += length as usize;
+                }
+                ClusterReadMapping::Allocated {
+                    offset: host_offset,
+                    length,
+                } => {
+                    let mut buf = vec![0u8; length as usize];
+                    pread_exact(data_file.as_raw_fd(), &mut buf, host_offset)
+                        .map_err(AsyncIoError::ReadVectored)?;
+                    // SAFETY: iovecs point to valid guest memory buffers.
+                    unsafe { scatter_to_iovecs(iovecs, buf_offset, &buf) };
+                    buf_offset += length as usize;
+                }
+                ClusterReadMapping::Compressed { data } => {
+                    let len = data.len();
+                    // SAFETY: iovecs point to valid guest memory buffers.
+                    unsafe { scatter_to_iovecs(iovecs, buf_offset, &data) };
+                    buf_offset += len;
+                }
+                ClusterReadMapping::Backing {
+                    offset: backing_offset,
+                    length,
+                } => {
+                    let mut buf = vec![0u8; length as usize];
+                    backing_file
+                        .as_ref()
+                        .unwrap()
+                        .read_at(backing_offset, &mut buf)
+                        .map_err(AsyncIoError::ReadVectored)?;
+                    // SAFETY: iovecs point to valid guest memory buffers.
+                    unsafe { scatter_to_iovecs(iovecs, buf_offset, &buf) };
+                    buf_offset += length as usize;
+                }
+            }
+        }
+        Ok(())
     }
 }
