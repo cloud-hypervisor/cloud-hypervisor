@@ -5,14 +5,14 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 
 use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE};
 use log::warn;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
+    AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::{DiskTopology, SECTOR_SIZE, probe_sparse_support};
 
@@ -23,6 +23,12 @@ pub struct RawFileDiskSync {
 impl RawFileDiskSync {
     pub fn new(file: File) -> Self {
         RawFileDiskSync { file }
+    }
+}
+
+impl AsFd for RawFileDiskSync {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.file.as_fd()
     }
 }
 
@@ -41,7 +47,12 @@ impl DiskFile for RawFileDiskSync {
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
-        let mut raw = RawFileSync::new(self.file.as_raw_fd());
+        let mut raw = RawFileSync::new(
+            self.file
+                .as_fd()
+                .try_clone_to_owned()
+                .map_err(DiskFileError::NewAsyncIo)?,
+        );
         raw.alignment =
             DiskTopology::probe(&self.file).map_or(SECTOR_SIZE, |t| t.logical_block_size);
         Ok(Box::new(raw) as Box<dyn AsyncIo>)
@@ -59,21 +70,17 @@ impl DiskFile for RawFileDiskSync {
     fn supports_sparse_operations(&self) -> bool {
         probe_sparse_support(&self.file)
     }
-
-    fn fd(&mut self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.file.as_raw_fd())
-    }
 }
 
 pub struct RawFileSync {
-    fd: RawFd,
+    fd: OwnedFd,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
     alignment: u64,
 }
 
 impl RawFileSync {
-    pub fn new(fd: RawFd) -> Self {
+    pub fn new(fd: OwnedFd) -> Self {
         RawFileSync {
             fd,
             eventfd: EventFd::new(libc::EFD_NONBLOCK).expect("Failed creating EventFd for RawFile"),
@@ -101,7 +108,7 @@ impl AsyncIo for RawFileSync {
         // SAFETY: FFI call with valid arguments
         let result = unsafe {
             libc::preadv(
-                self.fd as libc::c_int,
+                self.fd.as_raw_fd(),
                 iovecs.as_ptr(),
                 iovecs.len() as libc::c_int,
                 offset,
@@ -126,7 +133,7 @@ impl AsyncIo for RawFileSync {
         // SAFETY: FFI call with valid arguments
         let result = unsafe {
             libc::pwritev(
-                self.fd as libc::c_int,
+                self.fd.as_raw_fd(),
                 iovecs.as_ptr(),
                 iovecs.len() as libc::c_int,
                 offset,
@@ -144,7 +151,7 @@ impl AsyncIo for RawFileSync {
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
         // SAFETY: FFI call
-        let result = unsafe { libc::fsync(self.fd as libc::c_int) };
+        let result = unsafe { libc::fsync(self.fd.as_raw_fd()) };
         if result < 0 {
             return Err(AsyncIoError::Fsync(std::io::Error::last_os_error()));
         }
@@ -167,7 +174,7 @@ impl AsyncIo for RawFileSync {
         // SAFETY: FFI call with valid arguments
         let result = unsafe {
             libc::fallocate(
-                self.fd as libc::c_int,
+                self.fd.as_raw_fd(),
                 mode,
                 offset as libc::off_t,
                 length as libc::off_t,
@@ -189,7 +196,7 @@ impl AsyncIo for RawFileSync {
         // SAFETY: FFI call with valid arguments
         let result = unsafe {
             libc::fallocate(
-                self.fd as libc::c_int,
+                self.fd.as_raw_fd(),
                 mode,
                 offset as libc::off_t,
                 length as libc::off_t,
@@ -208,8 +215,6 @@ impl AsyncIo for RawFileSync {
 
 #[cfg(test)]
 mod unit_tests {
-    use std::os::unix::io::AsRawFd;
-
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
@@ -219,7 +224,7 @@ mod unit_tests {
     fn test_punch_hole() {
         let temp_file = TempFile::new().unwrap();
         let mut file = temp_file.into_file();
-        let mut async_io = RawFileSync::new(file.as_raw_fd());
+        let mut async_io = RawFileSync::new(file.as_fd().try_clone_to_owned().unwrap());
         raw_async_io_tests::test_punch_hole(&mut async_io, &mut file);
     }
 
@@ -227,7 +232,7 @@ mod unit_tests {
     fn test_write_zeroes() {
         let temp_file = TempFile::new().unwrap();
         let mut file = temp_file.into_file();
-        let mut async_io = RawFileSync::new(file.as_raw_fd());
+        let mut async_io = RawFileSync::new(file.as_fd().try_clone_to_owned().unwrap());
         raw_async_io_tests::test_write_zeroes(&mut async_io, &mut file);
     }
 
@@ -235,7 +240,7 @@ mod unit_tests {
     fn test_punch_hole_multiple_operations() {
         let temp_file = TempFile::new().unwrap();
         let mut file = temp_file.into_file();
-        let mut async_io = RawFileSync::new(file.as_raw_fd());
+        let mut async_io = RawFileSync::new(file.as_fd().try_clone_to_owned().unwrap());
         raw_async_io_tests::test_punch_hole_multiple_operations(&mut async_io, &mut file);
     }
 }

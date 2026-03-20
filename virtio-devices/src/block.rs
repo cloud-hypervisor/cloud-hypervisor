@@ -11,7 +11,7 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::num::Wrapping;
 use std::ops::Deref;
-use std::os::unix::io::AsRawFd;
+use std::os::fd::{AsFd, AsRawFd};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
@@ -918,7 +918,7 @@ impl Block {
             self.id,
             self.disk_path.display()
         );
-        let fd = self.disk_image.fd();
+        let fd = self.disk_image.as_fd();
         fcntl::try_acquire_lock(&fd, lock_type, granularity).map_err(|error| {
             let current_lock = get_lock_state(&fd, granularity);
             // Don't propagate the error to the outside, as it is not useful at all. Instead,
@@ -949,7 +949,7 @@ impl Block {
         // It is very unlikely that this fails;
         // Should we remove the Result to simplify the error propagation on
         // higher levels?
-        let fd = self.disk_image.fd();
+        let fd = self.disk_image.as_fd();
         fcntl::clear_lock(&fd, granularity).map_err(|error| Error::LockDiskImage {
             path: self.disk_path.clone(),
             error,

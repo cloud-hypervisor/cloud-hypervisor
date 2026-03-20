@@ -12,7 +12,7 @@ use std::{fmt, io, ptr, slice};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, DiskFileError};
 use crate::disk_file;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::metadata::{
@@ -233,9 +233,9 @@ impl disk_file::PhysicalSize for QcowDiskSync {
     }
 }
 
-impl disk_file::DiskFd for QcowDiskSync {
-    fn fd(&self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.data_raw_file.as_fd().as_raw_fd())
+impl AsFd for QcowDiskSync {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.data_raw_file.as_fd()
     }
 }
 

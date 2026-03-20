@@ -4,7 +4,7 @@
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::fd::{AsFd, BorrowedFd};
 
 use crate::BlockBackend;
 use crate::vhd::VhdFooter;
@@ -28,9 +28,9 @@ impl FixedVhd {
     }
 }
 
-impl AsRawFd for FixedVhd {
-    fn as_raw_fd(&self) -> RawFd {
-        self.file.as_raw_fd()
+impl AsFd for FixedVhd {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.file.as_fd()
     }
 }
 

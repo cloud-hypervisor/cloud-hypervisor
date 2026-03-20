@@ -3,12 +3,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fs::File;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
+    AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::fixed_vhd::FixedVhd;
 use crate::raw_async::RawFileAsync;
@@ -19,6 +19,12 @@ pub struct FixedVhdDiskAsync(FixedVhd);
 impl FixedVhdDiskAsync {
     pub fn new(file: File) -> std::io::Result<Self> {
         Ok(Self(FixedVhd::new(file)?))
+    }
+}
+
+impl AsFd for FixedVhdDiskAsync {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
     }
 }
 
@@ -34,16 +40,15 @@ impl DiskFile for FixedVhdDiskAsync {
     fn new_async_io(&self, ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
         Ok(Box::new(
             FixedVhdAsync::new(
-                self.0.as_raw_fd(),
+                self.0
+                    .as_fd()
+                    .try_clone_to_owned()
+                    .map_err(DiskFileError::NewAsyncIo)?,
                 ring_depth,
                 self.0.logical_size().unwrap(),
             )
             .map_err(DiskFileError::NewAsyncIo)?,
         ) as Box<dyn AsyncIo>)
-    }
-
-    fn fd(&mut self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.0.as_raw_fd())
     }
 }
 
@@ -53,7 +58,7 @@ pub struct FixedVhdAsync {
 }
 
 impl FixedVhdAsync {
-    pub fn new(fd: RawFd, ring_depth: u32, size: u64) -> std::io::Result<Self> {
+    pub fn new(fd: OwnedFd, ring_depth: u32, size: u64) -> std::io::Result<Self> {
         let raw_file_async = RawFileAsync::new(fd, ring_depth)?;
 
         Ok(FixedVhdAsync {

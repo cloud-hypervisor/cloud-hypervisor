@@ -8,6 +8,7 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
+use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::io::{AsRawFd, RawFd};
 
 use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE};
@@ -16,7 +17,7 @@ use vmm_sys_util::aio;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
+    AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::{DiskTopology, SECTOR_SIZE, probe_sparse_support};
 
@@ -27,6 +28,12 @@ pub struct RawFileDiskAio {
 impl RawFileDiskAio {
     pub fn new(file: File) -> Self {
         RawFileDiskAio { file }
+    }
+}
+
+impl AsFd for RawFileDiskAio {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.file.as_fd()
     }
 }
 
@@ -63,10 +70,6 @@ impl DiskFile for RawFileDiskAio {
 
     fn supports_sparse_operations(&self) -> bool {
         probe_sparse_support(&self.file)
-    }
-
-    fn fd(&mut self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.file.as_raw_fd())
     }
 }
 
