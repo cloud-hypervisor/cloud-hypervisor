@@ -21,9 +21,8 @@ use vhost::vhost_user::{
 use vhost::{VhostBackend, VhostUserDirtyLogRegion, VhostUserMemoryRegionInfo, VringConfigData};
 use virtio_queue::desc::RawDescriptor;
 use virtio_queue::{Queue, QueueT};
-use vm_memory::{
-    Address, Error as MmapError, FileOffset, GuestAddress, GuestMemory, GuestMemoryRegion,
-};
+use vm_memory::guest_memory::Error as MmapError;
+use vm_memory::{Address, FileOffset, GuestAddress, GuestMemory, GuestMemoryRegion};
 use vm_migration::protocol::MemoryRangeTable;
 use vmm_sys_util::eventfd::EventFd;
 
@@ -67,7 +66,11 @@ impl VhostUserHandle {
         for region in mem.iter() {
             let (mmap_handle, mmap_offset) = match region.file_offset() {
                 Some(_file_offset) => (_file_offset.file().as_raw_fd(), _file_offset.start()),
-                None => return Err(Error::VhostUserMemoryRegion(MmapError::NoMemoryRegion)),
+                None => {
+                    return Err(Error::VhostUserMemoryRegion(
+                        MmapError::InvalidGuestAddress(region.start_addr()),
+                    ));
+                }
             };
 
             let vhost_user_net_reg = VhostUserMemoryRegionInfo {

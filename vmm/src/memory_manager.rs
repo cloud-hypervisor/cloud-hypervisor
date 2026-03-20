@@ -35,10 +35,10 @@ use vm_allocator::GsiApic;
 use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
 use vm_device::BusDevice;
 use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::guest_memory::FileOffset;
+use vm_memory::guest_memory::{Error as MmapError, FileOffset};
 use vm_memory::mmap::MmapRegionError;
 use vm_memory::{
-    Address, Error as MmapError, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
+    Address, Bytes, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic,
     GuestMemoryError, GuestMemoryRegion, GuestUsize, MmapRegion, ReadVolatile,
 };
 use vm_migration::protocol::{MemoryRange, MemoryRangeTable};
@@ -250,6 +250,10 @@ pub enum Error {
     /// Mmap backed guest memory error
     #[error("Mmap backed guest memory error")]
     GuestMemory(#[source] MmapError),
+
+    /// Guest region collection error
+    #[error("Guest region collection error")]
+    GuestRegionCollection(#[source] vm_memory::GuestRegionCollectionError),
 
     /// Failed to allocate a memory range.
     #[error("Failed to allocate a memory range")]
@@ -1448,7 +1452,7 @@ impl MemoryManager {
                 config.thp,
             )?;
             let guest_memory =
-                GuestMemoryMmap::from_arc_regions(regions).map_err(Error::GuestMemory)?;
+                GuestMemoryMmap::from_arc_regions(regions).map_err(Error::GuestRegionCollection)?;
             let boot_guest_memory = guest_memory.clone();
             (
                 GuestAddress(data.start_of_device_area),
@@ -1485,8 +1489,8 @@ impl MemoryManager {
             let (mem_regions, mut memory_zones) =
                 Self::create_memory_regions_from_zones(&ram_regions, &zones, prefault, config.thp)?;
 
-            let mut guest_memory =
-                GuestMemoryMmap::from_arc_regions(mem_regions).map_err(Error::GuestMemory)?;
+            let mut guest_memory = GuestMemoryMmap::from_arc_regions(mem_regions)
+                .map_err(Error::GuestRegionCollection)?;
 
             let boot_guest_memory = guest_memory.clone();
 
@@ -1534,7 +1538,7 @@ impl MemoryManager {
 
                             guest_memory = guest_memory
                                 .insert_region(Arc::clone(&region))
-                                .map_err(Error::GuestMemory)?;
+                                .map_err(Error::GuestRegionCollection)?;
 
                             let hotplugged_size = zone.hotplugged_size.unwrap_or(0);
                             let region_size = region.len();
@@ -1961,9 +1965,9 @@ impl MemoryManager {
             thp,
         )?;
 
-        Ok(Arc::new(
-            GuestRegionMmap::new(r, start_addr).map_err(Error::GuestMemory)?,
-        ))
+        Ok(Arc::new(GuestRegionMmap::new(r, start_addr).ok_or(
+            Error::GuestMemory(MmapError::InvalidGuestAddress(start_addr)),
+        )?))
     }
 
     // Duplicate of `memory_zone_get_align_size` that does not require a `zone`
@@ -2024,7 +2028,7 @@ impl MemoryManager {
             .guest_memory
             .memory()
             .insert_region(region)
-            .map_err(Error::GuestMemory)?;
+            .map_err(Error::GuestRegionCollection)?;
         self.guest_memory.lock().unwrap().replace(guest_memory);
 
         Ok(())

@@ -8,7 +8,7 @@
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::ops::Deref;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
 use std::sync::{Arc, Mutex, RwLock};
 use std::{io, process};
 
@@ -27,6 +27,7 @@ use virtio_bindings::virtio_config::{VIRTIO_F_NOTIFY_ON_EMPTY, VIRTIO_F_VERSION_
 use virtio_bindings::virtio_net::*;
 use vm_memory::{GuestAddressSpace, GuestMemoryAtomic};
 use vmm_sys_util::epoll::EventSet;
+use vmm_sys_util::event::{EventConsumer, EventNotifier};
 use vmm_sys_util::eventfd::EventFd;
 
 type GuestMemoryMmap = vm_memory::GuestMemoryMmap<BitmapMmapRegion>;
@@ -249,15 +250,15 @@ impl VhostUserBackendMut for VhostUserNetBackend {
         Ok(())
     }
 
-    fn exit_event(&self, thread_index: usize) -> Option<EventFd> {
-        Some(
-            self.threads[thread_index]
-                .lock()
-                .unwrap()
-                .kill_evt
-                .try_clone()
-                .unwrap(),
-        )
+    fn exit_event(&self, thread_index: usize) -> Option<(EventConsumer, EventNotifier)> {
+        let kill_evt = &self.threads[thread_index].lock().unwrap().kill_evt;
+        // SAFETY: kill_evt is a valid eventfd
+        unsafe {
+            Some((
+                EventConsumer::from_raw_fd(kill_evt.try_clone().unwrap().into_raw_fd()),
+                EventNotifier::from_raw_fd(kill_evt.try_clone().unwrap().into_raw_fd()),
+            ))
+        }
     }
 
     fn queues_per_thread(&self) -> Vec<u64> {
@@ -394,7 +395,7 @@ pub fn start_net_backend(backend_command: &str) {
     if let Err(e) = if backend_config.client {
         net_daemon.start_client(&backend_config.socket)
     } else {
-        net_daemon.start(Listener::new(&backend_config.socket, true).unwrap())
+        net_daemon.start(&mut Listener::new(&backend_config.socket, true).unwrap())
     } {
         error!("failed to start daemon for vhost-user-net with error: {e:?}");
         process::exit(1);
