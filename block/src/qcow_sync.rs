@@ -5,7 +5,7 @@
 use std::cmp::min;
 use std::collections::VecDeque;
 use std::fs::File;
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use std::sync::Arc;
 use std::{fmt, io, ptr, slice};
 
@@ -41,9 +41,9 @@ impl BackingRead for RawBacking {
         }
         let available = (self.virtual_size - address) as usize;
         if available >= buf.len() {
-            pread_exact(self.fd.as_raw_fd(), buf, address)
+            pread_exact(self.fd.as_fd(), buf, address)
         } else {
-            pread_exact(self.fd.as_raw_fd(), &mut buf[..available], address)?;
+            pread_exact(self.fd.as_fd(), &mut buf[..available], address)?;
             buf[available..].fill(0);
             Ok(())
         }
@@ -104,7 +104,7 @@ impl Qcow2MetadataBacking {
                     length,
                 } => {
                     pread_exact(
-                        self.data_fd.as_raw_fd(),
+                        self.data_fd.as_fd(),
                         &mut buf[buf_offset..buf_offset + length as usize],
                         host_offset,
                     )?;
@@ -329,13 +329,13 @@ impl QcowSync {
 // shared position. pread64 and pwrite64 are atomic and never touch the position.
 
 /// Read exactly the requested bytes at offset, looping on short reads.
-fn pread_exact(fd: RawFd, buf: &mut [u8], offset: u64) -> io::Result<()> {
+fn pread_exact(fd: BorrowedFd, buf: &mut [u8], offset: u64) -> io::Result<()> {
     let mut total = 0usize;
     while total < buf.len() {
         // SAFETY: buf and fd are valid for the lifetime of the call.
         let ret = unsafe {
             libc::pread64(
-                fd,
+                fd.as_raw_fd(),
                 buf[total..].as_mut_ptr() as *mut libc::c_void,
                 buf.len() - total,
                 (offset + total as u64) as libc::off_t,
@@ -353,13 +353,13 @@ fn pread_exact(fd: RawFd, buf: &mut [u8], offset: u64) -> io::Result<()> {
 }
 
 /// Write all bytes to fd at offset, looping on short writes.
-fn pwrite_all(fd: RawFd, buf: &[u8], offset: u64) -> io::Result<()> {
+fn pwrite_all(fd: BorrowedFd, buf: &[u8], offset: u64) -> io::Result<()> {
     let mut total = 0usize;
     while total < buf.len() {
         // SAFETY: buf and fd are valid for the lifetime of the call.
         let ret = unsafe {
             libc::pwrite64(
-                fd,
+                fd.as_raw_fd(),
                 buf[total..].as_ptr() as *const libc::c_void,
                 buf.len() - total,
                 (offset + total as u64) as libc::off_t,
@@ -502,7 +502,7 @@ impl AsyncIo for QcowSync {
                     length,
                 } => {
                     let mut buf = vec![0u8; length as usize];
-                    pread_exact(self.data_file.as_raw_fd(), &mut buf, host_offset)
+                    pread_exact(self.data_file.as_fd(), &mut buf, host_offset)
                         .map_err(AsyncIoError::ReadVectored)?;
                     // SAFETY: iovecs point to valid guest memory buffers
                     unsafe { scatter_to_iovecs(iovecs, buf_offset, &buf) };
@@ -582,7 +582,7 @@ impl AsyncIo for QcowSync {
                 } => {
                     // SAFETY: iovecs point to valid guest memory buffers
                     let buf = unsafe { gather_from_iovecs(iovecs, buf_offset, count) };
-                    pwrite_all(self.data_file.as_raw_fd(), &buf, host_offset)
+                    pwrite_all(self.data_file.as_fd(), &buf, host_offset)
                         .map_err(AsyncIoError::WriteVectored)?;
                 }
             }

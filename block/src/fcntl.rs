@@ -15,7 +15,7 @@
 
 use std::fmt::Debug;
 use std::io;
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd as _, BorrowedFd};
 use std::str::FromStr;
 
 use thiserror::Error;
@@ -43,12 +43,12 @@ enum FcntlArg<'a> {
 }
 
 /// Wrapper for [`libc::fcntl`] that properly sets the function arguments.
-fn fcntl(fd: RawFd, arg: FcntlArg) -> libc::c_int {
+fn fcntl(fd: BorrowedFd, arg: FcntlArg) -> libc::c_int {
     // SAFETY: We use a valid FD.
     unsafe {
         match arg {
-            FcntlArg::F_OFD_SETLK(flock) => libc::fcntl(fd, libc::F_OFD_SETLK, flock),
-            FcntlArg::F_OFD_GETLK(flock) => libc::fcntl(fd, libc::F_OFD_GETLK, flock),
+            FcntlArg::F_OFD_SETLK(flock) => libc::fcntl(fd.as_raw_fd(), libc::F_OFD_SETLK, flock),
+            FcntlArg::F_OFD_GETLK(flock) => libc::fcntl(fd.as_raw_fd(), libc::F_OFD_GETLK, flock),
         }
     }
 }
@@ -194,14 +194,14 @@ const fn get_flock(lock_type: LockType, granularity: LockGranularity) -> libc::f
 ///   be logically mutated, but not technically.
 /// - `lock_type`: The [`LockType`]
 /// - `granularity`: The [`LockGranularity`].
-pub fn try_acquire_lock<Fd: AsRawFd>(
+pub fn try_acquire_lock<Fd: AsFd>(
     file: &Fd,
     lock_type: LockType,
     granularity: LockGranularity,
 ) -> Result<(), LockError> {
     let flock = get_flock(lock_type, granularity);
 
-    let res = fcntl(file.as_raw_fd(), FcntlArg::F_OFD_SETLK(&flock));
+    let res = fcntl(file.as_fd(), FcntlArg::F_OFD_SETLK(&flock));
     match res {
         0 => Ok(()),
         -1 => {
@@ -223,7 +223,7 @@ pub fn try_acquire_lock<Fd: AsRawFd>(
 /// # Parameters
 /// - `file`: The file to clear all locks for [`LockType`].
 /// - `granularity`: The [`LockGranularity`].
-pub fn clear_lock<Fd: AsRawFd>(file: &Fd, granularity: LockGranularity) -> Result<(), LockError> {
+pub fn clear_lock<Fd: AsFd>(file: &Fd, granularity: LockGranularity) -> Result<(), LockError> {
     try_acquire_lock(file, LockType::Unlock, granularity)
 }
 
@@ -233,12 +233,12 @@ pub fn clear_lock<Fd: AsRawFd>(file: &Fd, granularity: LockGranularity) -> Resul
 /// # Parameters
 /// - `file`: The file for which to get the lock state.
 /// - `granularity`: The [`LockGranularity`].
-pub fn get_lock_state<Fd: AsRawFd>(
+pub fn get_lock_state<Fd: AsFd>(
     file: &Fd,
     granularity: LockGranularity,
 ) -> Result<LockState, LockError> {
     let mut flock = get_flock(LockType::Write, granularity);
-    let res = fcntl(file.as_raw_fd(), FcntlArg::F_OFD_GETLK(&mut flock));
+    let res = fcntl(file.as_fd(), FcntlArg::F_OFD_GETLK(&mut flock));
     match res {
         0 => {
             let state = flock.l_type as libc::c_int;
