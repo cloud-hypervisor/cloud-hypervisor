@@ -8,8 +8,10 @@
 
 use std::fmt;
 use std::fs::File;
+use std::os::fd::{AsFd, AsRawFd};
 use std::sync::Arc;
 
+use crate::async_io::BorrowedDiskFd;
 use crate::disk_file;
 use crate::error::{BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::backing::shared_backing_from;
@@ -79,5 +81,11 @@ impl disk_file::DiskSize for QcowDiskAsync {
 impl disk_file::PhysicalSize for QcowDiskAsync {
     fn physical_size(&self) -> BlockResult<u64> {
         Ok(self.data_raw_file.physical_size()?)
+    }
+}
+
+impl disk_file::DiskFd for QcowDiskAsync {
+    fn fd(&self) -> BorrowedDiskFd<'_> {
+        BorrowedDiskFd::new(self.data_raw_file.as_fd().as_raw_fd())
     }
 }
