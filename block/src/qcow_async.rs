@@ -15,7 +15,7 @@ use std::{fmt, io};
 use io_uring::IoUring;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::async_io::{BorrowedDiskFd, DiskFileError};
+use crate::async_io::{AsyncIo, AsyncIoResult, BorrowedDiskFd, DiskFileError};
 use crate::disk_file;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::backing::shared_backing_from;
@@ -166,5 +166,50 @@ impl QcowAsync {
             eventfd,
             completion_list: VecDeque::new(),
         })
+    }
+}
+
+impl AsyncIo for QcowAsync {
+    fn notifier(&self) -> &EventFd {
+        &self.eventfd
+    }
+
+    fn read_vectored(
+        &mut self,
+        offset: libc::off_t,
+        iovecs: &[libc::iovec],
+        user_data: u64,
+    ) -> AsyncIoResult<()> {
+        unimplemented!()
+    }
+
+    fn write_vectored(
+        &mut self,
+        offset: libc::off_t,
+        iovecs: &[libc::iovec],
+        user_data: u64,
+    ) -> AsyncIoResult<()> {
+        unimplemented!()
+    }
+
+    fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
+        unimplemented!()
+    }
+
+    fn next_completed_request(&mut self) -> Option<(u64, i32)> {
+        // Drain io_uring completions first, then synthetic ones.
+        self.io_uring
+            .completion()
+            .next()
+            .map(|entry| (entry.user_data(), entry.result()))
+            .or_else(|| self.completion_list.pop_front())
+    }
+
+    fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
+        unimplemented!()
+    }
+
+    fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
+        unimplemented!()
     }
 }
