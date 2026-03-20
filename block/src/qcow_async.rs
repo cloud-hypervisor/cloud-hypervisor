@@ -6,6 +6,7 @@
 
 //! QCOW2 async disk backend.
 
+use std::cmp::min;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::Error;
@@ -20,10 +21,12 @@ use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, Disk
 use crate::disk_file;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::backing::shared_backing_from;
-use crate::qcow::metadata::{BackingRead, ClusterReadMapping, QcowMetadata};
+use crate::qcow::metadata::{BackingRead, ClusterReadMapping, ClusterWriteMapping, QcowMetadata};
 use crate::qcow::qcow_raw_file::QcowRawFile;
 use crate::qcow::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
-use crate::qcow_common::{pread_exact, scatter_to_iovecs, zero_fill_iovecs};
+use crate::qcow_common::{
+    gather_from_iovecs, pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
+};
 
 /// Device level handle for a QCOW2 image.
 ///
@@ -218,13 +221,30 @@ impl AsyncIo for QcowAsync {
         Ok(())
     }
 
+    // TODO Make writes async.
+    // Writes are synchronous. Async writes require a multi step
+    // state machine for COW (backing read, cluster allocation, data
+    // write, L2 commit) with per request buffer lifetime tracking
+    // and write ordering.
     fn write_vectored(
         &mut self,
         offset: libc::off_t,
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        unimplemented!()
+        Self::cow_write_sync(
+            offset as u64,
+            iovecs,
+            &self.metadata,
+            &self.data_file,
+            &self.backing_file,
+        )?;
+
+        let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
+        self.completion_list
+            .push_back((user_data, total_len as i32));
+        self.eventfd.write(1).unwrap();
+        Ok(())
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
@@ -333,6 +353,58 @@ impl QcowAsync {
                     buf_offset += length as usize;
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// Write iovec data cluster-by-cluster with COW from backing file.
+    #[inline]
+    fn cow_write_sync(
+        address: u64,
+        iovecs: &[libc::iovec],
+        metadata: &QcowMetadata,
+        data_file: &QcowRawFile,
+        backing_file: &Option<Arc<dyn BackingRead>>,
+    ) -> AsyncIoResult<()> {
+        let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
+        let mut buf_offset = 0usize;
+
+        while buf_offset < total_len {
+            let curr_addr = address + buf_offset as u64;
+            let cluster_size = metadata.cluster_size();
+            let intra_offset = metadata.cluster_offset(curr_addr);
+            let remaining_in_cluster = (cluster_size - intra_offset) as usize;
+            let count = min(total_len - buf_offset, remaining_in_cluster);
+
+            let backing_data = if let Some(backing) = backing_file
+                .as_ref()
+                .filter(|_| intra_offset != 0 || count < cluster_size as usize)
+            {
+                let cluster_begin = curr_addr - intra_offset;
+                let mut data = vec![0u8; cluster_size as usize];
+                backing
+                    .read_at(cluster_begin, &mut data)
+                    .map_err(AsyncIoError::WriteVectored)?;
+                Some(data)
+            } else {
+                None
+            };
+
+            let mapping = metadata
+                .map_cluster_for_write(curr_addr, backing_data)
+                .map_err(AsyncIoError::WriteVectored)?;
+
+            match mapping {
+                ClusterWriteMapping::Allocated {
+                    offset: host_offset,
+                } => {
+                    // SAFETY: iovecs point to valid guest memory buffers.
+                    let buf = unsafe { gather_from_iovecs(iovecs, buf_offset, count) };
+                    pwrite_all(data_file.as_raw_fd(), &buf, host_offset)
+                        .map_err(AsyncIoError::WriteVectored)?;
+                }
+            }
+            buf_offset += count;
         }
         Ok(())
     }
