@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::fs::File;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use std::sync::Arc;
-use std::{fmt, io, ptr, slice};
+use std::{fmt, io};
 
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
@@ -22,7 +22,9 @@ use crate::qcow::qcow_raw_file::QcowRawFile;
 use crate::qcow::{
     BackingFile, BackingKind, Error as QcowError, MAX_NESTING_DEPTH, RawFile, parse_qcow,
 };
-use crate::qcow_common::{pread_exact, pwrite_all};
+use crate::qcow_common::{
+    gather_from_iovecs, pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
+};
 
 /// Raw backing file using pread64 on a duplicated fd.
 struct RawBacking {
@@ -321,95 +323,6 @@ impl QcowSync {
             completion_list: VecDeque::new(),
         }
     }
-}
-
-/// Copy data into iovecs starting at the given byte offset.
-///
-/// # Safety
-/// Caller must ensure iovecs point to valid, writable memory of sufficient size.
-unsafe fn scatter_to_iovecs(iovecs: &[libc::iovec], start: usize, data: &[u8]) {
-    let mut remaining = data;
-    let mut pos = 0usize;
-    for iov in iovecs {
-        let iov_end = pos + iov.iov_len;
-        if iov_end <= start || remaining.is_empty() {
-            pos = iov_end;
-            continue;
-        }
-        let iov_start = start.saturating_sub(pos);
-        let available = iov.iov_len - iov_start;
-        let count = min(available, remaining.len());
-        // SAFETY: iov_base is valid for iov_len bytes per caller contract.
-        unsafe {
-            let dst = (iov.iov_base as *mut u8).add(iov_start);
-            ptr::copy_nonoverlapping(remaining.as_ptr(), dst, count);
-        }
-        remaining = &remaining[count..];
-        if remaining.is_empty() {
-            break;
-        }
-        pos = iov_end;
-    }
-}
-
-/// Zero fill iovecs starting at the given byte offset for the given length.
-///
-/// # Safety
-/// Caller must ensure iovecs point to valid, writable memory of sufficient size.
-unsafe fn zero_fill_iovecs(iovecs: &[libc::iovec], start: usize, len: usize) {
-    let mut remaining = len;
-    let mut pos = 0usize;
-    for iov in iovecs {
-        let iov_end = pos + iov.iov_len;
-        if iov_end <= start || remaining == 0 {
-            pos = iov_end;
-            continue;
-        }
-        let iov_start = start.saturating_sub(pos);
-        let available = iov.iov_len - iov_start;
-        let count = min(available, remaining);
-        // SAFETY: iov_base is valid for iov_len bytes per caller contract.
-        unsafe {
-            let dst = (iov.iov_base as *mut u8).add(iov_start);
-            ptr::write_bytes(dst, 0, count);
-        }
-        remaining -= count;
-        if remaining == 0 {
-            break;
-        }
-        pos = iov_end;
-    }
-}
-
-/// Gather bytes from iovecs starting at the given byte offset into a Vec.
-///
-/// # Safety
-/// Caller must ensure iovecs point to valid, readable memory of sufficient size.
-unsafe fn gather_from_iovecs(iovecs: &[libc::iovec], start: usize, len: usize) -> Vec<u8> {
-    let mut result = Vec::with_capacity(len);
-    let mut remaining = len;
-    let mut pos = 0usize;
-    for iov in iovecs {
-        let iov_end = pos + iov.iov_len;
-        if iov_end <= start || remaining == 0 {
-            pos = iov_end;
-            continue;
-        }
-        let iov_start = start.saturating_sub(pos);
-        let available = iov.iov_len - iov_start;
-        let count = min(available, remaining);
-        // SAFETY: iov_base is valid for iov_len bytes per caller contract.
-        unsafe {
-            let src = (iov.iov_base as *const u8).add(iov_start);
-            result.extend_from_slice(slice::from_raw_parts(src, count));
-        }
-        remaining -= count;
-        if remaining == 0 {
-            break;
-        }
-        pos = iov_end;
-    }
-    result
 }
 
 impl AsyncIo for QcowSync {
