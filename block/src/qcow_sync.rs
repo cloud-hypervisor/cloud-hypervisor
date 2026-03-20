@@ -5,7 +5,7 @@
 use std::cmp::min;
 use std::collections::VecDeque;
 use std::fs::File;
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use std::sync::Arc;
 use std::{fmt, io, ptr, slice};
 
@@ -22,6 +22,7 @@ use crate::qcow::qcow_raw_file::QcowRawFile;
 use crate::qcow::{
     BackingFile, BackingKind, Error as QcowError, MAX_NESTING_DEPTH, RawFile, parse_qcow,
 };
+use crate::qcow_common::{pread_exact, pwrite_all};
 
 /// Raw backing file using pread64 on a duplicated fd.
 struct RawBacking {
@@ -321,64 +322,6 @@ impl QcowSync {
         }
     }
 }
-
-// -- Position independent I/O helpers --
-//
-// Duplicated file descriptors share the kernel file description and thus the
-// file position. Using seek then read from multiple queues races on that
-// shared position. pread64 and pwrite64 are atomic and never touch the position.
-
-/// Read exactly the requested bytes at offset, looping on short reads.
-fn pread_exact(fd: RawFd, buf: &mut [u8], offset: u64) -> io::Result<()> {
-    let mut total = 0usize;
-    while total < buf.len() {
-        // SAFETY: buf and fd are valid for the lifetime of the call.
-        let ret = unsafe {
-            libc::pread64(
-                fd,
-                buf[total..].as_mut_ptr() as *mut libc::c_void,
-                buf.len() - total,
-                (offset + total as u64) as libc::off_t,
-            )
-        };
-        if ret < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        if ret == 0 {
-            return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
-        }
-        total += ret as usize;
-    }
-    Ok(())
-}
-
-/// Write all bytes to fd at offset, looping on short writes.
-fn pwrite_all(fd: RawFd, buf: &[u8], offset: u64) -> io::Result<()> {
-    let mut total = 0usize;
-    while total < buf.len() {
-        // SAFETY: buf and fd are valid for the lifetime of the call.
-        let ret = unsafe {
-            libc::pwrite64(
-                fd,
-                buf[total..].as_ptr() as *const libc::c_void,
-                buf.len() - total,
-                (offset + total as u64) as libc::off_t,
-            )
-        };
-        if ret < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        if ret == 0 {
-            return Err(io::Error::other("pwrite64 wrote 0 bytes"));
-        }
-        total += ret as usize;
-    }
-    Ok(())
-}
-
-// -- iovec helper functions --
-//
-// Operate on the iovec array as a flat byte stream.
 
 /// Copy data into iovecs starting at the given byte offset.
 ///
