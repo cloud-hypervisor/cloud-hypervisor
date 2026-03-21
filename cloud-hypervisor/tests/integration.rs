@@ -47,7 +47,6 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_focal_hypervisor_fw() {
-        let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = basic_regular_guest!(FOCAL_IMAGE_NAME)
             .with_kernel(fw_path(FwType::RustHypervisorFirmware));
         _test_simple_launch(&guest);
@@ -56,9 +55,7 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_focal_ovmf() {
-        let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let mut guest = Guest::new(Box::new(disk_config));
-        guest.kernel_path = Some(fw_path(FwType::Ovmf));
+        let guest = basic_regular_guest!(FOCAL_IMAGE_NAME).with_kernel(fw_path(FwType::Ovmf));
         _test_simple_launch(&guest);
     }
 
