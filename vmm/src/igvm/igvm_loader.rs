@@ -330,6 +330,10 @@ pub fn load_igvm(
                 import_parameter(&mut parameter_areas, info, memory_map.as_bytes())?;
             }
             IgvmDirectiveHeader::CommandLine(info) => {
+                debug!(
+                    "CommandLine parameter: area_index={} offset={}, cmdline={:?}",
+                    info.parameter_area_index, info.byte_offset, cmdline
+                );
                 import_parameter(&mut parameter_areas, info, command_line.as_bytes_with_nul())?;
             }
             IgvmDirectiveHeader::RequiredMemory {
