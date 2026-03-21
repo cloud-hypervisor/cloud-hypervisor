@@ -200,4 +200,10 @@ mod common_cvm {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_virtio_block_dynamic_vhdx_expand(&guest);
     }
+
+    #[test]
+    fn test_split_irqchip() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_split_irqchip(&guest);
+    }
 }
