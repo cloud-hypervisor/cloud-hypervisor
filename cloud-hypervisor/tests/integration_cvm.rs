@@ -194,4 +194,10 @@ mod common_cvm {
         );
         _test_virtio_block(&guest, false, false, true, true, ImageType::Qcow2);
     }
+
+    #[test]
+    fn test_virtio_block_dynamic_vhdx_expand() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_virtio_block_dynamic_vhdx_expand(&guest);
+    }
 }
