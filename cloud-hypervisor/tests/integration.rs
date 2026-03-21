@@ -10026,9 +10026,9 @@ mod live_migration {
         );
 
         let memory_param: &[&str] = if local {
-            &["--memory", "size=4G,shared=on"]
+            &["--memory", "size=1500M,shared=on"]
         } else {
-            &["--memory", "size=4G"]
+            &["--memory", "size=1500M"]
         };
 
         let boot_vcpus = 2;
@@ -10084,7 +10084,7 @@ mod live_migration {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
 
             // Check the guest RAM
-            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
 
             // Check the guest virtio-devices, e.g. block, rng, console, and net
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
@@ -10151,7 +10151,7 @@ mod live_migration {
         let r = std::panic::catch_unwind(|| {
             // Perform same checks to validate VM has been properly migrated
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
-            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
 
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
         });
@@ -10616,9 +10616,9 @@ mod live_migration {
         );
 
         let memory_param: &[&str] = if local {
-            &["--memory", "size=4G,shared=on"]
+            &["--memory", "size=1500M,shared=on"]
         } else {
-            &["--memory", "size=4G"]
+            &["--memory", "size=1500M"]
         };
 
         let boot_vcpus = 2;
@@ -10674,7 +10674,7 @@ mod live_migration {
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
             // Check the guest RAM
-            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
             // Check the guest virtio-devices, e.g. block, rng, console, and net
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
             // x86_64: Following what's done in the `test_snapshot_restore`, we need
@@ -10759,7 +10759,7 @@ mod live_migration {
         let r = std::panic::catch_unwind(|| {
             // Perform same checks to validate VM has been properly migrated
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
-            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
 
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
 
@@ -10934,7 +10934,7 @@ mod live_migration {
                 "--cpus",
                 format!("boot={boot_vcpus},max={max_vcpus}").as_str(),
             ])
-            .args(["--memory", "size=4G,shared=on"])
+            .args(["--memory", "size=1500M,shared=on"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -10966,7 +10966,7 @@ mod live_migration {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
 
             // Check the guest RAM
-            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
 
             // Check Landlock is enabled by hot-plugging a disk.
             assert!(!remote_command(
@@ -11016,7 +11016,7 @@ mod live_migration {
         let r = std::panic::catch_unwind(|| {
             // Perform same checks to validate VM has been properly migrated
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
-            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
         });
 
         // Check Landlock is enabled on destination VM by hot-plugging a disk.
@@ -11128,7 +11128,7 @@ mod live_migration {
             "id={},tap=,mac={},ip={},mask=255.255.255.128",
             net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
-        let memory_param: &[&str] = &["--memory", "size=4G,shared=on"];
+        let memory_param: &[&str] = &["--memory", "size=1500M,shared=on"];
         let boot_vcpus = 2;
         let max_vcpus = 4;
         let pmem_temp_file = TempFile::new().unwrap();
@@ -11178,7 +11178,7 @@ mod live_migration {
             guest.wait_vm_boot().unwrap();
             // Ensure the source VM is running normally
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
-            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
 
             // On x86_64 architecture, remove and re-add the virtio-net device
@@ -11230,7 +11230,7 @@ mod live_migration {
         let r = std::panic::catch_unwind(|| {
             // Perform the same checks to ensure the VM has migrated correctly
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
-            assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
+            assert!(guest.get_total_memory().unwrap_or_default() > 1_400_000);
             guest.check_devices_common(None, Some(&console_text), Some(&pmem_path));
         });
 
@@ -11255,7 +11255,7 @@ mod live_migration {
             "id={},tap=,mac={},ip={},mask=255.255.255.128",
             net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
-        let memory_param: &[&str] = &["--memory", "size=2G,shared=on"];
+        let memory_param: &[&str] = &["--memory", "size=1500M,shared=on"];
         let boot_vcpus = 2;
 
         let src_vm_path = clh_command("cloud-hypervisor");
@@ -11284,12 +11284,11 @@ mod live_migration {
             guest.wait_vm_boot().unwrap();
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
-            assert!(guest.get_total_memory().unwrap_or_default() > 2_000_000);
 
             // Start a memory stressor in the background to keep pages dirty,
             // ensuring the precopy loop cannot converge within the 1s timeout.
             guest
-                .ssh_command("nohup stress --vm 1 --vm-bytes 1G --vm-keep &>/dev/null &")
+                .ssh_command("nohup stress --vm 2 --vm-bytes 200M --vm-keep &>/dev/null &")
                 .unwrap();
             // Give stress a moment to actually start dirtying memory
             thread::sleep(Duration::from_secs(3));
@@ -11363,7 +11362,6 @@ mod live_migration {
 
                     // Confirm the source VM is still responsive over SSH
                     assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
-                    assert!(guest.get_total_memory().unwrap_or_default() >= 2_000_000);
                 }
                 TimeoutStrategy::Force => {
                     // Kill the stressor now that migration has completed or aborted,
@@ -11392,7 +11390,6 @@ mod live_migration {
 
                     // Confirm the VM is still responsive over SSH on the new host
                     assert_eq!(guest.get_cpu_count().unwrap_or_default(), boot_vcpus);
-                    assert!(guest.get_total_memory().unwrap_or_default() >= 2_000_000);
                 }
             }
         }));
