@@ -318,16 +318,16 @@ pub fn load_igvm(
             IgvmDirectiveHeader::MmioRanges(_info) => {
                 todo!("unsupported IgvmPageDataType");
             }
-            IgvmDirectiveHeader::MemoryMap(_info) => {
-                #[cfg(feature = "sev_snp")]
-                {
-                    let guest_mem = memory_manager.lock().unwrap().boot_guest_memory();
-                    let memory_map = generate_memory_map(&guest_mem)?;
-                    import_parameter(&mut parameter_areas, _info, memory_map.as_bytes())?;
+            IgvmDirectiveHeader::MemoryMap(info) => {
+                let guest_mem = memory_manager.lock().unwrap().boot_guest_memory();
+                let memory_map = generate_memory_map(&guest_mem)?;
+                for entry in &memory_map {
+                    debug!(
+                        "IGVM memory map entry: start=0x{:x} pages={} type={:?}",
+                        entry.starting_gpa_page_number, entry.number_of_pages, entry.entry_type
+                    );
                 }
-
-                #[cfg(not(feature = "sev_snp"))]
-                todo!("Not implemented");
+                import_parameter(&mut parameter_areas, info, memory_map.as_bytes())?;
             }
             IgvmDirectiveHeader::CommandLine(info) => {
                 import_parameter(&mut parameter_areas, info, command_line.as_bytes_with_nul())?;
