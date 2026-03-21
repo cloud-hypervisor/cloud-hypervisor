@@ -29,6 +29,13 @@ mod common;
 use common::tests_wrappers::*;
 use common::utils::*;
 
+macro_rules! basic_regular_guest {
+    ($image_name:expr) => {{
+        let disk_config = UbuntuDiskConfig::new($image_name.to_string());
+        GuestFactory::new_regular_guest_factory().create_guest(Box::new(disk_config))
+    }};
+}
+
 mod common_parallel {
     use std::io::{self, SeekFrom};
     use std::process::Command;
@@ -41,8 +48,8 @@ mod common_parallel {
     #[cfg(target_arch = "x86_64")]
     fn test_focal_hypervisor_fw() {
         let disk_config = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let mut guest = Guest::new(Box::new(disk_config));
-        guest.kernel_path = Some(fw_path(FwType::RustHypervisorFirmware));
+        let guest = basic_regular_guest!(FOCAL_IMAGE_NAME)
+            .with_kernel(fw_path(FwType::RustHypervisorFirmware));
         _test_simple_launch(&guest);
     }
 
