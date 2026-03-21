@@ -2180,3 +2180,33 @@ pub fn _test_split_irqchip(guest: &Guest) {
 
     handle_child_output(r, &output);
 }
+
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn _test_dmi_serial_number(guest: &Guest) {
+    let mut child = GuestCommand::new(guest)
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline_with_platform(Some("serial_number=a=b;c=d"))
+        .default_disks()
+        .default_net()
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        assert_eq!(
+            guest
+                .ssh_command("sudo cat /sys/class/dmi/id/product_serial")
+                .unwrap()
+                .trim(),
+            "a=b;c=d"
+        );
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
