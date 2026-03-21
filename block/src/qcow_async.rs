@@ -19,7 +19,6 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
-use crate::disk_file;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::backing::shared_backing_from;
 use crate::qcow::metadata::{
@@ -30,6 +29,7 @@ use crate::qcow::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
 use crate::qcow_common::{
     gather_from_iovecs, pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
 };
+use crate::{BatchRequest, RequestType, disk_file};
 
 /// Device level handle for a QCOW2 image.
 ///
@@ -354,6 +354,84 @@ impl AsyncIo for QcowAsync {
         // For QCOW2, zeroing and hole punching are the same operation.
         // Both discard guest data so the range reads back as zero.
         self.punch_hole(offset, length, user_data)
+    }
+
+    fn batch_requests_enabled(&self) -> bool {
+        true
+    }
+
+    fn submit_batch_requests(&mut self, batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
+        let (submitter, mut sq, _) = self.io_uring.split();
+        let mut needs_submit = false;
+        let mut sync_completions: Vec<(u64, i32)> = Vec::new();
+
+        for req in batch_request {
+            match req.request_type {
+                RequestType::In => {
+                    let total_len: usize = req.iovecs.iter().map(|v| v.iov_len).sum();
+
+                    if let Some(host_offset) = Self::resolve_read(
+                        &self.metadata,
+                        &self.data_file,
+                        &self.backing_file,
+                        req.offset as u64,
+                        &req.iovecs,
+                        total_len,
+                    )? {
+                        let fd = self.data_file.as_raw_fd();
+                        // SAFETY: fd is valid and iovecs point to valid guest memory.
+                        unsafe {
+                            sq.push(
+                                &opcode::Readv::new(
+                                    types::Fd(fd),
+                                    req.iovecs.as_ptr(),
+                                    req.iovecs.len() as u32,
+                                )
+                                .offset(host_offset)
+                                .build()
+                                .user_data(req.user_data),
+                            )
+                            .map_err(|_| {
+                                AsyncIoError::ReadVectored(Error::other("Submission queue is full"))
+                            })?;
+                        }
+                        needs_submit = true;
+                    } else {
+                        sync_completions.push((req.user_data, total_len as i32));
+                    }
+                }
+                RequestType::Out => {
+                    let total_len: usize = req.iovecs.iter().map(|v| v.iov_len).sum();
+                    Self::cow_write_sync(
+                        req.offset as u64,
+                        &req.iovecs,
+                        &self.metadata,
+                        &self.data_file,
+                        &self.backing_file,
+                    )?;
+                    sync_completions.push((req.user_data, total_len as i32));
+                }
+                _ => {
+                    unreachable!("Unexpected batch request type: {:?}", req.request_type)
+                }
+            }
+        }
+
+        if needs_submit {
+            sq.sync();
+            submitter
+                .submit()
+                .map_err(AsyncIoError::SubmitBatchRequests)?;
+        }
+
+        if !sync_completions.is_empty() {
+            for c in sync_completions {
+                self.completion_list.push_back(c);
+            }
+            self.eventfd.write(1).unwrap();
+        }
+
+        Ok(())
     }
 }
 
