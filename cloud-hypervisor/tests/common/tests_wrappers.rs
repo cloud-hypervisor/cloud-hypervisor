@@ -2057,3 +2057,85 @@ pub(crate) fn _test_virtio_block(
         );
     }
 }
+
+pub fn _test_virtio_block_dynamic_vhdx_expand(guest: &Guest) {
+    const VIRTUAL_DISK_SIZE: u64 = 100 << 20;
+    const EMPTY_VHDX_FILE_SIZE: u64 = 8 << 20;
+    const FULL_VHDX_FILE_SIZE: u64 = 112 << 20;
+    const DYNAMIC_VHDX_NAME: &str = "dynamic.vhdx";
+
+    let vhdx_pathbuf = guest.tmp_dir.as_path().join(DYNAMIC_VHDX_NAME);
+    let vhdx_path = vhdx_pathbuf.to_str().unwrap();
+
+    // Generate a 100 MiB dynamic VHDX file
+    std::process::Command::new("qemu-img")
+        .arg("create")
+        .args(["-f", "vhdx"])
+        .arg(vhdx_path)
+        .arg(VIRTUAL_DISK_SIZE.to_string())
+        .output()
+        .expect("Expect generating dynamic VHDX image");
+
+    // Check if the size matches with empty VHDx file size
+    assert_eq!(vhdx_image_size(vhdx_path), EMPTY_VHDX_FILE_SIZE);
+
+    let mut cloud_child = GuestCommand::new(guest)
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .args([
+            "--disk",
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+            )
+            .as_str(),
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::CloudInit).unwrap()
+            )
+            .as_str(),
+            format!("path={vhdx_path}").as_str(),
+        ])
+        .default_net()
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        // Check both if /dev/vdc exists and if the block size is 100 MiB.
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep vdc | grep -c 100M")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            1
+        );
+
+        // Write 100 MB of data to the VHDx disk
+        guest
+            .ssh_command("sudo dd if=/dev/urandom of=/dev/vdc bs=1M count=100")
+            .unwrap();
+    });
+
+    // Check if the size matches with expected expanded VHDx file size
+    assert_eq!(vhdx_image_size(vhdx_path), FULL_VHDX_FILE_SIZE);
+
+    kill_child(&mut cloud_child);
+    let output = cloud_child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+
+    disk_check_consistency(vhdx_path, None);
+}
+
+fn vhdx_image_size(disk_name: &str) -> u64 {
+    std::fs::File::open(disk_name)
+        .unwrap()
+        .seek(SeekFrom::End(0))
+        .unwrap()
+}
