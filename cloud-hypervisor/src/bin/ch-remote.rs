@@ -16,7 +16,9 @@ use api_client::{
     Error as ApiClientError, simple_api_command, simple_api_command_with_fds,
     simple_api_full_command,
 };
-use clap::{Arg, ArgAction, ArgMatches, Command};
+#[cfg(feature = "dbus_api")]
+use clap::ArgAction;
+use clap::{Arg, ArgMatches, Command};
 use log::error;
 use option_parser::{ByteSized, ByteSizedParseError};
 use thiserror::Error;
@@ -69,6 +71,8 @@ enum Error {
     ReadingFile(#[source] std::io::Error),
     #[error("Invalid disk size")]
     InvalidDiskSize(#[source] ByteSizedParseError),
+    #[error("Error parsing send migration configuration")]
+    SendMigrationConfig(#[from] vmm::api::VmSendMigrationParseError),
 }
 
 enum TargetApi<'a> {
@@ -519,11 +523,7 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                     .unwrap()
                     .get_one::<String>("send_migration_config")
                     .unwrap(),
-                matches
-                    .subcommand_matches("send-migration")
-                    .unwrap()
-                    .get_flag("send_migration_local"),
-            );
+            )?;
             simple_api_command(socket, "PUT", "send-migration", Some(&send_migration_data))
                 .map_err(Error::HttpApiClient)
         }
@@ -743,11 +743,7 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
                     .unwrap()
                     .get_one::<String>("send_migration_config")
                     .unwrap(),
-                matches
-                    .subcommand_matches("send-migration")
-                    .unwrap()
-                    .get_flag("send_migration_local"),
-            );
+            )?;
             proxy.api_vm_send_migration(&send_migration_data)
         }
         Some("receive-migration") => {
@@ -953,13 +949,11 @@ fn receive_migration_data(url: &str) -> String {
     serde_json::to_string(&receive_migration_data).unwrap()
 }
 
-fn send_migration_data(url: &str, local: bool) -> String {
-    let send_migration_data = vmm::api::VmSendMigrationData {
-        destination_url: url.to_owned(),
-        local,
-    };
-
-    serde_json::to_string(&send_migration_data).unwrap()
+fn send_migration_data(config: &str) -> Result<String, Error> {
+    let send_migration_data =
+        vmm::api::VmSendMigrationData::parse(config).map_err(Error::SendMigrationConfig)?;
+    let send_migration_config = serde_json::to_string(&send_migration_data).unwrap();
+    Ok(send_migration_config)
 }
 
 fn create_data(path: &str) -> Result<String, Error> {
@@ -1141,13 +1135,7 @@ fn get_cli_commands_sorted() -> Box<[Command]> {
             .arg(
                 Arg::new("send_migration_config")
                     .index(1)
-                    .help("<destination_url>"),
-            )
-            .arg(
-                Arg::new("send_migration_local")
-                    .long("local")
-                    .num_args(0)
-                    .action(ArgAction::SetTrue),
+                    .help(vmm::api::VmSendMigrationData::SYNTAX),
             ),
         Command::new("shutdown").about("Shutdown the VM"),
         Command::new("shutdown-vmm").about("Shutdown the VMM"),

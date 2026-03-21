@@ -34,10 +34,14 @@ pub mod dbus;
 pub mod http;
 
 use std::io;
+use std::num::NonZeroU64;
+use std::str::FromStr;
 use std::sync::mpsc::{RecvError, SendError, Sender, channel};
+use std::time::Duration;
 
 use log::info;
 use micro_http::Body;
+use option_parser::{OptionParser, OptionParserError, Toggle};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vm_migration::MigratableError;
@@ -266,13 +270,134 @@ pub struct VmReceiveMigrationData {
     pub receiver_url: String,
 }
 
-#[derive(Clone, Deserialize, Serialize, Default, Debug)]
+#[derive(Copy, Clone, Default, Deserialize, Serialize, Debug, PartialEq, Eq)]
+/// The migration timeout strategy.
+pub enum TimeoutStrategy {
+    #[default]
+    /// Cancel the migration and keep the VM running on the source.
+    Cancel,
+    /// Force the migration and ignore any downtime requirement.
+    Force,
+}
+
+impl FromStr for TimeoutStrategy {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "cancel" => Ok(TimeoutStrategy::Cancel),
+            "force" => Ok(TimeoutStrategy::Force),
+            _ => Err(format!("Invalid timeout strategy: {s}")),
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+#[error("Error parsing send migration parameters")]
+pub struct VmSendMigrationParseError(#[source] OptionParserError);
+
+/// Configuration for an outgoing migration.
+#[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct VmSendMigrationData {
     /// URL to migrate the VM to
     pub destination_url: String,
     /// Send memory across socket without copying
     #[serde(default)]
     pub local: bool,
+    /// The maximum downtime the migration aims for.
+    ///
+    /// Usually, on the order of a few hundred milliseconds.
+    #[serde(default = "VmSendMigrationData::default_downtime_ms")]
+    downtime_ms: NonZeroU64,
+    /// The timeout for the migration, i.e., the maximum duration.
+    #[serde(default = "VmSendMigrationData::default_timeout_s")]
+    timeout_s: NonZeroU64,
+    /// The timeout strategy for the migration.
+    #[serde(default)]
+    pub timeout_strategy: TimeoutStrategy,
+}
+
+impl VmSendMigrationData {
+    pub const SYNTAX: &'static str = "VM send migration parameters \
+        \"destination_url=<url>[,local=on|off,\
+        downtime_ms=<milliseconds>,timeout_s=<seconds>,\
+        timeout_strategy=cancel|force]\"";
+
+    // Same as QEMU.
+    pub const DEFAULT_DOWNTIME: Duration = Duration::from_millis(300);
+    pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60 * 60 /* one hour */);
+
+    fn default_downtime_ms() -> NonZeroU64 {
+        let ms_u64 = u64::try_from(Self::DEFAULT_DOWNTIME.as_millis()).unwrap();
+        NonZeroU64::new(ms_u64).unwrap()
+    }
+
+    fn default_timeout_s() -> NonZeroU64 {
+        NonZeroU64::new(Self::DEFAULT_TIMEOUT.as_secs()).unwrap()
+    }
+
+    pub fn parse(migration: &str) -> Result<Self, VmSendMigrationParseError> {
+        let mut parser = OptionParser::new();
+        parser
+            .add("destination_url")
+            .add("local")
+            .add("downtime_ms")
+            .add("timeout_s")
+            .add("timeout_strategy");
+        parser.parse(migration).map_err(VmSendMigrationParseError)?;
+
+        let destination_url = parser.get("destination_url").ok_or_else(|| {
+            VmSendMigrationParseError(OptionParserError::InvalidSyntax(
+                "destination_url is required".to_string(),
+            ))
+        })?;
+        let local = parser
+            .convert::<Toggle>("local")
+            .map_err(VmSendMigrationParseError)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let downtime_ms = match parser
+            .convert::<u64>("downtime_ms")
+            .map_err(VmSendMigrationParseError)?
+        {
+            Some(v) => NonZeroU64::new(v).ok_or_else(|| {
+                VmSendMigrationParseError(OptionParserError::InvalidValue(
+                    "downtime_ms must be non-zero".to_string(),
+                ))
+            })?,
+            None => Self::default_downtime_ms(),
+        };
+        let timeout_s = match parser
+            .convert::<u64>("timeout_s")
+            .map_err(VmSendMigrationParseError)?
+        {
+            Some(v) => NonZeroU64::new(v).ok_or_else(|| {
+                VmSendMigrationParseError(OptionParserError::InvalidValue(
+                    "timeout_s must be non-zero".to_string(),
+                ))
+            })?,
+            None => Self::default_timeout_s(),
+        };
+        let timeout_strategy = parser
+            .convert("timeout_strategy")
+            .map_err(VmSendMigrationParseError)?
+            .unwrap_or_default();
+
+        Ok(Self {
+            destination_url,
+            local,
+            downtime_ms,
+            timeout_s,
+            timeout_strategy,
+        })
+    }
+
+    pub fn downtime(&self) -> Duration {
+        Duration::from_millis(self.downtime_ms.get())
+    }
+
+    pub fn timeout(&self) -> Duration {
+        Duration::from_secs(self.timeout_s.get())
+    }
 }
 
 pub enum ApiResponsePayload {
@@ -1539,5 +1664,50 @@ impl ApiAction for VmNmi {
         data: Self::RequestBody,
     ) -> ApiResult<Self::ResponseBody> {
         get_response_body(self, api_evt, api_sender, data)
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    #[test]
+    fn test_vm_send_migration_data_parse() {
+        // Fully specified
+        let data = VmSendMigrationData::parse(
+            "destination_url=tcp://192.168.1.1:8080,local=on,downtime_ms=200,timeout_s=3600,timeout_strategy=cancel"
+        ).expect("valid migration string should parse");
+        assert_eq!(data.destination_url, "tcp://192.168.1.1:8080");
+        assert!(data.local);
+        assert_eq!(data.downtime_ms.get(), 200);
+        assert_eq!(data.timeout_s.get(), 3600);
+        assert_eq!(data.timeout_strategy, TimeoutStrategy::Cancel);
+
+        // Defaults applied when optional fields are omitted
+        let data = VmSendMigrationData::parse("destination_url=tcp://192.168.1.1:8080")
+            .expect("minimal migration string should parse");
+        assert_eq!(data.destination_url, "tcp://192.168.1.1:8080");
+        assert!(!data.local);
+        assert_eq!(data.downtime_ms, VmSendMigrationData::default_downtime_ms());
+        assert_eq!(data.timeout_s, VmSendMigrationData::default_timeout_s());
+        assert_eq!(data.timeout_strategy, TimeoutStrategy::default());
+
+        // Missing destination_url is an error
+        VmSendMigrationData::parse("local=on,downtime_ms=200").unwrap_err();
+
+        // Zero downtime_ms is rejected
+        let _data =
+            VmSendMigrationData::parse("destination_url=tcp://192.168.1.1:8080,downtime_ms=0")
+                .expect_err("zero downtime_ms should be rejected");
+
+        // Zero timeout_s is rejected
+        let _data = VmSendMigrationData::parse("destination_url=unix:/tmp/sock,timeout_s=0")
+            .expect_err("zero timeout_s should be rejected");
+
+        // Unknown option is an error
+        VmSendMigrationData::parse("destination_url=unix:/tmp/sock,unknown_field=foo").unwrap_err();
+
+        // Invalid toggle value is an error
+        VmSendMigrationData::parse("destination_url=unix:/tmp/sock,local=yes").unwrap_err();
     }
 }
