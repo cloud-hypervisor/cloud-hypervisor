@@ -2139,3 +2139,44 @@ fn vhdx_image_size(disk_name: &str) -> u64 {
         .seek(SeekFrom::End(0))
         .unwrap()
 }
+
+#[cfg(target_arch = "x86_64")]
+pub fn _test_split_irqchip(guest: &Guest) {
+    let mut child = GuestCommand::new(guest)
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .default_disks()
+        .default_net()
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        assert_eq!(
+            guest
+                .ssh_command("grep -c IO-APIC.*timer /proc/interrupts || true")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(1),
+            0
+        );
+        assert_eq!(
+            guest
+                .ssh_command("grep -c IO-APIC.*cascade /proc/interrupts || true")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(1),
+            0
+        );
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
