@@ -391,7 +391,7 @@ impl Vfio for VfioUserClientWrapper {
 impl PciDevice for VfioUserPciDevice {
     fn allocate_bars(
         &mut self,
-        allocator: &Arc<Mutex<SystemAllocator>>,
+        allocator: &mut SystemAllocator,
         mmio32_allocator: &mut AddressAllocator,
         mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,
