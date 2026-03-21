@@ -51,6 +51,8 @@ pub enum Error {
     FailedToDecodeHostData(#[source] hex::FromHexError),
     #[error("Error allocating address space")]
     MemoryManager(MemoryManagerError),
+    #[error("no matching platform type found in igvm file")]
+    NoMatchingPlatform,
 }
 
 #[allow(dead_code)]
@@ -159,15 +161,43 @@ pub fn load_igvm(
     file.seek(SeekFrom::Start(0)).map_err(Error::Igvm)?;
     file.read_to_end(&mut file_contents).map_err(Error::Igvm)?;
 
-    let igvm_file = IgvmFile::new_from_binary(&file_contents, Some(IsolationType::Snp))
-        .map_err(Error::InvalidIgvmFile)?;
-
-    let mask = match &igvm_file.platforms()[0] {
-        IgvmPlatformHeader::SupportedPlatform(info) => {
-            debug_assert!(info.platform_type == IgvmPlatformType::SEV_SNP);
-            info.compatibility_mask
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "sev_snp")] {
+            let expected_platform_type: &[IgvmPlatformType] = &[IgvmPlatformType::SEV_SNP];
+        } else {
+            let expected_platform_type: &[IgvmPlatformType] = &[IgvmPlatformType::NATIVE];
         }
-    };
+    }
+
+    // Determine which platform is present in the file so we can use the
+    // correct isolation filter when parsing directives.
+    let igvm_file_unfiltered =
+        IgvmFile::new_from_binary(&file_contents, None).map_err(Error::InvalidIgvmFile)?;
+
+    let (mask, match_isolation_type) = expected_platform_type
+        .iter()
+        .find_map(|expected| {
+            igvm_file_unfiltered
+                .platforms()
+                .iter()
+                .find_map(|platform| match platform {
+                    IgvmPlatformHeader::SupportedPlatform(info)
+                        if info.platform_type == *expected =>
+                    {
+                        let isolation: IsolationType = match info.platform_type {
+                            IgvmPlatformType::SEV_SNP => IsolationType::Snp,
+                            IgvmPlatformType::NATIVE => IsolationType::NotIsolated,
+                            _ => unimplemented!("Unsupported platform type"),
+                        };
+                        Some((info.compatibility_mask, isolation))
+                    }
+                    _ => None,
+                })
+        })
+        .ok_or(Error::NoMatchingPlatform)?;
+
+    let igvm_file = IgvmFile::new_from_binary(&file_contents, Some(match_isolation_type))
+        .map_err(Error::InvalidIgvmFile)?;
 
     let mut loader = Loader::new(memory);
 
