@@ -70,7 +70,11 @@ use crate::vhdx::VhdxError;
 const SECTOR_SHIFT: u8 = 9;
 pub const SECTOR_SIZE: u64 = 0x01 << SECTOR_SHIFT;
 
-/// Field offsets within `struct virtio_blk_discard_write_zeroes`.
+/// Maximum number of segments per DISCARD or WRITE_ZEROES request.
+pub const MAX_DISCARD_WRITE_ZEROES_SEG: u32 = 1;
+
+/// Size and field offsets within `struct virtio_blk_discard_write_zeroes`.
+const DISCARD_WZ_SEG_SIZE: u32 = mem::size_of::<virtio_blk_discard_write_zeroes>() as u32;
 const DISCARD_WZ_SECTOR_OFFSET: u64 =
     mem::offset_of!(virtio_blk_discard_write_zeroes, sector) as u64;
 const DISCARD_WZ_NUM_SECTORS_OFFSET: u64 =
@@ -105,6 +109,8 @@ pub enum Error {
     RawFileError(#[source] std::io::Error),
     #[error("The requested operation does not support multiple descriptors")]
     TooManyDescriptors,
+    #[error("Request contains too many segments")]
+    TooManySegments,
     #[error("Failure in vhdx")]
     VhdxError(#[source] VhdxError),
 }
@@ -591,8 +597,11 @@ impl Request {
                     return Err(ExecuteError::BadRequest(Error::TooManyDescriptors));
                 };
 
-                if data_len < 16 {
+                if data_len < DISCARD_WZ_SEG_SIZE {
                     return Err(ExecuteError::BadRequest(Error::DescriptorLengthTooSmall));
+                }
+                if data_len > DISCARD_WZ_SEG_SIZE * MAX_DISCARD_WRITE_ZEROES_SEG {
+                    return Err(ExecuteError::BadRequest(Error::TooManySegments));
                 }
 
                 let mut discard_sector = [0u8; 8];
@@ -630,8 +639,11 @@ impl Request {
                     return Err(ExecuteError::BadRequest(Error::TooManyDescriptors));
                 };
 
-                if data_len < 16 {
+                if data_len < DISCARD_WZ_SEG_SIZE {
                     return Err(ExecuteError::BadRequest(Error::DescriptorLengthTooSmall));
+                }
+                if data_len > DISCARD_WZ_SEG_SIZE * MAX_DISCARD_WRITE_ZEROES_SEG {
+                    return Err(ExecuteError::BadRequest(Error::TooManySegments));
                 }
 
                 let mut wz_sector = [0u8; 8];

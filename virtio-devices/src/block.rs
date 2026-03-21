@@ -23,7 +23,8 @@ use block::disk_file::DiskBackend;
 use block::error::BlockError;
 use block::fcntl::{LockError, LockGranularity, LockGranularityChoice, LockType, get_lock_state};
 use block::{
-    ExecuteAsync, ExecuteError, Request, RequestType, VirtioBlockConfig, build_serial, fcntl,
+    ExecuteAsync, ExecuteError, MAX_DISCARD_WRITE_ZEROES_SEG, Request, RequestType,
+    VirtioBlockConfig, build_serial, fcntl,
 };
 use event_monitor::event;
 use log::{debug, error, info, warn};
@@ -829,12 +830,12 @@ impl Block {
 
                 if avail_features & (1u64 << VIRTIO_BLK_F_WRITE_ZEROES) != 0 {
                     config.max_write_zeroes_sectors = u32::MAX;
-                    config.max_write_zeroes_seg = 1;
+                    config.max_write_zeroes_seg = MAX_DISCARD_WRITE_ZEROES_SEG;
                     config.write_zeroes_may_unmap = if discard_supported { 1 } else { 0 };
                 }
                 if avail_features & (1u64 << VIRTIO_BLK_F_DISCARD) != 0 {
                     config.max_discard_sectors = u32::MAX;
-                    config.max_discard_seg = 1;
+                    config.max_discard_seg = MAX_DISCARD_WRITE_ZEROES_SEG;
                     config.discard_sector_alignment = (logical_block_size / SECTOR_SIZE) as u32;
                 }
 
