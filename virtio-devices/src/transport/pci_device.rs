@@ -9,6 +9,7 @@
 use std::any::Any;
 use std::cmp;
 use std::io::Write;
+use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
@@ -53,8 +54,12 @@ enum PciCapabilityType {
     Isr = 3,
     Device = 4,
     Pci = 5,
+    Doorbell = 6,
     SharedMemory = 8,
 }
+
+/// Maximum number of doorbells.
+pub const MAX_DOORBELLS: u16 = (u8::MAX as u16) * 2 + 1;
 
 // This offset represents the 2 bytes omitted from the VirtioPciCap structure
 // as they are already handled through add_capability(). These 2 bytes are the
@@ -261,7 +266,18 @@ const DEVICE_CONFIG_BAR_OFFSET: u64 = next_bar_addr(ISR_CONFIG_BAR_OFFSET, ISR_C
 const DEVICE_CONFIG_SIZE: u64 = 0x1000;
 const NOTIFICATION_BAR_OFFSET: u64 = next_bar_addr(DEVICE_CONFIG_BAR_OFFSET, DEVICE_CONFIG_SIZE);
 const NOTIFICATION_SIZE: u64 = MAX_QUEUES * NOTIFY_OFF_MULTIPLIER as u64;
-const MSIX_TABLE_BAR_OFFSET: u64 = next_bar_addr(NOTIFICATION_BAR_OFFSET, NOTIFICATION_SIZE);
+// Make this 64K aligned so that it can be placed on a separate page
+// for direct exposure to userspace, even on systems with 64K pages.
+const DOORBELL_BAR_OFFSET: u64 =
+    next_bar_addr_align(NOTIFICATION_BAR_OFFSET, NOTIFICATION_SIZE, 1u64 << 16);
+const DOORBELL_OFF_MULTIPLIER: u32 = NOTIFY_OFF_MULTIPLIER;
+const DOORBELL_BAR_SIZE: u64 = (MAX_QUEUES * 2 + 1) * DOORBELL_OFF_MULTIPLIER as u64;
+
+// Make this 64K aligned again so that the doorbells and vhost-user notifications
+// can be directly exposed to userspace.  These are always safe for userspace
+// to write to via MMIO.
+const MSIX_TABLE_BAR_OFFSET: u64 =
+    next_bar_addr_align(DOORBELL_BAR_OFFSET, DOORBELL_BAR_SIZE, 1u64 << 16);
 
 // The size is 256KiB because the table can hold up to 2048 entries, with each
 // entry being 128 bits (4 DWORDS).
@@ -369,11 +385,11 @@ pub struct VirtioPciDevice {
     // Guest memory
     memory: GuestMemoryAtomic<GuestMemoryMmap>,
 
-    // Settings PCI BAR
-    settings_bar: u8,
-
     // Whether to use 64-bit bar location or 32-bit
     use_64bit_bar: bool,
+
+    // Number of doorbells
+    num_doorbells: u16,
 
     // Add a dedicated structure to hold information about the very specific
     // virtio-pci capability VIRTIO_PCI_CAP_PCI_CFG. This is needed to support
@@ -415,12 +431,27 @@ impl VirtioPciDevice {
     ) -> Result<Self> {
         let mut locked_device = device.lock().unwrap();
         let mut queue_evts = Vec::new();
-        for _ in locked_device.queue_max_sizes().iter() {
+        let num_queues =
+            locked_device.queue_max_sizes().len() + usize::from(locked_device.doorbells_max());
+        if num_queues > (NOTIFICATION_SIZE / u64::from(NOTIFY_OFF_MULTIPLIER)) as usize {
+            return Err(VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
+                "Got {} queues, but limit is {}",
+                num_queues,
+                NOTIFICATION_SIZE / u64::from(NOTIFY_OFF_MULTIPLIER)
+            )));
+        }
+        let num_doorbells = locked_device.doorbells_max();
+        if num_doorbells > MAX_DOORBELLS {
+            return Err(VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!(
+                "Got {num_doorbells} doorbells, but limit is {MAX_DOORBELLS}"
+            )));
+        }
+
+        for _ in 0..num_queues {
             queue_evts.push(EventFd::new(EFD_NONBLOCK).map_err(|e| {
                 VirtioPciDeviceError::CreateVirtioPciDevice(anyhow!("Failed creating eventfd: {e}"))
             })?);
         }
-        let num_queues = locked_device.queue_max_sizes().len();
 
         if let Some(access_platform) = &access_platform {
             locked_device.set_access_platform(access_platform.clone());
@@ -603,7 +634,6 @@ impl VirtioPciDevice {
             queues,
             queue_evts,
             memory,
-            settings_bar: 0,
             use_64bit_bar,
             interrupt_source_group: interrupt_source_group.clone(),
             cap_pci_cfg_info,
@@ -611,6 +641,7 @@ impl VirtioPciDevice {
             activate_evt,
             dma_handler,
             pending_activations,
+            num_doorbells,
         };
 
         if let Some(msix_config) = &virtio_pci_device.msix_config {
@@ -621,6 +652,14 @@ impl VirtioPciDevice {
                 virtio_pci_device.interrupt_source_group.clone(),
             )));
         }
+
+        // Set the device configuration space base address prior to activating
+        // it, so that it knows where to register its ioeventfds.
+        virtio_pci_device
+            .device
+            .lock()
+            .unwrap()
+            .set_config_address_base(virtio_pci_device.config_bar_addr());
 
         // In case of a restore, we can activate the device, as we know at
         // this point the virtqueues are in the right state and the device is
@@ -679,17 +718,14 @@ impl VirtioPciDevice {
     }
 
     pub fn config_bar_addr(&self) -> u64 {
-        self.configuration.get_bar_addr(self.settings_bar as usize)
+        self.configuration.get_bar_addr(VIRTIO_COMMON_BAR_INDEX)
     }
 
-    fn add_pci_capabilities(
-        &mut self,
-        settings_bar: u8,
-    ) -> std::result::Result<(), PciDeviceError> {
+    fn add_pci_capabilities(&mut self) -> std::result::Result<(), PciDeviceError> {
         // Add pointers to the different configuration structures from the PCI capabilities.
         let common_cap = VirtioPciCap::new(
             PciCapabilityType::Common,
-            settings_bar,
+            VIRTIO_COMMON_BAR_INDEX as u8,
             COMMON_CONFIG_BAR_OFFSET as u32,
             COMMON_CONFIG_SIZE as u32,
         );
@@ -699,7 +735,7 @@ impl VirtioPciDevice {
 
         let isr_cap = VirtioPciCap::new(
             PciCapabilityType::Isr,
-            settings_bar,
+            VIRTIO_COMMON_BAR_INDEX as u8,
             ISR_CONFIG_BAR_OFFSET as u32,
             ISR_CONFIG_SIZE as u32,
         );
@@ -710,7 +746,7 @@ impl VirtioPciDevice {
         // TODO(dgreid) - set based on device's configuration size?
         let device_cap = VirtioPciCap::new(
             PciCapabilityType::Device,
-            settings_bar,
+            VIRTIO_COMMON_BAR_INDEX as u8,
             DEVICE_CONFIG_BAR_OFFSET as u32,
             DEVICE_CONFIG_SIZE as u32,
         );
@@ -720,7 +756,7 @@ impl VirtioPciDevice {
 
         let notify_cap = VirtioPciNotifyCap::new(
             PciCapabilityType::Notify,
-            settings_bar,
+            VIRTIO_COMMON_BAR_INDEX as u8,
             NOTIFICATION_BAR_OFFSET as u32,
             NOTIFICATION_SIZE as u32,
             Le32::from(NOTIFY_OFF_MULTIPLIER),
@@ -737,12 +773,25 @@ impl VirtioPciDevice {
             + VIRTIO_PCI_CAP_OFFSET;
         self.cap_pci_cfg_info.cap = configuration_cap;
 
+        if self.num_doorbells > 0 {
+            let doorbell_cap = VirtioPciNotifyCap::new(
+                PciCapabilityType::Doorbell,
+                VIRTIO_COMMON_BAR_INDEX as u8,
+                DOORBELL_BAR_OFFSET as u32,
+                DOORBELL_BAR_SIZE as u32,
+                Le32::from(DOORBELL_OFF_MULTIPLIER),
+            );
+            self.configuration
+                .add_capability(&doorbell_cap)
+                .map_err(PciDeviceError::CapabilitiesSetup)?;
+        }
+
         if self.msix_config.is_some() {
             let msix_cap = MsixCap::new(
-                settings_bar,
+                VIRTIO_COMMON_BAR_INDEX as u8,
                 self.msix_num,
                 MSIX_TABLE_BAR_OFFSET as u32,
-                settings_bar,
+                VIRTIO_COMMON_BAR_INDEX as u8,
                 MSIX_PBA_BAR_OFFSET as u32,
             );
             self.configuration
@@ -750,7 +799,6 @@ impl VirtioPciDevice {
                 .map_err(PciDeviceError::CapabilitiesSetup)?;
         }
 
-        self.settings_bar = settings_bar;
         Ok(())
     }
 
@@ -846,15 +894,42 @@ impl VirtioPciDevice {
     }
 }
 
+pub struct PrivatelyConstructableError<'a>(PhantomData<&'a ()>);
+
 impl VirtioTransport for VirtioPciDevice {
-    fn ioeventfds(&self, base_addr: u64) -> impl Iterator<Item = (&EventFd, u64)> {
-        let notify_base = base_addr + NOTIFICATION_BAR_OFFSET;
-        self.queue_evts().iter().enumerate().map(move |(i, event)| {
-            (
+    fn ioeventfds<T: core::fmt::Debug>(
+        &self,
+        old_base_addr: u64,
+        new_base_addr: u64,
+        cb: &mut dyn FnMut(&EventFd, u64, u64) -> core::result::Result<(), T>,
+    ) -> core::result::Result<(), T> {
+        let old_notify_base = old_base_addr + NOTIFICATION_BAR_OFFSET;
+        let new_notify_base = new_base_addr + NOTIFICATION_BAR_OFFSET;
+        for (i, event) in self.queue_evts().iter().enumerate() {
+            cb(
                 event,
-                notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
-            )
-        })
+                old_notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
+                new_notify_base + i as u64 * u64::from(NOTIFY_OFF_MULTIPLIER),
+            )?;
+        }
+        let mut err = Ok(());
+        match self.device.lock().unwrap().ioeventfds(
+            old_base_addr,
+            new_base_addr,
+            &mut |eventfd, old_addr, new_addr| {
+                assert!(err.is_ok());
+                cb(eventfd, old_addr, new_addr).map_err(|e| {
+                    err = Err(e);
+                    PrivatelyConstructableError(PhantomData)
+                })
+            },
+        ) {
+            Ok(()) => {
+                err.unwrap();
+                Ok(())
+            }
+            Err(PrivatelyConstructableError(PhantomData)) => Err(err.unwrap_err()),
+        }
     }
 }
 
@@ -931,6 +1006,12 @@ impl VirtioInterrupt for VirtioInterruptMsix {
         self.interrupt_source_group
             .set_notifier(interrupt, eventfd, vm)
     }
+}
+
+pub fn doorbell_addr(base_addr: u64, doorbell: u16) -> u64 {
+    base_addr
+        .checked_add(u64::from(doorbell) * u64::from(DOORBELL_OFF_MULTIPLIER) + DOORBELL_BAR_OFFSET)
+        .expect("address goes past end of address space")
 }
 
 impl PciDevice for VirtioPciDevice {
@@ -1054,7 +1135,7 @@ impl PciDevice for VirtioPciDevice {
             })?;
 
             // Once the BARs are allocated, the capabilities can be added to the PCI configuration.
-            self.add_pci_capabilities(VIRTIO_COMMON_BAR_INDEX as u8)?;
+            self.add_pci_capabilities()?;
         }
 
         bars.push(bar);
@@ -1122,12 +1203,24 @@ impl PciDevice for VirtioPciDevice {
         old_base: u64,
         new_base: u64,
     ) -> std::result::Result<(), std::io::Error> {
+        let move_config_base = old_base == self.config_bar_addr();
         // We only update our idea of the bar in order to support free_bars() above.
         // The majority of the reallocation is done inside DeviceManager.
         for bar in self.bar_regions.iter_mut() {
             if bar.addr() == old_base {
                 *bar = bar.set_address(new_base);
             }
+        }
+
+        // Set the device configuration space base address prior to activating
+        // it, so that if it has not already been activated, it knows where to
+        // register its ioeventfds when it does get activated.  After activation,
+        // this job is done by VirtioPciDevice::ioeventfds() instead.
+        if move_config_base {
+            self.device
+                .lock()
+                .unwrap()
+                .set_config_address_base(new_base);
         }
 
         Ok(())
@@ -1156,6 +1249,9 @@ impl PciDevice for VirtioPciDevice {
             o if (NOTIFICATION_BAR_OFFSET..NOTIFICATION_BAR_OFFSET + NOTIFICATION_SIZE)
                 .contains(&o) =>
             {
+                // Handled with ioeventfds.
+            }
+            o if (DOORBELL_BAR_OFFSET..DOORBELL_BAR_OFFSET + DOORBELL_BAR_SIZE).contains(&o) => {
                 // Handled with ioeventfds.
             }
             o if (MSIX_TABLE_BAR_OFFSET..MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE).contains(&o) => {
@@ -1202,14 +1298,29 @@ impl PciDevice for VirtioPciDevice {
                 .contains(&o) =>
             {
                 #[cfg(feature = "sev_snp")]
-                for (event, addr) in self.ioeventfds(_base) {
+                self.ioeventfds(_base, _base, &mut |event, addr, _| {
                     if addr == _base + offset {
                         event.write(1).unwrap();
                     }
-                }
+                    Result::Ok(())
+                })
+                .unwrap();
                 // Handled with ioeventfds.
                 #[cfg(not(feature = "sev_snp"))]
                 error!("Unexpected write to notification BAR: offset = 0x{o:x}");
+            }
+            o if (DOORBELL_BAR_OFFSET..DOORBELL_BAR_OFFSET + DOORBELL_BAR_SIZE).contains(&o) => {
+                #[cfg(feature = "sev_snp")]
+                self.ioeventfds(_base, _base, &mut |event, addr, _| {
+                    if addr == _base + offset {
+                        event.write(1).unwrap();
+                    }
+                    Result::Ok(())
+                })
+                .unwrap();
+                // Handled with ioeventfds.
+                #[cfg(not(feature = "sev_snp"))]
+                error!("Unexpected write to doorbell BAR: offset = 0x{o:x}");
             }
             o if (MSIX_TABLE_BAR_OFFSET..MSIX_TABLE_BAR_OFFSET + MSIX_TABLE_SIZE).contains(&o) => {
                 if let Some(msix_config) = &self.msix_config {

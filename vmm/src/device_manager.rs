@@ -685,6 +685,10 @@ pub enum DeviceManagerError {
     #[error("Disk resize error")]
     DiskResize(#[source] virtio_devices::block::Error),
 
+    /// Too many MSI-X interrupts
+    #[error("Too many MSI-X interrupts: {0}")]
+    TooManyInterrupts(usize),
+
     /// Disk image type does not match expected type.
     #[error(
         "Disk image type does not match expected type: specified = {specified}, detected = {detected}"
@@ -815,20 +819,24 @@ impl DeviceRelocation for AddressManager {
         if let Some(virtio_pci_dev) = any_dev.downcast_ref::<VirtioPciDevice>() {
             let bar_addr = virtio_pci_dev.config_bar_addr();
             if bar_addr == new_base {
-                for (event, addr) in virtio_pci_dev.ioeventfds(old_base) {
-                    let io_addr = IoEventAddress::Mmio(addr);
-                    self.vm.unregister_ioevent(event, &io_addr).map_err(|e| {
-                        io::Error::other(format!("failed to unregister ioevent: {e:?}"))
-                    })?;
-                }
-                for (event, addr) in virtio_pci_dev.ioeventfds(new_base) {
-                    let io_addr = IoEventAddress::Mmio(addr);
-                    self.vm
-                        .register_ioevent(event, &io_addr, None)
-                        .map_err(|e| {
-                            io::Error::other(format!("failed to register ioevent: {e:?}"))
-                        })?;
-                }
+                virtio_pci_dev.ioeventfds(
+                    old_base,
+                    new_base,
+                    &mut |event, old_addr, new_addr| {
+                        let old_io_addr = IoEventAddress::Mmio(old_addr);
+                        self.vm
+                            .unregister_ioevent(event, &old_io_addr)
+                            .map_err(|e| {
+                                io::Error::other(format!("failed to unregister ioevent: {e:?}"))
+                            })?;
+                        let new_io_addr = IoEventAddress::Mmio(new_addr);
+                        self.vm
+                            .register_ioevent(event, &new_io_addr, None)
+                            .map_err(|e| {
+                                io::Error::other(format!("failed to register ioevent: {e:?}"))
+                            })
+                    },
+                )?;
             } else {
                 let virtio_dev = virtio_pci_dev.virtio_device();
                 let mut virtio_dev = virtio_dev.lock().unwrap();
@@ -4207,9 +4215,17 @@ impl DeviceManager {
         }
 
         // Allows support for one MSI-X vector per interrupt needed by the device.
-        // It also adds 1 as we need to take into account the dedicated vector to notify
-        // about a virtio config change.
-        let msix_num = (virtio_device.lock().unwrap().queue_max_sizes().len() + 1) as u16;
+        // This includes 1 per virtqueue, 1 per doorbell, and 1 for virtio config
+        // space change.
+        let msix_num = {
+            let virtio_device = virtio_device.lock().unwrap();
+            virtio_device.queue_max_sizes().len() + usize::from(virtio_device.doorbells_max()) + 1
+        };
+
+        if msix_num >= usize::from(pci::MAX_MSIX_VECTORS_PER_DEVICE) {
+            return Err(DeviceManagerError::TooManyInterrupts(msix_num));
+        }
+        let msix_num = msix_num as u16;
 
         // Create the AccessPlatform trait from the implementation IommuMapping.
         // This will provide address translation for any virtio device sitting
@@ -4307,13 +4323,17 @@ impl DeviceManager {
         )?;
 
         let bar_addr = virtio_pci_device.lock().unwrap().config_bar_addr();
-        for (event, addr) in virtio_pci_device.lock().unwrap().ioeventfds(bar_addr) {
-            let io_addr = IoEventAddress::Mmio(addr);
-            self.address_manager
-                .vm
-                .register_ioevent(event, &io_addr, None)
-                .map_err(|e| DeviceManagerError::RegisterIoevent(e.into()))?;
-        }
+        virtio_pci_device.lock().unwrap().ioeventfds(
+            bar_addr,
+            bar_addr,
+            &mut |event, addr, _| {
+                let io_addr = IoEventAddress::Mmio(addr);
+                self.address_manager
+                    .vm
+                    .register_ioevent(event, &io_addr, None)
+                    .map_err(|e| DeviceManagerError::RegisterIoevent(e.into()))
+            },
+        )?;
 
         // Update the device tree with correct resource information.
         node.resources = new_resources;
@@ -4784,13 +4804,13 @@ impl DeviceManager {
             PciDeviceHandle::Virtio(virtio_pci_device) => {
                 let dev = virtio_pci_device.lock().unwrap();
                 let bar_addr = dev.config_bar_addr();
-                for (event, addr) in dev.ioeventfds(bar_addr) {
+                dev.ioeventfds(bar_addr, bar_addr, &mut |event, addr, _| {
                     let io_addr = IoEventAddress::Mmio(addr);
                     self.address_manager
                         .vm
                         .unregister_ioevent(event, &io_addr)
-                        .map_err(|e| DeviceManagerError::UnRegisterIoevent(e.into()))?;
-                }
+                        .map_err(|e| DeviceManagerError::UnRegisterIoevent(e.into()))
+                })?;
 
                 if let Some(dma_handler) = dev.dma_handler()
                     && !iommu_attached
