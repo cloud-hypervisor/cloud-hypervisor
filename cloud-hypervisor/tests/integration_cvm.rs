@@ -262,4 +262,10 @@ mod common_cvm {
             basic_cvm_guest!(JAMMY_IMAGE_NAME).with_memory(&format!("{guest_memory_size_kb}K"));
         _test_memory_overhead(&guest, guest_memory_size_kb);
     }
+
+    #[test]
+    fn test_landlock() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_landlock(&guest);
+    }
 }
