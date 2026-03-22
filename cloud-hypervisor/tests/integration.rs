@@ -3251,10 +3251,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_block_topology() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-
-        let kernel_path = direct_kernel_boot_path();
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         let test_disk_path = guest.tmp_dir.as_path().join("test.img");
 
         let output = exec_host_command_output(
@@ -3271,71 +3268,7 @@ mod common_parallel {
         }
 
         let loop_dev = create_loop_device(test_disk_path.to_str().unwrap(), 4096, 5);
-
-        let mut child = GuestCommand::new(&guest)
-            .default_cpus()
-            .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args([
-                "--disk",
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
-                )
-                .as_str(),
-                format!(
-                    "path={}",
-                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
-                )
-                .as_str(),
-                format!("path={}", &loop_dev).as_str(),
-            ])
-            .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-
-            // MIN-IO column
-            assert_eq!(
-                guest
-                    .ssh_command("lsblk -t| grep vdc | awk '{print $3}'")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                4096
-            );
-            // PHY-SEC column
-            assert_eq!(
-                guest
-                    .ssh_command("lsblk -t| grep vdc | awk '{print $5}'")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                4096
-            );
-            // LOG-SEC column
-            assert_eq!(
-                guest
-                    .ssh_command("lsblk -t| grep vdc | awk '{print $6}'")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                4096
-            );
-        });
-
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-
-        handle_child_output(r, &output);
-
+        _test_virtio_block_topology(&guest, &loop_dev);
         Command::new("losetup")
             .args(["-d", &loop_dev])
             .output()
