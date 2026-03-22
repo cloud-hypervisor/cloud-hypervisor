@@ -254,4 +254,12 @@ mod common_cvm {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_pci_bar_reprogramming(&guest);
     }
+
+    #[test]
+    fn test_memory_overhead() {
+        let guest_memory_size_kb: u32 = 512 * 1024;
+        let guest =
+            basic_cvm_guest!(JAMMY_IMAGE_NAME).with_memory(&format!("{guest_memory_size_kb}K"));
+        _test_memory_overhead(&guest, guest_memory_size_kb);
+    }
 }
