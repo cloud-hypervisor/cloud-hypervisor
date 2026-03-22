@@ -218,4 +218,10 @@ mod common_cvm {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_dmi_oem_strings(&guest);
     }
+
+    #[test]
+    fn test_multiple_network_interfaces() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_multiple_network_interfaces(&guest);
+    }
 }
