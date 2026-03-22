@@ -4,6 +4,7 @@
 use std::ffi::CStr;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::string::String;
 use std::sync::mpsc;
@@ -3186,6 +3187,75 @@ pub(crate) fn _test_pvpanic(guest: &Guest) {
             &expected_sequential_events,
             &event_path
         ));
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
+
+pub(crate) fn _test_tap_from_fd(guest: &Guest) {
+    // Create a TAP interface with multi-queue enabled
+    let num_queue_pairs: usize = 2;
+
+    use std::str::FromStr;
+    let taps = net_util::open_tap(
+        Some("chtap0"),
+        Some(std::net::IpAddr::V4(
+            std::net::Ipv4Addr::from_str(&guest.network.host_ip0).unwrap(),
+        )),
+        None,
+        &mut None,
+        None,
+        num_queue_pairs,
+        Some(libc::O_RDWR | libc::O_NONBLOCK),
+    )
+    .unwrap();
+
+    let mut child = GuestCommand::new(guest)
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .default_disks()
+        .args([
+            "--net",
+            &format!(
+                "fd=[{},{}],mac={},num_queues={}",
+                taps[0].as_raw_fd(),
+                taps[1].as_raw_fd(),
+                guest.network.guest_mac0,
+                num_queue_pairs * 2
+            ),
+        ])
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        assert_eq!(
+            guest
+                .ssh_command("ip -o link | wc -l")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            2
+        );
+
+        guest.reboot_linux(0);
+
+        assert_eq!(
+            guest
+                .ssh_command("ip -o link | wc -l")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            2
+        );
     });
 
     kill_child(&mut child);
