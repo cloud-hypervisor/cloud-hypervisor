@@ -3074,3 +3074,80 @@ pub(crate) fn _test_counters(guest: &Guest) {
 
     handle_child_output(r, &output);
 }
+
+pub(crate) fn _test_watchdog(guest: &Guest) {
+    let api_socket = temp_api_path(&guest.tmp_dir);
+    let event_path = temp_event_monitor_path(&guest.tmp_dir);
+
+    let mut cmd = GuestCommand::new(guest);
+    cmd.default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .default_disks()
+        .args(["--net", guest.default_net_string().as_str()])
+        .args(["--watchdog"])
+        .args(["--api-socket", &api_socket])
+        .args(["--event-monitor", format!("path={event_path}").as_str()])
+        .capture_output();
+
+    let mut child = cmd.spawn().unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        let mut expected_reboot_count = 1;
+
+        // Enable the watchdog with a 15s timeout
+        enable_guest_watchdog(guest, 15);
+
+        assert_eq!(get_reboot_count(guest), expected_reboot_count);
+        assert_eq!(
+            guest
+                .ssh_command("sudo journalctl | grep -c -- \"Watchdog started\"")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            1
+        );
+
+        // Allow some normal time to elapse to check we don't get spurious reboots
+        thread::sleep(std::time::Duration::new(40, 0));
+        // Check no reboot
+        assert_eq!(get_reboot_count(guest), expected_reboot_count);
+
+        // Trigger a panic (sync first). We need to do this inside a screen with a delay so the SSH command returns.
+        guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
+        // Allow some time for the watchdog to trigger (max 30s) and reboot to happen
+        guest.wait_vm_boot_custom_timeout(50).unwrap();
+        // Check a reboot is triggered by the watchdog
+        expected_reboot_count += 1;
+        assert_eq!(get_reboot_count(guest), expected_reboot_count);
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            // Now pause the VM and remain offline for 30s
+            assert!(remote_command(&api_socket, "pause", None));
+            let latest_events = [
+                &MetaEvent {
+                    event: "pausing".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "paused".to_string(),
+                    device_id: None,
+                },
+            ];
+            assert!(check_latest_events_exact(&latest_events, &event_path));
+            assert!(remote_command(&api_socket, "resume", None));
+
+            // Check no reboot
+            assert_eq!(get_reboot_count(guest), expected_reboot_count);
+        }
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
