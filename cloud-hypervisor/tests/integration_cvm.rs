@@ -316,4 +316,12 @@ mod common_cvm {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
         _test_macvtap(&guest, true, "guestmacvtap1", "hostmacvtap1");
     }
+
+    #[test]
+    fn test_vdpa_block() {
+        assert!(exec_host_command_status("lsmod | grep vdpa_sim_blk").success());
+
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
+        _test_vdpa_block(&guest);
+    }
 }
