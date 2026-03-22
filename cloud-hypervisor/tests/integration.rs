@@ -5008,40 +5008,8 @@ mod common_parallel {
 
     #[test]
     fn test_counters() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-        let api_socket = temp_api_path(&guest.tmp_dir);
-
-        let mut cmd = GuestCommand::new(&guest);
-        cmd.default_cpus()
-            .default_memory()
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .default_disks()
-            .args(["--net", guest.default_net_string().as_str()])
-            .args(["--api-socket", &api_socket])
-            .capture_output();
-
-        let mut child = cmd.spawn().unwrap();
-
-        let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-
-            let orig_counters = get_counters(&api_socket);
-            guest
-                .ssh_command("dd if=/dev/zero of=test count=8 bs=1M")
-                .unwrap();
-
-            let new_counters = get_counters(&api_socket);
-
-            // Check that all the counters have increased
-            assert!(new_counters > orig_counters);
-        });
-
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-
-        handle_child_output(r, &output);
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        _test_counters(&guest);
     }
 
     #[test]
