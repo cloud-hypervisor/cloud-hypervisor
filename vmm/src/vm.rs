@@ -1491,6 +1491,7 @@ impl Vm {
                     setup_header: None,
                 }
             }
+            #[allow(unreachable_patterns)]
             Some(_) | None => unimplemented!("Unknown vp_context!"),
         };
 

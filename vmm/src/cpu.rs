@@ -1088,6 +1088,7 @@ impl CpuManager {
             #[cfg(feature = "igvm")]
             self.igvm_vp_context.as_ref().and_then(|ctx| match ctx {
                 crate::igvm::IgvmVpContext::X64Native(native) => Some(native.as_ref()),
+                #[allow(unreachable_patterns)]
                 _ => None,
             }),
         )?;
@@ -2251,6 +2252,7 @@ impl CpuManager {
     }
 
     #[cfg(feature = "igvm")]
+    #[allow(dead_code)]
     pub(crate) fn get_cpuid_leaf(
         &self,
         cpu_id: u8,

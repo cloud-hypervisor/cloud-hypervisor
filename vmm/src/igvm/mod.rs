@@ -27,7 +27,9 @@
 
 pub mod igvm_loader;
 mod loader;
+#[cfg(feature = "sev_snp")]
 use igvm_defs::IGVM_VHS_SNP_ID_BLOCK;
+#[cfg(feature = "sev_snp")]
 use zerocopy::FromZeros;
 
 /// VP context extracted from the IGVM file.

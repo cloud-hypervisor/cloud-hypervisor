@@ -5,31 +5,34 @@
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::io::{Read, Seek, SeekFrom};
+#[cfg(feature = "sev_snp")]
 use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 
+#[cfg(feature = "sev_snp")]
 use igvm::snp_defs::SevVmsa;
 use igvm::{IgvmDirectiveHeader, IgvmFile, IgvmPlatformHeader, IsolationType};
-#[cfg(feature = "sev_snp")]
-use igvm_defs::{IGVM_VHS_MEMORY_MAP_ENTRY, MemoryMapEntryType};
 use igvm_defs::{
-    IGVM_VHS_PARAMETER, IGVM_VHS_PARAMETER_INSERT, IgvmPageDataType, IgvmPlatformType,
+    IGVM_VHS_MEMORY_MAP_ENTRY, IGVM_VHS_PARAMETER, IGVM_VHS_PARAMETER_INSERT, IgvmPageDataType,
+    IgvmPlatformType, MemoryMapEntryType,
 };
 use log::debug;
 #[cfg(feature = "sev_snp")]
 use log::info;
+#[cfg(feature = "sev_snp")]
 use mshv_bindings::*;
 use thiserror::Error;
 use zerocopy::IntoBytes;
 
-#[cfg(feature = "sev_snp")]
 use crate::GuestMemoryMmap;
 use crate::cpu::CpuManager;
+#[cfg(feature = "sev_snp")]
+use crate::igvm::IgvmVpContext;
 use crate::igvm::loader::Loader;
-use crate::igvm::{
-    BootPageAcceptance, HV_PAGE_SIZE, IgvmLoadedInfo, IgvmVpContext, StartupMemoryType,
-};
-use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
+use crate::igvm::{BootPageAcceptance, HV_PAGE_SIZE, IgvmLoadedInfo, StartupMemoryType};
+#[cfg(feature = "sev_snp")]
+use crate::memory_manager::Error as MemoryManagerError;
+use crate::memory_manager::MemoryManager;
 use vm_memory::{Address, GuestMemory, GuestMemoryRegion};
 
 #[derive(Debug, Error)]
@@ -47,17 +50,22 @@ pub enum Error {
     #[error("parameter too large for parameter area")]
     ParameterTooLarge,
     #[error("Error importing isolated pages")]
+    #[cfg(feature = "sev_snp")]
     ImportIsolatedPages(#[source] hypervisor::HypervisorVmError),
+    #[cfg(feature = "sev_snp")]
     #[error("Error completing importing isolated pages")]
     CompleteIsolatedImport(#[source] hypervisor::HypervisorVmError),
+    #[cfg(feature = "sev_snp")]
     #[error("Error decoding host data")]
     FailedToDecodeHostData(#[source] hex::FromHexError),
+    #[cfg(feature = "sev_snp")]
     #[error("Error allocating address space")]
     MemoryManager(MemoryManagerError),
     #[error("no matching platform type found in igvm file")]
     NoMatchingPlatform,
 }
 
+#[cfg(feature = "sev_snp")]
 #[allow(dead_code)]
 #[derive(Copy, Clone)]
 struct GpaPages {
@@ -74,7 +82,6 @@ enum ParameterAreaState {
     Inserted,
 }
 
-#[cfg(feature = "sev_snp")]
 fn igvm_memmap_from_ram_range(ram_range: (u64, u64)) -> IGVM_VHS_MEMORY_MAP_ENTRY {
     assert!(ram_range.0.is_multiple_of(HV_PAGE_SIZE));
     assert!((ram_range.1 - ram_range.0).is_multiple_of(HV_PAGE_SIZE));
@@ -88,7 +95,6 @@ fn igvm_memmap_from_ram_range(ram_range: (u64, u64)) -> IGVM_VHS_MEMORY_MAP_ENTR
     }
 }
 
-#[cfg(feature = "sev_snp")]
 fn generate_memory_map(
     guest_mem: &GuestMemoryMmap,
 ) -> Result<Vec<IGVM_VHS_MEMORY_MAP_ENTRY>, Error> {
@@ -153,6 +159,7 @@ pub fn load_igvm(
     let command_line = CString::new(cmdline).map_err(Error::InvalidCommandLine)?;
     let mut file_contents = Vec::new();
     let memory = memory_manager.lock().as_ref().unwrap().guest_memory();
+    #[cfg(feature = "sev_snp")]
     let mut gpas: Vec<GpaPages> = Vec::new();
     let proc_count = cpu_manager.lock().unwrap().vcpus().len() as u32;
 
@@ -228,6 +235,7 @@ pub fn load_igvm(
                 let acceptance = match *data_type {
                     IgvmPageDataType::NORMAL => {
                         if flags.unmeasured() {
+                            #[cfg(feature = "sev_snp")]
                             gpas.push(GpaPages {
                                 gpa: *gpa,
                                 page_type: hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_UNMEASURED,
@@ -235,6 +243,7 @@ pub fn load_igvm(
                             });
                             BootPageAcceptance::ExclusiveUnmeasured
                         } else {
+                            #[cfg(feature = "sev_snp")]
                             gpas.push(GpaPages {
                                 gpa: *gpa,
                                 page_type: hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_NORMAL,
@@ -243,6 +252,7 @@ pub fn load_igvm(
                             BootPageAcceptance::Exclusive
                         }
                     }
+                    #[cfg(feature = "sev_snp")]
                     IgvmPageDataType::SECRETS => {
                         gpas.push(GpaPages {
                             gpa: *gpa,
@@ -251,6 +261,7 @@ pub fn load_igvm(
                         });
                         BootPageAcceptance::SecretsPage
                     }
+                    #[cfg(feature = "sev_snp")]
                     IgvmPageDataType::CPUID_DATA => {
                         // SAFETY: CPUID is readonly
                         unsafe {
@@ -362,6 +373,7 @@ pub fn load_igvm(
                     )
                     .map_err(Error::Loader)?;
             }
+            #[cfg(feature = "sev_snp")]
             IgvmDirectiveHeader::SnpVpContext {
                 gpa,
                 compatibility_mask: _,
@@ -389,6 +401,7 @@ pub fn load_igvm(
                     page_size: hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
                 });
             }
+            #[cfg(feature = "sev_snp")]
             IgvmDirectiveHeader::SnpIdBlock {
                 compatibility_mask,
                 author_key_enabled,
@@ -452,6 +465,7 @@ pub fn load_igvm(
                     ParameterAreaState::Inserted => panic!("igvmfile is invalid, multiple insert"),
                 }
                 *area = ParameterAreaState::Inserted;
+                #[cfg(feature = "sev_snp")]
                 gpas.push(GpaPages {
                     gpa: *gpa,
                     page_type: hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_UNMEASURED,
