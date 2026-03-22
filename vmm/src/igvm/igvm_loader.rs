@@ -30,6 +30,7 @@ use crate::igvm::{
     BootPageAcceptance, HV_PAGE_SIZE, IgvmLoadedInfo, IgvmVpContext, StartupMemoryType,
 };
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
+use vm_memory::{Address, GuestMemory, GuestMemoryRegion};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -93,11 +94,14 @@ fn generate_memory_map(
 ) -> Result<Vec<IGVM_VHS_MEMORY_MAP_ENTRY>, Error> {
     let mut memory_map = Vec::new();
 
-    // Get usable physical memory ranges
-    let ram_ranges = arch::generate_ram_ranges(guest_mem).map_err(Error::InvalidGuestMemmap)?;
-
-    for ram_range in ram_ranges {
-        memory_map.push(igvm_memmap_from_ram_range(ram_range));
+    // For IGVM boot, report the full guest memory layout including low memory.
+    // Unlike the e820 map (which skips below 1MiB), the IGVM memory map must
+    // include all usable RAM since the IGVM file may place boot structures
+    // (page tables, GDT, boot params) in low memory.
+    for region in guest_mem.iter() {
+        let start = region.start_addr().raw_value();
+        let size = region.len();
+        memory_map.push(igvm_memmap_from_ram_range((start, start + size)));
     }
 
     Ok(memory_map)
