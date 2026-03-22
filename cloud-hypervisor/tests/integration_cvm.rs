@@ -236,4 +236,10 @@ mod common_cvm {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_virtio_console(&guest);
     }
+
+    #[test]
+    fn test_console_file() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_console_file(&guest);
+    }
 }
