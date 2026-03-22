@@ -26,14 +26,19 @@ use zerocopy::IntoBytes;
 
 use crate::GuestMemoryMmap;
 use crate::cpu::CpuManager;
-#[cfg(feature = "sev_snp")]
-use crate::igvm::IgvmVpContext;
 use crate::igvm::loader::Loader;
-use crate::igvm::{BootPageAcceptance, HV_PAGE_SIZE, IgvmLoadedInfo, StartupMemoryType};
+use crate::igvm::{
+    BootPageAcceptance, HV_PAGE_SIZE, IgvmLoadedInfo, IgvmVpContext, StartupMemoryType,
+};
 #[cfg(feature = "sev_snp")]
 use crate::memory_manager::Error as MemoryManagerError;
 use crate::memory_manager::MemoryManager;
-use vm_memory::{Address, GuestMemory, GuestMemoryRegion};
+// use vm_memory::{Address, GuestMemory, GuestMemoryRegion};
+use arch::layout::{
+    BOOT_ACPI_RSDP_OFFSET, BOOT_E820_ENTRIES_OFFSET, BOOT_E820_TABLE_OFFSET, BOOT_MAX_E820_ENTRIES,
+    E820_TYPE_RAM, RSDP_POINTER,
+};
+use vm_memory::{Address, Bytes, GuestAddress, GuestMemory, GuestMemoryRegion};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -479,6 +484,65 @@ pub fn load_igvm(
                 todo!("Header not supported!!")
             }
         }
+    }
+
+    // Fill in e820 table and RSDP pointer in boot_params.
+    // The IGVM parameter mechanism places the memory map at a separate GPA,
+    // but Linux boot_params needs e820 entries inline at offset 0x2d0.
+    let boot_params_gpa = match &loaded_info.vp_context {
+        Some(IgvmVpContext::X64Native(ctx)) => Some(ctx.rsi),
+        _ => None,
+    };
+
+    if let Some(boot_params_gpa) = boot_params_gpa {
+        let guest_mem = memory_manager.lock().unwrap().boot_guest_memory();
+        // Generate e820 entries from guest memory regions
+        let memory_map = generate_memory_map(&guest_mem)?;
+        let num_entries = std::cmp::min(memory_map.len(), BOOT_MAX_E820_ENTRIES);
+        for (i, entry) in memory_map.iter().take(num_entries).enumerate() {
+            let addr = entry.starting_gpa_page_number * HV_PAGE_SIZE;
+            let size = entry.number_of_pages * HV_PAGE_SIZE;
+            let e820_offset = BOOT_E820_TABLE_OFFSET + (i as u64) * 20;
+
+            guest_mem
+                .write_obj(addr, GuestAddress(boot_params_gpa + e820_offset))
+                .map_err(|_| Error::ParameterTooLarge)?;
+            guest_mem
+                .write_obj(size, GuestAddress(boot_params_gpa + e820_offset + 8))
+                .map_err(|_| Error::ParameterTooLarge)?;
+            guest_mem
+                .write_obj(
+                    E820_TYPE_RAM,
+                    GuestAddress(boot_params_gpa + e820_offset + 16),
+                )
+                .map_err(|_| Error::ParameterTooLarge)?;
+
+            debug!(
+                "e820[{}]: addr=0x{:x} size=0x{:x} type={}",
+                i, addr, size, E820_TYPE_RAM
+            );
+        }
+
+        // Write e820_entries count
+        guest_mem
+            .write_obj(
+                num_entries as u8,
+                GuestAddress(boot_params_gpa + BOOT_E820_ENTRIES_OFFSET),
+            )
+            .map_err(|_| Error::ParameterTooLarge)?;
+
+        debug!(
+            "Wrote {} e820 entries to boot_params @ 0x{:x}",
+            num_entries, boot_params_gpa
+        );
+
+        guest_mem
+            .write_obj(
+                RSDP_POINTER.0,
+                GuestAddress(boot_params_gpa + BOOT_ACPI_RSDP_OFFSET),
+            )
+            .map_err(|_| Error::ParameterTooLarge)?;
+        debug!("Set acpi_rsdp_addr=0x{:x} in boot_params", RSDP_POINTER.0);
     }
 
     #[cfg(feature = "sev_snp")]
