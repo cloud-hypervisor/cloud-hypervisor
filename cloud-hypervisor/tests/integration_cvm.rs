@@ -242,4 +242,10 @@ mod common_cvm {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_console_file(&guest);
     }
+
+    #[test]
+    fn test_direct_kernel_boot_noacpi() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_direct_kernel_boot_noacpi(&guest);
+    }
 }
