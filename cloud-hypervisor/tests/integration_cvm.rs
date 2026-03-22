@@ -292,4 +292,10 @@ mod common_cvm {
         let guest = basic_cvm_guest!(FOCAL_IMAGE_NAME);
         _test_watchdog(&guest);
     }
+
+    #[test]
+    fn test_pvpanic() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_pvpanic(&guest);
+    }
 }
