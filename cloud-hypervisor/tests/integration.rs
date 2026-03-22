@@ -1734,37 +1734,8 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_dmi_uuid() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-
-        let mut child = GuestCommand::new(&guest)
-            .default_cpus()
-            .default_memory()
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(["--platform", "uuid=1e8aa28a-435d-4027-87f4-40dceff1fa0a"])
-            .default_disks()
-            .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-
-            assert_eq!(
-                guest
-                    .ssh_command("sudo cat /sys/class/dmi/id/product_uuid")
-                    .unwrap()
-                    .trim(),
-                "1e8aa28a-435d-4027-87f4-40dceff1fa0a"
-            );
-        });
-
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-
-        handle_child_output(r, &output);
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        _test_dmi_uuid(&guest);
     }
 
     #[test]
