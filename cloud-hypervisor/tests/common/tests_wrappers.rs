@@ -3406,3 +3406,115 @@ pub(crate) fn _test_macvtap(
 
     handle_child_output(r, &output);
 }
+
+pub(crate) fn _test_vdpa_block(guest: &Guest) {
+    let api_socket = temp_api_path(&guest.tmp_dir);
+
+    let mut child = GuestCommand::new(guest)
+        .default_cpus()
+        .args(["--memory", "size=512M,hugepages=on"])
+        .default_kernel_cmdline_with_platform(Some("num_pci_segments=2,iommu_segments=1"))
+        .default_disks()
+        .default_net()
+        .args(["--vdpa", "path=/dev/vhost-vdpa-0,num_queues=1"])
+        .args(["--api-socket", &api_socket])
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        // Check both if /dev/vdc exists and if the block size is 128M.
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep vdc | grep -c 128M")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            1
+        );
+
+        // Check the content of the block device after we wrote to it.
+        // The vpda-sim-blk should let us read what we previously wrote.
+        guest
+            .ssh_command("sudo bash -c 'echo foobar > /dev/vdc'")
+            .unwrap();
+        assert_eq!(
+            guest.ssh_command("sudo head -1 /dev/vdc").unwrap().trim(),
+            "foobar"
+        );
+
+        // Hotplug an extra vDPA block device behind the vIOMMU
+        // Add a new vDPA device to the VM
+        let (cmd_success, cmd_output) = remote_command_w_output(
+            &api_socket,
+            "add-vdpa",
+            Some("id=myvdpa0,path=/dev/vhost-vdpa-1,num_queues=1,pci_segment=1,iommu=on"),
+        );
+        assert!(cmd_success);
+        assert!(
+            String::from_utf8_lossy(&cmd_output)
+                .contains("{\"id\":\"myvdpa0\",\"bdf\":\"0001:00:01.0\"}")
+        );
+
+        thread::sleep(std::time::Duration::new(10, 0));
+
+        // Check IOMMU setup
+        assert!(
+            guest
+                .does_device_vendor_pair_match("0x1057", "0x1af4")
+                .unwrap_or_default()
+        );
+        assert!(
+            guest
+                .ssh_command("ls /sys/kernel/iommu_groups/*/devices")
+                .unwrap()
+                .contains("0001:00:01.0")
+        );
+
+        // Check both if /dev/vdd exists and if the block size is 128M.
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep vdd | grep -c 128M")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            1
+        );
+
+        // Write some content to the block device we've just plugged.
+        guest
+            .ssh_command("sudo bash -c 'echo foobar > /dev/vdd'")
+            .unwrap();
+
+        // Check we can read the content back.
+        assert_eq!(
+            guest.ssh_command("sudo head -1 /dev/vdd").unwrap().trim(),
+            "foobar"
+        );
+
+        // Unplug the device
+        let cmd_success = remote_command(&api_socket, "remove-device", Some("myvdpa0"));
+        assert!(cmd_success);
+        thread::sleep(std::time::Duration::new(10, 0));
+
+        // Check /dev/vdd doesn't exist anymore
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep -c vdd || true")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(1),
+            0
+        );
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
