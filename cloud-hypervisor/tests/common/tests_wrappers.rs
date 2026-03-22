@@ -2471,3 +2471,84 @@ pub(crate) fn _test_direct_kernel_boot_noacpi(guest: &Guest) {
 
     handle_child_output(r, &output);
 }
+
+pub(crate) fn _test_pci_bar_reprogramming(guest: &Guest) {
+    let mut child = GuestCommand::new(guest)
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .default_disks()
+        .args([
+            "--net",
+            guest.default_net_string().as_str(),
+            "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.128",
+        ])
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        // 2 network interfaces + default localhost ==> 3 interfaces
+        assert_eq!(
+            guest
+                .ssh_command("ip -o link | wc -l")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            3
+        );
+
+        let init_bar_addr = guest
+            .ssh_command("sudo awk '{print $1; exit}' /sys/bus/pci/devices/0000:00:05.0/resource")
+            .unwrap();
+
+        // Remove the PCI device
+        guest
+            .ssh_command("echo 1 | sudo tee /sys/bus/pci/devices/0000:00:05.0/remove")
+            .unwrap();
+
+        // Only 1 network interface left + default localhost ==> 2 interfaces
+        assert_eq!(
+            guest
+                .ssh_command("ip -o link | wc -l")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            2
+        );
+
+        // Remove the PCI device
+        guest
+            .ssh_command("echo 1 | sudo tee /sys/bus/pci/rescan")
+            .unwrap();
+
+        // Back to 2 network interface + default localhost ==> 3 interfaces
+        assert_eq!(
+            guest
+                .ssh_command("ip -o link | wc -l")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            3
+        );
+
+        let new_bar_addr = guest
+            .ssh_command("sudo awk '{print $1; exit}' /sys/bus/pci/devices/0000:00:05.0/resource")
+            .unwrap();
+
+        // Let's compare the BAR addresses for our virtio-net device.
+        // They should be different as we expect the BAR reprogramming
+        // to have happened.
+        assert_ne!(init_bar_addr, new_bar_addr);
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
