@@ -304,4 +304,10 @@ mod common_cvm {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
         _test_tap_from_fd(&guest);
     }
+
+    #[test]
+    fn test_macvtap() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
+        _test_macvtap(&guest, false, "guestmacvtap0", "hostmacvtap0");
+    }
 }
