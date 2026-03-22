@@ -501,6 +501,7 @@ fn signal_handler_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_close, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_exit_group, vec![]),
+        (libc::SYS_fcntl, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_ioctl, create_signal_handler_ioctl_seccomp_rule()?),
         (libc::SYS_landlock_create_ruleset, vec![]),
@@ -517,8 +518,6 @@ fn signal_handler_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_sendto, vec![]),
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_write, vec![]),
-        #[cfg(debug_assertions)]
-        (libc::SYS_fcntl, vec![]),
     ])
 }
 
@@ -534,7 +533,10 @@ fn pty_foreground_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
     Ok(vec![
         (libc::SYS_close, vec![]),
         (libc::SYS_exit_group, vec![]),
+        (libc::SYS_fcntl, vec![]),
+        (libc::SYS_getcwd, vec![]),
         (libc::SYS_getpgid, vec![]),
+        (libc::SYS_gettid, vec![]),
         #[cfg(target_arch = "x86_64")]
         (libc::SYS_getpgrp, vec![]),
         (libc::SYS_ioctl, create_pty_foreground_ioctl_seccomp_rule()?),
@@ -549,12 +551,8 @@ fn pty_foreground_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, Backend
         (libc::SYS_rt_sigreturn, vec![]),
         (libc::SYS_sched_yield, vec![]),
         (libc::SYS_setsid, vec![]),
-        (libc::SYS_gettid, vec![]),
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_write, vec![]),
-        #[cfg(debug_assertions)]
-        (libc::SYS_fcntl, vec![]),
-        (libc::SYS_getcwd, vec![]),
     ])
 }
 
@@ -598,6 +596,7 @@ fn vmm_thread_rules(
         #[cfg(target_arch = "aarch64")]
         (libc::SYS_newfstatat, vec![]),
         (libc::SYS_futex, vec![]),
+        (libc::SYS_getcwd, vec![]),
         (libc::SYS_getdents64, vec![]),
         (libc::SYS_getpgid, vec![]),
         #[cfg(target_arch = "x86_64")]
@@ -701,7 +700,6 @@ fn vmm_thread_rules(
         (libc::SYS_wait4, vec![]),
         (libc::SYS_write, vec![]),
         (libc::SYS_writev, vec![]),
-        (libc::SYS_getcwd, vec![]),
     ])
 }
 
@@ -801,11 +799,13 @@ fn vcpu_thread_rules(
         (libc::SYS_dup, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_epoll_ctl, vec![]),
+        (libc::SYS_fcntl, vec![]),
         (libc::SYS_fstat, vec![]),
-        (libc::SYS_gettid, vec![]),
         (libc::SYS_futex, vec![]),
+        (libc::SYS_getcwd, vec![]),
         (libc::SYS_getrandom, vec![]),
         (libc::SYS_getpid, vec![]),
+        (libc::SYS_gettid, vec![]),
         (
             libc::SYS_ioctl,
             create_vcpu_ioctl_seccomp_rule(hypervisor_type)?,
@@ -842,8 +842,6 @@ fn vcpu_thread_rules(
         (libc::SYS_unlinkat, vec![]),
         (libc::SYS_write, vec![]),
         (libc::SYS_writev, vec![]),
-        (libc::SYS_fcntl, vec![]),
-        (libc::SYS_getcwd, vec![]),
     ])
 }
 
@@ -863,6 +861,7 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_epoll_wait, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_fcntl, vec![]),
+        (libc::SYS_getcwd, vec![]),
         (libc::SYS_gettid, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_getrandom, vec![]),
@@ -876,12 +875,11 @@ fn http_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_prctl, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_recvmsg, vec![]),
+        (libc::SYS_rt_sigprocmask, vec![]),
         (libc::SYS_sched_yield, vec![]),
         (libc::SYS_sendto, vec![]),
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_write, vec![]),
-        (libc::SYS_rt_sigprocmask, vec![]),
-        (libc::SYS_getcwd, vec![]),
     ])
 }
 
@@ -899,7 +897,9 @@ fn dbus_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_epoll_ctl, vec![]),
         (libc::SYS_exit, vec![]),
         (libc::SYS_gettid, vec![]),
+        (libc::SYS_fcntl, vec![]),
         (libc::SYS_futex, vec![]),
+        (libc::SYS_getcwd, vec![]),
         (libc::SYS_getrandom, vec![]),
         (libc::SYS_madvise, vec![]),
         (libc::SYS_mmap, vec![]),
@@ -915,7 +915,6 @@ fn dbus_api_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendError>
         (libc::SYS_set_robust_list, vec![]),
         (libc::SYS_sigaltstack, vec![]),
         (libc::SYS_write, vec![]),
-        (libc::SYS_getcwd, vec![]),
     ])
 }
 
@@ -923,6 +922,7 @@ fn event_monitor_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendE
     Ok(vec![
         (libc::SYS_brk, vec![]),
         (libc::SYS_close, vec![]),
+        (libc::SYS_getcwd, vec![]),
         (libc::SYS_gettid, vec![]),
         (libc::SYS_futex, vec![]),
         (libc::SYS_landlock_create_ruleset, vec![]),
@@ -932,7 +932,6 @@ fn event_monitor_thread_rules() -> Result<Vec<(i64, Vec<SeccompRule>)>, BackendE
         (libc::SYS_prctl, vec![]),
         (libc::SYS_sched_yield, vec![]),
         (libc::SYS_write, vec![]),
-        (libc::SYS_getcwd, vec![]),
     ])
 }
 
