@@ -556,7 +556,7 @@ pub fn load_igvm(
     }
 
     debug!(
-        "Dumping the contents of VMSA page: {:x?}",
+        "Dumping the contents of VP context: {:x?}",
         loaded_info.vp_context
     );
     Ok(loaded_info)
