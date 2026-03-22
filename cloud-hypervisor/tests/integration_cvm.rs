@@ -298,4 +298,10 @@ mod common_cvm {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_pvpanic(&guest);
     }
+
+    #[test]
+    fn test_tap_from_fd() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
+        _test_tap_from_fd(&guest);
+    }
 }
