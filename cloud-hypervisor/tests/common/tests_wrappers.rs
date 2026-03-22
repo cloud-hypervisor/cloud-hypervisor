@@ -2322,3 +2322,43 @@ pub(crate) fn _test_serial_off(guest: &Guest) {
 
     handle_child_output(r, &output);
 }
+
+pub(crate) fn _test_multiple_network_interfaces(guest: &Guest) {
+    let mut child = GuestCommand::new(guest)
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .default_disks()
+        .args([
+            "--net",
+            guest.default_net_string().as_str(),
+            "tap=,mac=8a:6b:6f:5a:de:ac,ip=192.168.3.1,mask=255.255.255.128",
+            "tap=mytap1,mac=fe:1f:9e:e1:60:f2,ip=192.168.4.1,mask=255.255.255.128",
+        ])
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        let tap_count = exec_host_command_output("ip link | grep -c mytap1");
+        assert_eq!(String::from_utf8_lossy(&tap_count.stdout).trim(), "1");
+
+        // 3 network interfaces + default localhost ==> 4 interfaces
+        assert_eq!(
+            guest
+                .ssh_command("ip -o link | wc -l")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            4
+        );
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
