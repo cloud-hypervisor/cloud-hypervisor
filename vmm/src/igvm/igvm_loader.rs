@@ -338,6 +338,10 @@ pub fn load_igvm(
                 );
                 import_parameter(&mut parameter_areas, info, command_line.as_bytes_with_nul())?;
             }
+            IgvmDirectiveHeader::Madt(info) => {
+                let madt = cpu_manager.lock().unwrap().create_madt();
+                import_parameter(&mut parameter_areas, info, madt.as_slice())?;
+            }
             IgvmDirectiveHeader::RequiredMemory {
                 gpa,
                 compatibility_mask: _,
