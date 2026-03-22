@@ -286,4 +286,10 @@ mod common_cvm {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_counters(&guest);
     }
+
+    #[test]
+    fn test_watchdog() {
+        let guest = basic_cvm_guest!(FOCAL_IMAGE_NAME);
+        _test_watchdog(&guest);
+    }
 }
