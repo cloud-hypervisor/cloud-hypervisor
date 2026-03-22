@@ -34,6 +34,8 @@ use zerocopy::FromZeros;
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub enum IgvmVpContext {
+    /// Native x86-64 VP context (for non-isolated guests).
+    X64Native(Box<igvm_defs::IgvmNativeVpContextX64>),
     /// SEV-SNP VMSA context (for SNP-isolated guests).
     #[cfg(feature = "sev_snp")]
     SevSnp {

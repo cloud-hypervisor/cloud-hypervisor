@@ -681,6 +681,8 @@ pub struct CpuManager {
     sev_snp_enabled: bool,
     // State of the core scheduling group leader election (VM mode).
     core_scheduling_group_leader: Arc<AtomicI32>,
+    #[cfg(feature = "igvm")]
+    igvm_vp_context: Option<crate::igvm::IgvmVpContext>,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -956,6 +958,8 @@ impl CpuManager {
             core_scheduling_group_leader: Arc::new(AtomicI32::new(
                 CoreSchedulingLeader::Initial as i32,
             )),
+            #[cfg(feature = "igvm")]
+            igvm_vp_context: None,
         })))
     }
 
@@ -1140,6 +1144,11 @@ impl CpuManager {
 
     pub fn vcpus(&self) -> Vec<Arc<Mutex<Vcpu>>> {
         self.vcpus.clone()
+    }
+
+    #[cfg(feature = "igvm")]
+    pub fn set_igvm_vp_context(&mut self, ctx: crate::igvm::IgvmVpContext) {
+        self.igvm_vp_context = Some(ctx);
     }
 
     fn start_vcpu(

@@ -1479,6 +1479,17 @@ impl Vm {
                     setup_header: None,
                 }
             }
+            Some(IgvmVpContext::X64Native(ctx)) => {
+                let entry_addr = vm_memory::GuestAddress(ctx.rip);
+                cpu_manager
+                    .lock()
+                    .unwrap()
+                    .set_igvm_vp_context(IgvmVpContext::X64Native(ctx.clone()));
+                EntryPoint {
+                    entry_addr,
+                    setup_header: None,
+                }
+            }
             Some(_) | None => unimplemented!("Unknown vp_context!"),
         };
 
