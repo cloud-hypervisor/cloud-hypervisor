@@ -224,4 +224,10 @@ mod common_cvm {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_multiple_network_interfaces(&guest);
     }
+
+    #[test]
+    fn test_serial_off() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_serial_off(&guest);
+    }
 }
