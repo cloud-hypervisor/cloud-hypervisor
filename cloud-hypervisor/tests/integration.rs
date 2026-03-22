@@ -2197,48 +2197,8 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_console() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-
-        let kernel_path = direct_kernel_boot_path();
-
-        let mut child = GuestCommand::new(&guest)
-            .default_cpus()
-            .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .default_disks()
-            .default_net()
-            .args(["--console", "tty"])
-            .args(["--serial", "null"])
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let text = String::from("On a branch floating down river a cricket, singing.");
-        let cmd = format!("echo {text} | sudo tee /dev/hvc0");
-
-        let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-
-            assert!(
-                guest
-                    .does_device_vendor_pair_match("0x1043", "0x1af4")
-                    .unwrap_or_default()
-            );
-
-            guest.ssh_command(&cmd).unwrap();
-        });
-
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-        handle_child_output(r, &output);
-
-        let r = std::panic::catch_unwind(|| {
-            assert!(String::from_utf8_lossy(&output.stdout).contains(&text));
-        });
-
-        handle_child_output(r, &output);
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        _test_virtio_console(&guest);
     }
 
     #[test]
