@@ -5115,168 +5115,18 @@ mod common_parallel {
         _test_tap_from_fd(&guest);
     }
 
-    // By design, a guest VM won't be able to connect to the host
-    // machine when using a macvtap network interface (while it can
-    // communicate externally). As a workaround, this integration
-    // test creates two macvtap interfaces in 'bridge' mode on the
-    // same physical net interface, one for the guest and one for
-    // the host. With additional setup on the IP address and the
-    // routing table, it enables the communications between the
-    // guest VM and the host machine.
-    // Details: https://wiki.libvirt.org/page/TroubleshootMacvtapHostFail
-    fn _test_macvtap(hotplug: bool, guest_macvtap_name: &str, host_macvtap_name: &str) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-        let api_socket = temp_api_path(&guest.tmp_dir);
-
-        #[cfg(target_arch = "x86_64")]
-        let kernel_path = direct_kernel_boot_path();
-        #[cfg(target_arch = "aarch64")]
-        let kernel_path = edk2_path();
-
-        let phy_net = "eth0";
-
-        // Create a macvtap interface for the guest VM to use
-        assert!(
-            exec_host_command_status(&format!(
-                "sudo ip link add link {phy_net} name {guest_macvtap_name} type macvtap mod bridge"
-            ))
-            .success()
-        );
-        assert!(
-            exec_host_command_status(&format!(
-                "sudo ip link set {} address {} up",
-                guest_macvtap_name, guest.network.guest_mac0
-            ))
-            .success()
-        );
-        assert!(
-            exec_host_command_status(&format!("sudo ip link show {guest_macvtap_name}")).success()
-        );
-
-        let tap_index =
-            fs::read_to_string(format!("/sys/class/net/{guest_macvtap_name}/ifindex")).unwrap();
-        let tap_device = format!("/dev/tap{}", tap_index.trim());
-
-        assert!(exec_host_command_status(&format!("sudo chown $UID.$UID {tap_device}")).success());
-
-        let cstr_tap_device = std::ffi::CString::new(tap_device).unwrap();
-        let tap_fd1 = unsafe { libc::open(cstr_tap_device.as_ptr(), libc::O_RDWR) };
-        assert!(tap_fd1 > 0);
-        let tap_fd2 = unsafe { libc::open(cstr_tap_device.as_ptr(), libc::O_RDWR) };
-        assert!(tap_fd2 > 0);
-
-        // Create a macvtap on the same physical net interface for
-        // the host machine to use
-        assert!(
-            exec_host_command_status(&format!(
-                "sudo ip link add link {phy_net} name {host_macvtap_name} type macvtap mod bridge"
-            ))
-            .success()
-        );
-        // Use default mask "255.255.255.0"
-        assert!(
-            exec_host_command_status(&format!(
-                "sudo ip address add {}/24 dev {}",
-                guest.network.host_ip0, host_macvtap_name
-            ))
-            .success()
-        );
-        assert!(
-            exec_host_command_status(&format!("sudo ip link set dev {host_macvtap_name} up"))
-                .success()
-        );
-
-        let mut guest_command = GuestCommand::new(&guest);
-        guest_command
-            .args(["--cpus", "boot=2"])
-            .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .default_disks()
-            .args(["--api-socket", &api_socket]);
-
-        let net_params = format!(
-            "fd=[{},{}],mac={},num_queues=4",
-            tap_fd1, tap_fd2, guest.network.guest_mac0
-        );
-
-        if !hotplug {
-            guest_command.args(["--net", &net_params]);
-        }
-
-        let mut child = guest_command.capture_output().spawn().unwrap();
-
-        if hotplug {
-            // Give some time to the VMM process to listen to the API
-            // socket. This is the only requirement to avoid the following
-            // call to ch-remote from failing.
-            thread::sleep(std::time::Duration::new(10, 0));
-            // Hotplug the virtio-net device
-            let (cmd_success, cmd_output) =
-                remote_command_w_output(&api_socket, "add-net", Some(&net_params));
-            assert!(cmd_success);
-            #[cfg(target_arch = "x86_64")]
-            assert!(
-                String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"_net2\",\"bdf\":\"0000:00:05.0\"}")
-            );
-            #[cfg(target_arch = "aarch64")]
-            assert!(
-                String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"_net0\",\"bdf\":\"0000:00:05.0\"}")
-            );
-        }
-
-        // The functional connectivity provided by the virtio-net device
-        // gets tested through wait_vm_boot() as it expects to receive a
-        // HTTP request, and through the SSH command as well.
-        let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-
-            assert_eq!(
-                guest
-                    .ssh_command("ip -o link | wc -l")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                2
-            );
-
-            guest.reboot_linux(0);
-
-            assert_eq!(
-                guest
-                    .ssh_command("ip -o link | wc -l")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                2
-            );
-        });
-
-        kill_child(&mut child);
-
-        exec_host_command_status(&format!("sudo ip link del {guest_macvtap_name}"));
-        exec_host_command_status(&format!("sudo ip link del {host_macvtap_name}"));
-
-        let output = child.wait_with_output().unwrap();
-
-        handle_child_output(r, &output);
-    }
-
     #[test]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #5443")]
     fn test_macvtap() {
-        _test_macvtap(false, "guestmacvtap0", "hostmacvtap0");
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
+        _test_macvtap(&guest, false, "guestmacvtap0", "hostmacvtap0");
     }
 
     #[test]
     #[cfg_attr(target_arch = "aarch64", ignore = "See #5443")]
     fn test_macvtap_hotplug() {
-        _test_macvtap(true, "guestmacvtap1", "hostmacvtap1");
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME).with_cpu(2);
+        _test_macvtap(&guest, true, "guestmacvtap1", "hostmacvtap1");
     }
 
     #[test]
