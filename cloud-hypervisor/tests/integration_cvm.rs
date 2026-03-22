@@ -212,4 +212,10 @@ mod common_cvm {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_dmi_uuid(&guest);
     }
+
+    #[test]
+    fn test_dmi_oem_strings() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_dmi_oem_strings(&guest);
+    }
 }
