@@ -17,8 +17,9 @@ use vhost::vhost_user::message::{
 };
 use vhost::vhost_user::{FrontendReqHandler, VhostUserFrontendReqHandler};
 use virtio_queue::{Error as QueueError, Queue};
+use vm_memory::guest_memory::Error as MmapError;
 use vm_memory::mmap::MmapRegionError;
-use vm_memory::{Address, Error as MmapError, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
+use vm_memory::{Address, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
 use vm_migration::protocol::MemoryRangeTable;
 use vm_migration::{MigratableError, Snapshot};
 use vmm_sys_util::eventfd::EventFd;

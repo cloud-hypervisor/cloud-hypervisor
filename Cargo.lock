@@ -95,7 +95,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -106,7 +106,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -119,7 +119,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 name = "api_client"
 version = "0.1.0"
 dependencies = [
- "thiserror 2.0.18",
+ "thiserror",
  "vmm-sys-util",
 ]
 
@@ -144,7 +144,7 @@ dependencies = [
  "linux-loader",
  "log",
  "serde",
- "thiserror 2.0.18",
+ "thiserror",
  "uuid",
  "vm-fdt",
  "vm-memory",
@@ -204,7 +204,7 @@ dependencies = [
  "polling",
  "rustix",
  "slab",
- "windows-sys 0.61.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -262,7 +262,7 @@ dependencies = [
  "rustix",
  "signal-hook-registry",
  "slab",
- "windows-sys 0.61.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -357,7 +357,7 @@ dependencies = [
  "remain",
  "serde",
  "smallvec",
- "thiserror 2.0.18",
+ "thiserror",
  "uuid",
  "virtio-bindings",
  "virtio-queue",
@@ -471,7 +471,7 @@ dependencies = [
  "serde_json",
  "signal-hook",
  "test_infra",
- "thiserror 2.0.18",
+ "thiserror",
  "tpm",
  "tracer",
  "vm-memory",
@@ -597,7 +597,7 @@ dependencies = [
  "num_enum",
  "pci",
  "serde",
- "thiserror 2.0.18",
+ "thiserror",
  "tpm",
  "vm-allocator",
  "vm-device",
@@ -641,7 +641,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -723,7 +723,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -764,7 +764,7 @@ version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 dependencies = [
- "getrandom 0.2.15",
+ "getrandom 0.2.17",
 ]
 
 [[package]]
@@ -934,9 +934,9 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
-version = "0.2.15"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4567c8db10ae91089c99af84c68c38da3ec2f087c3f82960bcdbf3656b6f4d7"
+checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
 dependencies = [
  "cfg-if",
  "js-sys",
@@ -1040,7 +1040,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
- "thiserror 2.0.18",
+ "thiserror",
  "vfio-ioctls",
  "vm-memory",
  "vmm-sys-util",
@@ -1081,7 +1081,7 @@ dependencies = [
  "open-enum",
  "range_map_vec",
  "static_assertions",
- "thiserror 2.0.18",
+ "thiserror",
  "tracing",
  "zerocopy",
 ]
@@ -1147,9 +1147,9 @@ dependencies = [
 
 [[package]]
 name = "itoa"
-version = "1.0.17"
+version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
+checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
 name = "jiff"
@@ -1187,9 +1187,9 @@ dependencies = [
 
 [[package]]
 name = "js-sys"
-version = "0.3.77"
+version = "0.3.91"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cfaf33c695fc6e08064efbc1f72ec937429614f25eef83af942d0e227c3a28f"
+checksum = "b49715b7073f385ba4bc528e5747d02e66cb39c6146efb66b781f131f0fb399c"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
@@ -1197,9 +1197,9 @@ dependencies = [
 
 [[package]]
 name = "kvm-bindings"
-version = "0.12.1"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a537873e15e8daabb416667e606d9b0abc2a8fb9a45bd5853b888ae0ead82f9"
+checksum = "4b3c06ff73c7ce03e780887ec2389d62d2a2a9ddf471ab05c2ff69207cd3f3b4"
 dependencies = [
  "serde",
  "vmm-sys-util",
@@ -1208,9 +1208,9 @@ dependencies = [
 
 [[package]]
 name = "kvm-ioctls"
-version = "0.22.1"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c8f7370330b4f57981e300fa39b02088f2f2a5c2d0f1f994e8090589619c56d"
+checksum = "333f77a20344a448f3f70664918135fddeb804e938f28a99d685bd92926e0b19"
 dependencies = [
  "bitflags 2.11.0",
  "kvm-bindings",
@@ -1226,7 +1226,7 @@ checksum = "49fefd6652c57d68aaa32544a4c0e642929725bdc1fd929367cdeb673ab81088"
 dependencies = [
  "enumflags2",
  "libc",
- "thiserror 2.0.18",
+ "thiserror",
 ]
 
 [[package]]
@@ -1284,9 +1284,9 @@ dependencies = [
 
 [[package]]
 name = "linux-loader"
-version = "0.13.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53802c0b111faf302a16fa20a2e3a33bd0eab408f60fc34cbfe052f6b153791e"
+checksum = "de72cb02c55ecffcf75fe78295926f872eb6eb0a58d629c58a8c324dc26380f6"
 dependencies = [
  "vm-memory",
 ]
@@ -1336,7 +1336,7 @@ dependencies = [
 [[package]]
 name = "micro_http"
 version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#3248ceeae41461d034624b582d5d358cd6e6f89f"
+source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#5c2254d6cf4f32a668d0d8e57ba20bebad9d4fba"
 dependencies = [
  "libc",
  "vmm-sys-util",
@@ -1380,7 +1380,7 @@ checksum = "f035616abe1e4cbc026a1a8094ff8d3900f5063fe6608309098bc745926fdfd8"
 dependencies = [
  "libc",
  "mshv-bindings",
- "thiserror 2.0.18",
+ "thiserror",
  "vmm-sys-util",
 ]
 
@@ -1405,7 +1405,7 @@ dependencies = [
  "rate_limiter",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror",
  "virtio-bindings",
  "virtio-queue",
  "vm-memory",
@@ -1523,7 +1523,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 name = "option_parser"
 version = "0.1.0"
 dependencies = [
- "thiserror 2.0.18",
+ "thiserror",
 ]
 
 [[package]]
@@ -1581,7 +1581,7 @@ dependencies = [
  "libc",
  "log",
  "serde",
- "thiserror 2.0.18",
+ "thiserror",
  "vfio-bindings",
  "vfio-ioctls",
  "vfio_user",
@@ -1603,7 +1603,7 @@ dependencies = [
  "serde",
  "serde_json",
  "test_infra",
- "thiserror 2.0.18",
+ "thiserror",
  "vmm-sys-util",
 ]
 
@@ -1732,7 +1732,7 @@ dependencies = [
  "hermit-abi",
  "pin-project-lite",
  "rustix",
- "windows-sys 0.61.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1829,7 +1829,7 @@ dependencies = [
  "epoll",
  "libc",
  "log",
- "thiserror 2.0.18",
+ "thiserror",
  "vmm-sys-util",
 ]
 
@@ -1848,9 +1848,9 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4e608c6638b9c18977b00b475ac1f28d14e84b27d8d42f70e0bf1e3dec127ac"
 dependencies = [
- "getrandom 0.2.15",
+ "getrandom 0.2.17",
  "libredox",
- "thiserror 2.0.18",
+ "thiserror",
 ]
 
 [[package]]
@@ -1915,7 +1915,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2123,7 +2123,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2146,18 +2146,9 @@ dependencies = [
  "rand",
  "serde_json",
  "ssh2",
- "thiserror 2.0.18",
+ "thiserror",
  "vmm-sys-util",
  "wait-timeout",
-]
-
-[[package]]
-name = "thiserror"
-version = "1.0.62"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2675633b1499176c2dff06b0856a27976a8f9d436737b4cf4f312d4d91d8bbb"
-dependencies = [
- "thiserror-impl 1.0.62",
 ]
 
 [[package]]
@@ -2166,18 +2157,7 @@ version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4"
 dependencies = [
- "thiserror-impl 2.0.18",
-]
-
-[[package]]
-name = "thiserror-impl"
-version = "1.0.62"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d20468752b09f49e909e55a5d338caa8bedf615594e9d80bc4c565d30faf798c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
+ "thiserror-impl",
 ]
 
 [[package]]
@@ -2199,32 +2179,32 @@ checksum = "3bf63baf9f5039dadc247375c29eb13706706cfde997d0330d05aa63a77d8820"
 
 [[package]]
 name = "toml_datetime"
-version = "1.0.0+spec-1.1.0"
+version = "1.0.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32c2555c699578a4f59f0cc68e5116c8d7cabbd45e1409b989d4be085b53f13e"
+checksum = "9b320e741db58cac564e26c607d3cc1fdc4a88fd36c879568c07856ed83ff3e9"
 dependencies = [
  "serde_core",
 ]
 
 [[package]]
 name = "toml_edit"
-version = "0.25.4+spec-1.1.0"
+version = "0.25.5+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7193cbd0ce53dc966037f54351dbbcf0d5a642c7f0038c382ef9e677ce8c13f2"
+checksum = "8ca1a40644a28bce036923f6a431df0b34236949d111cc07cb6dca830c9ef2e1"
 dependencies = [
  "indexmap",
  "toml_datetime",
  "toml_parser",
- "winnow",
+ "winnow 1.0.0",
 ]
 
 [[package]]
 name = "toml_parser"
-version = "1.0.9+spec-1.1.0"
+version = "1.0.10+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "702d4415e08923e7e1ef96cd5727c0dfed80b4d2fa25db9647fe5eb6f7c5a4c4"
+checksum = "7df25b4befd31c4816df190124375d5a20c6b6921e2cad937316de3fccd63420"
 dependencies = [
- "winnow",
+ "winnow 1.0.0",
 ]
 
 [[package]]
@@ -2235,7 +2215,7 @@ dependencies = [
  "libc",
  "log",
  "net_gen",
- "thiserror 2.0.18",
+ "thiserror",
  "vmm-sys-util",
 ]
 
@@ -2288,7 +2268,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.61.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2330,18 +2310,16 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "vfio-bindings"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "698c66a4522a31ab407a410a59c9660da036178e4fe3f371825cd6aad7d46837"
+version = "0.6.1"
+source = "git+https://github.com/rust-vmm/vfio?rev=df861a878168ad71602d8a1945bd3b7acbd22693#df861a878168ad71602d8a1945bd3b7acbd22693"
 dependencies = [
  "vmm-sys-util",
 ]
 
 [[package]]
 name = "vfio-ioctls"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7af7e8d49719333e5eb52209417f26695c9ab2b117a82596a63a44947f97c5d6"
+version = "0.5.2"
+source = "git+https://github.com/rust-vmm/vfio?rev=df861a878168ad71602d8a1945bd3b7acbd22693#df861a878168ad71602d8a1945bd3b7acbd22693"
 dependencies = [
  "byteorder",
  "kvm-bindings",
@@ -2350,7 +2328,7 @@ dependencies = [
  "log",
  "mshv-bindings",
  "mshv-ioctls",
- "thiserror 2.0.18",
+ "thiserror",
  "vfio-bindings",
  "vm-memory",
  "vmm-sys-util",
@@ -2358,9 +2336,8 @@ dependencies = [
 
 [[package]]
 name = "vfio_user"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8db5bc783aad75202ad4cbcdc5e893cff1dd8fa24a1bcdb4de8998d3c4d169a"
+version = "0.1.2"
+source = "git+https://github.com/rust-vmm/vfio?rev=df861a878168ad71602d8a1945bd3b7acbd22693#df861a878168ad71602d8a1945bd3b7acbd22693"
 dependencies = [
  "bitflags 2.11.0",
  "libc",
@@ -2368,7 +2345,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror",
  "vfio-bindings",
  "vm-memory",
  "vmm-sys-util",
@@ -2376,9 +2353,8 @@ dependencies = [
 
 [[package]]
 name = "vhost"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a4dcad85a129d97d5d4b2f3c47a4affdeedd76bdcd02094bcb5d9b76cac2d05"
+version = "0.15.0"
+source = "git+https://github.com/rust-vmm/vhost?rev=c9b80a1c93bac7820e4aee4269aa904568937035#c9b80a1c93bac7820e4aee4269aa904568937035"
 dependencies = [
  "bitflags 2.11.0",
  "libc",
@@ -2389,9 +2365,8 @@ dependencies = [
 
 [[package]]
 name = "vhost-user-backend"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e183205a9ba7cb9c47fcb0fc0a07fc295a110efbb11ab78ad0d793b0a38a7bde"
+version = "0.21.0"
+source = "git+https://github.com/rust-vmm/vhost?rev=c9b80a1c93bac7820e4aee4269aa904568937035#c9b80a1c93bac7820e4aee4269aa904568937035"
 dependencies = [
  "libc",
  "log",
@@ -2412,7 +2387,7 @@ dependencies = [
  "libc",
  "log",
  "option_parser",
- "thiserror 2.0.18",
+ "thiserror",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -2432,7 +2407,7 @@ dependencies = [
  "log",
  "net_util",
  "option_parser",
- "thiserror 2.0.18",
+ "thiserror",
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
@@ -2442,9 +2417,9 @@ dependencies = [
 
 [[package]]
 name = "virtio-bindings"
-version = "0.2.6"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "804f498a26d5a63be7bbb8bdcd3869c3f286c4c4a17108905276454da0caf8cb"
+checksum = "091f1f09cfbf2a78563b562e7a949465cce1aef63b6065645188d995162f8868"
 
 [[package]]
 name = "virtio-devices"
@@ -2466,7 +2441,7 @@ dependencies = [
  "serde",
  "serde_with",
  "serial_buffer",
- "thiserror 2.0.18",
+ "thiserror",
  "vhost",
  "virtio-bindings",
  "virtio-queue",
@@ -2480,10 +2455,11 @@ dependencies = [
 
 [[package]]
 name = "virtio-queue"
-version = "0.16.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb0479158f863e59323771a1f684d843962f76960b86fecfec2bfa9c8f0f9180"
+checksum = "e358084f32ed165fddb41d98ff1b7ff3c08b9611d8d6114a1b422e2e85688baf"
 dependencies = [
+ "libc",
  "log",
  "virtio-bindings",
  "vm-memory",
@@ -2505,7 +2481,7 @@ version = "0.1.0"
 dependencies = [
  "hypervisor",
  "serde",
- "thiserror 2.0.18",
+ "thiserror",
  "vfio-ioctls",
  "vm-memory",
  "vmm-sys-util",
@@ -2519,13 +2495,13 @@ checksum = "7e21282841a059bb62627ce8441c491f09603622cd5a21c43bfedc85a2952f23"
 
 [[package]]
 name = "vm-memory"
-version = "0.16.2"
+version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fd5e56d48353c5f54ef50bd158a0452fc82f5383da840f7b8efc31695dd3b9d"
+checksum = "f39348a049689cabd3377cdd9182bf526ec76a6f823b79903896452e9d7a7380"
 dependencies = [
  "arc-swap",
  "libc",
- "thiserror 1.0.62",
+ "thiserror",
  "winapi",
 ]
 
@@ -2537,7 +2513,7 @@ dependencies = [
  "itertools",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror",
  "vm-memory",
 ]
 
@@ -2589,7 +2565,7 @@ dependencies = [
  "serde_json",
  "serial_buffer",
  "signal-hook",
- "thiserror 2.0.18",
+ "thiserror",
  "tracer",
  "uuid",
  "vfio-ioctls",
@@ -2609,9 +2585,9 @@ dependencies = [
 
 [[package]]
 name = "vmm-sys-util"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d21f366bf22bfba3e868349978766a965cbe628c323d58e026be80b8357ab789"
+checksum = "506c62fdf617a5176827c2f9afbcf1be155b03a9b4bf9617a60dbc07e3a1642f"
 dependencies = [
  "bitflags 1.3.2",
  "libc",
@@ -2654,35 +2630,22 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen"
-version = "0.2.100"
+version = "0.2.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1edc8929d7499fc4e8f0be2262a241556cfc54a0bea223790e71446f2aab1ef5"
+checksum = "6532f9a5c1ece3798cb1c2cfdba640b9b3ba884f5db45973a6f442510a87d38e"
 dependencies = [
  "cfg-if",
  "once_cell",
  "rustversion",
  "wasm-bindgen-macro",
-]
-
-[[package]]
-name = "wasm-bindgen-backend"
-version = "0.2.100"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f0a0651a5c2bc21487bde11ee802ccaf4c51935d0d3d42a6101f98161700bc6"
-dependencies = [
- "bumpalo",
- "log",
- "proc-macro2",
- "quote",
- "syn",
  "wasm-bindgen-shared",
 ]
 
 [[package]]
 name = "wasm-bindgen-macro"
-version = "0.2.100"
+version = "0.2.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fe63fc6d09ed3792bd0897b314f53de8e16568c2b3f7982f468c0bf9bd0b407"
+checksum = "18a2d50fcf105fb33bb15f00e7a77b772945a2ee45dcf454961fd843e74c18e6"
 dependencies = [
  "quote",
  "wasm-bindgen-macro-support",
@@ -2690,22 +2653,22 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro-support"
-version = "0.2.100"
+version = "0.2.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ae87ea40c9f689fc23f209965b6fb8a99ad69aeeb0231408be24920604395de"
+checksum = "03ce4caeaac547cdf713d280eda22a730824dd11e6b8c3ca9e42247b25c631e3"
 dependencies = [
+ "bumpalo",
  "proc-macro2",
  "quote",
  "syn",
- "wasm-bindgen-backend",
  "wasm-bindgen-shared",
 ]
 
 [[package]]
 name = "wasm-bindgen-shared"
-version = "0.2.100"
+version = "0.2.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a05d73b933a847d6cccdda8f838a22ff101ad9bf93e33684f39c1f5f0eece3d"
+checksum = "75a326b8c223ee17883a4251907455a2431acc2791c98c26279376490c378c16"
 dependencies = [
  "unicode-ident",
 ]
@@ -2783,9 +2746,9 @@ dependencies = [
 
 [[package]]
 name = "windows-sys"
-version = "0.61.0"
+version = "0.61.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e201184e40b2ede64bc2ea34968b28e33622acdbbf37104f0e4a33f7abe657aa"
+checksum = "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
 dependencies = [
  "windows-link",
 ]
@@ -2860,6 +2823,15 @@ name = "winnow"
 version = "0.7.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "winnow"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a90e88e4667264a994d34e6d1ab2d26d398dcdca8b7f52bec8668957517fc7d8"
 dependencies = [
  "memchr",
 ]
@@ -2980,8 +2952,8 @@ dependencies = [
  "tracing",
  "uds_windows",
  "uuid",
- "windows-sys 0.61.0",
- "winnow",
+ "windows-sys 0.61.2",
+ "winnow 0.7.15",
  "zbus_macros",
  "zbus_names",
  "zvariant",
@@ -3009,24 +2981,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ffd8af6d5b78619bab301ff3c560a5bd22426150253db278f164d6cf3b72c50f"
 dependencies = [
  "serde",
- "winnow",
+ "winnow 0.7.15",
  "zvariant",
 ]
 
 [[package]]
 name = "zerocopy"
-version = "0.8.42"
+version = "0.8.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2578b716f8a7a858b7f02d5bd870c14bf4ddbbcf3a4c05414ba6503640505e3"
+checksum = "efbb2a062be311f2ba113ce66f697a4dc589f85e78a4aea276200804cea0ed87"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.42"
+version = "0.8.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e6cc098ea4d3bd6246687de65af3f920c430e236bee1e3bf2e441463f08a02f"
+checksum = "0e8bc7269b54418e7aeeef514aa68f8690b8c0489a06b0136e5f57c4c5ccab89"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3076,7 +3048,7 @@ dependencies = [
  "endi",
  "enumflags2",
  "serde",
- "winnow",
+ "winnow 0.7.15",
  "zvariant_derive",
  "zvariant_utils",
 ]
@@ -3104,5 +3076,5 @@ dependencies = [
  "quote",
  "serde",
  "syn",
- "winnow",
+ "winnow 0.7.15",
 ]
