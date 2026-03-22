@@ -16,6 +16,7 @@ mod common_cvm {
     use common::tests_wrappers::*;
     use common::utils::*;
     use test_infra::*;
+    const NUM_PCI_SEGMENTS: u16 = 8;
 
     use super::*;
     macro_rules! basic_cvm_guest {
@@ -101,9 +102,8 @@ mod common_cvm {
         // Use 8 segments to test the multiple segment support since it's more than the default 6
         //  supported by Linux
         // IGVM file used by Sev-Snp Guest now support up to 8 segments, so we can use 8 segments for testing.
-        let num_pci_segments: u16 = 8;
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
-        _test_pci_multiple_segments(&guest, num_pci_segments, 5);
+        _test_pci_multiple_segments(&guest, NUM_PCI_SEGMENTS, 5);
     }
 
     #[test]
@@ -273,5 +273,11 @@ mod common_cvm {
     fn test_disk_hotplug() {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_disk_hotplug(&guest, false);
+    }
+
+    #[test]
+    fn test_net_hotplug() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_net_hotplug(&guest, NUM_PCI_SEGMENTS, None);
     }
 }
