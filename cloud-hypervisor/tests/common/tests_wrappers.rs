@@ -2577,3 +2577,57 @@ pub(crate) fn _test_memory_overhead(guest: &Guest, guest_memory_size_kb: u32) {
 
     handle_child_output(r, &output);
 }
+
+pub(crate) fn _test_landlock(guest: &Guest) {
+    let api_socket = temp_api_path(&guest.tmp_dir);
+
+    let mut child = GuestCommand::new(guest)
+        .args(["--api-socket", &api_socket])
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .args(["--landlock"])
+        .default_disks()
+        .default_net()
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        // Check /dev/vdc is not there
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep -c vdc.*16M || true")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(1),
+            0
+        );
+
+        // Now let's add the extra disk.
+        let mut blk_file_path = dirs::home_dir().unwrap();
+        blk_file_path.push("workloads");
+        blk_file_path.push("blk.img");
+        // As the path to the hotplug disk is not pre-added, this remote
+        // command will fail.
+        assert!(!remote_command(
+            &api_socket,
+            "add-disk",
+            Some(
+                format!(
+                    "path={},id=test0,readonly=true",
+                    blk_file_path.to_str().unwrap()
+                )
+                .as_str()
+            ),
+        ));
+    });
+
+    let _ = child.kill();
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
