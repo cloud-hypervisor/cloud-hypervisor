@@ -824,6 +824,10 @@ fn vcpu_thread_rules(
         (libc::SYS_pread64, vec![]),
         (libc::SYS_pwrite64, vec![]),
         (libc::SYS_read, vec![]),
+        #[cfg(target_arch = "x86_64")]
+        (libc::SYS_readlink, vec![]),
+        #[cfg(target_arch = "aarch64")]
+        (libc::SYS_readlinkat, vec![]),
         (libc::SYS_recvfrom, vec![]),
         (libc::SYS_recvmsg, vec![]),
         (libc::SYS_rt_sigaction, vec![]),
