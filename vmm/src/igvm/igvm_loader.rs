@@ -26,7 +26,9 @@ use zerocopy::IntoBytes;
 use crate::GuestMemoryMmap;
 use crate::cpu::CpuManager;
 use crate::igvm::loader::Loader;
-use crate::igvm::{BootPageAcceptance, HV_PAGE_SIZE, IgvmLoadedInfo, StartupMemoryType};
+use crate::igvm::{
+    BootPageAcceptance, HV_PAGE_SIZE, IgvmLoadedInfo, IgvmVpContext, StartupMemoryType,
+};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 
 #[derive(Debug, Error)]
@@ -361,8 +363,10 @@ pub fn load_igvm(
                 assert_eq!(gpa % HV_PAGE_SIZE, 0);
                 let mut data: [u8; 4096] = [0; 4096];
                 let len = size_of::<SevVmsa>();
-                loaded_info.vmsa_gpa = *gpa;
-                loaded_info.vmsa = **vmsa;
+                loaded_info.vp_context = Some(IgvmVpContext::SevSnp {
+                    vmsa: **vmsa,
+                    vmsa_gpa: *gpa,
+                });
                 // Only supported for index zero
                 if *vp_index == 0 {
                     data[..len].copy_from_slice(vmsa.as_bytes());
@@ -529,6 +533,9 @@ pub fn load_igvm(
         );
     }
 
-    debug!("Dumping the contents of VMSA page: {:x?}", loaded_info.vmsa);
+    debug!(
+        "Dumping the contents of VMSA page: {:x?}",
+        loaded_info.vp_context
+    );
     Ok(loaded_info)
 }

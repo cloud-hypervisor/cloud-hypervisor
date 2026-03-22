@@ -1457,6 +1457,8 @@ impl Vm {
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
     ) -> Result<EntryPoint> {
+        use crate::igvm::IgvmVpContext;
+
         let res = igvm_loader::load_igvm(
             &igvm,
             memory_manager,
@@ -1467,17 +1469,19 @@ impl Vm {
         )
         .map_err(Error::IgvmLoad)?;
 
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "sev_snp")] {
-                let entry_point = if cpu_manager.lock().unwrap().sev_snp_enabled() {
-                    EntryPoint { entry_addr: vm_memory::GuestAddress(res.vmsa_gpa), setup_header: None }
-                } else {
-                    EntryPoint {entry_addr: vm_memory::GuestAddress(res.vmsa.rip), setup_header: None }
-                };
-            } else {
-               let entry_point = EntryPoint { entry_addr: vm_memory::GuestAddress(res.vmsa.rip), setup_header: None };
+        let entry_point = match &res.vp_context {
+            #[cfg(feature = "sev_snp")]
+            Some(IgvmVpContext::SevSnp { vmsa_gpa, .. })
+                if cpu_manager.lock().unwrap().sev_snp_enabled() =>
+            {
+                EntryPoint {
+                    entry_addr: vm_memory::GuestAddress(*vmsa_gpa),
+                    setup_header: None,
+                }
             }
+            Some(_) | None => unimplemented!("Unknown vp_context!"),
         };
+
         Ok(entry_point)
     }
 
