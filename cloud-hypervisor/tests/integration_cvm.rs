@@ -206,4 +206,10 @@ mod common_cvm {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_split_irqchip(&guest);
     }
+
+    #[test]
+    fn test_dmi_uuid() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_dmi_uuid(&guest);
+    }
 }
