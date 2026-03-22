@@ -248,4 +248,10 @@ mod common_cvm {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_direct_kernel_boot_noacpi(&guest);
     }
+
+    #[test]
+    fn test_pci_bar_reprogramming() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_pci_bar_reprogramming(&guest);
+    }
 }
