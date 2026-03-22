@@ -4936,189 +4936,25 @@ mod common_parallel {
 
     #[test]
     fn test_net_hotplug() {
-        _test_net_hotplug(None);
-    }
-
-    #[test]
-    fn test_net_multi_segment_hotplug() {
-        _test_net_hotplug(Some(15));
-    }
-
-    fn _test_net_hotplug(pci_segment: Option<u16>) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-
         #[cfg(target_arch = "x86_64")]
         let kernel_path = direct_kernel_boot_path();
         #[cfg(target_arch = "aarch64")]
         let kernel_path = edk2_path();
+        let guest =
+            basic_regular_guest!(JAMMY_IMAGE_NAME).with_kernel_path(kernel_path.to_str().unwrap());
 
-        let api_socket = temp_api_path(&guest.tmp_dir);
+        _test_net_hotplug(&guest, MAX_NUM_PCI_SEGMENTS, None);
+    }
 
-        // Boot without network
-        let mut cmd = GuestCommand::new(&guest);
-
-        cmd.args(["--api-socket", &api_socket])
-            .default_cpus()
-            .default_memory()
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .default_net()
-            .default_disks()
-            .capture_output();
-
-        if pci_segment.is_some() {
-            cmd.args([
-                "--platform",
-                &format!("num_pci_segments={MAX_NUM_PCI_SEGMENTS}"),
-            ]);
-        }
-
-        let mut child = cmd.spawn().unwrap();
-
-        guest.wait_vm_boot().unwrap();
-
-        let r = std::panic::catch_unwind(|| {
-            // Add network
-            let (cmd_success, cmd_output) = remote_command_w_output(
-                &api_socket,
-                "add-net",
-                Some(
-                    format!(
-                        "id=test0,tap=,mac={},ip={},mask=255.255.255.128{}",
-                        guest.network.guest_mac1,
-                        guest.network.host_ip1,
-                        if let Some(pci_segment) = pci_segment {
-                            format!(",pci_segment={pci_segment}")
-                        } else {
-                            String::new()
-                        }
-                    )
-                    .as_str(),
-                ),
-            );
-            assert!(cmd_success);
-
-            if let Some(pci_segment) = pci_segment {
-                assert!(String::from_utf8_lossy(&cmd_output).contains(&format!(
-                    "{{\"id\":\"test0\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
-                )));
-            } else {
-                assert!(
-                    String::from_utf8_lossy(&cmd_output)
-                        .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
-                );
-            }
-
-            thread::sleep(std::time::Duration::new(5, 0));
-
-            // 2 network interfaces + default localhost ==> 3 interfaces
-            assert_eq!(
-                guest
-                    .ssh_command("ip -o link | wc -l")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                3
-            );
-
-            // Test the same using the added network interface's IP
-            assert_eq!(
-                ssh_command_ip(
-                    "ip -o link | wc -l",
-                    &guest.network.guest_ip1,
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT
-                )
-                .unwrap()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or_default(),
-                3
-            );
-
-            // Remove network
-            assert!(remote_command(&api_socket, "remove-device", Some("test0"),));
-            thread::sleep(std::time::Duration::new(5, 0));
-
-            // Add network
-            let (cmd_success, cmd_output) = remote_command_w_output(
-                &api_socket,
-                "add-net",
-                Some(
-                    format!(
-                        "id=test1,tap=,mac={},ip={},mask=255.255.255.128{}",
-                        guest.network.guest_mac1,
-                        guest.network.host_ip1,
-                        if let Some(pci_segment) = pci_segment {
-                            format!(",pci_segment={pci_segment}")
-                        } else {
-                            String::new()
-                        }
-                    )
-                    .as_str(),
-                ),
-            );
-            assert!(cmd_success);
-
-            if let Some(pci_segment) = pci_segment {
-                assert!(String::from_utf8_lossy(&cmd_output).contains(&format!(
-                    "{{\"id\":\"test1\",\"bdf\":\"{pci_segment:04x}:00:01.0\"}}"
-                )));
-            } else {
-                assert!(
-                    String::from_utf8_lossy(&cmd_output)
-                        .contains("{\"id\":\"test1\",\"bdf\":\"0000:00:06.0\"}")
-                );
-            }
-
-            thread::sleep(std::time::Duration::new(5, 0));
-
-            // 2 network interfaces + default localhost ==> 3 interfaces
-            assert_eq!(
-                guest
-                    .ssh_command("ip -o link | wc -l")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                3
-            );
-
-            guest.reboot_linux(0);
-
-            // 2 network interfaces + default localhost ==> 3 interfaces
-            assert_eq!(
-                guest
-                    .ssh_command("ip -o link | wc -l")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                3
-            );
-
-            // Test the same using the added network interface's IP
-            assert_eq!(
-                ssh_command_ip(
-                    "ip -o link | wc -l",
-                    &guest.network.guest_ip1,
-                    DEFAULT_SSH_RETRIES,
-                    DEFAULT_SSH_TIMEOUT
-                )
-                .unwrap()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or_default(),
-                3
-            );
-        });
-
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-
-        handle_child_output(r, &output);
+    #[test]
+    fn test_net_multi_segment_hotplug() {
+        #[cfg(target_arch = "x86_64")]
+        let kernel_path = direct_kernel_boot_path();
+        #[cfg(target_arch = "aarch64")]
+        let kernel_path = edk2_path();
+        let guest =
+            basic_regular_guest!(JAMMY_IMAGE_NAME).with_kernel_path(kernel_path.to_str().unwrap());
+        _test_net_hotplug(&guest, MAX_NUM_PCI_SEGMENTS, Some(15));
     }
 
     #[test]
