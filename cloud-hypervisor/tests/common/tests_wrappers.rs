@@ -2552,3 +2552,28 @@ pub(crate) fn _test_pci_bar_reprogramming(guest: &Guest) {
 
     handle_child_output(r, &output);
 }
+
+pub(crate) fn _test_memory_overhead(guest: &Guest, guest_memory_size_kb: u32) {
+    let mut child = GuestCommand::new(guest)
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .default_net()
+        .default_disks()
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    guest.wait_vm_boot().unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        let overhead = get_vmm_overhead(child.id(), guest_memory_size_kb);
+        eprintln!("Guest memory overhead: {overhead} vs {MAXIMUM_VMM_OVERHEAD_KB}");
+        assert!(overhead <= MAXIMUM_VMM_OVERHEAD_KB);
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
