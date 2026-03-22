@@ -1455,6 +1455,7 @@ impl Vm {
         igvm: File,
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
+        cmdline: &str,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
     ) -> Result<EntryPoint> {
         use crate::igvm::IgvmVpContext;
@@ -1463,7 +1464,7 @@ impl Vm {
             &igvm,
             memory_manager,
             cpu_manager.clone(),
-            "",
+            cmdline,
             #[cfg(feature = "sev_snp")]
             host_data,
         )
@@ -1570,12 +1571,19 @@ impl Vm {
         {
             if let Some(_igvm_file) = &payload.igvm {
                 let igvm = File::open(_igvm_file).map_err(Error::IgvmFile)?;
+                let cmdline = payload.cmdline.as_deref().unwrap_or("");
                 #[cfg(feature = "sev_snp")]
                 if sev_snp_enabled {
-                    return Self::load_igvm(igvm, memory_manager, cpu_manager, &payload.host_data);
+                    return Self::load_igvm(
+                        igvm,
+                        memory_manager,
+                        cpu_manager,
+                        cmdline,
+                        &payload.host_data,
+                    );
                 }
                 #[cfg(not(feature = "sev_snp"))]
-                return Self::load_igvm(igvm, memory_manager, cpu_manager);
+                return Self::load_igvm(igvm, memory_manager, cpu_manager, cmdline);
             }
         }
         match (&payload.firmware, &payload.kernel) {
