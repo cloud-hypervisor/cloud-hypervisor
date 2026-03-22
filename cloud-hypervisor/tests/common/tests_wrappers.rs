@@ -2289,3 +2289,36 @@ pub(crate) fn _test_dmi_oem_strings(guest: &Guest) {
 
     handle_child_output(r, &output);
 }
+
+pub(crate) fn _test_serial_off(guest: &Guest) {
+    let mut child = GuestCommand::new(guest)
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .default_disks()
+        .default_net()
+        .args(["--serial", "off"])
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        // Test that there is no ttyS0
+        assert_eq!(
+            guest
+                .ssh_command(GREP_SERIAL_IRQ_CMD)
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(1),
+            0
+        );
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
