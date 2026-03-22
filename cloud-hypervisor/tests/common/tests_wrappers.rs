@@ -3151,3 +3151,45 @@ pub(crate) fn _test_watchdog(guest: &Guest) {
 
     handle_child_output(r, &output);
 }
+
+pub(crate) fn _test_pvpanic(guest: &Guest) {
+    let api_socket = temp_api_path(&guest.tmp_dir);
+    let event_path = temp_event_monitor_path(&guest.tmp_dir);
+
+    let mut cmd = GuestCommand::new(guest);
+    cmd.default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .default_disks()
+        .args(["--net", guest.default_net_string().as_str()])
+        .args(["--pvpanic"])
+        .args(["--api-socket", &api_socket])
+        .args(["--event-monitor", format!("path={event_path}").as_str()])
+        .capture_output();
+
+    let mut child = cmd.spawn().unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        // Trigger guest a panic
+        make_guest_panic(guest);
+
+        // Wait a while for guest
+        thread::sleep(std::time::Duration::new(10, 0));
+
+        let expected_sequential_events = [&MetaEvent {
+            event: "panic".to_string(),
+            device_id: None,
+        }];
+        assert!(check_latest_events_exact(
+            &expected_sequential_events,
+            &event_path
+        ));
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
