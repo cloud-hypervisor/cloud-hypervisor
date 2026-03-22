@@ -2631,3 +2631,175 @@ pub(crate) fn _test_landlock(guest: &Guest) {
 
     handle_child_output(r, &output);
 }
+
+pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool) {
+    let api_socket = temp_api_path(&guest.tmp_dir);
+
+    let mut blk_file_path = dirs::home_dir().unwrap();
+    blk_file_path.push("workloads");
+    blk_file_path.push("blk.img");
+
+    let mut cmd = GuestCommand::new(guest);
+    if landlock_enabled {
+        cmd.args(["--landlock"]).args([
+            "--landlock-rules",
+            format!("path={blk_file_path:?},access=rw").as_str(),
+        ]);
+    }
+
+    cmd.args(["--api-socket", &api_socket])
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .default_disks()
+        .default_net()
+        .capture_output();
+
+    let mut child = cmd.spawn().unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        // Check /dev/vdc is not there
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep -c vdc.*16M || true")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(1),
+            0
+        );
+
+        // Now let's add the extra disk.
+        let (cmd_success, cmd_output) = remote_command_w_output(
+            &api_socket,
+            "add-disk",
+            Some(
+                format!(
+                    "path={},id=test0,readonly=true",
+                    blk_file_path.to_str().unwrap()
+                )
+                .as_str(),
+            ),
+        );
+        assert!(cmd_success);
+        assert!(
+            String::from_utf8_lossy(&cmd_output)
+                .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
+        );
+
+        thread::sleep(std::time::Duration::new(10, 0));
+
+        // Check that /dev/vdc exists and the block size is 16M.
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep vdc | grep -c 16M")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            1
+        );
+        // And check the block device can be read.
+        guest
+            .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
+            .unwrap();
+
+        // Let's remove it the extra disk.
+        assert!(remote_command(&api_socket, "remove-device", Some("test0")));
+        thread::sleep(std::time::Duration::new(5, 0));
+        // And check /dev/vdc is not there
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep -c vdc.*16M || true")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(1),
+            0
+        );
+
+        // And add it back to validate unplug did work correctly.
+        let (cmd_success, cmd_output) = remote_command_w_output(
+            &api_socket,
+            "add-disk",
+            Some(
+                format!(
+                    "path={},id=test0,readonly=true",
+                    blk_file_path.to_str().unwrap()
+                )
+                .as_str(),
+            ),
+        );
+        assert!(cmd_success);
+        assert!(
+            String::from_utf8_lossy(&cmd_output)
+                .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
+        );
+
+        thread::sleep(std::time::Duration::new(10, 0));
+
+        // Check that /dev/vdc exists and the block size is 16M.
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep vdc | grep -c 16M")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            1
+        );
+        // And check the block device can be read.
+        guest
+            .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
+            .unwrap();
+
+        // Reboot the VM.
+        guest.reboot_linux(0);
+
+        // Check still there after reboot
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep vdc | grep -c 16M")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            1
+        );
+
+        assert!(remote_command(&api_socket, "remove-device", Some("test0")));
+
+        thread::sleep(std::time::Duration::new(20, 0));
+
+        // Check device has gone away
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep -c vdc.*16M || true")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(1),
+            0
+        );
+
+        guest.reboot_linux(1);
+
+        // Check device still absent
+        assert_eq!(
+            guest
+                .ssh_command("lsblk | grep -c vdc.*16M || true")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or(1),
+            0
+        );
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
