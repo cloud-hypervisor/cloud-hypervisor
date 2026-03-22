@@ -280,4 +280,10 @@ mod common_cvm {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_net_hotplug(&guest, NUM_PCI_SEGMENTS, None);
     }
+
+    #[test]
+    fn test_counters() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_counters(&guest);
+    }
 }
