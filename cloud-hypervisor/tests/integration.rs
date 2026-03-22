@@ -2203,52 +2203,8 @@ mod common_parallel {
 
     #[test]
     fn test_console_file() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-
-        let console_path = guest.tmp_dir.as_path().join("console-output");
-        let mut child = GuestCommand::new(&guest)
-            .default_cpus()
-            .default_memory()
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .default_disks()
-            .default_net()
-            .args([
-                "--console",
-                format!("file={}", console_path.to_str().unwrap()).as_str(),
-            ])
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        guest.wait_vm_boot().unwrap();
-
-        guest.ssh_command("sudo shutdown -h now").unwrap();
-
-        let _ = child.wait_timeout(std::time::Duration::from_secs(20));
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-
-        let r = std::panic::catch_unwind(|| {
-            // Check that the cloud-hypervisor binary actually terminated
-            assert!(output.status.success());
-
-            // Do this check after shutdown of the VM as an easy way to ensure
-            // all writes are flushed to disk
-            let mut f = std::fs::File::open(console_path).unwrap();
-            let mut buf = String::new();
-            f.read_to_string(&mut buf).unwrap();
-
-            if !buf.contains(CONSOLE_TEST_STRING) {
-                eprintln!(
-                    "\n\n==== Console file output ====\n\n{buf}\n\n==== End console file output ===="
-                );
-            }
-            assert!(buf.contains(CONSOLE_TEST_STRING));
-        });
-
-        handle_child_output(r, &output);
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        _test_console_file(&guest);
     }
 
     #[test]

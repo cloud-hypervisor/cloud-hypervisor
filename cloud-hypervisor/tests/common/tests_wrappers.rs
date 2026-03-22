@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 use std::ffi::CStr;
 use std::fs::{self, OpenOptions};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::string::String;
 use std::sync::mpsc;
@@ -14,6 +14,7 @@ use net_util::MacAddr;
 use test_infra::*;
 use vmm_sys_util::tempdir::TempDir;
 use vmm_sys_util::tempfile::TempFile;
+use wait_timeout::ChildExt;
 
 use crate::common::utils::{TargetApi, *};
 
@@ -2397,6 +2398,51 @@ pub(crate) fn _test_virtio_console(guest: &Guest) {
 
     let r = std::panic::catch_unwind(|| {
         assert!(String::from_utf8_lossy(&output.stdout).contains(&text));
+    });
+
+    handle_child_output(r, &output);
+}
+
+pub(crate) fn _test_console_file(guest: &Guest) {
+    let console_path = guest.tmp_dir.as_path().join("console-output");
+    let mut child = GuestCommand::new(guest)
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .default_disks()
+        .default_net()
+        .args([
+            "--console",
+            format!("file={}", console_path.to_str().unwrap()).as_str(),
+        ])
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    guest.wait_vm_boot().unwrap();
+
+    guest.ssh_command("sudo shutdown -h now").unwrap();
+
+    let _ = child.wait_timeout(std::time::Duration::from_secs(20));
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        // Check that the cloud-hypervisor binary actually terminated
+        assert!(output.status.success());
+
+        // Do this check after shutdown of the VM as an easy way to ensure
+        // all writes are flushed to disk
+        let mut f = std::fs::File::open(console_path).unwrap();
+        let mut buf = String::new();
+        f.read_to_string(&mut buf).unwrap();
+
+        if !buf.contains(CONSOLE_TEST_STRING) {
+            eprintln!(
+                "\n\n==== Console file output ====\n\n{buf}\n\n==== End console file output ===="
+            );
+        }
+        assert!(buf.contains(CONSOLE_TEST_STRING));
     });
 
     handle_child_output(r, &output);
