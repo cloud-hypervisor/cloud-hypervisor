@@ -408,8 +408,7 @@ mod common_parallel {
 
     #[test]
     fn test_virtio_net_ctrl_queue() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = GuestFactory::new_regular_guest_factory().create_guest(Box::new(disk_config));
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
         _test_virtio_net_ctrl_queue(&guest);
     }
 
