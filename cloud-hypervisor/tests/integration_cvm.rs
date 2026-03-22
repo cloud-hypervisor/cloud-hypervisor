@@ -268,4 +268,10 @@ mod common_cvm {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_landlock(&guest);
     }
+
+    #[test]
+    fn test_disk_hotplug() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_disk_hotplug(&guest, false);
+    }
 }
