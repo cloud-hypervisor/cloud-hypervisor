@@ -230,4 +230,10 @@ mod common_cvm {
         let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
         _test_serial_off(&guest);
     }
+
+    #[test]
+    fn test_virtio_console() {
+        let guest = basic_cvm_guest!(JAMMY_IMAGE_NAME);
+        _test_virtio_console(&guest);
+    }
 }
