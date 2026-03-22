@@ -1741,58 +1741,8 @@ mod common_parallel {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_dmi_oem_strings() {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-
-        let s1 = "io.systemd.credential:xx=yy";
-        let s2 = "This is a test string";
-
-        let oem_strings = format!("oem_strings=[{s1},{s2}]");
-
-        let mut child = GuestCommand::new(&guest)
-            .default_cpus()
-            .default_memory()
-            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(["--platform", &oem_strings])
-            .default_disks()
-            .default_net()
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-
-            assert_eq!(
-                guest
-                    .ssh_command("sudo dmidecode --oem-string count")
-                    .unwrap()
-                    .trim(),
-                "2"
-            );
-
-            assert_eq!(
-                guest
-                    .ssh_command("sudo dmidecode --oem-string 1")
-                    .unwrap()
-                    .trim(),
-                s1
-            );
-
-            assert_eq!(
-                guest
-                    .ssh_command("sudo dmidecode --oem-string 2")
-                    .unwrap()
-                    .trim(),
-                s2
-            );
-        });
-
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-
-        handle_child_output(r, &output);
+        let guest = basic_regular_guest!(JAMMY_IMAGE_NAME);
+        _test_dmi_oem_strings(&guest);
     }
 
     #[test]
