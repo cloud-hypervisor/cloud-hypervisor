@@ -2803,3 +2803,68 @@ pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool) {
 
     handle_child_output(r, &output);
 }
+
+pub(crate) fn _test_virtio_block_topology(guest: &Guest, loop_dev: &str) {
+    let mut child = GuestCommand::new(guest)
+        .default_cpus()
+        .default_memory()
+        .default_kernel_cmdline()
+        .args([
+            "--disk",
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+            )
+            .as_str(),
+            format!(
+                "path={}",
+                guest.disk_config.disk(DiskType::CloudInit).unwrap()
+            )
+            .as_str(),
+            format!("path={loop_dev}").as_str(),
+        ])
+        .default_net()
+        .capture_output()
+        .spawn()
+        .unwrap();
+
+    let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
+        // MIN-IO column
+        assert_eq!(
+            guest
+                .ssh_command("lsblk -t| grep vdc | awk '{print $3}'")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            4096
+        );
+        // PHY-SEC column
+        assert_eq!(
+            guest
+                .ssh_command("lsblk -t| grep vdc | awk '{print $5}'")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            4096
+        );
+        // LOG-SEC column
+        assert_eq!(
+            guest
+                .ssh_command("lsblk -t| grep vdc | awk '{print $6}'")
+                .unwrap()
+                .trim()
+                .parse::<u32>()
+                .unwrap_or_default(),
+            4096
+        );
+    });
+
+    kill_child(&mut child);
+    let output = child.wait_with_output().unwrap();
+
+    handle_child_output(r, &output);
+}
