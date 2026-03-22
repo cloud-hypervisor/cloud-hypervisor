@@ -10,6 +10,8 @@ use std::{mem, result};
 
 use hypervisor::arch::x86::gdt::{gdt_entry, segment_from_gdt};
 use hypervisor::arch::x86::regs::CR0_PE;
+#[cfg(feature = "igvm")]
+use hypervisor::arch::x86::{DescriptorTable, SegmentRegister};
 use hypervisor::arch::x86::{FpuState, SpecialRegisters};
 use thiserror::Error;
 use vm_memory::{Address, Bytes, GuestMemory, GuestMemoryError};
@@ -193,6 +195,116 @@ pub fn configure_segments_and_sregs(
     }
 
     Ok(())
+}
+
+/// Convert IGVM segment attributes (VMX access rights format) to a SegmentRegister.
+///
+/// IGVM attribute format:
+///   Bits 3:0  = Type
+///   Bit  4    = S (descriptor type: 0=system, 1=code/data)
+///   Bits 6:5  = DPL
+///   Bit  7    = Present
+///   Bits 11:8 = Reserved (must be zero)
+///   Bit  12   = AVL
+///   Bit  13   = L (long mode)
+///   Bit  14   = D/B (default operation size)
+///   Bit  15   = G (granularity)
+#[cfg(feature = "igvm")]
+fn segment_from_igvm_attributes(
+    selector: u16,
+    attributes: u16,
+    base: u64,
+    limit: u32,
+) -> SegmentRegister {
+    SegmentRegister {
+        base,
+        limit,
+        selector,
+        type_: (attributes & 0xf) as u8,
+        s: ((attributes >> 4) & 1) as u8,
+        dpl: ((attributes >> 5) & 3) as u8,
+        present: ((attributes >> 7) & 1) as u8,
+        avl: ((attributes >> 12) & 1) as u8,
+        l: ((attributes >> 13) & 1) as u8,
+        db: ((attributes >> 14) & 1) as u8,
+        g: ((attributes >> 15) & 1) as u8,
+        unusable: 0,
+    }
+}
+
+/// Configure vCPU registers from an IGVM native VP context.
+///
+/// This sets the standard registers (GPRs + RIP + RFLAGS) and special registers
+/// (segments, CRs, EFER, GDT, IDT) from the IGVM context. Unlike `setup_sregs`,
+/// this does NOT write GDT/IDT to guest memory — the IGVM file already placed them.
+#[cfg(feature = "igvm")]
+pub fn setup_regs_from_igvm_native_context(
+    vcpu: &dyn hypervisor::Vcpu,
+    ctx: &igvm_defs::IgvmNativeVpContextX64,
+) -> Result<()> {
+    // Set standard registers (GPRs + RIP + RFLAGS)
+    let mut regs = vcpu.create_standard_regs();
+    regs.set_rip(ctx.rip);
+    regs.set_rflags(ctx.rflags);
+    regs.set_rax(ctx.rax);
+    regs.set_rbx(ctx.rbx);
+    regs.set_rcx(ctx.rcx);
+    regs.set_rdx(ctx.rdx);
+    regs.set_rsi(ctx.rsi);
+    regs.set_rdi(ctx.rdi);
+    regs.set_rsp(ctx.rsp);
+    regs.set_rbp(ctx.rbp);
+    regs.set_r8(ctx.r8);
+    regs.set_r9(ctx.r9);
+    regs.set_r10(ctx.r10);
+    regs.set_r11(ctx.r11);
+    regs.set_r12(ctx.r12);
+    regs.set_r13(ctx.r13);
+    regs.set_r14(ctx.r14);
+    regs.set_r15(ctx.r15);
+    vcpu.set_regs(&regs).map_err(Error::SetBaseRegisters)?;
+
+    // Set special registers (segments, CRs, EFER, GDT, IDT)
+    let mut sregs: SpecialRegisters = vcpu.get_sregs().map_err(Error::GetStatusRegisters)?;
+
+    sregs.cr0 = ctx.cr0;
+    sregs.cr3 = ctx.cr3;
+    sregs.cr4 = ctx.cr4;
+    sregs.efer = ctx.efer;
+
+    sregs.gdt = DescriptorTable {
+        base: ctx.gdtr_base,
+        limit: ctx.gdtr_limit,
+    };
+    sregs.idt = DescriptorTable {
+        base: ctx.idtr_base,
+        limit: ctx.idtr_limit,
+    };
+
+    sregs.cs = segment_from_igvm_attributes(
+        ctx.code_selector,
+        ctx.code_attributes,
+        ctx.code_base as u64,
+        ctx.code_limit,
+    );
+
+    let data_seg = segment_from_igvm_attributes(
+        ctx.data_selector,
+        ctx.data_attributes,
+        ctx.data_base as u64,
+        ctx.data_limit,
+    );
+    sregs.ds = data_seg;
+    sregs.es = data_seg;
+    sregs.fs = data_seg;
+    sregs.ss = data_seg;
+
+    // GS uses data segment attributes but with its own base
+    let mut gs_seg = data_seg;
+    gs_seg.base = ctx.gs_base;
+    sregs.gs = gs_seg;
+
+    vcpu.set_sregs(&sregs).map_err(Error::SetStatusRegisters)
 }
 
 #[cfg(test)]

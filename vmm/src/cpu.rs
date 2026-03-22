@@ -530,6 +530,9 @@ impl Vcpu {
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
         #[cfg(target_arch = "x86_64")] topology: (u16, u16, u16, u16),
         #[cfg(target_arch = "x86_64")] nested: bool,
+        #[cfg(all(target_arch = "x86_64", feature = "igvm"))] igvm_vp_context: Option<
+            &igvm_defs::IgvmNativeVpContextX64,
+        >,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
@@ -551,6 +554,8 @@ impl Vcpu {
             self.vendor,
             topology,
             nested,
+            #[cfg(feature = "igvm")]
+            igvm_vp_context,
         )
         .map_err(Error::VcpuConfiguration)?;
 
@@ -1080,6 +1085,11 @@ impl CpuManager {
             self.config.kvm_hyperv,
             topology,
             self.config.nested,
+            #[cfg(feature = "igvm")]
+            self.igvm_vp_context.as_ref().and_then(|ctx| match ctx {
+                crate::igvm::IgvmVpContext::X64Native(native) => Some(native.as_ref()),
+                _ => None,
+            }),
         )?;
 
         #[cfg(target_arch = "aarch64")]
