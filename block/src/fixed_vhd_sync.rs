@@ -11,14 +11,17 @@ use crate::BlockBackend;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
+use crate::error::{BlockError, BlockResult, ErrorOp};
 use crate::fixed_vhd::FixedVhd;
 use crate::raw_sync::RawFileSync;
 
 pub struct FixedVhdDiskSync(FixedVhd);
 
 impl FixedVhdDiskSync {
-    pub fn new(file: File) -> std::io::Result<Self> {
-        Ok(Self(FixedVhd::new(file)?))
+    pub fn new(file: File) -> BlockResult<Self> {
+        Ok(Self(
+            FixedVhd::new(file).map_err(|e| BlockError::from(e).with_op(ErrorOp::Open))?,
+        ))
     }
 }
 

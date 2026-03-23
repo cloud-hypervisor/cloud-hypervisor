@@ -573,7 +573,7 @@ pub enum DeviceManagerError {
 
     /// Failed to create FixedVhdDiskSync
     #[error("Failed to create FixedVhdDiskSync")]
-    CreateFixedVhdDiskSync(#[source] io::Error),
+    CreateFixedVhdDiskSync(#[source] BlockError),
 
     /// Failed to create QcowDiskSync
     #[error("Failed to create QcowDiskSync")]
