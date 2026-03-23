@@ -67,7 +67,7 @@ vhost-user-backend = { git = "https://github.com/rust-vmm/vhost", rev = "c9b80a1
 virtio-bindings = "0.2.6"
 virtio-queue = "0.17.0"
 vm-fdt = "0.3.0"
-vm-memory = "0.17.1"
+vm-memory = "0.18.0"
 vmm-sys-util = "0.15.0"
 
 # igvm crates
