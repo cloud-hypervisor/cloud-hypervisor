@@ -445,6 +445,15 @@ pub fn load_igvm(
             } => {
                 todo!("VbsVpContext not supported");
             }
+            IgvmDirectiveHeader::X64NativeVpContext {
+                compatibility_mask: _,
+                vp_index,
+                context,
+            } => {
+                if *vp_index == 0 {
+                    loaded_info.vp_context = Some(IgvmVpContext::X64Native(context.clone()));
+                }
+            }
             IgvmDirectiveHeader::VbsMeasurement { .. } => {
                 todo!("VbsMeasurement not supported")
             }
