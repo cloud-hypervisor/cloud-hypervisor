@@ -7,14 +7,15 @@ use std::os::unix::io::{AsRawFd, RawFd};
 
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::BlockBackend;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::error::{BlockError, BlockResult, ErrorOp};
 use crate::fixed_vhd::FixedVhd;
 use crate::raw_sync::RawFileSync;
+use crate::{BlockBackend, disk_file};
 
+#[derive(Debug)]
 pub struct FixedVhdDiskSync(FixedVhd);
 
 impl FixedVhdDiskSync {
@@ -49,6 +50,12 @@ impl DiskFile for FixedVhdDiskSync {
 
     fn fd(&mut self) -> BorrowedDiskFd<'_> {
         BorrowedDiskFd::new(self.0.as_raw_fd())
+    }
+}
+
+impl disk_file::DiskSize for FixedVhdDiskSync {
+    fn logical_size(&self) -> BlockResult<u64> {
+        Ok(self.0.logical_size().unwrap())
     }
 }
 
