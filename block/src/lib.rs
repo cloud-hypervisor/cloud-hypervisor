@@ -75,6 +75,7 @@ pub const MAX_DISCARD_WRITE_ZEROES_SEG: u32 = 1;
 
 /// Size and field offsets within `struct virtio_blk_discard_write_zeroes`.
 const DISCARD_WZ_SEG_SIZE: u32 = mem::size_of::<virtio_blk_discard_write_zeroes>() as u32;
+const DISCARD_WZ_MAX_PAYLOAD: u32 = DISCARD_WZ_SEG_SIZE * MAX_DISCARD_WRITE_ZEROES_SEG;
 const DISCARD_WZ_SECTOR_OFFSET: u64 =
     mem::offset_of!(virtio_blk_discard_write_zeroes, sector) as u64;
 const DISCARD_WZ_NUM_SECTORS_OFFSET: u64 =
@@ -600,7 +601,7 @@ impl Request {
                 if data_len < DISCARD_WZ_SEG_SIZE {
                     return Err(ExecuteError::BadRequest(Error::DescriptorLengthTooSmall));
                 }
-                if data_len > DISCARD_WZ_SEG_SIZE * MAX_DISCARD_WRITE_ZEROES_SEG {
+                if data_len > DISCARD_WZ_MAX_PAYLOAD {
                     return Err(ExecuteError::BadRequest(Error::TooManySegments));
                 }
 
@@ -649,7 +650,7 @@ impl Request {
                 if data_len < DISCARD_WZ_SEG_SIZE {
                     return Err(ExecuteError::BadRequest(Error::DescriptorLengthTooSmall));
                 }
-                if data_len > DISCARD_WZ_SEG_SIZE * MAX_DISCARD_WRITE_ZEROES_SEG {
+                if data_len > DISCARD_WZ_MAX_PAYLOAD {
                     return Err(ExecuteError::BadRequest(Error::TooManySegments));
                 }
 
