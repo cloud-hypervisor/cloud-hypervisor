@@ -110,8 +110,8 @@ pub enum Error {
     RawFileError(#[source] std::io::Error),
     #[error("The requested operation does not support multiple descriptors")]
     TooManyDescriptors,
-    #[error("Request contains too many segments")]
-    TooManySegments,
+    #[error("Request contains too many segments ({0}, max {MAX_DISCARD_WRITE_ZEROES_SEG})")]
+    TooManySegments(u32),
     #[error("Failure in vhdx")]
     VhdxError(#[source] VhdxError),
 }
@@ -602,7 +602,9 @@ impl Request {
                     return Err(ExecuteError::BadRequest(Error::DescriptorLengthTooSmall));
                 }
                 if data_len > DISCARD_WZ_MAX_PAYLOAD {
-                    return Err(ExecuteError::BadRequest(Error::TooManySegments));
+                    return Err(ExecuteError::BadRequest(Error::TooManySegments(
+                        data_len.div_ceil(DISCARD_WZ_SEG_SIZE),
+                    )));
                 }
 
                 let mut discard_sector = [0u8; 8];
@@ -651,7 +653,9 @@ impl Request {
                     return Err(ExecuteError::BadRequest(Error::DescriptorLengthTooSmall));
                 }
                 if data_len > DISCARD_WZ_MAX_PAYLOAD {
-                    return Err(ExecuteError::BadRequest(Error::TooManySegments));
+                    return Err(ExecuteError::BadRequest(Error::TooManySegments(
+                        data_len.div_ceil(DISCARD_WZ_SEG_SIZE),
+                    )));
                 }
 
                 let mut wz_sector = [0u8; 8];
