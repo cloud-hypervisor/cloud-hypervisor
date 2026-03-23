@@ -362,6 +362,18 @@ pub fn load_igvm(
                 let madt = cpu_manager.lock().unwrap().create_madt();
                 import_parameter(&mut parameter_areas, info, madt.as_slice())?;
             }
+            IgvmDirectiveHeader::Srat(info) => {
+                debug!("Srat parameter requested but no NUMA config available, importing empty");
+                import_parameter(&mut parameter_areas, info, &[])?;
+            }
+            IgvmDirectiveHeader::Slit(info) => {
+                debug!("Slit parameter requested but no NUMA config available, importing empty");
+                import_parameter(&mut parameter_areas, info, &[])?;
+            }
+            IgvmDirectiveHeader::Pptt(info) => {
+                debug!("Pptt parameter requested, importing empty");
+                import_parameter(&mut parameter_areas, info, &[])?;
+            }
             IgvmDirectiveHeader::RequiredMemory {
                 gpa,
                 compatibility_mask: _,
