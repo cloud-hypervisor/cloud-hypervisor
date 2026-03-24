@@ -569,7 +569,7 @@ pub enum DeviceManagerError {
 
     /// Failed to create FixedVhdDiskAsync
     #[error("Failed to create FixedVhdDiskAsync")]
-    CreateFixedVhdDiskAsync(#[source] io::Error),
+    CreateFixedVhdDiskAsync(#[source] BlockError),
 
     /// Failed to create FixedVhdDiskSync
     #[error("Failed to create FixedVhdDiskSync")]
