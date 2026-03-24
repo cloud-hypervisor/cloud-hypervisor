@@ -74,6 +74,8 @@ impl disk_file::DiskFd for FixedVhdDiskAsync {
     }
 }
 
+impl disk_file::Geometry for FixedVhdDiskAsync {}
+
 pub struct FixedVhdAsync {
     raw_file_async: RawFileAsync,
     size: u64,
