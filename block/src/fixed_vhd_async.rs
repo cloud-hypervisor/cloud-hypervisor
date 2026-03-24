@@ -13,8 +13,9 @@ use crate::async_io::{
 use crate::error::{BlockError, BlockResult, ErrorOp};
 use crate::fixed_vhd::FixedVhd;
 use crate::raw_async::RawFileAsync;
-use crate::{BatchRequest, BlockBackend};
+use crate::{BatchRequest, BlockBackend, disk_file};
 
+#[derive(Debug)]
 pub struct FixedVhdDiskAsync(FixedVhd);
 
 impl FixedVhdDiskAsync {
@@ -47,6 +48,12 @@ impl DiskFile for FixedVhdDiskAsync {
 
     fn fd(&mut self) -> BorrowedDiskFd<'_> {
         BorrowedDiskFd::new(self.0.as_raw_fd())
+    }
+}
+
+impl disk_file::DiskSize for FixedVhdDiskAsync {
+    fn logical_size(&self) -> BlockResult<u64> {
+        Ok(self.0.logical_size().unwrap())
     }
 }
 
