@@ -80,6 +80,16 @@ impl disk_file::Geometry for FixedVhdDiskSync {}
 
 impl disk_file::SparseCapable for FixedVhdDiskSync {}
 
+impl disk_file::Resizable for FixedVhdDiskSync {
+    fn resize(&mut self, _size: u64) -> BlockResult<()> {
+        Err(BlockError::new(
+            BlockErrorKind::UnsupportedFeature,
+            DiskFileError::ResizeError(std::io::Error::other("resize not supported for fixed VHD")),
+        )
+        .with_op(ErrorOp::Resize))
+    }
+}
+
 pub struct FixedVhdSync {
     raw_file_sync: RawFileSync,
     size: u64,
