@@ -2729,10 +2729,10 @@ impl DeviceManager {
                         }
                     } else {
                         info!("Using synchronous fixed VHD disk file");
-                        DiskBackend::Legacy(Box::new(
+                        DiskBackend::Next(Box::new(
                             FixedVhdDiskSync::new(file)
                                 .map_err(DeviceManagerError::CreateFixedVhdDiskSync)?,
-                        ) as Box<dyn DiskFile>)
+                        ))
                     }
                 }
                 ImageType::Raw => {
