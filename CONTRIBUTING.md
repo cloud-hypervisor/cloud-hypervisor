@@ -21,7 +21,7 @@ convention and enforce it through the Continuous Integration (CI) process callin
 
 ```sh
 # We currently rely on nightly-only formatting features
-cargo +nightly fmt --all 
+cargo +nightly fmt --all
 cargo check --all-targets --tests
 cargo clippy --all-targets --tests
 # Please note that this will not execute integration tests.
@@ -36,7 +36,7 @@ gitlint --commits "HEAD~3..HEAD"
 _Caution: These tests are taking a long time to complete (40+ mins) and need special setup._
 
 ```sh
- bash ./scripts/dev_cli.sh tests --integration -- --test-filter '<optionally filter test by name pattern>' 
+ bash ./scripts/dev_cli.sh tests --integration -- --test-filter '<optionally filter test by name pattern>'
 ```
 
 ### Setup Commit Hook
@@ -71,35 +71,35 @@ We require patches to:
 - Follow the pattern: \
   ```
    <component>: Change summary
-   
+
    More detailed explanation of your changes: Why and how.
    Wrap it to 72 characters.
    See http://chris.beams.io/posts/git-commit/
    for some more good pieces of advice.
-   
+
    Signed-off-by: <contributor@foo.com>
    ```
-  
+
 
 Valid components are listed in `TitleStartsWithComponent.py`. In short, each
-cargo workspace member is a valid component as well as `build`, `ci`, `docs` and 
+cargo workspace member is a valid component as well as `build`, `ci`, `docs` and
 `misc`.
 
 Example patch:
 
 ```
 vm-virtio: Reset underlying device on driver request
-    
+
 If the driver triggers a reset by writing zero into the status register
 then reset the underlying device if supported. A device reset also
 requires resetting various aspects of the queue.
-    
+
 In order to be able to do a subsequent reactivate it is required to
 reclaim certain resources (interrupt and queue EventFDs.) If a device
 reset is requested by the driver but the underlying device does not
 support it then generate an error as the driver would not be able to
 configure it anyway.
-    
+
 Signed-off-by: Rob Bradford <robert.bradford@intel.com>
 ```
 
@@ -109,11 +109,11 @@ We value a clean, **reviewable** commit history. Each commit should represent
 a self-contained, logical step that guides reviewers clearly from A to B.
 
 Avoid patterns like `init A -> init B -> fix A` or \
-`init design A -> revert A -> use design B`. Commits must be independently 
+`init design A -> revert A -> use design B`. Commits must be independently
 reviewable - don't leave "fix previous commit" or earlier design attempts in
 the history.
 
-Intermediate work-in-progress changes are acceptable only if a subsequent 
+Intermediate work-in-progress changes are acceptable only if a subsequent
 commit in the same series cleans them up (e.g. a temporary `#[allow(unused)]`
 removed in the next commit).
 
@@ -150,14 +150,14 @@ comments or by adding the `Fixes` keyword to your commit message:
 
 ```
 serial: Set terminal in raw mode
-    
+
 In order to have proper output from the serial, we need to setup the
 terminal in raw mode. When the VM is shutting down, it is also the
 VMM responsibility to set the terminal back into canonical mode if we
 don't want to get any weird behavior from the shell.
-    
+
 Fixes #88
-	
+
 Signed-off-by: Sebastien Boeuf <sebastien.boeuf@intel.com>
 ```
 
