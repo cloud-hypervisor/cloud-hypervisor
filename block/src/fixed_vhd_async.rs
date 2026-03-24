@@ -90,6 +90,26 @@ impl disk_file::Resizable for FixedVhdDiskAsync {
 
 impl disk_file::DiskFile for FixedVhdDiskAsync {}
 
+impl disk_file::AsyncDiskFile for FixedVhdDiskAsync {
+    fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
+        Ok(Box::new(FixedVhdDiskAsync(self.0.clone())))
+    }
+
+    fn new_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
+        Ok(Box::new(
+            FixedVhdAsync::new(
+                self.0.as_raw_fd(),
+                ring_depth,
+                self.0.logical_size().unwrap(),
+            )
+            .map_err(|e| {
+                BlockError::new(BlockErrorKind::Io, DiskFileError::NewAsyncIo(e))
+                    .with_op(ErrorOp::Open)
+            })?,
+        ))
+    }
+}
+
 pub struct FixedVhdAsync {
     raw_file_async: RawFileAsync,
     size: u64,
