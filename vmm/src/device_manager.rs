@@ -2722,10 +2722,10 @@ impl DeviceManager {
                         unreachable!("Checked in if statement above");
                         #[cfg(feature = "io_uring")]
                         {
-                            DiskBackend::Legacy(Box::new(
+                            DiskBackend::Next(Box::new(
                                 FixedVhdDiskAsync::new(file)
                                     .map_err(DeviceManagerError::CreateFixedVhdDiskAsync)?,
-                            ) as Box<dyn DiskFile>)
+                            ))
                         }
                     } else {
                         info!("Using synchronous fixed VHD disk file");
