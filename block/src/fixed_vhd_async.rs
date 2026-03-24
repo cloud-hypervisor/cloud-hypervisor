@@ -68,6 +68,12 @@ impl disk_file::PhysicalSize for FixedVhdDiskAsync {
     }
 }
 
+impl disk_file::DiskFd for FixedVhdDiskAsync {
+    fn fd(&self) -> BorrowedDiskFd<'_> {
+        BorrowedDiskFd::new(self.0.as_raw_fd())
+    }
+}
+
 pub struct FixedVhdAsync {
     raw_file_async: RawFileAsync,
     size: u64,
