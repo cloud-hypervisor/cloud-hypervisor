@@ -88,6 +88,8 @@ impl disk_file::Resizable for FixedVhdDiskAsync {
     }
 }
 
+impl disk_file::DiskFile for FixedVhdDiskAsync {}
+
 pub struct FixedVhdAsync {
     raw_file_async: RawFileAsync,
     size: u64,
