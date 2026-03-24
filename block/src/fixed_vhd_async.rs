@@ -7,9 +7,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
-};
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::fixed_vhd::FixedVhd;
 use crate::raw_async::RawFileAsync;
@@ -23,31 +21,6 @@ impl FixedVhdDiskAsync {
         Ok(Self(
             FixedVhd::new(file).map_err(|e| BlockError::from(e).with_op(ErrorOp::Open))?,
         ))
-    }
-}
-
-impl DiskFile for FixedVhdDiskAsync {
-    fn logical_size(&mut self) -> DiskFileResult<u64> {
-        Ok(self.0.logical_size().unwrap())
-    }
-
-    fn physical_size(&mut self) -> DiskFileResult<u64> {
-        Ok(self.0.physical_size().unwrap())
-    }
-
-    fn new_async_io(&self, ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
-        Ok(Box::new(
-            FixedVhdAsync::new(
-                self.0.as_raw_fd(),
-                ring_depth,
-                self.0.logical_size().unwrap(),
-            )
-            .map_err(DiskFileError::NewAsyncIo)?,
-        ) as Box<dyn AsyncIo>)
-    }
-
-    fn fd(&mut self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.0.as_raw_fd())
     }
 }
 
