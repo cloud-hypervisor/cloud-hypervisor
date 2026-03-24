@@ -76,6 +76,8 @@ impl disk_file::DiskFd for FixedVhdDiskSync {
     }
 }
 
+impl disk_file::Geometry for FixedVhdDiskSync {}
+
 pub struct FixedVhdSync {
     raw_file_sync: RawFileSync,
     size: u64,
