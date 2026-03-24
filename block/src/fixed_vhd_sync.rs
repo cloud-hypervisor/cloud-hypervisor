@@ -90,6 +90,8 @@ impl disk_file::Resizable for FixedVhdDiskSync {
     }
 }
 
+impl disk_file::DiskFile for FixedVhdDiskSync {}
+
 pub struct FixedVhdSync {
     raw_file_sync: RawFileSync,
     size: u64,
