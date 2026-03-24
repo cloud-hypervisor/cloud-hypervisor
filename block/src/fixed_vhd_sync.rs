@@ -10,7 +10,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
-use crate::error::{BlockError, BlockResult, ErrorOp};
+use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::fixed_vhd::FixedVhd;
 use crate::raw_sync::RawFileSync;
 use crate::{BlockBackend, disk_file};
@@ -56,6 +56,17 @@ impl DiskFile for FixedVhdDiskSync {
 impl disk_file::DiskSize for FixedVhdDiskSync {
     fn logical_size(&self) -> BlockResult<u64> {
         Ok(self.0.logical_size().unwrap())
+    }
+}
+
+impl disk_file::PhysicalSize for FixedVhdDiskSync {
+    fn physical_size(&self) -> BlockResult<u64> {
+        self.0.physical_size().map_err(|e| match e {
+            crate::Error::GetFileMetadata(io) => {
+                BlockError::new(BlockErrorKind::Io, crate::Error::GetFileMetadata(io))
+            }
+            _ => BlockError::new(BlockErrorKind::Io, e),
+        })
     }
 }
 
