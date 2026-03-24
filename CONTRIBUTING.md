@@ -164,12 +164,49 @@ Signed-off-by: Sebastien Boeuf <sebastien.boeuf@intel.com>
 Then, after the corresponding PR is merged, GitHub will automatically close that issue when parsing the
 [commit message](https://help.github.com/articles/closing-issues-via-commit-messages/).
 
-## AI Generated Code
+## AI/LLM Assistance & Generated Code
 
-Our policy is to decline any contributions known to contain contents
-generated or derived from using Large Language Models (LLMs). This
-includes ChatGPT, Gemini, Claude, Copilot and similar tools.
+We recommend **a careful and conservative approach** to LLM usage, guided by
+sound engineering judgment. Please use AI/LLM-assisted tooling thoughtfully and
+responsibly to ensure efficient use of limited project resources, particularly
+in code review and long-term maintenance. Our primary goals are to avoid
+ambiguity in license compliance and to keep contributions clear and easy to
+review.
 
-The goal is to avoid ambiguity in license compliance and optimize the
-use of limited project resources, especially for code review and
-maintenance. This policy can be revisited as LLMs evolve and mature.
+Or in other words: please apply common sense and don't blindly accept LLM
+suggestions.
+
+This policy can be revisited as LLMs evolve and mature.
+
+### Code Review
+
+We generally recommend doing early coarse-grained reviews using state-of-the-art
+LLMs. This can help identify rough edges, copy & paste errors, and typos early
+on. This reduces review cycles for human reviewers.
+
+Please **do not** use GitHub Copilot directly in PRs to keep discussions clean.
+Instead, ask an LLM of your choice for a review. A convenient way to do this is
+
+- appending `.patch` to the GitHub PR URL
+  (e.g., `https://github.com/cloud-hypervisor/cloud-hypervisor/pull/1234.patch`)
+  and pasting it into the LLM of your choice, or
+- using a local agent in your terminal, such as `codex` or `claude`.
+
+### Contributions assisted by LLMs
+
+All contributions **must** be submitted by a human contributor. Automated or
+bot-driven PRs are not accepted.
+
+You are responsible for every piece of code you submit, and you must understand
+both the design and the implementation details. LLMs are useful for prototyping
+and generating boilerplate code. However, large or complex logic must be
+authored and fully understood by the contributor - LLM output should not be
+submitted without careful review and comprehension.
+
+Please disclose LLM use in your commit message and PR description if it
+meaningfully contributed to the submitted code. Again, we recommend careful and
+conservative use of LLMs, guided by common sense.
+
+Maintainers reserve the right to request additional clarification or decline
+contributions where LLM usage raises concerns. Ultimately, acceptance of any
+contribution is at the maintainers' discretion.
