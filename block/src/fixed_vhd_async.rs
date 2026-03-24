@@ -78,6 +78,16 @@ impl disk_file::Geometry for FixedVhdDiskAsync {}
 
 impl disk_file::SparseCapable for FixedVhdDiskAsync {}
 
+impl disk_file::Resizable for FixedVhdDiskAsync {
+    fn resize(&mut self, _size: u64) -> BlockResult<()> {
+        Err(BlockError::new(
+            BlockErrorKind::UnsupportedFeature,
+            DiskFileError::ResizeError(std::io::Error::other("resize not supported for fixed VHD")),
+        )
+        .with_op(ErrorOp::Resize))
+    }
+}
+
 pub struct FixedVhdAsync {
     raw_file_async: RawFileAsync,
     size: u64,
