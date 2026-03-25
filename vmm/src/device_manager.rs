@@ -42,7 +42,7 @@ use block::raw_sync::RawFileDiskSync;
 use block::vhdx_sync::VhdxDiskSync;
 use block::{
     ImageType, block_aio_is_supported, block_io_uring_is_supported, detect_image_type,
-    open_disk_image, preallocate_disk, vhdx,
+    open_disk_image, preallocate_disk,
 };
 #[cfg(feature = "io_uring")]
 use block::{fixed_vhd_async::FixedVhdDiskAsync, raw_async::RawFileDisk};
@@ -581,7 +581,7 @@ pub enum DeviceManagerError {
 
     /// Failed to create FixedVhdxDiskSync
     #[error("Failed to create FixedVhdxDiskSync")]
-    CreateFixedVhdxDiskSync(#[source] vhdx::VhdxError),
+    CreateFixedVhdxDiskSync(#[source] BlockError),
 
     /// Failed to add DMA mapping handler to virtio-mem device.
     #[error("Failed to add DMA mapping handler to virtio-mem device")]
