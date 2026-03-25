@@ -96,6 +96,12 @@ impl disk_file::Geometry for RawFileDiskSync {
     }
 }
 
+impl disk_file::SparseCapable for RawFileDiskSync {
+    fn supports_sparse_operations(&self) -> bool {
+        probe_sparse_support(&self.file)
+    }
+}
+
 pub struct RawFileSync {
     fd: RawFd,
     eventfd: EventFd,
