@@ -13,7 +13,7 @@ build_virtiofsd() {
     VIRTIOFSD_DIR="$WORKLOADS_DIR/virtiofsd_build"
     VIRTIOFSD_REPO="https://gitlab.com/virtio-fs/virtiofsd.git"
 
-    checkout_repo "$VIRTIOFSD_DIR" "$VIRTIOFSD_REPO" v1.13.3 "bbf82173682a3e48083771a0a23331e5c23b4924"
+    checkout_repo "$VIRTIOFSD_DIR" "$VIRTIOFSD_REPO" main "0f5865629dc995a3e9d5a73b4eb45bb91740bccb"
 
     if [ ! -f "$VIRTIOFSD_DIR/.built" ]; then
         pushd "$VIRTIOFSD_DIR" || exit
