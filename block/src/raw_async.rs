@@ -96,6 +96,15 @@ impl disk_file::DiskFd for RawFileDisk {
     }
 }
 
+impl disk_file::Geometry for RawFileDisk {
+    fn topology(&self) -> DiskTopology {
+        DiskTopology::probe(&self.file).unwrap_or_else(|_| {
+            warn!("Unable to get device topology. Using default topology");
+            DiskTopology::default()
+        })
+    }
+}
+
 pub struct RawFileAsync {
     fd: RawFd,
     io_uring: IoUring,
