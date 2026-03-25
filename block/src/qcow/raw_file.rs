@@ -20,7 +20,7 @@ use vmm_sys_util::file_traits::FileSync;
 use vmm_sys_util::seek_hole::SeekHole;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use crate::BlockBackend;
+use crate::{BlockBackend, query_device_size};
 
 #[derive(Debug)]
 pub struct RawFile {
@@ -374,11 +374,15 @@ impl SeekHole for RawFile {
 
 impl BlockBackend for RawFile {
     fn logical_size(&self) -> std::result::Result<u64, crate::Error> {
-        Ok(self.metadata().map_err(crate::Error::RawFileError)?.len())
+        Ok(query_device_size(&self.file)
+            .map_err(crate::Error::RawFileError)?
+            .0)
     }
 
     fn physical_size(&self) -> std::result::Result<u64, crate::Error> {
-        Ok(self.metadata().map_err(crate::Error::RawFileError)?.len())
+        Ok(query_device_size(&self.file)
+            .map_err(crate::Error::RawFileError)?
+            .1)
     }
 }
 
