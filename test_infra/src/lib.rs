@@ -1981,7 +1981,7 @@ pub fn remote_command_w_output(
     api_socket: &str,
     command: &str,
     arg: Option<&str>,
-) -> (bool, Vec<u8>) {
+) -> (bool, Vec<u8> /* stdout */, Vec<u8> /* stderr */) {
     let mut cmd = Command::new(clh_command("ch-remote"));
     cmd.args([&format!("--api-socket={api_socket}"), command]);
 
@@ -1991,7 +1991,7 @@ pub fn remote_command_w_output(
 
     let output = cmd.output().expect("Failed to launch ch-remote");
 
-    (output.status.success(), output.stdout)
+    (output.status.success(), output.stdout, output.stderr)
 }
 
 pub fn parse_iperf3_output(output: &[u8], sender: bool, bandwidth: bool) -> Result<f64, Error> {

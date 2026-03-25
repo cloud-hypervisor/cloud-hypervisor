@@ -375,7 +375,7 @@ mod common_parallel {
         guest.wait_vm_boot().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some(
@@ -2979,7 +2979,7 @@ mod common_parallel {
             guest.wait_vm_boot().unwrap();
 
             // Add the disk to the VM
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some("path=/tmp/resize.img,id=test0"),
@@ -3094,7 +3094,7 @@ mod common_parallel {
             guest.wait_vm_boot().unwrap();
 
             // Add the QCOW2 disk to the VM
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some(&format!(
@@ -4907,7 +4907,7 @@ mod common_parallel {
 
             let pmem_temp_file = TempFile::new().unwrap();
             pmem_temp_file.as_file().set_len(128 << 20).unwrap();
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-pmem",
                 Some(&format!(
@@ -5405,7 +5405,7 @@ mod common_parallel {
             guest.wait_vm_boot().unwrap();
 
             // Hotplug the SPDK-NVMe device to the VM
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-user-device",
                 Some(&format!(
@@ -7982,7 +7982,7 @@ mod windows {
             assert_eq!(netdev_ctrl_threads_count(child.id()), netdev_num);
 
             // Hotplug network device
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-net",
                 Some(windows_guest.guest().default_net_string().as_str()),
@@ -8066,7 +8066,7 @@ mod windows {
             assert_eq!(disk_ctrl_threads_count(child.id()), disk_num);
 
             // Hotplug disk device
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some(format!("path={disk},readonly=off").as_str()),
@@ -8104,7 +8104,7 @@ mod windows {
             assert_eq!(disk_ctrl_threads_count(child.id()), disk_num);
 
             // Remount and check the file exists with the expected contents
-            let (cmd_success, _cmd_output) = remote_command_w_output(
+            let (cmd_success, _cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some(format!("path={disk},readonly=off").as_str()),
@@ -8195,7 +8195,7 @@ mod windows {
                 let expected_ctrl_threads = disk_ctrl_threads_count(child.id()) + 1;
 
                 // Hotplug disk device
-                let (cmd_success, cmd_output) = remote_command_w_output(
+                let (cmd_success, cmd_output, _) = remote_command_w_output(
                     &api_socket,
                     "add-disk",
                     Some(format!("path={disk},readonly=off").as_str()),
@@ -8248,7 +8248,7 @@ mod windows {
             // Remount
             for it in &disk_test_data {
                 let disk = it[1].as_str();
-                let (cmd_success, _cmd_output) = remote_command_w_output(
+                let (cmd_success, _cmd_output, _) = remote_command_w_output(
                     &api_socket,
                     "add-disk",
                     Some(format!("path={disk},readonly=off").as_str()),
@@ -8514,7 +8514,7 @@ mod vfio {
             guest.wait_vm_boot().unwrap();
 
             // Hotplug the card to the VM
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-device",
                 Some(format!("id=vfio0,path={NVIDIA_VFIO_DEVICE}").as_str()),
