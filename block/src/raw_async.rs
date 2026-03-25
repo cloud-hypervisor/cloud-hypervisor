@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::fs::File;
-use std::io::{Error, Seek, SeekFrom};
+use std::io::Error;
 use std::os::unix::io::{AsRawFd, RawFd};
 
 use io_uring::{IoUring, opcode, types};
@@ -14,7 +14,9 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
-use crate::{BatchRequest, DiskTopology, RequestType, SECTOR_SIZE, probe_sparse_support};
+use crate::{
+    BatchRequest, DiskTopology, RequestType, SECTOR_SIZE, probe_sparse_support, query_device_size,
+};
 
 pub struct RawFileDisk {
     file: File,
@@ -28,16 +30,15 @@ impl RawFileDisk {
 
 impl DiskFile for RawFileDisk {
     fn logical_size(&mut self) -> DiskFileResult<u64> {
-        self.file
-            .seek(SeekFrom::End(0))
-            .map_err(DiskFileError::Size)
+        Ok(query_device_size(&self.file)
+            .map_err(DiskFileError::Size)?
+            .0)
     }
 
     fn physical_size(&mut self) -> DiskFileResult<u64> {
-        self.file
-            .metadata()
-            .map(|m| m.len())
-            .map_err(DiskFileError::Size)
+        Ok(query_device_size(&self.file)
+            .map_err(DiskFileError::Size)?
+            .1)
     }
 
     fn new_async_io(&self, ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
