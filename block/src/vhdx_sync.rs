@@ -68,6 +68,8 @@ impl disk_file::DiskFd for VhdxDiskSync {
 
 impl disk_file::Geometry for VhdxDiskSync {}
 
+impl disk_file::SparseCapable for VhdxDiskSync {}
+
 impl DiskFile for VhdxDiskSync {
     fn logical_size(&mut self) -> DiskFileResult<u64> {
         Ok(self.vhdx_file.lock().unwrap().virtual_disk_size())
