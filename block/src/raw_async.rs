@@ -18,6 +18,7 @@ use crate::{
     BatchRequest, DiskTopology, RequestType, SECTOR_SIZE, probe_sparse_support, query_device_size,
 };
 
+#[derive(Debug)]
 pub struct RawFileDisk {
     file: File,
 }
