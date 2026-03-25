@@ -15,7 +15,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::{ffi, io};
 
-use block::async_io::DiskFile;
 use block::disk_file::DiskBackend;
 use block::fcntl::LockGranularityChoice;
 use block::raw_sync::RawFileDiskSync;
@@ -53,11 +52,10 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     // Create a virtio-block device backed by a synchronous raw file
     let shm = memfd_create(&ffi::CString::new("fuzz").unwrap(), 0).unwrap();
     let disk_file: File = unsafe { File::from_raw_fd(shm) };
-    let qcow_disk = Box::new(RawFileDiskSync::new(disk_file)) as Box<dyn DiskFile>;
     let queue_affinity = BTreeMap::new();
     let mut block = Block::new(
         "tmp".to_owned(),
-        DiskBackend::Legacy(qcow_disk),
+        DiskBackend::Next(Box::new(RawFileDiskSync::new(disk_file))),
         PathBuf::from(""),
         false,
         false,
