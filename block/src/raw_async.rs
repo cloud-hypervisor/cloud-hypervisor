@@ -90,6 +90,12 @@ impl disk_file::PhysicalSize for RawFileDisk {
     }
 }
 
+impl disk_file::DiskFd for RawFileDisk {
+    fn fd(&self) -> BorrowedDiskFd<'_> {
+        BorrowedDiskFd::new(self.file.as_raw_fd())
+    }
+}
+
 pub struct RawFileAsync {
     fd: RawFd,
     io_uring: IoUring,
