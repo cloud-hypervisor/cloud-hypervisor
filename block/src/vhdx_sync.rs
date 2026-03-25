@@ -14,8 +14,9 @@ use crate::async_io::{
 };
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::vhdx::Vhdx;
-use crate::{AsyncAdaptor, BlockBackend, Error};
+use crate::{AsyncAdaptor, BlockBackend, Error, disk_file};
 
+#[derive(Debug)]
 pub struct VhdxDiskSync {
     // FIXME: The Mutex serializes all VHDX I/O operations across queues, which
     // is necessary for correctness but eliminates any parallelism benefit from
@@ -35,6 +36,12 @@ impl VhdxDiskSync {
                 BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::Open)
             })?)),
         })
+    }
+}
+
+impl disk_file::DiskSize for VhdxDiskSync {
+    fn logical_size(&self) -> BlockResult<u64> {
+        Ok(self.vhdx_file.lock().unwrap().virtual_disk_size())
     }
 }
 
