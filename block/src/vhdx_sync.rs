@@ -9,9 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
-};
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::vhdx::Vhdx;
 use crate::{AsyncAdaptor, BlockBackend, Error, disk_file};
@@ -91,30 +89,6 @@ impl disk_file::AsyncDiskFile for VhdxDiskSync {
 
     fn new_async_io(&self, _ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
         Ok(Box::new(VhdxSync::new(Arc::clone(&self.vhdx_file))))
-    }
-}
-
-impl DiskFile for VhdxDiskSync {
-    fn logical_size(&mut self) -> DiskFileResult<u64> {
-        Ok(self.vhdx_file.lock().unwrap().virtual_disk_size())
-    }
-
-    fn physical_size(&mut self) -> DiskFileResult<u64> {
-        self.vhdx_file.lock().unwrap().physical_size().map_err(|e| {
-            let io_inner = match e {
-                Error::GetFileMetadata(e) => e,
-                _ => unreachable!(),
-            };
-            DiskFileError::Size(io_inner)
-        })
-    }
-
-    fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
-        Ok(Box::new(VhdxSync::new(Arc::clone(&self.vhdx_file))) as Box<dyn AsyncIo>)
-    }
-
-    fn fd(&mut self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.vhdx_file.lock().unwrap().as_raw_fd())
     }
 }
 
