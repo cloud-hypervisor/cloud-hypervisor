@@ -102,6 +102,14 @@ impl disk_file::SparseCapable for RawFileDiskSync {
     }
 }
 
+impl disk_file::Resizable for RawFileDiskSync {
+    fn resize(&mut self, size: u64) -> BlockResult<()> {
+        self.file
+            .set_len(size)
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e)))
+    }
+}
+
 pub struct RawFileSync {
     fd: RawFd,
     eventfd: EventFd,
