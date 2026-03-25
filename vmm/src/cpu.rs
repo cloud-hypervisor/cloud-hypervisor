@@ -230,14 +230,22 @@ const PR_SCHED_CORE: libc::c_int = 62;
 const PR_SCHED_CORE_GET: libc::c_int = 0;
 const PR_SCHED_CORE_CREATE: libc::c_int = 1;
 const PR_SCHED_CORE_SHARE_FROM: libc::c_int = 3;
-const PIDTYPE_PID: libc::c_int = 0;
+const PR_SCHED_CORE_SCOPE_THREAD: libc::c_int = 0;
 
 /// Create a new unique core scheduling cookie for the current thread.
 /// Silently succeeds on kernels that don't support PR_SCHED_CORE.
 fn core_scheduling_create() -> Result<()> {
     // SAFETY: prctl with PR_SCHED_CORE_CREATE on the current thread (pid=0).
     // All arguments are valid constants. We check the return value.
-    let ret = unsafe { libc::prctl(PR_SCHED_CORE, PR_SCHED_CORE_CREATE, 0, PIDTYPE_PID, 0) };
+    let ret = unsafe {
+        libc::prctl(
+            PR_SCHED_CORE,
+            PR_SCHED_CORE_CREATE,
+            0,
+            PR_SCHED_CORE_SCOPE_THREAD,
+            0,
+        )
+    };
     if ret == -1 {
         let err = io::Error::last_os_error();
         // EINVAL: kernel < 5.14 where PR_SCHED_CORE is unknown.
@@ -261,7 +269,15 @@ fn core_scheduling_create() -> Result<()> {
 fn core_scheduling_share_from(tid: i32) -> Result<()> {
     // SAFETY: prctl with PR_SCHED_CORE_SHARE_FROM targeting tid.
     // All arguments are valid. We check the return value.
-    let ret = unsafe { libc::prctl(PR_SCHED_CORE, PR_SCHED_CORE_SHARE_FROM, tid, PIDTYPE_PID, 0) };
+    let ret = unsafe {
+        libc::prctl(
+            PR_SCHED_CORE,
+            PR_SCHED_CORE_SHARE_FROM,
+            tid,
+            PR_SCHED_CORE_SCOPE_THREAD,
+            0,
+        )
+    };
     if ret == -1 {
         let err = io::Error::last_os_error();
         match err.raw_os_error() {
@@ -283,7 +299,7 @@ fn core_scheduling_cookie() -> u64 {
             PR_SCHED_CORE,
             PR_SCHED_CORE_GET,
             0,
-            PIDTYPE_PID,
+            PR_SCHED_CORE_SCOPE_THREAD,
             &mut cookie as *mut u64,
         )
     };
