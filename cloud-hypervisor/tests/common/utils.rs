@@ -277,7 +277,7 @@ pub(crate) fn remote_command_w_output(
     api_socket: &str,
     command: &str,
     arg: Option<&str>,
-) -> (bool, Vec<u8>) {
+) -> (bool, Vec<u8> /* stdout */, Vec<u8> /* stderr */) {
     let mut cmd = Command::new(clh_command("ch-remote"));
     cmd.args([&format!("--api-socket={api_socket}"), command]);
 
@@ -287,7 +287,7 @@ pub(crate) fn remote_command_w_output(
 
     let output = cmd.output().expect("Failed to launch ch-remote");
 
-    (output.status.success(), output.stdout)
+    (output.status.success(), output.stdout, output.stderr)
 }
 
 pub(crate) fn resize_command(
@@ -710,7 +710,7 @@ pub struct Counters {
 
 pub(crate) fn get_counters(api_socket: &str) -> Counters {
     // Get counters
-    let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "counters", None);
+    let (cmd_success, cmd_output, _) = remote_command_w_output(api_socket, "counters", None);
     assert!(cmd_success);
 
     let counters: HashMap<&str, HashMap<&str, u64>> =
@@ -760,7 +760,7 @@ pub(super) fn pty_read(mut pty: std::fs::File) -> Receiver<String> {
 }
 
 pub(crate) fn get_pty_path(api_socket: &str, pty_type: &str) -> PathBuf {
-    let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "info", None);
+    let (cmd_success, cmd_output, _) = remote_command_w_output(api_socket, "info", None);
     assert!(cmd_success);
     let info: serde_json::Value = serde_json::from_slice(&cmd_output).unwrap_or_default();
     assert_eq!("Pty", info["config"][pty_type]["mode"]);
@@ -808,7 +808,7 @@ pub(crate) fn cleanup_vfio_network_interfaces() {
 }
 
 pub(crate) fn balloon_size(api_socket: &str) -> u64 {
-    let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "info", None);
+    let (cmd_success, cmd_output, _) = remote_command_w_output(api_socket, "info", None);
     assert!(cmd_success);
 
     let info: serde_json::Value = serde_json::from_slice(&cmd_output).unwrap_or_default();
@@ -824,7 +824,7 @@ pub(crate) fn balloon_size(api_socket: &str) -> u64 {
 }
 
 pub(crate) fn vm_state(api_socket: &str) -> String {
-    let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "info", None);
+    let (cmd_success, cmd_output, _) = remote_command_w_output(api_socket, "info", None);
     assert!(cmd_success);
 
     let info: serde_json::Value = serde_json::from_slice(&cmd_output).unwrap_or_default();
