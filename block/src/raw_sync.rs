@@ -4,7 +4,6 @@
 
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{Seek, SeekFrom};
 use std::os::unix::io::{AsRawFd, RawFd};
 
 use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE};
@@ -14,7 +13,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
-use crate::{DiskTopology, SECTOR_SIZE, probe_sparse_support};
+use crate::{DiskTopology, SECTOR_SIZE, probe_sparse_support, query_device_size};
 
 pub struct RawFileDiskSync {
     file: File,
@@ -28,16 +27,15 @@ impl RawFileDiskSync {
 
 impl DiskFile for RawFileDiskSync {
     fn logical_size(&mut self) -> DiskFileResult<u64> {
-        self.file
-            .seek(SeekFrom::End(0))
-            .map_err(DiskFileError::Size)
+        Ok(query_device_size(&self.file)
+            .map_err(DiskFileError::Size)?
+            .0)
     }
 
     fn physical_size(&mut self) -> DiskFileResult<u64> {
-        self.file
-            .metadata()
-            .map(|m| m.len())
-            .map_err(DiskFileError::Size)
+        Ok(query_device_size(&self.file)
+            .map_err(DiskFileError::Size)?
+            .1)
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
