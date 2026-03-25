@@ -45,6 +45,21 @@ impl disk_file::DiskSize for VhdxDiskSync {
     }
 }
 
+impl disk_file::PhysicalSize for VhdxDiskSync {
+    fn physical_size(&self) -> BlockResult<u64> {
+        self.vhdx_file
+            .lock()
+            .unwrap()
+            .physical_size()
+            .map_err(|e| match e {
+                Error::GetFileMetadata(io) => {
+                    BlockError::new(BlockErrorKind::Io, Error::GetFileMetadata(io))
+                }
+                _ => BlockError::new(BlockErrorKind::Io, e),
+            })
+    }
+}
+
 impl DiskFile for VhdxDiskSync {
     fn logical_size(&mut self) -> DiskFileResult<u64> {
         Ok(self.vhdx_file.lock().unwrap().virtual_disk_size())
