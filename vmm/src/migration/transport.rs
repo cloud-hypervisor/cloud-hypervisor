@@ -1115,9 +1115,7 @@ pub(crate) fn expect_ok_response(
     socket: &mut SocketStream,
     error: MigratableError,
 ) -> Result<(), MigratableError> {
-    Response::read_from(socket)?
-        .ok_or_abandon(socket, error)
-        .map(|_| ())
+    Response::read_from(socket)?.ok_or_error(error).map(|_| ())
 }
 
 /// Send a request and validate that the peer responds with OK.
