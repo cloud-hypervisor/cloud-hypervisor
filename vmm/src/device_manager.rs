@@ -2784,10 +2784,10 @@ impl DeviceManager {
                 }
                 ImageType::Vhdx => {
                     info!("Using synchronous VHDX disk file");
-                    DiskBackend::Legacy(Box::new(
+                    DiskBackend::Next(Box::new(
                         VhdxDiskSync::new(file)
                             .map_err(DeviceManagerError::CreateFixedVhdxDiskSync)?,
-                    ) as Box<dyn DiskFile>)
+                    ))
                 }
                 ImageType::Unknown => unreachable!(),
             };
