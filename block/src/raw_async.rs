@@ -111,6 +111,14 @@ impl disk_file::SparseCapable for RawFileDisk {
     }
 }
 
+impl disk_file::Resizable for RawFileDisk {
+    fn resize(&mut self, size: u64) -> BlockResult<()> {
+        self.file
+            .set_len(size)
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e)))
+    }
+}
+
 pub struct RawFileAsync {
     fd: RawFd,
     io_uring: IoUring,
