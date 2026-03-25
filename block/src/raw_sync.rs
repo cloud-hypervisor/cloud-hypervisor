@@ -87,6 +87,15 @@ impl disk_file::DiskFd for RawFileDiskSync {
     }
 }
 
+impl disk_file::Geometry for RawFileDiskSync {
+    fn topology(&self) -> DiskTopology {
+        DiskTopology::probe(&self.file).unwrap_or_else(|_| {
+            warn!("Unable to get device topology. Using default topology");
+            DiskTopology::default()
+        })
+    }
+}
+
 pub struct RawFileSync {
     fd: RawFd,
     eventfd: EventFd,
