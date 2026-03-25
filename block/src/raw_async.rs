@@ -105,6 +105,12 @@ impl disk_file::Geometry for RawFileDisk {
     }
 }
 
+impl disk_file::SparseCapable for RawFileDisk {
+    fn supports_sparse_operations(&self) -> bool {
+        probe_sparse_support(&self.file)
+    }
+}
+
 pub struct RawFileAsync {
     fd: RawFd,
     io_uring: IoUring,
