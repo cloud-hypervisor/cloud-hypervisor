@@ -110,6 +110,8 @@ impl disk_file::Resizable for RawFileDiskSync {
     }
 }
 
+impl disk_file::DiskFile for RawFileDiskSync {}
+
 pub struct RawFileSync {
     fd: RawFd,
     eventfd: EventFd,
