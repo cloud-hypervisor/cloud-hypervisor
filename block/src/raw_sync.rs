@@ -112,6 +112,23 @@ impl disk_file::Resizable for RawFileDiskSync {
 
 impl disk_file::DiskFile for RawFileDiskSync {}
 
+impl disk_file::AsyncDiskFile for RawFileDiskSync {
+    fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
+        let file = self
+            .file
+            .try_clone()
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Clone(e)))?;
+        Ok(Box::new(RawFileDiskSync { file }))
+    }
+
+    fn new_async_io(&self, _ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
+        let mut raw = RawFileSync::new(self.file.as_raw_fd());
+        raw.alignment =
+            DiskTopology::probe(&self.file).map_or(SECTOR_SIZE, |t| t.logical_block_size);
+        Ok(Box::new(raw) as Box<dyn AsyncIo>)
+    }
+}
+
 pub struct RawFileSync {
     fd: RawFd,
     eventfd: EventFd,

@@ -24,6 +24,8 @@ pub enum DiskFileError {
     /// Resize failed
     #[error("Resize failed")]
     ResizeError(#[source] std::io::Error),
+    #[error("Failed cloning disk file")]
+    Clone(#[source] std::io::Error),
 }
 
 pub type DiskFileResult<T> = std::result::Result<T, DiskFileError>;
