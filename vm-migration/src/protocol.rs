@@ -362,17 +362,9 @@ impl Response {
         })
     }
 
-    pub fn ok_or_abandon<T>(
-        self,
-        fd: &mut T,
-        error: MigratableError,
-    ) -> Result<Response, MigratableError>
-    where
-        T: Read + Write,
-    {
+    /// Return the response if its status is `Ok`; return the caller-provided error for any other status.
+    pub fn ok_or_error(self, error: MigratableError) -> Result<Response, MigratableError> {
         if self.status != Status::Ok {
-            Request::abandon().write_to(fd)?;
-            Response::read_from(fd)?;
             return Err(error);
         }
         Ok(self)
