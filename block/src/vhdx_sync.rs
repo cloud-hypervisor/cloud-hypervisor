@@ -70,6 +70,16 @@ impl disk_file::Geometry for VhdxDiskSync {}
 
 impl disk_file::SparseCapable for VhdxDiskSync {}
 
+impl disk_file::Resizable for VhdxDiskSync {
+    fn resize(&mut self, _size: u64) -> BlockResult<()> {
+        Err(BlockError::new(
+            BlockErrorKind::UnsupportedFeature,
+            DiskFileError::ResizeError(std::io::Error::other("resize not supported for VHDX")),
+        )
+        .with_op(ErrorOp::Resize))
+    }
+}
+
 impl DiskFile for VhdxDiskSync {
     fn logical_size(&mut self) -> DiskFileResult<u64> {
         Ok(self.vhdx_file.lock().unwrap().virtual_disk_size())
