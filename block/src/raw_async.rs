@@ -82,6 +82,14 @@ impl disk_file::DiskSize for RawFileDisk {
     }
 }
 
+impl disk_file::PhysicalSize for RawFileDisk {
+    fn physical_size(&self) -> BlockResult<u64> {
+        query_device_size(&self.file)
+            .map(|(_, physical_size)| physical_size)
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Size(e)))
+    }
+}
+
 pub struct RawFileAsync {
     fd: RawFd,
     io_uring: IoUring,
