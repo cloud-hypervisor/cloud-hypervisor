@@ -119,6 +119,8 @@ impl disk_file::Resizable for RawFileDisk {
     }
 }
 
+impl disk_file::DiskFile for RawFileDisk {}
+
 pub struct RawFileAsync {
     fd: RawFd,
     io_uring: IoUring,
