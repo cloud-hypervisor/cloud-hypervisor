@@ -12,7 +12,8 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
-use crate::vhdx::{Result as VhdxResult, Vhdx};
+use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
+use crate::vhdx::Vhdx;
 use crate::{AsyncAdaptor, BlockBackend, Error};
 
 pub struct VhdxDiskSync {
@@ -28,9 +29,11 @@ pub struct VhdxDiskSync {
 }
 
 impl VhdxDiskSync {
-    pub fn new(f: File) -> VhdxResult<Self> {
+    pub fn new(f: File) -> BlockResult<Self> {
         Ok(VhdxDiskSync {
-            vhdx_file: Arc::new(Mutex::new(Vhdx::new(f)?)),
+            vhdx_file: Arc::new(Mutex::new(Vhdx::new(f).map_err(|e| {
+                BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::Open)
+            })?)),
         })
     }
 }
