@@ -60,6 +60,12 @@ impl disk_file::PhysicalSize for VhdxDiskSync {
     }
 }
 
+impl disk_file::DiskFd for VhdxDiskSync {
+    fn fd(&self) -> BorrowedDiskFd<'_> {
+        BorrowedDiskFd::new(self.vhdx_file.lock().unwrap().as_raw_fd())
+    }
+}
+
 impl DiskFile for VhdxDiskSync {
     fn logical_size(&mut self) -> DiskFileResult<u64> {
         Ok(self.vhdx_file.lock().unwrap().virtual_disk_size())
