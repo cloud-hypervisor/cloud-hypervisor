@@ -38,6 +38,7 @@ use std::fmt::{self, Debug};
 use std::fs::{File, OpenOptions};
 use std::io::{self, IoSlice, IoSliceMut, Read, Seek, SeekFrom, Write};
 use std::os::linux::fs::MetadataExt;
+use std::os::unix::fs::FileTypeExt;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 use std::str::FromStr;
@@ -61,7 +62,7 @@ use vm_memory::{
 };
 use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
-use vmm_sys_util::{aio, ioctl_io_nr};
+use vmm_sys_util::{aio, ioctl_io_nr, ioctl_ior_nr};
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
@@ -1193,6 +1194,36 @@ ioctl_io_nr!(BLKSSZGET, 0x12, 104);
 ioctl_io_nr!(BLKPBSZGET, 0x12, 123);
 ioctl_io_nr!(BLKIOMIN, 0x12, 120);
 ioctl_io_nr!(BLKIOOPT, 0x12, 121);
+ioctl_ior_nr!(BLKGETSIZE64, 0x12, 114, u64);
+
+/// Returns `(logical_size, physical_size)` in bytes for regular files and block devices.
+///
+/// For regular files, logical size is `st_size` and physical size is
+/// `st_blocks * 512` (actual host allocation). For block devices both
+/// values equal the `BLKGETSIZE64` result.
+pub fn query_device_size(file: &File) -> io::Result<(u64, u64)> {
+    let m = file.metadata()?;
+    if m.is_file() {
+        // st_blocks is always in 512-byte units on Linux
+        Ok((m.len(), m.st_blocks() * 512))
+    } else if m.file_type().is_block_device() {
+        let mut size: u64 = 0;
+        // SAFETY: BLKGETSIZE64 reads the device size into a u64 pointer.
+        let ret = unsafe { libc::ioctl(file.as_raw_fd(), BLKGETSIZE64() as _, &mut size) };
+        if ret != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok((size, size))
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "disk image must be a regular file or block device, is: {:?}",
+                m.file_type()
+            ),
+        ))
+    }
+}
 
 #[derive(Copy, Clone)]
 enum BlockSize {
