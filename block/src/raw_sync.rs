@@ -81,6 +81,12 @@ impl disk_file::PhysicalSize for RawFileDiskSync {
     }
 }
 
+impl disk_file::DiskFd for RawFileDiskSync {
+    fn fd(&self) -> BorrowedDiskFd<'_> {
+        BorrowedDiskFd::new(self.file.as_raw_fd())
+    }
+}
+
 pub struct RawFileSync {
     fd: RawFd,
     eventfd: EventFd,
