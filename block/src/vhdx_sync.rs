@@ -82,6 +82,18 @@ impl disk_file::Resizable for VhdxDiskSync {
 
 impl disk_file::DiskFile for VhdxDiskSync {}
 
+impl disk_file::AsyncDiskFile for VhdxDiskSync {
+    fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
+        Ok(Box::new(VhdxDiskSync {
+            vhdx_file: Arc::clone(&self.vhdx_file),
+        }))
+    }
+
+    fn new_async_io(&self, _ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
+        Ok(Box::new(VhdxSync::new(Arc::clone(&self.vhdx_file))))
+    }
+}
+
 impl DiskFile for VhdxDiskSync {
     fn logical_size(&mut self) -> DiskFileResult<u64> {
         Ok(self.vhdx_file.lock().unwrap().virtual_disk_size())
