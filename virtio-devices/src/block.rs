@@ -8,6 +8,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+use std::cmp::max;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::num::Wrapping;
 use std::ops::Deref;
@@ -887,10 +888,16 @@ impl Block {
         match self.lock_granularity_choice {
             LockGranularityChoice::Full => LockGranularity::WholeFile,
             LockGranularityChoice::ByteRange => {
-                // Byte-range lock covering [0, size)
-                self.disk_image.physical_size().map_or_else(
-                    // use a safe fallback
-                    |e| {
+                // Byte range lock covering [0, max(logical, physical))
+                // logical > physical for sparse files, physical > logical
+                // for small dense files due to filesystem block rounding.
+                let logical = self.disk_image.logical_size();
+                let physical = self.disk_image.physical_size();
+                match (logical, physical) {
+                    (Ok(l), Ok(p)) => LockGranularity::ByteRange(0, max(l, p)),
+                    (Ok(l), Err(_)) => LockGranularity::ByteRange(0, l),
+                    (Err(_), Ok(p)) => LockGranularity::ByteRange(0, p),
+                    (Err(e), Err(_)) => {
                         let fallback = LockGranularity::WholeFile;
                         warn!(
                             "Can't get disk size for id={},path={}, falling back to {:?}: error: {e}",
@@ -899,9 +906,8 @@ impl Block {
                             fallback
                         );
                         fallback
-                    },
-                    |size| LockGranularity::ByteRange(0, size),
-                )
+                    }
+                }
             }
         }
     }
