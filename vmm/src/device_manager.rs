@@ -2763,9 +2763,7 @@ impl DeviceManager {
                         DiskBackend::Legacy(Box::new(RawFileDiskAio::new(file)) as Box<dyn DiskFile>)
                     } else {
                         info!("Using synchronous RAW disk file");
-                        DiskBackend::Legacy(
-                            Box::new(RawFileDiskSync::new(file)) as Box<dyn DiskFile>
-                        )
+                        DiskBackend::Next(Box::new(RawFileDiskSync::new(file)))
                     }
                 }
                 ImageType::Qcow2 => {
