@@ -221,3 +221,29 @@ pub fn micro_bench_qcow_backing_read(control: &PerformanceTestControl) -> f64 {
 
     elapsed
 }
+
+/// Write num_ops clusters into a QCOW2 overlay backed by a raw file.
+///
+/// Each write triggers copy-on-write: the overlay must allocate a new
+/// cluster, update L2 and refcount tables, then write the data.  This
+/// measures the COW allocation overhead compared to writing into an
+/// empty image (no backing read needed since we overwrite the full
+/// cluster).
+///
+/// Returns the total write wall clock time in seconds.
+pub fn micro_bench_qcow_cow_write(control: &PerformanceTestControl) -> f64 {
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_backing, _overlay, disk) = util::qcow_overlay_tempfile(num_ops);
+    let mut async_io = disk.new_async_io(1).expect("new_async_io failed");
+
+    let buf = vec![0xBBu8; QCOW_CLUSTER_SIZE as usize];
+    let iovec = write_iovec(&buf);
+
+    let start = Instant::now();
+    submit_writes(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &[iovec]);
+    let elapsed = start.elapsed().as_secs_f64();
+
+    drain_completions(async_io.as_mut(), num_ops);
+
+    elapsed
+}
