@@ -9,7 +9,6 @@ use std::{result, thread};
 use event_monitor::event;
 use log::{error, info, warn};
 use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
 use vhost::vhost_user::message::{
     VhostUserConfigFlags, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
@@ -24,20 +23,13 @@ use super::vu_common_ctrl::VhostUserHandle;
 use super::{Error, Result};
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
-use crate::vhost_user::VhostUserCommon;
+use crate::vhost_user::{VhostUserCommon, VhostUserState};
 use crate::{
     ActivateResult, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM,
     VirtioCommon, VirtioDevice, VirtioInterrupt, VirtioSharedMemoryList,
 };
 
-#[derive(Serialize, Deserialize)]
-pub struct State {
-    pub avail_features: u64,
-    pub acked_features: u64,
-    pub acked_protocol_features: u64,
-    pub vu_num_queues: usize,
-    pub backend_req_support: bool,
-}
+pub type State = VhostUserState<()>;
 
 struct BackendReqHandler {}
 impl VhostUserFrontendReqHandler for BackendReqHandler {}
@@ -171,6 +163,7 @@ since the backend only supports {backend_num_queues}\n",
             acked_protocol_features: self.vu_common.acked_protocol_features,
             vu_num_queues: self.vu_common.vu_num_queues,
             backend_req_support: false,
+            ..Default::default()
         }
     }
 
