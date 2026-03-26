@@ -98,6 +98,24 @@ pub fn submit_reads(async_io: &mut dyn AsyncIo, count: usize, stride: u64, iovec
     }
 }
 
+/// Create an empty QCOW2 image sized for `num_clusters` clusters.
+/// No data clusters are allocated.
+fn create_empty_qcow_tempfile(num_clusters: usize) -> TempFile {
+    let tmp = TempFile::new().expect("failed to create tempfile");
+    let virtual_size = QCOW_CLUSTER_SIZE * num_clusters as u64;
+    let raw = RawFile::new(tmp.as_file().try_clone().unwrap(), false);
+    QcowFile::new(raw, 3, virtual_size, true).expect("failed to create qcow2 file");
+    tmp
+}
+
+/// Empty QCOW2 opened via QcowDiskSync.
+pub fn empty_qcow_tempfile(num_clusters: usize) -> (TempFile, QcowDiskSync) {
+    let tmp = create_empty_qcow_tempfile(num_clusters);
+    let disk = QcowDiskSync::new(tmp.as_file().try_clone().unwrap(), false, false, true)
+        .expect("failed to open qcow2 via QcowDiskSync");
+    (tmp, disk)
+}
+
 /// Spin and wait until the given eventfd becomes readable.
 pub fn wait_for_eventfd(notifier: &EventFd) {
     loop {
