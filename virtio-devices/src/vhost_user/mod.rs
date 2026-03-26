@@ -457,6 +457,17 @@ impl VhostUserCommon {
         Ok(())
     }
 
+    pub fn state<C: Default>(&self, common: &crate::VirtioCommon, config: C) -> VhostUserState<C> {
+        VhostUserState {
+            avail_features: common.avail_features,
+            acked_features: common.acked_features,
+            config,
+            acked_protocol_features: self.acked_protocol_features,
+            vu_num_queues: self.vu_num_queues,
+            ..Default::default()
+        }
+    }
+
     pub fn snapshot<T>(&mut self, state: &T) -> std::result::Result<Snapshot, MigratableError>
     where
         T: Serialize,

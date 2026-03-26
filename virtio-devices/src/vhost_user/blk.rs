@@ -192,14 +192,7 @@ impl Blk {
     }
 
     fn state(&self) -> State {
-        State {
-            avail_features: self.common.avail_features,
-            acked_features: self.common.acked_features,
-            config: self.config,
-            acked_protocol_features: self.vu_common.acked_protocol_features,
-            vu_num_queues: self.vu_common.vu_num_queues,
-            ..Default::default()
-        }
+        self.vu_common.state(&self.common, self.config)
     }
 }
 
