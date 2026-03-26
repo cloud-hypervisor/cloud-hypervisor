@@ -1179,6 +1179,7 @@ impl PciDevice for VirtioPciDevice {
     }
 
     fn write_bar(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+        let initial_ready = self.is_driver_ready();
         match offset {
             o if o < COMMON_CONFIG_BAR_OFFSET + COMMON_CONFIG_SIZE => self.common_config.write(
                 o - COMMON_CONFIG_BAR_OFFSET,
@@ -1230,8 +1231,8 @@ impl PciDevice for VirtioPciDevice {
             _ => (),
         }
 
-        // Try and activate the device if the driver status has changed
-        if self.needs_activation() {
+        // Try and activate the device if the driver status has changed (from unready to ready)
+        if !initial_ready && self.needs_activation() {
             let barrier = Arc::new(Barrier::new(2));
             let activator = self.prepare_activator(Some(barrier.clone()));
             self.pending_activations.lock().unwrap().push(activator);
