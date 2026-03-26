@@ -2061,7 +2061,7 @@ impl RequestHandler for Vmm {
 
                 let mut memory_actual_size = config.memory.total_size();
                 if let Some(vm) = &self.vm {
-                    memory_actual_size -= vm.balloon_size();
+                    memory_actual_size = memory_actual_size.saturating_sub(vm.balloon_size());
                 }
 
                 let device_tree = self
