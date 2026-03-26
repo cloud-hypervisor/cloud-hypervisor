@@ -196,3 +196,28 @@ pub fn micro_bench_qcow_fsync(control: &PerformanceTestControl) -> f64 {
 
     elapsed
 }
+
+/// Read num_ops clusters from a QCOW2 overlay whose data lives entirely
+/// in a raw backing file.
+///
+/// This exercises the backing file read path: L2 lookup finds no
+/// allocated cluster and falls through to the backing file for every
+/// read.
+///
+/// Returns the total read wall clock time in seconds.
+pub fn micro_bench_qcow_backing_read(control: &PerformanceTestControl) -> f64 {
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_backing, _overlay, disk) = util::qcow_overlay_tempfile(num_ops);
+    let mut async_io = disk.new_async_io(1).expect("new_async_io failed");
+
+    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
+    let iovec = read_iovec(&mut buf);
+
+    let start = Instant::now();
+    submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &[iovec]);
+    let elapsed = start.elapsed().as_secs_f64();
+
+    drain_completions(async_io.as_mut(), num_ops);
+
+    elapsed
+}
