@@ -213,7 +213,8 @@ impl VirtioDevice for GenericVhostUser {
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
-        if (VhostUserProtocolFeatures::CONFIG.bits() & self.state().acked_protocol_features) == 0 {
+        if (VhostUserProtocolFeatures::CONFIG.bits() & self.vu_common.acked_protocol_features) == 0
+        {
             self.warn_no_config_access();
 
             data.fill(0xFF);
@@ -240,7 +241,8 @@ impl VirtioDevice for GenericVhostUser {
     }
 
     fn write_config(&mut self, offset: u64, data: &[u8]) {
-        if (VhostUserProtocolFeatures::CONFIG.bits() & self.state().acked_protocol_features) == 0 {
+        if (VhostUserProtocolFeatures::CONFIG.bits() & self.vu_common.acked_protocol_features) == 0
+        {
             self.warn_no_config_access();
             return;
         }
