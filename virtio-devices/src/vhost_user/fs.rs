@@ -101,6 +101,7 @@ impl Fs {
             vu_num_queues,
             config,
             paused,
+            vring_bases,
         ) = if let Some(state) = state {
             info!("Restoring vhost-user-fs {id}");
 
@@ -109,6 +110,8 @@ impl Fs {
                 state.acked_protocol_features,
             )?;
 
+            vu.restore_state(&state)?;
+
             (
                 state.avail_features,
                 state.acked_features,
@@ -116,6 +119,7 @@ impl Fs {
                 state.vu_num_queues,
                 state.config,
                 true,
+                state.vring_bases,
             )
         } else {
             // Filling device and vring features VMM supports.
@@ -125,7 +129,8 @@ impl Fs {
                 | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
                 | VhostUserProtocolFeatures::REPLY_ACK
                 | VhostUserProtocolFeatures::INFLIGHT_SHMFD
-                | VhostUserProtocolFeatures::LOG_SHMFD;
+                | VhostUserProtocolFeatures::LOG_SHMFD
+                | VhostUserProtocolFeatures::DEVICE_STATE;
 
             let (acked_features, acked_protocol_features) =
                 vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
@@ -168,6 +173,7 @@ impl Fs {
                 num_queues,
                 config,
                 false,
+                None,
             )
         };
 
@@ -187,6 +193,7 @@ impl Fs {
                 acked_protocol_features,
                 socket_path: path.to_string(),
                 vu_num_queues,
+                vring_bases,
                 ..Default::default()
             },
             id,

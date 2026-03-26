@@ -68,64 +68,74 @@ impl GenericVhostUser {
         // Connect to the vhost-user socket.
         let mut vu = VhostUserHandle::connect_vhost_user(false, path, num_queues as u64, false)?;
 
-        let (avail_features, acked_features, acked_protocol_features, vu_num_queues, paused) =
-            if let Some(state) = state {
-                info!("Restoring generic vhost-user {id}");
-                vu.set_protocol_features_vhost_user(
-                    state.acked_features,
-                    state.acked_protocol_features,
-                )?;
+        let (
+            avail_features,
+            acked_features,
+            acked_protocol_features,
+            vu_num_queues,
+            paused,
+            vring_bases,
+        ) = if let Some(state) = state {
+            info!("Restoring generic vhost-user {id}");
+            vu.set_protocol_features_vhost_user(
+                state.acked_features,
+                state.acked_protocol_features,
+            )?;
 
-                (
-                    state.avail_features,
-                    state.acked_features,
-                    state.acked_protocol_features,
-                    state.vu_num_queues,
-                    true,
-                )
-            } else {
-                let avail_protocol_features = VhostUserProtocolFeatures::CONFIG
-                    | VhostUserProtocolFeatures::MQ
-                    | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
-                    | VhostUserProtocolFeatures::REPLY_ACK
-                    | VhostUserProtocolFeatures::INFLIGHT_SHMFD
-                    | VhostUserProtocolFeatures::LOG_SHMFD;
+            vu.restore_state(&state)?;
 
-                let avail_features = super::DEFAULT_VIRTIO_FEATURES;
+            (
+                state.avail_features,
+                state.acked_features,
+                state.acked_protocol_features,
+                state.vu_num_queues,
+                true,
+                state.vring_bases,
+            )
+        } else {
+            let avail_protocol_features = VhostUserProtocolFeatures::CONFIG
+                | VhostUserProtocolFeatures::MQ
+                | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
+                | VhostUserProtocolFeatures::REPLY_ACK
+                | VhostUserProtocolFeatures::INFLIGHT_SHMFD
+                | VhostUserProtocolFeatures::LOG_SHMFD
+                | VhostUserProtocolFeatures::DEVICE_STATE;
 
-                let (acked_features, acked_protocol_features) =
-                    vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
+            let avail_features = super::DEFAULT_VIRTIO_FEATURES;
 
-                let backend_num_queues =
-                    if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
-                        vu.socket_handle()
-                            .get_queue_num()
-                            .map_err(Error::VhostUserGetQueueMaxNum)?
-                            as usize
-                    } else {
-                        num_queues
-                    };
+            let (acked_features, acked_protocol_features) =
+                vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
 
-                if num_queues > backend_num_queues {
-                    error!(
-                        "generic vhost-user requested too many queues ({num_queues}) \
+            let backend_num_queues =
+                if acked_protocol_features & VhostUserProtocolFeatures::MQ.bits() != 0 {
+                    vu.socket_handle()
+                        .get_queue_num()
+                        .map_err(Error::VhostUserGetQueueMaxNum)? as usize
+                } else {
+                    num_queues
+                };
+
+            if num_queues > backend_num_queues {
+                error!(
+                    "generic vhost-user requested too many queues ({num_queues}) \
 since the backend only supports {backend_num_queues}\n",
-                    );
-                    return Err(Error::BadQueueNum);
-                }
+                );
+                return Err(Error::BadQueueNum);
+            }
 
-                (
-                    acked_features,
-                    // If part of the available features that have been acked, the
-                    // PROTOCOL_FEATURES bit must be already set through the VIRTIO
-                    // acked features as we know the guest would never ack it, thus
-                    // the feature would be lost.
-                    acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
-                    acked_protocol_features,
-                    num_queues,
-                    false,
-                )
-            };
+            (
+                acked_features,
+                // If part of the available features that have been acked, the
+                // PROTOCOL_FEATURES bit must be already set through the VIRTIO
+                // acked features as we know the guest would never ack it, thus
+                // the feature would be lost.
+                acked_features & VhostUserVirtioFeatures::PROTOCOL_FEATURES.bits(),
+                acked_protocol_features,
+                num_queues,
+                false,
+                None,
+            )
+        };
 
         Ok(GenericVhostUser {
             common: VirtioCommon {
@@ -143,6 +153,7 @@ since the backend only supports {backend_num_queues}\n",
                 acked_protocol_features,
                 socket_path: path.to_string(),
                 vu_num_queues,
+                vring_bases,
                 ..Default::default()
             },
             id,

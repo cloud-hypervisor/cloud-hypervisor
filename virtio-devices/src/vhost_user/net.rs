@@ -82,6 +82,7 @@ impl Net {
             vu_num_queues,
             config,
             paused,
+            vring_bases,
         ) = if let Some(state) = state {
             info!("Restoring vhost-user-net {id}");
 
@@ -94,6 +95,8 @@ impl Net {
                 backend_acked_features,
                 state.acked_protocol_features,
             )?;
+
+            vu.restore_state(&state)?;
 
             // If the control queue feature has been negotiated, let's
             // increase the number of queues.
@@ -108,6 +111,7 @@ impl Net {
                 state.vu_num_queues,
                 state.config,
                 true,
+                state.vring_bases,
             )
         } else {
             // Filling device and vring features VMM supports.
@@ -144,7 +148,8 @@ impl Net {
                 | VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS
                 | VhostUserProtocolFeatures::REPLY_ACK
                 | VhostUserProtocolFeatures::INFLIGHT_SHMFD
-                | VhostUserProtocolFeatures::LOG_SHMFD;
+                | VhostUserProtocolFeatures::LOG_SHMFD
+                | VhostUserProtocolFeatures::DEVICE_STATE;
 
             let (mut acked_features, acked_protocol_features) =
                 vu.negotiate_features_vhost_user(avail_features, avail_protocol_features)?;
@@ -187,6 +192,7 @@ impl Net {
                 vu_num_queues,
                 config,
                 false,
+                None,
             )
         };
 
@@ -208,6 +214,7 @@ impl Net {
                 socket_path: vu_cfg.socket,
                 vu_num_queues,
                 server,
+                vring_bases,
                 ..Default::default()
             },
             config,
