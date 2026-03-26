@@ -1473,4 +1473,68 @@ mod unit_tests {
         // SAFETY: buf was allocated with this layout via alloc_zeroed.
         unsafe { dealloc(buf, layout) };
     }
+
+    #[test]
+    fn test_query_device_size_regular_file() {
+        let temp_file = TempFile::new().unwrap();
+        let mut f = temp_file.into_file();
+        // 5 sectors + 13 extra bytes - not page aligned, not sectoraligned
+        f.write_all(&[0xAB; 5 * 512 + 13]).unwrap();
+        f.sync_all().unwrap();
+
+        let (logical, physical) = query_device_size(&f).unwrap();
+        assert_eq!(logical, 5 * 512 + 13);
+        assert!(physical > 0);
+    }
+
+    #[test]
+    fn test_query_device_size_sparse_file_punch_hole() {
+        let temp_file = TempFile::new().unwrap();
+        let f = temp_file.as_file();
+        // Allocate 1 MiB
+        let size: i64 = 1 << 20;
+        f.set_len(size as u64).unwrap();
+        // SAFETY: fd is valid, range is within file size.
+        let ret = unsafe {
+            libc::fallocate(
+                f.as_raw_fd(),
+                0, // allocate
+                0,
+                size,
+            )
+        };
+        assert_eq!(ret, 0, "fallocate failed: {}", io::Error::last_os_error());
+        f.sync_all().unwrap();
+
+        let (log_before, phys_before) = query_device_size(f).unwrap();
+        assert_eq!(log_before, size as u64);
+        assert_eq!(phys_before, size as u64);
+
+        // Punch a hole in the middle 512 KiB
+        // SAFETY: fd is valid, range is within file size.
+        let ret = unsafe {
+            libc::fallocate(
+                f.as_raw_fd(),
+                libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
+                size / 4,
+                size / 2,
+            )
+        };
+        assert_eq!(ret, 0, "punch hole failed: {}", io::Error::last_os_error());
+        f.sync_all().unwrap();
+
+        let (logical, physical) = query_device_size(f).unwrap();
+        assert_eq!(logical, size as u64, "logical size must not change");
+        assert!(
+            physical < logical,
+            "physical ({physical}) should be less than logical ({logical}) after punch hole"
+        );
+    }
+
+    #[test]
+    fn test_query_device_size_rejects_char_device() {
+        let f = std::fs::File::open("/dev/zero").unwrap();
+        let err = query_device_size(&f).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
 }
