@@ -5837,6 +5837,84 @@ mod common_parallel {
 
         handle_child_output(r, &output);
     }
+
+    #[test]
+    // Test that adding a duplicate PCI device ID fails
+    fn test_duplicate_pci_device_id() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+
+        #[cfg(target_arch = "x86_64")]
+        let kernel_path = direct_kernel_boot_path();
+        #[cfg(target_arch = "aarch64")]
+        let kernel_path = edk2_path();
+
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        // Boot without network
+        let mut cmd = GuestCommand::new(&guest);
+
+        cmd.args(["--api-socket", &api_socket])
+            .default_cpus()
+            .default_memory()
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_net()
+            .default_disks()
+            .capture_output();
+
+        let mut child = cmd.spawn().unwrap();
+
+        guest.wait_vm_boot().unwrap();
+
+        // Add a network device with non-static device ID request
+        let r = std::panic::catch_unwind(|| {
+            let (cmd_success, cmd_stdout, _) = remote_command_w_output(
+                &api_socket,
+                "add-net",
+                Some(
+                    format!(
+                        "id=test0,tap=,mac={},ip={},mask=255.255.255.128",
+                        guest.network.guest_mac1, guest.network.host_ip1,
+                    )
+                    .as_str(),
+                ),
+            );
+            assert!(cmd_success);
+
+            // We now know the first free device ID on the bus
+            let output = String::from_utf8(cmd_stdout).expect("should work");
+            let (_, _, first_free_device_id, _) = bdf_from_hotplug_response(output.as_str());
+            assert_ne!(first_free_device_id, 0);
+
+            let (cmd_success, _, cmd_stderr) = remote_command_w_output(
+                &api_socket,
+                "add-net",
+                Some(
+                    format!(
+                        "id=test1337,tap=,mac={},ip={},mask=255.255.255.128,pci_device_id={first_free_device_id}",
+                        guest.network.guest_mac1, guest.network.host_ip1,
+                    )
+                    .as_str(),
+                ),
+            );
+            // Check for fail; Allocating the same device ID for two devices is disallowed
+            assert!(!cmd_success);
+            // Check that the error message contains the expected error
+            let std_err_str = String::from_utf8(cmd_stderr).unwrap();
+            assert!(
+                std_err_str.contains(&format!(
+                    "Valid PCI device identifier but already used: {first_free_device_id}"
+                )),
+                "Command return was: {std_err_str}"
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
 }
 
 mod dbus_api {
