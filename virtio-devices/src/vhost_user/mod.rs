@@ -317,6 +317,10 @@ pub struct VhostUserState<C> {
     pub vu_num_queues: usize,
     #[serde(default)]
     pub backend_req_support: bool,
+    #[serde(default)]
+    pub vring_bases: Option<Vec<u64>>,
+    #[serde(default)]
+    pub backend_state: Option<Vec<u8>>,
 }
 
 #[derive(Default)]
@@ -328,6 +332,7 @@ pub struct VhostUserCommon {
     pub migration_started: bool,
     pub server: bool,
     pub interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
+    pub vring_bases: Option<Vec<u64>>,
 }
 
 impl VhostUserCommon {
@@ -359,6 +364,7 @@ impl VhostUserCommon {
             .iter()
             .map(|(i, q, e)| (*i, vm_virtio::clone_queue(q), e.try_clone().unwrap()))
             .collect::<Vec<_>>();
+        let vring_bases = self.vring_bases.take();
         vu.lock()
             .unwrap()
             .setup_vhost_user(
@@ -368,7 +374,7 @@ impl VhostUserCommon {
                 acked_features,
                 &backend_req_handler,
                 inflight.as_mut(),
-                None,
+                vring_bases.as_deref(),
             )
             .map_err(ActivateError::VhostUserSetup)?;
 
@@ -471,7 +477,7 @@ impl VhostUserCommon {
         common: &crate::VirtioCommon,
         config: C,
     ) -> std::result::Result<VhostUserState<C>, MigratableError> {
-        let state = VhostUserState {
+        let mut state = VhostUserState {
             avail_features: common.avail_features,
             acked_features: common.acked_features,
             config,
@@ -479,6 +485,17 @@ impl VhostUserCommon {
             vu_num_queues: self.vu_num_queues,
             ..Default::default()
         };
+
+        if let Some(vu) = &self.vu {
+            let mut vu_locked = vu.lock().unwrap();
+            if vu_locked.supports_device_state() {
+                let (backend_state, vring_bases) = vu_locked.save_backend_state().map_err(|e| {
+                    MigratableError::Snapshot(anyhow!("Failed saving backend state: {e:?}"))
+                })?;
+                state.backend_state = Some(backend_state);
+                state.vring_bases = Some(vring_bases);
+            }
+        }
 
         Ok(state)
     }
