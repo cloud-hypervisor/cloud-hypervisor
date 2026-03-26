@@ -17,6 +17,7 @@ use block::raw_async_aio::RawFileAsyncAio;
 use crate::PerformanceTestControl;
 use crate::util::{
     self, BLOCK_SIZE, QCOW_CLUSTER_SIZE, drain_completions, read_iovec, submit_reads,
+    submit_writes, write_iovec,
 };
 
 /// Submit num_ops AIO writes, wait for them all to land, then time
@@ -72,6 +73,32 @@ pub fn micro_bench_qcow_read(control: &PerformanceTestControl) -> f64 {
 
     let start = Instant::now();
     submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &[iovec]);
+    let elapsed = start.elapsed().as_secs_f64();
+
+    // Drain completions so Drop is clean.
+    drain_completions(async_io.as_mut(), num_ops);
+
+    elapsed
+}
+
+/// Write num_ops clusters into an empty qcow2 image through the
+/// QcowSync async_io path and time the total write_vectored wall clock.
+///
+/// This exercises the write allocation path: map_cluster_for_write
+/// allocates a new cluster and bumps refcounts, then pwrite_all writes
+/// the data.
+///
+/// Returns the total write wall clock time in seconds.
+pub fn micro_bench_qcow_write(control: &PerformanceTestControl) -> f64 {
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_tmp, disk) = util::empty_qcow_tempfile(num_ops);
+    let mut async_io = disk.new_async_io(1).expect("new_async_io failed");
+
+    let buf = vec![0xA5u8; QCOW_CLUSTER_SIZE as usize];
+    let iovec = write_iovec(&buf);
+
+    let start = Instant::now();
+    submit_writes(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &[iovec]);
     let elapsed = start.elapsed().as_secs_f64();
 
     // Drain completions so Drop is clean.
