@@ -73,11 +73,6 @@ pub(crate) fn receive_migration_socket(
             ))
         })?;
 
-        // Remove the UNIX socket file after accepting the connection
-        std::fs::remove_file(&path).map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error removing UNIX socket file: {e}"))
-        })?;
-
         Ok(SocketStream::Unix(socket))
     }
 }
