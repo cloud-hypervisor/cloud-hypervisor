@@ -16,8 +16,8 @@ use block::raw_async_aio::RawFileAsyncAio;
 
 use crate::PerformanceTestControl;
 use crate::util::{
-    self, BLOCK_SIZE, QCOW_CLUSTER_SIZE, drain_completions, read_iovec, submit_reads,
-    submit_writes, write_iovec,
+    self, BLOCK_SIZE, QCOW_CLUSTER_SIZE, deterministic_permutation, drain_completions, read_iovec,
+    submit_reads, submit_writes, write_iovec,
 };
 
 /// Submit num_ops AIO writes, wait for them all to land, then time
@@ -76,6 +76,40 @@ pub fn micro_bench_qcow_read(control: &PerformanceTestControl) -> f64 {
     let elapsed = start.elapsed().as_secs_f64();
 
     // Drain completions so Drop is clean.
+    drain_completions(async_io.as_mut(), num_ops);
+
+    elapsed
+}
+
+/// Read num_ops clusters from a prepopulated qcow2 image in random order.
+///
+/// Unlike micro_bench_qcow_read which reads sequentially, this shuffles
+/// the cluster indices to exercise L2 cache miss and eviction behaviour
+/// under random access patterns.
+///
+/// Returns the total read wall clock time in seconds.
+pub fn micro_bench_qcow_random_read(control: &PerformanceTestControl) -> f64 {
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_tmp, disk) = util::qcow_tempfile(num_ops);
+    let mut async_io = disk.new_async_io(1).expect("new_async_io failed");
+
+    let indices = deterministic_permutation(num_ops);
+
+    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
+    let iovec = read_iovec(&mut buf);
+
+    let start = Instant::now();
+    for (seq, &cluster_idx) in indices.iter().enumerate() {
+        async_io
+            .read_vectored(
+                (cluster_idx as u64 * QCOW_CLUSTER_SIZE) as libc::off_t,
+                &[iovec],
+                seq as u64,
+            )
+            .expect("read_vectored failed");
+    }
+    let elapsed = start.elapsed().as_secs_f64();
+
     drain_completions(async_io.as_mut(), num_ops);
 
     elapsed
