@@ -1055,3 +1055,29 @@ pub(crate) fn make_guest_panic(guest: &Guest) {
     // Trigger guest a panic
     guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
 }
+
+/// Extracts a BDF from a CHV returned response
+pub(crate) fn bdf_from_hotplug_response(
+    s: &str,
+) -> (
+    u16, /* Segment ID */
+    u8,  /* Bus ID */
+    u8,  /* Device ID */
+    u8,  /* Function ID */
+) {
+    let json: serde_json::Value = serde_json::from_str(s).expect("should be valid JSON");
+    let bdf_str = json["bdf"]
+        .as_str()
+        .expect("should contain string key `bdf`");
+
+    // BDF format: "SSSS:BB:DD.F"
+    let parts: Vec<&str> = bdf_str.split(&[':', '.'][..]).collect();
+    assert_eq!(parts.len(), 4, "unexpected BDF format: {bdf_str}");
+
+    let segment_id = u16::from_str_radix(parts[0], 16).unwrap();
+    let bus_id = u8::from_str_radix(parts[1], 16).unwrap();
+    let device_id = u8::from_str_radix(parts[2], 16).unwrap();
+    let function_id = u8::from_str_radix(parts[3], 16).unwrap();
+
+    (segment_id, bus_id, device_id, function_id)
+}
