@@ -17,6 +17,7 @@ use log::{debug, warn};
 use option_parser::{
     ByteSized, IntegerList, OptionParser, OptionParserError, StringList, Toggle, Tuple,
 };
+use pci::NUM_DEVICE_IDS;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use virtio_bindings::virtio_blk::VIRTIO_BLK_ID_BYTES;
@@ -402,6 +403,13 @@ pub enum ValidationError {
     /// Invalid NUMA Configuration
     #[error("NUMA Configuration is invalid")]
     InvalidNumaConfig(String),
+    /// The supplied PCI ID was greater then the max. supported number
+    /// of devices per Bus
+    #[error("Given PCI device ID ({0}) is out of the supported range of 0..{NUM_DEVICE_IDS}")]
+    InvalidPciDeviceId(u8),
+    /// The supplied PCI ID is reserved
+    #[error("Given PCI device ID ({0}) is reserved")]
+    ReservedPciDeviceId(u8),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -412,6 +420,21 @@ pub fn add_to_config<T>(items: &mut Option<Vec<T>>, item: T) {
     } else {
         *items = Some(vec![item]);
     }
+}
+
+/// Check that the PCI device supplied is neither out of range nor does
+/// it use any reserved device ID.
+fn validate_pci_device_id(device_id: u8) -> ValidationResult<()> {
+    if device_id >= pci::NUM_DEVICE_IDS {
+        // Check the given ID is not out of range
+        return Err(ValidationError::InvalidPciDeviceId(device_id));
+    } else if device_id == pci::PCI_ROOT_DEVICE_ID {
+        // Check the ID isn't any reserved one. Currently, only the device ID
+        // for the root device is reserved.
+        return Err(ValidationError::ReservedPciDeviceId(device_id));
+    }
+
+    Ok(())
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -1241,6 +1264,10 @@ impl PciDeviceCommonConfig {
             {
                 return Err(ValidationError::OnIommuSegment(self.pci_segment));
             }
+        }
+
+        if let Some(device_id) = self.pci_device_id {
+            validate_pci_device_id(device_id)?;
         }
 
         Ok(())
@@ -5643,7 +5670,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         }]);
         still_valid_config.validate().unwrap();
 
-        let mut still_valid_config = valid_config;
+        let mut still_valid_config = valid_config.clone();
         // SAFETY: Safe as the file was just opened
         let fd1 = unsafe { libc::dup(File::open("/dev/null").unwrap().as_raw_fd()) };
         // SAFETY: Safe as the file was just opened
@@ -5653,6 +5680,45 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             still_valid_config.add_preserved_fds(vec![fd1, fd2]);
         }
         let _still_valid_config = still_valid_config.clone();
+
+        // Valid BDF test
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.disks = Some(vec![DiskConfig {
+            pci_common: PciDeviceCommonConfig {
+                pci_device_id: Some(8),
+                ..Default::default()
+            },
+            ..disk_fixture()
+        }]);
+        still_valid_config.validate().unwrap();
+        // Invalid BDF - Same ID as Root device
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            pci_common: PciDeviceCommonConfig {
+                pci_device_id: Some(pci::PCI_ROOT_DEVICE_ID),
+                ..Default::default()
+            },
+            ..disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::ReservedPciDeviceId(
+                pci::PCI_ROOT_DEVICE_ID
+            ))
+        );
+        // Invalid BDF - Out of range
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            pci_common: PciDeviceCommonConfig {
+                pci_device_id: Some(pci::NUM_DEVICE_IDS + 1),
+                ..Default::default()
+            },
+            ..disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidPciDeviceId(pci::NUM_DEVICE_IDS + 1))
+        );
     }
     #[test]
     fn test_landlock_parsing() -> Result<()> {
