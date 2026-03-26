@@ -9,7 +9,6 @@ use block::VirtioBlockConfig;
 use event_monitor::event;
 use log::{error, info};
 use seccompiler::SeccompAction;
-use serde::{Deserialize, Serialize};
 use vhost::vhost_user::message::{
     VhostUserConfigFlags, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
@@ -29,19 +28,12 @@ use super::vu_common_ctrl::{VhostUserConfig, VhostUserHandle};
 use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
-use crate::vhost_user::VhostUserCommon;
+use crate::vhost_user::{VhostUserCommon, VhostUserState};
 use crate::{GuestMemoryMmap, GuestRegionMmap, VIRTIO_F_ACCESS_PLATFORM, VirtioInterrupt};
 
 const DEFAULT_QUEUE_NUMBER: usize = 1;
 
-#[derive(Serialize, Deserialize)]
-pub struct State {
-    pub avail_features: u64,
-    pub acked_features: u64,
-    pub config: VirtioBlockConfig,
-    pub acked_protocol_features: u64,
-    pub vu_num_queues: usize,
-}
+pub type State = VhostUserState<VirtioBlockConfig>;
 
 struct BackendReqHandler {}
 impl VhostUserFrontendReqHandler for BackendReqHandler {}
@@ -206,6 +198,7 @@ impl Blk {
             config: self.config,
             acked_protocol_features: self.vu_common.acked_protocol_features,
             vu_num_queues: self.vu_common.vu_num_queues,
+            ..Default::default()
         }
     }
 }

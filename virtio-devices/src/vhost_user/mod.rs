@@ -295,6 +295,22 @@ impl<S: VhostUserFrontendReqHandler> EpollHelperHandler for VhostUserEpollHandle
     }
 }
 
+/// Common snapshot state for all vhost-user device types.
+///
+/// Generic over `C` which is the device-specific config type
+/// (e.g. VirtioBlockConfig, VirtioFsConfig, VirtioNetConfig).
+/// Devices without a config type use `()`.
+#[derive(Default, Serialize, Deserialize)]
+pub struct VhostUserState<C> {
+    pub avail_features: u64,
+    pub acked_features: u64,
+    pub config: C,
+    pub acked_protocol_features: u64,
+    pub vu_num_queues: usize,
+    #[serde(default)]
+    pub backend_req_support: bool,
+}
+
 #[derive(Default)]
 pub struct VhostUserCommon {
     pub vu: Option<Arc<Mutex<VhostUserHandle>>>,
@@ -441,9 +457,9 @@ impl VhostUserCommon {
         Ok(())
     }
 
-    pub fn snapshot<'a, T>(&mut self, state: &T) -> std::result::Result<Snapshot, MigratableError>
+    pub fn snapshot<T>(&mut self, state: &T) -> std::result::Result<Snapshot, MigratableError>
     where
-        T: Serialize + Deserialize<'a>,
+        T: Serialize,
     {
         let snapshot = Snapshot::new_from_state(state)?;
 
