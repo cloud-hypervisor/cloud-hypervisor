@@ -1466,7 +1466,7 @@ pub struct VfioPciDevice {
     id: String,
     vm: Arc<dyn hypervisor::Vm>,
     device: Arc<VfioDevice>,
-    container: Arc<dyn VfioOps>,
+    vfio_ops: Arc<dyn VfioOps>,
     common: VfioCommon,
     iommu_attached: bool,
     memory_slot_allocator: MemorySlotAllocator,
@@ -1481,7 +1481,7 @@ impl VfioPciDevice {
         id: String,
         vm: Arc<dyn hypervisor::Vm>,
         device: VfioDevice,
-        container: Arc<dyn VfioOps>,
+        vfio_ops: Arc<dyn VfioOps>,
         msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         iommu_attached: bool,
@@ -1510,7 +1510,7 @@ impl VfioPciDevice {
             id,
             vm,
             device,
-            container,
+            vfio_ops,
             common,
             iommu_attached,
             memory_slot_allocator,
@@ -1705,7 +1705,7 @@ impl VfioPciDevice {
                         // user_memory_region.mapping.len() bytes of
                         // valid memory that will only be unmapped with munmap().
                         unsafe {
-                            self.container.vfio_dma_map(
+                            self.vfio_ops.vfio_dma_map(
                                 user_memory_region.start,
                                 user_memory_region.mapping.len(),
                                 user_memory_region.mapping.addr(),
@@ -1726,15 +1726,15 @@ impl VfioPciDevice {
             for user_memory_region in region.user_memory_regions.drain(..) {
                 let len = user_memory_region.mapping.len();
                 let host_addr = user_memory_region.mapping.addr();
-                // Unmap from vfio container
+                // Unmap MMIO region from the host IOMMU address space via VfioOps
                 if !self.iommu_attached
                     && let Err(e) = self
-                        .container
+                        .vfio_ops
                         .vfio_dma_unmap(user_memory_region.start, len)
                         .map_err(|e| VfioPciError::DmaUnmap(e, self.device_path.clone(), self.bdf))
                 {
                     error!(
-                        "Could not unmap mmio region from vfio container: \
+                        "Could not unmap MMIO region from the host IOMMU address space: \
                             iova 0x{:x}, size 0x{:x}: {}, ",
                         user_memory_region.start, len, e
                     );
@@ -1884,17 +1884,17 @@ impl PciDevice for VfioPciDevice {
                 for user_memory_region in region.user_memory_regions.iter_mut() {
                     let len = user_memory_region.mapping.len();
                     let host_addr = user_memory_region.mapping.addr();
-                    // Unmap the old MMIO region from vfio container
+                    // Unmap the old MMIO region from the host IOMMU address space via VfioOps
                     if !self.iommu_attached
                         && let Err(e) = self
-                            .container
+                            .vfio_ops
                             .vfio_dma_unmap(user_memory_region.start, len)
                             .map_err(|e| {
                                 VfioPciError::DmaUnmap(e, self.device_path.clone(), self.bdf)
                             })
                     {
                         error!(
-                            "Could not unmap mmio region from vfio container: \
+                            "Could not unmap MMIO region from the host IOMMU address space: \
 iova 0x{:x}, size 0x{:x}: {}, ",
                             user_memory_region.start, len, e
                         );
@@ -1938,7 +1938,7 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                     }
                     .map_err(io::Error::other)?;
 
-                    // Map the moved mmio region to vfio container
+                    // Map the moved MMIO region into the host IOMMU address space via VfioOps
                     if !self.iommu_attached {
                         // vfio_dma_map is unsound and ought to be marked as unsafe
                         #[allow(unused_unsafe)]
@@ -1946,13 +1946,13 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                         // host_addr points to len bytes of
                         // valid memory that will only be unmapped with munmap().
                         unsafe {
-                            self.container
+                            self.vfio_ops
                                 .vfio_dma_map(user_memory_region.start, len, host_addr)
                         }
                         .map_err(|e| VfioPciError::DmaMap(e, self.device_path.clone(), self.bdf))
                         .map_err(|e| {
                             io::Error::other(format!(
-                                "Could not map mmio region to vfio container: \
+                                "Could not map MMIO region into the host IOMMU address space: \
 iova 0x{:x}, size 0x{:x}: {}, ",
                                 user_memory_region.start, len, e
                             ))
@@ -1996,9 +1996,9 @@ impl Migratable for VfioPciDevice {}
 
 /// This structure implements the ExternalDmaMapping trait. It is meant to
 /// be used when the caller tries to provide a way to update the mappings
-/// associated with a specific VFIO container.
+/// associated with a specific VfioOps instance.
 pub struct VfioDmaMapping<M: GuestAddressSpace> {
-    container: Arc<dyn VfioOps>,
+    vfio_ops: Arc<dyn VfioOps>,
     memory: Arc<M>,
     mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
 }
@@ -2006,16 +2006,16 @@ pub struct VfioDmaMapping<M: GuestAddressSpace> {
 impl<M: GuestAddressSpace> VfioDmaMapping<M> {
     /// Create a DmaMapping object.
     /// # Parameters
-    /// * `container`: VFIO container object.
+    /// * `vfio_ops`: VfioOps instance.
     /// * `memory`: guest memory to mmap.
     /// * `mmio_regions`: mmio_regions to mmap.
     pub fn new(
-        container: Arc<dyn VfioOps>,
+        vfio_ops: Arc<dyn VfioOps>,
         memory: Arc<M>,
         mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
     ) -> Self {
         VfioDmaMapping {
-            container,
+            vfio_ops,
             memory,
             mmio_regions,
         }
@@ -2062,20 +2062,20 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
         // SAFETY: find_user_address and GuestMemory::get_slice() guarantee that
         // the returned pointer is valid for up to `usize_size` bytes.
         // `usize_size` is always equal to `size` due to the above `try_into()` call.
-        unsafe { self.container.vfio_dma_map(iova, size as usize, user_addr) }.map_err(|e| {
+        unsafe { self.vfio_ops.vfio_dma_map(iova, size as usize, user_addr) }.map_err(|e| {
             io::Error::other(format!(
-                "failed to map memory for VFIO container, \
+                "failed to map memory into the host IOMMU address space, \
                          iova 0x{iova:x}, gpa 0x{gpa:x}, size 0x{size:x}: {e:?}"
             ))
         })
     }
 
     fn unmap(&self, iova: u64, size: u64) -> std::result::Result<(), io::Error> {
-        self.container
+        self.vfio_ops
             .vfio_dma_unmap(iova, size as usize)
             .map_err(|e| {
                 io::Error::other(format!(
-                    "failed to unmap memory for VFIO container, \
+                    "failed to unmap memory from the host IOMMU address space, \
                      iova 0x{iova:x}, size 0x{size:x}: {e:?}"
                 ))
             })

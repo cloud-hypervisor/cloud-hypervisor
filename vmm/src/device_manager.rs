@@ -1029,10 +1029,10 @@ pub struct DeviceManager {
     // Passthrough device handle
     passthrough_device: Option<VfioDeviceFd>,
 
-    // VFIO container
-    // Only one container can be created, therefore it is stored as part of the
+    // VFIO operation instance
+    // Only one can be created, therefore it is stored as part of the
     // DeviceManager to be reused.
-    vfio_container: Option<Arc<dyn VfioOps>>,
+    vfio_ops: Option<Arc<dyn VfioOps>>,
 
     // Paravirtualized IOMMU
     iommu_device: Option<Arc<Mutex<virtio_devices::Iommu>>>,
@@ -1350,7 +1350,7 @@ impl DeviceManager {
             msi_interrupt_manager,
             legacy_interrupt_manager: None,
             passthrough_device: None,
-            vfio_container: None,
+            vfio_ops: None,
             iommu_device: None,
             iommu_mapping: None,
             iommu_attached_devices: None,
@@ -3798,7 +3798,7 @@ impl DeviceManager {
         self.add_vfio_device(device_cfg)
     }
 
-    fn create_vfio_container(&self) -> DeviceManagerResult<Arc<dyn VfioOps>> {
+    fn create_vfio_ops(&self) -> DeviceManagerResult<Arc<dyn VfioOps>> {
         let passthrough_device = self
             .passthrough_device
             .as_ref()
@@ -3830,19 +3830,24 @@ impl DeviceManager {
 
         let mut needs_dma_mapping = false;
 
-        // Here we create a new VFIO container for two reasons. Either this is
-        // the first VFIO device, meaning we need a new VFIO container, which
-        // will be shared with other VFIO devices. Or the new VFIO device is
-        // attached to a vIOMMU, meaning we must create a dedicated VFIO
-        // container. In the vIOMMU use case, we can't let all devices under
-        // the same VFIO container since we couldn't map/unmap memory for each
-        // device. That's simply because the map/unmap operations happen at the
-        // VFIO container level.
-        let vfio_container = if device_cfg.iommu {
-            let vfio_container = self.create_vfio_container()?;
+        // Here we create a new VfioOps for two reasons:
+        // 1) This is the first VFIO device, meaning we need a new VfioOps
+        //    which will be shared with other VFIO devices.
+        // 2) The new VFIO device is attached to a vIOMMU, meaning we must
+        //    create a dedicated VfioOps. In the vIOMMU use case, we can't
+        //    let all devices share the same VfioOps since we couldn't
+        //    map/unmap memory for each device independently. That's simply
+        //    because the map/unmap operations happen at the VfioOps level.
+        //
+        // Note: this is a limitation of the legacy VFIO interface using
+        // container/group. The VFIO cdev and iommufd do not have such a
+        // limitation, and this will be revised once we have VFIO cdev and
+        // iommufd support.
+        let vfio_ops = if device_cfg.iommu {
+            let vfio_ops = self.create_vfio_ops()?;
 
             let vfio_mapping = Arc::new(VfioDmaMapping::new(
-                Arc::clone(&vfio_container),
+                Arc::clone(&vfio_ops),
                 Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
                 Arc::clone(&self.mmio_regions),
             ));
@@ -3856,22 +3861,20 @@ impl DeviceManager {
                 return Err(DeviceManagerError::MissingVirtualIommu);
             }
 
-            vfio_container
-        } else if let Some(vfio_container) = &self.vfio_container {
-            Arc::clone(vfio_container)
+            vfio_ops
+        } else if let Some(vfio_ops) = &self.vfio_ops {
+            Arc::clone(vfio_ops)
         } else {
-            let vfio_container = self.create_vfio_container()?;
+            let vfio_ops = self.create_vfio_ops()?;
             needs_dma_mapping = true;
-            self.vfio_container = Some(Arc::clone(&vfio_container));
+            self.vfio_ops = Some(Arc::clone(&vfio_ops));
 
-            vfio_container
+            vfio_ops
         };
 
-        let vfio_device = VfioDevice::new(
-            &device_cfg.path,
-            Arc::clone(&vfio_container) as Arc<dyn VfioOps>,
-        )
-        .map_err(DeviceManagerError::VfioCreate)?;
+        let vfio_device =
+            VfioDevice::new(&device_cfg.path, Arc::clone(&vfio_ops) as Arc<dyn VfioOps>)
+                .map_err(DeviceManagerError::VfioCreate)?;
 
         if needs_dma_mapping {
             // Register DMA mapping in IOMMU.
@@ -3885,7 +3888,7 @@ impl DeviceManager {
                     // to len bytes of valid memory starting at as_ptr()
                     // that will only be freed with munmap().
                     unsafe {
-                        vfio_container.vfio_dma_map(
+                        vfio_ops.vfio_dma_map(
                             region.start_addr().raw_value(),
                             region.len() as usize,
                             region.as_ptr(),
@@ -3896,7 +3899,7 @@ impl DeviceManager {
             }
 
             let vfio_mapping = Arc::new(VfioDmaMapping::new(
-                Arc::clone(&vfio_container),
+                Arc::clone(&vfio_ops),
                 Arc::new(self.memory_manager.lock().unwrap().guest_memory()),
                 Arc::clone(&self.mmio_regions),
             ));
@@ -3934,7 +3937,7 @@ impl DeviceManager {
             vfio_name.clone(),
             self.address_manager.vm.clone(),
             vfio_device,
-            vfio_container,
+            vfio_ops,
             self.msi_interrupt_manager.clone(),
             legacy_interrupt_group,
             device_cfg.iommu,
@@ -4513,14 +4516,14 @@ impl DeviceManager {
         }
 
         // Take care of updating the memory for VFIO PCI devices.
-        if let Some(vfio_container) = &self.vfio_container {
+        if let Some(vfio_ops) = &self.vfio_ops {
             // vfio_dma_map is unsound and ought to be marked as unsafe
             #[allow(unused_unsafe)]
             // SAFETY: GuestMemoryMmap guarantees that region points
             // to len bytes of valid memory starting at as_ptr()
             // that will only be freed with munmap().
             unsafe {
-                vfio_container.vfio_dma_map(
+                vfio_ops.vfio_dma_map(
                     new_region.start_addr().raw_value(),
                     new_region.len() as usize,
                     new_region.as_ptr(),
@@ -4764,7 +4767,7 @@ impl DeviceManager {
 
         let (pci_device, bus_device, virtio_device, remove_dma_handler) = match pci_device_handle {
             // VirtioMemMappingSource::Container cleanup is handled by
-            // cleanup_vfio_container when the last VFIO device is removed.
+            // cleanup_vfio_ops when the last VFIO device is removed.
             PciDeviceHandle::Vfio(vfio_pci_device) => {
                 // Remove this device's MMIO regions from the DeviceManager's
                 // mmio_regions list. We match on UserMemoryRegion slot numbers
@@ -5154,11 +5157,11 @@ impl DeviceManager {
         &self.acpi_platform_addresses
     }
 
-    fn cleanup_vfio_container(&mut self) {
-        // Drop the 'vfio container' instance when "Self" is the only reference
-        if let Some(1) = self.vfio_container.as_ref().map(Arc::strong_count) {
-            debug!("Drop 'vfio container' given no active 'vfio devices'.");
-            self.vfio_container = None;
+    fn cleanup_vfio_ops(&mut self) {
+        // Drop the VfioOps instance when "Self" is the only reference
+        if let Some(1) = self.vfio_ops.as_ref().map(Arc::strong_count) {
+            debug!("Drop VfioOps given no active VFIO devices.");
+            self.vfio_ops = None;
         }
     }
 }
@@ -5644,7 +5647,7 @@ impl BusDevice for DeviceManager {
                     if let Err(e) = self.eject_device(self.selected_segment as u16, slot_id as u8) {
                         error!("Failed ejecting device {slot_id}: {e:?}");
                     }
-                    self.cleanup_vfio_container();
+                    self.cleanup_vfio_ops();
                     slot_bitmap &= !(1 << slot_id);
                 }
             }
