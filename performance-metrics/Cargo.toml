@@ -5,7 +5,7 @@ name = "performance-metrics"
 version = "0.1.0"
 
 [dependencies]
-block = { path = "../block" }
+block = { path = "../block", features = ["io_uring"] }
 clap = { workspace = true, features = ["wrap_help"] }
 dirs = { workspace = true }
 libc = { workspace = true }
