@@ -28,7 +28,7 @@ use vm_memory::{Address, FileOffset, GuestAddress, GuestMemory, GuestMemoryRegio
 use vm_migration::protocol::MemoryRangeTable;
 use vmm_sys_util::eventfd::EventFd;
 
-use super::{Error, Result};
+use super::{Error, Result, VhostUserState};
 use crate::vhost_user::Inflight;
 use crate::{
     GuestMemoryMmap, GuestRegionMmap, MmapRegion, VirtioInterrupt, VirtioInterruptType,
@@ -510,6 +510,14 @@ impl VhostUserHandle {
             .map_err(Error::VhostUserCheckDeviceState)?;
 
         Ok((state, vring_bases))
+    }
+
+    pub fn restore_state<C>(&mut self, state: &VhostUserState<C>) -> Result<()> {
+        state.validate()?;
+        if let Some(backend_state) = &state.backend_state {
+            self.restore_backend_state(backend_state)?;
+        }
+        Ok(())
     }
 
     /// Restore backend device state via the SET_DEVICE_STATE_FD protocol.

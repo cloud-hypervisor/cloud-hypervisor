@@ -156,6 +156,8 @@ pub enum Error {
     SaveRestoreBackendState(#[source] io::Error),
     #[error("Vring bases count ({0}) does not match queue count ({1})")]
     VringBasesCountMismatch(usize, usize),
+    #[error("Backend state and vring bases must both be present or both be absent")]
+    InconsistentBackendState,
 }
 type Result<T> = std::result::Result<T, Error>;
 
@@ -321,6 +323,15 @@ pub struct VhostUserState<C> {
     pub vring_bases: Option<Vec<u64>>,
     #[serde(default)]
     pub backend_state: Option<Vec<u8>>,
+}
+
+impl<C> VhostUserState<C> {
+    pub fn validate(&self) -> Result<()> {
+        if self.backend_state.is_some() != self.vring_bases.is_some() {
+            return Err(Error::InconsistentBackendState);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default)]
