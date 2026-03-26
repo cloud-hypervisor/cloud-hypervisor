@@ -16,8 +16,8 @@ use block::raw_async_aio::RawFileAsyncAio;
 
 use crate::PerformanceTestControl;
 use crate::util::{
-    self, BLOCK_SIZE, QCOW_CLUSTER_SIZE, deterministic_permutation, drain_completions, read_iovec,
-    submit_reads, submit_writes, write_iovec,
+    self, BLOCK_SIZE, L2_ENTRIES_PER_TABLE, QCOW_CLUSTER_SIZE, deterministic_permutation,
+    drain_completions, read_iovec, submit_reads, submit_writes, write_iovec,
 };
 
 /// Submit num_ops AIO writes, wait for them all to land, then time
@@ -298,6 +298,33 @@ pub fn micro_bench_qcow_multi_cluster_read(control: &PerformanceTestControl) -> 
     let elapsed = start.elapsed().as_secs_f64();
 
     drain_completions(async_io.as_mut(), num_reads);
+
+    elapsed
+}
+
+/// Read one cluster from each of num_ops distinct L2 tables in a
+/// sparsely allocated QCOW2 image.
+///
+/// The clusters are spaced L2_ENTRIES_PER_TABLE apart so every read
+/// touches a different L2 table.  With num_ops exceeding the L2 cache
+/// capacity (100 entries), this forces eviction on nearly every read
+/// and measures the cold L2 cache miss overhead.
+///
+/// Returns the total read wall clock time in seconds.
+pub fn micro_bench_qcow_l2_cache_miss(control: &PerformanceTestControl) -> f64 {
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_tmp, disk) = util::sparse_qcow_tempfile(num_ops);
+    let mut async_io = disk.new_async_io(1).expect("new_async_io failed");
+
+    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
+    let iovec = read_iovec(&mut buf);
+
+    let stride = L2_ENTRIES_PER_TABLE as u64 * QCOW_CLUSTER_SIZE;
+    let start = Instant::now();
+    submit_reads(async_io.as_mut(), num_ops, stride, &[iovec]);
+    let elapsed = start.elapsed().as_secs_f64();
+
+    drain_completions(async_io.as_mut(), num_ops);
 
     elapsed
 }
