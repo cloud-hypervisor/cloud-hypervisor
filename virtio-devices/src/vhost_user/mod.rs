@@ -148,6 +148,14 @@ pub enum Error {
     NewMmapRegion(#[source] MmapRegionError),
     #[error("Could not find the shm log region")]
     MissingShmLogRegion,
+    #[error("Failed setting device state fd")]
+    VhostUserSetDeviceStateFd(#[source] VhostError),
+    #[error("Failed checking device state")]
+    VhostUserCheckDeviceState(#[source] VhostError),
+    #[error("Failed saving/restoring backend state")]
+    SaveRestoreBackendState(#[source] io::Error),
+    #[error("Vring bases count ({0}) does not match queue count ({1})")]
+    VringBasesCountMismatch(usize, usize),
 }
 type Result<T> = std::result::Result<T, Error>;
 
@@ -360,6 +368,7 @@ impl VhostUserCommon {
                 acked_features,
                 &backend_req_handler,
                 inflight.as_mut(),
+                None,
             )
             .map_err(ActivateError::VhostUserSetup)?;
 

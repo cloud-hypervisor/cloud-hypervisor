@@ -3,8 +3,9 @@
 
 use std::ffi;
 use std::fs::File;
-use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::os::unix::net::UnixListener;
+use std::io::{Read, Write};
+use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::thread::sleep;
@@ -13,7 +14,8 @@ use std::time::{Duration, Instant};
 use log::{error, info};
 use vhost::vhost_kern::vhost_binding::{VHOST_F_LOG_ALL, VHOST_VRING_F_LOG};
 use vhost::vhost_user::message::{
-    VhostUserHeaderFlag, VhostUserInflight, VhostUserProtocolFeatures, VhostUserVirtioFeatures,
+    VhostTransferStateDirection, VhostTransferStatePhase, VhostUserHeaderFlag, VhostUserInflight,
+    VhostUserProtocolFeatures, VhostUserVirtioFeatures,
 };
 use vhost::vhost_user::{
     Frontend, FrontendReqHandler, VhostUserFrontend, VhostUserFrontendReqHandler,
@@ -54,6 +56,7 @@ pub struct VhostUserHandle {
     vu: Frontend,
     ready: bool,
     supports_migration: bool,
+    supports_device_state: bool,
     shm_log: Option<Arc<MmapRegion>>,
     acked_features: u64,
     vrings_info: Option<Vec<VringInfo>>,
@@ -164,7 +167,14 @@ impl VhostUserHandle {
         acked_features: u64,
         backend_req_handler: &Option<FrontendReqHandler<S>>,
         inflight: Option<&mut Inflight>,
+        vring_bases: Option<&[u64]>,
     ) -> Result<()> {
+        if let Some(bases) = &vring_bases
+            && bases.len() != queues.len()
+        {
+            return Err(Error::VringBasesCountMismatch(bases.len(), queues.len()));
+        }
+
         self.vu
             .set_features(acked_features)
             .map_err(Error::VhostUserSetFeatures)?;
@@ -207,7 +217,7 @@ impl VhostUserHandle {
         }
 
         let mut vrings_info = Vec::new();
-        for (queue_index, queue, queue_evt) in queues.iter() {
+        for (i, (queue_index, queue, queue_evt)) in queues.iter().enumerate() {
             let actual_size: usize = queue.size().into();
 
             let config_data = VringConfigData {
@@ -247,14 +257,16 @@ impl VhostUserHandle {
             self.vu
                 .set_vring_addr(*queue_index, &config_data)
                 .map_err(Error::VhostUserSetVringAddr)?;
+            let base = if let Some(bases) = vring_bases {
+                bases[i] as u16
+            } else {
+                queue
+                    .avail_idx(mem, Ordering::Acquire)
+                    .map_err(Error::GetAvailableIndex)?
+                    .0
+            };
             self.vu
-                .set_vring_base(
-                    *queue_index,
-                    queue
-                        .avail_idx(mem, Ordering::Acquire)
-                        .map_err(Error::GetAvailableIndex)?
-                        .0,
-                )
+                .set_vring_base(*queue_index, base)
                 .map_err(Error::VhostUserSetVringBase)?;
 
             if let Some(eventfd) =
@@ -359,6 +371,7 @@ impl VhostUserHandle {
             acked_features,
             backend_req_handler,
             inflight,
+            None,
         )
     }
 
@@ -382,6 +395,7 @@ impl VhostUserHandle {
                 vu: Frontend::from_stream(stream, num_queues),
                 ready: false,
                 supports_migration: false,
+                supports_device_state: false,
                 shm_log: None,
                 acked_features: 0,
                 vrings_info: None,
@@ -398,6 +412,7 @@ impl VhostUserHandle {
                             vu: m,
                             ready: false,
                             supports_migration: false,
+                            supports_device_state: false,
                             shm_log: None,
                             acked_features: 0,
                             vrings_info: None,
@@ -444,6 +459,91 @@ impl VhostUserHandle {
         {
             self.supports_migration = true;
         }
+        self.supports_device_state =
+            acked_protocol_features & VhostUserProtocolFeatures::DEVICE_STATE.bits() != 0;
+    }
+
+    pub fn supports_device_state(&self) -> bool {
+        self.supports_device_state
+    }
+
+    /// Save backend device state via the SET_DEVICE_STATE_FD protocol.
+    /// Returns the opaque state blob and per-queue vring base indices.
+    pub fn save_backend_state(&mut self) -> Result<(Vec<u8>, Vec<u64>)> {
+        // GET_VRING_BASE for each queue to stop the backend and capture indices
+        let mut vring_bases = Vec::new();
+        for queue_index in &self.queue_indexes {
+            let base = self
+                .vu
+                .get_vring_base(*queue_index)
+                .map_err(Error::VhostUserGetVringBase)?;
+            vring_bases.push(base as u64);
+        }
+
+        // The backend considers the vrings stopped after GET_VRING_BASE.
+        self.ready = false;
+
+        let (local, remote) = UnixStream::pair().map_err(Error::SaveRestoreBackendState)?;
+
+        let mut read_file: File = match self
+            .vu
+            .set_device_state_fd(
+                VhostTransferStateDirection::SAVE,
+                VhostTransferStatePhase::STOPPED,
+                remote.into(),
+            )
+            .map_err(Error::VhostUserSetDeviceStateFd)?
+        {
+            Some(file) => file,
+            None => OwnedFd::from(local).into(),
+        };
+
+        // Read all state from the socket
+        let mut state = Vec::new();
+        read_file
+            .read_to_end(&mut state)
+            .map_err(Error::SaveRestoreBackendState)?;
+
+        // Verify the transfer succeeded
+        self.vu
+            .check_device_state()
+            .map_err(Error::VhostUserCheckDeviceState)?;
+
+        Ok((state, vring_bases))
+    }
+
+    /// Restore backend device state via the SET_DEVICE_STATE_FD protocol.
+    /// Sends the saved opaque state blob to the backend via a socket.
+    pub fn restore_backend_state(&mut self, state: &[u8]) -> Result<()> {
+        let (local, remote) = UnixStream::pair().map_err(Error::SaveRestoreBackendState)?;
+
+        // Explicit scope to close the write end and signal EOF to the backend
+        {
+            let mut write_file: File = match self
+                .vu
+                .set_device_state_fd(
+                    VhostTransferStateDirection::LOAD,
+                    VhostTransferStatePhase::STOPPED,
+                    remote.into(),
+                )
+                .map_err(Error::VhostUserSetDeviceStateFd)?
+            {
+                Some(file) => file,
+                None => OwnedFd::from(local).into(),
+            };
+
+            // Write the saved state to the socket
+            write_file
+                .write_all(state)
+                .map_err(Error::SaveRestoreBackendState)?;
+        }
+
+        // Verify the transfer succeeded
+        self.vu
+            .check_device_state()
+            .map_err(Error::VhostUserCheckDeviceState)?;
+
+        Ok(())
     }
 
     fn update_log_base(&mut self, last_ram_addr: u64) -> Result<Option<Arc<MmapRegion>>> {
