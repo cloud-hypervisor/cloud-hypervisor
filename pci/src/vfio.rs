@@ -1564,13 +1564,33 @@ impl VfioPciDevice {
                             let (offset, size) = msix.cap.table_range();
                             let offset = align_page_size_down(offset);
                             let size = align_page_size_up(size);
-                            inter_ranges.insert(offset, size);
+                            // MSI-X mmap region safety: when a device has a non page
+                            // aligned MSI-X offset, fixup_msix_region() relocates MSI-X
+                            // to the upper half of an enlarged virtual BAR, causing the
+                            // offsets in msix.cap to exceed the physical BAR size. This
+                            // check skips carving a hole, preventing invalid offsets from
+                            // reaching the mmap path. With no holes,
+                            // generate_sparse_areas() returns a single sparse region
+                            // covering the entire physical BAR. The relocated MSI-X in
+                            // the virtual BAR remains trapped because its upper half has
+                            // no mmap backing. Exposing the physical MSI-X region through
+                            // mmap is safe when the kernel advertises
+                            // VFIO_REGION_INFO_CAP_MSIX_MAPPABLE. When MSI-X offsets are
+                            // already page aligned, fixup_msix_region() does not relocate
+                            // and this check is satisfied, so a hole is carved at the
+                            // intended offset as before.
+                            if offset < region_size {
+                                inter_ranges.insert(offset, size);
+                            }
                         }
                         if region_index == msix.cap.pba_bir() {
                             let (offset, size) = msix.cap.pba_range();
                             let offset = align_page_size_down(offset);
                             let size = align_page_size_up(size);
-                            inter_ranges.insert(offset, size);
+                            // See MSI-X mmap safety comment above.
+                            if offset < region_size {
+                                inter_ranges.insert(offset, size);
+                            }
                         }
                     }
 
