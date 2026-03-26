@@ -7078,6 +7078,158 @@ mod common_sequential {
     }
 
     #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_virtio_fs() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
+
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
+        let mut shared_dir = workload_path;
+        shared_dir.push("shared_dir");
+
+        let (mut daemon_child, virtiofsd_socket_path) =
+            prepare_virtiofsd(&guest.tmp_dir, shared_dir.to_str().unwrap());
+
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_source])
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=512M,shared=on"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .default_disks()
+            .default_net()
+            .args([
+                "--fs",
+                format!("socket={virtiofsd_socket_path},tag=myfs,num_queues=1,queue_size=1024")
+                    .as_str(),
+            ])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // Mount virtiofs and write a test file
+            guest
+                .ssh_command("mkdir -p mount_dir && sudo mount -t virtiofs myfs mount_dir/")
+                .unwrap();
+
+            // Verify the shared directory is accessible
+            assert_eq!(
+                guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
+                "foo"
+            );
+
+            // Write a file from the guest
+            guest
+                .ssh_command(
+                    "sudo bash -c 'echo snapshot_test_data > mount_dir/snapshot_test_file'",
+                )
+                .unwrap();
+
+            snapshot_and_check_events(&api_socket_source, &snapshot_dir, &event_path);
+        });
+
+        // Shutdown the source VM
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        // Kill the old virtiofsd
+        let _ = daemon_child.kill();
+        let _ = daemon_child.wait();
+
+        // Start a fresh virtiofsd (reusing the same socket path)
+        let (mut daemon_child, _) = prepare_virtiofsd(&guest.tmp_dir, shared_dir.to_str().unwrap());
+
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+        let event_path_restored = format!("{}.2", temp_event_monitor_path(&guest.tmp_dir));
+
+        // Restore the VM from the snapshot
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_restored])
+            .args([
+                "--event-monitor",
+                format!("path={event_path_restored}").as_str(),
+            ])
+            .args([
+                "--restore",
+                format!("source_url=file://{snapshot_dir}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        // Wait for the VM to be restored
+        thread::sleep(std::time::Duration::new(20, 0));
+
+        let latest_events = [&MetaEvent {
+            event: "restored".to_string(),
+            device_id: None,
+        }];
+        assert!(check_latest_events_exact(
+            &latest_events,
+            &event_path_restored
+        ));
+
+        // Remove the snapshot dir
+        let _ = remove_dir_all(snapshot_dir.as_str());
+
+        let r = std::panic::catch_unwind(|| {
+            // Resume the VM
+            assert!(remote_command(&api_socket_restored, "resume", None));
+            thread::sleep(std::time::Duration::new(5, 0));
+
+            // Verify virtiofs still works after restore
+            // Read the file written before snapshot
+            assert_eq!(
+                guest
+                    .ssh_command("cat mount_dir/snapshot_test_file")
+                    .unwrap()
+                    .trim(),
+                "snapshot_test_data"
+            );
+
+            // Read the pre-existing shared file
+            assert_eq!(
+                guest.ssh_command("cat mount_dir/file1").unwrap().trim(),
+                "foo"
+            );
+
+            // Write a new file after restore
+            guest
+                .ssh_command("sudo bash -c 'echo post_restore_data > mount_dir/post_restore_file'")
+                .unwrap();
+
+            // Verify the new file exists on the host
+            let post_restore_content =
+                std::fs::read_to_string(shared_dir.join("post_restore_file")).unwrap();
+            assert_eq!(post_restore_content.trim(), "post_restore_data");
+        });
+
+        // Shutdown the target VM
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        // Clean up virtiofsd and test files
+        let _ = daemon_child.kill();
+        let _ = daemon_child.wait();
+        let _ = std::fs::remove_file(shared_dir.join("snapshot_test_file"));
+        let _ = std::fs::remove_file(shared_dir.join("post_restore_file"));
+    }
+
+    #[test]
     fn test_virtio_pmem_persist_writes() {
         test_virtio_pmem(false, false);
     }
