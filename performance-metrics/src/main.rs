@@ -35,6 +35,31 @@ pub struct PerformanceTestResult {
     std_dev: f64,
     max: f64,
     min: f64,
+    status: String,
+}
+
+impl PerformanceTestResult {
+    fn passed(name: &str, mean: f64, std_dev: f64, max: f64, min: f64) -> Self {
+        Self {
+            name: name.to_string(),
+            mean,
+            std_dev,
+            max,
+            min,
+            status: "PASSED".to_string(),
+        }
+    }
+
+    fn failed(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            mean: 0.0,
+            std_dev: 0.0,
+            max: 0.0,
+            min: 0.0,
+            status: "FAILED".to_string(),
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -280,13 +305,7 @@ impl PerformanceTest {
         let max = (self.unit_adjuster)(metrics.clone().into_iter().reduce(f64::max).unwrap());
         let min = (self.unit_adjuster)(metrics.clone().into_iter().reduce(f64::min).unwrap());
 
-        PerformanceTestResult {
-            name: self.name.to_string(),
-            mean,
-            std_dev,
-            max,
-            min,
-        }
+        PerformanceTestResult::passed(self.name, mean, std_dev, max, min)
     }
 
     // Calculate the timeout for each test
@@ -1317,6 +1336,14 @@ fn main() {
                 .required(false),
         )
         .arg(
+            Arg::new("continue-on-failure")
+                .long("continue-on-failure")
+                .help("Continue running remaining tests after a test failure")
+                .num_args(0)
+                .action(ArgAction::SetTrue)
+                .required(false),
+        )
+        .arg(
             Arg::new("report-file")
                 .long("report-file")
                 .help("Report file. Standard error is used if not specified")
@@ -1406,6 +1433,9 @@ fn main() {
         init_tests(&overrides);
     }
 
+    let continue_on_failure = cmd_arguments.get_flag("continue-on-failure");
+    let mut has_failure = false;
+
     for test in tests_to_run {
         settle_host();
         match run_test_with_timeout(test, &overrides) {
@@ -1413,8 +1443,17 @@ fn main() {
                 metrics_report.results.push(r);
             }
             Err(e) => {
-                eprintln!("Aborting test due to error: '{e:?}'");
-                std::process::exit(1);
+                if continue_on_failure {
+                    eprintln!("Test '{}' failed: '{e:?}'. Continuing.", test.name);
+                    has_failure = true;
+                    metrics_report
+                        .results
+                        .push(PerformanceTestResult::failed(test.name));
+                    cleanup_stale_processes();
+                } else {
+                    eprintln!("Aborting test due to error: '{e:?}'");
+                    std::process::exit(1);
+                }
             }
         }
     }
@@ -1448,4 +1487,8 @@ fn main() {
             std::process::exit(1);
         })
         .unwrap();
+
+    if has_failure {
+        std::process::exit(1);
+    }
 }
