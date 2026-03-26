@@ -247,3 +247,27 @@ pub fn micro_bench_qcow_cow_write(control: &PerformanceTestControl) -> f64 {
 
     elapsed
 }
+
+/// Read num_ops clusters from a zlib compressed QCOW2 image.
+///
+/// Every cluster is stored compressed, so each read triggers
+/// decompression.  This isolates the decompression overhead from
+/// the normal allocated-cluster read path.
+///
+/// Returns the total read wall clock time in seconds.
+pub fn micro_bench_qcow_compressed_read(control: &PerformanceTestControl) -> f64 {
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_tmp, disk) = util::compressed_qcow_tempfile(num_ops);
+    let mut async_io = disk.new_async_io(1).expect("new_async_io failed");
+
+    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
+    let iovec = read_iovec(&mut buf);
+
+    let start = Instant::now();
+    submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &[iovec]);
+    let elapsed = start.elapsed().as_secs_f64();
+
+    drain_completions(async_io.as_mut(), num_ops);
+
+    elapsed
+}
