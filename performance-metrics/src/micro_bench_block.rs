@@ -17,7 +17,8 @@ use block::raw_async_aio::RawFileAsyncAio;
 use crate::PerformanceTestControl;
 use crate::util::{
     self, BLOCK_SIZE, L2_ENTRIES_PER_TABLE, QCOW_CLUSTER_SIZE, deterministic_permutation,
-    drain_completions, read_iovec, submit_reads, submit_writes, write_iovec,
+    drain_async_completions, drain_completions, read_iovec, submit_reads, submit_writes,
+    write_iovec,
 };
 
 /// Submit num_ops AIO writes, wait for them all to land, then time
@@ -327,4 +328,30 @@ pub fn micro_bench_qcow_l2_cache_miss(control: &PerformanceTestControl) -> f64 {
     drain_completions(async_io.as_mut(), num_ops);
 
     elapsed
+}
+
+/// Read num_ops clusters from a prepopulated qcow2 image through the
+/// QcowAsync io_uring path and time the total wall clock.
+///
+/// Unlike micro_bench_qcow_read which uses QcowDiskSync (blocking),
+/// this uses QcowDiskAsync where single-allocated-cluster reads go
+/// through io_uring for true asynchronous completion.
+///
+/// Returns the total read wall clock time in seconds.
+pub fn micro_bench_qcow_async_read(control: &PerformanceTestControl) -> f64 {
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_tmp, disk) = util::qcow_async_tempfile(num_ops);
+    let mut async_io = disk
+        .new_async_io(num_ops as u32)
+        .expect("new_async_io failed");
+
+    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
+    let iovec = read_iovec(&mut buf);
+
+    let start = Instant::now();
+    submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &[iovec]);
+
+    // Drain all io_uring completions before stopping the clock.
+    drain_async_completions(async_io.as_mut(), num_ops);
+    start.elapsed().as_secs_f64()
 }
