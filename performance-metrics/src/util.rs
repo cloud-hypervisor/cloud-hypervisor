@@ -237,6 +237,35 @@ pub fn compressed_qcow_tempfile(num_clusters: usize) -> (TempFile, QcowDiskSync)
     (tmp, disk)
 }
 
+/// Number of data clusters covered by a single L2 table (64 KiB cluster,
+/// 8-byte entries -> 8192 entries per L2 table).
+pub const L2_ENTRIES_PER_TABLE: usize = QCOW_CLUSTER_SIZE as usize / 8;
+
+/// Create a sparse QCOW2 image with one allocated cluster per L2 table,
+/// spanning `num_l2_tables` L2 tables.
+fn create_sparse_qcow_tempfile(num_l2_tables: usize) -> TempFile {
+    let virtual_size = QCOW_CLUSTER_SIZE * (num_l2_tables as u64 * L2_ENTRIES_PER_TABLE as u64);
+    let tmp = TempFile::new().expect("failed to create tempfile");
+    let raw = RawFile::new(tmp.as_file().try_clone().unwrap(), false);
+    let mut qcow = QcowFile::new(raw, 3, virtual_size, true).expect("failed to create qcow2 file");
+    let buf = vec![0xA5u8; QCOW_CLUSTER_SIZE as usize];
+    for i in 0..num_l2_tables {
+        let offset = i as u64 * L2_ENTRIES_PER_TABLE as u64 * QCOW_CLUSTER_SIZE;
+        qcow.seek(SeekFrom::Start(offset)).expect("seek failed");
+        qcow.write_all(&buf).expect("write failed");
+    }
+    qcow.flush().expect("flush failed");
+    tmp
+}
+
+/// Sparse QCOW2 opened via QcowDiskSync.
+pub fn sparse_qcow_tempfile(num_l2_tables: usize) -> (TempFile, QcowDiskSync) {
+    let tmp = create_sparse_qcow_tempfile(num_l2_tables);
+    let disk = QcowDiskSync::new(tmp.as_file().try_clone().unwrap(), false, false, true)
+        .expect("failed to open qcow2 via QcowDiskSync");
+    (tmp, disk)
+}
+
 /// Spin and wait until the given eventfd becomes readable.
 pub fn wait_for_eventfd(notifier: &EventFd) {
     loop {
