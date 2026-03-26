@@ -378,7 +378,7 @@ mod adjuster {
     }
 }
 
-const TEST_LIST: [PerformanceTest; 64] = [
+const TEST_LIST: [PerformanceTest; 66] = [
     PerformanceTest {
         name: "boot_time_ms",
         func_ptr: performance_boot_time,
@@ -1268,6 +1268,30 @@ const TEST_LIST: [PerformanceTest; 64] = [
     PerformanceTest {
         name: "micro_block_qcow_read_256_us",
         func_ptr: micro_bench_block::micro_bench_qcow_read,
+        control: PerformanceTestControl {
+            test_timeout: 10,
+            test_iterations: 20,
+            warmup_iterations: 5,
+            num_ops: Some(256),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::s_to_us,
+    },
+    PerformanceTest {
+        name: "micro_block_qcow_write_128_us",
+        func_ptr: micro_bench_block::micro_bench_qcow_write,
+        control: PerformanceTestControl {
+            test_timeout: 10,
+            test_iterations: 20,
+            warmup_iterations: 5,
+            num_ops: Some(128),
+            ..PerformanceTestControl::default()
+        },
+        unit_adjuster: adjuster::s_to_us,
+    },
+    PerformanceTest {
+        name: "micro_block_qcow_write_256_us",
+        func_ptr: micro_bench_block::micro_bench_qcow_write,
         control: PerformanceTestControl {
             test_timeout: 10,
             test_iterations: 20,
