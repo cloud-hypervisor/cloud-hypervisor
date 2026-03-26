@@ -9,7 +9,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 //
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
@@ -1002,7 +1002,7 @@ pub struct DeviceManager {
     cpu_manager: Arc<Mutex<CpuManager>>,
 
     // The virtio devices on the system
-    virtio_devices: Vec<MetaVirtioDevice>,
+    virtio_devices: VecDeque<MetaVirtioDevice>,
 
     /// All disks. Needed for locking and unlocking the images.
     block_devices: Vec<Arc<Mutex<Block>>>,
@@ -1343,7 +1343,7 @@ impl DeviceManager {
             config,
             memory_manager,
             cpu_manager,
-            virtio_devices: Vec::new(),
+            virtio_devices: VecDeque::new(),
             block_devices: vec![],
             bus_devices: Vec::new(),
             device_id_cnt,
@@ -2393,15 +2393,19 @@ impl DeviceManager {
         )
         .map_err(DeviceManagerError::CreateVirtioConsole)?;
         let virtio_console_device = Arc::new(Mutex::new(virtio_console_device));
-        self.virtio_devices.push(MetaVirtioDevice {
-            virtio_device: Arc::clone(&virtio_console_device)
-                as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-            iommu: console_config.iommu,
-            id: id.clone(),
-            pci_segment: 0,
-            dma_handler: None,
-            bdf_device: console_config.bdf_device,
-        });
+
+        DeviceManager::add_virtio_device(
+            &mut self.virtio_devices,
+            MetaVirtioDevice {
+                virtio_device: Arc::clone(&virtio_console_device)
+                    as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
+                iommu: console_config.iommu,
+                id: id.clone(),
+                pci_segment: 0,
+                dma_handler: None,
+                bdf_device: console_config.bdf_device,
+            },
+        );
 
         // Fill the device tree with a new node. In case of restore, we
         // know there is nothing to do, so we can simply override the
@@ -2545,6 +2549,19 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::DiskLockError)?;
         }
         Ok(())
+    }
+
+    /// Add a virtio to the device manager.
+    ///
+    /// Developer Note: This is a associated function because we might
+    /// want to call this helper in places where we cannot create a
+    /// mutable borrow of a [`DeviceManager`] instance.
+    fn add_virtio_device(devices: &mut VecDeque<MetaVirtioDevice>, device: MetaVirtioDevice) {
+        if device.bdf_device.is_some() {
+            devices.push_front(device);
+        } else {
+            devices.push_back(device);
+        }
     }
 
     fn make_virtio_devices(&mut self) -> DeviceManagerResult<()> {
@@ -2906,7 +2923,7 @@ impl DeviceManager {
         if let Some(disk_list_cfg) = &mut block_devices {
             for disk_cfg in disk_list_cfg.iter_mut() {
                 let device = self.make_virtio_block_device(disk_cfg, false)?;
-                self.virtio_devices.push(device);
+                DeviceManager::add_virtio_device(&mut self.virtio_devices, device);
             }
         }
         self.config.lock().unwrap().disks = block_devices;
@@ -3078,7 +3095,7 @@ impl DeviceManager {
         if let Some(net_list_cfg) = &mut net_devices {
             for net_cfg in net_list_cfg.iter_mut() {
                 let device = self.make_virtio_net_device(net_cfg)?;
-                self.virtio_devices.push(device);
+                DeviceManager::add_virtio_device(&mut self.virtio_devices, device);
             }
         }
         self.config.lock().unwrap().net = net_devices;
@@ -3107,15 +3124,18 @@ impl DeviceManager {
                 )
                 .map_err(DeviceManagerError::CreateVirtioRng)?,
             ));
-            self.virtio_devices.push(MetaVirtioDevice {
-                virtio_device: Arc::clone(&virtio_rng_device)
-                    as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-                iommu: rng_config.iommu,
-                id: id.clone(),
-                pci_segment: 0,
-                dma_handler: None,
-                bdf_device: rng_config.bdf_device,
-            });
+            DeviceManager::add_virtio_device(
+                &mut self.virtio_devices,
+                MetaVirtioDevice {
+                    virtio_device: Arc::clone(&virtio_rng_device)
+                        as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
+                    iommu: rng_config.iommu,
+                    id: id.clone(),
+                    pci_segment: 0,
+                    dma_handler: None,
+                    bdf_device: rng_config.bdf_device,
+                },
+            );
 
             // Fill the device tree with a new node. In case of restore, we
             // know there is nothing to do, so we can simply override the
@@ -3188,7 +3208,7 @@ impl DeviceManager {
         if let Some(generic_vhost_user_list_cfg) = &mut generic_vhost_user_devices {
             for generic_vhost_user_cfg in generic_vhost_user_list_cfg.iter_mut() {
                 let device = self.make_generic_vhost_user_device(generic_vhost_user_cfg)?;
-                self.virtio_devices.push(device);
+                DeviceManager::add_virtio_device(&mut self.virtio_devices, device);
             }
         }
         self.config.lock().unwrap().generic_vhost_user = generic_vhost_user_devices;
@@ -3255,7 +3275,7 @@ impl DeviceManager {
         if let Some(fs_list_cfg) = &mut fs_devices {
             for fs_cfg in fs_list_cfg.iter_mut() {
                 let device = self.make_virtio_fs_device(fs_cfg)?;
-                self.virtio_devices.push(device);
+                DeviceManager::add_virtio_device(&mut self.virtio_devices, device);
             }
         }
         self.config.lock().unwrap().fs = fs_devices;
@@ -3443,7 +3463,7 @@ impl DeviceManager {
         if let Some(pmem_list_cfg) = &mut pmem_devices {
             for pmem_cfg in pmem_list_cfg.iter_mut() {
                 let device = self.make_virtio_pmem_device(pmem_cfg)?;
-                self.virtio_devices.push(device);
+                DeviceManager::add_virtio_device(&mut self.virtio_devices, device);
             }
         }
         self.config.lock().unwrap().pmem = pmem_devices;
@@ -3513,7 +3533,7 @@ impl DeviceManager {
         let mut vsock = self.config.lock().unwrap().vsock.take();
         if let Some(vsock_cfg) = &mut vsock {
             let device = self.make_virtio_vsock_device(vsock_cfg)?;
-            self.virtio_devices.push(device);
+            DeviceManager::add_virtio_device(&mut self.virtio_devices, device);
         }
         self.config.lock().unwrap().vsock = vsock;
 
@@ -3555,7 +3575,7 @@ impl DeviceManager {
 
                 self.virtio_mem_devices.push(Arc::clone(&virtio_mem_device));
 
-                self.virtio_devices.push(MetaVirtioDevice {
+                self.virtio_devices.push_back(MetaVirtioDevice {
                     virtio_device: Arc::clone(&virtio_mem_device)
                         as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
                     iommu: false,
@@ -3643,7 +3663,7 @@ impl DeviceManager {
 
             self.balloon = Some(virtio_balloon_device.clone());
 
-            self.virtio_devices.push(MetaVirtioDevice {
+            let device = MetaVirtioDevice {
                 virtio_device: Arc::clone(&virtio_balloon_device)
                     as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
                 iommu: false,
@@ -3651,7 +3671,9 @@ impl DeviceManager {
                 pci_segment: 0,
                 dma_handler: None,
                 bdf_device: balloon_config.bdf_device,
-            });
+            };
+
+            DeviceManager::add_virtio_device(&mut self.virtio_devices, device);
 
             self.device_tree
                 .lock()
@@ -3683,7 +3705,7 @@ impl DeviceManager {
             )
             .map_err(DeviceManagerError::CreateVirtioWatchdog)?,
         ));
-        self.virtio_devices.push(MetaVirtioDevice {
+        self.virtio_devices.push_back(MetaVirtioDevice {
             virtio_device: Arc::clone(&virtio_watchdog_device)
                 as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
             iommu: false,
@@ -3759,7 +3781,7 @@ impl DeviceManager {
         if let Some(vdpa_list_cfg) = &mut vdpa_devices {
             for vdpa_cfg in vdpa_list_cfg.iter_mut() {
                 let device = self.make_vdpa_device(vdpa_cfg)?;
-                self.virtio_devices.push(device);
+                DeviceManager::add_virtio_device(&mut self.virtio_devices, device);
             }
         }
         self.config.lock().unwrap().vdpa = vdpa_devices;
@@ -4955,7 +4977,7 @@ impl DeviceManager {
         // Add the virtio device to the device manager list. This is important
         // as the list is used to notify virtio devices about memory updates
         // for instance.
-        self.virtio_devices.push(handle.clone());
+        self.virtio_devices.push_back(handle.clone());
 
         let mapping: Option<Arc<IommuMapping>> = if handle.iommu {
             self.iommu_mapping.clone()
