@@ -271,3 +271,33 @@ pub fn micro_bench_qcow_compressed_read(control: &PerformanceTestControl) -> f64
 
     elapsed
 }
+
+/// Issue large multicluster reads from a prepopulated QCOW2 image.
+///
+/// Each read_vectored call spans `CLUSTERS_PER_READ` contiguous clusters
+/// (8 x 64 KiB = 512 KiB).  This exercises the mapping coalesce path
+/// where multiple L2 entries are merged into fewer host I/O operations.
+/// `num_ops` is the total number of clusters; reads are issued in
+/// chunks of CLUSTERS_PER_READ.
+///
+/// Returns the total read wall clock time in seconds.
+pub fn micro_bench_qcow_multi_cluster_read(control: &PerformanceTestControl) -> f64 {
+    const CLUSTERS_PER_READ: usize = 8;
+
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_tmp, disk) = util::qcow_tempfile(num_ops);
+    let mut async_io = disk.new_async_io(1).expect("new_async_io failed");
+
+    let read_size = CLUSTERS_PER_READ * QCOW_CLUSTER_SIZE as usize;
+    let mut buf = vec![0u8; read_size];
+    let iovec = read_iovec(&mut buf);
+
+    let num_reads = num_ops / CLUSTERS_PER_READ;
+    let start = Instant::now();
+    submit_reads(async_io.as_mut(), num_reads, read_size as u64, &[iovec]);
+    let elapsed = start.elapsed().as_secs_f64();
+
+    drain_completions(async_io.as_mut(), num_reads);
+
+    elapsed
+}
