@@ -200,7 +200,7 @@ impl Fs {
         })
     }
 
-    fn state(&self) -> State {
+    fn state(&self) -> std::result::Result<State, MigratableError> {
         self.vu_common.state(&self.common, self.config)
     }
 }
@@ -377,7 +377,7 @@ impl Snapshottable for Fs {
     }
 
     fn snapshot(&mut self) -> std::result::Result<Snapshot, MigratableError> {
-        self.vu_common.snapshot(&self.state())
+        self.vu_common.snapshot(&self.state()?)
     }
 }
 impl Transportable for Fs {}
