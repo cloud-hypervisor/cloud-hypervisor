@@ -4,8 +4,10 @@
 
 //! Shared benchmark helpers.
 
+use std::fs::File;
 use std::io::{ErrorKind, Seek, SeekFrom, Write};
 use std::os::unix::fs::FileExt;
+use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
@@ -180,6 +182,59 @@ pub fn qcow_overlay_tempfile(num_clusters: usize) -> (TempFile, TempFile, QcowDi
     let disk = QcowDiskSync::new(overlay.as_file().try_clone().unwrap(), false, true, true)
         .expect("failed to open overlay qcow2 via QcowDiskSync");
     (backing, overlay, disk)
+}
+
+/// Create a zlib compressed QCOW2 image with `num_clusters` clusters
+/// via `qemu-img convert -c`.
+fn create_compressed_qcow_tempfile(num_clusters: usize) -> TempFile {
+    let virtual_size = QCOW_CLUSTER_SIZE * num_clusters as u64;
+
+    let raw_tmp = TempFile::new().expect("failed to create raw tempfile");
+    {
+        let f = raw_tmp.as_file();
+        f.set_len(virtual_size).expect("set_len failed");
+        let buf = vec![0xA5u8; QCOW_CLUSTER_SIZE as usize];
+        for i in 0..num_clusters {
+            f.write_at(&buf, i as u64 * QCOW_CLUSTER_SIZE)
+                .expect("write_at failed");
+        }
+    }
+
+    let qcow_tmp = TempFile::new().expect("failed to create qcow2 tempfile");
+    let qcow_path = qcow_tmp.as_path().to_str().unwrap().to_string();
+    let raw_path = raw_tmp.as_path().to_str().unwrap().to_string();
+    let status = Command::new("qemu-img")
+        .args([
+            "convert",
+            "-f",
+            "raw",
+            "-O",
+            "qcow2",
+            "-c",
+            "-o",
+            "compression_type=zlib",
+            &raw_path,
+            &qcow_path,
+        ])
+        .status()
+        .expect("failed to run qemu-img");
+    assert!(status.success(), "qemu-img convert failed");
+
+    qcow_tmp
+}
+
+/// Compressed QCOW2 opened via QcowDiskSync.
+pub fn compressed_qcow_tempfile(num_clusters: usize) -> (TempFile, QcowDiskSync) {
+    let tmp = create_compressed_qcow_tempfile(num_clusters);
+    let path = tmp.as_path().to_str().unwrap().to_string();
+    let disk = QcowDiskSync::new(
+        File::open(&path).expect("failed to open compressed qcow2"),
+        false,
+        false,
+        true,
+    )
+    .expect("failed to open compressed qcow2 via QcowDiskSync");
+    (tmp, disk)
 }
 
 /// Spin and wait until the given eventfd becomes readable.
