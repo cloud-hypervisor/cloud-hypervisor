@@ -553,6 +553,10 @@ pub fn default_consoleconfig_file() -> Option<PathBuf> {
 
 impl ApplyLandlock for ConsoleConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        if self.mode == ConsoleOutputMode::Pty {
+            landlock.add_rule_with_access(Path::new("/dev/pts"), "rw")?;
+            landlock.add_rule_with_access(Path::new("/dev/ptmx"), "rw")?;
+        }
         if let Some(file) = &self.file {
             landlock.add_rule_with_access(file, "rw")?;
         }
@@ -586,6 +590,10 @@ impl Default for DebugConsoleConfig {
 #[cfg(target_arch = "x86_64")]
 impl ApplyLandlock for DebugConsoleConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
+        if self.mode == ConsoleOutputMode::Pty {
+            landlock.add_rule_with_access(Path::new("/dev/pts"), "rw")?;
+            landlock.add_rule_with_access(Path::new("/dev/ptmx"), "rw")?;
+        }
         if let Some(file) = &self.file {
             landlock.add_rule_with_access(file, "rw")?;
         }
