@@ -165,7 +165,7 @@ process_volumes_args() {
         return
     fi
     exported_volumes=""
-    arr_vols=("${arg_vols//#/ }")
+    IFS='#' read -ra arr_vols <<<"$arg_vols"
     for var in "${arr_vols[@]}"; do
         dev=$(echo "$var" | cut -d ':' -f 1)
         if [[ ! -e "$dev" ]]; then
