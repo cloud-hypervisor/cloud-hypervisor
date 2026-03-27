@@ -549,3 +549,45 @@ pub fn micro_bench_qcow_async_l2_cache_miss(control: &PerformanceTestControl) ->
     drain_async_completions(async_io.as_mut(), num_ops);
     start.elapsed().as_secs_f64()
 }
+
+/// Measure QCOW2 batch write submission via io_uring.
+///
+/// Builds a batch of num_ops write requests and submits them all at once
+/// through submit_batch_requests. Writes in QcowAsync are synchronous
+/// (COW path), so this measures whether batching reduces per-request
+/// overhead compared to individual write_vectored calls.
+///
+/// Returns the total wall clock time in seconds.
+pub fn micro_bench_qcow_batch_write(control: &PerformanceTestControl) -> f64 {
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_tmp, disk) = util::empty_qcow_async_tempfile(num_ops);
+    let mut async_io = disk
+        .new_async_io(num_ops as u32)
+        .expect("new_async_io failed");
+
+    let buf = vec![0xA5u8; num_ops * QCOW_CLUSTER_SIZE as usize];
+
+    let batch: Vec<BatchRequest> = (0..num_ops)
+        .map(|i| {
+            let slice = &buf[i * QCOW_CLUSTER_SIZE as usize..(i + 1) * QCOW_CLUSTER_SIZE as usize];
+            BatchRequest {
+                offset: (i as u64 * QCOW_CLUSTER_SIZE) as libc::off_t,
+                iovecs: vec![libc::iovec {
+                    iov_base: slice.as_ptr() as *mut libc::c_void,
+                    iov_len: QCOW_CLUSTER_SIZE as usize,
+                }]
+                .into(),
+                user_data: i as u64,
+                request_type: RequestType::Out,
+            }
+        })
+        .collect();
+
+    let start = Instant::now();
+    async_io
+        .submit_batch_requests(&batch)
+        .expect("submit_batch_requests failed");
+
+    drain_async_completions(async_io.as_mut(), num_ops);
+    start.elapsed().as_secs_f64()
+}
