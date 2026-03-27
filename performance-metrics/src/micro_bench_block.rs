@@ -397,3 +397,34 @@ pub fn micro_bench_qcow_batch_read(control: &PerformanceTestControl) -> f64 {
     drain_async_completions(async_io.as_mut(), num_ops);
     start.elapsed().as_secs_f64()
 }
+
+/// Read num_ops clusters from a prepopulated QCOW2 image in random order
+/// through the QcowAsync io_uring path.
+///
+/// Returns the total read wall clock time in seconds.
+pub fn micro_bench_qcow_async_random_read(control: &PerformanceTestControl) -> f64 {
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_tmp, disk) = util::qcow_async_tempfile(num_ops);
+    let mut async_io = disk
+        .new_async_io(num_ops as u32)
+        .expect("new_async_io failed");
+
+    let indices = deterministic_permutation(num_ops);
+
+    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
+    let iovec = read_iovec(&mut buf);
+
+    let start = Instant::now();
+    for (seq, &cluster_idx) in indices.iter().enumerate() {
+        async_io
+            .read_vectored(
+                (cluster_idx as u64 * QCOW_CLUSTER_SIZE) as libc::off_t,
+                &[iovec],
+                seq as u64,
+            )
+            .expect("read_vectored failed");
+    }
+
+    drain_async_completions(async_io.as_mut(), num_ops);
+    start.elapsed().as_secs_f64()
+}
