@@ -158,6 +158,14 @@ pub fn empty_qcow_tempfile(num_clusters: usize) -> (TempFile, QcowDiskSync) {
     (tmp, disk)
 }
 
+/// Empty QCOW2 opened via QcowDiskAsync.
+pub fn empty_qcow_async_tempfile(num_clusters: usize) -> (TempFile, QcowDiskAsync) {
+    let tmp = create_empty_qcow_tempfile(num_clusters);
+    let disk = QcowDiskAsync::new(tmp.as_file().try_clone().unwrap(), false, false, true)
+        .expect("failed to open qcow2 via QcowDiskAsync");
+    (tmp, disk)
+}
+
 /// Create a QCOW2 overlay backed by a raw file with `num_clusters`
 /// pre-populated clusters.  Returns (backing_tempfile, overlay_tempfile).
 fn create_overlay_tempfiles(num_clusters: usize) -> (TempFile, TempFile) {
