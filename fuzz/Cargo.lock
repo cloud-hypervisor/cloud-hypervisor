@@ -1282,9 +1282,9 @@ dependencies = [
 
 [[package]]
 name = "vfio-ioctls"
-version = "0.5.3"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c80c6d52f8e592e31a8f7eb45e882a9617aa61ec2479981a175e9f0a79f2434e"
+checksum = "d4b1d98dff7f0d219278e406323e7eda4d426447bd203c7828189baf0d8c07b7"
 dependencies = [
  "byteorder",
  "kvm-bindings",
