@@ -480,3 +480,25 @@ pub fn micro_bench_qcow_async_backing_read(control: &PerformanceTestControl) -> 
     drain_async_completions(async_io.as_mut(), num_ops);
     start.elapsed().as_secs_f64()
 }
+
+/// Compressed clusters take the sync fallback in QcowAsync since they
+/// require decompression. This measures decompression overhead through
+/// the async code path.
+///
+/// Returns the total read wall clock time in seconds.
+pub fn micro_bench_qcow_async_compressed_read(control: &PerformanceTestControl) -> f64 {
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_tmp, disk) = util::compressed_qcow_async_tempfile(num_ops);
+    let mut async_io = disk
+        .new_async_io(num_ops as u32)
+        .expect("new_async_io failed");
+
+    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
+    let iovec = read_iovec(&mut buf);
+
+    let start = Instant::now();
+    submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &[iovec]);
+
+    drain_async_completions(async_io.as_mut(), num_ops);
+    start.elapsed().as_secs_f64()
+}
