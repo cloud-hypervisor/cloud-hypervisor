@@ -13,6 +13,7 @@ use std::time::Instant;
 use block::async_io::AsyncIo;
 use block::disk_file::AsyncDiskFile;
 use block::raw_async_aio::RawFileAsyncAio;
+use block::{BatchRequest, RequestType};
 
 use crate::PerformanceTestControl;
 use crate::util::{
@@ -350,6 +351,47 @@ pub fn micro_bench_qcow_async_read(control: &PerformanceTestControl) -> f64 {
 
     let start = Instant::now();
     submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &[iovec]);
+
+    // Drain all io_uring completions before stopping the clock.
+    drain_async_completions(async_io.as_mut(), num_ops);
+    start.elapsed().as_secs_f64()
+}
+
+/// Measure QCOW2 batch read submission via io_uring.
+///
+/// Builds a batch of `num_ops` read requests and submits them all at once
+/// through `submit_batch_requests`, which packs multiple SQEs into a single
+/// io_uring submission. Returns the total wall clock time in seconds.
+pub fn micro_bench_qcow_batch_read(control: &PerformanceTestControl) -> f64 {
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_tmp, disk) = util::qcow_async_tempfile(num_ops);
+    let mut async_io = disk
+        .new_async_io(num_ops as u32)
+        .expect("new_async_io failed");
+
+    let mut buf = vec![0u8; num_ops * QCOW_CLUSTER_SIZE as usize];
+
+    let batch: Vec<BatchRequest> = (0..num_ops)
+        .map(|i| {
+            let slice =
+                &mut buf[i * QCOW_CLUSTER_SIZE as usize..(i + 1) * QCOW_CLUSTER_SIZE as usize];
+            BatchRequest {
+                offset: (i as u64 * QCOW_CLUSTER_SIZE) as libc::off_t,
+                iovecs: vec![libc::iovec {
+                    iov_base: slice.as_mut_ptr() as *mut libc::c_void,
+                    iov_len: QCOW_CLUSTER_SIZE as usize,
+                }]
+                .into(),
+                user_data: i as u64,
+                request_type: RequestType::In,
+            }
+        })
+        .collect();
+
+    let start = Instant::now();
+    async_io
+        .submit_batch_requests(&batch)
+        .expect("submit_batch_requests failed");
 
     // Drain all io_uring completions before stopping the clock.
     drain_async_completions(async_io.as_mut(), num_ops);
