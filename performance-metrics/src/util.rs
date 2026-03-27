@@ -196,6 +196,14 @@ pub fn qcow_overlay_tempfile(num_clusters: usize) -> (TempFile, TempFile, QcowDi
     (backing, overlay, disk)
 }
 
+/// QCOW2 overlay with raw backing opened via QcowDiskAsync.
+pub fn qcow_async_overlay_tempfile(num_clusters: usize) -> (TempFile, TempFile, QcowDiskAsync) {
+    let (backing, overlay) = create_overlay_tempfiles(num_clusters);
+    let disk = QcowDiskAsync::new(overlay.as_file().try_clone().unwrap(), false, true, true)
+        .expect("failed to open overlay qcow2 via QcowDiskAsync");
+    (backing, overlay, disk)
+}
+
 /// Create a zlib compressed QCOW2 image with `num_clusters` clusters
 /// via `qemu-img convert -c`.
 fn create_compressed_qcow_tempfile(num_clusters: usize) -> TempFile {
