@@ -60,7 +60,7 @@ mshv-bindings = "0.6.7"
 mshv-ioctls = "0.6.7"
 seccompiler = "0.5.0"
 vfio-bindings = { version = "0.6.2", default-features = false }
-vfio-ioctls = { version = "0.5.3", default-features = false }
+vfio-ioctls = { version = "0.6.0", default-features = false }
 vfio_user = { version = "0.1.3", default-features = false }
 vhost = { version = "0.16.0", default-features = false }
 vhost-user-backend = { version = "0.22.0", default-features = false }
