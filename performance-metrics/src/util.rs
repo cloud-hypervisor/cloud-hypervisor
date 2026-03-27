@@ -308,6 +308,14 @@ pub fn sparse_qcow_tempfile(num_l2_tables: usize) -> (TempFile, QcowDiskSync) {
     (tmp, disk)
 }
 
+/// Sparse QCOW2 opened via QcowDiskAsync.
+pub fn sparse_qcow_async_tempfile(num_l2_tables: usize) -> (TempFile, QcowDiskAsync) {
+    let tmp = create_sparse_qcow_tempfile(num_l2_tables);
+    let disk = QcowDiskAsync::new(tmp.as_file().try_clone().unwrap(), false, false, true)
+        .expect("failed to open qcow2 via QcowDiskAsync");
+    (tmp, disk)
+}
+
 /// Spin and wait until the given eventfd becomes readable.
 pub fn wait_for_eventfd(notifier: &EventFd) {
     loop {
