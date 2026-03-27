@@ -502,3 +502,28 @@ pub fn micro_bench_qcow_async_compressed_read(control: &PerformanceTestControl) 
     drain_async_completions(async_io.as_mut(), num_ops);
     start.elapsed().as_secs_f64()
 }
+
+/// Write num_ops clusters into an empty QCOW2 image through the
+/// QcowAsync io_uring path.
+///
+/// Writes in QcowAsync are synchronous (COW metadata allocation must
+/// complete before the host offset is known), so this measures the
+/// write path overhead through the async code path.
+///
+/// Returns the total write wall clock time in seconds.
+pub fn micro_bench_qcow_async_write(control: &PerformanceTestControl) -> f64 {
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_tmp, disk) = util::empty_qcow_async_tempfile(num_ops);
+    let mut async_io = disk
+        .new_async_io(num_ops as u32)
+        .expect("new_async_io failed");
+
+    let buf = vec![0xA5u8; QCOW_CLUSTER_SIZE as usize];
+    let iovec = write_iovec(&buf);
+
+    let start = Instant::now();
+    submit_writes(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &[iovec]);
+
+    drain_async_completions(async_io.as_mut(), num_ops);
+    start.elapsed().as_secs_f64()
+}
