@@ -9797,7 +9797,7 @@ mod live_migration {
             // Start a memory stressor in the background to keep pages dirty,
             // ensuring the precopy loop cannot converge within the 1s timeout.
             guest
-                .ssh_command("nohup stress --vm 2 --vm-bytes 200M --vm-keep &>/dev/null &")
+                .ssh_command("nohup stress --vm 2 --vm-bytes 220M --vm-keep &>/dev/null &")
                 .unwrap();
             // Give stress a moment to actually start dirtying memory
             thread::sleep(Duration::from_secs(3));
@@ -9819,14 +9819,14 @@ mod live_migration {
 
             thread::sleep(Duration::from_secs(1));
 
-            // Use a tight downtime budget (50ms) combined with a 1s timeout so the
-            // migration cannot converge regardless of strategy.
+            // Use a tight downtime budget (1ms) combined with a 1s timeout so the
+            // migration practically cannot converge regardless of strategy.
             let mut send_migration = Command::new(clh_command("ch-remote"))
                 .args([
                     &format!("--api-socket={src_api_socket}"),
                     "send-migration",
                     &format!(
-                        "destination_url=tcp:{host_ip}:{migration_port},downtime_ms=50,timeout_s=1,timeout_strategy={timeout_strategy:?}"
+                        "destination_url=tcp:{host_ip}:{migration_port},downtime_ms=1,timeout_s=1,timeout_strategy={timeout_strategy:?}"
                     ),
                 ])
                 .stdin(Stdio::null())
