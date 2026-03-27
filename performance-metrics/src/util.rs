@@ -128,6 +128,18 @@ pub fn submit_writes(async_io: &mut dyn AsyncIo, count: usize, stride: u64, iove
     }
 }
 
+/// Drain `count` completions from an asynchronous I/O backend that delivers
+/// results via eventfd notification (e.g. io_uring).
+pub fn drain_async_completions(async_io: &mut dyn AsyncIo, count: usize) {
+    let mut drained = 0usize;
+    while drained < count {
+        wait_for_eventfd(async_io.notifier());
+        while async_io.next_completed_request().is_some() {
+            drained += 1;
+        }
+    }
+}
+
 /// Create an empty QCOW2 image sized for `num_clusters` clusters.
 /// No data clusters are allocated.
 fn create_empty_qcow_tempfile(num_clusters: usize) -> TempFile {
