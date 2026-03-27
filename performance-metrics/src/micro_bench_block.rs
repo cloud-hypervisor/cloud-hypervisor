@@ -527,3 +527,25 @@ pub fn micro_bench_qcow_async_write(control: &PerformanceTestControl) -> f64 {
     drain_async_completions(async_io.as_mut(), num_ops);
     start.elapsed().as_secs_f64()
 }
+
+/// Read one cluster from each of num_ops distinct L2 tables in a sparse
+/// QCOW2 image through the QcowAsync io_uring path.
+///
+/// Returns the total read wall clock time in seconds.
+pub fn micro_bench_qcow_async_l2_cache_miss(control: &PerformanceTestControl) -> f64 {
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_tmp, disk) = util::sparse_qcow_async_tempfile(num_ops);
+    let mut async_io = disk
+        .new_async_io(num_ops as u32)
+        .expect("new_async_io failed");
+
+    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
+    let iovec = read_iovec(&mut buf);
+
+    let stride = L2_ENTRIES_PER_TABLE as u64 * QCOW_CLUSTER_SIZE;
+    let start = Instant::now();
+    submit_reads(async_io.as_mut(), num_ops, stride, &[iovec]);
+
+    drain_async_completions(async_io.as_mut(), num_ops);
+    start.elapsed().as_secs_f64()
+}
