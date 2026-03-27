@@ -428,3 +428,31 @@ pub fn micro_bench_qcow_async_random_read(control: &PerformanceTestControl) -> f
     drain_async_completions(async_io.as_mut(), num_ops);
     start.elapsed().as_secs_f64()
 }
+
+/// Issue large multi-cluster reads from a prepopulated QCOW2 image
+/// through the QcowAsync io_uring path.
+///
+/// Each read spans 8 contiguous clusters (512 KiB). With coalesced
+/// mappings, this can hit the io_uring fast path for a single Readv.
+///
+/// Returns the total read wall clock time in seconds.
+pub fn micro_bench_qcow_async_multi_cluster_read(control: &PerformanceTestControl) -> f64 {
+    const CLUSTERS_PER_READ: usize = 8;
+
+    let num_ops = control.num_ops.expect("num_ops required") as usize;
+    let (_tmp, disk) = util::qcow_async_tempfile(num_ops);
+    let mut async_io = disk
+        .new_async_io(num_ops as u32)
+        .expect("new_async_io failed");
+
+    let read_size = CLUSTERS_PER_READ * QCOW_CLUSTER_SIZE as usize;
+    let mut buf = vec![0u8; read_size];
+    let iovec = read_iovec(&mut buf);
+
+    let num_reads = num_ops / CLUSTERS_PER_READ;
+    let start = Instant::now();
+    submit_reads(async_io.as_mut(), num_reads, read_size as u64, &[iovec]);
+
+    drain_async_completions(async_io.as_mut(), num_reads);
+    start.elapsed().as_secs_f64()
+}
