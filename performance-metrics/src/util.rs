@@ -257,6 +257,20 @@ pub fn compressed_qcow_tempfile(num_clusters: usize) -> (TempFile, QcowDiskSync)
     (tmp, disk)
 }
 
+/// Compressed QCOW2 opened via QcowDiskAsync.
+pub fn compressed_qcow_async_tempfile(num_clusters: usize) -> (TempFile, QcowDiskAsync) {
+    let tmp = create_compressed_qcow_tempfile(num_clusters);
+    let path = tmp.as_path().to_str().unwrap().to_string();
+    let disk = QcowDiskAsync::new(
+        File::open(&path).expect("failed to open compressed qcow2"),
+        false,
+        false,
+        true,
+    )
+    .expect("failed to open compressed qcow2 via QcowDiskAsync");
+    (tmp, disk)
+}
+
 /// Number of data clusters covered by a single L2 table (64 KiB cluster,
 /// 8-byte entries -> 8192 entries per L2 table).
 pub const L2_ENTRIES_PER_TABLE: usize = QCOW_CLUSTER_SIZE as usize / 8;
