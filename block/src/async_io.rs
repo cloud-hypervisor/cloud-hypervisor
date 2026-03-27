@@ -2,8 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::marker::PhantomData;
-use std::os::fd::{AsRawFd, OwnedFd, RawFd};
+use std::os::fd::AsFd;
 
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
@@ -28,40 +27,15 @@ pub enum DiskFileError {
 
 pub type DiskFileResult<T> = std::result::Result<T, DiskFileError>;
 
-/// A wrapper for [`RawFd`] capturing the lifetime of a corresponding [`DiskFile`].
-///
-/// This fulfills the same role as [`BorrowedFd`] but is tailored to the limitations
-/// by some implementations of [`DiskFile`], which wrap the effective [`File`]
-/// in an `Arc<Mutex<T>>`, making the use of [`BorrowedFd`] impossible.
-///
-/// [`BorrowedFd`]: std::os::fd::BorrowedFd
-#[derive(Copy, Clone, Debug)]
-pub struct BorrowedDiskFd<'fd> {
-    raw_fd: RawFd,
-    _lifetime: PhantomData<&'fd OwnedFd>,
-}
-
-impl BorrowedDiskFd<'_> {
-    pub(super) fn new(raw_fd: RawFd) -> Self {
-        Self {
-            raw_fd,
-            _lifetime: PhantomData,
-        }
-    }
-}
-
-impl AsRawFd for BorrowedDiskFd<'_> {
-    fn as_raw_fd(&self) -> RawFd {
-        self.raw_fd
-    }
-}
-
 /// Abstraction over the effective [`File`] backing up a block device,
 /// with support for synchronous and asynchronous I/O.
 ///
 /// This allows abstracting over raw image formats as well as structured
 /// image formats.
-pub trait DiskFile: Send {
+///
+/// The [`BorrowedFd`] returned by `<Self as AsFd>::as_fd(self) is
+/// only to be used for `fcntl` operations.
+pub trait DiskFile: Send + AsFd {
     /// Returns the logical disk size a guest will see.
     ///
     /// For raw formats, this is equal to [`Self::physical_size`]. For file formats
@@ -89,12 +63,6 @@ pub trait DiskFile: Send {
     fn supports_zero_flag(&self) -> bool {
         false
     }
-
-    /// Returns the file descriptor of the underlying disk image file.
-    ///
-    /// The file descriptor is supposed to be used for `fcntl()` calls but no
-    /// other operation.
-    fn fd(&mut self) -> BorrowedDiskFd<'_>;
 }
 
 #[derive(Error, Debug)]

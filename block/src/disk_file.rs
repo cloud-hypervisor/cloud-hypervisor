@@ -8,7 +8,6 @@
 //!
 //! - [`DiskSize`] - reported capacity (logical size)
 //! - [`PhysicalSize`] - host allocation size
-//! - [`DiskFd`] - backing file descriptor access
 //! - [`Geometry`] - sector/cluster geometry (default 512B)
 //! - [`SparseCapable`] - sparse and zero flag support
 //! - [`Resizable`] - online resize
@@ -24,7 +23,7 @@
 //!         /                                     \
 //! FullDiskFile:                           AsyncDiskFile:
 //!   DiskFile + PhysicalSize +               DiskFile + Unpin
-//!   DiskFd + SparseCapable +               try_clone, new_async_io
+//!   AsFd + SparseCapable +                  try_clone, new_async_io
 //!   Resizable
 //!         \                                     /
 //!          AsyncFullDiskFile: FullDiskFile + AsyncDiskFile
@@ -35,8 +34,9 @@
 
 use std::fmt::Debug;
 use std::io;
+use std::os::fd::{AsFd, BorrowedFd};
 
-use crate::async_io::{self, AsyncIo, BorrowedDiskFd};
+use crate::async_io::{self, AsyncIo};
 use crate::error::{BlockError, BlockErrorKind};
 use crate::{BlockResult, DiskTopology};
 
@@ -50,12 +50,6 @@ pub trait DiskSize: Send + Debug {
 pub trait PhysicalSize: Send + Debug {
     /// Actual bytes occupied on the host filesystem.
     fn physical_size(&self) -> BlockResult<u64>;
-}
-
-/// Backing file descriptor access for disk images backed by a file.
-pub trait DiskFd: Send + Debug {
-    /// Borrows the underlying file descriptor.
-    fn fd(&self) -> BorrowedDiskFd<'_>;
 }
 
 /// Sector and cluster geometry of a disk image.
@@ -106,11 +100,17 @@ pub trait DiskFile: DiskSize + Geometry + Sync {}
 /// file descriptor access, physical size, sparse operations, and resize.
 /// Used by consumers that need feature negotiation without async I/O
 /// (e.g. vhost user block).
-pub trait FullDiskFile: DiskFile + PhysicalSize + DiskFd + SparseCapable + Resizable {}
+pub trait FullDiskFile:
+    DiskFile + PhysicalSize + AsFd + Send + Debug + SparseCapable + Resizable
+{
+}
 
 /// Blanket implementation: any type implementing all constituent traits
 /// automatically satisfies [`FullDiskFile`].
-impl<T: DiskFile + PhysicalSize + DiskFd + SparseCapable + Resizable> FullDiskFile for T {}
+impl<T: DiskFile + PhysicalSize + AsFd + Send + Debug + SparseCapable + Resizable> FullDiskFile
+    for T
+{
+}
 
 /// Extended disk file trait for virtio queue workers.
 ///
@@ -168,6 +168,15 @@ pub enum DiskBackend {
     Next(Box<dyn AsyncFullDiskFile>),
 }
 
+impl AsFd for DiskBackend {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        match self {
+            Self::Legacy(d) => d.as_fd(),
+            Self::Next(d) => d.as_fd(),
+        }
+    }
+}
+
 impl DiskBackend {
     pub fn logical_size(&mut self) -> BlockResult<u64> {
         match self {
@@ -205,13 +214,6 @@ impl DiskBackend {
         match self {
             Self::Legacy(d) => d.supports_zero_flag(),
             Self::Next(d) => d.supports_zero_flag(),
-        }
-    }
-
-    pub fn fd(&mut self) -> BorrowedDiskFd<'_> {
-        match self {
-            Self::Legacy(d) => d.fd(),
-            Self::Next(d) => d.fd(),
         }
     }
 

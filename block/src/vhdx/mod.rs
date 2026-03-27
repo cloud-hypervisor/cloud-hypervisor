@@ -5,7 +5,7 @@
 use std::collections::btree_map::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::{AsFd, BorrowedFd};
 
 use byteorder::{BigEndian, ByteOrder};
 use remain::sorted;
@@ -230,9 +230,9 @@ impl Clone for Vhdx {
     }
 }
 
-impl AsRawFd for Vhdx {
-    fn as_raw_fd(&self) -> RawFd {
-        self.file.as_raw_fd()
+impl AsFd for Vhdx {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.file.as_fd()
     }
 }
 

@@ -18,7 +18,7 @@ use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::fs::{OpenOptions, read_link};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::{AsFd as _, AsRawFd};
 use std::str;
 
 #[cfg(test)]
@@ -485,9 +485,12 @@ pub(crate) fn parse_qcow(
                 Error::CorruptImage,
             ));
         }
-        let path = read_link(format!("/proc/self/fd/{}", raw_file.file().as_raw_fd()))
-            .map_or_else(|_| "<unknown>".to_string(), |p| p.display().to_string());
-        warn!("QCOW2 image is marked corrupt, opening read-only: {path}");
+        let path = read_link(format!(
+            "/proc/self/fd/{}",
+            raw_file.file().as_fd().as_raw_fd()
+        ))
+        .map_or_else(|_| "<unknown>".to_string(), |p| p.display().to_string());
+        warn!("QCOW2 image is marked corrupt, opening read-only: {path:?}");
     }
 
     // Image already has dirty bit set. Refcounts may be invalid.
@@ -1989,12 +1992,6 @@ impl QcowFile {
         }
 
         Ok(())
-    }
-}
-
-impl AsRawFd for QcowFile {
-    fn as_raw_fd(&self) -> RawFd {
-        self.raw_file.as_raw_fd()
     }
 }
 

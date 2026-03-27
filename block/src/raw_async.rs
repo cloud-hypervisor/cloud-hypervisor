@@ -4,7 +4,8 @@
 
 use std::fs::File;
 use std::io::{Error, Seek, SeekFrom};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::os::unix::io::AsRawFd;
 
 use io_uring::{IoUring, opcode, types};
 use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE};
@@ -12,7 +13,7 @@ use log::warn;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
+    AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::{BatchRequest, DiskTopology, RequestType, SECTOR_SIZE, probe_sparse_support};
 
@@ -23,6 +24,12 @@ pub struct RawFileDisk {
 impl RawFileDisk {
     pub fn new(file: File) -> Self {
         RawFileDisk { file }
+    }
+}
+
+impl AsFd for RawFileDisk {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.file.as_fd()
     }
 }
 
@@ -41,8 +48,14 @@ impl DiskFile for RawFileDisk {
     }
 
     fn new_async_io(&self, ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
-        let mut raw = RawFileAsync::new(self.file.as_raw_fd(), ring_depth)
-            .map_err(DiskFileError::NewAsyncIo)?;
+        let mut raw = RawFileAsync::new(
+            self.file
+                .try_clone()
+                .map_err(DiskFileError::NewAsyncIo)?
+                .into(),
+            ring_depth,
+        )
+        .map_err(DiskFileError::NewAsyncIo)?;
         raw.alignment =
             DiskTopology::probe(&self.file).map_or(SECTOR_SIZE, |t| t.logical_block_size);
         Ok(Box::new(raw) as Box<dyn AsyncIo>)
@@ -64,21 +77,17 @@ impl DiskFile for RawFileDisk {
     fn supports_sparse_operations(&self) -> bool {
         probe_sparse_support(&self.file)
     }
-
-    fn fd(&mut self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.file.as_raw_fd())
-    }
 }
 
 pub struct RawFileAsync {
-    fd: RawFd,
+    fd: OwnedFd,
     io_uring: IoUring,
     eventfd: EventFd,
     alignment: u64,
 }
 
 impl RawFileAsync {
-    pub fn new(fd: RawFd, ring_depth: u32) -> std::io::Result<Self> {
+    pub fn new(fd: OwnedFd, ring_depth: u32) -> std::io::Result<Self> {
         let io_uring = IoUring::new(ring_depth)?;
         let eventfd = EventFd::new(libc::EFD_NONBLOCK)?;
 
@@ -116,10 +125,14 @@ impl AsyncIo for RawFileAsync {
         // relied on vm-memory to provide the buffer address.
         unsafe {
             sq.push(
-                &opcode::Readv::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
-                    .offset(offset.try_into().unwrap())
-                    .build()
-                    .user_data(user_data),
+                &opcode::Readv::new(
+                    types::Fd(self.fd.as_raw_fd()),
+                    iovecs.as_ptr(),
+                    iovecs.len() as u32,
+                )
+                .offset(offset.try_into().unwrap())
+                .build()
+                .user_data(user_data),
             )
             .map_err(|_| AsyncIoError::ReadVectored(Error::other("Submission queue is full")))?;
         };
@@ -144,10 +157,14 @@ impl AsyncIo for RawFileAsync {
         // relied on vm-memory to provide the buffer address.
         unsafe {
             sq.push(
-                &opcode::Writev::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
-                    .offset(offset.try_into().unwrap())
-                    .build()
-                    .user_data(user_data),
+                &opcode::Writev::new(
+                    types::Fd(self.fd.as_raw_fd()),
+                    iovecs.as_ptr(),
+                    iovecs.len() as u32,
+                )
+                .offset(offset.try_into().unwrap())
+                .build()
+                .user_data(user_data),
             )
             .map_err(|_| AsyncIoError::WriteVectored(Error::other("Submission queue is full")))?;
         };
@@ -167,7 +184,7 @@ impl AsyncIo for RawFileAsync {
             // SAFETY: we know the file descriptor is valid.
             unsafe {
                 sq.push(
-                    &opcode::Fsync::new(types::Fd(self.fd))
+                    &opcode::Fsync::new(types::Fd(self.fd.as_raw_fd()))
                         .build()
                         .user_data(user_data),
                 )
@@ -180,7 +197,7 @@ impl AsyncIo for RawFileAsync {
             submitter.submit().map_err(AsyncIoError::Fsync)?;
         } else {
             // SAFETY: FFI call with a valid fd
-            unsafe { libc::fsync(self.fd) };
+            unsafe { libc::fsync(self.fd.as_raw_fd()) };
         }
 
         Ok(())
@@ -213,7 +230,7 @@ impl AsyncIo for RawFileAsync {
                     unsafe {
                         sq.push(
                             &opcode::Readv::new(
-                                types::Fd(self.fd),
+                                types::Fd(self.fd.as_raw_fd()),
                                 req.iovecs.as_ptr(),
                                 req.iovecs.len() as u32,
                             )
@@ -233,7 +250,7 @@ impl AsyncIo for RawFileAsync {
                     unsafe {
                         sq.push(
                             &opcode::Writev::new(
-                                types::Fd(self.fd),
+                                types::Fd(self.fd.as_raw_fd()),
                                 req.iovecs.as_ptr(),
                                 req.iovecs.len() as u32,
                             )
@@ -274,7 +291,7 @@ impl AsyncIo for RawFileAsync {
         // SAFETY: The file descriptor is known to be valid.
         unsafe {
             sq.push(
-                &opcode::Fallocate::new(types::Fd(self.fd), length)
+                &opcode::Fallocate::new(types::Fd(self.fd.as_raw_fd()), length)
                     .offset(offset)
                     .mode(mode)
                     .build()
@@ -299,7 +316,7 @@ impl AsyncIo for RawFileAsync {
         // SAFETY: The file descriptor is known to be valid.
         unsafe {
             sq.push(
-                &opcode::Fallocate::new(types::Fd(self.fd), length)
+                &opcode::Fallocate::new(types::Fd(self.fd.as_raw_fd()), length)
                     .offset(offset)
                     .mode(mode)
                     .build()

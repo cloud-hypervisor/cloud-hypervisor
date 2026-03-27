@@ -4,13 +4,13 @@
 
 use std::collections::VecDeque;
 use std::fs::File;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsFd, BorrowedFd};
 use std::sync::{Arc, Mutex};
 
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
+    AsyncIo, AsyncIoError, AsyncIoResult, DiskFile, DiskFileError, DiskFileResult,
 };
 use crate::vhdx::{Result as VhdxResult, Vhdx};
 use crate::{AsyncAdaptor, BlockBackend, Error};
@@ -35,6 +35,20 @@ impl VhdxDiskSync {
     }
 }
 
+impl AsFd for VhdxDiskSync {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        let wrong_lifetime_fd = self.vhdx_file.lock().unwrap();
+
+        // SAFETY: The FD really will last as long as this struct is alive,
+        // which is all that the trait promises.
+        unsafe {
+            // Use type annotations to validate that this is only at the lifetime
+            // level, not the type level.
+            core::mem::transmute::<BorrowedFd<'_>, BorrowedFd<'_>>(wrong_lifetime_fd.as_fd())
+        }
+    }
+}
+
 impl DiskFile for VhdxDiskSync {
     fn logical_size(&mut self) -> DiskFileResult<u64> {
         Ok(self.vhdx_file.lock().unwrap().virtual_disk_size())
@@ -52,10 +66,6 @@ impl DiskFile for VhdxDiskSync {
 
     fn new_async_io(&self, _ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
         Ok(Box::new(VhdxSync::new(Arc::clone(&self.vhdx_file))) as Box<dyn AsyncIo>)
-    }
-
-    fn fd(&mut self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.vhdx_file.lock().unwrap().as_raw_fd())
     }
 }
 

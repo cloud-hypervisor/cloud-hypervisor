@@ -393,12 +393,6 @@ impl Clone for RawFile {
     }
 }
 
-impl AsRawFd for RawFile {
-    fn as_raw_fd(&self) -> RawFd {
-        self.file.as_raw_fd()
-    }
-}
-
 impl AsFd for RawFile {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.file.as_fd()
