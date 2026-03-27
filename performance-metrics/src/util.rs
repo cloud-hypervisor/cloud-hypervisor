@@ -8,6 +8,7 @@ use std::io::{ErrorKind, Seek, SeekFrom, Write};
 use std::thread;
 use std::time::Duration;
 
+use block::async_io::AsyncIo;
 use block::qcow::{QcowFile, RawFile};
 use block::qcow_async::QcowDiskAsync;
 use block::qcow_sync::QcowDiskSync;
@@ -63,6 +64,13 @@ pub fn qcow_async_tempfile(num_clusters: usize) -> (TempFile, QcowDiskAsync) {
     let disk = QcowDiskAsync::new(tmp.as_file().try_clone().unwrap(), false, false, true)
         .expect("failed to open QCOW2 via QcowDiskAsync");
     (tmp, disk)
+}
+
+/// Drain `count` completions from a synchronous async_io backend.
+pub fn drain_completions(async_io: &mut dyn AsyncIo, count: usize) {
+    for _ in 0..count {
+        async_io.next_completed_request();
+    }
 }
 
 /// Spin and wait until the given eventfd becomes readable.
