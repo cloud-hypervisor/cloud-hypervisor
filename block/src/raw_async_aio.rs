@@ -86,8 +86,7 @@ impl disk_file::AsyncDiskFile for RawFileDiskAio {
     }
 
     fn new_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
-        let mut raw = RawFileAsyncAio::new(self.file.as_raw_fd(), ring_depth)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::NewAsyncIo(e)))?;
+        let mut raw = RawFileAsyncAio::new(self.file.as_raw_fd(), ring_depth)?;
         raw.alignment =
             DiskTopology::probe(&self.file).map_or(SECTOR_SIZE, |t| t.logical_block_size);
         Ok(Box::new(raw) as Box<dyn AsyncIo>)
@@ -103,9 +102,11 @@ pub struct RawFileAsyncAio {
 }
 
 impl RawFileAsyncAio {
-    pub fn new(fd: RawFd, queue_depth: u32) -> std::io::Result<Self> {
-        let eventfd = EventFd::new(libc::EFD_NONBLOCK)?;
-        let ctx = aio::IoContext::new(queue_depth)?;
+    pub fn new(fd: RawFd, queue_depth: u32) -> BlockResult<Self> {
+        let eventfd =
+            EventFd::new(libc::EFD_NONBLOCK).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+        let ctx =
+            aio::IoContext::new(queue_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
 
         Ok(RawFileAsyncAio {
             fd,
