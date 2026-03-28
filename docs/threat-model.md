@@ -22,14 +22,25 @@ Cloud Hypervisor considers the guest VM to be untrusted. This means that a guest
 VM is only allowed to perform I/O using the interfaces Cloud Hypervisor has been
 told to provide to it.
 
-Cloud Hypervisor cannot protect itself or the host from speculative execution
-attacks. Such self-protection This is entirely the responsibility of the hardware and the Linux
-kernel.
-
 Cloud Hypervisor assumes that guest VMs may have internal security boundaries.
 For instance, a guest OS may run untrusted userspace programs or nested VMs.
 Cloud Hypervisor cannot be used as a confused deputy to violate these
 boundaries.
+
+## Hardware Vulnerabilities
+
+Cloud Hypervisor cannot protect itself or the host from hardware
+vulnerabilities. This is entirely the responsibility of the hardware, firmware,
+and Linux kernel. If Linux is running under another hypervisor (using nested
+virtualization), it is also the responsibility of that hypervisor.
+
+Cloud Hypervisor assumes that Linux is configured to prevent the guest
+from reading or writing to memory belonging to the kernel or other userspace
+processes. Cloud Hypervisor relies on the integrity of its own memory, but not
+its confidentiality. Cloud Hypervisor's address space generally contains only
+configuration data (such as filenames) and the guest's data.  However, it may
+information from disk images that is no longer directly accessible to the guest
+but still in the image file.
 
 ## Vhost-User Devices
 
@@ -129,3 +140,5 @@ the Cloud Hypervisor process.
 The sandbox only prevents access to resources subject to Landlock access
 controls. For instance, it does not prevent access to AF\_UNIX sockets. This can
 be blocked via namespaces or by other kernel-enforced access controls.
+Additionally, the restricted resources are limited by the version of the
+Landlock API Cloud Hypervisor uses.
