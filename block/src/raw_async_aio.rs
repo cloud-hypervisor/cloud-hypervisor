@@ -107,6 +107,14 @@ impl disk_file::SparseCapable for RawFileDiskAio {
     }
 }
 
+impl disk_file::Resizable for RawFileDiskAio {
+    fn resize(&mut self, size: u64) -> BlockResult<()> {
+        self.file
+            .set_len(size)
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e)))
+    }
+}
+
 pub struct RawFileAsyncAio {
     fd: RawFd,
     ctx: aio::IoContext,
