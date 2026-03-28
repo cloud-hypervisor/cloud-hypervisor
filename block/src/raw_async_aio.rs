@@ -14,9 +14,7 @@ use log::warn;
 use vmm_sys_util::aio;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::async_io::{
-    AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
-};
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::{DiskTopology, SECTOR_SIZE, disk_file, probe_sparse_support, query_device_size};
 
@@ -28,45 +26,6 @@ pub struct RawFileDiskAio {
 impl RawFileDiskAio {
     pub fn new(file: File) -> Self {
         RawFileDiskAio { file }
-    }
-}
-
-impl DiskFile for RawFileDiskAio {
-    fn logical_size(&mut self) -> DiskFileResult<u64> {
-        Ok(query_device_size(&self.file)
-            .map_err(DiskFileError::Size)?
-            .0)
-    }
-
-    fn physical_size(&mut self) -> DiskFileResult<u64> {
-        Ok(query_device_size(&self.file)
-            .map_err(DiskFileError::Size)?
-            .1)
-    }
-
-    fn new_async_io(&self, ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>> {
-        let mut raw = RawFileAsyncAio::new(self.file.as_raw_fd(), ring_depth)
-            .map_err(DiskFileError::NewAsyncIo)?;
-        raw.alignment =
-            DiskTopology::probe(&self.file).map_or(SECTOR_SIZE, |t| t.logical_block_size);
-        Ok(Box::new(raw) as Box<dyn AsyncIo>)
-    }
-
-    fn topology(&mut self) -> DiskTopology {
-        if let Ok(topology) = DiskTopology::probe(&self.file) {
-            topology
-        } else {
-            warn!("Unable to get device topology. Using default topology");
-            DiskTopology::default()
-        }
-    }
-
-    fn supports_sparse_operations(&self) -> bool {
-        probe_sparse_support(&self.file)
-    }
-
-    fn fd(&mut self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.file.as_raw_fd())
     }
 }
 

@@ -32,7 +32,6 @@ use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use arch::{DeviceType, MmioDeviceInfo};
 use arch::{NumaNodes, layout};
-use block::async_io::DiskFile;
 use block::disk_file::DiskBackend;
 use block::error::BlockError;
 use block::fixed_vhd_sync::FixedVhdDiskSync;
@@ -2760,7 +2759,7 @@ impl DeviceManager {
                         }
                     } else if !disk_cfg.disable_aio && self.aio_is_supported() {
                         info!("Using asynchronous RAW disk file (aio)");
-                        DiskBackend::Legacy(Box::new(RawFileDiskAio::new(file)) as Box<dyn DiskFile>)
+                        DiskBackend::Next(Box::new(RawFileDiskAio::new(file)))
                     } else {
                         info!("Using synchronous RAW disk file");
                         DiskBackend::Next(Box::new(RawFileDiskSync::new(file)))
