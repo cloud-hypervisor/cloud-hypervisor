@@ -610,6 +610,7 @@ impl Request {
 
                 let mut discard_sector = [0u8; 8];
                 let mut discard_num_sectors = [0u8; 4];
+                let mut discard_flags = [0u8; 4];
 
                 let sector_addr = data_addr.checked_add(DISCARD_WZ_SECTOR_OFFSET).unwrap();
                 mem.read_slice(&mut discard_sector, sector_addr)
@@ -620,6 +621,17 @@ impl Request {
                     .unwrap();
                 mem.read_slice(&mut discard_num_sectors, num_sectors_addr)
                     .map_err(ExecuteError::Read)?;
+
+                let flags_addr = data_addr.checked_add(DISCARD_WZ_FLAGS_OFFSET).unwrap();
+                mem.read_slice(&mut discard_flags, flags_addr)
+                    .map_err(ExecuteError::Read)?;
+
+                let discard_flags = u32::from_le_bytes(discard_flags);
+                // Per virtio spec v1.2 reject discard if any flag is set, including unmap.
+                if discard_flags != 0 {
+                    warn!("Unsupported flags {discard_flags:#x} in discard request");
+                    return Err(ExecuteError::Unsupported(VIRTIO_BLK_T_DISCARD));
+                }
 
                 let discard_sector = u64::from_le_bytes(discard_sector);
 
