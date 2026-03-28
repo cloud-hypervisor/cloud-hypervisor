@@ -92,6 +92,15 @@ impl disk_file::DiskFd for RawFileDiskAio {
     }
 }
 
+impl disk_file::Geometry for RawFileDiskAio {
+    fn topology(&self) -> DiskTopology {
+        DiskTopology::probe(&self.file).unwrap_or_else(|_| {
+            warn!("Unable to get device topology. Using default topology");
+            DiskTopology::default()
+        })
+    }
+}
+
 pub struct RawFileAsyncAio {
     fd: RawFd,
     ctx: aio::IoContext,
