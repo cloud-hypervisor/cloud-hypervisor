@@ -86,6 +86,12 @@ impl disk_file::PhysicalSize for RawFileDiskAio {
     }
 }
 
+impl disk_file::DiskFd for RawFileDiskAio {
+    fn fd(&self) -> BorrowedDiskFd<'_> {
+        BorrowedDiskFd::new(self.file.as_raw_fd())
+    }
+}
+
 pub struct RawFileAsyncAio {
     fd: RawFd,
     ctx: aio::IoContext,
