@@ -73,6 +73,22 @@ pub fn drain_completions(async_io: &mut dyn AsyncIo, count: usize) {
     }
 }
 
+/// Build an iovec suitable for a read into `buf`.
+pub fn read_iovec(buf: &mut [u8]) -> libc::iovec {
+    libc::iovec {
+        iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+        iov_len: buf.len(),
+    }
+}
+
+/// Build an iovec suitable for a write from `buf`.
+pub fn write_iovec(buf: &[u8]) -> libc::iovec {
+    libc::iovec {
+        iov_base: buf.as_ptr() as *mut libc::c_void,
+        iov_len: buf.len(),
+    }
+}
+
 /// Submit `count` sequential read_vectored calls at `stride`-byte intervals.
 pub fn submit_reads(async_io: &mut dyn AsyncIo, count: usize, stride: u64, iovec: &[libc::iovec]) {
     for i in 0..count {
