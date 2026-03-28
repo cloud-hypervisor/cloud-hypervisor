@@ -16,6 +16,7 @@ use virtio_queue::{Queue, QueueT};
 use vm_migration::{MigratableError, Pausable, Snapshot, Snapshottable};
 use vm_virtio::AccessPlatform;
 
+use super::pci_device::VIRTQ_MSI_NO_VECTOR;
 use crate::VirtioDevice;
 
 pub const VIRTIO_PCI_COMMON_CONFIG_ID: &str = "virtio_pci_common_config";
@@ -249,7 +250,13 @@ impl VirtioPciCommonConfig {
             0x12 => queues.len() as u16, // num_queues
             0x16 => self.queue_select,
             0x18 => self.with_queue(queues, |q| q.size()).unwrap_or(0),
-            0x1a => self.msix_queues.lock().unwrap()[self.queue_select as usize],
+            0x1a => self
+                .msix_queues
+                .lock()
+                .unwrap()
+                .get(usize::from(self.queue_select))
+                .copied()
+                .unwrap_or(VIRTQ_MSI_NO_VECTOR),
             0x1c => u16::from(self.with_queue(queues, |q| q.ready()).unwrap_or(false)),
             0x1e => self.queue_select, // notify_off
             _ => {
@@ -265,7 +272,16 @@ impl VirtioPciCommonConfig {
             0x10 => self.msix_config.store(value, Ordering::Release),
             0x16 => self.queue_select = value,
             0x18 => self.with_queue_mut(queues, |q| q.set_size(value)),
-            0x1a => self.msix_queues.lock().unwrap()[self.queue_select as usize] = value,
+            0x1a => {
+                if let Some(entry) = self
+                    .msix_queues
+                    .lock()
+                    .unwrap()
+                    .get_mut(usize::from(self.queue_select))
+                {
+                    *entry = value;
+                }
+            }
             0x1c => self.with_queue_mut(queues, |q| {
                 let ready = value == 1;
                 q.set_ready(ready);
@@ -483,5 +499,35 @@ mod unit_tests {
         regs.read(0x16, &mut read_back, &queues, dev);
         assert_eq!(read_back[0], 0xaa);
         assert_eq!(read_back[1], 0x55);
+    }
+
+    #[test]
+    fn oob_queue_select_does_not_panic() {
+        // Regression test: reading/writing queue_msix_vector (offset 0x1a)
+        // with an out-of-bounds queue_select must not panic.
+        let mut regs = VirtioPciCommonConfig {
+            access_platform: None,
+            driver_status: Arc::new(AtomicU8::new(0)),
+            config_generation: 0,
+            device_feature_select: 0,
+            driver_feature_select: 0,
+            queue_select: 0,
+            msix_config: Arc::new(AtomicU16::new(0)),
+            msix_queues: Arc::new(Mutex::new(vec![0; 1])), // only 1 queue
+        };
+
+        let dev = Arc::new(Mutex::new(DummyDevice(0)));
+        let mut queues = vec![Queue::new(256).unwrap()];
+
+        // Set queue_select to an out-of-bounds value.
+        regs.write(0x16, &[0xFF, 0xFF], &mut queues, dev.clone());
+
+        // Read queue_msix_vector — must not panic, should return VIRTQ_MSI_NO_VECTOR.
+        let mut read_back = vec![0x00, 0x00];
+        regs.read(0x1a, &mut read_back, &queues, dev.clone());
+        assert_eq!(LittleEndian::read_u16(&read_back), VIRTQ_MSI_NO_VECTOR);
+
+        // Write queue_msix_vector — must not panic.
+        regs.write(0x1a, &[0xAB, 0xCD], &mut queues, dev);
     }
 }
