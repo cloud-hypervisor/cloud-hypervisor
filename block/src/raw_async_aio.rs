@@ -115,6 +115,8 @@ impl disk_file::Resizable for RawFileDiskAio {
     }
 }
 
+impl disk_file::DiskFile for RawFileDiskAio {}
+
 pub struct RawFileAsyncAio {
     fd: RawFd,
     ctx: aio::IoContext,
