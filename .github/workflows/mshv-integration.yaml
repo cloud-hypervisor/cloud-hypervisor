@@ -1,5 +1,6 @@
 name: Cloud Hypervisor Tests (MSHV) (x86_64)
 on: [pull_request_target, merge_group]
+permissions: {}
 
 jobs:
   infra-setup:
