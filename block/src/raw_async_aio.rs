@@ -19,6 +19,7 @@ use crate::async_io::{
 };
 use crate::{DiskTopology, SECTOR_SIZE, probe_sparse_support, query_device_size};
 
+#[derive(Debug)]
 pub struct RawFileDiskAio {
     file: File,
 }
