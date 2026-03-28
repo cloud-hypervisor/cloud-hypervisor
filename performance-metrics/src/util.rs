@@ -73,6 +73,15 @@ pub fn drain_completions(async_io: &mut dyn AsyncIo, count: usize) {
     }
 }
 
+/// Submit `count` sequential read_vectored calls at `stride`-byte intervals.
+pub fn submit_reads(async_io: &mut dyn AsyncIo, count: usize, stride: u64, iovec: &[libc::iovec]) {
+    for i in 0..count {
+        async_io
+            .read_vectored((i as u64 * stride) as libc::off_t, iovec, i as u64)
+            .expect("read_vectored failed");
+    }
+}
+
 /// Spin and wait until the given eventfd becomes readable.
 pub fn wait_for_eventfd(notifier: &EventFd) {
     loop {
