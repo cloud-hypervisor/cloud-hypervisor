@@ -340,7 +340,7 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                     Ok(_) => VIRTIO_BLK_S_OK,
                     Err(e) => {
                         warn!("Request failed: {request:x?} {e:?}");
-                        VIRTIO_BLK_S_IOERR
+                        e.status() as u32
                     }
                 };
 
