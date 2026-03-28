@@ -45,7 +45,7 @@ use crate::{
 };
 
 /// Vector value used to disable MSI for a queue.
-const VIRTQ_MSI_NO_VECTOR: u16 = 0xffff;
+pub(super) const VIRTQ_MSI_NO_VECTOR: u16 = 0xffff;
 
 enum PciCapabilityType {
     Common = 1,
