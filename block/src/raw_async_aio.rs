@@ -101,6 +101,12 @@ impl disk_file::Geometry for RawFileDiskAio {
     }
 }
 
+impl disk_file::SparseCapable for RawFileDiskAio {
+    fn supports_sparse_operations(&self) -> bool {
+        probe_sparse_support(&self.file)
+    }
+}
+
 pub struct RawFileAsyncAio {
     fd: RawFd,
     ctx: aio::IoContext,
