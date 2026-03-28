@@ -17,7 +17,8 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::async_io::{
     AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFile, DiskFileError, DiskFileResult,
 };
-use crate::{DiskTopology, SECTOR_SIZE, probe_sparse_support, query_device_size};
+use crate::error::{BlockError, BlockErrorKind, BlockResult};
+use crate::{DiskTopology, SECTOR_SIZE, disk_file, probe_sparse_support, query_device_size};
 
 #[derive(Debug)]
 pub struct RawFileDiskAio {
@@ -66,6 +67,14 @@ impl DiskFile for RawFileDiskAio {
 
     fn fd(&mut self) -> BorrowedDiskFd<'_> {
         BorrowedDiskFd::new(self.file.as_raw_fd())
+    }
+}
+
+impl disk_file::DiskSize for RawFileDiskAio {
+    fn logical_size(&self) -> BlockResult<u64> {
+        query_device_size(&self.file)
+            .map(|(logical_size, _)| logical_size)
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Size(e)))
     }
 }
 
