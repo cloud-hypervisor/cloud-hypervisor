@@ -39,7 +39,7 @@ Cloud Hypervisor process itself.
 
 ## Block, Network, and Console Devices
 
-Block, network, and consol devices allow guests to send and receive arbitrary
+Block, network, and console devices allow guests to send and receive arbitrary
 data. Cloud Hypervisor does not trust this data. Guests may choose to trust or
 not trust this data.
 
