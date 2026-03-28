@@ -98,6 +98,15 @@ pub fn submit_reads(async_io: &mut dyn AsyncIo, count: usize, stride: u64, iovec
     }
 }
 
+/// Submit `count` sequential write_vectored calls at `stride`-byte intervals.
+pub fn submit_writes(async_io: &mut dyn AsyncIo, count: usize, stride: u64, iovec: &[libc::iovec]) {
+    for i in 0..count {
+        async_io
+            .write_vectored((i as u64 * stride) as libc::off_t, iovec, i as u64)
+            .expect("write_vectored failed");
+    }
+}
+
 /// Create an empty QCOW2 image sized for `num_clusters` clusters.
 /// No data clusters are allocated.
 fn create_empty_qcow_tempfile(num_clusters: usize) -> TempFile {
