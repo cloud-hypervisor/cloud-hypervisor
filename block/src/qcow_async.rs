@@ -612,6 +612,7 @@ mod unit_tests {
             if let Some(c) = async_io.next_completed_request() {
                 return c;
             }
+            // Block until the eventfd is signaled (io_uring or synthetic).
             let fd = async_io.notifier().as_raw_fd();
             let mut val = 0u64;
             // SAFETY: reading 8 bytes from a valid eventfd.
@@ -619,6 +620,24 @@ mod unit_tests {
                 libc::read(fd, &mut val as *mut u64 as *mut libc::c_void, 8);
             }
         }
+    }
+
+    fn async_write(disk: &QcowDiskAsync, offset: u64, data: &[u8]) {
+        let mut async_io = disk.new_async_io(1).unwrap();
+        let iovec = libc::iovec {
+            iov_base: data.as_ptr() as *mut libc::c_void,
+            iov_len: data.len(),
+        };
+        async_io
+            .write_vectored(offset as libc::off_t, &[iovec], 2)
+            .unwrap();
+        let (user_data, result) = wait_for_completion(async_io.as_mut());
+        assert_eq!(user_data, 2);
+        assert_eq!(
+            result as usize,
+            data.len(),
+            "write should return requested length"
+        );
     }
 
     fn async_read(disk: &QcowDiskAsync, offset: u64, len: usize) -> Vec<u8> {
@@ -677,5 +696,24 @@ mod unit_tests {
             read_buf.iter().all(|&b| b == 0),
             "Write zeroes region should read as zeros"
         );
+    }
+
+    #[test]
+    fn test_qcow_async_write_read_roundtrip() {
+        let file_size = 100 * 1024 * 1024;
+        let temp_file = TempFile::new().unwrap();
+        {
+            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
+            QcowFile::new(raw_file, 3, file_size, true).unwrap();
+        }
+        let disk = QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), false, false, true)
+            .unwrap();
+
+        let pattern: Vec<u8> = (0..128 * 1024).map(|i| (i % 251) as u8).collect();
+        let offset = 64 * 1024;
+
+        async_write(&disk, offset, &pattern);
+        let read_buf = async_read(&disk, offset, pattern.len());
+        assert_eq!(read_buf, pattern, "read should match written data");
     }
 }
