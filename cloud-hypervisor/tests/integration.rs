@@ -10293,6 +10293,9 @@ mod aarch64_acpi {
 mod rate_limiter {
     use super::*;
 
+    const NET_RATE_LIMITER_RUNTIME: u32 = 10;
+    const BLOCK_RATE_LIMITER_RUNTIME: u32 = 10;
+
     // Check if the 'measured' rate is within the expected 'difference' (in percentage)
     // compared to given 'limit' rate.
     fn check_rate_limit(measured: f64, limit: f64, difference: f64) -> bool {
@@ -10316,7 +10319,6 @@ mod rate_limiter {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
 
-        let test_timeout = 10;
         let num_queues = 2;
         let queue_size = 256;
         let bw_size = 10485760_u64; // bytes
@@ -10346,9 +10348,14 @@ mod rate_limiter {
 
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot().unwrap();
-            let measured_bps =
-                measure_virtio_net_throughput(test_timeout, num_queues / 2, &guest, rx, true)
-                    .unwrap();
+            let measured_bps = measure_virtio_net_throughput(
+                NET_RATE_LIMITER_RUNTIME,
+                num_queues / 2,
+                &guest,
+                rx,
+                true,
+            )
+            .unwrap();
             assert!(check_rate_limit(measured_bps, limit_bps, 0.1));
         });
 
@@ -10368,7 +10375,6 @@ mod rate_limiter {
     }
 
     fn _test_rate_limiter_block(bandwidth: bool, num_queues: u32) {
-        let test_timeout = 10;
         let fio_ops = FioOps::RandRW;
 
         let bw_size = if bandwidth {
@@ -10436,7 +10442,7 @@ mod rate_limiter {
             let fio_command = format!(
                 "sudo fio --filename=/dev/vdc --name=test --output-format=json \
                 --direct=1 --bs=4k --ioengine=io_uring --iodepth=64 \
-                --rw={fio_ops} --runtime={test_timeout} --numjobs={num_queues}"
+                --rw={fio_ops} --runtime={BLOCK_RATE_LIMITER_RUNTIME} --numjobs={num_queues}"
             );
             let output = guest.ssh_command(&fio_command).unwrap();
 
