@@ -719,4 +719,30 @@ mod unit_tests {
         let read_buf = async_read(&disk, offset, pattern.len());
         assert_eq!(read_buf, pattern, "read should match written data");
     }
+
+    #[test]
+    fn test_qcow_async_read_spanning_cluster_boundary() {
+        let cluster_size: u64 = 65536;
+        let file_size = 100 * 1024 * 1024;
+
+        // Write distinct patterns into two adjacent clusters.
+        let pattern_a = vec![0xAA; cluster_size as usize];
+        let pattern_b = vec![0xBB; cluster_size as usize];
+        let (_temp, disk) = create_disk_with_data(file_size, &pattern_a, 0, true);
+        async_write(&disk, cluster_size, &pattern_b);
+
+        // Read across the boundary: last 4K of cluster 0 + first 4K of cluster 1.
+        let read_offset = cluster_size - 4096;
+        let read_len = 8192;
+        let buf = async_read(&disk, read_offset, read_len);
+
+        assert!(
+            buf[..4096].iter().all(|&b| b == 0xAA),
+            "first half should come from cluster 0"
+        );
+        assert!(
+            buf[4096..].iter().all(|&b| b == 0xBB),
+            "second half should come from cluster 1"
+        );
+    }
 }
