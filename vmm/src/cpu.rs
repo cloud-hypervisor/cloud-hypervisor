@@ -2762,7 +2762,7 @@ impl Debuggable for CpuManager {
         ];
 
         // GDB exposes 32-bit eflags instead of 64-bit rflags.
-        // https://github.com/bminor/binutils-gdb/blob/master/gdb/features/i386/64bit-core.xml
+        // https://sourceware.org/git/?p=binutils-gdb.git;a=blob;f=gdb/features/i386/64bit-core.xml
         let eflags = gregs.get_rflags() as u32;
         let rip = gregs.get_rip();
 
