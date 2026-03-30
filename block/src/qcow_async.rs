@@ -659,4 +659,26 @@ mod unit_tests {
             "Punched hole should read as zeros"
         );
     }
+
+    #[test]
+    fn test_qcow_async_write_zeroes_completion() {
+        let data = vec![0xAA; 128 * 1024];
+        let offset = 0u64;
+        let (_temp, disk) = create_disk_with_data(100 * 1024 * 1024, &data, offset, true);
+
+        let mut async_io = disk.new_async_io(1).unwrap();
+        async_io
+            .write_zeroes(offset, data.len() as u64, 200)
+            .unwrap();
+        let (user_data, result) = async_io.next_completed_request().unwrap();
+        assert_eq!(user_data, 200);
+        assert_eq!(result, 0, "write_zeroes should succeed");
+        drop(async_io);
+
+        let read_buf = async_read(&disk, offset, data.len());
+        assert!(
+            read_buf.iter().all(|&b| b == 0),
+            "Write zeroes region should read as zeros"
+        );
+    }
 }
