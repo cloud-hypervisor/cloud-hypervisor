@@ -1003,7 +1003,9 @@ impl Block {
             .resize(new_size)
             .map_err(Error::DiskResize)?;
 
-        let nsectors = new_size / SECTOR_SIZE;
+        // Re-query actual size - for block devices the resize happens externally
+        let actual_size = self.disk_image.logical_size().map_err(Error::DiskResize)?;
+        let nsectors = actual_size / SECTOR_SIZE;
 
         self.common.pause().map_err(Error::PauseVcpus)?;
 

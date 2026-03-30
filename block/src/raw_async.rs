@@ -3,10 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::fs::File;
-use std::io::Error;
+use std::io::{self, Error};
+use std::os::unix::fs::FileTypeExt;
 use std::os::unix::io::{AsRawFd, RawFd};
 
-use io_uring::{IoUring, opcode, types};
+use io_uring::{opcode, types, IoUring};
 use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE};
 use log::warn;
 use vmm_sys_util::eventfd::EventFd;
@@ -14,8 +15,8 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::{
-    BatchRequest, DiskTopology, RequestType, SECTOR_SIZE, disk_file, probe_sparse_support,
-    query_device_size,
+    disk_file, probe_sparse_support, query_device_size, BatchRequest, DiskTopology, RequestType,
+    BLKGETSIZE64, SECTOR_SIZE,
 };
 
 #[derive(Debug)]
@@ -68,9 +69,37 @@ impl disk_file::SparseCapable for RawFileDisk {
 
 impl disk_file::Resizable for RawFileDisk {
     fn resize(&mut self, size: u64) -> BlockResult<()> {
-        self.file
-            .set_len(size)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e)))
+        let fd_metadata = self
+            .file
+            .metadata()
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+
+        if fd_metadata.file_type().is_block_device() {
+            // Block devices cannot be resized via ftruncate - they are resized
+            // externally (LVM, losetup -c, etc.). Verify the ioctl works but
+            // don't require size to match - caller will re-query actual size.
+            let mut block_device_size: u64 = 0;
+            // SAFETY: BLKGETSIZE64 reads the device size into a u64 pointer.
+            let ret = unsafe {
+                libc::ioctl(
+                    self.file.as_raw_fd(),
+                    BLKGETSIZE64() as _,
+                    &mut block_device_size,
+                )
+            };
+            if ret != 0 {
+                return Err(BlockError::new(
+                    BlockErrorKind::Io,
+                    io::Error::last_os_error(),
+                ));
+            }
+
+            Ok(())
+        } else {
+            self.file
+                .set_len(size)
+                .map_err(|e| BlockError::new(BlockErrorKind::Io, e))
+        }
     }
 }
 
