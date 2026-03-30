@@ -10643,15 +10643,14 @@ mod rate_limiter {
     }
 
     fn _test_rate_limiter_group_block(bandwidth: bool, num_queues: u32, num_disks: u32) {
-        let test_timeout = 10;
         let fio_ops = FioOps::RandRW;
 
         let bw_size = if bandwidth {
-            10485760_u64 // bytes
+            104857600_u64 // bytes
         } else {
-            100_u64 // I/O
+            1000_u64 // I/O
         };
-        let bw_refill_time = 100; // ms
+        let bw_refill_time = 1000; // ms
         let limit_rate = (bw_size * 1000) as f64 / bw_refill_time as f64;
 
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -10660,9 +10659,13 @@ mod rate_limiter {
         let test_img_dir = TempDir::new_with_prefix("/var/tmp/ch").unwrap();
 
         let rate_limit_group_arg = if bandwidth {
-            format!("id=group0,bw_size={bw_size},bw_refill_time={bw_refill_time}")
+            format!(
+                "id=group0,bw_size={bw_size},bw_one_time_burst=0,bw_refill_time={bw_refill_time}"
+            )
         } else {
-            format!("id=group0,ops_size={bw_size},ops_refill_time={bw_refill_time}")
+            format!(
+                "id=group0,ops_size={bw_size},ops_one_time_burst=0,ops_refill_time={bw_refill_time}"
+            )
         };
 
         let mut disk_args = vec![
@@ -10718,7 +10721,7 @@ mod rate_limiter {
             let mut fio_command = format!(
                 "sudo fio --name=global --output-format=json \
                 --direct=1 --bs=4k --ioengine=io_uring --iodepth=64 \
-                --rw={fio_ops} --runtime={test_timeout} --numjobs={num_queues}"
+                --rw={fio_ops} --runtime={BLOCK_RATE_LIMITER_RUNTIME} --numjobs={num_queues}"
             );
 
             // Generate additional argument for each disk:
