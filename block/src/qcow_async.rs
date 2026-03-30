@@ -575,3 +575,88 @@ impl QcowAsync {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod unit_tests {
+    use std::io::{Seek, SeekFrom, Write};
+
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+    use crate::disk_file::AsyncDiskFile;
+    use crate::qcow::{QcowFile, RawFile};
+
+    fn create_disk_with_data(
+        file_size: u64,
+        data: &[u8],
+        offset: u64,
+        sparse: bool,
+    ) -> (TempFile, QcowDiskAsync) {
+        let temp_file = TempFile::new().unwrap();
+        {
+            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
+            let mut qcow_file = QcowFile::new(raw_file, 3, file_size, sparse).unwrap();
+            qcow_file.seek(SeekFrom::Start(offset)).unwrap();
+            qcow_file.write_all(data).unwrap();
+            qcow_file.flush().unwrap();
+        }
+        let disk = QcowDiskAsync::new(
+            temp_file.as_file().try_clone().unwrap(),
+            false,
+            false,
+            sparse,
+        )
+        .unwrap();
+        (temp_file, disk)
+    }
+
+    fn wait_for_completion(async_io: &mut dyn AsyncIo) -> (u64, i32) {
+        loop {
+            if let Some(c) = async_io.next_completed_request() {
+                return c;
+            }
+            let fd = async_io.notifier().as_raw_fd();
+            let mut val = 0u64;
+            // SAFETY: reading 8 bytes from a valid eventfd.
+            unsafe {
+                libc::read(fd, &mut val as *mut u64 as *mut libc::c_void, 8);
+            }
+        }
+    }
+
+    fn async_read(disk: &QcowDiskAsync, offset: u64, len: usize) -> Vec<u8> {
+        let mut async_io = disk.new_async_io(1).unwrap();
+        let mut buf = vec![0xFFu8; len];
+        let iovec = libc::iovec {
+            iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+            iov_len: buf.len(),
+        };
+        async_io
+            .read_vectored(offset as libc::off_t, &[iovec], 1)
+            .unwrap();
+        let (user_data, result) = wait_for_completion(async_io.as_mut());
+        assert_eq!(user_data, 1);
+        assert_eq!(result as usize, len, "read should return requested length");
+        buf
+    }
+
+    #[test]
+    fn test_qcow_async_punch_hole_completion() {
+        let data = vec![0xDD; 128 * 1024];
+        let offset = 0u64;
+        let (_temp, disk) = create_disk_with_data(100 * 1024 * 1024, &data, offset, true);
+
+        let mut async_io = disk.new_async_io(1).unwrap();
+        async_io.punch_hole(offset, data.len() as u64, 100).unwrap();
+        let (user_data, result) = async_io.next_completed_request().unwrap();
+        assert_eq!(user_data, 100);
+        assert_eq!(result, 0, "punch_hole should succeed");
+        drop(async_io);
+
+        let read_buf = async_read(&disk, offset, data.len());
+        assert!(
+            read_buf.iter().all(|&b| b == 0),
+            "Punched hole should read as zeros"
+        );
+    }
+}
