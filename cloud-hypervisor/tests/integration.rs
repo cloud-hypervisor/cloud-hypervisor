@@ -10475,8 +10475,8 @@ mod aarch64_acpi {
 mod rate_limiter {
     use super::*;
 
-    const NET_RATE_LIMITER_RUNTIME: u32 = 10;
-    const BLOCK_RATE_LIMITER_RUNTIME: u32 = 10;
+    const NET_RATE_LIMITER_RUNTIME: u32 = 20;
+    const BLOCK_RATE_LIMITER_RUNTIME: u32 = 20;
 
     // Check if the 'measured' rate is within the expected 'difference' (in percentage)
     // compared to given 'limit' rate.
@@ -10503,12 +10503,12 @@ mod rate_limiter {
 
         let num_queues = 2;
         let queue_size = 256;
-        let bw_size = 10485760_u64; // bytes
-        let bw_refill_time = 100; // ms
+        let bw_size = 104857600_u64; // bytes
+        let bw_refill_time = 1000; // ms
         let limit_bps = (bw_size * 8 * 1000) as f64 / bw_refill_time as f64;
 
         let net_params = format!(
-            "tap=,mac={},ip={},mask=255.255.255.128,num_queues={},queue_size={},bw_size={},bw_refill_time={}",
+            "tap=,mac={},ip={},mask=255.255.255.128,num_queues={},queue_size={},bw_size={},bw_one_time_burst=0,bw_refill_time={}",
             guest.network.guest_mac0,
             guest.network.host_ip0,
             num_queues,
@@ -10560,11 +10560,11 @@ mod rate_limiter {
         let fio_ops = FioOps::RandRW;
 
         let bw_size = if bandwidth {
-            10485760_u64 // bytes
+            104857600_u64 // bytes
         } else {
-            100_u64 // I/O
+            1000_u64 // I/O
         };
-        let bw_refill_time = 100; // ms
+        let bw_refill_time = 1000; // ms
         let limit_rate = (bw_size * 1000) as f64 / bw_refill_time as f64;
 
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -10585,11 +10585,11 @@ mod rate_limiter {
 
         let test_blk_params = if bandwidth {
             format!(
-                "path={blk_rate_limiter_test_img},num_queues={num_queues},bw_size={bw_size},bw_refill_time={bw_refill_time},image_type=raw"
+                "path={blk_rate_limiter_test_img},num_queues={num_queues},bw_size={bw_size},bw_one_time_burst=0,bw_refill_time={bw_refill_time},image_type=raw"
             )
         } else {
             format!(
-                "path={blk_rate_limiter_test_img},num_queues={num_queues},ops_size={bw_size},ops_refill_time={bw_refill_time},image_type=raw"
+                "path={blk_rate_limiter_test_img},num_queues={num_queues},ops_size={bw_size},ops_one_time_burst=0,ops_refill_time={bw_refill_time},image_type=raw"
             )
         };
 
