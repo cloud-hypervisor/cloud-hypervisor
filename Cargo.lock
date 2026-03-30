@@ -4,9 +4,9 @@ version = 4
 
 [[package]]
 name = "acpi_tables"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ad581b2b0fa02638f3df6ff3f852ebc30dc7cfe531e9745d1ca4c0f283a6dbe"
+checksum = "ce821f856a3eb1d033287f2dcfcdf94276d7895dd5bdd8ca45ae17e7d33d4dd9"
 dependencies = [
  "zerocopy",
 ]
@@ -123,7 +123,7 @@ dependencies = [
  "thiserror",
  "uuid",
  "vm-fdt",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
 ]
 
@@ -337,7 +337,7 @@ dependencies = [
  "uuid",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vm-virtio",
  "vmm-sys-util",
  "zstd",
@@ -450,7 +450,7 @@ dependencies = [
  "thiserror",
  "tpm",
  "tracer",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm",
  "vmm-sys-util",
  "wait-timeout",
@@ -577,7 +577,7 @@ dependencies = [
  "tpm",
  "vm-allocator",
  "vm-device",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vm-migration",
  "vmm-sys-util",
  "zerocopy",
@@ -1018,7 +1018,7 @@ dependencies = [
  "serde_with",
  "thiserror",
  "vfio-ioctls",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
  "zerocopy",
 ]
@@ -1264,7 +1264,7 @@ version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "de72cb02c55ecffcf75fe78295926f872eb6eb0a58d629c58a8c324dc26380f6"
 dependencies = [
- "vm-memory",
+ "vm-memory 0.17.1",
 ]
 
 [[package]]
@@ -1376,7 +1376,7 @@ dependencies = [
  "thiserror",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vm-virtio",
  "vmm-sys-util",
 ]
@@ -1555,7 +1555,7 @@ dependencies = [
  "vfio_user",
  "vm-allocator",
  "vm-device",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vm-migration",
  "vmm-sys-util",
 ]
@@ -2299,7 +2299,7 @@ dependencies = [
  "mshv-ioctls",
  "thiserror",
  "vfio-bindings",
- "vm-memory",
+ "vm-memory 0.17.1",
  "vmm-sys-util",
 ]
 
@@ -2317,7 +2317,7 @@ dependencies = [
  "serde_json",
  "thiserror",
  "vfio-bindings",
- "vm-memory",
+ "vm-memory 0.17.1",
  "vmm-sys-util",
 ]
 
@@ -2330,7 +2330,7 @@ dependencies = [
  "bitflags 2.11.0",
  "libc",
  "uuid",
- "vm-memory",
+ "vm-memory 0.17.1",
  "vmm-sys-util",
 ]
 
@@ -2345,7 +2345,7 @@ dependencies = [
  "vhost",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.17.1",
  "vmm-sys-util",
 ]
 
@@ -2364,7 +2364,7 @@ dependencies = [
  "vhost-user-backend",
  "virtio-bindings",
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
 ]
 
@@ -2383,7 +2383,7 @@ dependencies = [
  "vhost",
  "vhost-user-backend",
  "virtio-bindings",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
 ]
 
@@ -2419,7 +2419,7 @@ dependencies = [
  "virtio-queue",
  "vm-allocator",
  "vm-device",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vm-migration",
  "vm-virtio",
  "vmm-sys-util",
@@ -2434,7 +2434,7 @@ dependencies = [
  "libc",
  "log",
  "virtio-bindings",
- "vm-memory",
+ "vm-memory 0.17.1",
  "vmm-sys-util",
 ]
 
@@ -2444,7 +2444,7 @@ version = "0.1.0"
 dependencies = [
  "arch",
  "libc",
- "vm-memory",
+ "vm-memory 0.18.0",
 ]
 
 [[package]]
@@ -2455,7 +2455,7 @@ dependencies = [
  "serde",
  "thiserror",
  "vfio-ioctls",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vmm-sys-util",
 ]
 
@@ -2478,6 +2478,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vm-memory"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b55e753c7725603745cb32b2287ef7ef3da05c03c7702cda3fa8abe25ae0465"
+dependencies = [
+ "arc-swap",
+ "libc",
+ "thiserror",
+ "winapi",
+]
+
+[[package]]
 name = "vm-migration"
 version = "0.1.0"
 dependencies = [
@@ -2486,7 +2498,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "vm-memory",
+ "vm-memory 0.18.0",
 ]
 
 [[package]]
@@ -2494,7 +2506,7 @@ name = "vm-virtio"
 version = "0.1.0"
 dependencies = [
  "virtio-queue",
- "vm-memory",
+ "vm-memory 0.18.0",
 ]
 
 [[package]]
@@ -2547,7 +2559,7 @@ dependencies = [
  "virtio-devices",
  "vm-allocator",
  "vm-device",
- "vm-memory",
+ "vm-memory 0.18.0",
  "vm-migration",
  "vm-virtio",
  "vmm-sys-util",
