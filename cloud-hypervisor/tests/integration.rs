@@ -10063,6 +10063,177 @@ mod live_migration {
         handle_child_output(r, &src_output);
     }
 
+    fn _test_live_migration_virtio_fs(local: bool) {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
+        let mut shared_dir = workload_path;
+        shared_dir.push("shared_dir");
+
+        let (daemon_child, virtiofsd_socket_path) =
+            prepare_virtiofsd(&guest.tmp_dir, shared_dir.to_str().unwrap());
+
+        let src_api_socket = temp_api_path(&guest.tmp_dir);
+
+        // Start the source VM
+        let mut src_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &src_api_socket])
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=512M,shared=on"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .default_net()
+            .args([
+                "--fs",
+                format!("socket={virtiofsd_socket_path},tag=myfs,num_queues=1,queue_size=1024")
+                    .as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        // Start the destination VM
+        let mut dest_api_socket = temp_api_path(&guest.tmp_dir);
+        dest_api_socket.push_str(".dest");
+        let mut dest_child = GuestCommand::new(&guest)
+            .args(["--api-socket", &dest_api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        // Spawn a thread that waits for the old virtiofsd to exit then
+        // starts a replacement.  During migration the source saves
+        // DEVICE_STATE then disconnects, causing virtiofsd to exit.
+        // The destination needs a fresh virtiofsd to load DEVICE_STATE.
+        // We remove the socket file first so the destination cannot
+        // accidentally connect to the old instance.
+        let virtiofsd_socket_clone = virtiofsd_socket_path.clone();
+        let shared_dir_str = shared_dir.to_str().unwrap().to_string();
+        let (restart_tx, restart_rx) = std::sync::mpsc::channel();
+        let _monitor = thread::spawn(move || {
+            let mut child = daemon_child;
+            let _ = child.wait();
+            let mut path = dirs::home_dir().unwrap();
+            path.push("workloads");
+            path.push("virtiofsd");
+            let new_child = Command::new(path)
+                .args(["--shared-dir", &shared_dir_str])
+                .args(["--socket-path", &virtiofsd_socket_clone])
+                .args(["--cache", "never"])
+                .args(["--tag", "myfs"])
+                .spawn()
+                .unwrap();
+            wait_for_virtiofsd_socket(&virtiofsd_socket_clone);
+            let _ = restart_tx.send(new_child);
+        });
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // Mount virtiofs and verify it works
+            guest
+                .ssh_command("mkdir -p mount_dir && sudo mount -t virtiofs myfs mount_dir/")
+                .unwrap();
+
+            // Write a test file through virtiofs before migration
+            guest
+                .ssh_command(
+                    "sudo bash -c 'echo pre_migration_data > mount_dir/migration_test_file'",
+                )
+                .unwrap();
+
+            // Verify the file is accessible
+            assert_eq!(
+                guest
+                    .ssh_command("cat mount_dir/migration_test_file")
+                    .unwrap()
+                    .trim(),
+                "pre_migration_data"
+            );
+
+            let migration_socket = String::from(
+                guest
+                    .tmp_dir
+                    .as_path()
+                    .join("live-migration.sock")
+                    .to_str()
+                    .unwrap(),
+            );
+
+            // Remove the socket so the destination cannot connect to
+            // the old virtiofsd (which is still running).  The source's
+            // existing connection uses an already-accepted fd.
+            let _ = std::fs::remove_file(&virtiofsd_socket_path);
+
+            assert!(
+                start_live_migration(&migration_socket, &src_api_socket, &dest_api_socket, local),
+                "Unsuccessful command: 'send-migration' or 'receive-migration'."
+            );
+        });
+
+        // Check and report any errors occurred during the live-migration
+        if r.is_err() {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "Error occurred during live-migration with virtio-fs",
+            );
+        }
+
+        // Check the source vm has been terminated successfully (give it '3s' to settle)
+        thread::sleep(Duration::from_secs(3));
+        if !src_child.try_wait().unwrap().is_some_and(|s| s.success()) {
+            print_and_panic(
+                src_child,
+                dest_child,
+                None,
+                "source VM was not terminated successfully.",
+            );
+        }
+
+        // Post live-migration checks
+        let r = std::panic::catch_unwind(|| {
+            // Verify virtiofs still works after migration
+            // Read the file written before migration
+            assert_eq!(
+                guest
+                    .ssh_command("cat mount_dir/migration_test_file")
+                    .unwrap()
+                    .trim(),
+                "pre_migration_data"
+            );
+
+            // Write a new file after migration
+            guest
+                .ssh_command(
+                    "sudo bash -c 'echo post_migration_data > mount_dir/post_migration_file'",
+                )
+                .unwrap();
+
+            // Verify the new file exists on the host
+            let post_content =
+                std::fs::read_to_string(shared_dir.join("post_migration_file")).unwrap();
+            assert_eq!(post_content.trim(), "post_migration_data");
+        });
+
+        // Clean up
+        let _ = dest_child.kill();
+        let dest_output = dest_child.wait_with_output().unwrap();
+        if let Ok(mut new_daemon) = restart_rx.try_recv() {
+            let _ = new_daemon.kill();
+            let _ = new_daemon.wait();
+        }
+        let _ = std::fs::remove_file(shared_dir.join("migration_test_file"));
+        let _ = std::fs::remove_file(shared_dir.join("post_migration_file"));
+
+        handle_child_output(r, &dest_output);
+    }
+
     mod live_migration_parallel {
         use vmm::api::TimeoutStrategy;
 
@@ -10135,7 +10306,19 @@ mod live_migration {
     mod live_migration_sequential {
         use super::*;
 
-        // NUMA & balloon live migration tests are large so run sequentially
+        // NUMA, balloon, and virtio-fs live migration tests run sequentially
+
+        #[test]
+        #[cfg(not(feature = "mshv"))]
+        fn test_live_migration_virtio_fs() {
+            _test_live_migration_virtio_fs(false);
+        }
+
+        #[test]
+        #[cfg(not(feature = "mshv"))]
+        fn test_live_migration_virtio_fs_local() {
+            _test_live_migration_virtio_fs(true);
+        }
 
         #[test]
         fn test_live_migration_balloon() {
