@@ -864,4 +864,42 @@ mod unit_tests {
             "unallocated region should read as zeroes"
         );
     }
+
+    #[test]
+    fn test_qcow_async_sub_cluster_write() {
+        let cluster_size = 65536usize;
+        let file_size = 100 * 1024 * 1024;
+        let temp_file = TempFile::new().unwrap();
+        {
+            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
+            QcowFile::new(raw_file, 3, file_size, true).unwrap();
+        }
+        let disk = QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), false, false, true)
+            .unwrap();
+
+        // Write 4K into the middle of a cluster.
+        let write_offset = 4096u64;
+        let write_len = 4096;
+        let pattern = vec![0xCC; write_len];
+        async_write(&disk, write_offset, &pattern);
+
+        // Read the entire cluster back.
+        let buf = async_read(&disk, 0, cluster_size);
+
+        assert!(
+            buf[..write_offset as usize].iter().all(|&b| b == 0),
+            "bytes before the write should be zero"
+        );
+        assert_eq!(
+            &buf[write_offset as usize..write_offset as usize + write_len],
+            &pattern[..],
+            "written region should match"
+        );
+        assert!(
+            buf[write_offset as usize + write_len..]
+                .iter()
+                .all(|&b| b == 0),
+            "bytes after the write should be zero"
+        );
+    }
 }
