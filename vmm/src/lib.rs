@@ -17,7 +17,7 @@ use std::time::Duration;
 use std::time::Instant;
 use std::{io, result, thread};
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
 use api::http::HttpApiHandle;
@@ -2387,6 +2387,11 @@ impl RequestHandler for Vmm {
         &mut self,
         send_data_migration: VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
+        send_data_migration
+            .validate()
+            .context("Invalid send migration configuration")
+            .map_err(MigratableError::MigrateSend)?;
+
         info!(
             "Sending migration: destination_url={},local={},downtime={}ms,timeout={}s,timeout_strategy={:?}",
             send_data_migration.destination_url,

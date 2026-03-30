@@ -72,7 +72,7 @@ enum Error {
     #[error("Invalid disk size")]
     InvalidDiskSize(#[source] ByteSizedParseError),
     #[error("Error parsing send migration configuration")]
-    SendMigrationConfig(#[from] vmm::api::VmSendMigrationParseError),
+    SendMigrationConfig(#[from] vmm::api::VmSendMigrationConfigError),
 }
 
 enum TargetApi<'a> {
