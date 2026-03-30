@@ -895,4 +895,32 @@ mod unit_tests {
             "bytes after the write should be zero"
         );
     }
+
+    #[test]
+    fn test_qcow_async_write_after_punch_hole() {
+        let data = vec![0xAA; 64 * 1024];
+        let offset = 0u64;
+        let (_temp, disk) = create_disk_with_data(100 * 1024 * 1024, &data, offset, true);
+
+        let buf = async_read(&disk, offset, data.len());
+        assert!(buf.iter().all(|&b| b == 0xAA));
+
+        let mut async_io = disk.new_async_io(1).unwrap();
+        async_io.punch_hole(offset, data.len() as u64, 10).unwrap();
+        let (_, result) = wait_for_completion(async_io.as_mut());
+        assert_eq!(result, 0);
+        drop(async_io);
+
+        let buf = async_read(&disk, offset, data.len());
+        assert!(
+            buf.iter().all(|&b| b == 0),
+            "should be zero after punch hole"
+        );
+
+        let new_data = vec![0xBB; 64 * 1024];
+        async_write(&disk, offset, &new_data);
+
+        let buf = async_read(&disk, offset, new_data.len());
+        assert_eq!(buf, new_data, "should read new data after rewrite");
+    }
 }
