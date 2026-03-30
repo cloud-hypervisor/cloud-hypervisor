@@ -438,6 +438,7 @@ cmd_tests() {
             --device $exported_device \
             --device /dev/net/tun \
             --cap-add net_admin \
+            --security-opt seccomp=unconfined \
             --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
             ${exported_volumes:+$exported_volumes} \
             --env BUILD_TARGET="$target" \
