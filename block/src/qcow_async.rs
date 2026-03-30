@@ -839,4 +839,22 @@ mod unit_tests {
         assert_eq!(read_a, write_a, "batch read A should match written data");
         assert_eq!(read_b, write_b, "batch read B should match written data");
     }
+
+    #[test]
+    fn test_qcow_async_read_unallocated() {
+        let file_size = 100 * 1024 * 1024;
+        let temp_file = TempFile::new().unwrap();
+        {
+            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
+            QcowFile::new(raw_file, 3, file_size, true).unwrap();
+        }
+        let disk = QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), false, false, true)
+            .unwrap();
+
+        let buf = async_read(&disk, 0, 128 * 1024);
+        assert!(
+            buf.iter().all(|&b| b == 0),
+            "unallocated region should read as zeroes"
+        );
+    }
 }
