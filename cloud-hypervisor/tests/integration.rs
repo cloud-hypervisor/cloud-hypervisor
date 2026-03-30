@@ -10295,6 +10295,7 @@ mod rate_limiter {
 
     const NET_RATE_LIMITER_RUNTIME: u32 = 20;
     const BLOCK_RATE_LIMITER_RUNTIME: u32 = 20;
+    const BLOCK_RATE_LIMITER_RAMP_TIME: u32 = 5;
 
     // Check if the 'measured' rate is within the expected 'difference' (in percentage)
     // compared to given 'limit' rate.
@@ -10442,7 +10443,8 @@ mod rate_limiter {
             let fio_command = format!(
                 "sudo fio --filename=/dev/vdc --name=test --output-format=json \
                 --direct=1 --bs=4k --ioengine=io_uring --iodepth=64 \
-                --rw={fio_ops} --runtime={BLOCK_RATE_LIMITER_RUNTIME} --numjobs={num_queues}"
+                --rw={fio_ops} --runtime={BLOCK_RATE_LIMITER_RUNTIME} \
+                --ramp_time={BLOCK_RATE_LIMITER_RAMP_TIME} --numjobs={num_queues}",
             );
             let output = guest.ssh_command(&fio_command).unwrap();
 
@@ -10539,7 +10541,8 @@ mod rate_limiter {
             let mut fio_command = format!(
                 "sudo fio --name=global --output-format=json \
                 --direct=1 --bs=4k --ioengine=io_uring --iodepth=64 \
-                --rw={fio_ops} --runtime={BLOCK_RATE_LIMITER_RUNTIME} --numjobs={num_queues}"
+                --rw={fio_ops} --runtime={BLOCK_RATE_LIMITER_RUNTIME} \
+                --ramp_time={BLOCK_RATE_LIMITER_RAMP_TIME} --numjobs={num_queues}",
             );
 
             // Generate additional argument for each disk:
