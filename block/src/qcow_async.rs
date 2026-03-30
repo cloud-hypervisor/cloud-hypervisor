@@ -923,4 +923,28 @@ mod unit_tests {
         let buf = async_read(&disk, offset, new_data.len());
         assert_eq!(buf, new_data, "should read new data after rewrite");
     }
+
+    #[test]
+    fn test_qcow_async_large_sequential_io() {
+        let cluster_size = 64 * 1024;
+        let num_clusters = 8;
+        let total_len = cluster_size * num_clusters;
+        let offset = 0u64;
+
+        let mut data = vec![0u8; total_len];
+        for (i, chunk) in data.chunks_mut(cluster_size).enumerate() {
+            chunk.fill((i + 1) as u8);
+        }
+
+        let (_temp, disk) = create_disk_with_data(100 * 1024 * 1024, &data, offset, true);
+
+        let buf = async_read(&disk, offset, total_len);
+        assert_eq!(buf.len(), total_len);
+        for (i, chunk) in buf.chunks(cluster_size).enumerate() {
+            assert!(
+                chunk.iter().all(|&b| b == (i + 1) as u8),
+                "cluster {i} mismatch"
+            );
+        }
+    }
 }
