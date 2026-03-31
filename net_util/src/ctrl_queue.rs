@@ -171,7 +171,9 @@ impl CtrlQueue {
                         .translate_gva(access_platform, status_desc.len() as usize),
                 )
                 .map_err(Error::GuestMemory)?;
-            let len = ctrl_desc.len() + data_desc.len() + status_desc.len();
+            // Per virtio spec 2.6.8, used_len is the number of bytes written
+            // to device-writable descriptors. Only the status byte is written.
+            let len = status_desc.len();
 
             queue
                 .add_used(desc_chain.memory(), desc_chain.head_index(), len)
