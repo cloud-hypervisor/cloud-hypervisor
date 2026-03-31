@@ -29,7 +29,7 @@ use crate::{
     ActivateError, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
     GuestMemoryMmap, GuestRegionMmap, VIRTIO_F_IN_ORDER, VIRTIO_F_NOTIFICATION_DATA,
     VIRTIO_F_ORDER_PLATFORM, VIRTIO_F_RING_EVENT_IDX, VIRTIO_F_RING_INDIRECT_DESC,
-    VIRTIO_F_VERSION_1, VirtioInterrupt,
+    VIRTIO_F_VERSION_1, VirtioCommon, VirtioInterrupt,
 };
 
 pub mod blk;
@@ -336,6 +336,7 @@ impl<C> VhostUserState<C> {
 
 #[derive(Default)]
 pub struct VhostUserCommon {
+    pub virtio_common: VirtioCommon,
     pub vu: Option<Arc<Mutex<VhostUserHandle>>>,
     pub acked_protocol_features: u64,
     pub socket_path: String,
@@ -485,12 +486,11 @@ impl VhostUserCommon {
 
     pub fn state<C: Default>(
         &self,
-        common: &crate::VirtioCommon,
         config: C,
     ) -> std::result::Result<VhostUserState<C>, MigratableError> {
         let mut state = VhostUserState {
-            avail_features: common.avail_features,
-            acked_features: common.acked_features,
+            avail_features: self.virtio_common.avail_features,
+            acked_features: self.virtio_common.acked_features,
             config,
             acked_protocol_features: self.acked_protocol_features,
             vu_num_queues: self.vu_num_queues,
@@ -586,15 +586,12 @@ impl VhostUserCommon {
         Ok(())
     }
 
-    pub fn complete_migration(
-        &mut self,
-        kill_evt: Option<EventFd>,
-    ) -> std::result::Result<(), MigratableError> {
+    pub fn complete_migration(&mut self) -> std::result::Result<(), MigratableError> {
         self.migration_started = false;
 
         // Make sure the device thread is killed in order to prevent from
         // reconnections to the socket.
-        if let Some(kill_evt) = kill_evt {
+        if let Some(kill_evt) = self.virtio_common.kill_evt.take() {
             kill_evt.write(1).map_err(|e| {
                 MigratableError::CompleteMigration(anyhow!(
                     "Error killing vhost-user thread: {e:?}"
