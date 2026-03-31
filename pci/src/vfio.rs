@@ -21,7 +21,8 @@ use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::{VfioDevice, VfioIrq, VfioOps, VfioRegionInfoCap, VfioRegionSparseMmapArea};
 use vm_allocator::page_size::{
-    align_page_size_down, align_page_size_up, is_4k_aligned, is_4k_multiple, is_page_size_aligned,
+    align_page_size_down, align_page_size_up, get_page_size, is_4k_aligned, is_4k_multiple,
+    is_page_size_aligned,
 };
 use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
@@ -1686,9 +1687,40 @@ impl VfioPciDevice {
                     self.common.interrupt.msix.as_ref(),
                 )?;
 
+                let page_size = get_page_size();
                 for area in sparse_areas.iter() {
+                    // KVM_SET_USER_MEMORY_REGION requires memory_size to be a
+                    // multiple of the host page size. On aarch64 with 64K pages
+                    // a device BAR can be smaller than a page (e.g. 16K NVMe
+                    // BAR).
+                    //
+                    // The kernel only sets VFIO_REGION_INFO_FLAG_MMAP on sub-page
+                    // BARs after verifying the physical BAR start is page-aligned
+                    // and reserving the rest of the page. Expansion is only safe
+                    // at offset 0 where the kernel reservation applies.
+                    //
+                    // fixup_msix_region() ensures MSI-X relocation at >= page_size
+                    // offset, so the expanded mmap cannot overlap the trap region.
+                    let mmap_len = if area.size < page_size {
+                        if area.offset != 0 {
+                            error!(
+                                "BAR {}: sub-page sparse area at non-zero offset 0x{:x} \
+                                 cannot be safely expanded to page size",
+                                region.index, area.offset,
+                            );
+                            return Err(VfioPciError::MmapArea);
+                        }
+                        info!(
+                            "BAR {}: expanding sub-page sparse area mmap from 0x{:x} to \
+                             page size 0x{:x}",
+                            region.index, area.size, page_size,
+                        );
+                        page_size
+                    } else {
+                        area.size
+                    };
                     let mapping = match MmapRegion::mmap(
-                        area.size,
+                        mmap_len,
                         prot,
                         fd,
                         mmap_offset,
@@ -1699,7 +1731,7 @@ impl VfioPciDevice {
                             error!(
                                 "Could not mmap sparse area (offset = 0x{:x}, size = 0x{:x}): {}",
                                 mmap_offset,
-                                area.size,
+                                mmap_len,
                                 std::io::Error::last_os_error()
                             );
                             return Err(VfioPciError::MmapArea);
