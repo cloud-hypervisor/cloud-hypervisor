@@ -422,6 +422,9 @@ pub struct PciConfigurationState {
     rom_bar_used: bool,
     last_capability: Option<(usize, usize)>,
     msix_cap_reg_idx: Option<usize>,
+    // Preserve deferred BAR moves across snapshot and restore.
+    #[serde(default)]
+    pending_bar_reprogram: Vec<BarReprogrammingParams>,
 }
 
 /// Contains the configuration space of a PCI node.
@@ -557,6 +560,7 @@ impl PciConfiguration {
             rom_bar_used,
             last_capability,
             msix_cap_reg_idx,
+            pending_bar_reprogram,
         ) = if let Some(state) = state {
             (
                 state.registers.try_into().unwrap(),
@@ -567,6 +571,7 @@ impl PciConfiguration {
                 state.rom_bar_used,
                 state.last_capability,
                 state.msix_cap_reg_idx,
+                state.pending_bar_reprogram,
             )
         } else {
             let mut registers = [0u32; NUM_CONFIGURATION_REGISTERS];
@@ -606,6 +611,7 @@ impl PciConfiguration {
                 false,
                 None,
                 None,
+                Vec::new(),
             )
         };
 
@@ -619,7 +625,7 @@ impl PciConfiguration {
             last_capability,
             msix_cap_reg_idx,
             msix_config,
-            pending_bar_reprogram: Vec::new(),
+            pending_bar_reprogram,
         }
     }
 
@@ -633,6 +639,7 @@ impl PciConfiguration {
             rom_bar_used: self.rom_bar_used,
             last_capability: self.last_capability,
             msix_cap_reg_idx: self.msix_cap_reg_idx,
+            pending_bar_reprogram: self.pending_bar_reprogram.clone(),
         }
     }
 
