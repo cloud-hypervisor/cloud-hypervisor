@@ -202,17 +202,7 @@ impl Blk {
 
 impl Drop for Blk {
     fn drop(&mut self) {
-        if let Some(kill_evt) = self.vu_common.virtio_common.kill_evt.take()
-            && let Err(e) = kill_evt.write(1)
-        {
-            error!("failed to kill vhost-user-blk: {e:?}");
-        }
-        self.vu_common.virtio_common.wait_for_epoll_threads();
-        if let Some(thread) = self.vu_common.epoll_thread.take()
-            && let Err(e) = thread.join()
-        {
-            error!("Error joining thread: {e:?}");
-        }
+        self.vu_common.shutdown();
     }
 }
 
