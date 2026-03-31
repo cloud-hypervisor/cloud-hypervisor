@@ -95,9 +95,9 @@ libc = "0.2.183"
 log = "0.4.29"
 signal-hook = "0.4.3"
 thiserror = "2.0.18"
-uuid = { version = "1.22.0" }
+uuid = { version = "1.23.0" }
 wait-timeout = "0.2.1"
-zerocopy = { version = "0.8.42", default-features = false }
+zerocopy = { version = "0.8.48", default-features = false }
 
 [workspace.lints.clippy]
 # Any clippy lint (group) in alphabetical order:
