@@ -3,7 +3,7 @@
 
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
 use std::{io, thread};
 
@@ -425,6 +425,22 @@ impl VhostUserCommon {
     }
 
     pub fn shutdown(&mut self) {
+        // Signal the epoll thread to exit, unpause it (it may be parked
+        // if the VM was paused for migration), then wait for it to finish.
+        // This ensures the thread drops its Arc<VhostUserHandle>, fully
+        // closing the vhost-user socket so the backend can accept a new
+        // connection from the destination.
+        if let Some(kill_evt) = self.virtio_common.kill_evt.take() {
+            let _ = kill_evt.write(1);
+        }
+        self.virtio_common.paused.store(false, Ordering::SeqCst);
+        if let Some(t) = self.epoll_thread.as_ref() {
+            t.thread().unpark();
+        }
+        if let Some(t) = self.epoll_thread.take() {
+            let _ = t.join();
+        }
+
         // Remove socket path if needed
         if self.server {
             let _ = std::fs::remove_file(&self.socket_path);
