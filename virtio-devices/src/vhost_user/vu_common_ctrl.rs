@@ -670,6 +670,10 @@ impl VhostUserHandle {
     }
 
     pub fn dirty_log(&mut self, last_ram_addr: u64) -> Result<MemoryRangeTable> {
+        if !self.supports_migration {
+            return Err(Error::MigrationNotSupported);
+        }
+
         // The log region is updated by creating a new region that is sent to
         // the backend. This ensures the backend stops logging to the previous
         // region. The previous region is returned and processed to create the
