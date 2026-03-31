@@ -2,12 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use thiserror::Error;
 use virtio_bindings::virtio_net::{
-    VIRTIO_NET_CTRL_GUEST_OFFLOADS, VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET, VIRTIO_NET_CTRL_MQ,
-    VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN,
-    VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET, VIRTIO_NET_ERR, VIRTIO_NET_OK,
+    VIRTIO_NET_CTRL_ANNOUNCE, VIRTIO_NET_CTRL_ANNOUNCE_ACK, VIRTIO_NET_CTRL_GUEST_OFFLOADS,
+    VIRTIO_NET_CTRL_GUEST_OFFLOADS_SET, VIRTIO_NET_CTRL_MQ, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MAX,
+    VIRTIO_NET_CTRL_MQ_VQ_PAIRS_MIN, VIRTIO_NET_CTRL_MQ_VQ_PAIRS_SET, VIRTIO_NET_CTRL_RX,
+    VIRTIO_NET_CTRL_RX_ALLMULTI, VIRTIO_NET_CTRL_RX_ALLUNI, VIRTIO_NET_CTRL_RX_NOBCAST,
+    VIRTIO_NET_CTRL_RX_NOMULTI, VIRTIO_NET_CTRL_RX_NOUNI, VIRTIO_NET_CTRL_RX_PROMISC,
+    VIRTIO_NET_CTRL_VLAN, VIRTIO_NET_CTRL_VLAN_ADD, VIRTIO_NET_CTRL_VLAN_DEL, VIRTIO_NET_ERR,
+    VIRTIO_NET_OK,
 };
 use virtio_queue::{Queue, QueueT};
 use vm_memory::{ByteValued, Bytes, GuestMemoryError};
@@ -52,6 +56,26 @@ pub struct ControlHeader {
 
 // SAFETY: ControlHeader only contains a series of integers
 unsafe impl ByteValued for ControlHeader {}
+
+fn is_tolerated_ctrl_command(ctrl_hdr: ControlHeader) -> bool {
+    match u32::from(ctrl_hdr.class) {
+        VIRTIO_NET_CTRL_RX => matches!(
+            u32::from(ctrl_hdr.cmd),
+            VIRTIO_NET_CTRL_RX_PROMISC
+                | VIRTIO_NET_CTRL_RX_ALLMULTI
+                | VIRTIO_NET_CTRL_RX_ALLUNI
+                | VIRTIO_NET_CTRL_RX_NOMULTI
+                | VIRTIO_NET_CTRL_RX_NOUNI
+                | VIRTIO_NET_CTRL_RX_NOBCAST
+        ),
+        VIRTIO_NET_CTRL_VLAN => matches!(
+            u32::from(ctrl_hdr.cmd),
+            VIRTIO_NET_CTRL_VLAN_ADD | VIRTIO_NET_CTRL_VLAN_DEL
+        ),
+        VIRTIO_NET_CTRL_ANNOUNCE => u32::from(ctrl_hdr.cmd) == VIRTIO_NET_CTRL_ANNOUNCE_ACK,
+        _ => false,
+    }
+}
 
 pub struct CtrlQueue {
     pub taps: Vec<Tap>,
@@ -127,6 +151,10 @@ impl CtrlQueue {
                         warn!("Unsupported command: {}", ctrl_hdr.cmd);
                         false
                     }
+                }
+                _ if is_tolerated_ctrl_command(ctrl_hdr) => {
+                    debug!("Ignoring unsupported but tolerated control command {ctrl_hdr:?}");
+                    true
                 }
                 _ => {
                     warn!("Unsupported command {ctrl_hdr:?}");
