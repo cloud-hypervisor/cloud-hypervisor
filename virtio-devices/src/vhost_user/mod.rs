@@ -1,11 +1,11 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
+use std::{io, thread};
 
 use anyhow::anyhow;
 use log::error;
@@ -345,6 +345,7 @@ pub struct VhostUserCommon {
     pub server: bool,
     pub interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     pub vring_bases: Option<Vec<u64>>,
+    pub epoll_thread: Option<thread::JoinHandle<()>>,
 }
 
 impl VhostUserCommon {

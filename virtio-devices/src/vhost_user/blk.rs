@@ -3,7 +3,7 @@
 
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
-use std::{mem, result, thread};
+use std::{mem, result};
 
 use block::VirtioBlockConfig;
 use event_monitor::event;
@@ -43,7 +43,6 @@ pub struct Blk {
     id: String,
     config: VirtioBlockConfig,
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-    epoll_thread: Option<thread::JoinHandle<()>>,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     iommu: bool,
@@ -190,7 +189,6 @@ impl Blk {
             id,
             config,
             guest_memory: None,
-            epoll_thread: None,
             seccomp_action,
             exit_evt,
             iommu,
@@ -210,7 +208,7 @@ impl Drop for Blk {
             error!("failed to kill vhost-user-blk: {e:?}");
         }
         self.vu_common.virtio_common.wait_for_epoll_threads();
-        if let Some(thread) = self.epoll_thread.take()
+        if let Some(thread) = self.vu_common.epoll_thread.take()
             && let Err(e) = thread.join()
         {
             error!("Error joining thread: {e:?}");
@@ -311,7 +309,7 @@ impl VirtioDevice for Blk {
             &self.exit_evt,
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
-        self.epoll_thread = Some(epoll_threads.remove(0));
+        self.vu_common.epoll_thread = Some(epoll_threads.remove(0));
 
         Ok(())
     }
@@ -361,7 +359,7 @@ impl Pausable for Blk {
     fn resume(&mut self) -> result::Result<(), MigratableError> {
         self.vu_common.virtio_common.resume()?;
 
-        if let Some(epoll_thread) = &self.epoll_thread {
+        if let Some(epoll_thread) = &self.vu_common.epoll_thread {
             epoll_thread.thread().unpark();
         }
 
