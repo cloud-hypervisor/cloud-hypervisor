@@ -1,9 +1,9 @@
 // Copyright 2019 Intel Corporation. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+use std::result;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
-use std::{result, thread};
 
 use event_monitor::event;
 use log::{error, info};
@@ -67,7 +67,6 @@ pub struct Fs {
     cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
     seccomp_action: SeccompAction,
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
-    epoll_thread: Option<thread::JoinHandle<()>>,
     exit_evt: EventFd,
     iommu: bool,
 }
@@ -200,7 +199,6 @@ impl Fs {
             cache,
             seccomp_action,
             guest_memory: None,
-            epoll_thread: None,
             exit_evt,
             iommu,
         })
@@ -218,7 +216,7 @@ impl Drop for Fs {
             let _ = kill_evt.write(1);
         }
         self.vu_common.virtio_common.wait_for_epoll_threads();
-        if let Some(thread) = self.epoll_thread.take()
+        if let Some(thread) = self.vu_common.epoll_thread.take()
             && let Err(e) = thread.join()
         {
             error!("Error joining thread: {e:?}");
@@ -290,7 +288,7 @@ impl VirtioDevice for Fs {
             &self.exit_evt,
             move || handler.run(&paused, paused_sync.as_ref().unwrap()),
         )?;
-        self.epoll_thread = Some(epoll_threads.remove(0));
+        self.vu_common.epoll_thread = Some(epoll_threads.remove(0));
 
         event!("virtio-device", "activated", "id", &self.id);
         Ok(())
@@ -371,7 +369,7 @@ impl Pausable for Fs {
     fn resume(&mut self) -> result::Result<(), MigratableError> {
         self.vu_common.virtio_common.resume()?;
 
-        if let Some(epoll_thread) = &self.epoll_thread {
+        if let Some(epoll_thread) = &self.vu_common.epoll_thread {
             epoll_thread.thread().unpark();
         }
 
