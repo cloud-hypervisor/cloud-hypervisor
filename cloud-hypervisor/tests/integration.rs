@@ -4564,7 +4564,6 @@ mod common_parallel {
     #[test]
     fn test_virtio_block_sparse_off_qcow2() {
         const TEST_DISK_SIZE: &str = "2G";
-        const CLUSTER_SIZE_BYTES: u64 = 64 * 1024;
 
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
@@ -4618,37 +4617,36 @@ mod common_parallel {
                 1
             );
 
-            let mut current_offset_kb = 1024;
+            // With sparse=off, DISCARD should NOT be advertised.
+            // blkdiscard is expected to fail.
+            let discard_result =
+                guest.ssh_command("sudo blkdiscard -o 1048576 -l 1048576 /dev/vdc 2>&1; echo $?");
+            let exit_code = discard_result
+                .unwrap()
+                .trim()
+                .lines()
+                .last()
+                .unwrap_or("1")
+                .parse::<u32>()
+                .unwrap_or(1);
+            assert_ne!(
+                exit_code, 0,
+                "blkdiscard should fail with sparse=off (DISCARD not advertised)"
+            );
 
-            for &size_kb in BLOCK_DISCARD_TEST_SIZES_KB.iter() {
-                guest
-                    .ssh_command(&format!(
-                        "sudo dd if=/dev/urandom of=/dev/vdc bs=1K count={size_kb} seek={current_offset_kb} oflag=direct"
-                    ))
-                    .unwrap();
+            // WRITE_ZEROES should still work via blkdiscard --zeroout
+            guest
+                .ssh_command(
+                    "sudo dd if=/dev/urandom of=/dev/vdc bs=1K count=64 seek=1024 oflag=direct",
+                )
+                .unwrap();
+            guest.ssh_command("sync").unwrap();
+            guest
+                .ssh_command("sudo blkdiscard -z -o 1048576 -l 65536 /dev/vdc")
+                .unwrap();
+            guest.ssh_command("sync").unwrap();
 
-                guest.ssh_command("sync").unwrap();
-
-                guest
-                    .ssh_command(&format!(
-                        "sudo blkdiscard -o {} -l {} /dev/vdc",
-                        current_offset_kb * 1024,
-                        size_kb * 1024
-                    ))
-                    .unwrap();
-
-                guest.ssh_command("sync").unwrap();
-
-                // Verify VM sees zeros in discarded region
-                assert_guest_disk_region_is_zero(
-                    &guest,
-                    "/dev/vdc",
-                    current_offset_kb * 1024,
-                    size_kb * 1024,
-                );
-
-                current_offset_kb += size_kb + 64;
-            }
+            assert_guest_disk_region_is_zero(&guest, "/dev/vdc", 1048576, 65536);
         });
 
         kill_child(&mut child);
@@ -4659,9 +4657,10 @@ mod common_parallel {
 
         handle_child_output(r, &output);
 
+        // WRITE_ZEROES should still produce zero-flagged regions
         assert!(
             zero_regions_after > zero_regions_before,
-            "Expected zero-flagged regions to increase with sparse=off: before={zero_regions_before}, after={zero_regions_after}"
+            "Expected zero-flagged regions to increase via WRITE_ZEROES: before={zero_regions_before}, after={zero_regions_after}"
         );
 
         disk_check_consistency(test_disk_path, None);
