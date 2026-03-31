@@ -12,7 +12,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use log::{error, info};
-use vhost::vhost_kern::vhost_binding::{VHOST_F_LOG_ALL, VHOST_VRING_F_LOG};
+use vhost::vhost_kern::vhost_binding::VHOST_VRING_F_LOG;
 use vhost::vhost_user::message::{
     VhostTransferStateDirection, VhostTransferStatePhase, VhostUserHeaderFlag, VhostUserInflight,
     VhostUserProtocolFeatures, VhostUserVirtioFeatures,
@@ -454,11 +454,8 @@ impl VhostUserHandle {
     }
 
     fn update_supported_features(&mut self, acked_features: u64, acked_protocol_features: u64) {
-        if (acked_features & u64::from(vhost::vhost_kern::vhost_binding::VHOST_F_LOG_ALL) != 0)
-            && (acked_protocol_features & VhostUserProtocolFeatures::LOG_SHMFD.bits() != 0)
-        {
-            self.supports_migration = true;
-        }
+        self.supports_migration = acked_features & VhostUserVirtioFeatures::LOG_ALL.bits() != 0
+            && acked_protocol_features & VhostUserProtocolFeatures::LOG_SHMFD.bits() != 0;
         self.supports_device_state =
             acked_protocol_features & VhostUserProtocolFeatures::DEVICE_STATE.bits() != 0;
     }
@@ -643,7 +640,7 @@ impl VhostUserHandle {
         self.update_log_base(last_ram_addr)?;
 
         // Enable VHOST_F_LOG_ALL feature
-        let features = self.acked_features | (1 << VHOST_F_LOG_ALL);
+        let features = self.acked_features | VhostUserVirtioFeatures::LOG_ALL.bits();
         self.vu
             .set_features(features)
             .map_err(Error::VhostUserSetFeatures)?;
