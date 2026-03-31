@@ -135,6 +135,18 @@ src $ ch-remote --api-socket=/tmp/api send-migration destination_url=unix:/tmp/s
 When the above commands completed, the VM should be successfully
 migrated to the destination machine without interrupting the workload.
 
+### Network Announcements After Resume
+
+After a VM resumes from migration, snapshot restore, or any other path
+that restores a previously paused VM, Cloud Hypervisor asks supported
+network devices to announce the VM from its new host. For `virtio-net`,
+the current implementation sets `VIRTIO_NET_S_ANNOUNCE`, raises a config
+interrupt, retries that request a few times in the background, and also
+sends host-side RARP announcements on the TAP interfaces. A guest
+re-announcement therefore only happens when the guest negotiated
+`VIRTIO_NET_F_GUEST_ANNOUNCE`. For `vhost-user-net`, the current implementation
+only uses the guest announcement path.
+
 ### TCP Socket Migration
 
 If TCP socket is selected for migration, we need to consider migrating
@@ -190,6 +202,8 @@ After completing the above commands, the source VM will be migrated to
 the destination host and continue running there. The source VM instance
 will terminate normally. All ongoing processes and connections within
 the VM should remain intact after the migration.
+See [Network Announcements After Resume](#network-announcements-after-resume)
+for the announcement behavior after a VM resumes.
 
 #### Encryption
 

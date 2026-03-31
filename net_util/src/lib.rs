@@ -101,7 +101,7 @@ fn create_unix_socket() -> Result<net::UdpSocket> {
     Ok(unsafe { net::UdpSocket::from_raw_fd(sock) })
 }
 
-fn vnet_hdr_len() -> usize {
+pub fn vnet_hdr_len() -> usize {
     size_of::<virtio_net_hdr_v1>()
 }
 

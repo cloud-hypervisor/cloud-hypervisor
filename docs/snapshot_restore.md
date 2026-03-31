@@ -102,6 +102,9 @@ after restore completes:
 At this point, the VM is fully restored and is identical to the VM which was
 snapshot earlier.
 
+See [Network Announcements After Resume](live_migration.md#network-announcements-after-resume)
+for the announcement behavior after restore/resume.
+
 Restore also supports selecting how guest memory is populated:
 
 ```bash
