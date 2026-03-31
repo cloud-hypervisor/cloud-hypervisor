@@ -90,6 +90,15 @@ pub(crate) struct KvmSevSnpLaunchFinish {
 }
 
 impl SevFd {
+    fn run_encrypt_op(&self, vm: &VmFd, sev_cmd: &mut kvm_sev_cmd, op_name: &str) -> Result<()> {
+        vm.encrypt_op_sev(sev_cmd).inspect_err(|e| {
+            debug!(
+                "{op_name} failed: host errno={:?}, firmware error={:#x}",
+                e, sev_cmd.error
+            );
+        })
+    }
+
     pub(crate) fn new(sev_path: impl AsRef<Path>) -> Result<Self> {
         // give sev device rw and close on exec
         let file_r = OpenOptions::new()
@@ -114,7 +123,7 @@ impl SevFd {
             sev_fd: self.fd.as_raw_fd() as _,
             ..Default::default()
         };
-        vm.encrypt_op_sev(&mut sev_cmd)
+        self.run_encrypt_op(vm, &mut sev_cmd, "KVM_SEV_INIT2")
     }
 
     pub(crate) fn launch_start(&self, vm: &VmFd, guest_policy: SnpPolicy) -> Result<()> {
@@ -131,7 +140,7 @@ impl SevFd {
             sev_fd: self.fd.as_raw_fd() as _,
             ..Default::default()
         };
-        vm.encrypt_op_sev(&mut sev_cmd)
+        self.run_encrypt_op(vm, &mut sev_cmd, "KVM_SEV_SNP_LAUNCH_START")
     }
 
     pub(crate) fn launch_update(
@@ -157,7 +166,7 @@ impl SevFd {
             sev_fd: self.fd.as_raw_fd() as _,
             ..Default::default()
         };
-        vm.encrypt_op_sev(&mut sev_cmd)
+        self.run_encrypt_op(vm, &mut sev_cmd, "KVM_SEV_SNP_LAUNCH_UPDATE")
     }
     pub(crate) fn launch_finish(
         &self,
@@ -166,6 +175,23 @@ impl SevFd {
         id_block_en: u8,
         auth_key_en: u8,
     ) -> Result<()> {
+        let id_block_en = if id_block_en != 0 {
+            debug!(
+                "KVM_SEV_SNP_LAUNCH_FINISH currently does not provide id_block_uaddr/id_auth_uaddr; forcing id_block_en=0"
+            );
+            0
+        } else {
+            id_block_en
+        };
+        let auth_key_en = if auth_key_en != 0 {
+            debug!(
+                "KVM_SEV_SNP_LAUNCH_FINISH currently does not provide id_block_uaddr/id_auth_uaddr; forcing auth_key_en=0"
+            );
+            0
+        } else {
+            auth_key_en
+        };
+
         let mut finish = KvmSevSnpLaunchFinish {
             host_data,
             id_block_en,
@@ -179,7 +205,7 @@ impl SevFd {
             ..Default::default()
         };
         let flags = finish.flags;
-        debug!("Calling KVM_SEV_SNP_LAUNCH_FINISH, flags: {}", flags);
-        vm.encrypt_op_sev(&mut sev_cmd)
+        debug!("calling KVM_SEV_SNP_LAUNCH_FINISH, flags: {}", flags);
+        self.run_encrypt_op(vm, &mut sev_cmd, "KVM_SEV_SNP_LAUNCH_FINISH")
     }
 }
