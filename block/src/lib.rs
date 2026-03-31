@@ -169,6 +169,8 @@ pub enum ExecuteError {
     WriteAll(#[source] io::Error),
     #[error("Unsupported request: {0}")]
     Unsupported(u32),
+    #[error("Unsupported flags {flags:#x} for request type {request_type}")]
+    UnsupportedFlags { request_type: u32, flags: u32 },
     #[error("Failed to submit io uring")]
     SubmitIoUring(#[source] io::Error),
     #[error("Failed to get guest address")]
@@ -199,6 +201,7 @@ impl ExecuteError {
             ExecuteError::Write(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::WriteAll(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::Unsupported(_) => VIRTIO_BLK_S_UNSUPP,
+            ExecuteError::UnsupportedFlags { .. } => VIRTIO_BLK_S_UNSUPP,
             ExecuteError::SubmitIoUring(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::GetHostAddress(_) => VIRTIO_BLK_S_IOERR,
             ExecuteError::AsyncRead(_) => VIRTIO_BLK_S_IOERR,
@@ -630,7 +633,10 @@ impl Request {
                 // Per virtio spec v1.2 reject discard if any flag is set, including unmap.
                 if discard_flags != 0 {
                     warn!("Unsupported flags {discard_flags:#x} in discard request");
-                    return Err(ExecuteError::Unsupported(VIRTIO_BLK_T_DISCARD));
+                    return Err(ExecuteError::UnsupportedFlags {
+                        request_type: VIRTIO_BLK_T_DISCARD,
+                        flags: discard_flags,
+                    });
                 }
 
                 let discard_sector = u64::from_le_bytes(discard_sector);
@@ -696,7 +702,10 @@ impl Request {
                 // Per virtio spec v1.2 reject write zeroes if any unknown flag is set.
                 if (wz_flags & !VIRTIO_BLK_WRITE_ZEROES_FLAG_UNMAP) != 0 {
                     warn!("Unsupported flags {wz_flags:#x} in write zeroes request");
-                    return Err(ExecuteError::Unsupported(VIRTIO_BLK_T_WRITE_ZEROES));
+                    return Err(ExecuteError::UnsupportedFlags {
+                        request_type: VIRTIO_BLK_T_WRITE_ZEROES,
+                        flags: wz_flags,
+                    });
                 }
 
                 let wz_offset = wz_sector * SECTOR_SIZE;
