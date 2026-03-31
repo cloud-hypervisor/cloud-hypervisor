@@ -380,6 +380,12 @@ pub enum ValidationError {
     /// FwCfg missing initramfs
     #[error("Error --fw-cfg-config: missing --initramfs")]
     FwCfgMissingInitramfs,
+    #[cfg(feature = "fw_cfg")]
+    /// Invalid fw_cfg item content
+    #[error(
+        "Error --fw-cfg-config: invalid item '{0}' (exactly one of 'file' or 'string' is required)"
+    )]
+    FwCfgInvalidItem(String),
     #[cfg(feature = "ivshmem")]
     /// Invalid Ivshmem input size
     #[error("Invalid ivshmem input size")]
@@ -1990,6 +1996,15 @@ impl FwCfgConfig {
         } else if self.initramfs && payload.initramfs.is_none() {
             return Err(ValidationError::FwCfgMissingInitramfs);
         }
+
+        if let Some(items) = &self.items {
+            for item in &items.item_list {
+                if item.file.is_some() == item.string.is_some() {
+                    return Err(ValidationError::FwCfgInvalidItem(item.name.clone()));
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -2868,6 +2883,15 @@ impl VmConfig {
                 PayloadConfigError::MissingBootitem,
             ))?
             .validate()?;
+
+        #[cfg(feature = "fw_cfg")]
+        if let Some(fw_cfg_config) = self
+            .payload
+            .as_ref()
+            .and_then(|payload| payload.fw_cfg_config.as_ref())
+        {
+            fw_cfg_config.validate(self)?;
+        }
 
         #[cfg(feature = "tdx")]
         {
@@ -4917,6 +4941,33 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 PayloadConfigError::MissingBootitem
             ))
         );
+
+        #[cfg(feature = "fw_cfg")]
+        {
+            let mut invalid_config = valid_config.clone();
+            if let Some(payload) = invalid_config.payload.as_mut() {
+                payload.fw_cfg_config = Some(FwCfgConfig {
+                    e820: true,
+                    kernel: false,
+                    cmdline: false,
+                    initramfs: false,
+                    acpi_tables: true,
+                    items: Some(FwCfgItemList {
+                        item_list: vec![FwCfgItem {
+                            name: "opt/org.test/invalid".to_string(),
+                            file: None,
+                            string: None,
+                        }],
+                    }),
+                });
+            }
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::FwCfgInvalidItem(
+                    "opt/org.test/invalid".to_string()
+                ))
+            );
+        }
 
         let mut invalid_config = valid_config.clone();
         invalid_config.serial.mode = ConsoleOutputMode::File;
