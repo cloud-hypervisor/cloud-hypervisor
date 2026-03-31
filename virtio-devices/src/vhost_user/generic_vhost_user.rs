@@ -186,16 +186,7 @@ space access. Reads will return 0xFF and writes will be ignored."
 
 impl Drop for GenericVhostUser {
     fn drop(&mut self) {
-        if let Some(kill_evt) = self.vu_common.virtio_common.kill_evt.take() {
-            // Ignore the result because there is nothing we can do about it.
-            let _ = kill_evt.write(1);
-        }
-        self.vu_common.virtio_common.wait_for_epoll_threads();
-        if let Some(thread) = self.vu_common.epoll_thread.take()
-            && let Err(e) = thread.join()
-        {
-            error!("Error joining thread: {e:?}");
-        }
+        self.vu_common.shutdown();
     }
 }
 
