@@ -404,14 +404,19 @@ pub struct Net {
     rate_limiter_config: Option<RateLimiterConfig>,
     exit_evt: EventFd,
     device_status: Arc<AtomicU8>,
+    announce_pending: Arc<AtomicBool>,
 }
 
 #[derive(Serialize, Deserialize)]
+/// Serialized snapshot of the device state. The fields are copied from the
+/// live device when snapshotting and restored back into a new device instance.
 pub struct NetState {
     pub avail_features: u64,
     pub acked_features: u64,
     pub config: VirtioNetConfig,
     pub queue_size: Vec<u16>,
+    #[serde(default)]
+    pub announce_pending: bool,
 }
 
 impl Net {
@@ -443,67 +448,74 @@ impl Net {
             }
         };
 
-        let (avail_features, acked_features, config, queue_sizes, paused) = if let Some(state) =
-            state
-        {
-            info!("Restoring virtio-net {id}");
-            (
-                state.avail_features,
-                state.acked_features,
-                state.config,
-                state.queue_size,
-                true,
-            )
-        } else {
-            let mut avail_features = (1 << VIRTIO_RING_F_EVENT_IDX) | (1 << VIRTIO_F_VERSION_1);
-
-            if mtu.is_some() {
-                avail_features |= 1 << VIRTIO_NET_F_MTU;
-            }
-
-            if access_platform_enabled {
-                avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
-            }
-
-            // Configure TSO/UFO features when hardware checksum offload is enabled.
-            if offload_csum {
-                avail_features |= (1 << VIRTIO_NET_F_CSUM)
-                    | (1 << VIRTIO_NET_F_GUEST_CSUM)
-                    | (1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS);
-
-                if offload_tso {
-                    avail_features |= (1 << VIRTIO_NET_F_HOST_ECN)
-                        | (1 << VIRTIO_NET_F_HOST_TSO4)
-                        | (1 << VIRTIO_NET_F_HOST_TSO6)
-                        | (1 << VIRTIO_NET_F_GUEST_ECN)
-                        | (1 << VIRTIO_NET_F_GUEST_TSO4)
-                        | (1 << VIRTIO_NET_F_GUEST_TSO6);
-                }
-
-                if offload_ufo {
-                    avail_features |= (1 << VIRTIO_NET_F_HOST_UFO) | (1 << VIRTIO_NET_F_GUEST_UFO);
-                }
-            }
-
-            avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
-            avail_features |= 1 << VIRTIO_NET_F_STATUS;
-            let queue_num = num_queues + 1;
-
-            let mut config = VirtioNetConfig::default();
-            if let Some(mac) = guest_mac {
-                build_net_config_space(&mut config, mac, num_queues, mtu, &mut avail_features);
+        let (avail_features, acked_features, config, queue_sizes, paused, announce_pending) =
+            if let Some(state) = state {
+                info!("Restoring virtio-net {id}");
+                (
+                    state.avail_features,
+                    state.acked_features,
+                    state.config,
+                    state.queue_size,
+                    true,
+                    state.announce_pending,
+                )
             } else {
-                build_net_config_space_with_mq(&mut config, num_queues, mtu, &mut avail_features);
-            }
+                let mut avail_features = (1 << VIRTIO_RING_F_EVENT_IDX) | (1 << VIRTIO_F_VERSION_1);
 
-            (
-                avail_features,
-                0,
-                config,
-                vec![queue_size; queue_num],
-                false,
-            )
-        };
+                if mtu.is_some() {
+                    avail_features |= 1 << VIRTIO_NET_F_MTU;
+                }
+
+                if access_platform_enabled {
+                    avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
+                }
+
+                // Configure TSO/UFO features when hardware checksum offload is enabled.
+                if offload_csum {
+                    avail_features |= (1 << VIRTIO_NET_F_CSUM)
+                        | (1 << VIRTIO_NET_F_GUEST_CSUM)
+                        | (1 << VIRTIO_NET_F_CTRL_GUEST_OFFLOADS);
+
+                    if offload_tso {
+                        avail_features |= (1 << VIRTIO_NET_F_HOST_ECN)
+                            | (1 << VIRTIO_NET_F_HOST_TSO4)
+                            | (1 << VIRTIO_NET_F_HOST_TSO6)
+                            | (1 << VIRTIO_NET_F_GUEST_ECN)
+                            | (1 << VIRTIO_NET_F_GUEST_TSO4)
+                            | (1 << VIRTIO_NET_F_GUEST_TSO6);
+                    }
+
+                    if offload_ufo {
+                        avail_features |=
+                            (1 << VIRTIO_NET_F_HOST_UFO) | (1 << VIRTIO_NET_F_GUEST_UFO);
+                    }
+                }
+
+                avail_features |= 1 << VIRTIO_NET_F_CTRL_VQ;
+                avail_features |= 1 << VIRTIO_NET_F_STATUS;
+                let queue_num = num_queues + 1;
+
+                let mut config = VirtioNetConfig::default();
+                if let Some(mac) = guest_mac {
+                    build_net_config_space(&mut config, mac, num_queues, mtu, &mut avail_features);
+                } else {
+                    build_net_config_space_with_mq(
+                        &mut config,
+                        num_queues,
+                        mtu,
+                        &mut avail_features,
+                    );
+                }
+
+                (
+                    avail_features,
+                    0,
+                    config,
+                    vec![queue_size; queue_num],
+                    false,
+                    false,
+                )
+            };
 
         Ok(Net {
             common: VirtioCommon {
@@ -524,6 +536,7 @@ impl Net {
             rate_limiter_config,
             exit_evt,
             device_status: Arc::new(AtomicU8::new(0)),
+            announce_pending: Arc::new(AtomicBool::new(announce_pending)),
         })
     }
 
@@ -636,6 +649,7 @@ impl Net {
             acked_features: self.common.acked_features,
             config: self.config,
             queue_size: self.common.queue_sizes.clone(),
+            announce_pending: self.announce_pending.load(Ordering::Acquire),
         }
     }
 
@@ -645,6 +659,10 @@ impl Net {
 
         if self.common.feature_acked(VIRTIO_NET_F_STATUS.into()) {
             status |= VIRTIO_NET_S_LINK_UP as u16;
+
+            if self.announce_pending.load(Ordering::Acquire) {
+                status |= VIRTIO_NET_S_ANNOUNCE as u16;
+            }
         }
 
         status
@@ -710,7 +728,7 @@ impl VirtioDevice for Net {
                 mem: mem.clone(),
                 kill_evt,
                 pause_evt,
-                ctrl_q: CtrlQueue::new(self.taps.clone()),
+                ctrl_q: CtrlQueue::new(self.taps.clone(), Arc::clone(&self.announce_pending)),
                 queue: ctrl_queue,
                 queue_evt: ctrl_queue_evt,
                 access_platform: self.common.access_platform(),
@@ -814,6 +832,7 @@ impl VirtioDevice for Net {
 
     fn reset(&mut self) {
         self.common.reset();
+        self.announce_pending.store(false, Ordering::Release);
         event!("virtio-device", "reset", "id", &self.id);
     }
 
@@ -895,6 +914,7 @@ mod unit_tests {
             rate_limiter_config: None,
             exit_evt: EventFd::new(libc::EFD_NONBLOCK).unwrap(),
             device_status: Arc::new(AtomicU8::new(0)),
+            announce_pending: Arc::new(AtomicBool::new(false)),
         }
     }
 
