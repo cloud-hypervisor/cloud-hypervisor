@@ -102,6 +102,15 @@ after restore completes:
 At this point, the VM is fully restored and is identical to the VM which was
 snapshot earlier.
 
+When the restored VM resumes, Cloud Hypervisor asks supported network devices
+to re-announce the VM on the network. For `virtio-net`, the current
+implementation sets `VIRTIO_NET_S_ANNOUNCE`, raises a config interrupt,
+retries that request a few times in the background, and also sends host-side
+RARP announcements on the TAP interfaces. A guest re-announcement therefore
+only happens when the guest negotiated `VIRTIO_NET_F_GUEST_ANNOUNCE`. For
+`vhost-user-net`, the current implementation only uses the guest announcement
+path.
+
 Restore also supports selecting how guest memory is populated:
 
 ```bash

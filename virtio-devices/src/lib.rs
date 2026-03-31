@@ -15,6 +15,7 @@ use std::{fmt, io, result};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use vmm_sys_util::errno::Error as ErrnoError;
 
 #[macro_use]
 mod device;
@@ -122,6 +123,8 @@ pub enum ActivateError {
     CreateRateLimiter(#[source] io::Error),
     #[error("Failed to activate the vDPA device")]
     ActivateVdpa(#[source] vdpa::Error),
+    #[error("Failed to create TimerFd")]
+    CreateTimerFd(#[source] ErrnoError),
 }
 
 pub type ActivateResult = result::Result<(), ActivateError>;
