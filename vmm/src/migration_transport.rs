@@ -32,6 +32,10 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::sync_utils::Gate;
 use crate::{GuestMemoryMmap, VmMigrationConfig};
 
+/// Hard upper bound for migration worker connections on both the sender and
+/// receiver side.
+pub(crate) const MAX_MIGRATION_CONNECTIONS: u32 = 128;
+
 /// Transport-agnostic listener used to receive connections.
 #[derive(Debug)]
 pub(crate) enum ReceiveListener {
@@ -288,12 +292,30 @@ impl ReceiveAdditionalConnections {
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> Result<(), MigratableError> {
         let mut threads: Vec<thread::JoinHandle<Result<(), MigratableError>>> = Vec::new();
-        while let Some(mut socket) = listener.abortable_accept(terminate_fd)? {
+        let mut first_err = loop {
+            let socket = match listener.abortable_accept(terminate_fd) {
+                Ok(socket) => socket,
+                Err(e) => break Err(e),
+            };
+            let Some(mut socket) = socket else {
+                break Ok(());
+            };
+
+            if threads.len() >= MAX_MIGRATION_CONNECTIONS as usize {
+                break Err(MigratableError::MigrateReceive(anyhow!(
+                    "Received more than {MAX_MIGRATION_CONNECTIONS} additional migration connections."
+                )));
+            }
+
             let guest_memory = guest_memory.clone();
-            let terminate_fd = terminate_fd
+            let terminate_fd = match terminate_fd
                 .try_clone()
                 .context("Error cloning terminate fd")
-                .map_err(MigratableError::MigrateReceive)?;
+                .map_err(MigratableError::MigrateReceive)
+            {
+                Ok(terminate_fd) => terminate_fd,
+                Err(e) => break Err(e),
+            };
 
             match thread::Builder::new()
                 .name(format!("migrate-receive-memory-{}", threads.len()).to_owned())
@@ -303,15 +325,21 @@ impl ReceiveAdditionalConnections {
                 Ok(t) => threads.push(t),
                 Err(e) => {
                     error!("Error spawning receive-memory thread: {e}");
-                    break;
+                    break Err(MigratableError::MigrateReceive(
+                        anyhow!(e).context("Error spawning receive-memory thread"),
+                    ));
                 }
             }
+        };
+
+        if first_err.is_err() {
+            warn!("Signaling termination due to an error while accepting connections.");
+            let _ = terminate_fd.write(1);
         }
 
         info!("Stopped accepting additional connections. Cleaning up threads.");
 
         // We only return the first error we encounter here.
-        let mut first_err = Ok(());
         for thread in threads {
             let err = match thread.join() {
                 Ok(Ok(())) => None,

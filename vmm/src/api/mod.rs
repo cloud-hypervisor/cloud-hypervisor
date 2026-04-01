@@ -53,6 +53,7 @@ pub use self::http::{start_http_fd_thread, start_http_path_thread};
 use crate::Error as VmmError;
 use crate::config::RestoreConfig;
 use crate::device_tree::DeviceTree;
+use crate::migration_transport::MAX_MIGRATION_CONNECTIONS;
 use crate::vm::{Error as VmError, VmState};
 use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
@@ -324,7 +325,9 @@ pub struct VmSendMigrationData {
     #[serde(default)]
     pub timeout_strategy: TimeoutStrategy,
 
-    /// The number of parallel connections for migration.
+    /// The number of parallel TCP connections for migration.
+    ///
+    /// Must be between 1 and `MAX_MIGRATION_CONNECTIONS` inclusive.
     #[serde(default = "VmSendMigrationData::default_connections")]
     pub connections: NonZeroU32,
 }
@@ -457,6 +460,12 @@ impl VmSendMigrationData {
                     "destination_url must use tcp:<host>:<port> or unix:<path>.".to_string(),
                 ));
             }
+        }
+
+        if self.connections.get() > MAX_MIGRATION_CONNECTIONS {
+            return Err(VmSendMigrationConfigError::ValidationError(format!(
+                "connections must not exceed {MAX_MIGRATION_CONNECTIONS}."
+            )));
         }
 
         if self.local {
@@ -1785,8 +1794,14 @@ mod unit_tests {
             .expect_err("zero timeout_s should be rejected");
 
         // Zero connections is rejected
-        let _data = VmSendMigrationData::parse("destination_url=unix:/tmp/sock,connections=0")
-            .expect_err("zero connections should be rejected");
+        let _data =
+            VmSendMigrationData::parse("destination_url=tcp:192.168.1.1:8080,connections=0")
+                .expect_err("zero connections should be rejected");
+
+        // Excessive numbers of parallel connections are rejected
+        let _data =
+            VmSendMigrationData::parse("destination_url=tcp:192.168.1.1:8080,connections=129")
+                .expect_err("too many connections should be rejected");
 
         // Unknown option is an error
         VmSendMigrationData::parse("destination_url=unix:/tmp/sock,unknown_field=foo").unwrap_err();

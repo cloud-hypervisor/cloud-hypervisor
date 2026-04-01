@@ -207,3 +207,7 @@ migration process. Via the API or `ch-remote`, you may specify:
   Cancel will abort the migration and keep the VM running on the source.
   Ignore will proceed with the migration regardless of the downtime requirement.
   Defaults to `cancel`.
+- `connections <amount>`: \
+  The number of parallel TCP connections to use for migration.
+  Must be between `1` and `128`. Defaults to `1`.
+  Multiple connections are not supported with local UNIX-socket migration.
