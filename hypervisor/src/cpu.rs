@@ -591,6 +591,10 @@ pub trait Vcpu: Send + Sync {
     fn set_sev_control_register(&self, _vmsa_pfn: u64) -> Result<()> {
         unimplemented!()
     }
+    #[cfg(feature = "sev_snp")]
+    fn setup_sev_snp_regs(&self, _vmsa: igvm::snp_defs::SevVmsa) -> Result<()> {
+        unimplemented!()
+    }
 
     ///
     /// Sets the value of GIC redistributor address
