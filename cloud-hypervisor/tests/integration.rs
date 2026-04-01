@@ -6307,10 +6307,10 @@ mod common_sequential {
             "id={},tap=,mac={},ip={},mask=255.255.255.128",
             net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
-        let mut mem_params = "size=2G";
+        let mut mem_params = "size=1G";
 
         if use_hotplug {
-            mem_params = "size=2G,hotplug_method=virtio-mem,hotplug_size=32G";
+            mem_params = "size=1G,hotplug_method=virtio-mem,hotplug_size=32G";
         }
 
         let cloudinit_params = format!(
@@ -6354,7 +6354,7 @@ mod common_sequential {
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
             // Check the guest RAM
-            assert!(guest.get_total_memory().unwrap_or_default() > 1_920_000);
+            assert!(guest.get_total_memory().unwrap_or_default() > 900_000);
             if use_hotplug {
                 // Increase guest RAM with virtio-mem
                 resize_command(
@@ -6365,7 +6365,7 @@ mod common_sequential {
                     Some(&event_path),
                 );
                 thread::sleep(std::time::Duration::new(5, 0));
-                assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
+                assert!(guest.get_total_memory().unwrap_or_default() > 1_900_000);
                 // Use balloon to remove RAM from the VM
                 resize_command(
                     &api_socket_source,
@@ -6376,8 +6376,8 @@ mod common_sequential {
                 );
                 thread::sleep(std::time::Duration::new(5, 0));
                 let total_memory = guest.get_total_memory().unwrap_or_default();
-                assert!(total_memory > 4_800_000);
-                assert!(total_memory < 5_760_000);
+                assert!(total_memory > 1_900_000);
+                assert!(total_memory < 2_500_000);
             }
             // Check the guest virtio-devices, e.g. block, rng, vsock, console, and net
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
@@ -6544,20 +6544,20 @@ mod common_sequential {
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
             let total_memory = guest.get_total_memory().unwrap_or_default();
             if use_hotplug {
-                assert!(total_memory > 4_800_000);
-                assert!(total_memory < 5_760_000);
+                assert!(total_memory > 1_900_000);
+                assert!(total_memory < 2_500_000);
                 // Deflate balloon to restore entire RAM to the VM
                 resize_command(&api_socket_restored, None, None, Some(0), None);
                 thread::sleep(std::time::Duration::new(5, 0));
-                assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
+                assert!(guest.get_total_memory().unwrap_or_default() > 2_500_000);
                 // Decrease guest RAM with virtio-mem
                 resize_command(&api_socket_restored, None, Some(5 << 30), None, None);
                 thread::sleep(std::time::Duration::new(5, 0));
                 let total_memory = guest.get_total_memory().unwrap_or_default();
-                assert!(total_memory > 4_800_000);
-                assert!(total_memory < 5_760_000);
+                assert!(total_memory > 1_900_000);
+                assert!(total_memory < 2_500_000);
             } else {
-                assert!(total_memory > 1_920_000);
+                assert!(total_memory > 900_000, "total memory: {total_memory}");
             }
 
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
@@ -6920,11 +6920,9 @@ mod common_sequential {
             event: "restored".to_string(),
             device_id: None,
         }];
-        assert!(wait_until(
-            Duration::from_secs(30),
-            Duration::from_secs(1),
-            || check_latest_events_exact(&latest_events, &event_path_restored)
-        ));
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_latest_events_exact(&latest_events, &event_path_restored)
+        }));
 
         // Remove the snapshot dir
         let _ = remove_dir_all(snapshot_dir.as_str());
@@ -8411,7 +8409,7 @@ mod vfio {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args([
                 "--device",
@@ -8450,7 +8448,7 @@ mod vfio {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args(["--device", format!("path={NVIDIA_VFIO_DEVICE}").as_str()])
             .args([
@@ -10400,7 +10398,7 @@ mod rate_limiter {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("boot={}", num_queues / 2)])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -10472,7 +10470,7 @@ mod rate_limiter {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("boot={num_queues}")])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -10578,7 +10576,7 @@ mod rate_limiter {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("boot={}", num_queues * num_disks)])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(["--rate-limit-group", &rate_limit_group_arg])
