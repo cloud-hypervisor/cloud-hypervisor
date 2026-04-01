@@ -521,6 +521,9 @@ fn parse_event_file(event_file: &str) -> Vec<serde_json::Value> {
 // Return true if all events from the input 'expected_events' are matched sequentially
 // with events from the 'event_file'
 pub(crate) fn check_sequential_events(expected_events: &[&MetaEvent], event_file: &str) -> bool {
+    if !Path::new(event_file).exists() {
+        return false;
+    }
     let json_events = parse_event_file(event_file);
     let len = expected_events.len();
     let mut idx = 0;
@@ -552,8 +555,13 @@ pub(crate) fn check_sequential_events_exact(
     expected_events: &[&MetaEvent],
     event_file: &str,
 ) -> bool {
+    if !Path::new(event_file).exists() {
+        return false;
+    }
     let json_events = parse_event_file(event_file);
-    assert!(expected_events.len() <= json_events.len());
+    if expected_events.len() > json_events.len() {
+        return false;
+    }
     let json_events = &json_events[..expected_events.len()];
 
     for (idx, e) in json_events.iter().enumerate() {
@@ -574,8 +582,13 @@ pub(crate) fn check_sequential_events_exact(
 // Return true if events from the input 'latest_events' are matched exactly
 // with the most recent events from the 'event_file'
 pub(crate) fn check_latest_events_exact(latest_events: &[&MetaEvent], event_file: &str) -> bool {
+    if !Path::new(event_file).exists() {
+        return false;
+    }
     let json_events = parse_event_file(event_file);
-    assert!(latest_events.len() <= json_events.len());
+    if latest_events.len() > json_events.len() {
+        return false;
+    }
     let json_events = &json_events[(json_events.len() - latest_events.len())..];
 
     for (idx, e) in json_events.iter().enumerate() {

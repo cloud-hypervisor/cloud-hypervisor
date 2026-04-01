@@ -15,7 +15,7 @@ use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{env, fmt, fs, io, thread};
 
 use rand::Rng;
@@ -55,6 +55,42 @@ pub enum Error {
     Spawn(#[source] std::io::Error),
     #[error("waiting for timeout failed")]
     WaitTimeout(#[source] WaitTimeoutError),
+}
+
+pub fn wait_until<F>(timeout: Duration, mut condition: F) -> bool
+where
+    F: FnMut() -> bool,
+{
+    const INTERVAL: Duration = Duration::from_millis(50);
+    let start = Instant::now();
+
+    loop {
+        if condition() {
+            return true;
+        }
+
+        if start.elapsed() >= timeout {
+            return false;
+        }
+
+        thread::sleep(INTERVAL);
+    }
+}
+
+pub fn wait_until_succeeds<F, T, E>(timeout: Duration, mut operation: F) -> Result<T, E>
+where
+    F: FnMut() -> Result<T, E>,
+{
+    const INTERVAL: Duration = Duration::from_millis(50);
+    let start = Instant::now();
+
+    loop {
+        match operation() {
+            Ok(result) => return Ok(result),
+            Err(err) if start.elapsed() >= timeout => return Err(err),
+            Err(_) => thread::sleep(INTERVAL),
+        }
+    }
 }
 
 pub struct GuestNetworkConfig {
@@ -618,6 +654,25 @@ pub enum SshCommandError {
     WaitEof(#[source] ssh2::Error),
 }
 
+#[derive(Error, Debug)]
+pub enum WaitForSshError {
+    #[error("timed out after {timeout:?} waiting for ssh command {command:?} on {ip}: {source}")]
+    Timeout {
+        command: String,
+        ip: String,
+        timeout: Duration,
+        #[source]
+        source: SshCommandError,
+    },
+}
+
+fn default_guest_auth() -> PasswordAuth {
+    PasswordAuth {
+        username: String::from("cloud"),
+        password: String::from("cloud123"),
+    }
+}
+
 fn scp_to_guest_with_auth(
     path: &Path,
     remote_path: &Path,
@@ -789,6 +844,23 @@ pub fn ssh_command_ip(
         retries,
         timeout,
     )
+}
+
+pub fn wait_for_ssh(
+    command: &str,
+    auth: &PasswordAuth,
+    ip: &str,
+    timeout: Duration,
+) -> Result<String, WaitForSshError> {
+    wait_until_succeeds(timeout, || {
+        ssh_command_ip_with_auth(command, auth, ip, 1, 1)
+    })
+    .map_err(|source| WaitForSshError::Timeout {
+        command: command.to_string(),
+        ip: ip.to_string(),
+        timeout,
+        source,
+    })
 }
 
 pub fn exec_host_command_with_retries(command: &str, retries: u32, interval: Duration) -> bool {
@@ -1090,6 +1162,29 @@ impl Guest {
             &self.network.l2_guest_ip3,
             DEFAULT_SSH_RETRIES,
             DEFAULT_SSH_TIMEOUT,
+        )
+    }
+
+    pub fn wait_for_ssh(&self, timeout: Duration) -> Result<(), WaitForSshError> {
+        wait_for_ssh(
+            "true",
+            &default_guest_auth(),
+            &self.network.guest_ip0,
+            timeout,
+        )
+        .map(|_| ())
+    }
+
+    pub fn wait_for_ssh_command(
+        &self,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<String, WaitForSshError> {
+        wait_for_ssh(
+            command,
+            &default_guest_auth(),
+            &self.network.guest_ip0,
+            timeout,
         )
     }
 
