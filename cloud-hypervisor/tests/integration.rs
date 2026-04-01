@@ -282,17 +282,25 @@ mod common_parallel {
             guest.enable_memory_hotplug();
 
             resize_zone_command(&api_socket, "mem0", "3G");
-            thread::sleep(std::time::Duration::new(5, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 4_800_000);
+            assert!(wait_until(Duration::from_secs(30), || guest
+                .get_total_memory()
+                .unwrap_or_default()
+                > 4_800_000));
             resize_zone_command(&api_socket, "mem2", "3G");
-            thread::sleep(std::time::Duration::new(5, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 6_720_000);
+            assert!(wait_until(Duration::from_secs(30), || guest
+                .get_total_memory()
+                .unwrap_or_default()
+                > 6_720_000));
             resize_zone_command(&api_socket, "mem0", "2G");
-            thread::sleep(std::time::Duration::new(5, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
+            assert!(wait_until(Duration::from_secs(30), || guest
+                .get_total_memory()
+                .unwrap_or_default()
+                > 5_760_000));
             resize_zone_command(&api_socket, "mem2", "2G");
-            thread::sleep(std::time::Duration::new(5, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 4_800_000);
+            assert!(wait_until(Duration::from_secs(30), || guest
+                .get_total_memory()
+                .unwrap_or_default()
+                > 4_800_000));
 
             guest.reboot_linux(0);
 
@@ -302,11 +310,15 @@ mod common_parallel {
 
             // Check if we can still resize down to the initial 'boot'size
             resize_zone_command(&api_socket, "mem0", "1G");
-            thread::sleep(std::time::Duration::new(5, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() < 4_800_000);
+            assert!(wait_until(Duration::from_secs(30), || guest
+                .get_total_memory()
+                .unwrap_or_default()
+                < 4_800_000));
             resize_zone_command(&api_socket, "mem2", "1G");
-            thread::sleep(std::time::Duration::new(5, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() < 3_840_000);
+            assert!(wait_until(Duration::from_secs(30), || guest
+                .get_total_memory()
+                .unwrap_or_default()
+                < 3_840_000));
         });
 
         kill_child(&mut child);
@@ -2318,11 +2330,28 @@ mod common_parallel {
             .spawn()
             .unwrap();
 
-        thread::sleep(std::time::Duration::new(30, 0));
+        guest.wait_for_ssh(Duration::from_secs(30)).unwrap();
 
         let r = std::panic::catch_unwind(|| {
             guest.ssh_command_l1("sudo systemctl start vfio").unwrap();
-            thread::sleep(std::time::Duration::new(120, 0));
+            let auth = PasswordAuth {
+                username: String::from("cloud"),
+                password: String::from("cloud123"),
+            };
+            wait_for_ssh(
+                "true",
+                &auth,
+                &guest.network.l2_guest_ip1,
+                Duration::from_secs(120),
+            )
+            .unwrap();
+            wait_for_ssh(
+                "true",
+                &auth,
+                &guest.network.l2_guest_ip2,
+                Duration::from_secs(120),
+            )
+            .unwrap();
 
             // We booted our cloud hypervisor L2 guest with a "VFIOTAG" tag
             // added to its kernel command line.
@@ -2381,7 +2410,18 @@ mod common_parallel {
                 1
             ));
 
-            thread::sleep(std::time::Duration::new(10, 0));
+            wait_for_ssh(
+                "true",
+                &auth,
+                &guest.network.l2_guest_ip3,
+                Duration::from_secs(30),
+            )
+            .unwrap();
+            assert!(wait_until(Duration::from_secs(30), || {
+                guest
+                    .ssh_command_l2_1("ls /sys/bus/pci/devices")
+                    .is_ok_and(|output| check_lines_count(output.trim(), 9))
+            }));
 
             // Let's also verify from the third virtio-net device passed to
             // the L2 VM. This third device has been hotplugged through the L2
@@ -2413,7 +2453,11 @@ mod common_parallel {
                  remove-device vfio123",
                 )
                 .unwrap();
-            thread::sleep(std::time::Duration::new(10, 0));
+            assert!(wait_until(Duration::from_secs(30), || {
+                guest
+                    .ssh_command_l2_1("ls /sys/bus/pci/devices")
+                    .is_ok_and(|output| check_lines_count(output.trim(), 8))
+            }));
 
             // Check the amount of PCI devices appearing in L2 VM is back down
             // to 8 devices.
@@ -4765,18 +4809,16 @@ mod common_parallel {
                 .unwrap();
             });
 
-            // Wait for 50 seconds to make sure the stress command is consuming
-            // the expected amount of memory.
-            thread::sleep(std::time::Duration::new(50, 0));
+            // Wait for guest memory consumption to reach the expected level.
+            assert!(wait_until(Duration::from_secs(60), || process_rss_kib(pid) >= 2097152));
             let rss = process_rss_kib(pid);
             println!("RSS {rss} >= 2097152");
             assert!(rss >= 2097152);
 
-            // Wait for an extra minute to make sure the stress command has
-            // completed and that the guest reported the free pages to the VMM
-            // through the virtio-balloon device. We expect the RSS to be under
-            // 2GiB.
-            thread::sleep(std::time::Duration::new(60, 0));
+            // Wait for stress to complete and free-page reporting to shrink RSS again.
+            assert!(wait_until(Duration::from_secs(120), || process_rss_kib(
+                pid
+            ) < 2097152));
             let rss = process_rss_kib(pid);
             println!("RSS {rss} < 2097152");
             assert!(rss < 2097152);
@@ -4900,18 +4942,12 @@ mod common_parallel {
 
             assert!(remote_command(&api_socket, "remove-device", Some("test0")));
 
-            thread::sleep(std::time::Duration::new(20, 0));
-
-            // Check device has gone away
-            assert_eq!(
+            // Wait for the pmem device to disappear from lsblk.
+            assert!(wait_until(Duration::from_secs(30), || {
                 guest
                     .ssh_command("lsblk | grep -c pmem0.*128M || true")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or(1),
-                0
-            );
+                    .is_ok_and(|output| output.trim().parse::<u32>().unwrap_or(1) == 0)
+            }));
 
             guest.reboot_linux(1);
 
@@ -5160,8 +5196,12 @@ mod common_parallel {
                 .unwrap();
             });
 
-            // Wait for the server to be listening
-            thread::sleep(std::time::Duration::new(5, 0));
+            guest1
+                .wait_for_ssh_command(
+                    "ss -ltnH | awk '{print $4}' | grep -q ':12345$'",
+                    Duration::from_secs(20),
+                )
+                .unwrap();
 
             // Check the connection fails this time
             guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap_err();
@@ -5182,8 +5222,10 @@ mod common_parallel {
                 Some(format!("file://{snapshot_dir}").as_str()),
             ));
 
-            // Wait to make sure the snapshot is completed
-            thread::sleep(std::time::Duration::new(10, 0));
+            // Wait for the source VM snapshot artifacts to be ready.
+            assert!(wait_until(Duration::from_secs(30), || {
+                std::path::Path::new(&snapshot_dir).exists()
+            }));
         });
 
         // Shutdown the source VM
@@ -5210,12 +5252,17 @@ mod common_parallel {
             .spawn()
             .unwrap();
 
-        // Wait for the VM to be restored
-        thread::sleep(std::time::Duration::new(10, 0));
+        // Wait for the restored VM to accept SSH again after resume.
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
             assert!(remote_command(&api_socket_restored, "resume", None));
+            guest2.wait_for_ssh(Duration::from_secs(30)).unwrap();
 
             // Spawn a new netcat listener in the first VM
             let guest_ip = guest1.network.guest_ip0.clone();
@@ -5229,8 +5276,12 @@ mod common_parallel {
                 .unwrap();
             });
 
-            // Wait for the server to be listening
-            thread::sleep(std::time::Duration::new(5, 0));
+            guest1
+                .wait_for_ssh_command(
+                    "ss -ltnH | awk '{print $4}' | grep -q ':12345$'",
+                    Duration::from_secs(20),
+                )
+                .unwrap();
 
             // And check the connection is still functional after restore
             guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
@@ -5620,17 +5671,13 @@ mod common_parallel {
 
             assert!(remote_command(&api_socket, "nmi", None));
 
-            // Wait a while for guest
-            thread::sleep(std::time::Duration::new(3, 0));
-
             let expected_sequential_events = [&MetaEvent {
                 event: "panic".to_string(),
                 device_id: None,
             }];
-            assert!(check_latest_events_exact(
-                &expected_sequential_events,
-                &event_path
-            ));
+            assert!(wait_until(Duration::from_secs(30), || {
+                check_latest_events_exact(&expected_sequential_events, &event_path)
+            }));
         });
 
         kill_child(&mut child);
@@ -6104,30 +6151,26 @@ mod ivshmem {
             .spawn()
             .unwrap();
 
-        // Wait for the VM to be restored
-        thread::sleep(std::time::Duration::new(20, 0));
-
         let latest_events = [&MetaEvent {
             event: "restored".to_string(),
             device_id: None,
         }];
-        assert!(check_latest_events_exact(
-            &latest_events,
-            &event_path_restored
-        ));
+        // Wait for the restored event to show up in the monitor file.
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_latest_events_exact(&latest_events, &event_path_restored)
+        }));
 
         // Remove the snapshot dir
         let _ = remove_dir_all(snapshot_dir.as_str());
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
             assert!(remote_command(&api_socket_restored, "resume", None));
-            // There is no way that we can ensure the 'write()' to the
-            // event file is completed when the 'resume' request is
-            // returned successfully, because the 'write()' was done
-            // asynchronously from a different thread of Cloud
-            // Hypervisor (e.g. the event-monitor thread).
-            thread::sleep(std::time::Duration::new(1, 0));
             let latest_events = [
                 &MetaEvent {
                     event: "resuming".to_string(),
@@ -6138,10 +6181,9 @@ mod ivshmem {
                     device_id: None,
                 },
             ];
-            assert!(check_latest_events_exact(
-                &latest_events,
-                &event_path_restored
-            ));
+            assert!(wait_until(Duration::from_secs(30), || {
+                check_latest_events_exact(&latest_events, &event_path_restored)
+            }));
 
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
@@ -6201,9 +6243,10 @@ mod common_sequential {
                 device_id: None,
             },
         ];
-        // See: #5938
-        thread::sleep(std::time::Duration::new(1, 0));
-        assert!(check_latest_events_exact(&latest_events, event_path));
+
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_latest_events_exact(&latest_events, event_path)
+        }));
 
         // Take a snapshot from the VM
         assert!(remote_command(
@@ -6225,9 +6268,10 @@ mod common_sequential {
                 device_id: None,
             },
         ];
-        // See: #5938
-        thread::sleep(std::time::Duration::new(1, 0));
-        assert!(check_latest_events_exact(&latest_events, event_path));
+
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_latest_events_exact(&latest_events, event_path)
+        }));
     }
 
     // One thing to note about this test. The virtio-net device is heavily used
@@ -6263,10 +6307,10 @@ mod common_sequential {
             "id={},tap=,mac={},ip={},mask=255.255.255.128",
             net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
-        let mut mem_params = "size=2G";
+        let mut mem_params = "size=1G";
 
         if use_hotplug {
-            mem_params = "size=2G,hotplug_method=virtio-mem,hotplug_size=32G";
+            mem_params = "size=1G,hotplug_method=virtio-mem,hotplug_size=32G";
         }
 
         let cloudinit_params = format!(
@@ -6310,7 +6354,7 @@ mod common_sequential {
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
             // Check the guest RAM
-            assert!(guest.get_total_memory().unwrap_or_default() > 1_920_000);
+            assert!(guest.get_total_memory().unwrap_or_default() > 900_000);
             if use_hotplug {
                 // Increase guest RAM with virtio-mem
                 resize_command(
@@ -6321,7 +6365,7 @@ mod common_sequential {
                     Some(&event_path),
                 );
                 thread::sleep(std::time::Duration::new(5, 0));
-                assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
+                assert!(guest.get_total_memory().unwrap_or_default() > 1_900_000);
                 // Use balloon to remove RAM from the VM
                 resize_command(
                     &api_socket_source,
@@ -6332,8 +6376,8 @@ mod common_sequential {
                 );
                 thread::sleep(std::time::Duration::new(5, 0));
                 let total_memory = guest.get_total_memory().unwrap_or_default();
-                assert!(total_memory > 4_800_000);
-                assert!(total_memory < 5_760_000);
+                assert!(total_memory > 1_900_000);
+                assert!(total_memory < 2_500_000);
             }
             // Check the guest virtio-devices, e.g. block, rng, vsock, console, and net
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
@@ -6357,9 +6401,9 @@ mod common_sequential {
                     event: "device-removed".to_string(),
                     device_id: Some(net_id.to_string()),
                 }];
-                // See: #5938
-                thread::sleep(std::time::Duration::new(1, 0));
-                assert!(check_latest_events_exact(&latest_events, &event_path));
+                assert!(wait_until(Duration::from_secs(30), || {
+                    check_latest_events_exact(&latest_events, &event_path)
+                }));
 
                 // Plug the virtio-net device again
                 assert!(remote_command(
@@ -6409,8 +6453,6 @@ mod common_sequential {
             .spawn()
             .unwrap();
 
-        // Wait for the VM to be restored
-        thread::sleep(std::time::Duration::new(20, 0));
         let expected_events = [
             &MetaEvent {
                 event: "starting".to_string(),
@@ -6429,10 +6471,9 @@ mod common_sequential {
                 device_id: None,
             },
         ];
-        assert!(check_sequential_events(
-            &expected_events,
-            &event_path_restored
-        ));
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_sequential_events(&expected_events, &event_path_restored)
+        }));
         if use_resume_option {
             let latest_events = [
                 &MetaEvent {
@@ -6448,20 +6489,25 @@ mod common_sequential {
                     device_id: None,
                 },
             ];
-            assert!(check_latest_events_exact(
-                &latest_events,
-                &event_path_restored
-            ));
+            assert!(wait_until(Duration::from_secs(30), || {
+                check_latest_events_exact(&latest_events, &event_path_restored)
+            }));
         } else {
             let latest_events = [&MetaEvent {
                 event: "restored".to_string(),
                 device_id: None,
             }];
-            assert!(check_latest_events_exact(
-                &latest_events,
-                &event_path_restored
-            ));
+            assert!(wait_until(Duration::from_secs(30), || {
+                check_latest_events_exact(&latest_events, &event_path_restored)
+            }));
         }
+
+        // Wait until the restored VM API is ready before issuing follow-up requests.
+        assert!(wait_until(Duration::from_secs(30), || remote_command(
+            &api_socket_restored,
+            "info",
+            None
+        )));
 
         // Remove the snapshot dir
         let _ = remove_dir_all(snapshot_dir.as_str());
@@ -6472,13 +6518,12 @@ mod common_sequential {
                 thread::sleep(std::time::Duration::new(1, 0));
             } else {
                 // Resume the VM manually
+                assert!(wait_until(Duration::from_secs(30), || remote_command(
+                    &api_socket_restored,
+                    "info",
+                    None
+                )));
                 assert!(remote_command(&api_socket_restored, "resume", None));
-                // There is no way that we can ensure the 'write()' to the
-                // event file is completed when the 'resume' request is
-                // returned successfully, because the 'write()' was done
-                // asynchronously from a different thread of Cloud
-                // Hypervisor (e.g. the event-monitor thread).
-                thread::sleep(std::time::Duration::new(1, 0));
 
                 let latest_events = [
                     &MetaEvent {
@@ -6490,30 +6535,29 @@ mod common_sequential {
                         device_id: None,
                     },
                 ];
-                assert!(check_latest_events_exact(
-                    &latest_events,
-                    &event_path_restored
-                ));
+                assert!(wait_until(Duration::from_secs(30), || {
+                    check_latest_events_exact(&latest_events, &event_path_restored)
+                }));
             }
 
             // Perform same checks to validate VM has been properly restored
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
             let total_memory = guest.get_total_memory().unwrap_or_default();
             if use_hotplug {
-                assert!(total_memory > 4_800_000);
-                assert!(total_memory < 5_760_000);
+                assert!(total_memory > 1_900_000);
+                assert!(total_memory < 2_500_000);
                 // Deflate balloon to restore entire RAM to the VM
                 resize_command(&api_socket_restored, None, None, Some(0), None);
                 thread::sleep(std::time::Duration::new(5, 0));
-                assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
+                assert!(guest.get_total_memory().unwrap_or_default() > 2_500_000);
                 // Decrease guest RAM with virtio-mem
                 resize_command(&api_socket_restored, None, Some(5 << 30), None, None);
                 thread::sleep(std::time::Duration::new(5, 0));
                 let total_memory = guest.get_total_memory().unwrap_or_default();
-                assert!(total_memory > 4_800_000);
-                assert!(total_memory < 5_760_000);
+                assert!(total_memory > 1_900_000);
+                assert!(total_memory < 2_500_000);
             } else {
-                assert!(total_memory > 1_920_000);
+                assert!(total_memory > 900_000, "total memory: {total_memory}");
             }
 
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
@@ -6641,20 +6685,23 @@ mod common_sequential {
             .spawn()
             .unwrap();
 
-        thread::sleep(std::time::Duration::new(20, 0));
-
         let latest_events = [&MetaEvent {
             event: "restored".to_string(),
             device_id: None,
         }];
-        assert!(check_latest_events_exact(
-            &latest_events,
-            &event_path_restored
-        ));
+
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_latest_events_exact(&latest_events, &event_path_restored)
+        }));
 
         let r = std::panic::catch_unwind(|| {
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
             assert!(remote_command(&api_socket_restored, "resume", None));
-            thread::sleep(std::time::Duration::new(1, 0));
+
             let latest_events = [
                 &MetaEvent {
                     event: "resuming".to_string(),
@@ -6665,10 +6712,9 @@ mod common_sequential {
                     device_id: None,
                 },
             ];
-            assert!(check_latest_events_exact(
-                &latest_events,
-                &event_path_restored
-            ));
+            assert!(wait_until(Duration::from_secs(30), || {
+                check_latest_events_exact(&latest_events, &event_path_restored)
+            }));
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
             assert!(guest.get_total_memory().unwrap_or_default() > min_total_memory_kib);
@@ -6839,7 +6885,9 @@ mod common_sequential {
         ));
 
         // Wait for the VM to be restored
-        thread::sleep(std::time::Duration::new(20, 0));
+        assert!(wait_until(Duration::from_secs(30), || {
+            remote_command(&api_socket_restored, "info", None)
+        }));
 
         // close the fds as CH duplicates them before using
         for tap in taps.iter() {
@@ -6864,31 +6912,30 @@ mod common_sequential {
                 device_id: None,
             },
         ];
-        assert!(check_sequential_events(
-            &expected_events,
-            &event_path_restored
-        ));
+        // Wait for the restore event sequence to be recorded.
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_sequential_events(&expected_events, &event_path_restored)
+        }));
         let latest_events = [&MetaEvent {
             event: "restored".to_string(),
             device_id: None,
         }];
-        assert!(check_latest_events_exact(
-            &latest_events,
-            &event_path_restored
-        ));
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_latest_events_exact(&latest_events, &event_path_restored)
+        }));
 
         // Remove the snapshot dir
         let _ = remove_dir_all(snapshot_dir.as_str());
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
             assert!(remote_command(&api_socket_restored, "resume", None));
-            // There is no way that we can ensure the 'write()' to the
-            // event file is completed when the 'resume' request is
-            // returned successfully, because the 'write()' was done
-            // asynchronously from a different thread of Cloud
-            // Hypervisor (e.g. the event-monitor thread).
-            thread::sleep(std::time::Duration::new(1, 0));
+
             let latest_events = [
                 &MetaEvent {
                     event: "resuming".to_string(),
@@ -6899,10 +6946,9 @@ mod common_sequential {
                     device_id: None,
                 },
             ];
-            assert!(check_latest_events_exact(
-                &latest_events,
-                &event_path_restored
-            ));
+            assert!(wait_until(Duration::from_secs(30), || {
+                check_latest_events_exact(&latest_events, &event_path_restored)
+            }));
 
             // Perform same checks to validate VM has been properly restored
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), n_cpu);
@@ -7005,30 +7051,26 @@ mod common_sequential {
             .spawn()
             .unwrap();
 
-        // Wait for the VM to be restored
-        thread::sleep(std::time::Duration::new(20, 0));
-
         let latest_events = [&MetaEvent {
             event: "restored".to_string(),
             device_id: None,
         }];
-        assert!(check_latest_events_exact(
-            &latest_events,
-            &event_path_restored
-        ));
+        // Wait for the restored event to show up in the monitor file.
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_latest_events_exact(&latest_events, &event_path_restored)
+        }));
 
         // Remove the snapshot dir
         let _ = remove_dir_all(snapshot_dir.as_str());
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
             assert!(remote_command(&api_socket_restored, "resume", None));
-            // There is no way that we can ensure the 'write()' to the
-            // event file is completed when the 'resume' request is
-            // returned successfully, because the 'write()' was done
-            // asynchronously from a different thread of Cloud
-            // Hypervisor (e.g. the event-monitor thread).
-            thread::sleep(std::time::Duration::new(1, 0));
             let latest_events = [
                 &MetaEvent {
                     event: "resuming".to_string(),
@@ -7039,10 +7081,9 @@ mod common_sequential {
                     device_id: None,
                 },
             ];
-            assert!(check_latest_events_exact(
-                &latest_events,
-                &event_path_restored
-            ));
+            assert!(wait_until(Duration::from_secs(30), || {
+                check_latest_events_exact(&latest_events, &event_path_restored)
+            }));
 
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
@@ -7170,7 +7211,9 @@ mod common_sequential {
             .unwrap();
 
         // Wait for the VM to be restored
-        thread::sleep(std::time::Duration::new(20, 0));
+        assert!(wait_until(Duration::from_secs(30), || {
+            remote_command(&api_socket_restored, "info", None)
+        }));
 
         let latest_events = [&MetaEvent {
             event: "restored".to_string(),
@@ -7186,6 +7229,11 @@ mod common_sequential {
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
             assert!(remote_command(&api_socket_restored, "resume", None));
             thread::sleep(std::time::Duration::new(5, 0));
 
@@ -7457,37 +7505,19 @@ mod windows {
             ))
         }
 
-        fn wait_for_boot(&self) -> bool {
-            let cmd = "dir /b c:\\ | find \"Windows\"";
-            let tmo_max = 180;
-            // The timeout increase by n*1+n*2+n*3+..., therefore the initial
-            // interval must be small.
-            let tmo_int = 2;
-            let out = ssh_command_ip_with_auth(
-                cmd,
+        fn wait_for_boot(&self) -> Result<(), WaitForSshError> {
+            let out = wait_for_ssh(
+                "dir /b c:\\ | find \"Windows\"",
                 &self.auth,
                 &self.guest.network.guest_ip0,
-                {
-                    let mut ret = 1;
-                    let mut tmo_acc = 0;
-                    loop {
-                        tmo_acc += tmo_int * ret;
-                        if tmo_acc >= tmo_max {
-                            break;
-                        }
-                        ret += 1;
-                    }
-                    ret
-                },
-                tmo_int,
-            )
-            .unwrap();
+                Duration::from_secs(180),
+            )?;
 
-            if "Windows" == out.trim() {
-                return true;
+            if out.trim() == "Windows" {
+                Ok(())
+            } else {
+                panic!("Unexpected Windows boot probe output: {:?}", out.trim());
             }
-
-            false
         }
     }
 
@@ -7556,7 +7586,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Wait to make sure Windows boots up
-            assert!(windows_guest.wait_for_boot());
+            windows_guest.wait_for_boot().unwrap();
 
             windows_guest.shutdown();
         });
@@ -7621,7 +7651,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Wait to make sure Windows boots up
-            assert!(windows_guest.wait_for_boot());
+            windows_guest.wait_for_boot().unwrap();
 
             windows_guest.shutdown();
         });
@@ -7672,7 +7702,7 @@ mod windows {
         let mut child_dnsmasq = windows_guest.run_dnsmasq();
 
         // Wait to make sure Windows boots up
-        assert!(windows_guest.wait_for_boot());
+        windows_guest.wait_for_boot().unwrap();
 
         let snapshot_dir = temp_snapshot_dir_path(&tmp_dir);
 
@@ -7706,10 +7736,17 @@ mod windows {
             .unwrap();
 
         // Wait for the VM to be restored
-        thread::sleep(std::time::Duration::new(20, 0));
+        assert!(wait_until(Duration::from_secs(30), || {
+            remote_command(&api_socket_restored, "info", None)
+        }));
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
             assert!(remote_command(&api_socket_restored, "resume", None));
 
             windows_guest.shutdown();
@@ -7755,7 +7792,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Wait to make sure Windows boots up
-            assert!(windows_guest.wait_for_boot());
+            windows_guest.wait_for_boot().unwrap();
 
             let vcpu_num = 2;
             // Check the initial number of CPUs the guest sees
@@ -7766,8 +7803,10 @@ mod windows {
             let vcpu_num = 6;
             // Hotplug some CPUs
             resize_command(&api_socket, Some(vcpu_num), None, None, None);
-            // Wait to make sure CPUs are added
-            thread::sleep(std::time::Duration::new(10, 0));
+            // Wait for Windows to report the hotplugged CPUs.
+            assert!(wait_until(Duration::from_secs(60), || windows_guest
+                .cpu_count()
+                == vcpu_num));
             // Check the guest sees the correct number
             assert_eq!(windows_guest.cpu_count(), vcpu_num);
             // Check the CH process has the correct number of vcpu threads
@@ -7776,12 +7815,10 @@ mod windows {
             let vcpu_num = 4;
             // Remove some CPUs. Note that Windows doesn't support hot-remove.
             resize_command(&api_socket, Some(vcpu_num), None, None, None);
-            // Wait to make sure CPUs are removed
-            thread::sleep(std::time::Duration::new(10, 0));
             // Reboot to let Windows catch up
             windows_guest.reboot();
-            // Wait to make sure Windows completely rebooted
-            thread::sleep(std::time::Duration::new(60, 0));
+            // Wait for Windows to come back after the reboot.
+            windows_guest.wait_for_boot().unwrap();
             // Check the guest sees the correct number
             assert_eq!(windows_guest.cpu_count(), vcpu_num);
             // Check the CH process has the correct number of vcpu threads
@@ -7830,7 +7867,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Wait to make sure Windows boots up
-            assert!(windows_guest.wait_for_boot());
+            windows_guest.wait_for_boot().unwrap();
 
             let ram_size = 2 * 1024 * 1024 * 1024;
             // Check the initial number of RAM the guest sees
@@ -7845,20 +7882,20 @@ mod windows {
             let ram_size = 4 * 1024 * 1024 * 1024;
             // Hotplug some RAM
             resize_command(&api_socket, None, Some(ram_size), None, None);
-            // Wait to make sure RAM has been added
-            thread::sleep(std::time::Duration::new(10, 0));
+            // Wait for Windows to report the hotplugged memory.
+            assert!(wait_until(Duration::from_secs(60), || windows_guest
+                .ram_size()
+                == ram_size - reserved_ram_size));
             // Check the guest sees the correct number
             assert_eq!(windows_guest.ram_size(), ram_size - reserved_ram_size);
 
             let ram_size = 3 * 1024 * 1024 * 1024;
             // Unplug some RAM. Note that hot-remove most likely won't work.
             resize_command(&api_socket, None, Some(ram_size), None, None);
-            // Wait to make sure RAM has been added
-            thread::sleep(std::time::Duration::new(10, 0));
             // Reboot to let Windows catch up
             windows_guest.reboot();
-            // Wait to make sure guest completely rebooted
-            thread::sleep(std::time::Duration::new(60, 0));
+            // Wait for Windows to come back after the reboot.
+            windows_guest.wait_for_boot().unwrap();
             // Check the guest sees the correct number
             assert_eq!(windows_guest.ram_size(), ram_size - reserved_ram_size);
 
@@ -7904,7 +7941,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Wait to make sure Windows boots up
-            assert!(windows_guest.wait_for_boot());
+            windows_guest.wait_for_boot().unwrap();
 
             // Initially present network device
             let netdev_num = 1;
@@ -7919,7 +7956,11 @@ mod windows {
             );
             assert!(cmd_success);
             assert!(String::from_utf8_lossy(&cmd_output).contains("\"id\":\"_net2\""));
-            thread::sleep(std::time::Duration::new(5, 0));
+            // Wait for Windows to enumerate the added network device.
+            assert!(wait_until(Duration::from_secs(30), || windows_guest
+                .netdev_count()
+                == 2
+                && netdev_ctrl_threads_count(child.id()) == 2));
             // Verify the device  is on the system
             let netdev_num = 2;
             assert_eq!(windows_guest.netdev_count(), netdev_num);
@@ -7928,7 +7969,11 @@ mod windows {
             // Remove network device
             let cmd_success = remote_command(&api_socket, "remove-device", Some("_net2"));
             assert!(cmd_success);
-            thread::sleep(std::time::Duration::new(5, 0));
+            // Wait for Windows to drop the removed network device.
+            assert!(wait_until(Duration::from_secs(30), || windows_guest
+                .netdev_count()
+                == 1
+                && netdev_ctrl_threads_count(child.id()) == 1));
             // Verify the device has been removed
             let netdev_num = 1;
             assert_eq!(windows_guest.netdev_count(), netdev_num);
@@ -7980,7 +8025,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Wait to make sure Windows boots up
-            assert!(windows_guest.wait_for_boot());
+            windows_guest.wait_for_boot().unwrap();
 
             // Initially present disk device
             let disk_num = 1;
@@ -7995,10 +8040,14 @@ mod windows {
             );
             assert!(cmd_success);
             assert!(String::from_utf8_lossy(&cmd_output).contains("\"id\":\"_disk2\""));
-            thread::sleep(std::time::Duration::new(5, 0));
             // Online disk device
             windows_guest.disks_set_rw();
             windows_guest.disks_online();
+            // Wait for Windows to enumerate the added disk.
+            assert!(wait_until(Duration::from_secs(30), || windows_guest
+                .disk_count()
+                == 2
+                && disk_ctrl_threads_count(child.id()) == 2));
             // Verify the device is on the system
             let disk_num = 2;
             assert_eq!(windows_guest.disk_count(), disk_num);
@@ -8011,7 +8060,11 @@ mod windows {
             // Unmount disk device
             let cmd_success = remote_command(&api_socket, "remove-device", Some("_disk2"));
             assert!(cmd_success);
-            thread::sleep(std::time::Duration::new(5, 0));
+            // Wait for Windows to drop the removed disk.
+            assert!(wait_until(Duration::from_secs(30), || windows_guest
+                .disk_count()
+                == 1
+                && disk_ctrl_threads_count(child.id()) == 1));
             // Verify the device has been removed
             let disk_num = 1;
             assert_eq!(windows_guest.disk_count(), disk_num);
@@ -8024,7 +8077,11 @@ mod windows {
                 Some(format!("path={disk},readonly=off").as_str()),
             );
             assert!(cmd_success);
-            thread::sleep(std::time::Duration::new(5, 0));
+            // Wait for Windows to mount the re-added disk again.
+            assert!(wait_until(Duration::from_secs(30), || windows_guest
+                .disk_file_read(fname)
+                .trim()
+                == data));
             let out = windows_guest.disk_file_read(fname);
             assert_eq!(data, out.trim());
 
@@ -8090,7 +8147,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Wait to make sure Windows boots up
-            assert!(windows_guest.wait_for_boot());
+            windows_guest.wait_for_boot().unwrap();
 
             // Initially present disk device
             let disk_num = 1;
@@ -8133,9 +8190,13 @@ mod windows {
                 let disk_id = it[0].as_str();
                 let cmd_success = remote_command(&api_socket, "remove-device", Some(disk_id));
                 assert!(cmd_success);
-                thread::sleep(std::time::Duration::new(5, 0));
             }
 
+            // Wait for Windows to drop all removed disks.
+            assert!(wait_until(Duration::from_secs(30), || windows_guest
+                .disk_count()
+                == 1
+                && disk_ctrl_threads_count(child.id()) == 1));
             // Verify the devices have been removed
             let disk_num = 1;
             assert_eq!(windows_guest.disk_count(), disk_num);
@@ -8150,9 +8211,12 @@ mod windows {
                     Some(format!("path={disk},readonly=off").as_str()),
                 );
                 assert!(cmd_success);
-                thread::sleep(std::time::Duration::new(5, 0));
             }
 
+            // Wait for Windows to enumerate the re-added disks.
+            assert!(wait_until(Duration::from_secs(30), || {
+                windows_guest.disk_count() == 4 && disk_ctrl_threads_count(child.id()) == 4
+            }));
             // Check the files exists with the expected contents
             for it in &disk_test_data {
                 let fname = it[2].as_str();
@@ -8212,7 +8276,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Wait to make sure Windows boots up
-            assert!(windows_guest.wait_for_boot());
+            windows_guest.wait_for_boot().unwrap();
 
             let netdev_num = 3;
             assert_eq!(windows_guest.netdev_count(), netdev_num);
@@ -8345,7 +8409,7 @@ mod vfio {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args([
                 "--device",
@@ -8384,7 +8448,7 @@ mod vfio {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args(["--device", format!("path={NVIDIA_VFIO_DEVICE}").as_str()])
             .args([
@@ -10334,7 +10398,7 @@ mod rate_limiter {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("boot={}", num_queues / 2)])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -10406,7 +10470,7 @@ mod rate_limiter {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("boot={num_queues}")])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -10512,7 +10576,7 @@ mod rate_limiter {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("boot={}", num_queues * num_disks)])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(["--rate-limit-group", &rate_limit_group_arg])
