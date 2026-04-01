@@ -16,7 +16,7 @@ use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, Disk
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::{
     disk_file, probe_sparse_support, query_device_size, BatchRequest, DiskTopology, RequestType,
-    BLKGETSIZE64, SECTOR_SIZE,
+    SECTOR_SIZE,
 };
 
 #[derive(Debug)]
@@ -72,33 +72,26 @@ impl disk_file::Resizable for RawFileDisk {
         let fd_metadata = self
             .file
             .metadata()
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e)))?;
 
         if fd_metadata.file_type().is_block_device() {
             // Block devices cannot be resized via ftruncate - they are resized
-            // externally (LVM, losetup -c, etc.). Verify the ioctl works but
-            // don't require size to match - caller will re-query actual size.
-            let mut block_device_size: u64 = 0;
-            // SAFETY: BLKGETSIZE64 reads the device size into a u64 pointer.
-            let ret = unsafe {
-                libc::ioctl(
-                    self.file.as_raw_fd(),
-                    BLKGETSIZE64() as _,
-                    &mut block_device_size,
-                )
-            };
-            if ret != 0 {
+            // externally (LVM, losetup -c, etc.). Verify the size matches.
+            let (actual_size, _) = query_device_size(&self.file)
+                .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e)))?;
+            if actual_size != size {
                 return Err(BlockError::new(
                     BlockErrorKind::Io,
-                    io::Error::last_os_error(),
+                    DiskFileError::ResizeError(io::Error::other(format!(
+                        "Block device size {actual_size} does not match requested size {size}"
+                    ))),
                 ));
             }
-
             Ok(())
         } else {
             self.file
                 .set_len(size)
-                .map_err(|e| BlockError::new(BlockErrorKind::Io, e))
+                .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e)))
         }
     }
 }
