@@ -8528,6 +8528,8 @@ mod vfio {
 }
 
 mod live_migration {
+    use std::num::NonZeroU32;
+
     use vmm::api::TimeoutStrategy;
 
     use crate::*;
@@ -9701,7 +9703,11 @@ mod live_migration {
             .port()
     }
 
-    fn start_live_migration_tcp(src_api_socket: &str, dest_api_socket: &str) -> bool {
+    fn start_live_migration_tcp(
+        src_api_socket: &str,
+        dest_api_socket: &str,
+        connections: NonZeroU32,
+    ) -> bool {
         // Get an available TCP port
         let migration_port = get_available_port();
         let host_ip = "127.0.0.1";
@@ -9723,11 +9729,14 @@ mod live_migration {
         thread::sleep(Duration::from_secs(1));
 
         // Start the 'send-migration' command on the source
+        let connections = connections.get();
         let mut send_migration = Command::new(clh_command("ch-remote"))
             .args([
                 &format!("--api-socket={src_api_socket}"),
                 "send-migration",
-                &format!("destination_url=tcp:{host_ip}:{migration_port}"),
+                &format!(
+                    "destination_url=tcp:{host_ip}:{migration_port},connections={connections}"
+                ),
             ])
             .stdin(Stdio::null())
             .stderr(Stdio::piped())
@@ -9778,7 +9787,7 @@ mod live_migration {
         send_success && receive_success
     }
 
-    fn _test_live_migration_tcp() {
+    fn _test_live_migration_tcp(connections: NonZeroU32) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
@@ -9860,7 +9869,7 @@ mod live_migration {
             }
             // Start TCP live migration
             assert!(
-                start_live_migration_tcp(&src_api_socket, &dest_api_socket),
+                start_live_migration_tcp(&src_api_socket, &dest_api_socket, connections),
                 "Unsuccessful command: 'send-migration' or 'receive-migration'."
             );
         });
@@ -10249,7 +10258,12 @@ mod live_migration {
 
         #[test]
         fn test_live_migration_tcp() {
-            _test_live_migration_tcp();
+            _test_live_migration_tcp(NonZeroU32::new(1).unwrap());
+        }
+
+        #[test]
+        fn test_live_migration_tcp_parallel_connections() {
+            _test_live_migration_tcp(NonZeroU32::new(8).unwrap());
         }
 
         #[test]
