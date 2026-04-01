@@ -1410,6 +1410,11 @@ components:
           format: int64
           default: 1
           minimum: 1
+          maximum: 128
+          description: >
+            The number of parallel TCP connections to use for migration.
+            Must be between 1 and 128. Multiple connections are not supported
+            with local UNIX-socket migration.
 
     VmAddUserDevice:
       required:
