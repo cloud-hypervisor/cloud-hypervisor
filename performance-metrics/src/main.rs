@@ -145,6 +145,7 @@ pub struct PerformanceTestOverrides {
     test_iterations: Option<u32>,
     test_timeout: Option<u32>,
     test_image_format: Option<ImageFormat>,
+    vm_type: Option<GuestVmType>,
 }
 
 impl fmt::Display for PerformanceTestOverrides {
@@ -158,6 +159,10 @@ impl fmt::Display for PerformanceTestOverrides {
 
         if let Some(test_image_format) = self.test_image_format {
             write!(f, "test_image_format = {test_image_format}")?;
+        }
+
+        if let Some(vm_type) = self.vm_type {
+            write!(f, "vm_type = {vm_type}")?;
         }
 
         Ok(())
@@ -1396,6 +1401,7 @@ fn main() {
             .map(|s| s.parse())
             .transpose()
             .unwrap_or_default(),
+        vm_type: None,
     });
 
     // Skip heavy VM level init/cleanup when only micro benchmarks are selected.
