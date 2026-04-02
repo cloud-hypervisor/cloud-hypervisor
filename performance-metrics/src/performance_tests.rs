@@ -135,7 +135,7 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
     let (rx, bandwidth) = control.net_control.unwrap();
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-    let guest = performance_test_new_guest(Box::new(focal), GuestVmType::Regular);
+    let guest = performance_test_new_guest(Box::new(focal), control.vm_type);
 
     let num_queues = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
