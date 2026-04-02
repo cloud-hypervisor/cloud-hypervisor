@@ -255,41 +255,6 @@ pub(crate) fn prepare_swtpm_daemon(tmp_dir: &TempDir) -> (std::process::Command,
     (swtpm_command, swtpm_socket_path)
 }
 
-pub(crate) fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
-    let mut cmd = Command::new(clh_command("ch-remote"));
-    cmd.args([&format!("--api-socket={api_socket}"), command]);
-
-    if let Some(arg) = arg {
-        cmd.arg(arg);
-    }
-    let output = cmd.output().unwrap();
-    if output.status.success() {
-        true
-    } else {
-        eprintln!("Error running ch-remote command: {:?}", &cmd);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        eprintln!("stderr: {stderr}");
-        false
-    }
-}
-
-pub(crate) fn remote_command_w_output(
-    api_socket: &str,
-    command: &str,
-    arg: Option<&str>,
-) -> (bool, Vec<u8>) {
-    let mut cmd = Command::new(clh_command("ch-remote"));
-    cmd.args([&format!("--api-socket={api_socket}"), command]);
-
-    if let Some(arg) = arg {
-        cmd.arg(arg);
-    }
-
-    let output = cmd.output().expect("Failed to launch ch-remote");
-
-    (output.status.success(), output.stdout)
-}
-
 pub(crate) fn resize_command(
     api_socket: &str,
     desired_vcpus: Option<u8>,
