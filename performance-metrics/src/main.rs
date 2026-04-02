@@ -183,20 +183,20 @@ pub struct PerformanceTestOverrides {
 
 impl fmt::Display for PerformanceTestOverrides {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(test_iterations) = self.test_iterations {
-            write!(f, "test_iterations = {test_iterations}, ")?;
-        }
-        if let Some(test_timeout) = self.test_timeout {
-            write!(f, "test_timeout = {test_timeout}")?;
-        }
-
-        if let Some(test_image_format) = self.test_image_format {
-            write!(f, "test_image_format = {test_image_format}")?;
-        }
-
-        write!(f, "vm_type = {}", self.vm_type)?;
-
-        Ok(())
+        write!(
+            f,
+            "{}{}{}vm_type = {}",
+            self.test_iterations
+                .map(|v| format!("test_iterations = {v}, "))
+                .unwrap_or_default(),
+            self.test_timeout
+                .map(|v| format!("test_timeout = {v}, "))
+                .unwrap_or_default(),
+            self.test_image_format
+                .map(|v| format!("test_image_format = {v}, "))
+                .unwrap_or_default(),
+            self.vm_type
+        )
     }
 }
 
@@ -1837,6 +1837,16 @@ fn main() {
                 )
                 .num_args(1),
         )
+        .arg(
+            Arg::new("vm-type")
+                .long("vm-type")
+                .help(
+                    "Set the VM type: 'regular' (default) or 'confidential' (CVM).",
+                )
+                .num_args(1)
+                .value_parser(["regular","confidential"])
+                .default_value("regular"),
+        )
         .get_matches();
 
     // It seems that the tool (ethr) used for testing the virtio-net latency
@@ -1891,7 +1901,10 @@ fn main() {
             .map(|s| s.parse())
             .transpose()
             .unwrap_or_default(),
-        vm_type: GuestVmType::Regular,
+        vm_type: cmd_arguments
+            .get_one::<String>("vm-type")
+            .map(|s| s.parse().unwrap_or_default())
+            .unwrap_or_default(),
     });
 
     // Skip heavy VM level init/cleanup when only micro benchmarks are selected.
