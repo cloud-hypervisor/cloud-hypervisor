@@ -1350,6 +1350,14 @@ fn main() {
                 )
                 .num_args(1),
         )
+        .arg(
+            Arg::new("vm-type")
+                .long("vm-type")
+                .help(
+                    "Set the VM type: 'regular' (default) or 'confidential' (CVM).",
+                )
+                .num_args(1),
+        )
         .get_matches();
 
     // It seems that the tool (ethr) used for testing the virtio-net latency
@@ -1404,7 +1412,11 @@ fn main() {
             .map(|s| s.parse())
             .transpose()
             .unwrap_or_default(),
-        vm_type: None,
+        vm_type: cmd_arguments
+            .get_one::<String>("vm-type")
+            .map(|s| s.parse())
+            .transpose()
+            .unwrap_or_default(),
     });
 
     // Skip heavy VM level init/cleanup when only micro benchmarks are selected.
