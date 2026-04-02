@@ -2375,8 +2375,9 @@ pub fn extract_bar_address(output: &str, device_desc: &str, bar_index: usize) ->
     None
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Default)]
 pub enum GuestVmType {
+    #[default]
     Regular,
     Confidential,
 }
