@@ -352,7 +352,7 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
 pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
     let r = std::panic::catch_unwind(|| {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let guest = performance_test_new_guest(Box::new(focal), GuestVmType::Regular);
+        let guest = performance_test_new_guest(Box::new(focal), control.vm_type);
         let mut cmd = GuestCommand::new(&guest);
         let c = cmd
             .args([
