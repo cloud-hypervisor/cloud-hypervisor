@@ -124,26 +124,6 @@ fn performance_test_new_guest(disk_config: Box<dyn DiskConfig>) -> Guest {
     Guest::new_from_ip_range(disk_config, "172.19", 0)
 }
 
-fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
-    let mut cmd = std::process::Command::new(clh_command("ch-remote"));
-    cmd.args([&format!("--api-socket={api_socket}"), command]);
-
-    if let Some(arg) = arg {
-        cmd.arg(arg);
-    }
-    let output = cmd.output().unwrap();
-    if output.status.success() {
-        true
-    } else {
-        eprintln!(
-            "Error running ch-remote command: {:?}\nstderr: {}",
-            &cmd,
-            String::from_utf8_lossy(&output.stderr)
-        );
-        false
-    }
-}
-
 pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
     let test_timeout = control.test_timeout;
     let (rx, bandwidth) = control.net_control.unwrap();
