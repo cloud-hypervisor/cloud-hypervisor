@@ -1776,6 +1776,42 @@ pub fn clh_command(cmd: &str) -> String {
     String::from(full_path.to_str().unwrap())
 }
 
+pub fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
+    let mut cmd = Command::new(clh_command("ch-remote"));
+    cmd.args([&format!("--api-socket={api_socket}"), command]);
+
+    if let Some(arg) = arg {
+        cmd.arg(arg);
+    }
+
+    let output = cmd.output().unwrap();
+    if output.status.success() {
+        true
+    } else {
+        eprintln!("Error running ch-remote command: {:?}", &cmd);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("stderr: {stderr}");
+        false
+    }
+}
+
+pub fn remote_command_w_output(
+    api_socket: &str,
+    command: &str,
+    arg: Option<&str>,
+) -> (bool, Vec<u8>) {
+    let mut cmd = Command::new(clh_command("ch-remote"));
+    cmd.args([&format!("--api-socket={api_socket}"), command]);
+
+    if let Some(arg) = arg {
+        cmd.arg(arg);
+    }
+
+    let output = cmd.output().expect("Failed to launch ch-remote");
+
+    (output.status.success(), output.stdout)
+}
+
 pub fn parse_iperf3_output(output: &[u8], sender: bool, bandwidth: bool) -> Result<f64, Error> {
     std::panic::catch_unwind(|| {
         let s = String::from_utf8_lossy(output);
