@@ -26,10 +26,13 @@ use virtio_devices::block::MINIMUM_BLOCK_QUEUE_SIZE;
 use virtio_devices::vhost_user::VIRTIO_FS_TAG_LEN;
 use virtio_devices::{RateLimiterConfig, TokenBucketConfig};
 
+use arch::layout;
+
 use crate::landlock::LandlockAccess;
 use crate::vm_config::*;
 
-const MAX_NUM_PCI_SEGMENTS: u16 = 96;
+const MAX_NUM_PCI_SEGMENTS: u16 =
+    (layout::PCI_MMCONFIG_SIZE / layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT) as u16;
 const MAX_IOMMU_ADDRESS_WIDTH_BITS: u8 = 64;
 
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
@@ -2229,7 +2232,7 @@ impl DeviceConfig {
     \"path=<device_path>,iommu=on|off,id=<device_id>,\
     pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
     x_nv_gpudirect_clique=<clique_id>,\
-    x_exclude_mmap_bars=[<bar>...]\"";
+    x_exclude_mmap_bars=[<bar>...],root_port=on|off\"";
 
     pub fn parse(device: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2237,7 +2240,8 @@ impl DeviceConfig {
             .add("path")
             .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU)
             .add("x_nv_gpudirect_clique")
-            .add("x_exclude_mmap_bars");
+            .add("x_exclude_mmap_bars")
+            .add("root_port");
         parser.parse(device).map_err(Error::ParseDevice)?;
 
         let pci_common = PciDeviceCommonConfig::parse(device)?;
@@ -2260,11 +2264,17 @@ impl DeviceConfig {
             }
             x_exclude_mmap_bars.push(bar as u8);
         }
+        let root_port = parser
+            .convert::<Toggle>("root_port")
+            .map_err(Error::ParseDevice)?
+            .unwrap_or(Toggle(false))
+            .0;
         Ok(DeviceConfig {
             pci_common,
             path,
             x_nv_gpudirect_clique,
             x_exclude_mmap_bars,
+            root_port,
         })
     }
 
@@ -4410,6 +4420,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             path: PathBuf::from("/path/to/device"),
             x_nv_gpudirect_clique: None,
             x_exclude_mmap_bars: Vec::new(),
+            root_port: false,
         }
     }
 
@@ -4465,6 +4476,14 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             DeviceConfig::parse("path=/path/to/device,x_exclude_mmap_bars=[6]").unwrap_err(),
             Error::ParseDeviceExcludeMmapBarInvalid(6)
         ));
+
+        assert_eq!(
+            DeviceConfig::parse("path=/path/to/device,root_port=on")?,
+            DeviceConfig {
+                root_port: true,
+                ..device_fixture()
+            }
+        );
         Ok(())
     }
 

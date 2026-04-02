@@ -766,7 +766,7 @@ impl VfioCommon {
                         .allocate(restored_bar_addr, region_size, Some(region_size))
                         .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
                 }
-                PciBarRegionType::Memory64BitRegion => {
+                PciBarRegionType::Memory64BitRegion if bool::from(prefetchable) => {
                     // We need do some fixup to keep MMIO RW region and msix cap region page size
                     // aligned.
                     region_size = self.fixup_msix_region(bar_id, region_size);
@@ -780,6 +780,15 @@ impl VfioCommon {
                                 region_size,
                             )),
                         )
+                        .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
+                }
+                PciBarRegionType::Memory64BitRegion => {
+                    // Some devices expose 64-bit BARs that are still non-prefetchable.
+                    // Those must live behind the bridge's normal 32-bit memory window,
+                    // so keep them in the 32-bit PCI MMIO aperture.
+                    region_size = self.fixup_msix_region(bar_id, region_size);
+                    mmio32_allocator
+                        .allocate(restored_bar_addr, region_size, Some(region_size))
                         .ok_or(PciDeviceError::IoAllocationFailed(region_size))?
                 }
             };

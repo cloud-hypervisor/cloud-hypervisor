@@ -12,6 +12,7 @@ mod device;
 mod mmap;
 mod msi;
 mod msix;
+mod root_port;
 mod vfio;
 mod vfio_user;
 
@@ -38,6 +39,7 @@ pub use self::msix::{
     MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, MaybeMutInterruptSourceGroup, MsixCap, MsixConfig,
     MsixTableEntry,
 };
+pub use self::root_port::PcieRootPort;
 pub use self::vfio::{MmioRegion, VfioDmaMapping, VfioPciDevice, VfioPciError};
 pub use self::vfio_user::{VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError};
 

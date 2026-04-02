@@ -12,6 +12,7 @@ use std::collections::btree_map::BTreeMap;
 use std::sync::{Arc, Barrier, Mutex, RwLock, Weak};
 use std::{convert, io, result};
 
+use log::error;
 use thiserror::Error;
 
 /// Trait for devices that respond to reads or writes in an arbitrary address space.
@@ -164,6 +165,17 @@ impl Bus {
             .iter()
             .any(|(range, _dev)| range.overlaps(base, len))
         {
+            for (range, _dev) in self.devices.read().unwrap().iter() {
+                if range.overlaps(base, len) {
+                    error!(
+                        "Bus insert overlap: requested [0x{:x}-0x{:x}] conflicts with existing [0x{:x}-0x{:x}]",
+                        base,
+                        base + len - 1,
+                        range.base,
+                        range.base + range.len - 1
+                    );
+                }
+            }
             return Err(Error::Overlap);
         }
 

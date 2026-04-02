@@ -84,8 +84,9 @@ pub const MEM_32BIT_DEVICES_SIZE: u64 = 0x2000_0000;
 /// PCI MMCONFIG space (start: after the device space at 768MiB, length: 256MiB)
 pub const PCI_MMCONFIG_START: GuestAddress = GuestAddress(0x3000_0000);
 pub const PCI_MMCONFIG_SIZE: u64 = 256 << 20;
-// One bus with potentially 256 devices (32 slots x 8 functions).
-pub const PCI_MMIO_CONFIG_SIZE_PER_SEGMENT: u64 = 4096 * 256;
+pub const PCI_BUSES_PER_SEGMENT: u64 = 32;
+// One segment exposes bus 0 plus a secondary bus for each hotplug root port.
+pub const PCI_MMIO_CONFIG_SIZE_PER_SEGMENT: u64 = 4096 * 256 * PCI_BUSES_PER_SEGMENT;
 
 /// Start of RAM.
 pub const RAM_START: GuestAddress = GuestAddress(0x4000_0000);

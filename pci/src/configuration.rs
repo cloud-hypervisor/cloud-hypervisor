@@ -32,6 +32,7 @@ const ROM_BAR_ADDR_MASK: u32 = 0xffff_f800;
 const MSI_CAPABILITY_REGISTER_MASK: u32 = 0x0071_0000;
 const MSIX_CAPABILITY_REGISTER_MASK: u32 = 0xc000_0000;
 const NUM_BAR_REGS: usize = 6;
+const NUM_BRIDGE_BAR_REGS: usize = 2;
 const CAPABILITY_LIST_HEAD_OFFSET: usize = 0x34;
 const FIRST_CAPABILITY_OFFSET: usize = 0x40;
 const CAPABILITY_MAX_OFFSET: usize = 192;
@@ -41,10 +42,14 @@ const INTERRUPT_LINE_PIN_REG: usize = 15;
 pub const PCI_CONFIGURATION_ID: &str = "pci_configuration";
 
 /// Represents the types of PCI headers allowed in the configuration registers.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PciHeaderType {
     Device,
     Bridge,
+}
+
+fn default_pci_header_type() -> PciHeaderType {
+    PciHeaderType::Device
 }
 
 /// Classes of PCI nodes.
@@ -417,6 +422,8 @@ pub struct PciConfigurationState {
     registers: Vec<u32>,
     writable_bits: Vec<u32>,
     bars: Vec<PciBar>,
+    #[serde(default = "default_pci_header_type")]
+    header_type: PciHeaderType,
     rom_bar_addr: u32,
     rom_bar_size: u32,
     rom_bar_used: bool,
@@ -435,6 +442,7 @@ pub struct PciConfiguration {
     registers: [u32; NUM_CONFIGURATION_REGISTERS],
     writable_bits: [u32; NUM_CONFIGURATION_REGISTERS], // writable bits for each register.
     bars: [PciBar; NUM_BAR_REGS],
+    header_type: PciHeaderType,
     rom_bar_addr: u32,
     rom_bar_size: u32,
     rom_bar_used: bool,
@@ -555,6 +563,7 @@ impl PciConfiguration {
             registers,
             writable_bits,
             bars,
+            header_type,
             rom_bar_addr,
             rom_bar_size,
             rom_bar_used,
@@ -566,6 +575,7 @@ impl PciConfiguration {
                 state.registers.try_into().unwrap(),
                 state.writable_bits.try_into().unwrap(),
                 state.bars.try_into().unwrap(),
+                state.header_type,
                 state.rom_bar_addr,
                 state.rom_bar_size,
                 state.rom_bar_used,
@@ -593,19 +603,27 @@ impl PciConfiguration {
                 PciHeaderType::Device => {
                     registers[3] = 0x0000_0000; // Header type 0 (device)
                     writable_bits[15] = 0x0000_00ff; // Interrupt line (r/w)
+                    registers[11] =
+                        (u32::from(subsystem_id) << 16) | u32::from(subsystem_vendor_id);
                 }
                 PciHeaderType::Bridge => {
                     registers[3] = 0x0001_0000; // Header type 1 (bridge)
-                    writable_bits[9] = 0xfff0_fff0; // Memory base and limit
+                    writable_bits[6] = 0x00ff_ff00; // Secondary and subordinate bus numbers
+                    writable_bits[7] = 0x0000_f0f0; // I/O base and limit
+                    writable_bits[8] = 0xfff0_fff0; // Memory base and limit
+                    writable_bits[9] = 0xfff1_fff1; // Prefetchable memory base and limit
+                    writable_bits[10] = 0xffff_ffff; // Prefetchable memory base upper 32 bits
+                    writable_bits[11] = 0xffff_ffff; // Prefetchable memory limit upper 32 bits
+                    writable_bits[12] = 0x0000_ffff; // I/O base and limit upper 16 bits
                     writable_bits[15] = 0xffff_00ff; // Bridge control (r/w), interrupt line (r/w)
                 }
             }
-            registers[11] = (u32::from(subsystem_id) << 16) | u32::from(subsystem_vendor_id);
 
             (
                 registers,
                 writable_bits,
                 [PciBar::default(); NUM_BAR_REGS],
+                header_type,
                 0,
                 0,
                 false,
@@ -619,6 +637,7 @@ impl PciConfiguration {
             registers,
             writable_bits,
             bars,
+            header_type,
             rom_bar_addr,
             rom_bar_size,
             rom_bar_used,
@@ -634,6 +653,7 @@ impl PciConfiguration {
             registers: self.registers.to_vec(),
             writable_bits: self.writable_bits.to_vec(),
             bars: self.bars.to_vec(),
+            header_type: self.header_type,
             rom_bar_addr: self.rom_bar_addr,
             rom_bar_size: self.rom_bar_size,
             rom_bar_used: self.rom_bar_used,
@@ -648,17 +668,24 @@ impl PciConfiguration {
         *(self.registers.get(reg_idx).unwrap_or(&0xffff_ffff))
     }
 
+    fn num_bars(&self) -> usize {
+        match self.header_type {
+            PciHeaderType::Device => NUM_BAR_REGS,
+            PciHeaderType::Bridge => NUM_BRIDGE_BAR_REGS,
+        }
+    }
+
     /// Writes a 32bit register to `reg_idx` in the register map.
     pub fn write_reg(&mut self, reg_idx: usize, value: u32) {
         let mut mask = self.writable_bits[reg_idx];
 
-        if (BAR0_REG..BAR0_REG + NUM_BAR_REGS).contains(&reg_idx) {
+        if (BAR0_REG..BAR0_REG + self.num_bars()).contains(&reg_idx) {
             // Handle very specific case where the BAR is being written with
             // all 1's to retrieve the BAR size during next BAR reading.
             if value == 0xffff_ffff {
                 mask &= self.bars[reg_idx - 4].size;
             }
-        } else if reg_idx == ROM_BAR_REG {
+        } else if reg_idx == ROM_BAR_REG && self.header_type == PciHeaderType::Device {
             // Handle very specific case where the BAR is being written with
             // all 1's on bits 31-11 to retrieve the BAR size during next BAR
             // reading.
@@ -735,7 +762,7 @@ impl PciConfiguration {
             return Err(Error::BarSizeInvalid(config.size));
         }
 
-        if bar_idx >= NUM_BAR_REGS {
+        if bar_idx >= self.num_bars() {
             return Err(Error::BarInvalid(bar_idx));
         }
 
@@ -981,7 +1008,7 @@ impl PciConfiguration {
         let value = LittleEndian::read_u32(data);
 
         let mask = self.writable_bits[reg_idx];
-        if (BAR0_REG..BAR0_REG + NUM_BAR_REGS).contains(&reg_idx) {
+        if (BAR0_REG..BAR0_REG + self.num_bars()).contains(&reg_idx) {
             // Ignore the case where the BAR size is being asked for.
             if value == 0xffff_ffff {
                 return None;
@@ -1054,7 +1081,10 @@ impl PciConfiguration {
                     region_type,
                 });
             }
-        } else if reg_idx == ROM_BAR_REG && (value & mask) != (self.rom_bar_addr & mask) {
+        } else if self.header_type == PciHeaderType::Device
+            && reg_idx == ROM_BAR_REG
+            && (value & mask) != (self.rom_bar_addr & mask)
+        {
             // Ignore the case where the BAR size is being asked for.
             if value & ROM_BAR_ADDR_MASK == ROM_BAR_ADDR_MASK {
                 return None;
@@ -1342,5 +1372,115 @@ mod unit_tests {
         assert_eq!(class_code, 0x04);
         assert_eq!(subclass, 0x01);
         assert_eq!(prog_if, 0x5a);
+    }
+
+    #[test]
+    fn bridge_register_write_is_not_treated_as_bar_reprogramming() {
+        let mut cfg = PciConfiguration::new(
+            0x1234,
+            0x5678,
+            0x1,
+            PciClassCode::BridgeDevice,
+            &PciBridgeSubclass::PciToPciBridge,
+            None,
+            PciHeaderType::Bridge,
+            0,
+            0,
+            None,
+            None,
+        );
+
+        assert!(
+            cfg.write_config_register(8, 0, &u32::MAX.to_le_bytes())
+                .is_empty()
+        );
+        assert_eq!(cfg.read_reg(8), 0xfff0_fff0);
+        assert_eq!(cfg.pending_bar_reprogram.len(), 0);
+    }
+
+    #[test]
+    fn bridge_configuration_only_allows_two_bars() {
+        let mut cfg = PciConfiguration::new(
+            0x1234,
+            0x5678,
+            0x1,
+            PciClassCode::BridgeDevice,
+            &PciBridgeSubclass::PciToPciBridge,
+            None,
+            PciHeaderType::Bridge,
+            0,
+            0,
+            None,
+            None,
+        );
+
+        let err = cfg
+            .add_pci_bar(&PciBarConfiguration::new(
+                2,
+                0x1000,
+                PciBarRegionType::Memory32BitRegion,
+                PciBarPrefetchable::NotPrefetchable,
+            ))
+            .unwrap_err();
+
+        assert!(matches!(err, Error::BarInvalid(2)));
+    }
+
+    #[test]
+    fn bridge_register_twelve_is_not_treated_as_rom_bar() {
+        let mut cfg = PciConfiguration::new(
+            0x1234,
+            0x5678,
+            0x1,
+            PciClassCode::BridgeDevice,
+            &PciBridgeSubclass::PciToPciBridge,
+            None,
+            PciHeaderType::Bridge,
+            0,
+            0,
+            None,
+            None,
+        );
+
+        assert!(
+            cfg.write_config_register(12, 0, &0x00ff_00ff_u32.to_le_bytes())
+                .is_empty()
+        );
+        assert_eq!(cfg.read_reg(12), 0x0000_00ff);
+        assert_eq!(cfg.pending_bar_reprogram.len(), 0);
+    }
+
+    #[test]
+    fn bridge_configuration_state_preserves_header_type() {
+        let cfg = PciConfiguration::new(
+            0x1234,
+            0x5678,
+            0x1,
+            PciClassCode::BridgeDevice,
+            &PciBridgeSubclass::PciToPciBridge,
+            None,
+            PciHeaderType::Bridge,
+            0,
+            0,
+            None,
+            None,
+        );
+
+        let restored = PciConfiguration::new(
+            0,
+            0,
+            0,
+            PciClassCode::TooOld,
+            &PciBridgeSubclass::PciToPciBridge,
+            None,
+            PciHeaderType::Device,
+            0,
+            0,
+            None,
+            Some(cfg.state()),
+        );
+
+        assert_eq!(restored.header_type, PciHeaderType::Bridge);
+        assert_eq!(restored.num_bars(), NUM_BRIDGE_BAR_REGS);
     }
 }
