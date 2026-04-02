@@ -5,7 +5,7 @@
 
 use std::any::Any;
 use std::result;
-use std::sync::{Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier};
 
 use anyhow::anyhow;
 use event_monitor::event;
@@ -174,7 +174,7 @@ impl PciDevice for PvPanicDevice {
 
     fn allocate_bars(
         &mut self,
-        _allocator: &Arc<Mutex<SystemAllocator>>,
+        _allocator: &mut SystemAllocator,
         mmio32_allocator: &mut AddressAllocator,
         _mmio64_allocator: &mut AddressAllocator,
         resources: Option<Vec<Resource>>,

@@ -1767,7 +1767,7 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "aarch64")]
-    pub fn get_interrupt_controller(&mut self) -> Option<&Arc<Mutex<gic::Gic>>> {
+    pub fn get_interrupt_controller(&self) -> Option<&Arc<Mutex<gic::Gic>>> {
         self.interrupt_controller.as_ref()
     }
 
@@ -1804,7 +1804,7 @@ impl DeviceManager {
     }
 
     #[cfg(target_arch = "riscv64")]
-    pub fn get_interrupt_controller(&mut self) -> Option<&Arc<Mutex<aia::Aia>>> {
+    pub fn get_interrupt_controller(&self) -> Option<&Arc<Mutex<aia::Aia>>> {
         self.interrupt_controller.as_ref()
     }
 
@@ -4006,7 +4006,7 @@ impl DeviceManager {
             .lock()
             .unwrap()
             .allocate_bars(
-                &self.address_manager.allocator,
+                &mut self.address_manager.allocator.lock().unwrap(),
                 &mut self.pci_segments[segment_id as usize]
                     .mem32_allocator
                     .lock()
