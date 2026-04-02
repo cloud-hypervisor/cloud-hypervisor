@@ -2199,6 +2199,18 @@ pub enum GuestVmType {
     Confidential,
 }
 
+impl std::str::FromStr for GuestVmType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "regular" => Ok(GuestVmType::Regular),
+            "confidential" => Ok(GuestVmType::Confidential),
+            _ => Err(()),
+        }
+    }
+}
+
 // Get the direct igvm boot file path based on the console type
 fn direct_igvm_boot_path(console: Option<&str>) -> Option<PathBuf> {
     // get the default hvc0 igvm file if console string is not passed
