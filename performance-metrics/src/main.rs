@@ -17,7 +17,7 @@ use std::{env, fmt, thread};
 use clap::{Arg, ArgAction, Command as ClapCommand};
 use performance_tests::*;
 use serde::{Deserialize, Serialize};
-use test_infra::FioOps;
+use test_infra::{FioOps, GuestVmType};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -215,6 +215,7 @@ pub struct PerformanceTestControl {
     block_control: Option<BlockControl>,
     num_boot_vcpus: Option<u8>,
     num_ops: Option<u32>, // Workload size for micro benchmarks
+    vm_type: GuestVmType,
 }
 
 impl fmt::Display for PerformanceTestControl {
@@ -243,6 +244,8 @@ impl fmt::Display for PerformanceTestControl {
             output = format!("{output}, num_ops = {o}");
         }
 
+        output = format!("{output}, vm_type = {}", self.vm_type);
+
         write!(f, "{output}")
     }
 }
@@ -259,6 +262,7 @@ impl PerformanceTestControl {
             block_control: None,
             num_boot_vcpus: Some(1),
             num_ops: None,
+            vm_type: GuestVmType::Regular,
         }
     }
 }
