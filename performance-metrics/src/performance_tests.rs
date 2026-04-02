@@ -393,7 +393,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     let test_file = block_control.test_file;
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-    let guest = performance_test_new_guest(Box::new(focal), GuestVmType::Regular);
+    let guest = performance_test_new_guest(Box::new(focal), control.vm_type);
     let api_socket = guest
         .tmp_dir
         .as_path()
