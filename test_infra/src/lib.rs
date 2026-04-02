@@ -2211,6 +2211,15 @@ impl std::str::FromStr for GuestVmType {
     }
 }
 
+impl std::fmt::Display for GuestVmType {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            GuestVmType::Regular => write!(f, "regular"),
+            GuestVmType::Confidential => write!(f, "confidential"),
+        }
+    }
+}
+
 // Get the direct igvm boot file path based on the console type
 fn direct_igvm_boot_path(console: Option<&str>) -> Option<PathBuf> {
     // get the default hvc0 igvm file if console string is not passed
