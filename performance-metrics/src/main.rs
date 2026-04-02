@@ -294,6 +294,7 @@ impl PerformanceTest {
             if let Some(test_timeout) = overrides.test_timeout {
                 control.test_timeout = test_timeout;
             }
+            control.vm_type = overrides.vm_type;
             control
         };
 
