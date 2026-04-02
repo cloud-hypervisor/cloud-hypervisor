@@ -18,9 +18,8 @@
 use std::os::unix::net::UnixStream;
 
 use vhost::vhost_user::Error;
-use vm_virtio::AccessPlatform;
 
-use super::queue_pair::{FdRearm, VirtioVhostUserQueuePair};
+use super::queue_pair::{FdRearm, Translate, VirtioVhostUserQueuePair};
 use crate::EpollHelper;
 
 pub(super) struct BackendRequestQueuePair {
@@ -43,7 +42,7 @@ impl BackendRequestQueuePair {
     }
     pub(super) fn process_incoming(
         &mut self,
-        access_platform: Option<&(dyn AccessPlatform + 'static)>,
+        access_platform: Option<Translate>,
         max_iterations: usize,
     ) -> Result<(FdRearm, bool), Error> {
         self.queue_pair.process_incoming(
@@ -60,7 +59,7 @@ impl BackendRequestQueuePair {
     }
     pub(super) fn process_outgoing(
         &mut self,
-        access_platform: Option<&(dyn AccessPlatform + 'static)>,
+        access_platform: Option<Translate>,
         max_iterations: usize,
     ) -> Result<(FdRearm, bool), Error> {
         self.queue_pair

@@ -22,7 +22,6 @@ use std::sync::Arc;
 
 use vhost::vhost_user::Error;
 use vhost::vhost_user::message::VhostUserMemoryRegion;
-use vm_allocator::AddressAllocator;
 use vm_memory::{GuestAddress, GuestMemoryRegion as _};
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone)]
@@ -34,10 +33,10 @@ pub(super) struct MemRegionInfo {
 
 pub(super) type Region = Arc<vm_memory::GuestRegionMmap<vm_memory::bitmap::AtomicBitmap>>;
 
-pub(super) struct Mapping {
+pub(super) struct Mapping<T: Allocator> {
     region: Region,
     address_ranges: HashMap<MemRegionInfo, usize>,
-    allocator: AddressAllocator,
+    allocator: T,
     page_size_mask: u64,
 }
 
@@ -68,7 +67,13 @@ fn unmap_region_internal(
     }
 }
 
-impl Mapping {
+pub(super) trait Allocator {
+    fn new(base: GuestAddress, size: u64) -> Self;
+    fn allocate(&mut self, size: u64) -> Option<GuestAddress>;
+    fn base(&self) -> GuestAddress;
+}
+
+impl<T: Allocator> Mapping<T> {
     pub(super) fn check_region(
         &self,
         &VhostUserMemoryRegion {
@@ -152,7 +157,7 @@ impl Mapping {
     ) -> Result<(), Error> {
         self.check_region(&region)?;
 
-        let allocator: &mut AddressAllocator = &mut self.allocator;
+        let allocator: &mut T = &mut self.allocator;
         // inner function with the unsafe code
         fn map_region_not_method_raw(
             fd: BorrowedFd,
@@ -212,7 +217,7 @@ impl Mapping {
         }
         // TODO: log message (out of memory)
         let GuestAddress(guest_address) = allocator
-            .allocate(None, memory_size, None)
+            .allocate(memory_size)
             .ok_or(Error::BackendInternalError)?;
         let GuestAddress(base) = allocator.base();
         let guest_offset = usize::try_from(guest_address - base).unwrap();
@@ -253,9 +258,7 @@ impl Mapping {
         // SAFETY: FFI call with valid parameters
         let page_size = unsafe { libc::sysconf(libc::_SC_PAGE_SIZE) };
         assert!(page_size.count_ones() == 1);
-        let allocator =
-            AddressAllocator::new(region.start_addr(), region.size().try_into().unwrap())
-                .expect("valid range");
+        let allocator = T::new(region.start_addr(), region.size().try_into().unwrap());
         Self {
             region,
             address_ranges: Default::default(),

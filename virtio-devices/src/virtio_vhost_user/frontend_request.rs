@@ -31,10 +31,10 @@ use vhost::vhost_user::message::{
     VhostUserProtocolFeatures, VhostUserSingleMemoryRegion, VhostUserU64,
 };
 use vm_memory::ByteValued;
-use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
 
-use super::queue_pair;
+use super::queue_pair::{self, Translate};
+use crate::virtio_vhost_user::mapping::Allocator;
 use crate::virtio_vhost_user::queue_pair::FdRearm;
 use crate::{EpollHelper, VirtioInterrupt, VirtioInterruptType};
 
@@ -117,9 +117,9 @@ pub(super) fn validate_reply(hdr: VhostUserMsgHeader, buf: &mut [u8]) -> Result<
     Ok(())
 }
 
-pub(super) struct FrontendRequestQueuePair {
+pub(super) struct FrontendRequestQueuePair<T: Allocator> {
     queue_pair: queue_pair::VirtioVhostUserQueuePair,
-    internals: FrontendRequestQueuePairInternals,
+    internals: FrontendRequestQueuePairInternals<T>,
 }
 
 pub(super) struct IoEventFds {
@@ -127,8 +127,8 @@ pub(super) struct IoEventFds {
     pub fds: Vec<Option<EventFd>>,
 }
 
-struct FrontendRequestQueuePairInternals {
-    mapping: super::mapping::Mapping,
+struct FrontendRequestQueuePairInternals<T: Allocator> {
+    mapping: super::mapping::Mapping<T>,
     ioeventfds: Arc<Mutex<IoEventFds>>,
     queues: u8,
     vm: Arc<dyn hypervisor::Vm>,
@@ -136,7 +136,7 @@ struct FrontendRequestQueuePairInternals {
     interrupt_cb: Arc<dyn VirtioInterrupt>,
 }
 
-impl FrontendRequestQueuePairInternals {
+impl<T: Allocator> FrontendRequestQueuePairInternals<T> {
     fn set_mem_table(&mut self, buf: &[u8], fd: &mut [Option<OwnedFd>]) -> Result<(), Error> {
         const _: () = assert!(
             u64::MAX as usize as u64 == u64::MAX,
@@ -430,10 +430,10 @@ impl FrontendRequestQueuePairInternals {
     }
 }
 
-impl FrontendRequestQueuePair {
+impl<T: Allocator> FrontendRequestQueuePair<T> {
     pub(super) fn new(
         queue_pair: queue_pair::VirtioVhostUserQueuePair,
-        mapping: super::mapping::Mapping,
+        mapping: super::mapping::Mapping<T>,
         ioeventfds: Arc<Mutex<IoEventFds>>,
         queues: u8,
         vm: Arc<dyn hypervisor::Vm>,
@@ -454,7 +454,7 @@ impl FrontendRequestQueuePair {
 
     pub(super) fn process_replies(
         &mut self,
-        access_platform: Option<&(dyn AccessPlatform + 'static)>,
+        access_platform: Option<Translate>,
         max_iterations: usize,
     ) -> std::result::Result<(FdRearm, bool), vhost::vhost_user::Error> {
         self.queue_pair
@@ -464,7 +464,7 @@ impl FrontendRequestQueuePair {
     }
     pub(super) fn process_requests(
         &mut self,
-        access_platform: Option<&(dyn AccessPlatform + 'static)>,
+        access_platform: Option<Translate>,
         max_iterations: usize,
         helper: &mut EpollHelper,
         cb: &mut dyn FnMut(UnixStream, &mut EpollHelper) -> Result<(), Error>,
