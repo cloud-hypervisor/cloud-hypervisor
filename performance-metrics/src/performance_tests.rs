@@ -126,9 +126,6 @@ fn performance_test_new_guest(disk_config: Box<dyn DiskConfig>) -> Guest {
     Guest::new_from_ip_range(disk_config, "172.19", 0)
 }
 
-const DIRECT_KERNEL_BOOT_CMDLINE: &str =
-    "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1";
-
 fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
     let mut cmd = std::process::Command::new(clh_command("ch-remote"));
     cmd.args([&format!("--api-socket={api_socket}"), command]);
