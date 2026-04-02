@@ -20,5 +20,6 @@
 
 #![allow(dead_code)]
 mod backend_request;
+mod frontend_request;
 mod mapping;
 mod queue_pair;
