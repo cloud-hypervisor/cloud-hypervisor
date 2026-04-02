@@ -19,5 +19,6 @@
 // https://stefanha.github.io/virtio/vhost-user-slave.html
 
 #![allow(dead_code)]
+mod backend_request;
 mod mapping;
 mod queue_pair;
