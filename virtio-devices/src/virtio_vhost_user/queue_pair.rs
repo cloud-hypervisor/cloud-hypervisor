@@ -31,8 +31,9 @@ use vhost::vhost_user::Error;
 use vhost::vhost_user::message::{MAX_ATTACHED_FD_ENTRIES, MAX_MSG_SIZE};
 use virtio_queue::{Queue, QueueT as _};
 use vm_memory::bitmap::AtomicBitmap;
-use vm_memory::{ByteValued, Bytes as _, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap};
-use vm_virtio::{AccessPlatform, Translatable as _};
+use vm_memory::{
+    ByteValued, Bytes as _, GuestAddress, GuestAddressSpace, GuestMemoryAtomic, GuestMemoryMmap,
+};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket as _;
 
@@ -47,6 +48,9 @@ pub struct VhostUserMsgHeader {
     pub flags: u32,
     pub size: u32,
 }
+
+pub(super) type Translate<'a> =
+    &'a mut dyn FnMut(GuestAddress, usize) -> std::io::Result<GuestAddress>;
 
 #[repr(u16)]
 pub(super) enum Events {
@@ -222,9 +226,9 @@ impl VirtioVhostUserQueuePair {
     /// Fails if there is an I/O error on the socket or if the callback
     /// returns an error.
     #[allow(clippy::type_complexity)] // pulling this out leads to borrowck error
-    pub(super) fn process_outgoing(
+    pub(super) fn process_outgoing<'a>(
         &mut self,
-        access_platform: Option<&dyn AccessPlatform>,
+        mut access_platform: Option<Translate<'a>>,
         max_messages: usize,
         process_message: &mut dyn FnMut(VhostUserMsgHeader, &mut [u8]) -> Result<(), Error>,
     ) -> Result<(FdRearm, bool), Error> {
@@ -259,7 +263,10 @@ impl VirtioVhostUserQueuePair {
                 return Err(Error::InvalidMessage);
             }
             self.outgoing_buf.resize(desc_len, 0);
-            let addr = desc.addr().translate_gva(access_platform, desc_len);
+            let mut addr = desc.addr();
+            if let Some(ref mut translate) = access_platform {
+                addr = translate(addr, desc_len).map_err(Error::ReqHandlerError)?;
+            }
             if let Err(e) = mem.read_slice(&mut self.outgoing_buf, addr) {
                 error!("virtio-vhost-user: Problem reading guest data: {e}");
                 return Err(Error::InvalidMessage);
@@ -366,9 +373,9 @@ impl VirtioVhostUserQueuePair {
     /// Returns an error if the callback returns an error or an
     /// invalid message was received.
     #[allow(clippy::type_complexity)] // pulling this out leads to borrowck error
-    pub(super) fn process_incoming(
+    pub(super) fn process_incoming<'a>(
         &mut self,
-        access_platform: Option<&(dyn AccessPlatform + 'static)>,
+        mut access_platform: Option<Translate<'a>>,
         max_messages: usize,
         process_message: &mut dyn FnMut(
             VhostUserMsgHeader,
@@ -410,7 +417,10 @@ impl VirtioVhostUserQueuePair {
 
             used_descs = true;
             let mem = desc_chain.memory();
-            let addr = desc.addr().translate_gva(access_platform, desc_len);
+            let mut addr = desc.addr();
+            if let Some(ref mut translate) = access_platform {
+                addr = translate(addr, desc_len).map_err(Error::ReqHandlerError)?;
+            }
             process_message(hdr, body, &mut self.files_for_cycle)?;
             if let Err(e) = mem.write_slice(&self.incoming_data, addr) {
                 error!("virtio-vhost-user: Problem writing guest data: {e}");

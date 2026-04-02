@@ -30,13 +30,15 @@ use event_monitor::event;
 use log::{error, info, trace, warn};
 use seccompiler::SeccompAction;
 use vhost::vhost_user::Error;
-use vm_memory::{ByteValued, Le32};
+use vm_allocator::AddressAllocator;
+use vm_memory::{ByteValued, GuestAddress, Le32};
 use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::virtio_vhost_user::frontend_request::IoEventFds;
+use crate::virtio_vhost_user::queue_pair::Translate;
 use crate::{
     ActivateResult, ActivationContext, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError,
     EpollHelperHandler, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice, VirtioDeviceType,
@@ -131,8 +133,23 @@ mod frontend_request;
 mod mapping;
 mod queue_pair;
 
+struct InternalAllocator(AddressAllocator);
+impl mapping::Allocator for InternalAllocator {
+    fn new(base: vm_memory::GuestAddress, size: u64) -> Self {
+        Self(AddressAllocator::new(base, size).unwrap())
+    }
+
+    fn allocate(&mut self, size: u64) -> Option<vm_memory::GuestAddress> {
+        self.0.allocate(None, size, None)
+    }
+
+    fn base(&self) -> vm_memory::GuestAddress {
+        self.0.base()
+    }
+}
+
 struct VdbEpollHandler {
-    requests: frontend_request::FrontendRequestQueuePair,
+    requests: frontend_request::FrontendRequestQueuePair<InternalAllocator>,
     replies: backend_request::BackendRequestQueuePair,
     kill_evt: EventFd,
     pause_evt: EventFd,
@@ -174,46 +191,51 @@ impl VdbEpollHandler {
         helper: &mut EpollHelper,
         ev_type: u16,
     ) -> Result<(), EpollHelperError> {
+        // Avoid Option::map here.  The compiler can't figure out the types
+        // and produces confusing errors.
+        let translate: Option<Translate> = match self.access_platform.as_deref() {
+            None => None,
+            Some(a) => Some(&mut |base, size| {
+                a.translate_gva(base.0, size.try_into().unwrap())
+                    .map(GuestAddress)
+            }),
+        };
+
         match match ev_type {
             // TODO: handle FD rearming, queue interrupts
             F2B_REQUEST_QUEUE_SPACE_AVAIL | F2B_REQUEST_READABLE => self
                 .requests
-                .process_requests(
-                    self.access_platform.as_deref(),
-                    50,
-                    helper,
-                    &mut |socket, helper| {
-                        fn conv(e: EpollHelperError) -> Error {
-                            match e {
-                                EpollHelperError::Ctl(e) => Error::ReqHandlerError(e),
-                                _ => unreachable!(),
-                            }
+                .process_requests(translate, 50, helper, &mut |socket, helper| {
+                    fn conv(e: EpollHelperError) -> Error {
+                        match e {
+                            EpollHelperError::Ctl(e) => Error::ReqHandlerError(e),
+                            _ => unreachable!(),
                         }
-                        helper
-                            .add_event(socket.as_raw_fd(), F2B_REPLY_READABLE)
-                            .map_err(conv)?;
-                        helper
-                            .add_event_custom(
-                                socket.as_raw_fd(),
-                                B2F_REQUEST_SENDABLE,
-                                epoll::Events::EPOLLOUT,
-                            )
-                            .map_err(conv)?;
-                        self.replies.set_socket(socket)
-                    },
-                )
+                    }
+                    helper
+                        .add_event(socket.as_raw_fd(), F2B_REPLY_READABLE)
+                        .map_err(conv)?;
+                    helper
+                        .add_event_custom(
+                            socket.as_raw_fd(),
+                            B2F_REQUEST_SENDABLE,
+                            epoll::Events::EPOLLOUT,
+                        )
+                        .map_err(conv)?;
+                    self.replies.set_socket(socket)
+                })
                 .map(|b| do_use(b.1, 0)),
             B2F_REPLY_AVAILABLE | B2F_REPLY_SENDABLE => self
                 .requests
-                .process_replies(self.access_platform.as_deref(), 50)
+                .process_replies(translate, 50)
                 .map(|b| do_use(b.1, 1)),
             F2B_REPLY_QUEUE_SPACE_AVAIL | F2B_REPLY_READABLE => self
                 .replies
-                .process_incoming(self.access_platform.as_deref(), 50)
+                .process_incoming(translate, 50)
                 .map(|b| do_use(b.1, 2)),
             B2F_REQUEST_AVAILABLE | B2F_REQUEST_SENDABLE => self
                 .replies
-                .process_outgoing(self.access_platform.as_deref(), 50)
+                .process_outgoing(translate, 50)
                 .map(|b| do_use(b.1, 3)),
 
             _ => {
