@@ -32,6 +32,7 @@ struct VdpaConfig {
     iommu: bool,
     id: Option<String>,
     pci_segment: u16,
+    pub bdf_device: Option<u8>,
 }
 ```
 
@@ -94,6 +95,23 @@ _Example_
 
 ```
 --vdpa path=/dev/vhost-vdpa-0,pci_segment=1
+```
+
+### `bdf_device`
+
+Allows configuring the PCI bus address at which the guest sees the vDPA device.
+The VMM is not allowed to assign another address to the device if the address is
+already in use. PCI bus addresses are specified in the format `DD.F`, where `DD`
+denotes a hexadecimal value for the bus device address and `F` the function ID
+part of the device address. If no value is supplied, the VMM may assign any free
+bus device address.
+
+Currently, only function ID `0` is supported.
+
+_Example_
+
+```
+--vdpa path=/dev/vhost-vdpa-0,addr=15.0
 ```
 
 ## Example with vDPA block simulator

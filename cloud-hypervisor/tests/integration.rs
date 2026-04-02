@@ -363,7 +363,7 @@ mod common_parallel {
         guest.wait_vm_boot().unwrap();
 
         let r = std::panic::catch_unwind(|| {
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some(
@@ -2922,7 +2922,7 @@ mod common_parallel {
             guest.wait_vm_boot().unwrap();
 
             // Add the disk to the VM
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some("path=/tmp/resize.img,id=test0"),
@@ -3037,7 +3037,7 @@ mod common_parallel {
             guest.wait_vm_boot().unwrap();
 
             // Add the QCOW2 disk to the VM
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some(&format!(
@@ -4849,7 +4849,7 @@ mod common_parallel {
 
             let pmem_temp_file = TempFile::new().unwrap();
             pmem_temp_file.as_file().set_len(128 << 20).unwrap();
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-pmem",
                 Some(&format!(
@@ -5338,7 +5338,7 @@ mod common_parallel {
             guest.wait_vm_boot().unwrap();
 
             // Hotplug the SPDK-NVMe device to the VM
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-user-device",
                 Some(&format!(
@@ -5631,6 +5631,303 @@ mod common_parallel {
                 &expected_sequential_events,
                 &event_path
             ));
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_bdf_allocation() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+
+        #[cfg(target_arch = "x86_64")]
+        let kernel_path = direct_kernel_boot_path();
+        #[cfg(target_arch = "aarch64")]
+        let kernel_path = edk2_path();
+
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        // Boot without network
+        let mut cmd = GuestCommand::new(&guest);
+
+        cmd.args(["--api-socket", &api_socket])
+            .default_cpus()
+            .default_memory()
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_net()
+            .default_disks()
+            .capture_output();
+
+        let mut child = cmd.spawn().unwrap();
+
+        guest.wait_vm_boot().unwrap();
+
+        // Add a network device with non-static BDF request
+        let r = std::panic::catch_unwind(|| {
+            let (cmd_success, cmd_stdout, _) = remote_command_w_output(
+                &api_socket,
+                "add-net",
+                Some(
+                    format!(
+                        "id=test0,tap=,mac={},ip={},mask=255.255.255.128",
+                        guest.network.guest_mac1, guest.network.host_ip1,
+                    )
+                    .as_str(),
+                ),
+            );
+            assert!(cmd_success);
+            // We now know the first free device ID on the bus
+            let output = String::from_utf8(cmd_stdout).expect("should work");
+            let (_, _, first_free_device_id, _) = bdf_from_hotplug_response(output.as_str());
+            assert_ne!(first_free_device_id, 0);
+
+            // We expect a match from grep
+            let _ = String::from(
+                guest
+                    .ssh_command(&format!(
+                        "lspci -n | grep \"00:{first_free_device_id:02x}.0\""
+                    ))
+                    .unwrap()
+                    .trim(),
+            );
+            // Calculate the succeeding device ID
+            let device_id_to_allocate = first_free_device_id + 1;
+            // We expect the succeeding device ID to be free
+            assert!(matches!(
+                guest.ssh_command(&format!(
+                    "lspci -n | grep \"00:{device_id_to_allocate:02x}.0\""
+                )),
+                Err(SshCommandError::NonZeroExitStatus(1))
+            ));
+
+            // Add a device to the next device slot explicitly
+            let (cmd_success, cmd_stdout, _) = remote_command_w_output(
+                &api_socket,
+                "add-net",
+                Some(
+                    format!(
+                        "id=test1337,tap=,mac={},ip={},mask=255.255.255.128,addr={:02x}.0",
+                        guest.network.guest_mac1, guest.network.host_ip1, device_id_to_allocate,
+                    )
+                    .as_str(),
+                ),
+            );
+            assert!(cmd_success);
+            // Retrieve what BDF we actually reserved and assert it's equal to that we wanted to reserve
+            let output = String::from_utf8(cmd_stdout).expect("should work");
+            let (_, _, allocated_device_id, _) = bdf_from_hotplug_response(output.as_str());
+            assert_eq!(device_id_to_allocate, allocated_device_id);
+            // Check that the device ID is really in use
+            let _ = String::from(
+                guest
+                    .ssh_command(&format!(
+                        "lspci -n | grep \"00:{allocated_device_id:02x}.0\""
+                    ))
+                    .unwrap()
+                    .trim(),
+            );
+            // Remove the first device to create a hole
+            let cmd_success = remote_command(&api_socket, "remove-device", Some("test0"));
+            assert!(cmd_success);
+            thread::sleep(std::time::Duration::new(5, 0));
+            // We left a hole in the used PCI IDs. The guest sees no device on the respective BDF
+            assert!(matches!(
+                guest.ssh_command(&format!(
+                    "lspci -n | grep \"00:{first_free_device_id:02x}.0\""
+                )),
+                Err(SshCommandError::NonZeroExitStatus(1))
+            ));
+            // Reuse the device ID hole by dynamically calloating the first free BDF
+            let (cmd_success, cmd_stdout, _) = remote_command_w_output(
+                &api_socket,
+                "add-net",
+                Some(
+                    format!(
+                        "id=test0,tap=,mac={},ip={},mask=255.255.255.128",
+                        guest.network.guest_mac1, guest.network.host_ip1,
+                    )
+                    .as_str(),
+                ),
+            );
+            assert!(cmd_success);
+            // Check that CHV reports that we added the same device to the same BDF
+            let output = String::from_utf8(cmd_stdout).expect("should work");
+            let (_, _, allocated_device_id, _) = bdf_from_hotplug_response(output.as_str());
+            assert_eq!(first_free_device_id, allocated_device_id);
+
+            // Check that guest sees the same device again at the same BDF
+            let _ = String::from(
+                guest
+                    .ssh_command(&format!(
+                        "lspci -n | grep \"00:{allocated_device_id:02x}.0\""
+                    ))
+                    .unwrap()
+                    .trim(),
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    // Test that requesting a specific BDF twice fails.
+    fn test_bdf_request_same_device_id_twice_fails() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+
+        #[cfg(target_arch = "x86_64")]
+        let kernel_path = direct_kernel_boot_path();
+        #[cfg(target_arch = "aarch64")]
+        let kernel_path = edk2_path();
+
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        // Boot without network
+        let mut cmd = GuestCommand::new(&guest);
+
+        cmd.args(["--api-socket", &api_socket])
+            .default_cpus()
+            .default_memory()
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_net()
+            .default_disks()
+            .capture_output();
+
+        let mut child = cmd.spawn().unwrap();
+
+        guest.wait_vm_boot().unwrap();
+
+        // Add a network device with non-static BDF request
+        let r = std::panic::catch_unwind(|| {
+            let (cmd_success, cmd_stdout, _) = remote_command_w_output(
+                &api_socket,
+                "add-net",
+                Some(
+                    format!(
+                        "id=test0,tap=,mac={},ip={},mask=255.255.255.128",
+                        guest.network.guest_mac1, guest.network.host_ip1,
+                    )
+                    .as_str(),
+                ),
+            );
+            assert!(cmd_success);
+
+            // We now know the first free device ID on the bus
+            let output = String::from_utf8(cmd_stdout).expect("should work");
+            let (_, _, first_free_device_id, _) = bdf_from_hotplug_response(output.as_str());
+            assert_ne!(first_free_device_id, 0);
+
+            let (cmd_success, _, cmd_stderr) = remote_command_w_output(
+                &api_socket,
+                "add-net",
+                Some(
+                    format!(
+                        "id=test1377,tap=,mac={},ip={},mask=255.255.255.128,addr={first_free_device_id:02x}.0",
+                        guest.network.guest_mac1, guest.network.host_ip1,
+                    )
+                    .as_str(),
+                ),
+            );
+            // Check for fail; Allocating the same BDF for two devices is disallowed
+            assert!(!cmd_success);
+            // Check that the error message contains the expected error
+            let std_err_str = String::from_utf8(cmd_stderr).unwrap();
+            assert!(
+                std_err_str.contains(&format!(
+                    "Valid PCI device identifier but already used: {first_free_device_id}"
+                )),
+                "Command return was: {std_err_str}"
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    // Test that requesting an invalid device ID fails.
+    fn test_bdf_request_invalid() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+
+        #[cfg(target_arch = "x86_64")]
+        let kernel_path = direct_kernel_boot_path();
+        #[cfg(target_arch = "aarch64")]
+        let kernel_path = edk2_path();
+
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        // Boot without network
+        let mut cmd = GuestCommand::new(&guest);
+
+        cmd.args(["--api-socket", &api_socket])
+            .default_cpus()
+            .default_memory()
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_net()
+            .default_disks()
+            .capture_output();
+
+        let mut child = cmd.spawn().unwrap();
+
+        guest.wait_vm_boot().unwrap();
+
+        // Add a network device with non-static BDF request
+        let r = std::panic::catch_unwind(|| {
+            // Invalid API call because the BDF is out of range
+            let (cmd_success, _, cmd_stderr) = remote_command_w_output(
+                &api_socket,
+                "add-net",
+                Some(
+                    format!(
+                        "id=test0,tap=,mac={},ip={},mask=255.255.255.128,addr={:02x}.0",
+                        guest.network.guest_mac1, guest.network.host_ip1, 0xBC,
+                    )
+                    .as_str(),
+                ),
+            );
+            // Check for fail
+            assert!(!cmd_success);
+            // Check that the error message contains the expected error
+            let std_err_str = String::from_utf8(cmd_stderr).unwrap();
+            assert!(
+                std_err_str.contains("invalid value: expected a device ID in the inclusive range of 1 to 31, found 188"),
+                "Command return was: {std_err_str}",
+            );
+
+            // Use a valid device ID but a not supported function ID
+            let (cmd_success, _, cmd_stderr) = remote_command_w_output(
+                &api_socket,
+                "add-net",
+                Some(
+                    format!(
+                        "id=test0,tap=,mac={},ip={},mask=255.255.255.128,addr={:02x}.6",
+                        guest.network.guest_mac1, guest.network.host_ip1, 0x10,
+                    )
+                    .as_str(),
+                ),
+            );
+            // Check for fail
+            assert!(!cmd_success);
+            // Check that the error message contains the expected error
+            let std_err_str = String::from_utf8(cmd_stderr).unwrap();
+            assert!(
+                std_err_str
+                    .contains("multi-function devices currently not supported; expected 0 got 6"),
+                "Command return was: {std_err_str}"
+            );
         });
 
         kill_child(&mut child);
@@ -7912,7 +8209,7 @@ mod windows {
             assert_eq!(netdev_ctrl_threads_count(child.id()), netdev_num);
 
             // Hotplug network device
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-net",
                 Some(windows_guest.guest().default_net_string().as_str()),
@@ -7988,7 +8285,7 @@ mod windows {
             assert_eq!(disk_ctrl_threads_count(child.id()), disk_num);
 
             // Hotplug disk device
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some(format!("path={disk},readonly=off").as_str()),
@@ -8018,7 +8315,7 @@ mod windows {
             assert_eq!(disk_ctrl_threads_count(child.id()), disk_num);
 
             // Remount and check the file exists with the expected contents
-            let (cmd_success, _cmd_output) = remote_command_w_output(
+            let (cmd_success, _cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
                 Some(format!("path={disk},readonly=off").as_str()),
@@ -8101,7 +8398,7 @@ mod windows {
                 let disk_id = it[0].as_str();
                 let disk = it[1].as_str();
                 // Hotplug disk device
-                let (cmd_success, cmd_output) = remote_command_w_output(
+                let (cmd_success, cmd_output, _) = remote_command_w_output(
                     &api_socket,
                     "add-disk",
                     Some(format!("path={disk},readonly=off").as_str()),
@@ -8144,7 +8441,7 @@ mod windows {
             // Remount
             for it in &disk_test_data {
                 let disk = it[1].as_str();
-                let (cmd_success, _cmd_output) = remote_command_w_output(
+                let (cmd_success, _cmd_output, _) = remote_command_w_output(
                     &api_socket,
                     "add-disk",
                     Some(format!("path={disk},readonly=off").as_str()),
@@ -8314,7 +8611,7 @@ mod vfio {
             guest.wait_vm_boot().unwrap();
 
             // Hotplug the card to the VM
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-device",
                 Some(format!("id=vfio0,path={NVIDIA_VFIO_DEVICE}").as_str()),

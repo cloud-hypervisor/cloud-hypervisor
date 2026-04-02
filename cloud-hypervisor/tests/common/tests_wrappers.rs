@@ -976,7 +976,7 @@ pub(crate) fn _test_virtio_fs(
 
         if hotplug {
             // Add fs to the VM
-            let (cmd_success, cmd_output) =
+            let (cmd_success, cmd_output, _) =
                 remote_command_w_output(&api_socket, add_arg, Some(&fs_params));
             assert!(cmd_success);
 
@@ -1065,7 +1065,7 @@ pub(crate) fn _test_virtio_fs(
             );
 
             // Add back and check it works
-            let (cmd_success, cmd_output) =
+            let (cmd_success, cmd_output, _) =
                 remote_command_w_output(&api_socket, add_arg, Some(&fs_params));
             assert!(cmd_success);
             if let Some(pci_segment) = pci_segment {
@@ -1207,7 +1207,7 @@ pub(crate) fn _test_virtio_vsock(guest: &Guest, hotplug: bool) {
         guest.wait_vm_boot().unwrap();
 
         if hotplug {
-            let (cmd_success, cmd_output) = remote_command_w_output(
+            let (cmd_success, cmd_output, _) = remote_command_w_output(
                 &api_socket,
                 "add-vsock",
                 Some(format!("cid=3,socket={socket},id=test0").as_str()),
@@ -2673,7 +2673,7 @@ pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool) {
         );
 
         // Now let's add the extra disk.
-        let (cmd_success, cmd_output) = remote_command_w_output(
+        let (cmd_success, cmd_output, _) = remote_command_w_output(
             &api_socket,
             "add-disk",
             Some(
@@ -2722,7 +2722,7 @@ pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool) {
         );
 
         // And add it back to validate unplug did work correctly.
-        let (cmd_success, cmd_output) = remote_command_w_output(
+        let (cmd_success, cmd_output, _) = remote_command_w_output(
             &api_socket,
             "add-disk",
             Some(
@@ -2901,7 +2901,7 @@ pub(crate) fn _test_net_hotplug(
 
     let r = std::panic::catch_unwind(|| {
         // Add network
-        let (cmd_success, cmd_output) = remote_command_w_output(
+        let (cmd_success, cmd_output, _) = remote_command_w_output(
             &api_socket,
             "add-net",
             Some(
@@ -2964,7 +2964,7 @@ pub(crate) fn _test_net_hotplug(
         thread::sleep(std::time::Duration::new(5, 0));
 
         // Add network
-        let (cmd_success, cmd_output) = remote_command_w_output(
+        let (cmd_success, cmd_output, _) = remote_command_w_output(
             &api_socket,
             "add-net",
             Some(
@@ -3353,7 +3353,7 @@ pub(crate) fn _test_macvtap(
         // call to ch-remote from failing.
         thread::sleep(std::time::Duration::new(10, 0));
         // Hotplug the virtio-net device
-        let (cmd_success, cmd_output) =
+        let (cmd_success, cmd_output, _) =
             remote_command_w_output(&api_socket, "add-net", Some(&net_params));
         assert!(cmd_success);
         #[cfg(target_arch = "x86_64")]
@@ -3448,7 +3448,7 @@ pub(crate) fn _test_vdpa_block(guest: &Guest) {
 
         // Hotplug an extra vDPA block device behind the vIOMMU
         // Add a new vDPA device to the VM
-        let (cmd_success, cmd_output) = remote_command_w_output(
+        let (cmd_success, cmd_output, _) = remote_command_w_output(
             &api_socket,
             "add-vdpa",
             Some("id=myvdpa0,path=/dev/vhost-vdpa-1,num_queues=1,pci_segment=1,iommu=on"),
