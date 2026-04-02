@@ -6,7 +6,7 @@
 #![allow(clippy::undocumented_unsafe_blocks)]
 
 use std::ffi::OsStr;
-use std::fmt::Display;
+use std::fmt::{Display, Formatter};
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
@@ -2389,6 +2389,15 @@ impl FromStr for GuestVmType {
             "regular" => Ok(GuestVmType::Regular),
             "confidential" => Ok(GuestVmType::Confidential),
             _ => Err(()),
+        }
+    }
+}
+
+impl Display for GuestVmType {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            GuestVmType::Regular => write!(f, "regular"),
+            GuestVmType::Confidential => write!(f, "confidential"),
         }
     }
 }
