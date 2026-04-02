@@ -535,7 +535,7 @@ fn measure_restore_time(
 pub fn performance_restore_latency(control: &PerformanceTestControl) -> f64 {
     let r = std::panic::catch_unwind(|| {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let guest = performance_test_new_guest(Box::new(focal), GuestVmType::Regular);
+        let guest = performance_test_new_guest(Box::new(focal), control.vm_type);
         let api_socket_source = String::from(
             guest
                 .tmp_dir
