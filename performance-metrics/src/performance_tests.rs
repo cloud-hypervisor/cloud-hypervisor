@@ -135,7 +135,7 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
     let (rx, bandwidth) = control.net_control.unwrap();
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-    let guest = performance_test_new_guest(Box::new(focal), GuestVmType::Regular);
+    let guest = performance_test_new_guest(Box::new(focal), control.vm_type);
 
     let num_queues = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
@@ -176,7 +176,7 @@ pub fn performance_net_throughput(control: &PerformanceTestControl) -> f64 {
 
 pub fn performance_net_latency(control: &PerformanceTestControl) -> f64 {
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-    let guest = performance_test_new_guest(Box::new(focal), GuestVmType::Regular);
+    let guest = performance_test_new_guest(Box::new(focal), control.vm_type);
 
     let num_queues = control.num_queues.unwrap();
     let queue_size = control.queue_size.unwrap();
@@ -324,7 +324,7 @@ fn measure_boot_time(cmd: &mut GuestCommand, test_timeout: u32) -> Result<f64, E
 pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
     let r = std::panic::catch_unwind(|| {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let guest = performance_test_new_guest(Box::new(focal), GuestVmType::Regular);
+        let guest = performance_test_new_guest(Box::new(focal), control.vm_type);
         let mut cmd = GuestCommand::new(&guest);
 
         let c = cmd
@@ -352,7 +352,7 @@ pub fn performance_boot_time(control: &PerformanceTestControl) -> f64 {
 pub fn performance_boot_time_pmem(control: &PerformanceTestControl) -> f64 {
     let r = std::panic::catch_unwind(|| {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let guest = performance_test_new_guest(Box::new(focal), GuestVmType::Regular);
+        let guest = performance_test_new_guest(Box::new(focal), control.vm_type);
         let mut cmd = GuestCommand::new(&guest);
         let c = cmd
             .args([
@@ -393,7 +393,7 @@ pub fn performance_block_io(control: &PerformanceTestControl) -> f64 {
     let test_file = block_control.test_file;
 
     let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-    let guest = performance_test_new_guest(Box::new(focal), GuestVmType::Regular);
+    let guest = performance_test_new_guest(Box::new(focal), control.vm_type);
     let api_socket = guest
         .tmp_dir
         .as_path()
@@ -535,7 +535,7 @@ fn measure_restore_time(
 pub fn performance_restore_latency(control: &PerformanceTestControl) -> f64 {
     let r = std::panic::catch_unwind(|| {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
-        let guest = performance_test_new_guest(Box::new(focal), GuestVmType::Regular);
+        let guest = performance_test_new_guest(Box::new(focal), control.vm_type);
         let api_socket_source = String::from(
             guest
                 .tmp_dir
