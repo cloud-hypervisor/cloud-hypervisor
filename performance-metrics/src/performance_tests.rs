@@ -13,8 +13,6 @@ use thiserror::Error;
 
 use crate::{ImageFormat, PerformanceTestControl, PerformanceTestOverrides, mean};
 
-#[cfg(target_arch = "x86_64")]
-pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-amd64-custom-20210609-0.raw";
 #[cfg(target_arch = "aarch64")]
 pub const FOCAL_IMAGE_NAME: &str = "focal-server-cloudimg-arm64-custom-20210929-0-update-tool.raw";
 
