@@ -5,7 +5,6 @@
 
 // Performance tests
 
-use std::path::PathBuf;
 use std::time::Duration;
 use std::{fs, thread};
 
@@ -129,22 +128,6 @@ fn performance_test_new_guest(disk_config: Box<dyn DiskConfig>) -> Guest {
 
 const DIRECT_KERNEL_BOOT_CMDLINE: &str =
     "root=/dev/vda1 console=hvc0 rw systemd.journald.forward_to_console=1";
-
-// Creates the path for direct kernel boot and return the path.
-// For x86_64, this function returns the vmlinux kernel path.
-// For AArch64, this function returns the PE kernel path.
-fn direct_kernel_boot_path() -> PathBuf {
-    let mut workload_path = dirs::home_dir().unwrap();
-    workload_path.push("workloads");
-
-    let mut kernel_path = workload_path;
-    #[cfg(target_arch = "x86_64")]
-    kernel_path.push("vmlinux-x86_64");
-    #[cfg(target_arch = "aarch64")]
-    kernel_path.push("Image-arm64");
-
-    kernel_path
-}
 
 fn remote_command(api_socket: &str, command: &str, arg: Option<&str>) -> bool {
     let mut cmd = std::process::Command::new(clh_command("ch-remote"));
