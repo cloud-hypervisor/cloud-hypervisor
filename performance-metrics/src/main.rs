@@ -249,15 +249,17 @@ impl PerformanceTest {
             );
         }
 
+        let effective_control = {
+            let mut control = self.control.clone();
+            if let Some(test_timeout) = overrides.test_timeout {
+                control.test_timeout = test_timeout;
+            }
+            control
+        };
+
         // Run warmup iterations if configured (results discarded)
         for _ in 0..self.control.warmup_iterations {
-            if let Some(test_timeout) = overrides.test_timeout {
-                let mut control: PerformanceTestControl = self.control.clone();
-                control.test_timeout = test_timeout;
-                let _ = (self.func_ptr)(&control);
-            } else {
-                let _ = (self.func_ptr)(&self.control);
-            }
+            let _ = (self.func_ptr)(&effective_control);
         }
 
         let mut metrics = Vec::new();
@@ -265,14 +267,7 @@ impl PerformanceTest {
             .test_iterations
             .unwrap_or(self.control.test_iterations)
         {
-            // update the timeout in control if passed explicitly and run testcase with it
-            if let Some(test_timeout) = overrides.test_timeout {
-                let mut control: PerformanceTestControl = self.control.clone();
-                control.test_timeout = test_timeout;
-                metrics.push((self.func_ptr)(&control));
-            } else {
-                metrics.push((self.func_ptr)(&self.control));
-            }
+            metrics.push((self.func_ptr)(&effective_control));
         }
 
         let mean = (self.unit_adjuster)(mean(&metrics).unwrap());
