@@ -1200,6 +1200,14 @@ fn create_mmio_allocators(
     mmio_allocators
 }
 
+fn use_64bit_bar_for_virtio_device(
+    device_type: u32,
+    pci_segment_id: u16,
+    is_hotplug: bool,
+) -> bool {
+    pci_segment_id > 0 || device_type != VirtioDeviceType::Block as u32 || is_hotplug
+}
+
 impl DeviceManager {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -1714,6 +1722,7 @@ impl DeviceManager {
                     &mapping,
                     &id,
                     handle.pci_common.pci_segment,
+                    false,
                     handle.dma_handler,
                     handle.pci_common.pci_device_id,
                 )?;
@@ -1747,8 +1756,15 @@ impl DeviceManager {
             }
 
             if let Some(iommu_device) = iommu_device {
-                let dev_id =
-                    self.add_virtio_pci_device(iommu_device, &None, &iommu_id, 0, None, None)?;
+                let dev_id = self.add_virtio_pci_device(
+                    iommu_device,
+                    &None,
+                    &iommu_id,
+                    0,
+                    false,
+                    None,
+                    None,
+                )?;
                 self.iommu_attached_devices = Some((dev_id, iommu_attached_devices));
             }
         }
@@ -4306,12 +4322,14 @@ impl DeviceManager {
         Ok(vec![])
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn add_virtio_pci_device(
         &mut self,
         virtio_device: Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
         iommu_mapping: &Option<Arc<IommuMapping>>,
         virtio_device_id: &str,
         pci_segment_id: u16,
+        is_hotplug: bool,
         dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
         pci_device_id: Option<u8>,
     ) -> DeviceManagerResult<PciBdf> {
@@ -4411,11 +4429,10 @@ impl DeviceManager {
                 self.activate_evt
                     .try_clone()
                     .map_err(DeviceManagerError::EventFd)?,
-                // All device types *except* virtio block devices should be allocated a 64-bit bar
-                // The block devices should be given a 32-bit BAR so that they are easily accessible
-                // to firmware without requiring excessive identity mapping.
-                // The exception being if not on the default PCI segment.
-                pci_segment_id > 0 || device_type != VirtioDeviceType::Block as u32,
+                // Boot-time block devices stay in 32-bit BAR space so early firmware can access
+                // them without additional identity mapping. Hot-plugged block devices do not have
+                // that constraint and should use 64-bit BARs like the rest of the virtio devices.
+                use_64bit_bar_for_virtio_device(device_type, pci_segment_id, is_hotplug),
                 dma_handler,
                 self.pending_activations.clone(),
                 vm_migration::snapshot_from_id(self.snapshot.as_ref(), id.as_str()),
@@ -5119,6 +5136,7 @@ impl DeviceManager {
             &mapping,
             &id,
             handle.pci_common.pci_segment,
+            true,
             handle.dma_handler,
             handle.pci_common.pci_device_id,
         )?;
@@ -5866,6 +5884,30 @@ impl Drop for DeviceManager {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+
+    #[test]
+    fn test_hotplugged_block_devices_use_64bit_bars() {
+        assert!(!use_64bit_bar_for_virtio_device(
+            VirtioDeviceType::Block as u32,
+            0,
+            false,
+        ));
+        assert!(use_64bit_bar_for_virtio_device(
+            VirtioDeviceType::Block as u32,
+            0,
+            true,
+        ));
+        assert!(use_64bit_bar_for_virtio_device(
+            VirtioDeviceType::Net as u32,
+            0,
+            false,
+        ));
+        assert!(use_64bit_bar_for_virtio_device(
+            VirtioDeviceType::Block as u32,
+            1,
+            false,
+        ));
+    }
 
     #[test]
     fn test_create_mmio_allocators() {
