@@ -1879,7 +1879,9 @@ impl RequestHandler for Vmm {
             for net in restored_nets.iter() {
                 for net_config in vm_net_configs.iter_mut() {
                     // update only if the net dev is backed by FDs
-                    if net_config.id.as_ref() == Some(&net.id) && net_config.fds.is_some() {
+                    if net_config.pci_common.id.as_ref() == Some(&net.id)
+                        && net_config.fds.is_some()
+                    {
                         net_config.fds.clone_from(&net.fds);
                     }
                 }

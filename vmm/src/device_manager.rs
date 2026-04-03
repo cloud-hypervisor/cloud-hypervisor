@@ -2937,11 +2937,11 @@ impl DeviceManager {
         &mut self,
         net_cfg: &mut NetConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &net_cfg.id {
+        let id = if let Some(id) = &net_cfg.pci_common.id {
             id.clone()
         } else {
             let id = self.next_device_name(NET_DEVICE_NAME_PREFIX)?;
-            net_cfg.id = Some(id.clone());
+            net_cfg.pci_common.id = Some(id.clone());
             id
         };
         info!("Creating virtio-net device: {net_cfg:?}");
@@ -2999,7 +2999,7 @@ impl DeviceManager {
                         Some(net_cfg.mac),
                         &mut net_cfg.host_mac,
                         net_cfg.mtu,
-                        self.force_iommu | net_cfg.iommu,
+                        self.force_iommu | net_cfg.pci_common.iommu,
                         net_cfg.num_queues,
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
@@ -3020,7 +3020,7 @@ impl DeviceManager {
                     fds,
                     Some(net_cfg.mac),
                     net_cfg.mtu,
-                    self.force_iommu | net_cfg.iommu,
+                    self.force_iommu | net_cfg.pci_common.iommu,
                     net_cfg.queue_size,
                     self.seccomp_action.clone(),
                     net_cfg.rate_limiter_config,
@@ -3050,7 +3050,7 @@ impl DeviceManager {
                         Some(net_cfg.mac),
                         &mut net_cfg.host_mac,
                         net_cfg.mtu,
-                        self.force_iommu | net_cfg.iommu,
+                        self.force_iommu | net_cfg.pci_common.iommu,
                         net_cfg.num_queues,
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
@@ -3083,9 +3083,9 @@ impl DeviceManager {
 
         Ok(MetaVirtioDevice {
             virtio_device,
-            iommu: net_cfg.iommu,
+            iommu: net_cfg.pci_common.iommu,
             id,
-            pci_segment: net_cfg.pci_segment,
+            pci_segment: net_cfg.pci_common.pci_segment,
             dma_handler: None,
         })
     }
@@ -4737,7 +4737,7 @@ impl DeviceManager {
                     let nets = config.net.as_deref_mut().unwrap();
                     let net_dev_cfg = nets
                         .iter_mut()
-                        .find(|net| net.id.as_deref() == Some(id))
+                        .find(|net| net.pci_common.id.as_deref() == Some(id))
                         // unwrap: the device could not have been removed without an ID
                         .unwrap();
                     let fds = net_dev_cfg.fds.take().unwrap_or(Vec::new());
@@ -5067,9 +5067,9 @@ impl DeviceManager {
     }
 
     pub fn add_net(&mut self, net_cfg: &mut NetConfig) -> DeviceManagerResult<PciDeviceInfo> {
-        self.validate_identifier(&net_cfg.id)?;
+        self.validate_identifier(&net_cfg.pci_common.id)?;
 
-        if net_cfg.iommu && !self.is_iommu_segment(net_cfg.pci_segment) {
+        if net_cfg.pci_common.iommu && !self.is_iommu_segment(net_cfg.pci_common.pci_segment) {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
