@@ -75,6 +75,11 @@ pub trait SparseCapable: Send + Debug {
         false
     }
 
+    /// Indicates support for WRITE_ZEROES requests.
+    fn supports_write_zeroes(&self) -> bool {
+        self.supports_sparse_operations()
+    }
+
     /// Indicates support for a metadata level zero flag optimization in
     /// virtio `VIRTIO_BLK_T_WRITE_ZEROES` requests. When true, the format
     /// can mark regions as reading zeros via a metadata bit rather than
@@ -198,6 +203,13 @@ impl DiskBackend {
         match self {
             Self::Legacy(d) => d.supports_sparse_operations(),
             Self::Next(d) => d.supports_sparse_operations(),
+        }
+    }
+
+    pub fn supports_write_zeroes(&self) -> bool {
+        match self {
+            Self::Legacy(d) => d.supports_write_zeroes(),
+            Self::Next(d) => d.supports_write_zeroes(),
         }
     }
 

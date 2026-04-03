@@ -86,6 +86,14 @@ pub trait DiskFile: Send {
         false
     }
 
+    /// Indicates support for WRITE_ZEROES requests.
+    ///
+    /// Backends can override this when write zeroes support differs from the
+    /// broader sparse/discard capability.
+    fn supports_write_zeroes(&self) -> bool {
+        self.supports_sparse_operations()
+    }
+
     /// Indicates support for zero flag optimization in WRITE_ZEROES. Override
     /// to return true when supported.
     fn supports_zero_flag(&self) -> bool {
