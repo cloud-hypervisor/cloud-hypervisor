@@ -649,6 +649,18 @@ impl FwCfg {
         let kernel_start = bp.text_offset;
         #[cfg(target_arch = "x86_64")]
         let kernel_start = (bp.hdr.setup_sects as usize + 1) * 512;
+
+        #[cfg(target_arch = "x86_64")]
+        if kernel_start <= buffer.len() {
+            buffer.truncate(kernel_start);
+        } else {
+            buffer.resize(kernel_start, 0);
+            file.read_exact_at(
+                &mut buffer[size_of::<boot_params>()..],
+                size_of::<boot_params>() as u64,
+            )?;
+        }
+
         self.known_items[FW_CFG_SETUP_SIZE as usize] = FwCfgContent::U32(buffer.len() as u32);
         self.known_items[FW_CFG_SETUP_DATA as usize] = FwCfgContent::Bytes(buffer);
         self.known_items[FW_CFG_KERNEL_SIZE as usize] =
