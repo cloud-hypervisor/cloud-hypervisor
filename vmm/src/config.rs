@@ -320,11 +320,6 @@ pub enum ValidationError {
     /// GPUDirect clique requires P2P DMA
     #[error("Device with x_nv_gpudirect_clique requires vfio_p2p_dma=on")]
     GpuDirectCliqueRequiresP2pDma,
-    // On a IOMMU segment but IOMMU not supported
-    #[error(
-        "Device is on an IOMMU PCI segment ({0}) but does not support being placed behind IOMMU"
-    )]
-    IommuNotSupportedOnSegment(u16),
     // Identifier is not unique
     #[error("Identifier {0} is not unique")]
     IdentifierNotUnique(String),
