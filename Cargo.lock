@@ -2417,6 +2417,7 @@ dependencies = [
  "vhost",
  "virtio-bindings",
  "virtio-queue",
+ "virtio-vhost-user",
  "vm-allocator",
  "vm-device",
  "vm-memory",
@@ -2434,6 +2435,22 @@ dependencies = [
  "libc",
  "log",
  "virtio-bindings",
+ "vm-memory",
+ "vmm-sys-util",
+]
+
+[[package]]
+name = "virtio-vhost-user"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "byteorder",
+ "epoll",
+ "libc",
+ "log",
+ "thiserror",
+ "vhost",
+ "virtio-queue",
  "vm-memory",
  "vmm-sys-util",
 ]

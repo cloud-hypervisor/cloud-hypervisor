@@ -31,9 +31,9 @@ pub(super) struct MemRegionInfo {
     pub memory_size: u64,
 }
 
-pub(super) type Region = Arc<vm_memory::GuestRegionMmap<vm_memory::bitmap::AtomicBitmap>>;
+pub type Region = Arc<vm_memory::GuestRegionMmap<vm_memory::bitmap::AtomicBitmap>>;
 
-pub(super) struct Mapping<T: Allocator> {
+pub struct Mapping<T: Allocator> {
     region: Region,
     address_ranges: HashMap<MemRegionInfo, usize>,
     allocator: T,
@@ -67,7 +67,7 @@ fn unmap_region_internal(
     }
 }
 
-pub(super) trait Allocator {
+pub trait Allocator {
     fn new(base: GuestAddress, size: u64) -> Self;
     fn allocate(&mut self, size: u64) -> Option<GuestAddress>;
     fn base(&self) -> GuestAddress;
@@ -254,7 +254,7 @@ impl<T: Allocator> Mapping<T> {
         Ok(())
     }
 
-    pub(super) fn new(region: Region) -> Self {
+    pub fn new(region: Region) -> Self {
         // SAFETY: FFI call with valid parameters
         let page_size = unsafe { libc::sysconf(libc::_SC_PAGE_SIZE) };
         assert!(page_size.count_ones() == 1);

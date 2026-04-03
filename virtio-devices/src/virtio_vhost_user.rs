@@ -18,7 +18,7 @@
 // This implements a vhost-user device backend.  Documentation can be found at:
 // https://stefanha.github.io/virtio/vhost-user-slave.html
 
-use std::os::fd::{AsRawFd as _, BorrowedFd, OwnedFd};
+use std::os::fd::{AsRawFd as _, BorrowedFd, FromRawFd as _, IntoRawFd as _, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::AtomicBool;
@@ -27,9 +27,14 @@ use std::{io, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
+use hypervisor::IoEventAddress;
 use log::{error, info, trace, warn};
 use seccompiler::SeccompAction;
 use vhost::vhost_user::Error;
+use virtio_vhost_user::{
+    BackendRequestQueuePair, FrontendRequestQueuePair, IoEventFds, Mapping, Region, Translate, VM,
+    VirtioVhostUserQueuePair,
+};
 use vm_allocator::AddressAllocator;
 use vm_memory::{ByteValued, GuestAddress, Le32};
 use vm_virtio::AccessPlatform;
@@ -37,12 +42,10 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
-use crate::virtio_vhost_user::frontend_request::IoEventFds;
-use crate::virtio_vhost_user::queue_pair::Translate;
 use crate::{
     ActivateResult, ActivationContext, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError,
     EpollHelperHandler, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice, VirtioDeviceType,
-    VirtioInterrupt,
+    VirtioInterrupt, VirtioInterruptType,
 };
 
 #[allow(unused)]
@@ -111,30 +114,23 @@ unsafe impl ByteValued for VirtioDeviceBackendConfig {}
 const QUEUE_SIZE: u16 = 128;
 const NUM_QUEUES: usize = 2;
 
-const F2B_REQUEST_QUEUE_SPACE_AVAIL: u16 =
-    EPOLL_HELPER_EVENT_LAST + 1 + queue_pair::Events::QueueIn as u16;
-const B2F_REPLY_AVAILABLE: u16 = EPOLL_HELPER_EVENT_LAST + 1 + queue_pair::Events::QueueOut as u16;
-const F2B_REQUEST_READABLE: u16 = EPOLL_HELPER_EVENT_LAST + 1 + queue_pair::Events::SocketIn as u16;
-const B2F_REPLY_SENDABLE: u16 = EPOLL_HELPER_EVENT_LAST + 1 + queue_pair::Events::SocketOut as u16;
+const F2B_REQUEST_QUEUE_SPACE_AVAIL: u16 = EPOLL_HELPER_EVENT_LAST + 1 + Events::QueueIn as u16;
+const B2F_REPLY_AVAILABLE: u16 = EPOLL_HELPER_EVENT_LAST + 1 + Events::QueueOut as u16;
+const F2B_REQUEST_READABLE: u16 = EPOLL_HELPER_EVENT_LAST + 1 + Events::SocketIn as u16;
+const B2F_REPLY_SENDABLE: u16 = EPOLL_HELPER_EVENT_LAST + 1 + Events::SocketOut as u16;
 
-const F2B_REPLY_QUEUE_SPACE_AVAIL: u16 =
-    F2B_REQUEST_QUEUE_SPACE_AVAIL + queue_pair::Events::Total as u16;
-const B2F_REQUEST_AVAILABLE: u16 = B2F_REPLY_AVAILABLE + queue_pair::Events::Total as u16;
-const F2B_REPLY_READABLE: u16 = F2B_REQUEST_READABLE + queue_pair::Events::Total as u16;
-const B2F_REQUEST_SENDABLE: u16 = B2F_REPLY_SENDABLE + queue_pair::Events::Total as u16;
+const F2B_REPLY_QUEUE_SPACE_AVAIL: u16 = F2B_REQUEST_QUEUE_SPACE_AVAIL + Events::Total as u16;
+const B2F_REQUEST_AVAILABLE: u16 = B2F_REPLY_AVAILABLE + Events::Total as u16;
+const F2B_REPLY_READABLE: u16 = F2B_REQUEST_READABLE + Events::Total as u16;
+const B2F_REQUEST_SENDABLE: u16 = B2F_REPLY_SENDABLE + Events::Total as u16;
 
 // The most complex part of this struct is the threading model.
 // Implementations should use one thread per queue, rather than
 // being single-threaded.
 pub struct Backend {}
 
-mod backend_request;
-mod frontend_request;
-mod mapping;
-mod queue_pair;
-
 struct InternalAllocator(AddressAllocator);
-impl mapping::Allocator for InternalAllocator {
+impl virtio_vhost_user::Allocator for InternalAllocator {
     fn new(base: vm_memory::GuestAddress, size: u64) -> Self {
         Self(AddressAllocator::new(base, size).unwrap())
     }
@@ -148,14 +144,101 @@ impl mapping::Allocator for InternalAllocator {
     }
 }
 
+struct InternalVM {
+    vm: Arc<dyn hypervisor::Vm>,
+    interrupt_cb: Arc<dyn VirtioInterrupt>,
+    backend_socket: Option<UnixStream>,
+}
+
+impl VM for InternalVM {
+    fn register_ioevent(&mut self, fd: &EventFd, offset: u64) {
+        self.vm
+            .unregister_ioevent(fd, &IoEventAddress::Mmio(offset))
+            .expect("TODO");
+    }
+
+    fn unregister_ioevent(&mut self, fd: EventFd, offset: u64) {
+        // SAFETY: into_raw_fd returns valid Fd and the eventfd
+        // is only used in operations that reject non-eventfds
+        let fd = unsafe { EventFd::from_raw_fd(fd.into_raw_fd()) };
+        self.vm
+            .unregister_ioevent(&fd, &IoEventAddress::Mmio(offset))
+            .expect("TODO");
+    }
+
+    fn register_vring_kick(&mut self, fd: Option<EventFd>, queue: u8) {
+        // SAFETY: into_raw_fd returns valid Fd and the eventfd
+        // is only used in operations that reject non-eventfds
+        let fd = fd.map(|fd| unsafe { EventFd::from_raw_fd(fd.into_raw_fd()) });
+        self.interrupt_cb
+            .set_notifier(queue.into(), fd, &*self.vm)
+            .map_err(|e| {
+                error!("Cannot set vring kick notifier: {e}");
+                vhost::vhost_user::Error::BackendInternalError
+            })
+            .expect("TODO: handle error");
+    }
+
+    fn backend_request_socket(&mut self, socket: UnixStream) {
+        self.backend_socket = Some(socket);
+    }
+}
+
+fn register_socket(helper: &mut EpollHelper, socket: &UnixStream) -> Result<(), io::Error> {
+    fn conv(e: EpollHelperError) -> Error {
+        match e {
+            EpollHelperError::Ctl(e) => Error::ReqHandlerError(e),
+            _ => unreachable!(),
+        }
+    }
+    helper
+        .add_event(socket.as_raw_fd(), F2B_REPLY_READABLE)
+        .map_err(conv)?;
+    helper
+        .add_event_custom(
+            socket.as_raw_fd(),
+            B2F_REQUEST_SENDABLE,
+            epoll::Events::EPOLLOUT,
+        )
+        .map_err(conv)?;
+    Ok(())
+}
+
 struct VdbEpollHandler {
-    requests: frontend_request::FrontendRequestQueuePair<InternalAllocator>,
-    replies: backend_request::BackendRequestQueuePair,
+    requests: FrontendRequestQueuePair<InternalAllocator, InternalVM>,
+    replies: BackendRequestQueuePair,
     kill_evt: EventFd,
     pause_evt: EventFd,
     epoll_fd: Option<BorrowedFd<'static>>,
     access_platform: Option<Box<dyn AccessPlatform>>,
     needs_reset: bool,
+}
+
+#[repr(u16)]
+enum Events {
+    QueueIn = 0,
+    QueueOut = 1,
+    SocketIn = 2,
+    SocketOut = 3,
+    Total = 4,
+}
+
+fn register_epoll_events(
+    helper: &mut EpollHelper,
+    fds: &virtio_vhost_user::Fds,
+    base: u16,
+) -> Result<(), EpollHelperError> {
+    helper.add_event(fds.queue_in.as_raw_fd(), base + Events::QueueIn as u16)?;
+    helper.add_event(fds.queue_out.as_raw_fd(), base + Events::QueueOut as u16)?;
+    if let Some(socket) = &fds.socket {
+        helper.add_event(socket.as_raw_fd(), base + Events::SocketIn as u16)?;
+        helper.add_event_custom(
+            socket.as_raw_fd(),
+            base + Events::SocketOut as u16,
+            epoll::Events::EPOLLOUT,
+        )?;
+    }
+    Ok(())
 }
 
 impl VdbEpollHandler {
@@ -164,13 +247,18 @@ impl VdbEpollHandler {
         paused: &AtomicBool,
         paused_sync: &Barrier,
     ) -> result::Result<(), EpollHelperError> {
-        // TODO: handle incoming messages
-        // TODO: send interrupts
         let mut helper = EpollHelper::new(&self.kill_evt, &self.pause_evt)?;
-        self.requests
-            .register_epoll_events(&mut helper, F2B_REQUEST_QUEUE_SPACE_AVAIL)?;
-        self.replies
-            .register_epoll_events(&mut helper, F2B_REPLY_QUEUE_SPACE_AVAIL)?;
+
+        register_epoll_events(
+            &mut helper,
+            &self.requests.fds(),
+            F2B_REQUEST_QUEUE_SPACE_AVAIL,
+        )?;
+        register_epoll_events(
+            &mut helper,
+            &self.replies.fds(),
+            F2B_REPLY_QUEUE_SPACE_AVAIL,
+        )?;
         // SAFETY: The 'static lifetime on the returned FD is a lie. However,
         // we have a unique reference to self so nobody else can access the fd
         // through this reference. Furthermore, the FD will stay alive until
@@ -188,8 +276,8 @@ impl VdbEpollHandler {
 
     fn process_event(
         &mut self,
-        helper: &mut EpollHelper,
         ev_type: u16,
+        helper: &mut EpollHelper,
     ) -> Result<(), EpollHelperError> {
         // Avoid Option::map here.  The compiler can't figure out the types
         // and produces confusing errors.
@@ -205,25 +293,7 @@ impl VdbEpollHandler {
             // TODO: handle FD rearming, queue interrupts
             F2B_REQUEST_QUEUE_SPACE_AVAIL | F2B_REQUEST_READABLE => self
                 .requests
-                .process_requests(translate, 50, helper, &mut |socket, helper| {
-                    fn conv(e: EpollHelperError) -> Error {
-                        match e {
-                            EpollHelperError::Ctl(e) => Error::ReqHandlerError(e),
-                            _ => unreachable!(),
-                        }
-                    }
-                    helper
-                        .add_event(socket.as_raw_fd(), F2B_REPLY_READABLE)
-                        .map_err(conv)?;
-                    helper
-                        .add_event_custom(
-                            socket.as_raw_fd(),
-                            B2F_REQUEST_SENDABLE,
-                            epoll::Events::EPOLLOUT,
-                        )
-                        .map_err(conv)?;
-                    self.replies.set_socket(socket)
-                })
+                .process_requests(translate, 50)
                 .map(|b| do_use(b.1, 0)),
             B2F_REPLY_AVAILABLE | B2F_REPLY_SENDABLE => self
                 .requests
@@ -245,12 +315,25 @@ impl VdbEpollHandler {
             }
         } {
             Ok(None) => Ok(()),
-            Ok(Some(queue)) => self.requests.trigger(queue).map_err(|e| {
-                error!("Error triggering interrupt: {e}");
-                EpollHelperError::HandleEvent(anyhow!(e))
-            }),
+            Ok(Some(queue)) => self
+                .requests
+                .vm_mut()
+                .interrupt_cb
+                .trigger(VirtioInterruptType::Queue(queue))
+                .map_err(|e| {
+                    error!("Error triggering interrupt: {e}");
+                    EpollHelperError::HandleEvent(anyhow!(e))
+                }),
             Err(e) => Err(EpollHelperError::HandleEvent(anyhow!(e))),
+        }?;
+        if let Some(socket) = self.requests.vm_mut().backend_socket.take() {
+            register_socket(helper, &socket)
+                .map_err(|e| EpollHelperError::HandleEvent(anyhow!(e)))?;
+            self.replies
+                .set_socket(socket)
+                .map_err(|e| EpollHelperError::HandleEvent(anyhow!(e)))?;
         }
+        Ok(())
     }
 }
 
@@ -270,7 +353,7 @@ impl EpollHelperHandler for VdbEpollHandler {
                 "Needs reset, cannot handle events"
             )));
         }
-        self.process_event(helper, ev_type)
+        self.process_event(ev_type, helper)
             .inspect_err(|_| self.needs_reset = true)
     }
 }
@@ -299,7 +382,7 @@ pub struct VirtioVhostUser {
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     max_queues: u8,
-    region: mapping::Region,
+    region: Region,
     listener: Option<UnixStream>,
     msix_fds: [Option<OwnedFd>; MSIX_ARRAY_SIZE],
     statuses: [bool; MSIX_ARRAY_SIZE],
@@ -320,7 +403,7 @@ impl VirtioVhostUser {
         uuid: [u8; 16],
         listener: UnixStream,
         vm: Arc<dyn hypervisor::Vm>,
-        region: mapping::Region,
+        region: Region,
         access_platform: Option<Box<dyn AccessPlatform>>,
     ) -> io::Result<Self> {
         if max_queues > 255 {
@@ -479,7 +562,7 @@ impl VirtioDevice for VirtioVhostUser {
         let (_, frontend_reply_queue, frontend_reply_queue_evt) = queues.remove(0);
         let (_, backend_reply_queue, backend_reply_queue_evt) = queues.remove(0);
         let (_, backend_request_queue, backend_request_queue_evt) = queues.remove(0);
-        let queue_pair = queue_pair::VirtioVhostUserQueuePair::new(
+        let queue_pair = VirtioVhostUserQueuePair::new(
             frontend_request_queue,
             backend_reply_queue,
             frontend_request_queue_evt,
@@ -487,7 +570,7 @@ impl VirtioDevice for VirtioVhostUser {
             Some(self.listener.take().expect("double activate")),
             mem.clone(),
         );
-        let backend_request_queue_pair = queue_pair::VirtioVhostUserQueuePair::new(
+        let backend_request_queue_pair = VirtioVhostUserQueuePair::new(
             backend_request_queue,
             frontend_reply_queue,
             backend_request_queue_evt,
@@ -495,21 +578,24 @@ impl VirtioDevice for VirtioVhostUser {
             None,
             mem.clone(),
         );
-        let mapping = mapping::Mapping::new(self.region.clone());
-
+        let mapping = Mapping::new(self.region.clone());
+        let vm = InternalVM {
+            vm: self.vm.take().expect("double activate"),
+            interrupt_cb,
+            backend_socket: None,
+        };
         let mut handler = VdbEpollHandler {
             kill_evt,
             pause_evt,
             epoll_fd: None,
-            requests: frontend_request::FrontendRequestQueuePair::new(
+            requests: FrontendRequestQueuePair::new(
                 queue_pair,
                 mapping,
                 self.ioeventfds.clone(),
                 self.max_queues,
-                self.vm.take().expect("double activate"),
-                interrupt_cb,
+                vm,
             ),
-            replies: backend_request::BackendRequestQueuePair::new(backend_request_queue_pair),
+            replies: BackendRequestQueuePair::new(backend_request_queue_pair),
             needs_reset: false,
             access_platform: self.access_platform.take(),
         };

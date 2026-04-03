@@ -1,0 +1,29 @@
+[package]
+authors = ["The Cloud Hypervisor Authors"]
+edition.workspace = true
+name = "virtio-vhost-user"
+rust-version.workspace = true
+version = "0.1.0"
+
+
+[dependencies]
+anyhow = { workspace = true }
+byteorder = { workspace = true }
+epoll = { workspace = true }
+libc = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+vhost = { workspace = true, features = [
+  "vhost-user-backend",
+  "vhost-user-frontend",
+] }
+virtio-queue = { workspace = true }
+vm-memory = { workspace = true, features = [
+  "backend-atomic",
+  "backend-bitmap",
+  "backend-mmap",
+] }
+vmm-sys-util = { workspace = true }
+
+[lints]
+workspace = true
