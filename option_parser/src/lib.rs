@@ -93,7 +93,7 @@ impl OptionParser {
         }
     }
 
-    pub fn parse(&mut self, input: &str) -> OptionParserResult<()> {
+    fn parse_inner(&mut self, input: &str, ignore_unknown: bool) -> OptionParserResult<()> {
         if input.trim().is_empty() {
             return Ok(());
         }
@@ -101,7 +101,11 @@ impl OptionParser {
         for option in split_commas(input)?.iter() {
             let parts: Vec<&str> = option.splitn(2, '=').collect();
             match self.options.get_mut(parts[0]) {
-                None => return Err(OptionParserError::UnknownOption(parts[0].to_owned())),
+                None => {
+                    if !ignore_unknown {
+                        return Err(OptionParserError::UnknownOption(parts[0].to_owned()));
+                    }
+                }
                 Some(value) => {
                     if value.requires_value {
                         if parts.len() != 2 {
@@ -116,6 +120,14 @@ impl OptionParser {
         }
 
         Ok(())
+    }
+
+    pub fn parse(&mut self, input: &str) -> OptionParserResult<()> {
+        self.parse_inner(input, false)
+    }
+
+    pub fn parse_subset(&mut self, input: &str) -> OptionParserResult<()> {
+        self.parse_inner(input, true)
     }
 
     pub fn add(&mut self, option: &str) -> &mut Self {
