@@ -4065,16 +4065,16 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut UserDeviceConfig,
     ) -> DeviceManagerResult<(PciBdf, String)> {
-        let vfio_user_name = if let Some(id) = &device_cfg.id {
+        let vfio_user_name = if let Some(id) = &device_cfg.pci_common.id {
             id.clone()
         } else {
             let id = self.next_device_name(VFIO_USER_DEVICE_NAME_PREFIX)?;
-            device_cfg.id = Some(id.clone());
+            device_cfg.pci_common.id = Some(id.clone());
             id
         };
 
         let (pci_segment_id, pci_device_bdf, resources) =
-            self.pci_resources(&vfio_user_name, device_cfg.pci_segment)?;
+            self.pci_resources(&vfio_user_name, device_cfg.pci_common.pci_segment)?;
 
         let legacy_interrupt_group =
             if let Some(legacy_interrupt_manager) = &self.legacy_interrupt_manager {
@@ -4598,12 +4598,13 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut UserDeviceConfig,
     ) -> DeviceManagerResult<PciDeviceInfo> {
-        self.validate_identifier(&device_cfg.id)?;
+        self.validate_identifier(&device_cfg.pci_common.id)?;
 
         let (bdf, device_name) = self.add_vfio_user_device(device_cfg)?;
 
         // Update the PCIU bitmap
-        self.pci_segments[device_cfg.pci_segment as usize].pci_devices_up |= 1 << bdf.device();
+        self.pci_segments[device_cfg.pci_common.pci_segment as usize].pci_devices_up |=
+            1 << bdf.device();
 
         Ok(PciDeviceInfo {
             id: device_name,

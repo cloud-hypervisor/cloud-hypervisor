@@ -2190,37 +2190,21 @@ impl UserDeviceConfig {
         parser.add("socket").add("id").add("pci_segment");
         parser.parse(user_device).map_err(Error::ParseUserDevice)?;
 
+        let pci_common = PciDeviceCommonConfig::parse(user_device)?;
         let socket = parser
             .get("socket")
             .map(PathBuf::from)
             .ok_or(Error::ParseUserDeviceSocketMissing)?;
-        let id = parser.get("id");
-        let pci_segment = parser
-            .convert::<u16>("pci_segment")
-            .map_err(Error::ParseUserDevice)?
-            .unwrap_or_default();
 
-        Ok(UserDeviceConfig {
-            socket,
-            id,
-            pci_segment,
-        })
+        Ok(UserDeviceConfig { pci_common, socket })
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-            {
-                return Err(ValidationError::IommuNotSupportedOnSegment(
-                    self.pci_segment,
-                ));
-            }
+        if self.pci_common.iommu {
+            return Err(ValidationError::IommuNotSupported);
         }
+
+        self.pci_common.validate(vm_config)?;
 
         Ok(())
     }
@@ -2998,7 +2982,7 @@ impl VmConfig {
             for user_device in user_devices {
                 user_device.validate(self)?;
 
-                Self::validate_identifier(&mut id_list, &user_device.id)?;
+                Self::validate_identifier(&mut id_list, &user_device.pci_common.id)?;
             }
         }
 
@@ -3385,7 +3369,7 @@ impl VmConfig {
         // Remove if VFIO user device
         if let Some(user_devices) = self.user_devices.as_mut() {
             let len = user_devices.len();
-            user_devices.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            user_devices.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= user_devices.len() != len;
         }
 
@@ -5272,9 +5256,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.user_devices = Some(vec![UserDeviceConfig {
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                pci_segment: 1,
+                ..Default::default()
+            },
             socket: PathBuf::new(),
-            id: None,
         }]);
         assert_eq!(
             invalid_config.validate(),
