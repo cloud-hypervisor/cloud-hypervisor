@@ -39,7 +39,7 @@ jobs:
         run: |
           set -eufo pipefail
           mkdir $HOME/workloads
-          az storage blob download --container-name private-images --file "$HOME/workloads/windows-server-2022-amd64-2.raw" --name windows-server-2022-amd64-2.raw --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
+          az storage blob download --container-name private-images --file "$HOME/workloads/windows-server-2025-amd64-1.raw" --name windows-server-2025-amd64-1.raw --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
       - name: Run Windows guest integration tests
         if: ${{ github.event_name != 'pull_request' }}
         timeout-minutes: 15
