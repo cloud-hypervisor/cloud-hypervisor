@@ -488,12 +488,10 @@ impl ApplyLandlock for FsConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct GenericVhostUserConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub socket: PathBuf,
     pub queue_sizes: Vec<u16>,
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub pci_segment: u16,
     pub device_type: u32,
 }
 
