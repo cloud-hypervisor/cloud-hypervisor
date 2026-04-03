@@ -2277,6 +2277,7 @@ impl VdpaConfig {
             .add("pci_segment");
         parser.parse(vdpa).map_err(Error::ParseVdpa)?;
 
+        let pci_common = PciDeviceCommonConfig::parse(vdpa)?;
         let path = parser
             .get("path")
             .map(PathBuf::from)
@@ -2285,41 +2286,16 @@ impl VdpaConfig {
             .convert("num_queues")
             .map_err(Error::ParseVdpa)?
             .unwrap_or_else(default_vdpaconfig_num_queues);
-        let iommu = parser
-            .convert::<Toggle>("iommu")
-            .map_err(Error::ParseVdpa)?
-            .unwrap_or(Toggle(false))
-            .0;
-        let id = parser.get("id");
-        let pci_segment = parser
-            .convert("pci_segment")
-            .map_err(Error::ParseVdpa)?
-            .unwrap_or_default();
 
         Ok(VdpaConfig {
+            pci_common,
             path,
             num_queues,
-            iommu,
-            id,
-            pci_segment,
         })
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-                && !self.iommu
-            {
-                return Err(ValidationError::OnIommuSegment(self.pci_segment));
-            }
-        }
-
-        Ok(())
+        self.pci_common.validate(vm_config)
     }
 }
 
@@ -3041,9 +3017,9 @@ impl VmConfig {
         if let Some(vdpa_devices) = &self.vdpa {
             for vdpa_device in vdpa_devices {
                 vdpa_device.validate(self)?;
-                self.iommu |= vdpa_device.iommu;
+                self.iommu |= vdpa_device.pci_common.iommu;
 
-                Self::validate_identifier(&mut id_list, &vdpa_device.id)?;
+                Self::validate_identifier(&mut id_list, &vdpa_device.pci_common.id)?;
             }
         }
 
@@ -3464,7 +3440,7 @@ impl VmConfig {
         // Remove if vDPA device
         if let Some(vdpa) = self.vdpa.as_mut() {
             let len = vdpa.len();
-            vdpa.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            vdpa.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= vdpa.len() != len;
         }
 
@@ -4446,11 +4422,9 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     fn vdpa_fixture() -> VdpaConfig {
         VdpaConfig {
+            pci_common: PciDeviceCommonConfig::default(),
             path: PathBuf::from("/dev/vhost-vdpa"),
             num_queues: 1,
-            iommu: false,
-            id: None,
-            pci_segment: 0,
         }
     }
 
@@ -4462,8 +4436,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             VdpaConfig::parse("path=/dev/vhost-vdpa,num_queues=2,id=my_vdpa")?,
             VdpaConfig {
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("my_vdpa".to_owned()),
+                    ..Default::default()
+                },
                 num_queues: 2,
-                id: Some("my_vdpa".to_owned()),
                 ..vdpa_fixture()
             }
         );
@@ -5408,7 +5385,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.vdpa = Some(vec![VdpaConfig {
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..vdpa_fixture()
         }]);
         assert_eq!(

@@ -3715,11 +3715,11 @@ impl DeviceManager {
         &mut self,
         vdpa_cfg: &mut VdpaConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &vdpa_cfg.id {
+        let id = if let Some(id) = &vdpa_cfg.pci_common.id {
             id.clone()
         } else {
             let id = self.next_device_name(VDPA_DEVICE_NAME_PREFIX)?;
-            vdpa_cfg.id = Some(id.clone());
+            vdpa_cfg.pci_common.id = Some(id.clone());
             id
         };
 
@@ -3755,9 +3755,9 @@ impl DeviceManager {
 
         Ok(MetaVirtioDevice {
             virtio_device: vdpa_device as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-            iommu: vdpa_cfg.iommu,
+            iommu: vdpa_cfg.pci_common.iommu,
             id,
-            pci_segment: vdpa_cfg.pci_segment,
+            pci_segment: vdpa_cfg.pci_common.pci_segment,
             dma_handler: Some(vdpa_mapping),
         })
     }
@@ -5081,9 +5081,9 @@ impl DeviceManager {
     }
 
     pub fn add_vdpa(&mut self, vdpa_cfg: &mut VdpaConfig) -> DeviceManagerResult<PciDeviceInfo> {
-        self.validate_identifier(&vdpa_cfg.id)?;
+        self.validate_identifier(&vdpa_cfg.pci_common.id)?;
 
-        if vdpa_cfg.iommu && !self.is_iommu_segment(vdpa_cfg.pci_segment) {
+        if vdpa_cfg.pci_common.iommu && !self.is_iommu_segment(vdpa_cfg.pci_common.pci_segment) {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
