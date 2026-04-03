@@ -208,6 +208,8 @@ pub enum Error {
     /// Failed Parsing FwCfgItem config
     #[error("Error parsing --fw-cfg-config items")]
     ParseFwCfgItem(#[source] OptionParserError),
+    #[error("Error parsing common PCI device config")]
+    ParsePciDeviceCommonConfig(#[source] OptionParserError),
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]
@@ -1141,6 +1143,35 @@ impl RateLimiterGroupConfig {
         }
 
         Ok(())
+    }
+}
+
+impl PciDeviceCommonConfig {
+    pub fn parse(input: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+
+        parser.add("id").add("iommu").add("pci_segment");
+
+        parser
+            .parse_subset(input)
+            .map_err(Error::ParsePciDeviceCommonConfig)?;
+
+        let id = parser.get("id");
+        let iommu = parser
+            .convert::<Toggle>("iommu")
+            .map_err(Error::ParsePciDeviceCommonConfig)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let pci_segment = parser
+            .convert("pci_segment")
+            .map_err(Error::ParsePciDeviceCommonConfig)?
+            .unwrap_or_default();
+
+        Ok(Self {
+            id,
+            iommu,
+            pci_segment,
+        })
     }
 }
 
