@@ -2159,45 +2159,23 @@ impl DeviceConfig {
             .add("x_nv_gpudirect_clique");
         parser.parse(device).map_err(Error::ParseDevice)?;
 
+        let pci_common = PciDeviceCommonConfig::parse(device)?;
         let path = parser
             .get("path")
             .map(PathBuf::from)
             .ok_or(Error::ParseDevicePathMissing)?;
-        let iommu = parser
-            .convert::<Toggle>("iommu")
-            .map_err(Error::ParseDevice)?
-            .unwrap_or(Toggle(false))
-            .0;
-        let id = parser.get("id");
-        let pci_segment = parser
-            .convert::<u16>("pci_segment")
-            .map_err(Error::ParseDevice)?
-            .unwrap_or_default();
         let x_nv_gpudirect_clique = parser
             .convert::<u8>("x_nv_gpudirect_clique")
             .map_err(Error::ParseDevice)?;
         Ok(DeviceConfig {
+            pci_common,
             path,
-            iommu,
-            id,
-            pci_segment,
             x_nv_gpudirect_clique,
         })
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-                && !self.iommu
-            {
-                return Err(ValidationError::OnIommuSegment(self.pci_segment));
-            }
-        }
+        self.pci_common.validate(vm_config)?;
 
         Ok(())
     }
@@ -3066,9 +3044,9 @@ impl VmConfig {
                 }
 
                 device.validate(self)?;
-                self.iommu |= device.iommu;
+                self.iommu |= device.pci_common.iommu;
 
-                Self::validate_identifier(&mut id_list, &device.id)?;
+                Self::validate_identifier(&mut id_list, &device.pci_common.id)?;
             }
         }
 
@@ -3400,7 +3378,7 @@ impl VmConfig {
         // Remove if VFIO device
         if let Some(devices) = self.devices.as_mut() {
             let len = devices.len();
-            devices.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            devices.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= devices.len() != len;
         }
 
@@ -4308,10 +4286,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     fn device_fixture() -> DeviceConfig {
         DeviceConfig {
+            pci_common: PciDeviceCommonConfig::default(),
             path: PathBuf::from("/path/to/device"),
-            id: None,
-            iommu: false,
-            pci_segment: 0,
             x_nv_gpudirect_clique: None,
         }
     }
@@ -4328,7 +4304,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             DeviceConfig::parse("path=/path/to/device,iommu=on")?,
             DeviceConfig {
-                iommu: true,
+                pci_common: PciDeviceCommonConfig {
+                    iommu: true,
+                    ..Default::default()
+                },
                 ..device_fixture()
             }
         );
@@ -4336,8 +4315,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             DeviceConfig::parse("path=/path/to/device,iommu=on,id=mydevice0")?,
             DeviceConfig {
-                id: Some("mydevice0".to_owned()),
-                iommu: true,
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("mydevice0".to_owned()),
+                    iommu: true,
+                    ..Default::default()
+                },
                 ..device_fixture()
             }
         );
@@ -5171,8 +5153,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         still_valid_config.devices = Some(vec![DeviceConfig {
-            iommu: true,
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                iommu: true,
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..device_fixture()
         }]);
         still_valid_config.validate().unwrap();
@@ -5252,8 +5237,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.devices = Some(vec![DeviceConfig {
-            iommu: false,
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..device_fixture()
         }]);
         assert_eq!(
