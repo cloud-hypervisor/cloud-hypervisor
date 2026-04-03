@@ -504,17 +504,13 @@ impl ApplyLandlock for GenericVhostUserConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PmemConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub file: PathBuf,
     #[serde(default)]
     pub size: Option<u64>,
     #[serde(default)]
-    pub iommu: bool,
-    #[serde(default)]
     pub discard_writes: bool,
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub pci_segment: u16,
 }
 
 impl ApplyLandlock for PmemConfig {

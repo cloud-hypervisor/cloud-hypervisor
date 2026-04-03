@@ -2012,50 +2012,28 @@ impl PmemConfig {
             .add("pci_segment");
         parser.parse(pmem).map_err(Error::ParsePersistentMemory)?;
 
+        let pci_common = PciDeviceCommonConfig::parse(pmem)?;
         let file = PathBuf::from(parser.get("file").ok_or(Error::ParsePmemFileMissing)?);
         let size = parser
             .convert::<ByteSized>("size")
             .map_err(Error::ParsePersistentMemory)?
             .map(|v| v.0);
-        let iommu = parser
-            .convert::<Toggle>("iommu")
-            .map_err(Error::ParsePersistentMemory)?
-            .unwrap_or(Toggle(false))
-            .0;
         let discard_writes = parser
             .convert::<Toggle>("discard_writes")
             .map_err(Error::ParsePersistentMemory)?
             .unwrap_or(Toggle(false))
             .0;
-        let id = parser.get("id");
-        let pci_segment = parser
-            .convert("pci_segment")
-            .map_err(Error::ParsePersistentMemory)?
-            .unwrap_or_default();
 
         Ok(PmemConfig {
+            pci_common,
             file,
             size,
-            iommu,
             discard_writes,
-            id,
-            pci_segment,
         })
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-                && !self.iommu
-            {
-                return Err(ValidationError::OnIommuSegment(self.pci_segment));
-            }
-        }
+        self.pci_common.validate(vm_config)?;
 
         Ok(())
     }
@@ -2990,9 +2968,9 @@ impl VmConfig {
         if let Some(pmems) = &self.pmem {
             for pmem in pmems {
                 pmem.validate(self)?;
-                self.iommu |= pmem.iommu;
+                self.iommu |= pmem.pci_common.iommu;
 
-                Self::validate_identifier(&mut id_list, &pmem.id)?;
+                Self::validate_identifier(&mut id_list, &pmem.pci_common.id)?;
             }
         }
 
@@ -3465,7 +3443,7 @@ impl VmConfig {
         // Remove if pmem device
         if let Some(pmem) = self.pmem.as_mut() {
             let len = pmem.len();
-            pmem.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            pmem.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= pmem.len() != len;
         }
 
@@ -4208,12 +4186,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     fn pmem_fixture() -> PmemConfig {
         PmemConfig {
+            pci_common: PciDeviceCommonConfig::default(),
             file: PathBuf::from("/tmp/pmem"),
             size: Some(128 << 20),
-            iommu: false,
             discard_writes: false,
-            id: None,
-            pci_segment: 0,
         }
     }
 
@@ -4229,15 +4205,21 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             PmemConfig::parse("file=/tmp/pmem,size=128M,id=mypmem0")?,
             PmemConfig {
-                id: Some("mypmem0".to_owned()),
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("mypmem0".to_owned()),
+                    ..Default::default()
+                },
                 ..pmem_fixture()
             }
         );
         assert_eq!(
             PmemConfig::parse("file=/tmp/pmem,size=128M,iommu=on,discard_writes=on")?,
             PmemConfig {
+                pci_common: PciDeviceCommonConfig {
+                    iommu: true,
+                    ..Default::default()
+                },
                 discard_writes: true,
-                iommu: true,
                 ..pmem_fixture()
             }
         );
@@ -5174,8 +5156,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         still_valid_config.pmem = Some(vec![PmemConfig {
-            iommu: true,
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                iommu: true,
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..pmem_fixture()
         }]);
         still_valid_config.validate().unwrap();
@@ -5249,8 +5234,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.pmem = Some(vec![PmemConfig {
-            iommu: false,
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..pmem_fixture()
         }]);
         assert_eq!(
