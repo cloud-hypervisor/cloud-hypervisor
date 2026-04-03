@@ -3469,11 +3469,11 @@ impl DeviceManager {
         &mut self,
         vsock_cfg: &mut VsockConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &vsock_cfg.id {
+        let id = if let Some(id) = &vsock_cfg.pci_common.id {
             id.clone()
         } else {
             let id = self.next_device_name(VSOCK_DEVICE_NAME_PREFIX)?;
-            vsock_cfg.id = Some(id.clone());
+            vsock_cfg.pci_common.id = Some(id.clone());
             id
         };
 
@@ -3493,7 +3493,7 @@ impl DeviceManager {
                 vsock_cfg.cid,
                 vsock_cfg.socket.clone(),
                 backend,
-                self.force_iommu | vsock_cfg.iommu,
+                self.force_iommu | vsock_cfg.pci_common.iommu,
                 self.seccomp_action.clone(),
                 self.exit_evt
                     .try_clone()
@@ -3515,9 +3515,9 @@ impl DeviceManager {
         Ok(MetaVirtioDevice {
             virtio_device: Arc::clone(&vsock_device)
                 as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-            iommu: vsock_cfg.iommu,
+            iommu: vsock_cfg.pci_common.iommu,
             id,
-            pci_segment: vsock_cfg.pci_segment,
+            pci_segment: vsock_cfg.pci_common.pci_segment,
             dma_handler: None,
         })
     }
@@ -5092,9 +5092,9 @@ impl DeviceManager {
     }
 
     pub fn add_vsock(&mut self, vsock_cfg: &mut VsockConfig) -> DeviceManagerResult<PciDeviceInfo> {
-        self.validate_identifier(&vsock_cfg.id)?;
+        self.validate_identifier(&vsock_cfg.pci_common.id)?;
 
-        if vsock_cfg.iommu && !self.is_iommu_segment(vsock_cfg.pci_segment) {
+        if vsock_cfg.pci_common.iommu && !self.is_iommu_segment(vsock_cfg.pci_common.pci_segment) {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
