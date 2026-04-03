@@ -128,8 +128,8 @@ use crate::serial_manager::{Error as SerialManagerError, SerialManager};
 use crate::vm_config::IvshmemConfig;
 use crate::vm_config::{
     ConsoleOutputMode, DEFAULT_IOMMU_ADDRESS_WIDTH_BITS, DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT,
-    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
-    UserDeviceConfig, VdpaConfig, VhostMode, VmConfig, VsockConfig,
+    DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PciDeviceCommonConfig,
+    PmemConfig, UserDeviceConfig, VdpaConfig, VhostMode, VmConfig, VsockConfig,
 };
 use crate::{DEVICE_MANAGER_SNAPSHOT_ID, GuestRegionMmap, PciDeviceInfo, device_node};
 
@@ -913,9 +913,7 @@ pub enum PciDeviceHandle {
 #[derive(Clone)]
 struct MetaVirtioDevice {
     virtio_device: Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-    iommu: bool,
-    id: String,
-    pci_segment: u16,
+    pci_common: PciDeviceCommonConfig,
     dma_handler: Option<Arc<dyn ExternalDmaMapping>>,
 }
 
@@ -1645,7 +1643,7 @@ impl DeviceManager {
         let mut iommu_attached_devices = Vec::new();
         {
             for handle in self.virtio_devices.clone() {
-                let mapping: Option<Arc<IommuMapping>> = if handle.iommu {
+                let mapping: Option<Arc<IommuMapping>> = if handle.pci_common.iommu {
                     self.iommu_mapping.clone()
                 } else {
                     None
@@ -1654,15 +1652,16 @@ impl DeviceManager {
                 let dev_id = self.add_virtio_pci_device(
                     handle.virtio_device,
                     &mapping,
-                    &handle.id,
-                    handle.pci_segment,
+                    handle.pci_common.id.as_ref().unwrap(),
+                    handle.pci_common.pci_segment,
                     handle.dma_handler,
                 )?;
 
                 // Track device BDF for Generic Initiator support
-                self.device_id_to_bdf.insert(handle.id.clone(), dev_id);
+                self.device_id_to_bdf
+                    .insert(handle.pci_common.id.unwrap(), dev_id);
 
-                if handle.iommu {
+                if handle.pci_common.iommu {
                     iommu_attached_devices.push(dev_id);
                 }
             }
@@ -2393,9 +2392,11 @@ impl DeviceManager {
         self.virtio_devices.push(MetaVirtioDevice {
             virtio_device: Arc::clone(&virtio_console_device)
                 as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-            iommu: console_config.iommu,
-            id: id.clone(),
-            pci_segment: 0,
+            pci_common: PciDeviceCommonConfig {
+                id: Some(id.clone()),
+                iommu: console_config.iommu,
+                ..Default::default()
+            },
             dma_handler: None,
         });
 
@@ -2612,13 +2613,10 @@ impl DeviceManager {
         disk_cfg: &mut DiskConfig,
         is_hotplug: bool,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &disk_cfg.pci_common.id {
-            id.clone()
-        } else {
-            let id = self.next_device_name(DISK_DEVICE_NAME_PREFIX)?;
-            disk_cfg.pci_common.id = Some(id.clone());
-            id
-        };
+        if disk_cfg.pci_common.id.is_none() {
+            disk_cfg.pci_common.id = Some(self.next_device_name(DISK_DEVICE_NAME_PREFIX)?);
+        }
+        let id = disk_cfg.pci_common.id.as_ref().unwrap();
 
         info!("Creating virtio-block device: {disk_cfg:?}");
 
@@ -2889,9 +2887,7 @@ impl DeviceManager {
 
         Ok(MetaVirtioDevice {
             virtio_device,
-            iommu: disk_cfg.pci_common.iommu,
-            id,
-            pci_segment: disk_cfg.pci_common.pci_segment,
+            pci_common: disk_cfg.pci_common.clone(),
             dma_handler: None,
         })
     }
@@ -2913,13 +2909,10 @@ impl DeviceManager {
         &mut self,
         net_cfg: &mut NetConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &net_cfg.pci_common.id {
-            id.clone()
-        } else {
-            let id = self.next_device_name(NET_DEVICE_NAME_PREFIX)?;
-            net_cfg.pci_common.id = Some(id.clone());
-            id
-        };
+        if net_cfg.pci_common.id.is_none() {
+            net_cfg.pci_common.id = Some(self.next_device_name(NET_DEVICE_NAME_PREFIX)?);
+        }
+        let id = net_cfg.pci_common.id.as_ref().unwrap();
         info!("Creating virtio-net device: {net_cfg:?}");
 
         let (virtio_device, migratable_device) = if net_cfg.vhost_user {
@@ -3059,9 +3052,7 @@ impl DeviceManager {
 
         Ok(MetaVirtioDevice {
             virtio_device,
-            iommu: net_cfg.pci_common.iommu,
-            id,
-            pci_segment: net_cfg.pci_common.pci_segment,
+            pci_common: net_cfg.pci_common.clone(),
             dma_handler: None,
         })
     }
@@ -3104,9 +3095,11 @@ impl DeviceManager {
             self.virtio_devices.push(MetaVirtioDevice {
                 virtio_device: Arc::clone(&virtio_rng_device)
                     as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-                iommu: rng_config.iommu,
-                id: id.clone(),
-                pci_segment: 0,
+                pci_common: PciDeviceCommonConfig {
+                    id: Some(id.clone()),
+                    iommu: rng_config.iommu,
+                    ..Default::default()
+                },
                 dma_handler: None,
             });
 
@@ -3126,13 +3119,11 @@ impl DeviceManager {
         &mut self,
         generic_vhost_user_cfg: &mut GenericVhostUserConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &generic_vhost_user_cfg.pci_common.id {
-            id.clone()
-        } else {
-            let id = self.next_device_name(GENERIC_VHOST_USER_DEVICE_NAME_PREFIX)?;
-            generic_vhost_user_cfg.pci_common.id = Some(id.clone());
-            id
-        };
+        if generic_vhost_user_cfg.pci_common.id.is_none() {
+            generic_vhost_user_cfg.pci_common.id =
+                Some(self.next_device_name(GENERIC_VHOST_USER_DEVICE_NAME_PREFIX)?);
+        }
+        let id = generic_vhost_user_cfg.pci_common.id.as_ref().unwrap();
 
         info!("Creating generic vhost-user device: {generic_vhost_user_cfg:?}");
 
@@ -3165,9 +3156,7 @@ impl DeviceManager {
             Ok(MetaVirtioDevice {
                 virtio_device: Arc::clone(&generic_vhost_user_device)
                     as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-                iommu: false,
-                id,
-                pci_segment: generic_vhost_user_cfg.pci_common.pci_segment,
+                pci_common: generic_vhost_user_cfg.pci_common.clone(),
                 dma_handler: None,
             })
         } else {
@@ -3192,13 +3181,10 @@ impl DeviceManager {
         &mut self,
         fs_cfg: &mut FsConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &fs_cfg.pci_common.id {
-            id.clone()
-        } else {
-            let id = self.next_device_name(FS_DEVICE_NAME_PREFIX)?;
-            fs_cfg.pci_common.id = Some(id.clone());
-            id
-        };
+        if fs_cfg.pci_common.id.is_none() {
+            fs_cfg.pci_common.id = Some(self.next_device_name(FS_DEVICE_NAME_PREFIX)?);
+        }
+        let id = fs_cfg.pci_common.id.as_ref().unwrap();
 
         info!("Creating virtio-fs device: {fs_cfg:?}");
 
@@ -3231,9 +3217,7 @@ impl DeviceManager {
             Ok(MetaVirtioDevice {
                 virtio_device: Arc::clone(&virtio_fs_device)
                     as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-                iommu: false,
-                id,
-                pci_segment: fs_cfg.pci_common.pci_segment,
+                pci_common: fs_cfg.pci_common.clone(),
                 dma_handler: None,
             })
         } else {
@@ -3258,13 +3242,10 @@ impl DeviceManager {
         &mut self,
         pmem_cfg: &mut PmemConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &pmem_cfg.pci_common.id {
-            id.clone()
-        } else {
-            let id = self.next_device_name(PMEM_DEVICE_NAME_PREFIX)?;
-            pmem_cfg.pci_common.id = Some(id.clone());
-            id
-        };
+        if pmem_cfg.pci_common.id.is_none() {
+            pmem_cfg.pci_common.id = Some(self.next_device_name(PMEM_DEVICE_NAME_PREFIX)?);
+        }
+        let id = pmem_cfg.pci_common.id.as_ref().unwrap();
 
         info!("Creating virtio-pmem device: {pmem_cfg:?}");
 
@@ -3272,7 +3253,7 @@ impl DeviceManager {
 
         // Look for the id in the device tree. If it can be found, that means
         // the device is being restored, otherwise it's created from scratch.
-        let region_range = if let Some(node) = self.device_tree.lock().unwrap().get(&id) {
+        let region_range = if let Some(node) = self.device_tree.lock().unwrap().get(id) {
             info!("Restoring virtio-pmem {id} resources");
 
             let mut region_range: Option<(u64, u64)> = None;
@@ -3420,9 +3401,7 @@ impl DeviceManager {
         Ok(MetaVirtioDevice {
             virtio_device: Arc::clone(&virtio_pmem_device)
                 as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-            iommu: pmem_cfg.pci_common.iommu,
-            id,
-            pci_segment: pmem_cfg.pci_common.pci_segment,
+            pci_common: pmem_cfg.pci_common.clone(),
             dma_handler: None,
         })
     }
@@ -3445,13 +3424,10 @@ impl DeviceManager {
         &mut self,
         vsock_cfg: &mut VsockConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &vsock_cfg.pci_common.id {
-            id.clone()
-        } else {
-            let id = self.next_device_name(VSOCK_DEVICE_NAME_PREFIX)?;
-            vsock_cfg.pci_common.id = Some(id.clone());
-            id
-        };
+        if vsock_cfg.pci_common.id.is_none() {
+            vsock_cfg.pci_common.id = Some(self.next_device_name(VSOCK_DEVICE_NAME_PREFIX)?);
+        }
+        let id = vsock_cfg.pci_common.id.as_ref().unwrap();
 
         info!("Creating virtio-vsock device: {vsock_cfg:?}");
 
@@ -3491,9 +3467,7 @@ impl DeviceManager {
         Ok(MetaVirtioDevice {
             virtio_device: Arc::clone(&vsock_device)
                 as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-            iommu: vsock_cfg.pci_common.iommu,
-            id,
-            pci_segment: vsock_cfg.pci_common.pci_segment,
+            pci_common: vsock_cfg.pci_common.clone(),
             dma_handler: None,
         })
     }
@@ -3547,9 +3521,10 @@ impl DeviceManager {
                 self.virtio_devices.push(MetaVirtioDevice {
                     virtio_device: Arc::clone(&virtio_mem_device)
                         as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-                    iommu: false,
-                    id: memory_zone_id.clone(),
-                    pci_segment: 0,
+                    pci_common: PciDeviceCommonConfig {
+                        id: Some(memory_zone_id.clone()),
+                        ..Default::default()
+                    },
                     dma_handler: None,
                 });
 
@@ -3634,9 +3609,10 @@ impl DeviceManager {
             self.virtio_devices.push(MetaVirtioDevice {
                 virtio_device: Arc::clone(&virtio_balloon_device)
                     as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-                iommu: false,
-                id: id.clone(),
-                pci_segment: 0,
+                pci_common: PciDeviceCommonConfig {
+                    id: Some(id.clone()),
+                    ..Default::default()
+                },
                 dma_handler: None,
             });
 
@@ -3673,9 +3649,10 @@ impl DeviceManager {
         self.virtio_devices.push(MetaVirtioDevice {
             virtio_device: Arc::clone(&virtio_watchdog_device)
                 as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-            iommu: false,
-            id: id.clone(),
-            pci_segment: 0,
+            pci_common: PciDeviceCommonConfig {
+                id: Some(id.clone()),
+                ..Default::default()
+            },
             dma_handler: None,
         });
 
@@ -3691,13 +3668,10 @@ impl DeviceManager {
         &mut self,
         vdpa_cfg: &mut VdpaConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &vdpa_cfg.pci_common.id {
-            id.clone()
-        } else {
-            let id = self.next_device_name(VDPA_DEVICE_NAME_PREFIX)?;
-            vdpa_cfg.pci_common.id = Some(id.clone());
-            id
-        };
+        if vdpa_cfg.pci_common.id.is_none() {
+            vdpa_cfg.pci_common.id = Some(self.next_device_name(VDPA_DEVICE_NAME_PREFIX)?);
+        }
+        let id = vdpa_cfg.pci_common.id.as_ref().unwrap();
 
         info!("Creating vDPA device: {vdpa_cfg:?}");
 
@@ -3731,9 +3705,7 @@ impl DeviceManager {
 
         Ok(MetaVirtioDevice {
             virtio_device: vdpa_device as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-            iommu: vdpa_cfg.pci_common.iommu,
-            id,
-            pci_segment: vdpa_cfg.pci_common.pci_segment,
+            pci_common: vdpa_cfg.pci_common.clone(),
             dma_handler: Some(vdpa_mapping),
         })
     }
@@ -4500,7 +4472,7 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::UpdateMemoryForVirtioDevice)?;
 
             if let Some(dma_handler) = &handle.dma_handler
-                && !handle.iommu
+                && !handle.pci_common.iommu
             {
                 let gpa = new_region.start_addr().0;
                 let size = new_region.len();
@@ -4939,7 +4911,7 @@ impl DeviceManager {
         // for instance.
         self.virtio_devices.push(handle.clone());
 
-        let mapping: Option<Arc<IommuMapping>> = if handle.iommu {
+        let mapping: Option<Arc<IommuMapping>> = if handle.pci_common.iommu {
             self.iommu_mapping.clone()
         } else {
             None
@@ -4948,15 +4920,19 @@ impl DeviceManager {
         let bdf = self.add_virtio_pci_device(
             handle.virtio_device,
             &mapping,
-            &handle.id,
-            handle.pci_segment,
+            handle.pci_common.id.as_ref().unwrap(),
+            handle.pci_common.pci_segment,
             handle.dma_handler,
         )?;
 
         // Update the PCIU bitmap
-        self.pci_segments[handle.pci_segment as usize].pci_devices_up |= 1 << bdf.device();
+        self.pci_segments[handle.pci_common.pci_segment as usize].pci_devices_up |=
+            1 << bdf.device();
 
-        Ok(PciDeviceInfo { id: handle.id, bdf })
+        Ok(PciDeviceInfo {
+            id: handle.pci_common.id.unwrap(),
+            bdf,
+        })
     }
 
     fn is_iommu_segment(&self, pci_segment_id: u16) -> bool {
@@ -5053,7 +5029,10 @@ impl DeviceManager {
         for handle in &self.virtio_devices {
             let virtio_device = handle.virtio_device.lock().unwrap();
             if let Some(device_counters) = virtio_device.counters() {
-                counters.insert(handle.id.clone(), device_counters.clone());
+                counters.insert(
+                    handle.pci_common.id.as_ref().unwrap().clone(),
+                    device_counters.clone(),
+                );
             }
         }
 
