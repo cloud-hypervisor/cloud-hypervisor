@@ -2263,47 +2263,25 @@ impl VsockConfig {
             .add("pci_segment");
         parser.parse(vsock).map_err(Error::ParseVsock)?;
 
+        let pci_common = PciDeviceCommonConfig::parse(vsock)?;
         let socket = parser
             .get("socket")
             .map(PathBuf::from)
             .ok_or(Error::ParseVsockSockMissing)?;
-        let iommu = parser
-            .convert::<Toggle>("iommu")
-            .map_err(Error::ParseVsock)?
-            .unwrap_or(Toggle(false))
-            .0;
         let cid = parser
             .convert("cid")
             .map_err(Error::ParseVsock)?
             .ok_or(Error::ParseVsockCidMissing)?;
-        let id = parser.get("id");
-        let pci_segment = parser
-            .convert("pci_segment")
-            .map_err(Error::ParseVsock)?
-            .unwrap_or_default();
 
         Ok(VsockConfig {
+            pci_common,
             cid,
             socket,
-            iommu,
-            id,
-            pci_segment,
         })
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-                && !self.iommu
-            {
-                return Err(ValidationError::OnIommuSegment(self.pci_segment));
-            }
-        }
+        self.pci_common.validate(vm_config)?;
 
         Ok(())
     }
@@ -3014,9 +2992,9 @@ impl VmConfig {
 
         if let Some(vsock) = &self.vsock {
             vsock.validate(self)?;
-            self.iommu |= vsock.iommu;
+            self.iommu |= vsock.pci_common.iommu;
 
-            Self::validate_identifier(&mut id_list, &vsock.id)?;
+            Self::validate_identifier(&mut id_list, &vsock.pci_common.id)?;
         }
 
         let num_pci_segments = match &self.platform {
@@ -3396,7 +3374,7 @@ impl VmConfig {
 
         // Remove if vsock device
         if let Some(vsock) = self.vsock.as_ref()
-            && vsock.id.as_ref().map(|id| id.as_ref()) == Some(id)
+            && vsock.pci_common.id.as_ref().map(|id| id.as_ref()) == Some(id)
         {
             self.vsock = None;
             removed = true;
@@ -4336,21 +4314,20 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             VsockConfig::parse("socket=/tmp/sock,cid=3")?,
             VsockConfig {
+                pci_common: PciDeviceCommonConfig::default(),
                 cid: 3,
                 socket: PathBuf::from("/tmp/sock"),
-                iommu: false,
-                id: None,
-                pci_segment: 0,
             }
         );
         assert_eq!(
             VsockConfig::parse("socket=/tmp/sock,cid=3,iommu=on")?,
             VsockConfig {
+                pci_common: PciDeviceCommonConfig {
+                    iommu: true,
+                    ..Default::default()
+                },
                 cid: 3,
                 socket: PathBuf::from("/tmp/sock"),
-                iommu: true,
-                id: None,
-                pci_segment: 0,
             }
         );
         Ok(())
@@ -5131,11 +5108,13 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         still_valid_config.vsock = Some(VsockConfig {
+            pci_common: PciDeviceCommonConfig {
+                iommu: true,
+                pci_segment: 1,
+                ..Default::default()
+            },
             cid: 3,
             socket: PathBuf::new(),
-            id: None,
-            iommu: true,
-            pci_segment: 1,
         });
         still_valid_config.validate().unwrap();
 
@@ -5217,11 +5196,12 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.vsock = Some(VsockConfig {
+            pci_common: PciDeviceCommonConfig {
+                pci_segment: 1,
+                ..Default::default()
+            },
             cid: 3,
             socket: PathBuf::new(),
-            id: None,
-            iommu: false,
-            pci_segment: 1,
         });
         assert_eq!(
             invalid_config.validate(),
