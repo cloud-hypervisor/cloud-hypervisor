@@ -1299,11 +1299,6 @@ impl DiskConfig {
             .map_err(Error::ParseDisk)?
             .unwrap_or(Toggle(false))
             .0;
-        let iommu = parser
-            .convert::<Toggle>("iommu")
-            .map_err(Error::ParseDisk)?
-            .unwrap_or(Toggle(false))
-            .0;
         let queue_size = parser
             .convert("queue_size")
             .map_err(Error::ParseDisk)?
@@ -1318,7 +1313,6 @@ impl DiskConfig {
             .unwrap_or(Toggle(false))
             .0;
         let vhost_socket = parser.get("socket");
-        let id = parser.get("id");
         let disable_io_uring = parser
             .convert::<Toggle>("_disable_io_uring")
             .map_err(Error::ParseDisk)?
@@ -1329,10 +1323,6 @@ impl DiskConfig {
             .map_err(Error::ParseDisk)?
             .unwrap_or(Toggle(false))
             .0;
-        let pci_segment = parser
-            .convert("pci_segment")
-            .map_err(Error::ParseDisk)?
-            .unwrap_or_default();
         let rate_limit_group = parser.get("rate_limit_group");
         let bw_size = parser
             .convert("bw_size")
@@ -1423,21 +1413,21 @@ impl DiskConfig {
             .unwrap_or_else(|| Toggle(default_diskconfig_sparse()))
             .0;
 
+        let pci_common = PciDeviceCommonConfig::parse(disk)?;
+
         Ok(DiskConfig {
+            pci_common,
             path,
             readonly,
             direct,
-            iommu,
             num_queues,
             queue_size,
             vhost_user,
             vhost_socket,
             rate_limit_group,
             rate_limiter_config,
-            id,
             disable_io_uring,
             disable_aio,
-            pci_segment,
             serial,
             queue_affinity,
             backing_files,
@@ -1448,6 +1438,8 @@ impl DiskConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        self.pci_common.validate(vm_config)?;
+
         if self.num_queues > vm_config.cpus.boot_vcpus as usize {
             return Err(ValidationError::TooManyQueues(
                 self.num_queues,
@@ -1459,21 +1451,8 @@ impl DiskConfig {
             return Err(ValidationError::InvalidQueueSize(self.queue_size));
         }
 
-        if self.vhost_user && self.iommu {
+        if self.vhost_user && self.pci_common.iommu {
             return Err(ValidationError::IommuNotSupported);
-        }
-
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-                && !self.iommu
-            {
-                return Err(ValidationError::OnIommuSegment(self.pci_segment));
-            }
         }
 
         if self.rate_limiter_config.is_some() && self.rate_limit_group.is_some() {
@@ -3075,9 +3054,9 @@ impl VmConfig {
                 }
 
                 disk.validate(self)?;
-                self.iommu |= disk.iommu;
+                self.iommu |= disk.pci_common.iommu;
 
-                Self::validate_identifier(&mut id_list, &disk.id)?;
+                Self::validate_identifier(&mut id_list, &disk.pci_common.id)?;
             }
         }
 
@@ -3564,7 +3543,7 @@ impl VmConfig {
         // Remove if disk device
         if let Some(disks) = self.disks.as_mut() {
             let len = disks.len();
-            disks.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            disks.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= disks.len() != len;
         }
 
@@ -4025,20 +4004,18 @@ mod unit_tests {
 
     fn disk_fixture() -> DiskConfig {
         DiskConfig {
+            pci_common: PciDeviceCommonConfig::default(),
             path: Some(PathBuf::from("/path/to_file")),
             readonly: false,
             direct: false,
-            iommu: false,
             num_queues: 1,
             queue_size: 128,
             vhost_user: false,
             vhost_socket: None,
-            id: None,
             disable_io_uring: false,
             disable_aio: false,
             rate_limit_group: None,
             rate_limiter_config: None,
-            pci_segment: 0,
             serial: None,
             queue_affinity: None,
             backing_files: false,
@@ -4057,7 +4034,10 @@ mod unit_tests {
         assert_eq!(
             DiskConfig::parse("path=/path/to_file,id=mydisk0")?,
             DiskConfig {
-                id: Some("mydisk0".to_owned()),
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("mydisk0".to_owned()),
+                    ..Default::default()
+                },
                 ..disk_fixture()
             }
         );
@@ -4074,14 +4054,20 @@ mod unit_tests {
         assert_eq!(
             DiskConfig::parse("path=/path/to_file,iommu=on")?,
             DiskConfig {
-                iommu: true,
+                pci_common: PciDeviceCommonConfig {
+                    iommu: true,
+                    ..Default::default()
+                },
                 ..disk_fixture()
             }
         );
         assert_eq!(
             DiskConfig::parse("path=/path/to_file,iommu=on,queue_size=256")?,
             DiskConfig {
-                iommu: true,
+                pci_common: PciDeviceCommonConfig {
+                    iommu: true,
+                    ..Default::default()
+                },
                 queue_size: 256,
                 ..disk_fixture()
             }
@@ -4089,7 +4075,10 @@ mod unit_tests {
         assert_eq!(
             DiskConfig::parse("path=/path/to_file,iommu=on,queue_size=256,num_queues=4")?,
             DiskConfig {
-                iommu: true,
+                pci_common: PciDeviceCommonConfig {
+                    iommu: true,
+                    ..Default::default()
+                },
                 queue_size: 256,
                 num_queues: 4,
                 ..disk_fixture()
@@ -5326,8 +5315,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         still_valid_config.disks = Some(vec![DiskConfig {
-            iommu: true,
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                iommu: true,
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..disk_fixture()
         }]);
         still_valid_config.validate().unwrap();
@@ -5388,8 +5380,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.disks = Some(vec![DiskConfig {
-            iommu: false,
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                iommu: false,
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..disk_fixture()
         }]);
         assert_eq!(
