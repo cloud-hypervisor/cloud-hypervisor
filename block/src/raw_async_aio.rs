@@ -16,7 +16,10 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
-use crate::{DiskTopology, SECTOR_SIZE, disk_file, probe_sparse_support, query_device_size};
+use crate::{
+    DiskTopology, SECTOR_SIZE, disk_file, probe_sparse_support, probe_write_zeroes_support,
+    query_device_size,
+};
 
 #[derive(Debug)]
 pub struct RawFileDiskAio {
@@ -63,6 +66,10 @@ impl disk_file::Geometry for RawFileDiskAio {
 impl disk_file::SparseCapable for RawFileDiskAio {
     fn supports_sparse_operations(&self) -> bool {
         probe_sparse_support(&self.file)
+    }
+
+    fn supports_write_zeroes(&self) -> bool {
+        probe_write_zeroes_support(&self.file)
     }
 }
 
