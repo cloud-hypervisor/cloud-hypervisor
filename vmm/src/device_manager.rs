@@ -3216,11 +3216,11 @@ impl DeviceManager {
         &mut self,
         fs_cfg: &mut FsConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &fs_cfg.id {
+        let id = if let Some(id) = &fs_cfg.pci_common.id {
             id.clone()
         } else {
             let id = self.next_device_name(FS_DEVICE_NAME_PREFIX)?;
-            fs_cfg.id = Some(id.clone());
+            fs_cfg.pci_common.id = Some(id.clone());
             id
         };
 
@@ -3257,7 +3257,7 @@ impl DeviceManager {
                     as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
                 iommu: false,
                 id,
-                pci_segment: fs_cfg.pci_segment,
+                pci_segment: fs_cfg.pci_common.pci_segment,
                 dma_handler: None,
             })
         } else {
@@ -5039,7 +5039,7 @@ impl DeviceManager {
     }
 
     pub fn add_fs(&mut self, fs_cfg: &mut FsConfig) -> DeviceManagerResult<PciDeviceInfo> {
-        self.validate_identifier(&fs_cfg.id)?;
+        self.validate_identifier(&fs_cfg.pci_common.id)?;
 
         let device = self.make_virtio_fs_device(fs_cfg)?;
         self.hotplug_virtio_pci_device(device)
