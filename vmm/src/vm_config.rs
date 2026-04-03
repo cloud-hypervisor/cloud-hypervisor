@@ -275,13 +275,13 @@ pub struct PciDeviceCommonConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DiskConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub path: Option<PathBuf>,
     #[serde(default)]
     pub readonly: bool,
     #[serde(default)]
     pub direct: bool,
-    #[serde(default)]
-    pub iommu: bool,
     #[serde(default = "default_diskconfig_num_queues")]
     pub num_queues: usize,
     #[serde(default = "default_diskconfig_queue_size")]
@@ -293,16 +293,12 @@ pub struct DiskConfig {
     pub rate_limit_group: Option<String>,
     #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
-    #[serde(default)]
-    pub id: Option<String>,
     // For testing use only. Not exposed in API.
     #[serde(default)]
     pub disable_io_uring: bool,
     // For testing use only. Not exposed in API.
     #[serde(default)]
     pub disable_aio: bool,
-    #[serde(default)]
-    pub pci_segment: u16,
     #[serde(default)]
     pub serial: Option<String>,
     #[serde(default)]

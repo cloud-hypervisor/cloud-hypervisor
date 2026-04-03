@@ -2612,11 +2612,11 @@ impl DeviceManager {
         disk_cfg: &mut DiskConfig,
         is_hotplug: bool,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &disk_cfg.id {
+        let id = if let Some(id) = &disk_cfg.pci_common.id {
             id.clone()
         } else {
             let id = self.next_device_name(DISK_DEVICE_NAME_PREFIX)?;
-            disk_cfg.id = Some(id.clone());
+            disk_cfg.pci_common.id = Some(id.clone());
             id
         };
 
@@ -2798,7 +2798,7 @@ impl DeviceManager {
                     let bw = rate_limiter_cfg.bandwidth.unwrap_or_default();
                     let ops = rate_limiter_cfg.ops.unwrap_or_default();
                     let mut rate_limit_group = RateLimiterGroup::new(
-                        disk_cfg.id.as_ref().unwrap(),
+                        disk_cfg.pci_common.id.as_ref().unwrap(),
                         bw.size,
                         bw.one_time_burst.unwrap_or(0),
                         bw.refill_time,
@@ -2841,7 +2841,7 @@ impl DeviceManager {
                     .ok_or(DeviceManagerError::NoDiskPath)?
                     .clone(),
                 disk_cfg.readonly,
-                self.force_iommu | disk_cfg.iommu,
+                self.force_iommu | disk_cfg.pci_common.iommu,
                 disk_cfg.num_queues,
                 disk_cfg.queue_size,
                 disk_cfg.serial.clone(),
@@ -2889,9 +2889,9 @@ impl DeviceManager {
 
         Ok(MetaVirtioDevice {
             virtio_device,
-            iommu: disk_cfg.iommu,
+            iommu: disk_cfg.pci_common.iommu,
             id,
-            pci_segment: disk_cfg.pci_segment,
+            pci_segment: disk_cfg.pci_common.pci_segment,
             dma_handler: None,
         })
     }
@@ -4973,9 +4973,9 @@ impl DeviceManager {
     }
 
     pub fn add_disk(&mut self, disk_cfg: &mut DiskConfig) -> DeviceManagerResult<PciDeviceInfo> {
-        self.validate_identifier(&disk_cfg.id)?;
+        self.validate_identifier(&disk_cfg.pci_common.id)?;
 
-        if disk_cfg.iommu && !self.is_iommu_segment(disk_cfg.pci_segment) {
+        if disk_cfg.pci_common.iommu && !self.is_iommu_segment(disk_cfg.pci_common.pci_segment) {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
