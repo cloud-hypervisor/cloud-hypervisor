@@ -2412,7 +2412,7 @@ pub mod x86_64 {
         "jammy-server-cloudimg-amd64-custom-20241017-0-backing-uncompressed.qcow2";
     pub const JAMMY_IMAGE_NAME_QCOW2_BACKING_RAW_FILE: &str =
         "jammy-server-cloudimg-amd64-custom-20241017-0-backing-raw.qcow2";
-    pub const WINDOWS_IMAGE_NAME: &str = "windows-server-2022-amd64-2.raw";
+    pub const WINDOWS_IMAGE_NAME: &str = "windows-server-2025-amd64-1.raw";
     pub const OVMF_NAME: &str = "CLOUDHV.fd";
     pub const GREP_SERIAL_IRQ_CMD: &str = "grep -c 'IO-APIC.*ttyS0' /proc/interrupts || true";
 }

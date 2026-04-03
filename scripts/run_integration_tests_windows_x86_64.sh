@@ -13,7 +13,7 @@ test_features=""
 if [ "$hypervisor" = "mshv" ]; then
     test_features="--features mshv"
 fi
-WIN_IMAGE_FILE="/root/workloads/windows-server-2022-amd64-2.raw"
+WIN_IMAGE_FILE="/root/workloads/windows-server-2025-amd64-1.raw"
 
 WORKLOADS_DIR="/root/workloads"
 
