@@ -35,6 +35,8 @@ use arch::{NumaNodes, layout};
 use block::disk_file::DiskBackend;
 use block::error::BlockError;
 use block::fixed_vhd_sync::FixedVhdDiskSync;
+#[cfg(feature = "io_uring")]
+use block::qcow_async::QcowDiskAsync;
 use block::qcow_sync::QcowDiskSync;
 use block::raw_async_aio::RawFileDiskAio;
 use block::raw_sync::RawFileDiskSync;
@@ -577,6 +579,10 @@ pub enum DeviceManagerError {
     /// Failed to create QcowDiskSync
     #[error("Failed to create QcowDiskSync")]
     CreateQcowDiskSync(#[source] BlockError),
+
+    /// Failed to create QcowDiskAsync
+    #[error("Failed to create QcowDiskAsync")]
+    CreateQcowDiskAsync(#[source] BlockError),
 
     /// Failed to create FixedVhdxDiskSync
     #[error("Failed to create FixedVhdxDiskSync")]
@@ -2766,20 +2772,46 @@ impl DeviceManager {
                     }
                 }
                 ImageType::Qcow2 => {
-                    info!("Using synchronous QCOW2 disk file");
-                    DiskBackend::Next(Box::new(
-                        QcowDiskSync::new(
-                            file,
-                            disk_cfg.direct,
-                            disk_cfg.backing_files,
-                            disk_cfg.sparse,
-                        )
-                        .map_err(|e| match &disk_cfg.path {
-                            Some(p) => e.with_path(p),
-                            None => e,
-                        })
-                        .map_err(DeviceManagerError::CreateQcowDiskSync)?,
-                    ))
+                    if cfg!(feature = "io_uring")
+                        && !disk_cfg.disable_io_uring
+                        && self.io_uring_is_supported()
+                    {
+                        info!("Using asynchronous QCOW2 disk file (io_uring)");
+
+                        #[cfg(not(feature = "io_uring"))]
+                        unreachable!("Checked in if statement above");
+                        #[cfg(feature = "io_uring")]
+                        {
+                            DiskBackend::Next(Box::new(
+                                QcowDiskAsync::new(
+                                    file,
+                                    disk_cfg.direct,
+                                    disk_cfg.backing_files,
+                                    disk_cfg.sparse,
+                                )
+                                .map_err(|e| match &disk_cfg.path {
+                                    Some(p) => e.with_path(p),
+                                    None => e,
+                                })
+                                .map_err(DeviceManagerError::CreateQcowDiskAsync)?,
+                            ))
+                        }
+                    } else {
+                        info!("Using synchronous QCOW2 disk file");
+                        DiskBackend::Next(Box::new(
+                            QcowDiskSync::new(
+                                file,
+                                disk_cfg.direct,
+                                disk_cfg.backing_files,
+                                disk_cfg.sparse,
+                            )
+                            .map_err(|e| match &disk_cfg.path {
+                                Some(p) => e.with_path(p),
+                                None => e,
+                            })
+                            .map_err(DeviceManagerError::CreateQcowDiskSync)?,
+                        ))
+                    }
                 }
                 ImageType::Vhdx => {
                     info!("Using synchronous VHDX disk file");

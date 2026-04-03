@@ -1,0 +1,164 @@
+// Copyright © 2021 Intel Corporation
+//
+// Copyright 2026 The Cloud Hypervisor Authors. All rights reserved.
+//
+// SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
+
+//! Thread safe backing file readers for QCOW2 images.
+
+use std::io;
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
+use std::sync::Arc;
+
+use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
+use crate::qcow::metadata::{BackingRead, ClusterReadMapping, QcowMetadata};
+use crate::qcow::{BackingFile, BackingKind, Error as QcowError};
+use crate::qcow_common::pread_exact;
+
+/// Raw backing file using pread64 on a duplicated fd.
+pub struct RawBacking {
+    pub fd: OwnedFd,
+    pub virtual_size: u64,
+}
+
+// SAFETY: The only I/O operation is pread64 which is position independent
+// and safe for concurrent use from multiple threads.
+unsafe impl Sync for RawBacking {}
+
+impl BackingRead for RawBacking {
+    fn read_at(&self, address: u64, buf: &mut [u8]) -> io::Result<()> {
+        if address >= self.virtual_size {
+            buf.fill(0);
+            return Ok(());
+        }
+        let available = (self.virtual_size - address) as usize;
+        if available >= buf.len() {
+            pread_exact(self.fd.as_raw_fd(), buf, address)
+        } else {
+            pread_exact(self.fd.as_raw_fd(), &mut buf[..available], address)?;
+            buf[available..].fill(0);
+            Ok(())
+        }
+    }
+}
+
+/// QCOW2 backing file with RwLock metadata and pread64 data reads.
+///
+/// Read only because backing files never receive writes. Nested backing
+/// files are handled recursively.
+pub struct Qcow2MetadataBacking {
+    pub metadata: Arc<QcowMetadata>,
+    pub data_fd: OwnedFd,
+    pub backing_file: Option<Arc<dyn BackingRead>>,
+}
+
+// SAFETY: All reads go through QcowMetadata which uses RwLock
+// and pread64 which is position independent and thread safe.
+unsafe impl Sync for Qcow2MetadataBacking {}
+
+impl BackingRead for Qcow2MetadataBacking {
+    fn read_at(&self, address: u64, buf: &mut [u8]) -> io::Result<()> {
+        let virtual_size = self.metadata.virtual_size();
+        if address >= virtual_size {
+            buf.fill(0);
+            return Ok(());
+        }
+        let available = (virtual_size - address) as usize;
+        if available < buf.len() {
+            self.read_clusters(address, &mut buf[..available])?;
+            buf[available..].fill(0);
+            return Ok(());
+        }
+        self.read_clusters(address, buf)
+    }
+}
+
+impl Qcow2MetadataBacking {
+    /// Resolve cluster mappings via metadata then read allocated clusters
+    /// with pread64.
+    fn read_clusters(&self, address: u64, buf: &mut [u8]) -> io::Result<()> {
+        let total_len = buf.len();
+        let has_backing = self.backing_file.is_some();
+
+        let mappings = self
+            .metadata
+            .map_clusters_for_read(address, total_len, has_backing)?;
+
+        let mut buf_offset = 0usize;
+        for mapping in mappings {
+            match mapping {
+                ClusterReadMapping::Zero { length } => {
+                    buf[buf_offset..buf_offset + length as usize].fill(0);
+                    buf_offset += length as usize;
+                }
+                ClusterReadMapping::Allocated {
+                    offset: host_offset,
+                    length,
+                } => {
+                    pread_exact(
+                        self.data_fd.as_raw_fd(),
+                        &mut buf[buf_offset..buf_offset + length as usize],
+                        host_offset,
+                    )?;
+                    buf_offset += length as usize;
+                }
+                ClusterReadMapping::Compressed { data } => {
+                    let len = data.len();
+                    buf[buf_offset..buf_offset + len].copy_from_slice(&data);
+                    buf_offset += len;
+                }
+                ClusterReadMapping::Backing {
+                    offset: backing_offset,
+                    length,
+                } => {
+                    self.backing_file.as_ref().unwrap().read_at(
+                        backing_offset,
+                        &mut buf[buf_offset..buf_offset + length as usize],
+                    )?;
+                    buf_offset += length as usize;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Qcow2MetadataBacking {
+    fn drop(&mut self) {
+        self.metadata.shutdown();
+    }
+}
+
+/// Construct a thread safe backing file reader.
+pub fn shared_backing_from(bf: BackingFile) -> BlockResult<Arc<dyn BackingRead>> {
+    let (kind, virtual_size) = bf.into_kind();
+
+    let dup_fd = |fd: BorrowedFd<'_>| -> BlockResult<OwnedFd> {
+        fd.try_clone_to_owned().map_err(|e| {
+            BlockError::new(
+                BlockErrorKind::Io,
+                QcowError::BackingFileIo(String::new(), e),
+            )
+            .with_op(ErrorOp::DupBackingFd)
+        })
+    };
+
+    match kind {
+        BackingKind::Raw(raw_file) => {
+            let fd = dup_fd(raw_file.as_fd())?;
+            Ok(Arc::new(RawBacking { fd, virtual_size }))
+        }
+        BackingKind::Qcow { inner, backing } => {
+            let data_fd = dup_fd(inner.raw_file.as_fd())?;
+            Ok(Arc::new(Qcow2MetadataBacking {
+                metadata: Arc::new(QcowMetadata::new(*inner)),
+                data_fd,
+                backing_file: backing.map(|bf| shared_backing_from(*bf)).transpose()?,
+            }))
+        }
+        #[cfg(test)]
+        BackingKind::QcowFile(_) => {
+            unreachable!("QcowFile variant is only used by set_backing_file() in tests")
+        }
+    }
+}

@@ -18,6 +18,9 @@ pub mod fixed_vhd;
 pub mod fixed_vhd_async;
 pub mod fixed_vhd_sync;
 pub mod qcow;
+#[cfg(feature = "io_uring")]
+pub mod qcow_async;
+pub(crate) mod qcow_common;
 pub mod qcow_sync;
 #[cfg(feature = "io_uring")]
 /// Async primitives based on `io-uring`
