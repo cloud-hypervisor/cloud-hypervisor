@@ -15,13 +15,14 @@ use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use hypervisor::HypervisorVmError;
 use libc::{_SC_PAGESIZE, sysconf};
-use log::{error, info};
+use log::{error, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
 use vfio_ioctls::{VfioDevice, VfioIrq, VfioOps, VfioRegionInfoCap, VfioRegionSparseMmapArea};
 use vm_allocator::page_size::{
-    align_page_size_down, align_page_size_up, is_4k_aligned, is_4k_multiple, is_page_size_aligned,
+    align_page_size_down, align_page_size_up, get_page_size, is_4k_aligned, is_4k_multiple,
+    is_page_size_aligned,
 };
 use vm_allocator::{AddressAllocator, MemorySlotAllocator, SystemAllocator};
 use vm_device::dma_mapping::ExternalDmaMapping;
@@ -589,9 +590,14 @@ impl VfioCommon {
 
             let (pba_offset, pba_size) = msix_cap.pba_range();
             let msix_sz = align_page_size_up(table_size + pba_size);
-            // Expand region to hold RW and trap region which both page size aligned
-            let size = std::cmp::max(region_size * 2, msix_sz * 2);
-            // let table starts from the middle of the region
+            // Double the virtual BAR so the lower half is mmapped for direct
+            // guest access and the upper half holds the relocated MSI-X
+            // (trapped by the VMM). Use max(region_size, page_size) so the
+            // lower half is at least one host page. This lets
+            // map_mmio_regions() expand a sub-page BAR mmap to page size
+            // without the KVM memory slot overlapping the relocated MSI-X.
+            let size = std::cmp::max(std::cmp::max(region_size, get_page_size()) * 2, msix_sz * 2);
+            // Relocate MSI-X table to the start of the upper half
             msix_cap.table_set_offset((size / 2) as u32);
             msix_cap.pba_set_offset((size / 2 + pba_offset - table_offset) as u32);
 
@@ -1679,8 +1685,47 @@ impl VfioPciDevice {
                 )?;
 
                 for area in sparse_areas.iter() {
+                    let page_size = get_page_size();
+                    let mmap_len = if area.size < page_size {
+                        // KVM_SET_USER_MEMORY_REGION requires memory_size to be a
+                        // multiple of the host page size. On aarch64 with 64K pages
+                        // a device BAR can be smaller than a page (e.g. 16K NVMe
+                        // BAR).
+                        //
+                        // The kernel only sets VFIO_REGION_INFO_FLAG_MMAP on sub-page
+                        // BARs after verifying the physical BAR start is page-aligned
+                        // and reserving the rest of the page. We expand the mmap to
+                        // page size for direct guest MMIO access, matching QEMU.
+                        //
+                        // fixup_msix_region() guarantees MSI-X is relocated to at
+                        // least page_size offset, so the one-page KVM memory slot
+                        // cannot overlap the MSI-X trap region.
+                        //
+                        // Only expand when the sparse area offset and guest physical
+                        // address are both page-aligned. A non-aligned offset from
+                        // MSI-X carving could overlap other trap regions.
+                        let gpa = region.start.0 + area.offset;
+                        if !is_page_size_aligned(area.offset)
+                            || !is_page_size_aligned(gpa)
+                        {
+                            warn!(
+                                "Skipping mmap of sub-page sparse area \
+                                 (offset 0x{:x}, size 0x{:x}): not page-aligned",
+                                area.offset, area.size,
+                            );
+                            continue;
+                        }
+                        info!(
+                            "Expanding sub-page sparse area mmap from 0x{:x} to \
+                             page size 0x{:x}",
+                            area.size, page_size,
+                        );
+                        page_size
+                    } else {
+                        area.size
+                    };
                     let mapping = match MmapRegion::mmap(
-                        area.size,
+                        mmap_len,
                         prot,
                         fd,
                         mmap_offset,
@@ -1691,7 +1736,7 @@ impl VfioPciDevice {
                             error!(
                                 "Could not mmap sparse area (offset = 0x{:x}, size = 0x{:x}): {}",
                                 mmap_offset,
-                                area.size,
+                                mmap_len,
                                 std::io::Error::last_os_error()
                             );
                             return Err(VfioPciError::MmapArea);
