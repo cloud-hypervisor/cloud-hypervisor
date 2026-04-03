@@ -350,6 +350,8 @@ pub fn default_diskconfig_sparse() -> bool {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct NetConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     #[serde(default = "default_netconfig_tap")]
     pub tap: Option<String>,
     pub ip: Option<IpAddr>,
@@ -360,8 +362,6 @@ pub struct NetConfig {
     pub host_mac: Option<MacAddr>,
     #[serde(default)]
     pub mtu: Option<u16>,
-    #[serde(default)]
-    pub iommu: bool,
     #[serde(default = "default_netconfig_num_queues")]
     pub num_queues: usize,
     #[serde(default = "default_netconfig_queue_size")]
@@ -371,8 +371,6 @@ pub struct NetConfig {
     pub vhost_socket: Option<String>,
     #[serde(default)]
     pub vhost_mode: VhostMode,
-    #[serde(default)]
-    pub id: Option<String>,
     // Special deserialize handling:
     // Therefore, we don't serialize FDs, and whatever value is here after
     // deserialization is invalid.
@@ -383,8 +381,6 @@ pub struct NetConfig {
     pub fds: Option<Vec<i32>>,
     #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
-    #[serde(default)]
-    pub pci_segment: u16,
     #[serde(default = "default_netconfig_true")]
     pub offload_tso: bool,
     #[serde(default = "default_netconfig_true")]
