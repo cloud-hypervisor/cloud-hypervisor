@@ -20,27 +20,23 @@ use std::os::unix::net::UnixStream;
 use vhost::vhost_user::Error;
 
 use super::queue_pair::{FdRearm, Translate, VirtioVhostUserQueuePair};
-use crate::EpollHelper;
+use crate::queue_pair::Fds;
 
-pub(super) struct BackendRequestQueuePair {
+pub struct BackendRequestQueuePair {
     queue_pair: VirtioVhostUserQueuePair,
 }
 impl BackendRequestQueuePair {
-    pub(super) fn set_socket(&mut self, socket: UnixStream) -> Result<(), Error> {
+    pub fn set_socket(&mut self, socket: UnixStream) -> Result<(), Error> {
         self.queue_pair.set_socket(socket)
     }
-    pub(super) fn new(queue_pair: VirtioVhostUserQueuePair) -> Self {
+    pub fn new(queue_pair: VirtioVhostUserQueuePair) -> Self {
         Self { queue_pair }
     }
 
-    pub(super) fn register_epoll_events(
-        &mut self,
-        helper: &mut EpollHelper,
-        base: u16,
-    ) -> Result<(), crate::EpollHelperError> {
-        self.queue_pair.register_epoll_events(helper, base)
+    pub fn fds(&mut self) -> Fds<'_> {
+        self.queue_pair.fds()
     }
-    pub(super) fn process_incoming(
+    pub fn process_incoming(
         &mut self,
         access_platform: Option<Translate>,
         max_iterations: usize,
@@ -57,7 +53,7 @@ impl BackendRequestQueuePair {
             },
         )
     }
-    pub(super) fn process_outgoing(
+    pub fn process_outgoing(
         &mut self,
         access_platform: Option<Translate>,
         max_iterations: usize,

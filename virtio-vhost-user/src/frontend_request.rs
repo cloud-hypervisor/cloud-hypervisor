@@ -22,9 +22,8 @@ use std::os::fd::{AsFd as _, AsRawFd as _, BorrowedFd, FromRawFd as _, IntoRawFd
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 
-use hypervisor::IoEventAddress;
 use log::error;
-use queue_pair::VhostUserMsgHeader;
+use queue_pair::{FdRearm, VhostUserMsgHeader};
 use vhost::vhost_user::Error;
 use vhost::vhost_user::message::{
     FrontendReq, MAX_MSG_SIZE, VhostUserLog, VhostUserMemory, VhostUserMemoryRegion,
@@ -33,23 +32,22 @@ use vhost::vhost_user::message::{
 use vm_memory::ByteValued;
 use vmm_sys_util::eventfd::EventFd;
 
+use super::mapping::Allocator;
 use super::queue_pair::{self, Translate};
-use crate::virtio_vhost_user::mapping::Allocator;
-use crate::virtio_vhost_user::queue_pair::FdRearm;
-use crate::{EpollHelper, VirtioInterrupt, VirtioInterruptType};
+use crate::eventfd_checker::{self, EventfdChecker};
+use crate::queue_pair::Fds;
 
-pub(crate) const SUPPORTED_PROTOCOL_FEATURES: VhostUserProtocolFeatures =
-    VhostUserProtocolFeatures::MQ
-        .union(VhostUserProtocolFeatures::LOG_SHMFD)
-        .union(VhostUserProtocolFeatures::RARP)
-        .union(VhostUserProtocolFeatures::MTU)
-        .union(VhostUserProtocolFeatures::CROSS_ENDIAN)
-        .union(VhostUserProtocolFeatures::CRYPTO_SESSION)
-        .union(VhostUserProtocolFeatures::CONFIG)
-        .union(VhostUserProtocolFeatures::RESET_DEVICE)
-        .union(VhostUserProtocolFeatures::MTU)
-        .union(VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS)
-        .union(VhostUserProtocolFeatures::STATUS);
+pub const SUPPORTED_PROTOCOL_FEATURES: VhostUserProtocolFeatures = VhostUserProtocolFeatures::MQ
+    .union(VhostUserProtocolFeatures::LOG_SHMFD)
+    .union(VhostUserProtocolFeatures::RARP)
+    .union(VhostUserProtocolFeatures::MTU)
+    .union(VhostUserProtocolFeatures::CROSS_ENDIAN)
+    .union(VhostUserProtocolFeatures::CRYPTO_SESSION)
+    .union(VhostUserProtocolFeatures::CONFIG)
+    .union(VhostUserProtocolFeatures::RESET_DEVICE)
+    .union(VhostUserProtocolFeatures::MTU)
+    .union(VhostUserProtocolFeatures::CONFIGURE_MEM_SLOTS)
+    .union(VhostUserProtocolFeatures::STATUS);
 
 // TODO: move this to a utility crate
 fn check_is_stream_socket(fd: OwnedFd) -> std::io::Result<UnixStream> {
@@ -100,7 +98,7 @@ fn check_is_stream_socket(fd: OwnedFd) -> std::io::Result<UnixStream> {
     Ok(unsafe { UnixStream::from_raw_fd(fd.into_raw_fd()) })
 }
 
-pub(super) fn validate_reply(hdr: VhostUserMsgHeader, buf: &mut [u8]) -> Result<(), Error> {
+fn validate_reply(hdr: VhostUserMsgHeader, buf: &mut [u8]) -> Result<(), Error> {
     let flags = hdr.flags;
     if flags & 255 != 5 {
         error!("virtio-vhost-user: Wrong flags: 0x{flags:b}");
@@ -117,26 +115,34 @@ pub(super) fn validate_reply(hdr: VhostUserMsgHeader, buf: &mut [u8]) -> Result<
     Ok(())
 }
 
-pub(super) struct FrontendRequestQueuePair<T: Allocator> {
+pub struct FrontendRequestQueuePair<T: Allocator, U: VM> {
     queue_pair: queue_pair::VirtioVhostUserQueuePair,
-    internals: FrontendRequestQueuePairInternals<T>,
+    internals: FrontendRequestQueuePairInternals<T, U>,
 }
 
-pub(super) struct IoEventFds {
+pub struct IoEventFds {
     pub offset: u64,
     pub fds: Vec<Option<EventFd>>,
 }
 
-struct FrontendRequestQueuePairInternals<T: Allocator> {
+pub trait VM {
+    fn register_ioevent(&mut self, fd: &EventFd, offset: u64);
+    fn unregister_ioevent(&mut self, fd: EventFd, offset: u64);
+    fn register_vring_kick(&mut self, fd: Option<EventFd>, queue: u8);
+    fn backend_request_socket(&mut self, socket: UnixStream);
+}
+
+struct FrontendRequestQueuePairInternals<T: Allocator, U: VM> {
     mapping: super::mapping::Mapping<T>,
     ioeventfds: Arc<Mutex<IoEventFds>>,
     queues: u8,
-    vm: Arc<dyn hypervisor::Vm>,
     seen_log_mapping: bool,
-    interrupt_cb: Arc<dyn VirtioInterrupt>,
+    seen_backend_req_socket: bool,
+    vm: U,
+    checker: EventfdChecker,
 }
 
-impl<T: Allocator> FrontendRequestQueuePairInternals<T> {
+impl<T: Allocator, U: VM> FrontendRequestQueuePairInternals<T, U> {
     fn set_mem_table(&mut self, buf: &[u8], fd: &mut [Option<OwnedFd>]) -> Result<(), Error> {
         const _: () = assert!(
             u64::MAX as usize as u64 == u64::MAX,
@@ -205,15 +211,23 @@ impl<T: Allocator> FrontendRequestQueuePairInternals<T> {
         let has_fd = (msg.value & 0x100u64) == 0;
         let file = match (has_fd, files) {
             (false, &mut []) => None,
-            (true, &mut [ref mut something]) if something.is_some() => something.take(),
+            (true, &mut [ref mut something]) => {
+                let Some(fd) = something.take() else {
+                    return Err(Error::InvalidMessage);
+                };
+                match self.checker.convert_to_eventfd(fd) {
+                    Ok(fd) => Some(fd),
+                    Err((_, eventfd_checker::Error::NotEventFd)) => {
+                        return Err(Error::InvalidMessage);
+                    }
+                    Err((_, eventfd_checker::Error::IO(e))) => {
+                        return Err(Error::ReqHandlerError(e));
+                    }
+                }
+            }
             _ => return Err(Error::InvalidMessage),
         };
 
-        let file = file.map(|fd: OwnedFd| {
-            // SAFETY: into_raw_fd returns valid Fd and the eventfd
-            // is only used in operations that reject non-eventfds
-            unsafe { EventFd::from_raw_fd(fd.into_raw_fd()) }
-        });
         Ok((queue, file))
     }
     fn handle_ioeventfd_req(
@@ -226,11 +240,7 @@ impl<T: Allocator> FrontendRequestQueuePairInternals<T> {
             FrontendReq::SET_VRING_CALL => (self.handle_vring_fd_request(buf, files)?, 0),
             FrontendReq::SET_VRING_ERR => (self.handle_vring_fd_request(buf, files)?, 1),
             FrontendReq::SET_LOG_FD if buf.is_empty() && files.len() == 1 => {
-                let f = files[0].take().unwrap();
-                // SAFETY: into_raw_fd returns valid Fd and the eventfd
-                // is only used in operations that reject non-eventfds
-                let f = unsafe { EventFd::from_raw_fd(f.into_raw_fd()) };
-                ((0, Some(f)), 2)
+                (self.handle_vring_fd_request(buf, files)?, 2)
             }
             FrontendReq::SET_LOG_FD => return Err(Error::InvalidMessage),
             _ => unreachable!(),
@@ -238,19 +248,12 @@ impl<T: Allocator> FrontendRequestQueuePairInternals<T> {
         let fd_offset: u64 = queue as u64 + self.queues as u64 * queue_offset;
         let mut ioeventfds = self.ioeventfds.lock().unwrap();
         let offset: u64 = ioeventfds.offset + 4u64 * fd_offset;
-        let offset = IoEventAddress::Mmio(offset);
         let fd_offset = usize::try_from(fd_offset).unwrap();
         if let Some(fd) = ioeventfds.fds[fd_offset].take() {
-            self.vm
-                .as_ref()
-                .unregister_ioevent(&fd, &offset)
-                .expect("TODO");
+            self.vm.unregister_ioevent(fd, offset);
         }
         if let Some(fd) = fd {
-            self.vm
-                .as_ref()
-                .register_ioevent(&fd, &offset, None)
-                .expect("TODO");
+            self.vm.register_ioevent(&fd, offset);
             ioeventfds.fds[fd_offset] = Some(fd);
         }
         Ok(())
@@ -261,8 +264,6 @@ impl<T: Allocator> FrontendRequestQueuePairInternals<T> {
         msg: VhostUserMsgHeader,
         buf: &mut [u8],
         fd: &mut [Option<OwnedFd>],
-        socket_cb: &mut dyn FnMut(UnixStream, &mut EpollHelper) -> Result<(), Error>,
-        helper: &mut EpollHelper,
     ) -> Result<(), Error> {
         let req = FrontendReq::try_from(msg.request).or(Err(Error::InvalidMessage))?;
         match req {
@@ -305,18 +306,8 @@ impl<T: Allocator> FrontendRequestQueuePairInternals<T> {
                     let (index, fd) = self.handle_vring_fd_request(
                         buf,
                         fd)?;
-                        let fd = fd.map(|fd|
-                        // SAFETY: into_raw_fd returns valid Fd and the eventfd
-                        // is only used in operations that reject non-eventfds
-                        unsafe {
-                            EventFd::from_raw_fd(fd.into_raw_fd())
-                        });
-                        self.interrupt_cb
-                        .set_notifier(index.into(), fd, &*self.vm)
-                        .map_err(|e| {
-                            error!("Cannot set vring kick notifier: {e}");
-                            vhost::vhost_user::Error::BackendInternalError
-                        })
+                    self.vm.register_vring_kick(fd, index);
+                    Ok(())
                 }
 
                 FrontendReq::ADD_MEM_REG => {
@@ -358,10 +349,14 @@ impl<T: Allocator> FrontendRequestQueuePairInternals<T> {
 
                 FrontendReq::SET_BACKEND_REQ_FD => {
                     let file = Self::get_single_file(fd)?;
+                    if self.seen_backend_req_socket {
+                        return Err(Error::InvalidOperation("Backend request FD already sent"))
+                    }                    self.seen_backend_req_socket = true;
+
                     let socket = check_is_stream_socket(file).map_err(
                         Error::ReqHandlerError
                     )?;
-                    socket_cb(socket, helper)?;
+                    self.vm.backend_request_socket(socket);
                     Ok(())
                 }
 
@@ -418,6 +413,7 @@ impl<T: Allocator> FrontendRequestQueuePairInternals<T> {
                 | FrontendReq::SET_STATUS
                 | FrontendReq::GET_STATUS => Ok(())
         }?;
+
         Ok(())
     }
 
@@ -430,61 +426,58 @@ impl<T: Allocator> FrontendRequestQueuePairInternals<T> {
     }
 }
 
-impl<T: Allocator> FrontendRequestQueuePair<T> {
-    pub(super) fn new(
+impl<T: Allocator, U: VM> FrontendRequestQueuePair<T, U> {
+    pub fn new(
         queue_pair: queue_pair::VirtioVhostUserQueuePair,
         mapping: super::mapping::Mapping<T>,
         ioeventfds: Arc<Mutex<IoEventFds>>,
         queues: u8,
-        vm: Arc<dyn hypervisor::Vm>,
-        interrupt_cb: Arc<dyn VirtioInterrupt>,
+        vm: U,
     ) -> Self {
         Self {
             queue_pair,
             internals: FrontendRequestQueuePairInternals {
+                checker: EventfdChecker::new()
+                    .expect("cannot create eventfd checker, you're out of resources"),
                 mapping,
                 ioeventfds,
                 queues,
-                vm,
                 seen_log_mapping: false,
-                interrupt_cb,
+                vm,
+                seen_backend_req_socket: false,
             },
         }
     }
 
-    pub(super) fn process_replies(
+    pub fn vm_mut(&mut self) -> &mut U {
+        &mut self.internals.vm
+    }
+
+    pub fn vm(&mut self) -> &U {
+        &self.internals.vm
+    }
+
+    pub fn process_replies(
         &mut self,
         access_platform: Option<Translate>,
         max_iterations: usize,
-    ) -> std::result::Result<(FdRearm, bool), vhost::vhost_user::Error> {
+    ) -> Result<(FdRearm, bool), vhost::vhost_user::Error> {
         self.queue_pair
             .process_outgoing(access_platform, max_iterations, &mut |hdr, buf| {
                 validate_reply(hdr, buf)
             })
     }
-    pub(super) fn process_requests(
+    pub fn process_requests(
         &mut self,
         access_platform: Option<Translate>,
         max_iterations: usize,
-        helper: &mut EpollHelper,
-        cb: &mut dyn FnMut(UnixStream, &mut EpollHelper) -> Result<(), Error>,
     ) -> std::result::Result<(FdRearm, bool), vhost::vhost_user::Error> {
         self.queue_pair
             .process_incoming(access_platform, max_iterations, &mut |hdr, buf, files| {
-                self.internals.process_incoming(hdr, buf, files, cb, helper)
+                self.internals.process_incoming(hdr, buf, files)
             })
     }
-    pub(super) fn register_epoll_events(
-        &mut self,
-        helper: &mut EpollHelper,
-        base: u16,
-    ) -> Result<(), crate::EpollHelperError> {
-        self.queue_pair.register_epoll_events(helper, base)
-    }
-
-    pub(super) fn trigger(&self, queue: u16) -> Result<(), std::io::Error> {
-        self.internals
-            .interrupt_cb
-            .trigger(VirtioInterruptType::Queue(queue))
+    pub fn fds(&self) -> Fds<'_> {
+        self.queue_pair.fds()
     }
 }

@@ -21,7 +21,7 @@
 use std::ffi::c_void;
 use std::fs::File;
 use std::io::ErrorKind;
-use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd as _, BorrowedFd, FromRawFd as _, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::process;
 
@@ -37,8 +37,6 @@ use vm_memory::{
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::sock_ctrl_msg::ScmSocket as _;
 
-use crate::{EpollHelper, EpollHelperError};
-
 // SAFETY: is POD
 unsafe impl ByteValued for VhostUserMsgHeader {}
 #[repr(C, packed)]
@@ -49,25 +47,21 @@ pub struct VhostUserMsgHeader {
     pub size: u32,
 }
 
-pub(super) type Translate<'a> =
-    &'a mut dyn FnMut(GuestAddress, usize) -> std::io::Result<GuestAddress>;
+pub type Translate<'a> = &'a mut dyn FnMut(GuestAddress, usize) -> std::io::Result<GuestAddress>;
 
-#[repr(u16)]
-pub(super) enum Events {
-    QueueIn = 0,
-    QueueOut = 1,
-    SocketIn = 2,
-    SocketOut = 3,
-    Total = 4,
-}
-
-pub(super) enum FdRearm {
+pub enum FdRearm {
     Neither,
     Socket,
     Queue,
 }
 
-pub(super) struct VirtioVhostUserQueuePair {
+pub struct Fds<'a> {
+    pub queue_in: &'a EventFd,
+    pub queue_out: &'a EventFd,
+    pub socket: Option<BorrowedFd<'a>>,
+}
+
+pub struct VirtioVhostUserQueuePair {
     front2back_queue: Queue,
     back2front_queue: Queue,
     front2back_queue_evt: EventFd,
@@ -92,7 +86,7 @@ fn validate_hdr(buf: &mut [u8]) -> Result<(VhostUserMsgHeader, &mut [u8]), Error
 }
 
 impl VirtioVhostUserQueuePair {
-    pub(super) fn new(
+    pub fn new(
         front2back_queue: Queue,
         back2front_queue: Queue,
         front2back_queue_evt: EventFd,
@@ -117,7 +111,7 @@ impl VirtioVhostUserQueuePair {
     /// Sets the file descriptor to use for the socket.
     /// Does not close the socket on success
     /// (so socket.as_raw_fd() is still a valid fd).
-    pub(super) fn set_socket(&mut self, socket: UnixStream) -> Result<(), Error> {
+    pub fn set_socket(&mut self, socket: UnixStream) -> Result<(), Error> {
         if self.socket.is_some() {
             return Err(Error::InvalidMessage);
         }
@@ -125,28 +119,12 @@ impl VirtioVhostUserQueuePair {
         Ok(())
     }
 
-    pub(super) fn register_epoll_events(
-        &mut self,
-        helper: &mut EpollHelper,
-        base: u16,
-    ) -> Result<(), EpollHelperError> {
-        helper.add_event(
-            self.front2back_queue_evt.as_raw_fd(),
-            base + Events::QueueIn as u16,
-        )?;
-        helper.add_event(
-            self.back2front_queue_evt.as_raw_fd(),
-            base + Events::QueueOut as u16,
-        )?;
-        if let Some(socket) = &self.socket {
-            helper.add_event(socket.as_raw_fd(), base + Events::SocketIn as u16)?;
-            helper.add_event_custom(
-                socket.as_raw_fd(),
-                base + Events::SocketOut as u16,
-                epoll::Events::EPOLLOUT,
-            )?;
+    pub fn fds(&self) -> Fds<'_> {
+        Fds {
+            queue_in: &self.front2back_queue_evt,
+            queue_out: &self.back2front_queue_evt,
+            socket: self.socket.as_ref().map(AsFd::as_fd),
         }
-        Ok(())
     }
 
     /// Send an outgoing message if possible.
