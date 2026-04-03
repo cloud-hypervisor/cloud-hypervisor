@@ -3858,16 +3858,16 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<(PciBdf, String)> {
-        let vfio_name = if let Some(id) = &device_cfg.id {
+        let vfio_name = if let Some(id) = &device_cfg.pci_common.id {
             id.clone()
         } else {
             let id = self.next_device_name(VFIO_DEVICE_NAME_PREFIX)?;
-            device_cfg.id = Some(id.clone());
+            device_cfg.pci_common.id = Some(id.clone());
             id
         };
 
         let (pci_segment_id, pci_device_bdf, resources) =
-            self.pci_resources(&vfio_name, device_cfg.pci_segment)?;
+            self.pci_resources(&vfio_name, device_cfg.pci_common.pci_segment)?;
 
         let mut needs_dma_mapping = false;
 
@@ -3884,7 +3884,7 @@ impl DeviceManager {
         // container/group. The VFIO cdev and iommufd do not have such a
         // limitation, and this will be revised once we have VFIO cdev and
         // iommufd support.
-        let vfio_ops = if device_cfg.iommu {
+        let vfio_ops = if device_cfg.pci_common.iommu {
             let vfio_ops = self.create_vfio_ops()?;
 
             let vfio_mapping = Arc::new(VfioDmaMapping::new(
@@ -3989,7 +3989,7 @@ impl DeviceManager {
             vfio_ops,
             self.msi_interrupt_manager.clone(),
             legacy_interrupt_group,
-            device_cfg.iommu,
+            device_cfg.pci_common.iommu,
             vfio_p2p_dma,
             pci_device_bdf,
             memory_manager.lock().unwrap().memory_slot_allocator(),
@@ -4104,7 +4104,7 @@ impl DeviceManager {
         if let Some(device_list_cfg) = &mut devices {
             for device_cfg in device_list_cfg.iter_mut() {
                 let (device_id, _) = self.add_passthrough_device(device_cfg)?;
-                if device_cfg.iommu && self.iommu_device.is_some() {
+                if device_cfg.pci_common.iommu && self.iommu_device.is_some() {
                     iommu_attached_device_ids.push(device_id);
                 }
             }
@@ -4630,16 +4630,18 @@ impl DeviceManager {
         &mut self,
         device_cfg: &mut DeviceConfig,
     ) -> DeviceManagerResult<PciDeviceInfo> {
-        self.validate_identifier(&device_cfg.id)?;
+        self.validate_identifier(&device_cfg.pci_common.id)?;
 
-        if device_cfg.iommu && !self.is_iommu_segment(device_cfg.pci_segment) {
+        if device_cfg.pci_common.iommu && !self.is_iommu_segment(device_cfg.pci_common.pci_segment)
+        {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
         let (bdf, device_name) = self.add_passthrough_device(device_cfg)?;
 
         // Update the PCIU bitmap
-        self.pci_segments[device_cfg.pci_segment as usize].pci_devices_up |= 1 << bdf.device();
+        self.pci_segments[device_cfg.pci_common.pci_segment as usize].pci_devices_up |=
+            1 << bdf.device();
 
         Ok(PciDeviceInfo {
             id: device_name,
