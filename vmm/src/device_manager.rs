@@ -3150,11 +3150,11 @@ impl DeviceManager {
         &mut self,
         generic_vhost_user_cfg: &mut GenericVhostUserConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &generic_vhost_user_cfg.id {
+        let id = if let Some(id) = &generic_vhost_user_cfg.pci_common.id {
             id.clone()
         } else {
             let id = self.next_device_name(GENERIC_VHOST_USER_DEVICE_NAME_PREFIX)?;
-            generic_vhost_user_cfg.id = Some(id.clone());
+            generic_vhost_user_cfg.pci_common.id = Some(id.clone());
             id
         };
 
@@ -3191,7 +3191,7 @@ impl DeviceManager {
                     as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
                 iommu: false,
                 id,
-                pci_segment: generic_vhost_user_cfg.pci_segment,
+                pci_segment: generic_vhost_user_cfg.pci_common.pci_segment,
                 dma_handler: None,
             })
         } else {
@@ -5049,7 +5049,7 @@ impl DeviceManager {
         &mut self,
         generic_vhost_user_cfg: &mut GenericVhostUserConfig,
     ) -> DeviceManagerResult<PciDeviceInfo> {
-        self.validate_identifier(&generic_vhost_user_cfg.id)?;
+        self.validate_identifier(&generic_vhost_user_cfg.pci_common.id)?;
 
         let device = self.make_generic_vhost_user_device(generic_vhost_user_cfg)?;
         self.hotplug_virtio_pci_device(device)
