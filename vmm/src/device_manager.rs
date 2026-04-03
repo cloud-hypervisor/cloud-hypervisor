@@ -3282,11 +3282,11 @@ impl DeviceManager {
         &mut self,
         pmem_cfg: &mut PmemConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &pmem_cfg.id {
+        let id = if let Some(id) = &pmem_cfg.pci_common.id {
             id.clone()
         } else {
             let id = self.next_device_name(PMEM_DEVICE_NAME_PREFIX)?;
-            pmem_cfg.id = Some(id.clone());
+            pmem_cfg.pci_common.id = Some(id.clone());
             id
         };
 
@@ -3358,7 +3358,7 @@ impl DeviceManager {
         let (region_base, region_size) = if let Some((base, size)) = region_range {
             // The memory needs to be 2MiB aligned in order to support
             // hugepages.
-            self.pci_segments[pmem_cfg.pci_segment as usize]
+            self.pci_segments[pmem_cfg.pci_common.pci_segment as usize]
                 .mem64_allocator
                 .lock()
                 .unwrap()
@@ -3373,7 +3373,7 @@ impl DeviceManager {
         } else {
             // The memory needs to be 2MiB aligned in order to support
             // hugepages.
-            let base = self.pci_segments[pmem_cfg.pci_segment as usize]
+            let base = self.pci_segments[pmem_cfg.pci_common.pci_segment as usize]
                 .mem64_allocator
                 .lock()
                 .unwrap()
@@ -3421,7 +3421,7 @@ impl DeviceManager {
                 file,
                 GuestAddress(region_base),
                 mapping,
-                self.force_iommu | pmem_cfg.iommu,
+                self.force_iommu | pmem_cfg.pci_common.iommu,
                 self.seccomp_action.clone(),
                 self.exit_evt
                     .try_clone()
@@ -3444,9 +3444,9 @@ impl DeviceManager {
         Ok(MetaVirtioDevice {
             virtio_device: Arc::clone(&virtio_pmem_device)
                 as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
-            iommu: pmem_cfg.iommu,
+            iommu: pmem_cfg.pci_common.iommu,
             id,
-            pci_segment: pmem_cfg.pci_segment,
+            pci_segment: pmem_cfg.pci_common.pci_segment,
             dma_handler: None,
         })
     }
@@ -5056,9 +5056,9 @@ impl DeviceManager {
     }
 
     pub fn add_pmem(&mut self, pmem_cfg: &mut PmemConfig) -> DeviceManagerResult<PciDeviceInfo> {
-        self.validate_identifier(&pmem_cfg.id)?;
+        self.validate_identifier(&pmem_cfg.pci_common.id)?;
 
-        if pmem_cfg.iommu && !self.is_iommu_segment(pmem_cfg.pci_segment) {
+        if pmem_cfg.pci_common.iommu && !self.is_iommu_segment(pmem_cfg.pci_common.pci_segment) {
             return Err(DeviceManagerError::InvalidIommuHotplug);
         }
 
