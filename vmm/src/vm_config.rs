@@ -607,13 +607,9 @@ impl ApplyLandlock for DebugConsoleConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DeviceConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub path: PathBuf,
-    #[serde(default)]
-    pub iommu: bool,
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub pci_segment: u16,
     #[serde(default)]
     pub x_nv_gpudirect_clique: Option<u8>,
 }
