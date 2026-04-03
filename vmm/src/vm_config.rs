@@ -273,6 +273,16 @@ pub struct VirtQueueAffinity {
     pub host_cpus: Vec<usize>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub struct PciDeviceCommonConfig {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "<&bool as std::ops::Not>::not")]
+    pub iommu: bool,
+    #[serde(default)]
+    pub pci_segment: u16,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DiskConfig {
     pub path: Option<PathBuf>,
