@@ -637,15 +637,11 @@ impl ApplyLandlock for UserDeviceConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VdpaConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub path: PathBuf,
     #[serde(default = "default_vdpaconfig_num_queues")]
     pub num_queues: usize,
-    #[serde(default)]
-    pub iommu: bool,
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub pci_segment: u16,
 }
 
 pub fn default_vdpaconfig_num_queues() -> usize {
