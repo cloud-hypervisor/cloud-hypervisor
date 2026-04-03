@@ -1907,6 +1907,14 @@ fn main() {
             .unwrap_or_default(),
     });
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        if overrides.vm_type == GuestVmType::Confidential {
+            eprintln!("Confidential VM is currently not supported on Arm64");
+            std::process::exit(1);
+        }
+    }
+
     // Skip heavy VM level init/cleanup when only micro benchmarks are selected.
     let needs_vm_tests = tests_to_run.iter().any(|t| !t.name.starts_with("micro_"));
 
