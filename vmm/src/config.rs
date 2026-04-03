@@ -1884,20 +1884,14 @@ impl FsConfig {
             .map_err(Error::ParseFileSystem)?
             .unwrap_or_else(default_fsconfig_num_queues);
 
-        let id = parser.get("id");
-
-        let pci_segment = parser
-            .convert("pci_segment")
-            .map_err(Error::ParseFileSystem)?
-            .unwrap_or_default();
+        let pci_common = PciDeviceCommonConfig::parse(fs)?;
 
         Ok(FsConfig {
+            pci_common,
             tag,
             socket,
             num_queues,
             queue_size,
-            id,
-            pci_segment,
         })
     }
 
@@ -1909,19 +1903,11 @@ impl FsConfig {
             ));
         }
 
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-            {
-                return Err(ValidationError::IommuNotSupportedOnSegment(
-                    self.pci_segment,
-                ));
-            }
+        if self.pci_common.iommu {
+            return Err(ValidationError::IommuNotSupported);
         }
+
+        self.pci_common.validate(vm_config)?;
 
         Ok(())
     }
@@ -2999,7 +2985,7 @@ impl VmConfig {
             for fs in fses {
                 fs.validate(self)?;
 
-                Self::validate_identifier(&mut id_list, &fs.id)?;
+                Self::validate_identifier(&mut id_list, &fs.pci_common.id)?;
             }
         }
 
@@ -3470,7 +3456,7 @@ impl VmConfig {
         // Remove if fs device
         if let Some(fs) = self.fs.as_mut() {
             let len = fs.len();
-            fs.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            fs.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= fs.len() != len;
         }
 
@@ -4115,12 +4101,11 @@ mod unit_tests {
 
     fn fs_fixture() -> FsConfig {
         FsConfig {
+            pci_common: PciDeviceCommonConfig::default(),
             socket: PathBuf::from("/tmp/sock"),
             tag: "mytag".to_owned(),
             num_queues: 1,
             queue_size: 1024,
-            id: None,
-            pci_segment: 0,
         }
     }
 
@@ -5328,7 +5313,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         }]);
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::IommuNotSupportedOnSegment(1))
+            Err(ValidationError::OnIommuSegment(1))
         );
 
         let mut invalid_config = valid_config.clone();
@@ -5352,12 +5337,15 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.fs = Some(vec![FsConfig {
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..fs_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::IommuNotSupportedOnSegment(1))
+            Err(ValidationError::OnIommuSegment(1))
         );
 
         let mut invalid_config = valid_config.clone();
