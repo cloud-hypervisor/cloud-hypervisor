@@ -633,11 +633,9 @@ impl ApplyLandlock for DeviceConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct UserDeviceConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub socket: PathBuf,
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub pci_segment: u16,
 }
 
 impl ApplyLandlock for UserDeviceConfig {
