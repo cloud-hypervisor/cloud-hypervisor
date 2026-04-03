@@ -1501,11 +1501,6 @@ impl NetConfig {
             .unwrap_or(Toggle(true))
             .0;
         let mtu = parser.convert("mtu").map_err(Error::ParseNetwork)?;
-        let iommu = parser
-            .convert::<Toggle>("iommu")
-            .map_err(Error::ParseNetwork)?
-            .unwrap_or(Toggle(false))
-            .0;
         let queue_size = parser
             .convert("queue_size")
             .map_err(Error::ParseNetwork)?
@@ -1524,15 +1519,10 @@ impl NetConfig {
             .convert("vhost_mode")
             .map_err(Error::ParseNetwork)?
             .unwrap_or_default();
-        let id = parser.get("id");
         let fds = parser
             .convert::<IntegerList>("fd")
             .map_err(Error::ParseNetwork)?
             .map(|v| v.0.iter().map(|e| *e as i32).collect());
-        let pci_segment = parser
-            .convert("pci_segment")
-            .map_err(Error::ParseNetwork)?
-            .unwrap_or_default();
         let bw_size = parser
             .convert("bw_size")
             .map_err(Error::ParseNetwork)?
@@ -1584,23 +1574,23 @@ impl NetConfig {
             None
         };
 
+        let pci_common = PciDeviceCommonConfig::parse(net)?;
+
         let config = NetConfig {
+            pci_common,
             tap,
             ip,
             mask,
             mac,
             host_mac,
             mtu,
-            iommu,
             num_queues,
             queue_size,
             vhost_user,
             vhost_socket,
             vhost_mode,
-            id,
             fds,
             rate_limiter_config,
-            pci_segment,
             offload_tso,
             offload_ufo,
             offload_csum,
@@ -1609,6 +1599,8 @@ impl NetConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        self.pci_common.validate(vm_config)?;
+
         if self.num_queues < 2 {
             return Err(ValidationError::VnetQueueLowerThan2(self.num_queues));
         }
@@ -1636,21 +1628,8 @@ impl NetConfig {
             ));
         }
 
-        if self.vhost_user && self.iommu {
+        if self.vhost_user && self.pci_common.iommu {
             return Err(ValidationError::IommuNotSupported);
-        }
-
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-                && !self.iommu
-            {
-                return Err(ValidationError::OnIommuSegment(self.pci_segment));
-            }
         }
 
         if let Some(mtu) = self.mtu
@@ -2718,6 +2697,7 @@ impl RestoreConfig {
         for net_fds in vm_config.net.iter().flatten() {
             if let Some(expected_fds) = &net_fds.fds {
                 let expected_id = net_fds
+                    .pci_common
                     .id
                     .as_ref()
                     .expect("Invalid 'NetConfig' with empty 'id' for VM restore.");
@@ -3006,9 +2986,9 @@ impl VmConfig {
                     return Err(ValidationError::VhostUserRequiresSharedMemory);
                 }
                 net.validate(self)?;
-                self.iommu |= net.iommu;
+                self.iommu |= net.pci_common.iommu;
 
-                Self::validate_identifier(&mut id_list, &net.id)?;
+                Self::validate_identifier(&mut id_list, &net.pci_common.id)?;
             }
         }
 
@@ -3504,7 +3484,7 @@ impl VmConfig {
         // Remove if net device
         if let Some(net) = self.net.as_mut() {
             let len = net.len();
-            net.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            net.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= net.len() != len;
         }
 
@@ -4007,22 +3987,20 @@ mod unit_tests {
 
     fn net_fixture() -> NetConfig {
         NetConfig {
+            pci_common: PciDeviceCommonConfig::default(),
             tap: None,
             ip: None,
             mask: None,
             mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
             host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
             mtu: None,
-            iommu: false,
             num_queues: 2,
             queue_size: 256,
             vhost_user: false,
             vhost_socket: None,
             vhost_mode: VhostMode::Client,
-            id: None,
             fds: None,
             rate_limiter_config: None,
-            pci_segment: 0,
             offload_tso: true,
             offload_ufo: true,
             offload_csum: true,
@@ -4040,7 +4018,10 @@ mod unit_tests {
         assert_eq!(
             NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,id=mynet0")?,
             NetConfig {
-                id: Some("mynet0".to_owned()),
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("mynet0".to_owned()),
+                    ..Default::default()
+                },
                 ..net_fixture()
             }
         );
@@ -4073,9 +4054,12 @@ mod unit_tests {
                 "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,num_queues=4,queue_size=1024,iommu=on"
             )?,
             NetConfig {
+                pci_common: PciDeviceCommonConfig {
+                    iommu: true,
+                    ..Default::default()
+                },
                 num_queues: 4,
                 queue_size: 1024,
-                iommu: true,
                 ..net_fixture()
             }
         );
@@ -4699,19 +4683,28 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             preserved_fds: None,
             net: Some(vec![
                 NetConfig {
-                    id: Some("net0".to_owned()),
+                    pci_common: PciDeviceCommonConfig {
+                        id: Some("net0".to_owned()),
+                        ..Default::default()
+                    },
                     num_queues: 2,
                     fds: Some(vec![-1, -1, -1, -1]),
                     ..net_fixture()
                 },
                 NetConfig {
-                    id: Some("net1".to_owned()),
+                    pci_common: PciDeviceCommonConfig {
+                        id: Some("net1".to_owned()),
+                        ..Default::default()
+                    },
                     num_queues: 1,
                     fds: Some(vec![-1, -1]),
                     ..net_fixture()
                 },
                 NetConfig {
-                    id: Some("net2".to_owned()),
+                    pci_common: PciDeviceCommonConfig {
+                        id: Some("net2".to_owned()),
+                        ..Default::default()
+                    },
                     fds: None,
                     ..net_fixture()
                 },
@@ -4806,7 +4799,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             resume: false,
         };
         snapshot_vm_config.net = Some(vec![NetConfig {
-            id: Some("net2".to_owned()),
+            pci_common: PciDeviceCommonConfig {
+                id: Some("net2".to_owned()),
+                ..Default::default()
+            },
             fds: None,
             ..net_fixture()
         }]);
@@ -5187,8 +5183,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         still_valid_config.net = Some(vec![NetConfig {
-            iommu: true,
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                iommu: true,
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..net_fixture()
         }]);
         still_valid_config.validate().unwrap();
@@ -5255,8 +5254,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.net = Some(vec![NetConfig {
-            iommu: false,
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                iommu: false,
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..net_fixture()
         }]);
         assert_eq!(
