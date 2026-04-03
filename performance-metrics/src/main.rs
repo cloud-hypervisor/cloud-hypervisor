@@ -1419,6 +1419,14 @@ fn main() {
             .unwrap_or_default(),
     });
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        if overrides.vm_type == Some(GuestVmType::Confidential) {
+            eprintln!("CVM is currently not supported on AArch64");
+            std::process::exit(1);
+        }
+    }
+
     // Skip heavy VM level init/cleanup when only micro benchmarks are selected.
     let needs_vm_tests = tests_to_run.iter().any(|t| !t.name.starts_with("micro_"));
 
