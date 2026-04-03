@@ -815,7 +815,9 @@ pub struct FwCfgItem {
     #[serde(default)]
     pub name: String,
     #[serde(default)]
-    pub file: PathBuf,
+    pub file: Option<PathBuf>,
+    #[serde(default)]
+    pub string: Option<String>,
 }
 
 #[cfg(feature = "fw_cfg")]

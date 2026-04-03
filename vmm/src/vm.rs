@@ -370,6 +370,10 @@ pub enum Error {
     AddingFwCfgItem(#[source] io::Error),
 
     #[cfg(feature = "fw_cfg")]
+    #[error("Invalid fw_cfg item config: exactly one of 'file' or 'string' is required")]
+    InvalidFwCfgItemConfig,
+
+    #[cfg(feature = "fw_cfg")]
     #[error("Error populating fw_cfg")]
     ErrorPopulatingFwCfg(#[source] io::Error),
 
@@ -1143,15 +1147,22 @@ impl Vm {
             initramfs_option = initramfs;
         }
         let mut fw_cfg_item_list_option: Option<Vec<FwCfgItem>> = None;
-        if let Some(fw_cfg_files) = &fw_cfg_config.items {
+        if let Some(fw_cfg_items) = &fw_cfg_config.items {
             let mut fw_cfg_item_list = vec![];
-            for fw_cfg_file in fw_cfg_files.item_list.clone() {
-                fw_cfg_item_list.push(FwCfgItem {
-                    name: fw_cfg_file.name,
-                    content: devices::legacy::fw_cfg::FwCfgContent::File(
+            for fw_cfg_item in fw_cfg_items.item_list.clone() {
+                let content = match (fw_cfg_item.string, fw_cfg_item.file) {
+                    (Some(string_val), None) => {
+                        devices::legacy::fw_cfg::FwCfgContent::Bytes(string_val.into_bytes())
+                    }
+                    (None, Some(file_path)) => devices::legacy::fw_cfg::FwCfgContent::File(
                         0,
-                        File::open(fw_cfg_file.file).map_err(Error::AddingFwCfgItem)?,
+                        File::open(file_path).map_err(Error::AddingFwCfgItem)?,
                     ),
+                    _ => return Err(Error::InvalidFwCfgItemConfig),
+                };
+                fw_cfg_item_list.push(FwCfgItem {
+                    name: fw_cfg_item.name,
+                    content,
                 });
             }
             fw_cfg_item_list_option = Some(fw_cfg_item_list);
