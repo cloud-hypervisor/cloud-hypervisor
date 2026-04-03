@@ -1861,11 +1861,7 @@ impl GenericVhostUserConfig {
             }
             _ => {}
         }
-        let id = parser.get("id");
-        let pci_segment = parser
-            .convert("pci_segment")
-            .map_err(Error::ParseGenericVhostUser)?
-            .unwrap_or_default();
+        let pci_common = PciDeviceCommonConfig::parse(vhost_user)?;
         let mut converted_queue_sizes: Vec<u16> = Vec::new();
         for (offset, &queue_size) in queue_sizes.iter().enumerate() {
             match queue_size.try_into() {
@@ -1879,30 +1875,19 @@ impl GenericVhostUserConfig {
         }
 
         Ok(GenericVhostUserConfig {
+            pci_common,
             socket: socket.into(),
             device_type,
-            id,
-            pci_segment,
             queue_sizes: converted_queue_sizes,
         })
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-            {
-                return Err(ValidationError::IommuNotSupportedOnSegment(
-                    self.pci_segment,
-                ));
-            }
+        if self.pci_common.iommu {
+            return Err(ValidationError::IommuNotSupported);
         }
 
-        Ok(())
+        self.pci_common.validate(vm_config)
     }
 }
 
@@ -3054,7 +3039,7 @@ impl VmConfig {
             for generic_vhost_user_device in generic_vhost_user_devices {
                 generic_vhost_user_device.validate(self)?;
 
-                Self::validate_identifier(&mut id_list, &generic_vhost_user_device.id)?;
+                Self::validate_identifier(&mut id_list, &generic_vhost_user_device.pci_common.id)?;
             }
         }
 
@@ -3521,7 +3506,8 @@ impl VmConfig {
         // Remove if generic vhost-user device
         if let Some(generic_vhost_user) = self.generic_vhost_user.as_mut() {
             let len = generic_vhost_user.len();
-            generic_vhost_user.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            generic_vhost_user
+                .retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= generic_vhost_user.len() != len;
         }
 
@@ -4292,10 +4278,13 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             assert_eq!(
                 config.unwrap(),
                 GenericVhostUserConfig {
+                    pci_common: PciDeviceCommonConfig {
+                        id: Some(id.to_owned()),
+                        pci_segment: u16::try_from(pci_segment).unwrap(),
+                        ..Default::default()
+                    },
                     socket: socket.into(),
-                    id: Some(id.to_owned()),
                     device_type: u32::try_from(virtio_id).unwrap(),
-                    pci_segment: u16::try_from(pci_segment).unwrap(),
                     queue_sizes: queue_sizes
                         .0
                         .iter()
