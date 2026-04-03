@@ -471,16 +471,14 @@ pub struct PvmemcontrolConfig {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct FsConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub tag: String,
     pub socket: PathBuf,
     #[serde(default = "default_fsconfig_num_queues")]
     pub num_queues: usize,
     #[serde(default = "default_fsconfig_queue_size")]
     pub queue_size: u16,
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub pci_segment: u16,
 }
 
 pub fn default_fsconfig_num_queues() -> usize {
