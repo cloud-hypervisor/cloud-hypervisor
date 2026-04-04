@@ -32,11 +32,12 @@ struct VdpaConfig {
     iommu: bool,
     id: Option<String>,
     pci_segment: u16,
+    pci_device_id: Option<u8>
 }
 ```
 
 ```
---vdpa <vdpa>	vDPA device "path=<device_path>,num_queues=<number_of_queues>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>"
+--vdpa <vdpa>	vDPA device "path=<device_path>,num_queues=<number_of_queues>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>"
 ```
 
 ### `path`
@@ -96,6 +97,21 @@ _Example_
 --vdpa path=/dev/vhost-vdpa-0,pci_segment=1
 ```
 
+### `pci_device_id`
+
+PCI device ID to assign to the vDPA device on its PCI bus.
+
+This parameter is optional. If not specified, a device ID is automatically
+allocated.
+
+Value is an unsigned integer in the range 1-31.
+
+_Example_
+
+```
+--vdpa path=/dev/vhost-vdpa-0,pci_device_id=5
+```
+
 ## Example with vDPA block simulator
 
 The vDPA framework provides a simulator with both `virtio-block` and
@@ -146,10 +162,10 @@ The `virtio-block` device backed by the vDPA simulator can be found as
 ```
 cloud@cloud:~$ lsblk
 NAME    MAJ:MIN RM  SIZE RO TYPE MOUNTPOINT
-nullb0  252:0    0  250G  0 disk 
-vda     254:0    0  2.2G  0 disk 
+nullb0  252:0    0  250G  0 disk
+vda     254:0    0  2.2G  0 disk
 ├─vda1  254:1    0  2.1G  0 part /
-├─vda14 254:14   0    4M  0 part 
+├─vda14 254:14   0    4M  0 part
 └─vda15 254:15   0  106M  0 part /boot/efi
 vdb     254:16   0  128M  0 disk
 ```
