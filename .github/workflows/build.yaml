@@ -64,6 +64,9 @@ jobs:
       - name: Build (sev_snp)
         run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "sev_snp"
 
+      - name: Build (kvm + sev_snp)
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "kvm,igvm,sev_snp,fw_cfg"
+
       - name: Build (igvm)
         run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "igvm"
 
