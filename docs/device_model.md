@@ -90,8 +90,9 @@ feature is enabled by default.
 
 For all virtio devices listed below, only `virtio-pci` transport layer is
 supported. Cloud Hypervisor supports multiple PCI segments, and users can
-append `,pci_segment=<PCI_segment_number>` to the device flag in the Cloud
-Hypervisor command line to assign devices to a specific PCI segment.
+append `,pci_segment=<PCI_segment_number>` or `,pci_device_id=<PCI_device_ID>` to
+the device flag in the Cloud Hypervisor command line to assign devices to a specific
+PCI segment or into a specific device slot.
 
 ### virtio-block
 
