@@ -105,7 +105,7 @@ impl PciSegment {
         };
 
         info!(
-            "Adding PCI segment: id={}, PCI MMIO config address: 0x{:x}, mem32 area [0x{:x}-0x{:x}, mem64 area [0x{:x}-0x{:x}",
+            "Adding PCI segment: id={}, PCI MMIO config address: 0x{:x}, mem32 area [0x{:x}-0x{:x}], mem64 area [0x{:x}-0x{:x}]",
             segment.id,
             segment.mmio_config_address,
             segment.start_of_mem32_area,
