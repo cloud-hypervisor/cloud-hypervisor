@@ -212,6 +212,9 @@ pub enum Error {
     #[cfg(feature = "sev_snp")]
     #[error("Failed to set sev control register")]
     SetSevControlRegister(#[source] hypervisor::HypervisorCpuError),
+    #[cfg(feature = "sev_snp")]
+    #[error("Failed to set up SEV-SNP vCPU registers")]
+    SetupSevSnpRegs(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(target_arch = "x86_64")]
     #[error("Failed to inject NMI")]
@@ -546,6 +549,7 @@ impl Vcpu {
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
         #[cfg(target_arch = "x86_64")] topology: (u16, u16, u16, u16),
         #[cfg(target_arch = "x86_64")] nested: bool,
+        #[cfg(feature = "igvm")] igvm_enabled: bool,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
@@ -558,17 +562,32 @@ impl Vcpu {
             .map_err(Error::VcpuConfiguration)?;
         info!("Configuring vCPU: cpu_id = {}", self.id);
         #[cfg(target_arch = "x86_64")]
-        arch::configure_vcpu(
-            self.vcpu.as_ref(),
-            self.id,
-            boot_setup,
-            cpuid,
-            kvm_hyperv,
-            self.vendor,
-            topology,
-            nested,
-        )
-        .map_err(Error::VcpuConfiguration)?;
+        {
+            // When IGVM is enabled, skip standard register setup here — the IGVM
+            // loader populates vCPU registers from the VMSA via set_sev_control_register
+            // (currently KVM-specific; MSHV handles this through its own import path).
+            // igvm_enabled is kept as an explicit flag rather than derived from sev_snp
+            // state because IGVM could theoretically be used independently of SEV-SNP.
+            cfg_if::cfg_if! {
+                if #[cfg(feature = "igvm")] {
+                    let setup_registers = !igvm_enabled;
+                }  else {
+                    let setup_registers = true;
+                }
+            }
+            arch::configure_vcpu(
+                self.vcpu.as_ref(),
+                self.id,
+                boot_setup,
+                cpuid,
+                kvm_hyperv,
+                self.vendor,
+                topology,
+                nested,
+                setup_registers,
+            )
+            .map_err(Error::VcpuConfiguration)?;
+        }
 
         Ok(())
     }
@@ -626,6 +645,13 @@ impl Vcpu {
         self.vcpu
             .set_sev_control_register(vmsa_pfn)
             .map_err(Error::SetSevControlRegister)
+    }
+
+    #[cfg(feature = "sev_snp")]
+    pub fn setup_sev_snp_regs(&self, vmsa: igvm::snp_defs::SevVmsa) -> Result<()> {
+        self.vcpu
+            .setup_sev_snp_regs(vmsa)
+            .map_err(Error::SetupSevSnpRegs)
     }
 
     ///
@@ -697,6 +723,8 @@ pub struct CpuManager {
     sev_snp_enabled: bool,
     // State of the core scheduling group leader election (VM mode).
     core_scheduling_group_leader: Arc<AtomicI32>,
+    #[cfg(feature = "igvm")]
+    igvm_enabled: bool,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -896,6 +924,7 @@ impl CpuManager {
         #[cfg(feature = "tdx")] tdx_enabled: bool,
         numa_nodes: &NumaNodes,
         #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
+        #[cfg(feature = "igvm")] igvm_enabled: bool,
     ) -> Result<Arc<Mutex<CpuManager>>> {
         if config.max_vcpus > hypervisor.get_max_vcpus() {
             return Err(Error::MaximumVcpusExceeded(
@@ -972,6 +1001,8 @@ impl CpuManager {
             core_scheduling_group_leader: Arc::new(AtomicI32::new(
                 CoreSchedulingLeader::Initial as i32,
             )),
+            #[cfg(feature = "igvm")]
+            igvm_enabled,
         })))
     }
 
@@ -1050,8 +1081,10 @@ impl CpuManager {
         vcpu: &mut Vcpu,
         boot_setup: Option<(EntryPoint, &GuestMemoryAtomic<GuestMemoryMmap>)>,
     ) -> Result<()> {
-        #[cfg(feature = "sev_snp")]
-        if self.sev_snp_enabled {
+        #[cfg(all(feature = "sev_snp", feature = "mshv"))]
+        if self.sev_snp_enabled
+            && self.hypervisor.hypervisor_type() == hypervisor::HypervisorType::Mshv
+        {
             if let Some((kernel_entry_point, _)) = boot_setup {
                 vcpu.set_sev_control_register(
                     kernel_entry_point.entry_addr.0 / crate::igvm::HV_PAGE_SIZE,
@@ -1092,6 +1125,8 @@ impl CpuManager {
             self.config.kvm_hyperv,
             topology,
             self.config.nested,
+            #[cfg(feature = "igvm")]
+            self.igvm_enabled,
         )?;
 
         #[cfg(target_arch = "aarch64")]
@@ -2247,7 +2282,7 @@ impl CpuManager {
         &self.vcpus_kill_signalled
     }
 
-    #[cfg(feature = "igvm")]
+    #[cfg(all(feature = "igvm", feature = "mshv"))]
     pub(crate) fn get_cpuid_leaf(
         &self,
         cpu_id: u8,
