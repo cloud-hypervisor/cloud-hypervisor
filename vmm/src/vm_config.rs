@@ -263,15 +263,27 @@ pub struct VirtQueueAffinity {
     pub host_cpus: Vec<usize>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, Default)]
+pub struct PciDeviceCommonConfig {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "<&bool as std::ops::Not>::not")]
+    pub iommu: bool,
+    #[serde(default)]
+    pub pci_segment: u16,
+    #[serde(default)]
+    pub pci_device_id: Option<u8>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DiskConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub path: Option<PathBuf>,
     #[serde(default)]
     pub readonly: bool,
     #[serde(default)]
     pub direct: bool,
-    #[serde(default)]
-    pub iommu: bool,
     #[serde(default = "default_diskconfig_num_queues")]
     pub num_queues: usize,
     #[serde(default = "default_diskconfig_queue_size")]
@@ -283,16 +295,12 @@ pub struct DiskConfig {
     pub rate_limit_group: Option<String>,
     #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
-    #[serde(default)]
-    pub id: Option<String>,
     // For testing use only. Not exposed in API.
     #[serde(default)]
     pub disable_io_uring: bool,
     // For testing use only. Not exposed in API.
     #[serde(default)]
     pub disable_aio: bool,
-    #[serde(default)]
-    pub pci_segment: u16,
     #[serde(default)]
     pub serial: Option<String>,
     #[serde(default)]
@@ -334,6 +342,8 @@ pub fn default_diskconfig_sparse() -> bool {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct NetConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     #[serde(default = "default_netconfig_tap")]
     pub tap: Option<String>,
     pub ip: Option<IpAddr>,
@@ -344,8 +354,6 @@ pub struct NetConfig {
     pub host_mac: Option<MacAddr>,
     #[serde(default)]
     pub mtu: Option<u16>,
-    #[serde(default)]
-    pub iommu: bool,
     #[serde(default = "default_netconfig_num_queues")]
     pub num_queues: usize,
     #[serde(default = "default_netconfig_queue_size")]
@@ -355,8 +363,6 @@ pub struct NetConfig {
     pub vhost_socket: Option<String>,
     #[serde(default)]
     pub vhost_mode: VhostMode,
-    #[serde(default)]
-    pub id: Option<String>,
     // Special deserialize handling:
     // Therefore, we don't serialize FDs, and whatever value is here after
     // deserialization is invalid.
@@ -367,8 +373,6 @@ pub struct NetConfig {
     pub fds: Option<Vec<i32>>,
     #[serde(default)]
     pub rate_limiter_config: Option<RateLimiterConfig>,
-    #[serde(default)]
-    pub pci_segment: u16,
     #[serde(default = "default_netconfig_true")]
     pub offload_tso: bool,
     #[serde(default = "default_netconfig_true")]
@@ -459,16 +463,14 @@ pub struct PvmemcontrolConfig {}
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct FsConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub tag: String,
     pub socket: PathBuf,
     #[serde(default = "default_fsconfig_num_queues")]
     pub num_queues: usize,
     #[serde(default = "default_fsconfig_queue_size")]
     pub queue_size: u16,
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub pci_segment: u16,
 }
 
 pub fn default_fsconfig_num_queues() -> usize {
@@ -488,12 +490,10 @@ impl ApplyLandlock for FsConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct GenericVhostUserConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub socket: PathBuf,
     pub queue_sizes: Vec<u16>,
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub pci_segment: u16,
     pub device_type: u32,
 }
 
@@ -506,17 +506,13 @@ impl ApplyLandlock for GenericVhostUserConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PmemConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub file: PathBuf,
     #[serde(default)]
     pub size: Option<u64>,
     #[serde(default)]
-    pub iommu: bool,
-    #[serde(default)]
     pub discard_writes: bool,
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub pci_segment: u16,
 }
 
 impl ApplyLandlock for PmemConfig {
@@ -603,13 +599,9 @@ impl ApplyLandlock for DebugConsoleConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct DeviceConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub path: PathBuf,
-    #[serde(default)]
-    pub iommu: bool,
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub pci_segment: u16,
     #[serde(default)]
     pub x_nv_gpudirect_clique: Option<u8>,
 }
@@ -633,11 +625,9 @@ impl ApplyLandlock for DeviceConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct UserDeviceConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub socket: PathBuf,
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub pci_segment: u16,
 }
 
 impl ApplyLandlock for UserDeviceConfig {
@@ -649,15 +639,11 @@ impl ApplyLandlock for UserDeviceConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VdpaConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub path: PathBuf,
     #[serde(default = "default_vdpaconfig_num_queues")]
     pub num_queues: usize,
-    #[serde(default)]
-    pub iommu: bool,
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub pci_segment: u16,
 }
 
 pub fn default_vdpaconfig_num_queues() -> usize {
@@ -673,14 +659,10 @@ impl ApplyLandlock for VdpaConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VsockConfig {
+    #[serde(flatten)]
+    pub pci_common: PciDeviceCommonConfig,
     pub cid: u32,
     pub socket: PathBuf,
-    #[serde(default)]
-    pub iommu: bool,
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub pci_segment: u16,
 }
 
 impl ApplyLandlock for VsockConfig {

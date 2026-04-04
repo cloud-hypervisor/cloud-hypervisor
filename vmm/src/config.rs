@@ -208,6 +208,8 @@ pub enum Error {
     /// Failed Parsing FwCfgItem config
     #[error("Error parsing --fw-cfg-config items")]
     ParseFwCfgItem(#[source] OptionParserError),
+    #[error("Error parsing common PCI device config")]
+    ParsePciDeviceCommonConfig(#[source] OptionParserError),
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]
@@ -314,11 +316,6 @@ pub enum ValidationError {
     /// On a IOMMU segment but not behind IOMMU
     #[error("Device is on an IOMMU PCI segment ({0}) but not placed behind IOMMU")]
     OnIommuSegment(u16),
-    // On a IOMMU segment but IOMMU not supported
-    #[error(
-        "Device is on an IOMMU PCI segment ({0}) but does not support being placed behind IOMMU"
-    )]
-    IommuNotSupportedOnSegment(u16),
     // Identifier is not unique
     #[error("Identifier {0} is not unique")]
     IdentifierNotUnique(String),
@@ -401,6 +398,13 @@ pub enum ValidationError {
     /// Invalid NUMA Configuration
     #[error("NUMA Configuration is invalid")]
     InvalidNumaConfig(String),
+    /// The supplied PCI ID was greater then the max. supported number
+    /// of devices per Bus
+    #[error("Given PCI device ID ({0:02x}) is out of the supported range of 0..31")]
+    InvalidPciDeviceId(u8),
+    /// The supplied PCI ID is reserved
+    #[error("Given PCI device ID ({0:02x}) is reserved")]
+    ReservedPciDeviceId(u8),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -411,6 +415,21 @@ pub fn add_to_config<T>(items: &mut Option<Vec<T>>, item: T) {
     } else {
         *items = Some(vec![item]);
     }
+}
+
+// Check that the PCI device supplied is neither out of range nor does
+// it use any reserved device ID.
+fn validate_pci_device_id(device_id: u8) -> ValidationResult<()> {
+    if device_id >= pci::NUM_DEVICE_IDS {
+        // Check the given ID is not out of range
+        return Err(ValidationError::InvalidPciDeviceId(device_id));
+    } else if device_id == pci::PCI_ROOT_DEVICE_ID {
+        // Check the ID isn't any reserved one. Currently, only the device ID
+        // for the root device is reserved.
+        return Err(ValidationError::ReservedPciDeviceId(device_id));
+    }
+
+    Ok(())
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -1144,6 +1163,63 @@ impl RateLimiterGroupConfig {
     }
 }
 
+impl PciDeviceCommonConfig {
+    const OPTIONS: &[&str] = &["id", "pci_segment", "pci_device_id"];
+    const OPTIONS_IOMMU: &[&str] = &["id", "iommu", "pci_segment", "pci_device_id"];
+
+    pub fn parse(input: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+
+        parser.extend(Self::OPTIONS_IOMMU);
+
+        parser
+            .parse_subset(input)
+            .map_err(Error::ParsePciDeviceCommonConfig)?;
+
+        let id = parser.get("id");
+        let iommu = parser
+            .convert::<Toggle>("iommu")
+            .map_err(Error::ParsePciDeviceCommonConfig)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let pci_segment = parser
+            .convert("pci_segment")
+            .map_err(Error::ParsePciDeviceCommonConfig)?
+            .unwrap_or_default();
+        let pci_device_id = parser
+            .convert::<u8>("pci_device_id")
+            .map_err(Error::ParsePciDeviceCommonConfig)?;
+
+        Ok(Self {
+            id,
+            iommu,
+            pci_segment,
+            pci_device_id,
+        })
+    }
+
+    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        if let Some(platform_config) = vm_config.platform.as_ref() {
+            if self.pci_segment >= platform_config.num_pci_segments {
+                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
+            }
+
+            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
+                && iommu_segments.contains(&self.pci_segment)
+                && !self.iommu
+            {
+                return Err(ValidationError::OnIommuSegment(self.pci_segment));
+            }
+        }
+
+        if let Some(device_id) = self.pci_device_id {
+            validate_pci_device_id(device_id)?;
+        }
+
+        Ok(())
+    }
+}
+
 impl DiskConfig {
     pub const SYNTAX: &'static str = "Disk parameters \
          \"path=<disk_image_path>,readonly=on|off,direct=on|off,iommu=on|off,\
@@ -1151,7 +1227,8 @@ impl DiskConfig {
          vhost_user=on|off,socket=<vhost_user_socket_path>,\
          bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
          ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
-         id=<device_id>,pci_segment=<segment_id>,rate_limit_group=<group_id>,\
+         id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
+         rate_limit_group=<group_id>,\
          queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>,\
          serial=<serial_number>,backing_files=on|off,sparse=on|off,\
          image_type=<raw,qcow2,vhd,vhdx>,lock_granularity=byte-range|full";
@@ -1162,7 +1239,6 @@ impl DiskConfig {
             .add("path")
             .add("readonly")
             .add("direct")
-            .add("iommu")
             .add("queue_size")
             .add("num_queues")
             .add("vhost_user")
@@ -1173,17 +1249,16 @@ impl DiskConfig {
             .add("ops_size")
             .add("ops_one_time_burst")
             .add("ops_refill_time")
-            .add("id")
             .add("_disable_io_uring")
             .add("_disable_aio")
-            .add("pci_segment")
             .add("serial")
             .add("rate_limit_group")
             .add("queue_affinity")
             .add("backing_files")
             .add("sparse")
             .add("image_type")
-            .add("lock_granularity");
+            .add("lock_granularity")
+            .extend(PciDeviceCommonConfig::OPTIONS_IOMMU);
 
         parser.parse(disk).map_err(Error::ParseDisk)?;
 
@@ -1195,11 +1270,6 @@ impl DiskConfig {
             .0;
         let direct = parser
             .convert::<Toggle>("direct")
-            .map_err(Error::ParseDisk)?
-            .unwrap_or(Toggle(false))
-            .0;
-        let iommu = parser
-            .convert::<Toggle>("iommu")
             .map_err(Error::ParseDisk)?
             .unwrap_or(Toggle(false))
             .0;
@@ -1217,7 +1287,6 @@ impl DiskConfig {
             .unwrap_or(Toggle(false))
             .0;
         let vhost_socket = parser.get("socket");
-        let id = parser.get("id");
         let disable_io_uring = parser
             .convert::<Toggle>("_disable_io_uring")
             .map_err(Error::ParseDisk)?
@@ -1228,10 +1297,6 @@ impl DiskConfig {
             .map_err(Error::ParseDisk)?
             .unwrap_or(Toggle(false))
             .0;
-        let pci_segment = parser
-            .convert("pci_segment")
-            .map_err(Error::ParseDisk)?
-            .unwrap_or_default();
         let rate_limit_group = parser.get("rate_limit_group");
         let bw_size = parser
             .convert("bw_size")
@@ -1322,21 +1387,21 @@ impl DiskConfig {
             .unwrap_or_else(|| Toggle(default_diskconfig_sparse()))
             .0;
 
+        let pci_common = PciDeviceCommonConfig::parse(disk)?;
+
         Ok(DiskConfig {
+            pci_common,
             path,
             readonly,
             direct,
-            iommu,
             num_queues,
             queue_size,
             vhost_user,
             vhost_socket,
             rate_limit_group,
             rate_limiter_config,
-            id,
             disable_io_uring,
             disable_aio,
-            pci_segment,
             serial,
             queue_affinity,
             backing_files,
@@ -1347,6 +1412,8 @@ impl DiskConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        self.pci_common.validate(vm_config)?;
+
         if self.num_queues > vm_config.cpus.boot_vcpus as usize {
             return Err(ValidationError::TooManyQueues(
                 self.num_queues,
@@ -1358,21 +1425,8 @@ impl DiskConfig {
             return Err(ValidationError::InvalidQueueSize(self.queue_size));
         }
 
-        if self.vhost_user && self.iommu {
+        if self.vhost_user && self.pci_common.iommu {
             return Err(ValidationError::IommuNotSupported);
-        }
-
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-                && !self.iommu
-            {
-                return Err(ValidationError::OnIommuSegment(self.pci_segment));
-            }
         }
 
         if self.rate_limiter_config.is_some() && self.rate_limit_group.is_some() {
@@ -1416,7 +1470,8 @@ impl NetConfig {
     num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,id=<device_id>,\
     vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,vhost_mode=client|server,\
     bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
-    ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,pci_segment=<segment_id>,\
+    ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
+    pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
     offload_tso=on|off,offload_ufo=on|off,offload_csum=on|off\"";
 
     pub fn parse(net: &str) -> Result<Self> {
@@ -1432,13 +1487,11 @@ impl NetConfig {
             .add("offload_ufo")
             .add("offload_csum")
             .add("mtu")
-            .add("iommu")
             .add("queue_size")
             .add("num_queues")
             .add("vhost_user")
             .add("socket")
             .add("vhost_mode")
-            .add("id")
             .add("fd")
             .add("bw_size")
             .add("bw_one_time_burst")
@@ -1446,7 +1499,7 @@ impl NetConfig {
             .add("ops_size")
             .add("ops_one_time_burst")
             .add("ops_refill_time")
-            .add("pci_segment");
+            .extend(PciDeviceCommonConfig::OPTIONS_IOMMU);
         parser.parse(net).map_err(Error::ParseNetwork)?;
 
         let tap = parser.get("tap");
@@ -1474,11 +1527,6 @@ impl NetConfig {
             .unwrap_or(Toggle(true))
             .0;
         let mtu = parser.convert("mtu").map_err(Error::ParseNetwork)?;
-        let iommu = parser
-            .convert::<Toggle>("iommu")
-            .map_err(Error::ParseNetwork)?
-            .unwrap_or(Toggle(false))
-            .0;
         let queue_size = parser
             .convert("queue_size")
             .map_err(Error::ParseNetwork)?
@@ -1497,15 +1545,10 @@ impl NetConfig {
             .convert("vhost_mode")
             .map_err(Error::ParseNetwork)?
             .unwrap_or_default();
-        let id = parser.get("id");
         let fds = parser
             .convert::<IntegerList>("fd")
             .map_err(Error::ParseNetwork)?
             .map(|v| v.0.iter().map(|e| *e as i32).collect());
-        let pci_segment = parser
-            .convert("pci_segment")
-            .map_err(Error::ParseNetwork)?
-            .unwrap_or_default();
         let bw_size = parser
             .convert("bw_size")
             .map_err(Error::ParseNetwork)?
@@ -1557,23 +1600,23 @@ impl NetConfig {
             None
         };
 
+        let pci_common = PciDeviceCommonConfig::parse(net)?;
+
         let config = NetConfig {
+            pci_common,
             tap,
             ip,
             mask,
             mac,
             host_mac,
             mtu,
-            iommu,
             num_queues,
             queue_size,
             vhost_user,
             vhost_socket,
             vhost_mode,
-            id,
             fds,
             rate_limiter_config,
-            pci_segment,
             offload_tso,
             offload_ufo,
             offload_csum,
@@ -1582,6 +1625,8 @@ impl NetConfig {
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
+        self.pci_common.validate(vm_config)?;
+
         if self.num_queues < 2 {
             return Err(ValidationError::VnetQueueLowerThan2(self.num_queues));
         }
@@ -1609,21 +1654,8 @@ impl NetConfig {
             ));
         }
 
-        if self.vhost_user && self.iommu {
+        if self.vhost_user && self.pci_common.iommu {
             return Err(ValidationError::IommuNotSupported);
-        }
-
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-                && !self.iommu
-            {
-                return Err(ValidationError::OnIommuSegment(self.pci_segment));
-            }
         }
 
         if let Some(mtu) = self.mtu
@@ -1710,7 +1742,7 @@ impl GenericVhostUserConfig {
     \"virtio_id=<ID number for virtio device type (FS, block, net, etc) or symbolic name>,\
     socket=<socket_path>,\
     queue_sizes=<list of queue sizes>,\
-    id=<device_id>,pci_segment=<segment_id>\"";
+    id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(vhost_user: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1718,8 +1750,7 @@ impl GenericVhostUserConfig {
             .add("virtio_id")
             .add("queue_sizes")
             .add("socket")
-            .add("id")
-            .add("pci_segment");
+            .extend(PciDeviceCommonConfig::OPTIONS);
         parser
             .parse(vhost_user)
             .map_err(Error::ParseGenericVhostUser)?;
@@ -1802,11 +1833,7 @@ impl GenericVhostUserConfig {
             }
             _ => {}
         }
-        let id = parser.get("id");
-        let pci_segment = parser
-            .convert("pci_segment")
-            .map_err(Error::ParseGenericVhostUser)?
-            .unwrap_or_default();
+        let pci_common = PciDeviceCommonConfig::parse(vhost_user)?;
         let mut converted_queue_sizes: Vec<u16> = Vec::new();
         for (offset, &queue_size) in queue_sizes.iter().enumerate() {
             match queue_size.try_into() {
@@ -1820,28 +1847,19 @@ impl GenericVhostUserConfig {
         }
 
         Ok(GenericVhostUserConfig {
+            pci_common,
             socket: socket.into(),
             device_type,
-            id,
-            pci_segment,
             queue_sizes: converted_queue_sizes,
         })
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-            {
-                return Err(ValidationError::IommuNotSupportedOnSegment(
-                    self.pci_segment,
-                ));
-            }
+        if self.pci_common.iommu {
+            return Err(ValidationError::IommuNotSupported);
         }
+
+        self.pci_common.validate(vm_config)?;
 
         Ok(())
     }
@@ -1850,7 +1868,8 @@ impl GenericVhostUserConfig {
 impl FsConfig {
     pub const SYNTAX: &'static str = "virtio-fs parameters \
     \"tag=<tag_name>,socket=<socket_path>,num_queues=<number_of_queues>,\
-    queue_size=<size_of_each_queue>,id=<device_id>,pci_segment=<segment_id>\"";
+    queue_size=<size_of_each_queue>,id=<device_id>,\
+    pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(fs: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1859,8 +1878,7 @@ impl FsConfig {
             .add("queue_size")
             .add("num_queues")
             .add("socket")
-            .add("id")
-            .add("pci_segment");
+            .extend(PciDeviceCommonConfig::OPTIONS);
         parser.parse(fs).map_err(Error::ParseFileSystem)?;
 
         let tag = parser.get("tag").ok_or(Error::ParseFsTagMissing)?;
@@ -1878,20 +1896,14 @@ impl FsConfig {
             .map_err(Error::ParseFileSystem)?
             .unwrap_or_else(default_fsconfig_num_queues);
 
-        let id = parser.get("id");
-
-        let pci_segment = parser
-            .convert("pci_segment")
-            .map_err(Error::ParseFileSystem)?
-            .unwrap_or_default();
+        let pci_common = PciDeviceCommonConfig::parse(fs)?;
 
         Ok(FsConfig {
+            pci_common,
             tag,
             socket,
             num_queues,
             queue_size,
-            id,
-            pci_segment,
         })
     }
 
@@ -1903,19 +1915,11 @@ impl FsConfig {
             ));
         }
 
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-            {
-                return Err(ValidationError::IommuNotSupportedOnSegment(
-                    self.pci_segment,
-                ));
-            }
+        if self.pci_common.iommu {
+            return Err(ValidationError::IommuNotSupported);
         }
+
+        self.pci_common.validate(vm_config)?;
 
         Ok(())
     }
@@ -2020,63 +2024,40 @@ impl FwCfgItem {
 impl PmemConfig {
     pub const SYNTAX: &'static str = "Persistent memory parameters \
     \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
-    discard_writes=on|off,id=<device_id>,pci_segment=<segment_id>\"";
+    discard_writes=on|off,id=<device_id>,\
+    pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(pmem: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
             .add("size")
             .add("file")
-            .add("iommu")
             .add("discard_writes")
-            .add("id")
-            .add("pci_segment");
+            .extend(PciDeviceCommonConfig::OPTIONS_IOMMU);
         parser.parse(pmem).map_err(Error::ParsePersistentMemory)?;
 
+        let pci_common = PciDeviceCommonConfig::parse(pmem)?;
         let file = PathBuf::from(parser.get("file").ok_or(Error::ParsePmemFileMissing)?);
         let size = parser
             .convert::<ByteSized>("size")
             .map_err(Error::ParsePersistentMemory)?
             .map(|v| v.0);
-        let iommu = parser
-            .convert::<Toggle>("iommu")
-            .map_err(Error::ParsePersistentMemory)?
-            .unwrap_or(Toggle(false))
-            .0;
         let discard_writes = parser
             .convert::<Toggle>("discard_writes")
             .map_err(Error::ParsePersistentMemory)?
             .unwrap_or(Toggle(false))
             .0;
-        let id = parser.get("id");
-        let pci_segment = parser
-            .convert("pci_segment")
-            .map_err(Error::ParsePersistentMemory)?
-            .unwrap_or_default();
 
         Ok(PmemConfig {
+            pci_common,
             file,
             size,
-            iommu,
             discard_writes,
-            id,
-            pci_segment,
         })
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-                && !self.iommu
-            {
-                return Err(ValidationError::OnIommuSegment(self.pci_segment));
-            }
-        }
+        self.pci_common.validate(vm_config)?;
 
         Ok(())
     }
@@ -2190,102 +2171,64 @@ impl DebugConsoleConfig {
 }
 
 impl DeviceConfig {
-    pub const SYNTAX: &'static str = "Direct device assignment parameters \"path=<device_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>\"";
+    pub const SYNTAX: &'static str = "Direct device assignment parameters \
+    \"path=<device_path>,iommu=on|off,id=<device_id>,\
+    pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(device: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
             .add("path")
-            .add("id")
-            .add("iommu")
-            .add("pci_segment")
+            .extend(PciDeviceCommonConfig::OPTIONS_IOMMU)
             .add("x_nv_gpudirect_clique");
         parser.parse(device).map_err(Error::ParseDevice)?;
 
+        let pci_common = PciDeviceCommonConfig::parse(device)?;
         let path = parser
             .get("path")
             .map(PathBuf::from)
             .ok_or(Error::ParseDevicePathMissing)?;
-        let iommu = parser
-            .convert::<Toggle>("iommu")
-            .map_err(Error::ParseDevice)?
-            .unwrap_or(Toggle(false))
-            .0;
-        let id = parser.get("id");
-        let pci_segment = parser
-            .convert::<u16>("pci_segment")
-            .map_err(Error::ParseDevice)?
-            .unwrap_or_default();
         let x_nv_gpudirect_clique = parser
             .convert::<u8>("x_nv_gpudirect_clique")
             .map_err(Error::ParseDevice)?;
         Ok(DeviceConfig {
+            pci_common,
             path,
-            iommu,
-            id,
-            pci_segment,
             x_nv_gpudirect_clique,
         })
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-                && !self.iommu
-            {
-                return Err(ValidationError::OnIommuSegment(self.pci_segment));
-            }
-        }
+        self.pci_common.validate(vm_config)?;
 
         Ok(())
     }
 }
 
 impl UserDeviceConfig {
-    pub const SYNTAX: &'static str =
-        "Userspace device socket=<socket_path>,id=<device_id>,pci_segment=<segment_id>\"";
+    pub const SYNTAX: &'static str = "Userspace device socket=<socket_path>,id=<device_id>,\
+        pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(user_device: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("socket").add("id").add("pci_segment");
+        parser.add("socket").extend(PciDeviceCommonConfig::OPTIONS);
         parser.parse(user_device).map_err(Error::ParseUserDevice)?;
 
+        let pci_common = PciDeviceCommonConfig::parse(user_device)?;
         let socket = parser
             .get("socket")
             .map(PathBuf::from)
             .ok_or(Error::ParseUserDeviceSocketMissing)?;
-        let id = parser.get("id");
-        let pci_segment = parser
-            .convert::<u16>("pci_segment")
-            .map_err(Error::ParseUserDevice)?
-            .unwrap_or_default();
 
-        Ok(UserDeviceConfig {
-            socket,
-            id,
-            pci_segment,
-        })
+        Ok(UserDeviceConfig { pci_common, socket })
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-            {
-                return Err(ValidationError::IommuNotSupportedOnSegment(
-                    self.pci_segment,
-                ));
-            }
+        if self.pci_common.iommu {
+            return Err(ValidationError::IommuNotSupported);
         }
+
+        self.pci_common.validate(vm_config)?;
 
         Ok(())
     }
@@ -2294,18 +2237,17 @@ impl UserDeviceConfig {
 impl VdpaConfig {
     pub const SYNTAX: &'static str = "vDPA device \
         \"path=<device_path>,num_queues=<number_of_queues>,iommu=on|off,\
-        id=<device_id>,pci_segment=<segment_id>\"";
+        id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(vdpa: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
             .add("path")
             .add("num_queues")
-            .add("iommu")
-            .add("id")
-            .add("pci_segment");
+            .extend(PciDeviceCommonConfig::OPTIONS_IOMMU);
         parser.parse(vdpa).map_err(Error::ParseVdpa)?;
 
+        let pci_common = PciDeviceCommonConfig::parse(vdpa)?;
         let path = parser
             .get("path")
             .map(PathBuf::from)
@@ -2314,39 +2256,16 @@ impl VdpaConfig {
             .convert("num_queues")
             .map_err(Error::ParseVdpa)?
             .unwrap_or_else(default_vdpaconfig_num_queues);
-        let iommu = parser
-            .convert::<Toggle>("iommu")
-            .map_err(Error::ParseVdpa)?
-            .unwrap_or(Toggle(false))
-            .0;
-        let id = parser.get("id");
-        let pci_segment = parser
-            .convert("pci_segment")
-            .map_err(Error::ParseVdpa)?
-            .unwrap_or_default();
 
         Ok(VdpaConfig {
+            pci_common,
             path,
             num_queues,
-            iommu,
-            id,
-            pci_segment,
         })
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-                && !self.iommu
-            {
-                return Err(ValidationError::OnIommuSegment(self.pci_segment));
-            }
-        }
+        self.pci_common.validate(vm_config)?;
 
         Ok(())
     }
@@ -2354,59 +2273,36 @@ impl VdpaConfig {
 
 impl VsockConfig {
     pub const SYNTAX: &'static str = "Virtio VSOCK parameters \
-        \"cid=<context_id>,socket=<socket_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>\"";
+        \"cid=<context_id>,socket=<socket_path>,iommu=on|off,id=<device_id>,\
+        pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(vsock: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
             .add("socket")
             .add("cid")
-            .add("iommu")
-            .add("id")
-            .add("pci_segment");
+            .extend(PciDeviceCommonConfig::OPTIONS_IOMMU);
         parser.parse(vsock).map_err(Error::ParseVsock)?;
 
+        let pci_common = PciDeviceCommonConfig::parse(vsock)?;
         let socket = parser
             .get("socket")
             .map(PathBuf::from)
             .ok_or(Error::ParseVsockSockMissing)?;
-        let iommu = parser
-            .convert::<Toggle>("iommu")
-            .map_err(Error::ParseVsock)?
-            .unwrap_or(Toggle(false))
-            .0;
         let cid = parser
             .convert("cid")
             .map_err(Error::ParseVsock)?
             .ok_or(Error::ParseVsockCidMissing)?;
-        let id = parser.get("id");
-        let pci_segment = parser
-            .convert("pci_segment")
-            .map_err(Error::ParseVsock)?
-            .unwrap_or_default();
 
         Ok(VsockConfig {
+            pci_common,
             cid,
             socket,
-            iommu,
-            id,
-            pci_segment,
         })
     }
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        if let Some(platform_config) = vm_config.platform.as_ref() {
-            if self.pci_segment >= platform_config.num_pci_segments {
-                return Err(ValidationError::InvalidPciSegment(self.pci_segment));
-            }
-
-            if let Some(iommu_segments) = platform_config.iommu_segments.as_ref()
-                && iommu_segments.contains(&self.pci_segment)
-                && !self.iommu
-            {
-                return Err(ValidationError::OnIommuSegment(self.pci_segment));
-            }
-        }
+        self.pci_common.validate(vm_config)?;
 
         Ok(())
     }
@@ -2691,6 +2587,7 @@ impl RestoreConfig {
         for net_fds in vm_config.net.iter().flatten() {
             if let Some(expected_fds) = &net_fds.fds {
                 let expected_id = net_fds
+                    .pci_common
                     .id
                     .as_ref()
                     .expect("Invalid 'NetConfig' with empty 'id' for VM restore.");
@@ -2967,9 +2864,9 @@ impl VmConfig {
                 }
 
                 disk.validate(self)?;
-                self.iommu |= disk.iommu;
+                self.iommu |= disk.pci_common.iommu;
 
-                Self::validate_identifier(&mut id_list, &disk.id)?;
+                Self::validate_identifier(&mut id_list, &disk.pci_common.id)?;
             }
         }
 
@@ -2979,9 +2876,9 @@ impl VmConfig {
                     return Err(ValidationError::VhostUserRequiresSharedMemory);
                 }
                 net.validate(self)?;
-                self.iommu |= net.iommu;
+                self.iommu |= net.pci_common.iommu;
 
-                Self::validate_identifier(&mut id_list, &net.id)?;
+                Self::validate_identifier(&mut id_list, &net.pci_common.id)?;
             }
         }
 
@@ -2992,7 +2889,7 @@ impl VmConfig {
             for fs in fses {
                 fs.validate(self)?;
 
-                Self::validate_identifier(&mut id_list, &fs.id)?;
+                Self::validate_identifier(&mut id_list, &fs.pci_common.id)?;
             }
         }
 
@@ -3003,16 +2900,16 @@ impl VmConfig {
             for generic_vhost_user_device in generic_vhost_user_devices {
                 generic_vhost_user_device.validate(self)?;
 
-                Self::validate_identifier(&mut id_list, &generic_vhost_user_device.id)?;
+                Self::validate_identifier(&mut id_list, &generic_vhost_user_device.pci_common.id)?;
             }
         }
 
         if let Some(pmems) = &self.pmem {
             for pmem in pmems {
                 pmem.validate(self)?;
-                self.iommu |= pmem.iommu;
+                self.iommu |= pmem.pci_common.iommu;
 
-                Self::validate_identifier(&mut id_list, &pmem.id)?;
+                Self::validate_identifier(&mut id_list, &pmem.pci_common.id)?;
             }
         }
 
@@ -3062,16 +2959,16 @@ impl VmConfig {
             for user_device in user_devices {
                 user_device.validate(self)?;
 
-                Self::validate_identifier(&mut id_list, &user_device.id)?;
+                Self::validate_identifier(&mut id_list, &user_device.pci_common.id)?;
             }
         }
 
         if let Some(vdpa_devices) = &self.vdpa {
             for vdpa_device in vdpa_devices {
                 vdpa_device.validate(self)?;
-                self.iommu |= vdpa_device.iommu;
+                self.iommu |= vdpa_device.pci_common.iommu;
 
-                Self::validate_identifier(&mut id_list, &vdpa_device.id)?;
+                Self::validate_identifier(&mut id_list, &vdpa_device.pci_common.id)?;
             }
         }
 
@@ -3108,17 +3005,17 @@ impl VmConfig {
                 }
 
                 device.validate(self)?;
-                self.iommu |= device.iommu;
+                self.iommu |= device.pci_common.iommu;
 
-                Self::validate_identifier(&mut id_list, &device.id)?;
+                Self::validate_identifier(&mut id_list, &device.pci_common.id)?;
             }
         }
 
         if let Some(vsock) = &self.vsock {
             vsock.validate(self)?;
-            self.iommu |= vsock.iommu;
+            self.iommu |= vsock.pci_common.iommu;
 
-            Self::validate_identifier(&mut id_list, &vsock.id)?;
+            Self::validate_identifier(&mut id_list, &vsock.pci_common.id)?;
         }
 
         let num_pci_segments = match &self.platform {
@@ -3442,62 +3339,63 @@ impl VmConfig {
         // Remove if VFIO device
         if let Some(devices) = self.devices.as_mut() {
             let len = devices.len();
-            devices.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            devices.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= devices.len() != len;
         }
 
         // Remove if VFIO user device
         if let Some(user_devices) = self.user_devices.as_mut() {
             let len = user_devices.len();
-            user_devices.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            user_devices.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= user_devices.len() != len;
         }
 
         // Remove if disk device
         if let Some(disks) = self.disks.as_mut() {
             let len = disks.len();
-            disks.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            disks.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= disks.len() != len;
         }
 
         // Remove if fs device
         if let Some(fs) = self.fs.as_mut() {
             let len = fs.len();
-            fs.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            fs.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= fs.len() != len;
         }
 
         // Remove if generic vhost-user device
         if let Some(generic_vhost_user) = self.generic_vhost_user.as_mut() {
             let len = generic_vhost_user.len();
-            generic_vhost_user.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            generic_vhost_user
+                .retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= generic_vhost_user.len() != len;
         }
 
         // Remove if net device
         if let Some(net) = self.net.as_mut() {
             let len = net.len();
-            net.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            net.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= net.len() != len;
         }
 
         // Remove if pmem device
         if let Some(pmem) = self.pmem.as_mut() {
             let len = pmem.len();
-            pmem.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            pmem.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= pmem.len() != len;
         }
 
         // Remove if vDPA device
         if let Some(vdpa) = self.vdpa.as_mut() {
             let len = vdpa.len();
-            vdpa.retain(|dev| dev.id.as_ref().map(|id| id.as_ref()) != Some(id));
+            vdpa.retain(|dev| dev.pci_common.id.as_ref().map(|id| id.as_ref()) != Some(id));
             removed |= vdpa.len() != len;
         }
 
         // Remove if vsock device
         if let Some(vsock) = self.vsock.as_ref()
-            && vsock.id.as_ref().map(|id| id.as_ref()) == Some(id)
+            && vsock.pci_common.id.as_ref().map(|id| id.as_ref()) == Some(id)
         {
             self.vsock = None;
             removed = true;
@@ -3836,20 +3734,18 @@ mod unit_tests {
 
     fn disk_fixture() -> DiskConfig {
         DiskConfig {
+            pci_common: PciDeviceCommonConfig::default(),
             path: Some(PathBuf::from("/path/to_file")),
             readonly: false,
             direct: false,
-            iommu: false,
             num_queues: 1,
             queue_size: 128,
             vhost_user: false,
             vhost_socket: None,
-            id: None,
             disable_io_uring: false,
             disable_aio: false,
             rate_limit_group: None,
             rate_limiter_config: None,
-            pci_segment: 0,
             serial: None,
             queue_affinity: None,
             backing_files: false,
@@ -3868,7 +3764,10 @@ mod unit_tests {
         assert_eq!(
             DiskConfig::parse("path=/path/to_file,id=mydisk0")?,
             DiskConfig {
-                id: Some("mydisk0".to_owned()),
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("mydisk0".to_owned()),
+                    ..Default::default()
+                },
                 ..disk_fixture()
             }
         );
@@ -3885,14 +3784,20 @@ mod unit_tests {
         assert_eq!(
             DiskConfig::parse("path=/path/to_file,iommu=on")?,
             DiskConfig {
-                iommu: true,
+                pci_common: PciDeviceCommonConfig {
+                    iommu: true,
+                    ..Default::default()
+                },
                 ..disk_fixture()
             }
         );
         assert_eq!(
             DiskConfig::parse("path=/path/to_file,iommu=on,queue_size=256")?,
             DiskConfig {
-                iommu: true,
+                pci_common: PciDeviceCommonConfig {
+                    iommu: true,
+                    ..Default::default()
+                },
                 queue_size: 256,
                 ..disk_fixture()
             }
@@ -3900,7 +3805,10 @@ mod unit_tests {
         assert_eq!(
             DiskConfig::parse("path=/path/to_file,iommu=on,queue_size=256,num_queues=4")?,
             DiskConfig {
-                iommu: true,
+                pci_common: PciDeviceCommonConfig {
+                    iommu: true,
+                    ..Default::default()
+                },
                 queue_size: 256,
                 num_queues: 4,
                 ..disk_fixture()
@@ -3970,22 +3878,20 @@ mod unit_tests {
 
     fn net_fixture() -> NetConfig {
         NetConfig {
+            pci_common: PciDeviceCommonConfig::default(),
             tap: None,
             ip: None,
             mask: None,
             mac: MacAddr::parse_str("de:ad:be:ef:12:34").unwrap(),
             host_mac: Some(MacAddr::parse_str("12:34:de:ad:be:ef").unwrap()),
             mtu: None,
-            iommu: false,
             num_queues: 2,
             queue_size: 256,
             vhost_user: false,
             vhost_socket: None,
             vhost_mode: VhostMode::Client,
-            id: None,
             fds: None,
             rate_limiter_config: None,
-            pci_segment: 0,
             offload_tso: true,
             offload_ufo: true,
             offload_csum: true,
@@ -4003,7 +3909,10 @@ mod unit_tests {
         assert_eq!(
             NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,id=mynet0")?,
             NetConfig {
-                id: Some("mynet0".to_owned()),
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("mynet0".to_owned()),
+                    ..Default::default()
+                },
                 ..net_fixture()
             }
         );
@@ -4036,9 +3945,12 @@ mod unit_tests {
                 "mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,num_queues=4,queue_size=1024,iommu=on"
             )?,
             NetConfig {
+                pci_common: PciDeviceCommonConfig {
+                    iommu: true,
+                    ..Default::default()
+                },
                 num_queues: 4,
                 queue_size: 1024,
-                iommu: true,
                 ..net_fixture()
             }
         );
@@ -4094,12 +4006,11 @@ mod unit_tests {
 
     fn fs_fixture() -> FsConfig {
         FsConfig {
+            pci_common: PciDeviceCommonConfig::default(),
             socket: PathBuf::from("/tmp/sock"),
             tag: "mytag".to_owned(),
             num_queues: 1,
             queue_size: 1024,
-            id: None,
-            pci_segment: 0,
         }
     }
 
@@ -4147,10 +4058,13 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             assert_eq!(
                 config.unwrap(),
                 GenericVhostUserConfig {
+                    pci_common: PciDeviceCommonConfig {
+                        id: Some(id.to_owned()),
+                        pci_segment: u16::try_from(pci_segment).unwrap(),
+                        ..Default::default()
+                    },
                     socket: socket.into(),
-                    id: Some(id.to_owned()),
                     device_type: u32::try_from(virtio_id).unwrap(),
-                    pci_segment: u16::try_from(pci_segment).unwrap(),
                     queue_sizes: queue_sizes
                         .0
                         .iter()
@@ -4211,12 +4125,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     fn pmem_fixture() -> PmemConfig {
         PmemConfig {
+            pci_common: PciDeviceCommonConfig::default(),
             file: PathBuf::from("/tmp/pmem"),
             size: Some(128 << 20),
-            iommu: false,
             discard_writes: false,
-            id: None,
-            pci_segment: 0,
         }
     }
 
@@ -4232,15 +4144,21 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             PmemConfig::parse("file=/tmp/pmem,size=128M,id=mypmem0")?,
             PmemConfig {
-                id: Some("mypmem0".to_owned()),
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("mypmem0".to_owned()),
+                    ..Default::default()
+                },
                 ..pmem_fixture()
             }
         );
         assert_eq!(
             PmemConfig::parse("file=/tmp/pmem,size=128M,iommu=on,discard_writes=on")?,
             PmemConfig {
+                pci_common: PciDeviceCommonConfig {
+                    iommu: true,
+                    ..Default::default()
+                },
                 discard_writes: true,
-                iommu: true,
                 ..pmem_fixture()
             }
         );
@@ -4329,10 +4247,8 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     fn device_fixture() -> DeviceConfig {
         DeviceConfig {
+            pci_common: PciDeviceCommonConfig::default(),
             path: PathBuf::from("/path/to/device"),
-            id: None,
-            iommu: false,
-            pci_segment: 0,
             x_nv_gpudirect_clique: None,
         }
     }
@@ -4349,7 +4265,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             DeviceConfig::parse("path=/path/to/device,iommu=on")?,
             DeviceConfig {
-                iommu: true,
+                pci_common: PciDeviceCommonConfig {
+                    iommu: true,
+                    ..Default::default()
+                },
                 ..device_fixture()
             }
         );
@@ -4357,8 +4276,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             DeviceConfig::parse("path=/path/to/device,iommu=on,id=mydevice0")?,
             DeviceConfig {
-                id: Some("mydevice0".to_owned()),
-                iommu: true,
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("mydevice0".to_owned()),
+                    iommu: true,
+                    ..Default::default()
+                },
                 ..device_fixture()
             }
         );
@@ -4368,11 +4290,9 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     fn vdpa_fixture() -> VdpaConfig {
         VdpaConfig {
+            pci_common: PciDeviceCommonConfig::default(),
             path: PathBuf::from("/dev/vhost-vdpa"),
             num_queues: 1,
-            iommu: false,
-            id: None,
-            pci_segment: 0,
         }
     }
 
@@ -4384,8 +4304,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             VdpaConfig::parse("path=/dev/vhost-vdpa,num_queues=2,id=my_vdpa")?,
             VdpaConfig {
+                pci_common: PciDeviceCommonConfig {
+                    id: Some("my_vdpa".to_owned()),
+                    ..Default::default()
+                },
                 num_queues: 2,
-                id: Some("my_vdpa".to_owned()),
                 ..vdpa_fixture()
             }
         );
@@ -4412,21 +4335,20 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         assert_eq!(
             VsockConfig::parse("socket=/tmp/sock,cid=3")?,
             VsockConfig {
+                pci_common: PciDeviceCommonConfig::default(),
                 cid: 3,
                 socket: PathBuf::from("/tmp/sock"),
-                iommu: false,
-                id: None,
-                pci_segment: 0,
             }
         );
         assert_eq!(
             VsockConfig::parse("socket=/tmp/sock,cid=3,iommu=on")?,
             VsockConfig {
+                pci_common: PciDeviceCommonConfig {
+                    iommu: true,
+                    ..Default::default()
+                },
                 cid: 3,
                 socket: PathBuf::from("/tmp/sock"),
-                iommu: true,
-                id: None,
-                pci_segment: 0,
             }
         );
         Ok(())
@@ -4662,19 +4584,28 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             preserved_fds: None,
             net: Some(vec![
                 NetConfig {
-                    id: Some("net0".to_owned()),
+                    pci_common: PciDeviceCommonConfig {
+                        id: Some("net0".to_owned()),
+                        ..Default::default()
+                    },
                     num_queues: 2,
                     fds: Some(vec![-1, -1, -1, -1]),
                     ..net_fixture()
                 },
                 NetConfig {
-                    id: Some("net1".to_owned()),
+                    pci_common: PciDeviceCommonConfig {
+                        id: Some("net1".to_owned()),
+                        ..Default::default()
+                    },
                     num_queues: 1,
                     fds: Some(vec![-1, -1]),
                     ..net_fixture()
                 },
                 NetConfig {
-                    id: Some("net2".to_owned()),
+                    pci_common: PciDeviceCommonConfig {
+                        id: Some("net2".to_owned()),
+                        ..Default::default()
+                    },
                     fds: None,
                     ..net_fixture()
                 },
@@ -4769,7 +4700,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             resume: false,
         };
         snapshot_vm_config.net = Some(vec![NetConfig {
-            id: Some("net2".to_owned()),
+            pci_common: PciDeviceCommonConfig {
+                id: Some("net2".to_owned()),
+                ..Default::default()
+            },
             fds: None,
             ..net_fixture()
         }]);
@@ -5135,8 +5069,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         still_valid_config.disks = Some(vec![DiskConfig {
-            iommu: true,
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                iommu: true,
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..disk_fixture()
         }]);
         still_valid_config.validate().unwrap();
@@ -5147,8 +5084,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         still_valid_config.net = Some(vec![NetConfig {
-            iommu: true,
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                iommu: true,
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..net_fixture()
         }]);
         still_valid_config.validate().unwrap();
@@ -5159,8 +5099,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         still_valid_config.pmem = Some(vec![PmemConfig {
-            iommu: true,
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                iommu: true,
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..pmem_fixture()
         }]);
         still_valid_config.validate().unwrap();
@@ -5171,8 +5114,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         still_valid_config.devices = Some(vec![DeviceConfig {
-            iommu: true,
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                iommu: true,
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..device_fixture()
         }]);
         still_valid_config.validate().unwrap();
@@ -5183,11 +5129,13 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         still_valid_config.vsock = Some(VsockConfig {
+            pci_common: PciDeviceCommonConfig {
+                iommu: true,
+                pci_segment: 1,
+                ..Default::default()
+            },
             cid: 3,
             socket: PathBuf::new(),
-            id: None,
-            iommu: true,
-            pci_segment: 1,
         });
         still_valid_config.validate().unwrap();
 
@@ -5197,8 +5145,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.disks = Some(vec![DiskConfig {
-            iommu: false,
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                iommu: false,
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..disk_fixture()
         }]);
         assert_eq!(
@@ -5212,8 +5163,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.net = Some(vec![NetConfig {
-            iommu: false,
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                iommu: false,
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..net_fixture()
         }]);
         assert_eq!(
@@ -5228,8 +5182,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.pmem = Some(vec![PmemConfig {
-            iommu: false,
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..pmem_fixture()
         }]);
         assert_eq!(
@@ -5244,8 +5200,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.devices = Some(vec![DeviceConfig {
-            iommu: false,
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..device_fixture()
         }]);
         assert_eq!(
@@ -5259,11 +5217,12 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.vsock = Some(VsockConfig {
+            pci_common: PciDeviceCommonConfig {
+                pci_segment: 1,
+                ..Default::default()
+            },
             cid: 3,
             socket: PathBuf::new(),
-            id: None,
-            iommu: false,
-            pci_segment: 1,
         });
         assert_eq!(
             invalid_config.validate(),
@@ -5277,13 +5236,15 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.user_devices = Some(vec![UserDeviceConfig {
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                pci_segment: 1,
+                ..Default::default()
+            },
             socket: PathBuf::new(),
-            id: None,
         }]);
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::IommuNotSupportedOnSegment(1))
+            Err(ValidationError::OnIommuSegment(1))
         );
 
         let mut invalid_config = valid_config.clone();
@@ -5292,7 +5253,10 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.vdpa = Some(vec![VdpaConfig {
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..vdpa_fixture()
         }]);
         assert_eq!(
@@ -5307,12 +5271,15 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..platform_fixture()
         });
         invalid_config.fs = Some(vec![FsConfig {
-            pci_segment: 1,
+            pci_common: PciDeviceCommonConfig {
+                pci_segment: 1,
+                ..Default::default()
+            },
             ..fs_fixture()
         }]);
         assert_eq!(
             invalid_config.validate(),
-            Err(ValidationError::IommuNotSupportedOnSegment(1))
+            Err(ValidationError::OnIommuSegment(1))
         );
 
         let mut invalid_config = valid_config.clone();
@@ -5536,7 +5503,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             config_with_invalid_host_data.validate().unwrap_err();
         }
 
-        let mut still_valid_config = valid_config;
+        let mut still_valid_config = valid_config.clone();
         // SAFETY: Safe as the file was just opened
         let fd1 = unsafe { libc::dup(File::open("/dev/null").unwrap().as_raw_fd()) };
         // SAFETY: Safe as the file was just opened
@@ -5546,6 +5513,45 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             still_valid_config.add_preserved_fds(vec![fd1, fd2]);
         }
         let _still_valid_config = still_valid_config.clone();
+
+        // Valid BDF test
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.disks = Some(vec![DiskConfig {
+            pci_common: PciDeviceCommonConfig {
+                pci_device_id: Some(8),
+                ..Default::default()
+            },
+            ..disk_fixture()
+        }]);
+        still_valid_config.validate().unwrap();
+        // Invalid BDF - Same ID as Root device
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            pci_common: PciDeviceCommonConfig {
+                pci_device_id: Some(pci::PCI_ROOT_DEVICE_ID),
+                ..Default::default()
+            },
+            ..disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::ReservedPciDeviceId(
+                pci::PCI_ROOT_DEVICE_ID
+            ))
+        );
+        // Invalid BDF - Out of range
+        let mut invalid_config = valid_config.clone();
+        invalid_config.disks = Some(vec![DiskConfig {
+            pci_common: PciDeviceCommonConfig {
+                pci_device_id: Some(pci::NUM_DEVICE_IDS + 1),
+                ..Default::default()
+            },
+            ..disk_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidPciDeviceId(pci::NUM_DEVICE_IDS + 1))
+        );
     }
     #[test]
     fn test_landlock_parsing() -> Result<()> {

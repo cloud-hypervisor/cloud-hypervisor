@@ -20,9 +20,13 @@ use crate::configuration::{
 };
 use crate::device::{BarReprogrammingParams, DeviceRelocation, Error as PciDeviceError, PciDevice};
 
+/// Denotes the PCI device ID of a bus' root bridge device.
+pub const PCI_ROOT_DEVICE_ID: u8 = 0;
+/// Denotes the maximum number of PCI device allowed on a bus. 32 per PCI spec.
+pub const NUM_DEVICE_IDS: u8 = 32;
+
 const VENDOR_ID_INTEL: u16 = 0x8086;
 const DEVICE_ID_INTEL_VIRT_PCIE_HOST: u16 = 0x0d57;
-const NUM_DEVICE_IDS: usize = 32;
 
 /// Errors for device manager.
 #[derive(Error, Debug)]
@@ -43,10 +47,10 @@ pub enum PciRootError {
     #[error("Could not find an available device slot on the PCI bus")]
     NoPciDeviceSlotAvailable,
     /// Invalid PCI device identifier provided.
-    #[error("Invalid PCI device identifier provided")]
+    #[error("Invalid PCI device identifier provided: {0}")]
     InvalidPciDeviceSlot(usize),
     /// Valid PCI device identifier but already used.
-    #[error("Valid PCI device identifier but already used")]
+    #[error("Valid PCI device identifier but already used: {0}")]
     AlreadyInUsePciDeviceSlot(usize),
 }
 pub type Result<T> = std::result::Result<T, PciRootError>;
@@ -110,21 +114,28 @@ impl PciDevice for PciRoot {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DeviceIdState {
+    Free,
+    Reserved,
+    Allocated,
+}
+
 pub struct PciBus {
     /// Devices attached to this bus.
     /// Device 0 is host bridge.
-    devices: HashMap<u32, Arc<Mutex<dyn PciDevice>>>,
+    devices: HashMap<u8, Arc<Mutex<dyn PciDevice>>>,
     device_reloc: Arc<dyn DeviceRelocation>,
-    device_ids: Vec<bool>,
+    device_ids: [DeviceIdState; NUM_DEVICE_IDS as usize],
 }
 
 impl PciBus {
     pub fn new(pci_root: PciRoot, device_reloc: Arc<dyn DeviceRelocation>) -> Self {
-        let mut devices: HashMap<u32, Arc<Mutex<dyn PciDevice>>> = HashMap::new();
-        let mut device_ids: Vec<bool> = vec![false; NUM_DEVICE_IDS];
+        let mut devices: HashMap<u8, Arc<Mutex<dyn PciDevice>>> = HashMap::new();
+        let mut device_ids = [DeviceIdState::Free; NUM_DEVICE_IDS as usize];
 
-        devices.insert(0, Arc::new(Mutex::new(pci_root)));
-        device_ids[0] = true;
+        devices.insert(PCI_ROOT_DEVICE_ID, Arc::new(Mutex::new(pci_root)));
+        device_ids[PCI_ROOT_DEVICE_ID as usize] = DeviceIdState::Allocated;
 
         PciBus {
             devices,
@@ -158,7 +169,7 @@ impl PciBus {
         Ok(())
     }
 
-    pub fn add_device(&mut self, device_id: u32, device: Arc<Mutex<dyn PciDevice>>) -> Result<()> {
+    pub fn add_device(&mut self, device_id: u8, device: Arc<Mutex<dyn PciDevice>>) -> Result<()> {
         self.devices.insert(device_id, device);
         Ok(())
     }
@@ -168,33 +179,71 @@ impl PciBus {
         Ok(())
     }
 
-    pub fn next_device_id(&mut self) -> Result<u32> {
-        for (idx, device_id) in self.device_ids.iter_mut().enumerate() {
-            if !(*device_id) {
-                *device_id = true;
-                return Ok(idx as u32);
-            }
-        }
-
-        Err(PciRootError::NoPciDeviceSlotAvailable)
-    }
-
-    pub fn get_device_id(&mut self, id: usize) -> Result<()> {
-        if id < NUM_DEVICE_IDS {
-            if self.device_ids[id] {
-                Err(PciRootError::AlreadyInUsePciDeviceSlot(id))
+    /// Reserves a PCI device ID on the bus, marking it as in-use so
+    /// that automatic allocation will not use it.
+    ///
+    /// ## Errors
+    ///
+    /// * Returns [`PciRootError::AlreadyInUsePciDeviceSlot`] if the
+    ///   slot is already reserved or allocated.
+    /// * Returns [`PciRootError::InvalidPciDeviceSlot`] if the slot
+    ///   exceeds [`NUM_DEVICE_IDS`].
+    pub fn reserve_device_id(&mut self, id: u8) -> Result<u8> {
+        let idx = id as usize;
+        if idx < NUM_DEVICE_IDS as usize {
+            if self.device_ids[idx] == DeviceIdState::Free {
+                self.device_ids[idx] = DeviceIdState::Reserved;
+                Ok(id)
             } else {
-                self.device_ids[id] = true;
-                Ok(())
+                Err(PciRootError::AlreadyInUsePciDeviceSlot(idx))
             }
         } else {
-            Err(PciRootError::InvalidPciDeviceSlot(id))
+            Err(PciRootError::InvalidPciDeviceSlot(idx))
+        }
+    }
+
+    /// Allocates a PCI device ID on the bus.
+    ///
+    /// - `id`: ID to allocate on the bus. If [`None`], the next free
+    ///   device ID on the bus is allocated, else the ID given is
+    ///   allocated
+    ///
+    /// ## Errors
+    ///
+    /// * Returns [`PciRootError::AlreadyInUsePciDeviceSlot`] in case
+    ///   the ID requested is already allocated.
+    /// * Returns [`PciRootError::InvalidPciDeviceSlot`] in case the
+    ///   requested ID exceeds the maximum number of devices allowed per
+    ///   bus (see [`NUM_DEVICE_IDS`]).
+    /// * If `id` is [`None`]: Returns
+    ///   [`PciRootError::NoPciDeviceSlotAvailable`] if no free device
+    ///   slot is available on the bus.
+    pub fn allocate_device_id(&mut self, id: Option<u8>) -> Result<u8> {
+        if let Some(idx) = id.map(|i| i as usize) {
+            if idx < NUM_DEVICE_IDS as usize {
+                if self.device_ids[idx] == DeviceIdState::Allocated {
+                    Err(PciRootError::AlreadyInUsePciDeviceSlot(idx))
+                } else {
+                    self.device_ids[idx] = DeviceIdState::Allocated;
+                    Ok(idx as u8)
+                }
+            } else {
+                Err(PciRootError::InvalidPciDeviceSlot(idx))
+            }
+        } else {
+            for (idx, device_id) in self.device_ids.iter_mut().enumerate() {
+                if *device_id == DeviceIdState::Free {
+                    *device_id = DeviceIdState::Allocated;
+                    return Ok(idx as u8);
+                }
+            }
+            Err(PciRootError::NoPciDeviceSlotAvailable)
         }
     }
 
     pub fn put_device_id(&mut self, id: usize) -> Result<()> {
-        if id < NUM_DEVICE_IDS {
-            self.device_ids[id] = false;
+        if id < NUM_DEVICE_IDS as usize {
+            self.device_ids[id] = DeviceIdState::Free;
             Ok(())
         } else {
             Err(PciRootError::InvalidPciDeviceSlot(id))
@@ -240,7 +289,7 @@ impl PciConfigIo {
             .lock()
             .unwrap()
             .devices
-            .get(&(device as u32))
+            .get(&(device as u8))
             .map_or(0xffff_ffff, |d| {
                 d.lock().unwrap().read_config_register(register)
             })
@@ -265,7 +314,7 @@ impl PciConfigIo {
         }
 
         let pci_bus = self.pci_bus.as_ref().lock().unwrap();
-        if let Some(d) = pci_bus.devices.get(&(device as u32)) {
+        if let Some(d) = pci_bus.devices.get(&(device as u8)) {
             let mut device = d.lock().unwrap();
 
             // Update the register value
@@ -371,7 +420,7 @@ impl PciConfigMmio {
             .lock()
             .unwrap()
             .devices
-            .get(&(device as u32))
+            .get(&(device as u8))
             .map_or(0xffff_ffff, |d| {
                 d.lock().unwrap().read_config_register(register)
             })
@@ -390,7 +439,7 @@ impl PciConfigMmio {
         }
 
         let pci_bus = self.pci_bus.lock().unwrap();
-        if let Some(d) = pci_bus.devices.get(&(device as u32)) {
+        if let Some(d) = pci_bus.devices.get(&(device as u8)) {
             let mut device = d.lock().unwrap();
 
             // Update the register value
@@ -485,4 +534,123 @@ fn parse_io_config_address(config_address: u32) -> (usize, usize, usize, usize) 
         shift_and_mask(config_address, FUNCTION_NUMBER_OFFSET, FUNCTION_NUMBER_MASK),
         shift_and_mask(config_address, REGISTER_NUMBER_OFFSET, REGISTER_NUMBER_MASK),
     )
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use std::error::Error;
+    use std::result::Result;
+
+    use super::*;
+
+    #[derive(Debug)]
+    /// Helper struct that mocks the implementation of DeviceRelocation
+    struct MockDeviceRelocation;
+
+    impl DeviceRelocation for MockDeviceRelocation {
+        fn move_bar(
+            &self,
+            _old_base: u64,
+            _new_base: u64,
+            _len: u64,
+            _pci_dev: &mut dyn PciDevice,
+            _region_type: PciBarRegionType,
+        ) -> Result<(), std::io::Error> {
+            Ok(())
+        }
+    }
+
+    fn setup_bus() -> PciBus {
+        let pci_root = PciRoot::new(None);
+        let mock_device_reloc = Arc::new(MockDeviceRelocation {});
+        PciBus::new(pci_root, mock_device_reloc)
+    }
+
+    #[test]
+    // Test to acquire all IDs that can be acquired
+    fn allocate_device_id_next_free() {
+        // The first address is occupied by the root
+        let mut bus = setup_bus();
+        for expected_id in 1..NUM_DEVICE_IDS {
+            assert_eq!(expected_id, bus.allocate_device_id(None).unwrap());
+        }
+    }
+
+    #[test]
+    // Test that requesting specific ID work
+    fn allocate_device_id_request_id() -> Result<(), Box<dyn Error>> {
+        // The first address is occupied by the root
+        let mut bus = setup_bus();
+        let max_id = NUM_DEVICE_IDS - 1;
+        assert_eq!(0x01_u8, bus.allocate_device_id(Some(0x01))?);
+        assert_eq!(0x10_u8, bus.allocate_device_id(Some(0x10))?);
+        assert_eq!(max_id, bus.allocate_device_id(Some(max_id))?);
+        Ok(())
+    }
+
+    #[test]
+    // Test that reserved IDs are skipped by automatic allocation
+    fn allocate_device_id_fills_gaps() -> Result<(), Box<dyn Error>> {
+        // The first address is occupied by the root
+        let mut bus = setup_bus();
+        bus.reserve_device_id(0x01)?;
+        bus.reserve_device_id(0x03)?;
+        bus.reserve_device_id(0x06)?;
+        assert_eq!(0x02_u8, bus.allocate_device_id(None)?);
+        assert_eq!(0x04_u8, bus.allocate_device_id(None)?);
+        assert_eq!(0x05_u8, bus.allocate_device_id(None)?);
+        assert_eq!(0x07_u8, bus.allocate_device_id(None)?);
+        Ok(())
+    }
+
+    #[test]
+    // Test that reserving the same ID twice fails
+    fn reserve_device_id_twice_fails() -> Result<(), Box<dyn Error>> {
+        let mut bus = setup_bus();
+        let max_id = NUM_DEVICE_IDS - 1;
+        bus.reserve_device_id(max_id)?;
+        let result = bus.reserve_device_id(max_id);
+        assert!(matches!(
+            result,
+            Err(PciRootError::AlreadyInUsePciDeviceSlot(x)) if x == usize::from(max_id),
+        ));
+        Ok(())
+    }
+
+    #[test]
+    // Test that allocating a previously reserved ID succeeds (idempotent)
+    fn allocate_device_id_after_reserve() -> Result<(), Box<dyn Error>> {
+        let mut bus = setup_bus();
+        bus.reserve_device_id(0x10)?;
+        assert_eq!(0x10_u8, bus.allocate_device_id(Some(0x10))?);
+        Ok(())
+    }
+
+    #[test]
+    // Test to request an invalid ID
+    fn allocate_device_id_request_invalid_id_fails() -> Result<(), Box<dyn Error>> {
+        let mut bus = setup_bus();
+        let max_id = NUM_DEVICE_IDS + 1;
+        let result = bus.allocate_device_id(Some(max_id));
+        assert!(matches!(
+            result,
+            Err(PciRootError::InvalidPciDeviceSlot(x)) if x == usize::from(max_id),
+        ));
+        Ok(())
+    }
+
+    #[test]
+    // Test to acquire an ID when all IDs were already acquired
+    fn allocate_device_id_none_left() {
+        // The first address is occupied by the root
+        let mut bus = setup_bus();
+        for expected_id in 1..NUM_DEVICE_IDS {
+            assert_eq!(expected_id, bus.allocate_device_id(None).unwrap());
+        }
+        let result = bus.allocate_device_id(None);
+        assert!(matches!(
+            result,
+            Err(PciRootError::NoPciDeviceSlotAvailable),
+        ));
+    }
 }

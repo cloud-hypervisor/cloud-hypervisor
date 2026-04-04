@@ -675,7 +675,7 @@ pub struct Counters {
 
 pub(crate) fn get_counters(api_socket: &str) -> Counters {
     // Get counters
-    let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "counters", None);
+    let (cmd_success, cmd_output, _) = remote_command_w_output(api_socket, "counters", None);
     assert!(cmd_success);
 
     let counters: HashMap<&str, HashMap<&str, u64>> =
@@ -725,7 +725,7 @@ pub(super) fn pty_read(mut pty: std::fs::File) -> Receiver<String> {
 }
 
 pub(crate) fn get_pty_path(api_socket: &str, pty_type: &str) -> PathBuf {
-    let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "info", None);
+    let (cmd_success, cmd_output, _) = remote_command_w_output(api_socket, "info", None);
     assert!(cmd_success);
     let info: serde_json::Value = serde_json::from_slice(&cmd_output).unwrap_or_default();
     assert_eq!("Pty", info["config"][pty_type]["mode"]);
@@ -773,7 +773,7 @@ pub(crate) fn cleanup_vfio_network_interfaces() {
 }
 
 pub(crate) fn balloon_size(api_socket: &str) -> u64 {
-    let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "info", None);
+    let (cmd_success, cmd_output, _) = remote_command_w_output(api_socket, "info", None);
     assert!(cmd_success);
 
     let info: serde_json::Value = serde_json::from_slice(&cmd_output).unwrap_or_default();
@@ -789,7 +789,7 @@ pub(crate) fn balloon_size(api_socket: &str) -> u64 {
 }
 
 pub(crate) fn vm_state(api_socket: &str) -> String {
-    let (cmd_success, cmd_output) = remote_command_w_output(api_socket, "info", None);
+    let (cmd_success, cmd_output, _) = remote_command_w_output(api_socket, "info", None);
     assert!(cmd_success);
 
     let info: serde_json::Value = serde_json::from_slice(&cmd_output).unwrap_or_default();
@@ -1019,4 +1019,30 @@ pub(crate) fn make_guest_panic(guest: &Guest) {
 
     // Trigger guest a panic
     guest.ssh_command("screen -dmS reboot sh -c \"sleep 5; echo s | tee /proc/sysrq-trigger; echo c | sudo tee /proc/sysrq-trigger\"").unwrap();
+}
+
+/// Extracts a BDF from a CHV returned response
+pub(crate) fn bdf_from_hotplug_response(
+    s: &str,
+) -> (
+    u16, /* Segment ID */
+    u8,  /* Bus ID */
+    u8,  /* Device ID */
+    u8,  /* Function ID */
+) {
+    let json: serde_json::Value = serde_json::from_str(s).expect("should be valid JSON");
+    let bdf_str = json["bdf"]
+        .as_str()
+        .expect("should contain string key `bdf`");
+
+    // BDF format: "SSSS:BB:DD.F"
+    let parts: Vec<&str> = bdf_str.split(&[':', '.'][..]).collect();
+    assert_eq!(parts.len(), 4, "unexpected BDF format: {bdf_str}");
+
+    let segment_id = u16::from_str_radix(parts[0], 16).unwrap();
+    let bus_id = u8::from_str_radix(parts[1], 16).unwrap();
+    let device_id = u8::from_str_radix(parts[2], 16).unwrap();
+    let function_id = u8::from_str_radix(parts[3], 16).unwrap();
+
+    (segment_id, bus_id, device_id, function_id)
 }
