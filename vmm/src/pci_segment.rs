@@ -164,6 +164,17 @@ impl PciSegment {
         )
     }
 
+    /// Reserves a device ID on this PCI segment, marking it as in-use
+    /// so that automatic allocation will not use it.
+    pub(crate) fn reserve_device_id(&self, device_id: u8) -> DeviceManagerResult<()> {
+        self.pci_bus
+            .lock()
+            .unwrap()
+            .reserve_device_id(device_id)
+            .map_err(DeviceManagerError::ReservePciDeviceId)?;
+        Ok(())
+    }
+
     /// Allocates a device's ID on this PCI segment.
     ///
     /// - `device_id`: Device ID to request for allocation
@@ -613,17 +624,17 @@ mod unit_tests {
     }
 
     #[test]
-    // Test to acquire a device ID that is invalid, one that is already taken
-    // and one being greater than the number of allowed devices per bus.
+    // Test that reserving an already taken device ID fails and that
+    // allocating an out-of-range device ID fails.
     fn allocate_device_id_invalid_device_id() {
         // The first address is occupied by the root
         let already_taken_device_id = 0x0_u8;
         let overflow_device_id = 0xff_u8;
         let segment = setup();
-        let bdf_res = segment.allocate_device_id(Some(already_taken_device_id));
+        let bdf_res = segment.reserve_device_id(already_taken_device_id);
         assert!(matches!(
             bdf_res,
-            Err(DeviceManagerError::GetPciDeviceId(e)) if matches!(
+            Err(DeviceManagerError::ReservePciDeviceId(e)) if matches!(
                 e,
                 pci::PciRootError::AlreadyInUsePciDeviceSlot(0x0)
             )
