@@ -33,8 +33,8 @@ pub use self::device::{
 };
 pub use self::msi::{MsiCap, MsiConfig, msi_num_enabled_vectors};
 pub use self::msix::{
-    MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE, MaybeMutInterruptSourceGroup, MsixCap, MsixConfig,
-    MsixTableEntry,
+    MAX_MSIX_VECTORS_PER_DEVICE, MSIX_CONFIG_ID, MSIX_TABLE_ENTRY_SIZE,
+    MaybeMutInterruptSourceGroup, MsixCap, MsixConfig, MsixTableEntry,
 };
 pub use self::vfio::{MmioRegion, VfioDmaMapping, VfioPciDevice, VfioPciError};
 pub use self::vfio_user::{VfioUserDmaMapping, VfioUserPciDevice, VfioUserPciDeviceError};

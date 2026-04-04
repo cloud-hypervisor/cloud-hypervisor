@@ -22,6 +22,7 @@ use vm_migration::{MigratableError, Pausable};
 use vm_virtio::{AccessPlatform, VirtioDeviceType};
 use vmm_sys_util::eventfd::EventFd;
 
+use crate::transport::PrivatelyConstructableError;
 use crate::{
     ActivateError, ActivateResult, Error, GuestMemoryMmap, GuestRegionMmap, MmapRegion,
     VIRTIO_F_RING_INDIRECT_DESC,
@@ -76,6 +77,13 @@ pub struct ActivationContext {
 pub trait VirtioDevice: Send {
     /// The virtio device type.
     fn device_type(&self) -> u32;
+
+    /// The maximum number of doorbells the device supports.
+    /// Most devices don't support any.
+    /// Limited to 511 doorbells.
+    fn doorbells_max(&self) -> u16 {
+        0
+    }
 
     /// The maximum size of each queue that this device supports.
     fn queue_max_sizes(&self) -> &[u16];
@@ -152,6 +160,46 @@ pub trait VirtioDevice: Send {
     ) -> std::result::Result<(), Error> {
         Ok(())
     }
+
+    /// Tell the device to call the provided callback with each ioeventfd
+    /// it has registered, along with the corresponding old and new base
+    /// addresses.  Core code uses this to unregister and reregister ioeventfds.
+    /// when a device's base address changes.  If new_base_addr does not
+    /// equal old_base_addr, this means the base address is being moved.
+    ///
+    /// The provided base address must be used for subsequent ioeventfd
+    /// registrations.
+    ///
+    /// Implementations must return Err the first time the callback
+    /// returns Err, and Ok iff the callback never returns Err.
+    /// This is checked at runtime and a panic will happen if the
+    /// rule is not followed.
+    ///
+    /// Most devices should use the default implementation.
+    #[allow(unused_variables)]
+    fn ioeventfds<'a>(
+        &self,
+        old_base_addr: u64,
+        new_base_addr: u64,
+        cb: &mut dyn FnMut(&EventFd, u64, u64) -> Result<(), PrivatelyConstructableError<'a>>,
+    ) -> Result<(), PrivatelyConstructableError<'a>> {
+        Ok(())
+    }
+
+    /// Sets the device's config address base. This is only necessary for
+    /// devices that need to know the guest physical address of the PCI BARs
+    /// they use. Therefore, it is only meaningful for PCIe devices.
+    /// Most devices won't implement this method.
+    ///
+    /// One valid use of this method is to set the address at which the
+    /// device should register custom ioeventfds.
+    ///
+    /// This method will be called *before* [`VirtioDevice::activate`] and
+    /// implementations must be prepared for this.
+    ///
+    /// Calls after [`VirtioDevice::activate`] must not affect ioeventfd
+    /// registration.  This is the job of [`VirtioDevice::ioeventfds`].
+    fn set_config_address_base(&mut self, _base: u64) {}
 
     /// Returns the list of userspace mappings associated with this device.
     fn userspace_mappings(&self) -> Vec<UserspaceMapping> {
