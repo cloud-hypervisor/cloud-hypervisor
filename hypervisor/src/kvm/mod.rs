@@ -70,7 +70,8 @@ pub use x86_64::{CpuId, ExtendedControlRegisters, MsrEntries, VcpuKvmState};
 use crate::ClockData;
 #[cfg(target_arch = "x86_64")]
 use crate::arch::x86::{
-    CpuIdEntry, FpuState, LapicState, MsrEntry, NUM_IOAPIC_PINS, SpecialRegisters, XsaveState,
+    CpuIdEntry, FpuState, LapicState, MTRR_MSR_INDICES, MsrEntry, NUM_IOAPIC_PINS,
+    SpecialRegisters, XsaveState,
 };
 use crate::{CpuState, IoEventAddress, IrqRoutingEntry, MpState, StandardRegisters};
 // aarch64 dependencies
@@ -1128,9 +1129,21 @@ impl KvmHypervisor {
     /// Retrieve the list of MSRs supported by the hypervisor.
     ///
     fn get_msr_list(&self) -> hypervisor::Result<MsrList> {
-        self.kvm
+        let mut indices = self
+            .kvm
             .get_msr_index_list()
-            .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))
+            .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))?
+            .as_slice()
+            .to_vec();
+
+        // KVM_GET_MSR_INDEX_LIST does not include MTRR MSRs, but firmware may update them before an early boot snapshot.
+        indices.extend(MTRR_MSR_INDICES);
+
+        let mut msr_list = MsrList::new(indices.len())
+            .map_err(|e| hypervisor::HypervisorError::GetMsrList(e.into()))?;
+        msr_list.as_mut_slice().copy_from_slice(&indices);
+
+        Ok(msr_list)
     }
 }
 
