@@ -1195,10 +1195,13 @@ impl RateLimiterGroupConfig {
 }
 
 impl PciDeviceCommonConfig {
+    const OPTIONS: &[&str] = &["id", "pci_segment"];
+    const OPTIONS_IOMMU: &[&str] = &["id", "iommu", "pci_segment"];
+
     pub fn parse(input: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
 
-        parser.add("id").add("iommu").add("pci_segment");
+        parser.add_all(Self::OPTIONS_IOMMU);
 
         parser
             .parse_subset(input)
@@ -1258,7 +1261,6 @@ impl DiskConfig {
             .add("path")
             .add("readonly")
             .add("direct")
-            .add("iommu")
             .add("queue_size")
             .add("num_queues")
             .add("vhost_user")
@@ -1269,17 +1271,16 @@ impl DiskConfig {
             .add("ops_size")
             .add("ops_one_time_burst")
             .add("ops_refill_time")
-            .add("id")
             .add("_disable_io_uring")
             .add("_disable_aio")
-            .add("pci_segment")
             .add("serial")
             .add("rate_limit_group")
             .add("queue_affinity")
             .add("backing_files")
             .add("sparse")
             .add("image_type")
-            .add("lock_granularity");
+            .add("lock_granularity")
+            .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
 
         parser.parse(disk).map_err(Error::ParseDisk)?;
 
@@ -1507,13 +1508,11 @@ impl NetConfig {
             .add("offload_ufo")
             .add("offload_csum")
             .add("mtu")
-            .add("iommu")
             .add("queue_size")
             .add("num_queues")
             .add("vhost_user")
             .add("socket")
             .add("vhost_mode")
-            .add("id")
             .add("fd")
             .add("bw_size")
             .add("bw_one_time_burst")
@@ -1521,7 +1520,7 @@ impl NetConfig {
             .add("ops_size")
             .add("ops_one_time_burst")
             .add("ops_refill_time")
-            .add("pci_segment");
+            .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
         parser.parse(net).map_err(Error::ParseNetwork)?;
 
         let tap = parser.get("tap");
@@ -1772,8 +1771,7 @@ impl GenericVhostUserConfig {
             .add("virtio_id")
             .add("queue_sizes")
             .add("socket")
-            .add("id")
-            .add("pci_segment");
+            .add_all(PciDeviceCommonConfig::OPTIONS);
         parser
             .parse(vhost_user)
             .map_err(Error::ParseGenericVhostUser)?;
@@ -1898,8 +1896,7 @@ impl FsConfig {
             .add("queue_size")
             .add("num_queues")
             .add("socket")
-            .add("id")
-            .add("pci_segment");
+            .add_all(PciDeviceCommonConfig::OPTIONS);
         parser.parse(fs).map_err(Error::ParseFileSystem)?;
 
         let tag = parser.get("tag").ok_or(Error::ParseFsTagMissing)?;
@@ -2050,10 +2047,8 @@ impl PmemConfig {
         parser
             .add("size")
             .add("file")
-            .add("iommu")
             .add("discard_writes")
-            .add("id")
-            .add("pci_segment");
+            .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
         parser.parse(pmem).map_err(Error::ParsePersistentMemory)?;
 
         let pci_common = PciDeviceCommonConfig::parse(pmem)?;
@@ -2195,9 +2190,7 @@ impl DeviceConfig {
         let mut parser = OptionParser::new();
         parser
             .add("path")
-            .add("id")
-            .add("iommu")
-            .add("pci_segment")
+            .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU)
             .add("x_nv_gpudirect_clique");
         parser.parse(device).map_err(Error::ParseDevice)?;
 
@@ -2236,7 +2229,7 @@ impl UserDeviceConfig {
 
     pub fn parse(user_device: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
-        parser.add("socket").add("id").add("pci_segment");
+        parser.add("socket").add_all(PciDeviceCommonConfig::OPTIONS);
         parser.parse(user_device).map_err(Error::ParseUserDevice)?;
 
         let pci_common = PciDeviceCommonConfig::parse(user_device)?;
@@ -2267,9 +2260,7 @@ impl VdpaConfig {
         parser
             .add("path")
             .add("num_queues")
-            .add("iommu")
-            .add("id")
-            .add("pci_segment");
+            .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
         parser.parse(vdpa).map_err(Error::ParseVdpa)?;
 
         let pci_common = PciDeviceCommonConfig::parse(vdpa)?;
@@ -2303,9 +2294,7 @@ impl VsockConfig {
         parser
             .add("socket")
             .add("cid")
-            .add("iommu")
-            .add("id")
-            .add("pci_segment");
+            .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU);
         parser.parse(vsock).map_err(Error::ParseVsock)?;
 
         let pci_common = PciDeviceCommonConfig::parse(vsock)?;
