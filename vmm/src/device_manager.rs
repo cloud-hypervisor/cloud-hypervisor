@@ -498,7 +498,7 @@ pub enum DeviceManagerError {
 
     /// Could not reserve the PCI device ID.
     #[error("Could not reserve the PCI device ID")]
-    GetPciDeviceId(#[source] pci::PciRootError),
+    ReservePciDeviceId(#[source] pci::PciRootError),
 
     /// Could not give the PCI device ID back.
     #[error("Could not give the PCI device ID back")]
@@ -4550,8 +4550,8 @@ impl DeviceManager {
                 .pci_bus
                 .lock()
                 .unwrap()
-                .get_device_id(pci_device_bdf.device() as usize)
-                .map_err(DeviceManagerError::GetPciDeviceId)?;
+                .allocate_device_id(Some(pci_device_bdf.device()))
+                .map_err(DeviceManagerError::AllocatePciDeviceId)?;
 
             (pci_segment_id, pci_device_bdf, resources)
         } else {
