@@ -613,9 +613,8 @@ impl VirtioPciDevice {
             pending_activations,
         };
 
-        if let Some(msix_config) = &virtio_pci_device.msix_config {
+        if virtio_pci_device.msix_config.is_some() {
             virtio_pci_device.virtio_interrupt = Some(Arc::new(VirtioInterruptMsix::new(
-                msix_config.clone(),
                 virtio_pci_device.common_config.msix_config.clone(),
                 virtio_pci_device.common_config.msix_queues.clone(),
                 virtio_pci_device.interrupt_source_group.clone(),
@@ -859,7 +858,6 @@ impl VirtioTransport for VirtioPciDevice {
 }
 
 pub struct VirtioInterruptMsix {
-    msix_config: Arc<Mutex<MsixConfig>>,
     config_vector: Arc<AtomicU16>,
     queues_vectors: Arc<Mutex<Vec<u16>>>,
     interrupt_source_group: MaybeMutInterruptSourceGroup,
@@ -867,13 +865,11 @@ pub struct VirtioInterruptMsix {
 
 impl VirtioInterruptMsix {
     pub fn new(
-        msix_config: Arc<Mutex<MsixConfig>>,
         config_vector: Arc<AtomicU16>,
         queues_vectors: Arc<Mutex<Vec<u16>>>,
         interrupt_source_group: MaybeMutInterruptSourceGroup,
     ) -> Self {
         VirtioInterruptMsix {
-            msix_config,
             config_vector,
             queues_vectors,
             interrupt_source_group,
@@ -891,18 +887,6 @@ impl VirtioInterrupt for VirtioInterruptMsix {
         };
 
         if vector == VIRTQ_MSI_NO_VECTOR {
-            return Ok(());
-        }
-
-        let config = &mut self.msix_config.lock().unwrap();
-        let entry = &config.table_entries[vector as usize];
-        // In case the vector control register associated with the entry
-        // has its first bit set, this means the vector is masked and the
-        // device should not inject the interrupt.
-        // Instead, the Pending Bit Array table is updated to reflect there
-        // is a pending interrupt for this specific vector.
-        if config.masked() || entry.masked() {
-            config.set_pba_bit(vector, false);
             return Ok(());
         }
 

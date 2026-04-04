@@ -3,10 +3,14 @@
 // SPDX-License-Identifier: Apache-2.0 OR BSD-3-Clause
 //
 
+use std::ffi::c_int;
+use std::os::fd::AsRawFd;
+use std::process::abort;
 use std::sync::{Arc, Mutex};
 use std::{io, result};
 
 use byteorder::{ByteOrder, LittleEndian};
+use libc::{nfds_t, poll};
 use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -202,9 +206,18 @@ impl MsixConfig {
     }
 
     fn state(&self) -> MsixConfigState {
+        let mut pba_entries = self.pba_entries.clone();
+        // The pending state of an irqfd is lost during migration.
+        // Therefore, it needs to be stored in the migration state
+        // explicitly.
+        for (offset, entry) in pba_entries.iter_mut().enumerate() {
+            let mut data = [0u8; 8];
+            self.read_pba(offset.try_into().unwrap(), &mut data[..]);
+            *entry |= LittleEndian::read_u64(&data[..]);
+        }
         MsixConfigState {
             table_entries: self.table_entries.clone(),
-            pba_entries: self.pba_entries.clone(),
+            pba_entries,
             masked: self.masked,
             enabled: self.enabled,
         }
@@ -378,7 +391,8 @@ impl MsixConfig {
         // Update interrupt routes
         // Optimisation: only update routes if the entry is not masked;
         // this is safe because if the entry is masked (starts masked as per spec)
-        // in the table then it won't be triggered. (See: #4273)
+        // in the table then it isn't registered with the kernel and so triggering
+        // it has no effect until it is registered again. (See: #4273)
         if self.enabled && !self.masked && !table_entry.masked() {
             let config = MsiIrqSourceConfig {
                 high_addr: table_entry.msg_addr_hi,
@@ -396,66 +410,67 @@ impl MsixConfig {
                 error!("Failed updating vector: {e:?}");
             }
         }
-
-        // After the MSI-X table entry has been updated, it is necessary to
-        // check if the vector control masking bit has changed. In case the
-        // bit has been flipped from 1 to 0, we need to inject a MSI message
-        // if the corresponding pending bit from the PBA is set. Once the MSI
-        // has been injected, the pending bit in the PBA needs to be cleared.
-        // All of this is valid only if MSI-X has not been masked for the whole
-        // device.
-
-        // Check if bit has been flipped
-        if !self.masked()
-            && self.enabled()
-            && old_entry.masked()
-            && !table_entry.masked()
-            && self.get_pba_bit(index as u16) == 1
-        {
-            self.inject_msix_and_clear_pba(index);
-        }
     }
 
-    pub fn read_pba(&mut self, offset: u64, data: &mut [u8]) {
-        assert!(data.len() == 4 || data.len() == 8);
-
+    #[cold]
+    pub fn read_pba(&self, offset: u64, data: &mut [u8]) {
+        let len = data.len();
         let index: usize = (offset / MSIX_PBA_ENTRIES_MODULO) as usize;
-        let modulo_offset = offset % MSIX_PBA_ENTRIES_MODULO;
-
-        if index >= self.pba_entries.len() {
-            debug!("Invalid MSI-X PBA entry index {index}");
-            data.copy_from_slice(&[0xff; 8][..data.len()]);
+        if len != 4 || len != 8 || offset & (len as u64 - 1) != 0 || index >= self.pba_entries.len()
+        {
+            debug!("Invalid MSI-X PBA entry index {index} or length {len}");
+            data.fill(0xFF);
             return;
         }
 
-        match data.len() {
-            4 => {
-                let value: u32 = match modulo_offset {
-                    0x0 => (self.pba_entries[index] & 0xffff_ffffu64) as u32,
-                    0x4 => (self.pba_entries[index] >> 32) as u32,
-                    _ => {
-                        error!("invalid offset");
-                        0
-                    }
-                };
+        let offset = offset as u32;
+        let mut buf = Vec::new();
+        let mut mask = 0u64;
+        for i in 0..len {
+            let Some(fd) = self.interrupt_source_group.notifier(offset + i as u32) else {
+                continue;
+            };
+            mask |= 1u64 << i;
+            // SAFETY: zero is valid for libc types
+            let mut data: libc::pollfd = unsafe { std::mem::zeroed() };
+            data.fd = fd.as_raw_fd();
+            data.events = libc::POLLIN as _;
+            buf.push(data);
+        }
 
-                debug!("MSI_R PBA offset 0x{offset:x} data 0x{value:x}");
-                LittleEndian::write_u32(data, value);
-            }
-            8 => {
-                let value: u64 = match modulo_offset {
-                    0x0 => self.pba_entries[index],
-                    _ => {
-                        error!("invalid offset");
-                        0
-                    }
-                };
+        // Whether the try_from() is useless might depend on libc or architecture.
+        #[allow(clippy::useless_conversion)]
+        // Check which FDs have been triggered.
+        // SAFETY: FFI call with valid parameters.
+        let r = unsafe { poll(buf.as_mut_ptr(), nfds_t::try_from(buf.len()).unwrap(), 0) };
+        if r < -1 || r > buf.len() as c_int {
+            // Kernel bug (memory corruption?)
+            abort();
+        }
+        if r == -1 {
+            // ENOMEM is only documented error that can happen here,
+            // and it's fatal.
+            panic!("Fatal error from poll: {}", std::io::Error::last_os_error());
+        }
 
-                debug!("MSI_R PBA offset 0x{offset:x} data 0x{value:x}");
-                LittleEndian::write_u64(data, value);
+        let pba_entry = self.pba_entries[(offset / MSIX_PBA_ENTRIES_MODULO as u32) as usize];
+        if len == 4 {
+            let value = if offset & 4 != 0 {
+                (pba_entry >> 32) as u32
+            } else {
+                pba_entry as u32
+            };
+            LittleEndian::write_u32(data, value);
+        } else {
+            LittleEndian::write_u64(data, pba_entry);
+        }
+        let mut iter = buf.iter();
+        for i in 0..len {
+            if mask & (1u64 << i) == 0 {
+                continue;
             }
-            _ => {
-                error!("invalid data length");
+            if libc::POLLIN as libc::c_short & iter.next().unwrap().revents != 0 {
+                data[i / 8] |= 1 << (i % 8);
             }
         }
     }
@@ -464,19 +479,12 @@ impl MsixConfig {
         error!("Pending Bit Array is read only");
     }
 
-    pub fn set_pba_bit(&mut self, vector: u16, reset: bool) {
+    fn clear_pba_bit(&mut self, vector: u16) {
         assert!(vector < MAX_MSIX_VECTORS_PER_DEVICE);
 
         let index: usize = (vector as usize) / BITS_PER_PBA_ENTRY;
         let shift: usize = (vector as usize) % BITS_PER_PBA_ENTRY;
-        let mut mask: u64 = (1 << shift) as u64;
-
-        if reset {
-            mask = !mask;
-            self.pba_entries[index] &= mask;
-        } else {
-            self.pba_entries[index] |= mask;
-        }
+        self.pba_entries[index] &= !((1 << shift) as u64);
     }
 
     fn get_pba_bit(&self, vector: u16) -> u8 {
@@ -499,7 +507,7 @@ impl MsixConfig {
         }
 
         // Clear the bit from PBA
-        self.set_pba_bit(vector as u16, true);
+        self.clear_pba_bit(vector as u16);
     }
 }
 
