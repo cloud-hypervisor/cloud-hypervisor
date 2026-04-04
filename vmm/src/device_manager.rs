@@ -1697,6 +1697,10 @@ impl DeviceManager {
 
         let mut iommu_attached_devices = Vec::new();
         {
+            // Reserve all explicit PCI device IDs before any device creation
+            // so that they won't be picked for dynamic allocation.
+            self.reserve_explicit_device_ids()?;
+
             for handle in self.virtio_devices.clone() {
                 let mapping: Option<Arc<IommuMapping>> = if handle.pci_common.iommu {
                     self.iommu_mapping.clone()
@@ -4532,6 +4536,37 @@ impl DeviceManager {
         self.device_tree.lock().unwrap().insert(id, node);
 
         Ok(Some(ivshmem_device))
+    }
+
+    fn reserve_explicit_device_ids(&self) -> DeviceManagerResult<()> {
+        for handle in &self.virtio_devices {
+            if let Some(device_id) = handle.pci_common.pci_device_id {
+                self.pci_segments[handle.pci_common.pci_segment as usize]
+                    .reserve_device_id(device_id)?;
+            }
+        }
+
+        let config = self.config.lock().unwrap();
+
+        if let Some(devices) = &config.devices {
+            for device_cfg in devices {
+                if let Some(device_id) = device_cfg.pci_common.pci_device_id {
+                    self.pci_segments[device_cfg.pci_common.pci_segment as usize]
+                        .reserve_device_id(device_id)?;
+                }
+            }
+        }
+
+        if let Some(user_devices) = &config.user_devices {
+            for device_cfg in user_devices {
+                if let Some(device_id) = device_cfg.pci_common.pci_device_id {
+                    self.pci_segments[device_cfg.pci_common.pci_segment as usize]
+                        .reserve_device_id(device_id)?;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn pci_resources(
