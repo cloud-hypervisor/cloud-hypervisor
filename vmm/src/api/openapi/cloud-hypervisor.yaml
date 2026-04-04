@@ -984,6 +984,9 @@ components:
         pci_segment:
           type: integer
           format: int16
+        pci_device_id:
+          type: integer
+          format: uint8
         id:
           type: string
         serial:
@@ -1046,6 +1049,9 @@ components:
         pci_segment:
           type: integer
           format: int16
+        pci_device_id:
+          type: integer
+          format: uint8
         rate_limiter_config:
           $ref: "#/components/schemas/RateLimiterConfig"
         offload_tso:
@@ -1107,6 +1113,9 @@ components:
         pci_segment:
           type: integer
           format: int16
+        pci_device_id:
+          type: integer
+          format: uint8
         id:
           type: string
 
@@ -1127,6 +1136,9 @@ components:
         pci_segment:
           type: integer
           format: int16
+        pci_device_id:
+          type: integer
+          format: uint8
         virtio_id:
           type: uint32
 
@@ -1149,6 +1161,9 @@ components:
         pci_segment:
           type: integer
           format: int16
+        pci_device_id:
+          type: integer
+          format: uint8
         id:
           type: string
 
@@ -1196,6 +1211,9 @@ components:
         pci_segment:
           type: integer
           format: int16
+        pci_device_id:
+          type: integer
+          format: uint8
         id:
           type: string
         x_nv_gpudirect_clique:
@@ -1226,6 +1244,9 @@ components:
         pci_segment:
           type: integer
           format: int16
+        pci_device_id:
+          type: integer
+          format: uint8
         id:
           type: string
 
@@ -1249,6 +1270,9 @@ components:
         pci_segment:
           type: integer
           format: int16
+        pci_device_id:
+          type: integer
+          format: uint8
         id:
           type: string
 
@@ -1429,6 +1453,12 @@ components:
       properties:
         socket:
           type: string
+        pci_segment:
+          type: integer
+          format: int16
+        pci_device_id:
+          type: integer
+          format: uint8
 
     LandlockConfig:
       required:
