@@ -1254,7 +1254,8 @@ impl DiskConfig {
          vhost_user=on|off,socket=<vhost_user_socket_path>,\
          bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
          ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
-         id=<device_id>,pci_segment=<segment_id>,rate_limit_group=<group_id>,\
+         id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
+         rate_limit_group=<group_id>,\
          queue_affinity=<list_of_queue_indices_with_their_associated_cpuset>,\
          serial=<serial_number>,backing_files=on|off,sparse=on|off,\
          image_type=<raw,qcow2,vhd,vhdx>,lock_granularity=byte-range|full";
@@ -1496,7 +1497,8 @@ impl NetConfig {
     num_queues=<number_of_queues>,queue_size=<size_of_each_queue>,id=<device_id>,\
     vhost_user=<vhost_user_enable>,socket=<vhost_user_socket_path>,vhost_mode=client|server,\
     bw_size=<bytes>,bw_one_time_burst=<bytes>,bw_refill_time=<ms>,\
-    ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,pci_segment=<segment_id>,\
+    ops_size=<io_ops>,ops_one_time_burst=<io_ops>,ops_refill_time=<ms>,\
+    pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
     offload_tso=on|off,offload_ufo=on|off,offload_csum=on|off\"";
 
     pub fn parse(net: &str) -> Result<Self> {
@@ -1767,7 +1769,7 @@ impl GenericVhostUserConfig {
     \"virtio_id=<ID number for virtio device type (FS, block, net, etc) or symbolic name>,\
     socket=<socket_path>,\
     queue_sizes=<list of queue sizes>,\
-    id=<device_id>,pci_segment=<segment_id>\"";
+    id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(vhost_user: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1891,7 +1893,8 @@ impl GenericVhostUserConfig {
 impl FsConfig {
     pub const SYNTAX: &'static str = "virtio-fs parameters \
     \"tag=<tag_name>,socket=<socket_path>,num_queues=<number_of_queues>,\
-    queue_size=<size_of_each_queue>,id=<device_id>,pci_segment=<segment_id>\"";
+    queue_size=<size_of_each_queue>,id=<device_id>,\
+    pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(fs: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2044,7 +2047,8 @@ impl FwCfgItem {
 impl PmemConfig {
     pub const SYNTAX: &'static str = "Persistent memory parameters \
     \"file=<backing_file_path>,size=<persistent_memory_size>,iommu=on|off,\
-    discard_writes=on|off,id=<device_id>,pci_segment=<segment_id>\"";
+    discard_writes=on|off,id=<device_id>,\
+    pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(pmem: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2188,7 +2192,9 @@ impl DebugConsoleConfig {
 }
 
 impl DeviceConfig {
-    pub const SYNTAX: &'static str = "Direct device assignment parameters \"path=<device_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>\"";
+    pub const SYNTAX: &'static str = "Direct device assignment parameters \
+    \"path=<device_path>,iommu=on|off,id=<device_id>,\
+    pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(device: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2228,8 +2234,8 @@ impl DeviceConfig {
 }
 
 impl UserDeviceConfig {
-    pub const SYNTAX: &'static str =
-        "Userspace device socket=<socket_path>,id=<device_id>,pci_segment=<segment_id>\"";
+    pub const SYNTAX: &'static str = "Userspace device socket=<socket_path>,id=<device_id>,\
+        pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(user_device: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2257,7 +2263,7 @@ impl UserDeviceConfig {
 impl VdpaConfig {
     pub const SYNTAX: &'static str = "vDPA device \
         \"path=<device_path>,num_queues=<number_of_queues>,iommu=on|off,\
-        id=<device_id>,pci_segment=<segment_id>\"";
+        id=<device_id>,pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(vdpa: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -2291,7 +2297,8 @@ impl VdpaConfig {
 
 impl VsockConfig {
     pub const SYNTAX: &'static str = "Virtio VSOCK parameters \
-        \"cid=<context_id>,socket=<socket_path>,iommu=on|off,id=<device_id>,pci_segment=<segment_id>\"";
+        \"cid=<context_id>,socket=<socket_path>,iommu=on|off,id=<device_id>,\
+        pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
 
     pub fn parse(vsock: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
