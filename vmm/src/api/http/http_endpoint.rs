@@ -122,7 +122,7 @@ mod fds_helper {
 
         impl ConfigWithFDs for NetConfig {
             fn id(&self) -> Option<&str> {
-                self.id.as_deref()
+                self.pci_common.id.as_deref()
             }
 
             fn fds_from_http_body(&self) -> Option<&[RawFd]> {
