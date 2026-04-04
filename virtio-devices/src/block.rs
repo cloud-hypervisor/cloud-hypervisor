@@ -14,7 +14,7 @@ use std::num::Wrapping;
 use std::ops::Deref;
 use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Barrier};
 use std::{io, result};
 
@@ -22,15 +22,15 @@ use anyhow::anyhow;
 use block::async_io::{AsyncIo, AsyncIoError};
 use block::disk_file::DiskBackend;
 use block::error::BlockError;
-use block::fcntl::{LockError, LockGranularity, LockGranularityChoice, LockType, get_lock_state};
+use block::fcntl::{get_lock_state, LockError, LockGranularity, LockGranularityChoice, LockType};
 use block::{
-    ExecuteAsync, ExecuteError, MAX_DISCARD_WRITE_ZEROES_SEG, Request, RequestType,
-    VirtioBlockConfig, build_serial, fcntl,
+    build_serial, fcntl, ExecuteAsync, ExecuteError, Request, RequestType, VirtioBlockConfig,
+    MAX_DISCARD_WRITE_ZEROES_SEG,
 };
 use event_monitor::event;
 use log::{debug, error, info, warn};
-use rate_limiter::TokenType;
 use rate_limiter::group::{RateLimiterGroup, RateLimiterGroupHandle};
+use rate_limiter::TokenType;
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -44,9 +44,9 @@ use vm_virtio::AccessPlatform;
 use vmm_sys_util::eventfd::EventFd;
 
 use super::{
-    ActivateError, ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError,
-    EpollHelperHandler, Error as DeviceError, VirtioCommon, VirtioDevice, VirtioDeviceType,
-    VirtioInterruptType,
+    ActivateError, ActivateResult, EpollHelper, EpollHelperError, EpollHelperHandler,
+    Error as DeviceError, VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterruptType,
+    EPOLL_HELPER_EVENT_LAST,
 };
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
@@ -1003,15 +1003,13 @@ impl Block {
             .resize(new_size)
             .map_err(Error::DiskResize)?;
 
-        let nsectors = new_size / SECTOR_SIZE;
-
-        self.common.pause().map_err(Error::PauseVcpus)?;
+        // Re-query actual size - for block devices the resize happens externally
+        let actual_size = self.disk_image.logical_size().map_err(Error::DiskResize)?;
+        let nsectors = actual_size / SECTOR_SIZE;
 
         self.disk_nsectors.store(nsectors, Ordering::SeqCst);
         self.config.capacity = nsectors;
         self.state().disk_nsectors = nsectors;
-
-        self.common.resume().map_err(Error::ResumeVcpus)?;
 
         if let Some(interrupt_cb) = self.common.interrupt_cb.as_ref() {
             interrupt_cb
