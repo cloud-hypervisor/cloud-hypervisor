@@ -217,7 +217,7 @@ impl Vdpa {
 
     fn activate_vdpa(
         &mut self,
-        mem: &GuestMemoryMmap,
+        _mem: &GuestMemoryMmap,
         virtio_interrupt: &dyn VirtioInterrupt,
         queues: &[(usize, Queue, EventFd)],
     ) -> Result<()> {
@@ -269,13 +269,7 @@ impl Vdpa {
             self.vhost
                 .as_ref()
                 .unwrap()
-                .set_vring_base(
-                    *queue_index,
-                    queue
-                        .avail_idx(mem, Ordering::Acquire)
-                        .map_err(Error::GetAvailableIndex)?
-                        .0,
-                )
+                .set_vring_base(*queue_index, 0)
                 .map_err(Error::SetVringBase)?;
 
             if let Some(eventfd) =
