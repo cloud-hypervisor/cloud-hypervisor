@@ -8,6 +8,7 @@ version = "0.1.0"
 [features]
 default = []
 fw_cfg = []
+igvm = ["dep:igvm", "igvm_defs"]
 kvm = ["hypervisor/kvm"]
 sev_snp = []
 tdx = []
@@ -16,6 +17,8 @@ tdx = []
 anyhow = { workspace = true }
 byteorder = { workspace = true }
 hypervisor = { path = "../hypervisor" }
+igvm = { workspace = true, optional = true }
+igvm_defs = { workspace = true, optional = true }
 libc = { workspace = true }
 linux-loader = { workspace = true, features = ["bzimage", "elf", "pe"] }
 log = { workspace = true }

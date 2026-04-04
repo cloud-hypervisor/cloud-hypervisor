@@ -123,3 +123,14 @@ pub const APIC_START: GuestAddress = GuestAddress(0xfee0_0000);
 
 // ** 64-bit RAM start (start: 4GiB, length: varies) **
 pub const RAM_64BIT_START: GuestAddress = GuestAddress(0x1_0000_0000);
+
+/// Linux boot_params e820 table offset (offset of e820_table within struct boot_params).
+pub const BOOT_E820_TABLE_OFFSET: u64 = 0x2d0;
+/// Linux boot_params e820 entry count offset (offset of e820_entries within struct boot_params).
+pub const BOOT_E820_ENTRIES_OFFSET: u64 = 0x1e8;
+/// Linux boot_params ACPI RSDP address offset.
+pub const BOOT_ACPI_RSDP_OFFSET: u64 = 0x70;
+/// Linux boot_params max e820 entries.
+pub const BOOT_MAX_E820_ENTRIES: usize = 128;
+/// E820 memory type: usable RAM.
+pub const E820_TYPE_RAM: u32 = 1;

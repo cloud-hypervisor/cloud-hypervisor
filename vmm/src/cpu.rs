@@ -546,6 +546,9 @@ impl Vcpu {
         #[cfg(target_arch = "x86_64")] kvm_hyperv: bool,
         #[cfg(target_arch = "x86_64")] topology: (u16, u16, u16, u16),
         #[cfg(target_arch = "x86_64")] nested: bool,
+        #[cfg(all(target_arch = "x86_64", feature = "igvm"))] igvm_vp_context: Option<
+            &igvm_defs::IgvmNativeVpContextX64,
+        >,
     ) -> Result<()> {
         #[cfg(target_arch = "aarch64")]
         {
@@ -567,6 +570,8 @@ impl Vcpu {
             self.vendor,
             topology,
             nested,
+            #[cfg(feature = "igvm")]
+            igvm_vp_context,
         )
         .map_err(Error::VcpuConfiguration)?;
 
@@ -697,6 +702,8 @@ pub struct CpuManager {
     sev_snp_enabled: bool,
     // State of the core scheduling group leader election (VM mode).
     core_scheduling_group_leader: Arc<AtomicI32>,
+    #[cfg(feature = "igvm")]
+    igvm_vp_context: Option<crate::igvm::IgvmVpContext>,
 }
 
 const CPU_ENABLE_FLAG: usize = 0;
@@ -972,6 +979,8 @@ impl CpuManager {
             core_scheduling_group_leader: Arc::new(AtomicI32::new(
                 CoreSchedulingLeader::Initial as i32,
             )),
+            #[cfg(feature = "igvm")]
+            igvm_vp_context: None,
         })))
     }
 
@@ -1092,6 +1101,12 @@ impl CpuManager {
             self.config.kvm_hyperv,
             topology,
             self.config.nested,
+            #[cfg(feature = "igvm")]
+            self.igvm_vp_context.as_ref().and_then(|ctx| match ctx {
+                crate::igvm::IgvmVpContext::X64Native(native) => Some(native.as_ref()),
+                #[allow(unreachable_patterns)]
+                _ => None,
+            }),
         )?;
 
         #[cfg(target_arch = "aarch64")]
@@ -1156,6 +1171,11 @@ impl CpuManager {
 
     pub fn vcpus(&self) -> Vec<Arc<Mutex<Vcpu>>> {
         self.vcpus.clone()
+    }
+
+    #[cfg(feature = "igvm")]
+    pub fn set_igvm_vp_context(&mut self, ctx: crate::igvm::IgvmVpContext) {
+        self.igvm_vp_context = Some(ctx);
     }
 
     fn start_vcpu(
@@ -2248,6 +2268,7 @@ impl CpuManager {
     }
 
     #[cfg(feature = "igvm")]
+    #[allow(dead_code)]
     pub(crate) fn get_cpuid_leaf(
         &self,
         cpu_id: u8,

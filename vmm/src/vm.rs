@@ -1455,29 +1455,46 @@ impl Vm {
         igvm: File,
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
+        cmdline: &str,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
     ) -> Result<EntryPoint> {
+        use crate::igvm::IgvmVpContext;
+
         let res = igvm_loader::load_igvm(
             &igvm,
             memory_manager,
             cpu_manager.clone(),
-            "",
+            cmdline,
             #[cfg(feature = "sev_snp")]
             host_data,
         )
         .map_err(Error::IgvmLoad)?;
 
-        cfg_if::cfg_if! {
-            if #[cfg(feature = "sev_snp")] {
-                let entry_point = if cpu_manager.lock().unwrap().sev_snp_enabled() {
-                    EntryPoint { entry_addr: vm_memory::GuestAddress(res.vmsa_gpa), setup_header: None }
-                } else {
-                    EntryPoint {entry_addr: vm_memory::GuestAddress(res.vmsa.rip), setup_header: None }
-                };
-            } else {
-               let entry_point = EntryPoint { entry_addr: vm_memory::GuestAddress(res.vmsa.rip), setup_header: None };
+        let entry_point = match &res.vp_context {
+            #[cfg(feature = "sev_snp")]
+            Some(IgvmVpContext::SevSnp { vmsa_gpa, .. })
+                if cpu_manager.lock().unwrap().sev_snp_enabled() =>
+            {
+                EntryPoint {
+                    entry_addr: vm_memory::GuestAddress(*vmsa_gpa),
+                    setup_header: None,
+                }
             }
+            Some(IgvmVpContext::X64Native(ctx)) => {
+                let entry_addr = vm_memory::GuestAddress(ctx.rip);
+                cpu_manager
+                    .lock()
+                    .unwrap()
+                    .set_igvm_vp_context(IgvmVpContext::X64Native(ctx.clone()));
+                EntryPoint {
+                    entry_addr,
+                    setup_header: None,
+                }
+            }
+            #[allow(unreachable_patterns)]
+            Some(_) | None => unimplemented!("Unknown vp_context!"),
         };
+
         Ok(entry_point)
     }
 
@@ -1555,12 +1572,19 @@ impl Vm {
         {
             if let Some(_igvm_file) = &payload.igvm {
                 let igvm = File::open(_igvm_file).map_err(Error::IgvmFile)?;
+                let cmdline = payload.cmdline.as_deref().unwrap_or("");
                 #[cfg(feature = "sev_snp")]
                 if sev_snp_enabled {
-                    return Self::load_igvm(igvm, memory_manager, cpu_manager, &payload.host_data);
+                    return Self::load_igvm(
+                        igvm,
+                        memory_manager,
+                        cpu_manager,
+                        cmdline,
+                        &payload.host_data,
+                    );
                 }
                 #[cfg(not(feature = "sev_snp"))]
-                return Self::load_igvm(igvm, memory_manager, cpu_manager);
+                return Self::load_igvm(igvm, memory_manager, cpu_manager, cmdline);
             }
         }
         match (&payload.firmware, &payload.kernel) {
