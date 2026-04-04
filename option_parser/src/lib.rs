@@ -148,6 +148,14 @@ impl OptionParser {
         self
     }
 
+    pub fn add_all(&mut self, options: &[&str]) -> &mut Self {
+        for option in options {
+            self.add(option);
+        }
+
+        self
+    }
+
     pub fn add_valueless(&mut self, option: &str) -> &mut Self {
         self.options.insert(
             option.to_owned(),
