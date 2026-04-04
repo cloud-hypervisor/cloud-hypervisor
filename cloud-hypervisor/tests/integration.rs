@@ -1786,6 +1786,69 @@ mod common_parallel {
     }
 
     #[test]
+    fn test_virtio_rtc() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+
+        let kernel_path = direct_kernel_boot_path();
+
+        // virtio-rtc is always created by the VMM (no CLI flag needed)
+        let mut child = GuestCommand::new(&guest)
+            .default_cpus()
+            .default_memory()
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // Fail fast if the virtio-rtc driver is not loaded.
+            assert_eq!(
+                guest
+                    .ssh_command(
+                        "test -d /sys/bus/virtio/drivers/virtio_rtc && echo ok || echo missing"
+                    )
+                    .unwrap()
+                    .trim(),
+                "ok"
+            );
+
+            // Find the PTP device backed by virtio-rtc (clock_name starts with
+            // "Virtio PTP"), which may coexist with KVM's "KVM virtual PTP".
+            let ptp_dev = guest
+                .ssh_command(
+                    "for d in /sys/class/ptp/ptp*; do \
+                   if grep -q '^Virtio PTP' \"$d/clock_name\" 2>/dev/null; then \
+                     basename \"$d\"; break; \
+                   fi; \
+                 done",
+                )
+                .unwrap();
+            let ptp_dev = ptp_dev.trim();
+            assert!(ptp_dev.starts_with("ptp"), "No virtio-rtc PTP device found");
+
+            // Verify the device node exists
+            assert_eq!(
+                guest
+                    .ssh_command(&format!("ls /dev/{ptp_dev} 2>/dev/null || echo missing"))
+                    .unwrap()
+                    .trim(),
+                format!("/dev/{ptp_dev}")
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_virtio_pmem_discard_writes() {
         test_virtio_pmem(true, false);
     }
@@ -2349,7 +2412,7 @@ mod common_parallel {
                     .ssh_command_l2_1("ls /sys/bus/pci/devices")
                     .unwrap()
                     .trim(),
-                8
+                9
             ));
 
             // Check both if /dev/vdc exists and if the block size is 16M in L2 VM
@@ -2377,7 +2440,7 @@ mod common_parallel {
                 .unwrap();
             assert!(check_matched_lines_count(
                 vfio_hotplug_output.trim(),
-                &["{\"id\":\"vfio123\",\"bdf\":\"0000:00:08.0\"}"],
+                &["{\"id\":\"vfio123\",\"bdf\":\"0000:00:09.0\"}"],
                 1
             ));
 
@@ -2394,13 +2457,13 @@ mod common_parallel {
 
             // Check the amount of PCI devices appearing in L2 VM.
             // There should be one more device than before, raising the count
-            // up to 9 PCI devices.
+            // up to 10 PCI devices.
             assert!(check_lines_count(
                 guest
                     .ssh_command_l2_1("ls /sys/bus/pci/devices")
                     .unwrap()
                     .trim(),
-                9
+                10
             ));
 
             // Let's now verify that we can correctly remove the virtio-net
@@ -2416,13 +2479,13 @@ mod common_parallel {
             thread::sleep(std::time::Duration::new(10, 0));
 
             // Check the amount of PCI devices appearing in L2 VM is back down
-            // to 8 devices.
+            // to 9 devices.
             assert!(check_lines_count(
                 guest
                     .ssh_command_l2_1("ls /sys/bus/pci/devices")
                     .unwrap()
                     .trim(),
-                8
+                9
             ));
 
             // Perform memory hotplug in L2 and validate the memory is showing
@@ -2931,7 +2994,7 @@ mod common_parallel {
             assert!(cmd_success);
             assert!(
                 String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
+                    .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:07.0\"}")
             );
 
             // Check that /dev/vdc exists and the block size is 16M.
@@ -4870,7 +4933,7 @@ mod common_parallel {
             } else {
                 assert!(
                     String::from_utf8_lossy(&cmd_output)
-                        .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
+                        .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:07.0\"}")
                 );
             }
 
@@ -5353,7 +5416,7 @@ mod common_parallel {
             assert!(cmd_success);
             assert!(
                 String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"vfio_user0\",\"bdf\":\"0000:00:05.0\"}")
+                    .contains("{\"id\":\"vfio_user0\",\"bdf\":\"0000:00:06.0\"}")
             );
 
             thread::sleep(std::time::Duration::new(10, 0));
@@ -8322,7 +8385,7 @@ mod vfio {
             assert!(cmd_success);
             assert!(
                 String::from_utf8_lossy(&cmd_output)
-                    .contains("{\"id\":\"vfio0\",\"bdf\":\"0000:00:06.0\"}")
+                    .contains("{\"id\":\"vfio0\",\"bdf\":\"0000:00:07.0\"}")
             );
 
             thread::sleep(std::time::Duration::new(10, 0));
