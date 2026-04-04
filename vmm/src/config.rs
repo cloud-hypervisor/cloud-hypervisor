@@ -1142,8 +1142,8 @@ impl RateLimiterGroupConfig {
 }
 
 impl PciDeviceCommonConfig {
-    const OPTIONS: &[&str] = &["id", "pci_segment"];
-    const OPTIONS_IOMMU: &[&str] = &["id", "iommu", "pci_segment"];
+    const OPTIONS: &[&str] = &["id", "pci_segment", "pci_device_id"];
+    const OPTIONS_IOMMU: &[&str] = &["id", "iommu", "pci_segment", "pci_device_id"];
 
     pub fn parse(input: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
@@ -1164,11 +1164,15 @@ impl PciDeviceCommonConfig {
             .convert("pci_segment")
             .map_err(Error::ParsePciDeviceCommonConfig)?
             .unwrap_or_default();
+        let pci_device_id = parser
+            .convert::<u8>("pci_device_id")
+            .map_err(Error::ParsePciDeviceCommonConfig)?;
 
         Ok(Self {
             id,
             iommu,
             pci_segment,
+            pci_device_id,
         })
     }
 

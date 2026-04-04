@@ -271,6 +271,8 @@ pub struct PciDeviceCommonConfig {
     pub iommu: bool,
     #[serde(default)]
     pub pci_segment: u16,
+    #[serde(default)]
+    pub pci_device_id: Option<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
