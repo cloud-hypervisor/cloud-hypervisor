@@ -241,19 +241,6 @@ impl PciBus {
         }
     }
 
-    pub fn get_device_id(&mut self, id: usize) -> Result<()> {
-        if id < NUM_DEVICE_IDS as usize {
-            if self.device_ids[id] == DeviceIdState::Free {
-                self.device_ids[id] = DeviceIdState::Allocated;
-                Ok(())
-            } else {
-                Err(PciRootError::AlreadyInUsePciDeviceSlot(id))
-            }
-        } else {
-            Err(PciRootError::InvalidPciDeviceSlot(id))
-        }
-    }
-
     pub fn put_device_id(&mut self, id: usize) -> Result<()> {
         if id < NUM_DEVICE_IDS as usize {
             self.device_ids[id] = DeviceIdState::Free;
