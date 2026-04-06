@@ -3,6 +3,7 @@
 WORKLOADS_DIR="$HOME/workloads"
 
 mkdir -p "$WORKLOADS_DIR"
+mkdir -p "$WORKLOADS_DIR/junit"
 
 build_edk2() {
     EDK2_BUILD_DIR="$WORKLOADS_DIR/edk2_build"
