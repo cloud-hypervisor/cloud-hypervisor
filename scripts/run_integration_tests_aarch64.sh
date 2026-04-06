@@ -285,7 +285,7 @@ fi
 
 # Run tests on dbus_api
 if [ $RES -eq 0 ]; then
-    cargo build --features "dbus_api" --all --release --target "$BUILD_TARGET"
+    cargo build --features "mshv,dbus_api" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
     # integration tests now do not reply on build feature "dbus_api"
     time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "dbus_api::$test_filter" -- ${test_binary_args[*]}
@@ -294,14 +294,14 @@ fi
 
 # Run tests on fw_cfg
 if [ $RES -eq 0 ]; then
-    cargo build --features "fw_cfg" --all --release --target "$BUILD_TARGET"
+    cargo build --features "mshv,fw_cfg" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
     time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "fw_cfg::$test_filter" -- ${test_binary_args[*]}
     RES=$?
 fi
 
 if [ $RES -eq 0 ]; then
-    cargo build --features "ivshmem" --all --release --target "$BUILD_TARGET"
+    cargo build --features "mshv,ivshmem" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
     time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "ivshmem::$test_filter" -- ${test_binary_args[*]}
 
