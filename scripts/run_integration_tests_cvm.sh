@@ -8,6 +8,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/test-util.sh"
 
 WORKLOADS_DIR="$HOME/workloads"
 mkdir -p "$WORKLOADS_DIR"
+mkdir -p "$WORKLOADS_DIR/junit"
 
 process_common_args "$@"
 
@@ -27,7 +28,7 @@ popd || exit
 cargo build --features $build_features --all --release --target "$BUILD_TARGET"
 
 export RUST_BACKTRACE=1
-time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "common_cvm::$test_filter" -- ${test_binary_args[*]}
+time cargo nextest run $test_features --profile common_cvm --no-tests=pass --test-threads=$(($(nproc) / 4)) "$test_filter" -- ${test_binary_args[*]}
 RES=$?
 
 exit $RES
