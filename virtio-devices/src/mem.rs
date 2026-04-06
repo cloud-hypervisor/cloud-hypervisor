@@ -834,6 +834,10 @@ impl Mem {
         })
     }
 
+    pub fn plugged_size(&self) -> u64 {
+        self.config.lock().unwrap().plugged_size
+    }
+
     pub fn resize(&mut self, size: u64) -> result::Result<(), Error> {
         let mut config = self.config.lock().unwrap();
         config.resize(size).map_err(|e| {

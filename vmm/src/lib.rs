@@ -1915,9 +1915,11 @@ impl RequestHandler for Vmm {
                 };
                 let config = vm_config.lock().unwrap().clone();
 
-                let mut memory_actual_size = config.memory.total_size();
+                let mut memory_actual_size =
+                    config.memory.total_size() - config.memory.hotplugged_size();
                 if let Some(vm) = &self.vm {
                     memory_actual_size = memory_actual_size.saturating_sub(vm.balloon_size());
+                    memory_actual_size += vm.virtio_mem_plugged_size();
                 }
 
                 let device_tree = self
