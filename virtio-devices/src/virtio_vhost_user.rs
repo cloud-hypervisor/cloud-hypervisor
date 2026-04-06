@@ -18,7 +18,7 @@
 // This implements a vhost-user device backend.  Documentation can be found at:
 // https://stefanha.github.io/virtio/vhost-user-slave.html
 
-use std::os::fd::{AsRawFd as _, BorrowedFd, FromRawFd as _, IntoRawFd as _, OwnedFd};
+use std::os::fd::{AsRawFd as _, BorrowedFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::AtomicBool;
@@ -158,20 +158,14 @@ impl VM for InternalVM {
     }
 
     fn unregister_ioevent(&mut self, fd: EventFd, offset: u64) {
-        // SAFETY: into_raw_fd returns valid Fd and the eventfd
-        // is only used in operations that reject non-eventfds
-        let fd = unsafe { EventFd::from_raw_fd(fd.into_raw_fd()) };
         self.vm
             .unregister_ioevent(&fd, &IoEventAddress::Mmio(offset))
             .expect("TODO");
     }
 
     fn register_vring_kick(&mut self, fd: Option<EventFd>, queue: u8) {
-        // SAFETY: into_raw_fd returns valid Fd and the eventfd
-        // is only used in operations that reject non-eventfds
-        let fd = fd.map(|fd| unsafe { EventFd::from_raw_fd(fd.into_raw_fd()) });
         self.interrupt_cb
-            .set_notifier(queue.into(), fd, &*self.vm)
+            .set_notifier(u32::from(queue) + 4, fd, &*self.vm)
             .map_err(|e| {
                 error!("Cannot set vring kick notifier: {e}");
                 vhost::vhost_user::Error::BackendInternalError
