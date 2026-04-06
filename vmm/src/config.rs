@@ -1039,21 +1039,24 @@ impl MemoryConfig {
     }
 
     pub fn total_size(&self) -> u64 {
-        let mut size = self.size;
-        if let Some(hotplugged_size) = self.hotplugged_size {
-            size += hotplugged_size;
-        }
+        self.size
+            + self
+                .zones
+                .iter()
+                .flatten()
+                .map(|zone| zone.size)
+                .sum::<u64>()
+            + self.hotplugged_size()
+    }
 
-        if let Some(zones) = &self.zones {
-            for zone in zones.iter() {
-                size += zone.size;
-                if let Some(hotplugged_size) = zone.hotplugged_size {
-                    size += hotplugged_size;
-                }
-            }
-        }
-
-        size
+    pub fn hotplugged_size(&self) -> u64 {
+        self.hotplugged_size.unwrap_or(0)
+            + self
+                .zones
+                .iter()
+                .flatten()
+                .filter_map(|zone| zone.hotplugged_size)
+                .sum::<u64>()
     }
 }
 

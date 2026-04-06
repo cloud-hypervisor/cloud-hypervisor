@@ -2822,6 +2822,14 @@ impl Vm {
         self.device_manager.lock().unwrap().balloon_size()
     }
 
+    /// Get the actual size of the virtio_mem regions
+    pub fn virtio_mem_plugged_size(&self) -> u64 {
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .virtio_mem_plugged_size()
+    }
+
     pub fn send_memory_fds(
         &mut self,
         socket: &mut UnixStream,

@@ -2420,6 +2420,19 @@ impl MemoryManager {
         unsafe { (*stat.as_ptr()).st_nlink as usize > 0 }
     }
 
+    pub fn virtio_mem_plugged_size(&self) -> u64 {
+        self.memory_zones
+            .values()
+            .filter_map(|zone| {
+                zone.virtio_mem_zone
+                    .as_ref()?
+                    .virtio_device
+                    .as_ref()
+                    .map(|dev| dev.lock().unwrap().plugged_size())
+            })
+            .sum()
+    }
+
     pub fn memory_zones(&self) -> &MemoryZones {
         &self.memory_zones
     }
