@@ -849,7 +849,7 @@ impl PayloadConfig {
         #[cfg(feature = "igvm")]
         {
             if self.igvm.is_some() {
-                if self.firmware.is_some() || self.kernel.is_some() {
+                if self.firmware.is_some() {
                     return Err(PayloadConfigError::IgvmPlusOtherPayloads);
                 }
                 return Ok(());
