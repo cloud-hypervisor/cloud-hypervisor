@@ -190,6 +190,8 @@ pub struct HypervisorVmConfig {
     pub sev_snp_enabled: bool,
     #[cfg(feature = "sev_snp")]
     pub mem_size: u64,
+    #[cfg(feature = "sev_snp")]
+    pub vmsa_features: u64,
     pub nested: bool,
     pub smt_enabled: bool,
 }
