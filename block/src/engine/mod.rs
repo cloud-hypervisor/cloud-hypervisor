@@ -13,6 +13,9 @@ use crate::async_io::{AsyncIoError, BorrowedDiskFd};
 use crate::request::SECTOR_SIZE;
 use crate::{BatchRequest, IoBuf};
 
+mod aio;
+#[cfg(feature = "io_uring")]
+mod io_uring;
 mod tracker;
 
 pub type SubmitResult = Result<(), (bool, AsyncIoError)>;
@@ -37,6 +40,10 @@ pub struct InnerCompletion {
     /// version of the same system call would have returned.
     pub result: i32,
 }
+
+pub use aio::AioEngine;
+#[cfg(feature = "io_uring")]
+pub use io_uring::IoUringEngine;
 
 /// An engine that can be created from a given queue depth.
 pub trait CreatableEngine: AsyncIoEngine + Sized {
