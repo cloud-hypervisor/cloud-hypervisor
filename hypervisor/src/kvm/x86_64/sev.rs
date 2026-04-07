@@ -11,7 +11,7 @@ use std::path::Path;
 use igvm_defs::SnpPolicy;
 use kvm_bindings::kvm_sev_cmd;
 use kvm_ioctls::VmFd;
-use log::{error, info};
+use log::{debug, error, info};
 use vmm_sys_util::errno;
 
 pub(crate) type Result<T> = std::result::Result<T, errno::Error>;
@@ -20,6 +20,7 @@ pub(crate) type Result<T> = std::result::Result<T, errno::Error>;
 const KVM_SEV_INIT2: u32 = 22;
 const KVM_SEV_SNP_LAUNCH_START: u32 = 100;
 const KVM_SEV_SNP_LAUNCH_UPDATE: u32 = 101;
+const KVM_SEV_SNP_LAUNCH_FINISH: u32 = 102;
 // SNP_LAUNCH_UPDATE page types — linux/arch/x86/include/uapi/asm/sev-guest.h
 pub const SNP_PAGE_TYPE_VMSA: u32 = 2;
 
@@ -78,6 +79,21 @@ pub(crate) struct KvmSevSnpLaunchUpdate {
     pub flags: u16,
     pub pad1: u32,
     pub pad2: [u64; 4],
+}
+
+#[repr(C, packed)]
+#[derive(Debug, Copy, Clone, Default)]
+pub(crate) struct KvmSevSnpLaunchFinish {
+    pub id_block_uaddr: u64,
+    pub id_auth_uaddr: u64,
+    pub id_block_en: u8,
+    pub auth_key_en: u8,
+    pub vcek_disabled: u8,
+    pub host_data: [u8; 32],
+    pub pad0: [u8; 3],
+    // must be zero https://elixir.bootlin.com/linux/v6.11/source/arch/x86/kvm/svm/sev.c#L2506
+    pub flags: u16,
+    pub pad1: [u64; 4],
 }
 
 impl SevFd {
@@ -156,5 +172,29 @@ impl SevFd {
             ..Default::default()
         };
         sev_op(vm, &mut sev_cmd, "KVM_SEV_SNP_LAUNCH_UPDATE")
+    }
+
+    pub(crate) fn launch_finish(
+        &self,
+        vm: &VmFd,
+        host_data: [u8; 32],
+        id_block_en: u8,
+        auth_key_en: u8,
+    ) -> Result<()> {
+        let mut finish = KvmSevSnpLaunchFinish {
+            host_data,
+            id_block_en,
+            auth_key_en,
+            ..Default::default()
+        };
+        let mut sev_cmd = kvm_sev_cmd {
+            id: KVM_SEV_SNP_LAUNCH_FINISH,
+            data: &mut finish as *mut KvmSevSnpLaunchFinish as _,
+            sev_fd: self.fd.as_raw_fd() as _,
+            ..Default::default()
+        };
+        let flags = finish.flags;
+        debug!("Calling KVM_SEV_SNP_LAUNCH_FINISH, flags: {flags}");
+        sev_op(vm, &mut sev_cmd, "KVM_SEV_SNP_LAUNCH_FINISH")
     }
 }
