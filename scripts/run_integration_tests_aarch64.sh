@@ -136,6 +136,9 @@ update_workloads() {
         popd || exit
     fi
 
+    # Download aarch64 ovmf
+    download_aarch64_ovmf
+
     pushd "$WORKLOADS_DIR" || exit
 
     if ! sha1sum sha1sums-aarch64-common --check; then
@@ -202,9 +205,6 @@ update_workloads() {
         echo "foo" >"$SHARED_DIR/file1"
         echo "bar" >"$SHARED_DIR/file3" || exit 1
     fi
-
-    # Checkout and build EDK2
-    build_edk2
 }
 
 process_common_args "$@"

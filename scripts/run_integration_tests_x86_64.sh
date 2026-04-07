@@ -25,7 +25,7 @@ if [ ! -f "$WORKLOADS_DIR/hypervisor-fw" ]; then
 fi
 
 if [ ! -f "$WORKLOADS_DIR/CLOUDHV.fd" ]; then
-    download_ovmf
+    download_amd64_ovmf
 fi
 
 download_x86_guest_images
