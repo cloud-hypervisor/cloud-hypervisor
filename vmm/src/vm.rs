@@ -1327,10 +1327,16 @@ impl Vm {
                 .map_err(Error::IgvmLoad)?
         };
 
-        let vm = Self::create_hypervisor_vm(
-            hypervisor.as_ref(),
-            vm_config.as_ref().lock().unwrap().deref().into(),
-        )?;
+        let vm = {
+            #[allow(unused_mut)]
+            let mut hv_config: hypervisor::HypervisorVmConfig =
+                vm_config.as_ref().lock().unwrap().deref().into();
+            #[cfg(all(feature = "igvm", feature = "sev_snp"))]
+            if let Some(ref igvm) = igvm_file {
+                hv_config.vmsa_features = igvm_loader::extract_sev_features(igvm);
+            }
+            Self::create_hypervisor_vm(hypervisor.as_ref(), hv_config)?
+        };
 
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         if vm_config.lock().unwrap().max_apic_id() > MAX_SUPPORTED_CPUS_LEGACY {

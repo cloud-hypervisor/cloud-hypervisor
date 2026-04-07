@@ -234,6 +234,8 @@ impl From<&VmConfig> for hypervisor::HypervisorVmConfig {
             sev_snp_enabled: _value.is_sev_snp_enabled(),
             #[cfg(feature = "sev_snp")]
             mem_size: _value.memory.total_size(),
+            #[cfg(feature = "sev_snp")]
+            vmsa_features: 0,
             nested: _value.cpus.nested,
             smt_enabled: _value
                 .cpus

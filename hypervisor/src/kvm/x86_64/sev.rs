@@ -1,0 +1,113 @@
+// Copyright 2025 Google LLC.
+//
+// SPDX-License-Identifier: Apache-2.0
+//
+
+use std::fs::OpenOptions;
+use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::Path;
+
+use igvm_defs::SnpPolicy;
+use kvm_bindings::kvm_sev_cmd;
+use kvm_ioctls::VmFd;
+use log::{error, info};
+use vmm_sys_util::errno;
+
+pub(crate) type Result<T> = std::result::Result<T, errno::Error>;
+
+// KVM SEV command IDs — linux/include/uapi/linux/kvm.h
+const KVM_SEV_INIT2: u32 = 22;
+const KVM_SEV_SNP_LAUNCH_START: u32 = 100;
+
+// SNP in VMSA - linux/arch/x86/include/asm/svm.h
+const SVM_SEV_FEAT_SNP_ACTIVE: u64 = 1 << 0;
+
+fn sev_op(vm: &VmFd, sev_cmd: &mut kvm_sev_cmd, name: &str) -> Result<()> {
+    let ret = vm.encrypt_op_sev(sev_cmd);
+    if ret.is_err() {
+        error!("{name} op failed. error code: 0x{:x}", sev_cmd.error);
+    }
+    ret
+}
+
+#[derive(Debug)]
+pub struct SevFd {
+    pub fd: OwnedFd,
+}
+
+// These ioctl structs must match the kernel layout exactly.
+// Layouts from linux/arch/x86/include/uapi/asm/kvm.h
+
+#[repr(C, packed)]
+#[derive(Debug, Copy, Clone, Default)]
+pub(crate) struct KvmSevInit {
+    pub vmsa_features: u64,
+    pub flags: u32,
+    pub ghcb_version: u16,
+    pub pad1: u16,
+    pub pad2: [u32; 8],
+}
+
+#[repr(C, packed)]
+#[derive(Debug, Copy, Clone, Default)]
+pub(crate) struct KvmSevSnpLaunchStart {
+    pub policy: u64,
+    pub gosvw: [u8; 16],
+    pub flags: u16,
+    pub pad0: [u8; 6],
+    pub pad1: [u64; 4],
+}
+
+impl SevFd {
+    pub(crate) fn new(sev_path: impl AsRef<Path>) -> Result<Self> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(libc::O_CLOEXEC)
+            .open(sev_path.as_ref())
+            .map_err(|e| errno::Error::new(e.raw_os_error().unwrap_or(libc::EINVAL)))?;
+        Ok(SevFd {
+            fd: OwnedFd::from(file),
+        })
+    }
+
+    pub(crate) fn init2(&self, vm: &VmFd, vmsa_features: u64) -> Result<()> {
+        // Clear the SNP bit, KVM sets it directly
+        let vmsa_features = vmsa_features & !SVM_SEV_FEAT_SNP_ACTIVE;
+
+        // TODO: Query KVM for supported VMSA features before calling init2
+        if vmsa_features != 0 {
+            info!("SEV-SNP: requesting vmsa_features: {vmsa_features:#x}");
+        }
+
+        let mut init = KvmSevInit {
+            vmsa_features,
+            ..Default::default()
+        };
+        let mut sev_cmd = kvm_sev_cmd {
+            id: KVM_SEV_INIT2,
+            data: &mut init as *mut KvmSevInit as _,
+            sev_fd: self.fd.as_raw_fd() as _,
+            ..Default::default()
+        };
+        sev_op(vm, &mut sev_cmd, "KVM_SEV_INIT2")
+    }
+
+    pub(crate) fn launch_start(&self, vm: &VmFd, guest_policy: SnpPolicy) -> Result<()> {
+        // See AMD Spec Section 4.3 - Guest Policy
+        // Bit 17 is reserved and has to be one.
+        // https://docs.amd.com/v/u/en-US/56860_PUB_1.58_SEV_SNP
+        let mut start: KvmSevSnpLaunchStart = KvmSevSnpLaunchStart {
+            policy: guest_policy.into_bits(),
+            ..Default::default()
+        };
+        let mut sev_cmd = kvm_sev_cmd {
+            id: KVM_SEV_SNP_LAUNCH_START,
+            data: &mut start as *mut KvmSevSnpLaunchStart as _,
+            sev_fd: self.fd.as_raw_fd() as _,
+            ..Default::default()
+        };
+        sev_op(vm, &mut sev_cmd, "KVM_SEV_SNP_LAUNCH_START")
+    }
+}

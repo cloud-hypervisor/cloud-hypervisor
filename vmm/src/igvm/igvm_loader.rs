@@ -130,6 +130,21 @@ fn import_parameter(
 }
 
 ///
+/// Extract sev_features from the boot CPU (vp_index 0) VMSA.
+///
+#[cfg(feature = "sev_snp")]
+pub fn extract_sev_features(igvm_file: &IgvmFile) -> u64 {
+    for header in igvm_file.directives() {
+        if let IgvmDirectiveHeader::SnpVpContext { vp_index, vmsa, .. } = header
+            && *vp_index == 0
+        {
+            return vmsa.sev_features.into();
+        }
+    }
+    0
+}
+
+///
 /// Load the given IGVM file to guest memory.
 /// Right now it only supports SNP based isolation.
 /// We can boot legacy VM with an igvm file without

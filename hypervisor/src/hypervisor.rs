@@ -96,6 +96,11 @@ pub enum HypervisorError {
     #[cfg(target_arch = "x86_64")]
     #[error("Failed to enable AMX tile state components")]
     CouldNotEnableAmxStateComponents(#[source] crate::arch::x86::AmxGuestSupportError),
+    ///
+    /// Failed to retrieve SEV-SNP capabilities
+    ///
+    #[error("Failed to retrieve SEV-SNP capabilities:{0}")]
+    SevSnpCapabilities(#[source] anyhow::Error),
 }
 
 ///
