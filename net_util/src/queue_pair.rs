@@ -69,7 +69,10 @@ impl TxVirtio {
             while let Some(desc) = next_desc {
                 let desc_addr = desc
                     .addr()
-                    .translate_gva(access_platform, desc.len() as usize);
+                    .translate_gva(access_platform, desc.len() as usize)
+                    .map_err(|e| {
+                        NetQueuePairError::GuestMemory(vm_memory::GuestMemoryError::IOError(e))
+                    })?;
                 if !desc.is_write_only() && desc.len() > 0 {
                     let buf = desc_chain
                         .memory()
@@ -207,7 +210,10 @@ impl RxVirtio {
                 .memory()
                 .checked_offset(
                     desc.addr()
-                        .translate_gva(access_platform, desc.len() as usize),
+                        .translate_gva(access_platform, desc.len() as usize)
+                        .map_err(|e| {
+                            NetQueuePairError::GuestMemory(vm_memory::GuestMemoryError::IOError(e))
+                        })?,
                     10,
                 )
                 .ok_or(NetQueuePairError::DescriptorInvalidHeader)?;
@@ -217,7 +223,10 @@ impl RxVirtio {
             while let Some(desc) = next_desc {
                 let desc_addr = desc
                     .addr()
-                    .translate_gva(access_platform, desc.len() as usize);
+                    .translate_gva(access_platform, desc.len() as usize)
+                    .map_err(|e| {
+                        NetQueuePairError::GuestMemory(vm_memory::GuestMemoryError::IOError(e))
+                    })?;
                 if desc.is_write_only() && desc.len() > 0 {
                     let buf = desc_chain
                         .memory()

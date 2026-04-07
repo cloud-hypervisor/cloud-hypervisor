@@ -142,7 +142,8 @@ impl VsockPacket {
 
         let guest_hdr_addr = head
             .addr()
-            .translate_gva(access_platform, VSOCK_PKT_HDR_SIZE);
+            .translate_gva(access_platform, VSOCK_PKT_HDR_SIZE)
+            .map_err(|_| VsockError::GuestMemory)?;
 
         // To avoid TOCTOU issues when reading/writing the VSock packet header in guest memory,
         // we need to copy the content of the header in the VMM's memory.
@@ -178,8 +179,9 @@ impl VsockPacket {
                 desc_chain.memory(),
                 head.addr()
                     .checked_add(VSOCK_PKT_HDR_SIZE as u64)
-                    .unwrap()
-                    .translate_gva(access_platform, buf_size),
+                    .ok_or(VsockError::GuestMemory)?
+                    .translate_gva(access_platform, buf_size)
+                    .map_err(|_| VsockError::GuestMemory)?,
                 buf_size,
             )
             .ok_or(VsockError::GuestMemory)?;
@@ -214,7 +216,10 @@ impl VsockPacket {
                 let desc_len = desc.len() as usize;
                 if desc_len > 0 && offset < total_len {
                     let to_copy = std::cmp::min(desc_len, total_len - offset);
-                    let desc_addr = desc.addr().translate_gva(access_platform, desc_len);
+                    let desc_addr = desc
+                        .addr()
+                        .translate_gva(access_platform, desc_len)
+                        .map_err(|_| VsockError::GuestMemory)?;
                     desc_chain
                         .memory()
                         .read_slice(&mut owned[offset..offset + to_copy], desc_addr)
@@ -242,7 +247,10 @@ impl VsockPacket {
             let buf_size = buf_desc.len() as usize;
             let buf_ptr = get_host_address_range(
                 desc_chain.memory(),
-                buf_desc.addr().translate_gva(access_platform, buf_size),
+                buf_desc
+                    .addr()
+                    .translate_gva(access_platform, buf_size)
+                    .map_err(|_| VsockError::GuestMemory)?,
                 buf_size,
             )
             .ok_or(VsockError::GuestMemory)?;
@@ -283,7 +291,8 @@ impl VsockPacket {
 
         let guest_hdr_addr = head
             .addr()
-            .translate_gva(access_platform, VSOCK_PKT_HDR_SIZE);
+            .translate_gva(access_platform, VSOCK_PKT_HDR_SIZE)
+            .map_err(|_| VsockError::GuestMemory)?;
 
         // To avoid TOCTOU issues when reading/writing the VSock packet header in guest memory,
         // we need to copy the content of the header in the VMM's memory.
@@ -313,7 +322,10 @@ impl VsockPacket {
                 buf: Some(PacketBuffer::Borrowed {
                     ptr: get_host_address_range(
                         desc_chain.memory(),
-                        buf_desc.addr().translate_gva(access_platform, buf_size),
+                        buf_desc
+                            .addr()
+                            .translate_gva(access_platform, buf_size)
+                            .map_err(|_| VsockError::GuestMemory)?,
                         buf_size,
                     )
                     .ok_or(VsockError::GuestMemory)?,
@@ -330,8 +342,9 @@ impl VsockPacket {
                         desc_chain.memory(),
                         head.addr()
                             .checked_add(VSOCK_PKT_HDR_SIZE as u64)
-                            .unwrap()
-                            .translate_gva(access_platform, buf_size),
+                            .ok_or(VsockError::GuestMemory)?
+                            .translate_gva(access_platform, buf_size)
+                            .map_err(|_| VsockError::GuestMemory)?,
                         buf_size,
                     )
                     .ok_or(VsockError::GuestMemory)?,

@@ -287,15 +287,36 @@ impl VirtioPciCommonConfig {
                 q.set_ready(ready);
                 // Translate address of descriptor table and vrings.
                 if ready && let Some(access_platform) = &self.access_platform {
-                    let desc_table = access_platform
+                    let desc_table = match access_platform
                         .translate_gva(q.desc_table(), get_vring_size(VringType::Desc, q.size()))
-                        .unwrap();
-                    let avail_ring = access_platform
+                    {
+                        Ok(addr) => addr,
+                        Err(e) => {
+                            error!("Failed to translate desc_table GVA: {e}");
+                            q.set_ready(false);
+                            return;
+                        }
+                    };
+                    let avail_ring = match access_platform
                         .translate_gva(q.avail_ring(), get_vring_size(VringType::Avail, q.size()))
-                        .unwrap();
-                    let used_ring = access_platform
+                    {
+                        Ok(addr) => addr,
+                        Err(e) => {
+                            error!("Failed to translate avail_ring GVA: {e}");
+                            q.set_ready(false);
+                            return;
+                        }
+                    };
+                    let used_ring = match access_platform
                         .translate_gva(q.used_ring(), get_vring_size(VringType::Used, q.size()))
-                        .unwrap();
+                    {
+                        Ok(addr) => addr,
+                        Err(e) => {
+                            error!("Failed to translate used_ring GVA: {e}");
+                            q.set_ready(false);
+                            return;
+                        }
+                    };
                     q.set_desc_table_address(
                         Some((desc_table & 0xffff_ffff) as u32),
                         Some((desc_table >> 32) as u32),
