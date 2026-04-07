@@ -142,6 +142,8 @@ ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 
 #[cfg(feature = "sev_snp")]
 use kvm_bindings::{KVM_MEMORY_ATTRIBUTE_PRIVATE, KVM_X86_SNP_VM, kvm_memory_attributes};
+#[cfg(feature = "sev_snp")]
+use x86_64::sev;
 
 #[cfg(feature = "tdx")]
 const KVM_EXIT_TDX: u32 = 50;
@@ -633,6 +635,44 @@ impl vm::Vm for KvmVm {
             .unwrap()
             .launch_start(&self.fd, guest_policy)
             .map_err(|e| vm::HypervisorVmError::InitializeSevSnp(e.into()))
+    }
+
+    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+    fn import_isolated_pages(
+        &self,
+        page_type: u32,
+        page_size: u32,
+        // host page frame numbers
+        pfns: &[u64],
+        uaddrs: &[u64],
+    ) -> vm::Result<()> {
+        if pfns.is_empty() {
+            return Ok(());
+        }
+        assert_eq!(pfns.len(), uaddrs.len());
+        // VMSA pages are not supported by launch_update
+        // https://elixir.bootlin.com/linux/v6.11/source/arch/x86/kvm/svm/sev.c#L2377
+        if page_type == sev::SNP_PAGE_TYPE_VMSA {
+            return Ok(());
+        }
+        for i in 0..pfns.len() {
+            self.fd
+                .set_memory_attributes(kvm_memory_attributes {
+                    address: pfns[i] << sev::GPA_METADATA_SHIFT_OFFSET,
+                    size: page_size as u64,
+                    attributes: kvm_bindings::KVM_MEMORY_ATTRIBUTE_PRIVATE as u64,
+                    // Flags must be zero o/w error (flags aren't being used here yet)
+                    flags: 0,
+                })
+                .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
+            self.sev_fd
+                .as_ref()
+                .unwrap()
+                .launch_update(&self.fd, uaddrs[i], page_size as u64, pfns[i], page_type)
+                .map_err(|e| vm::HypervisorVmError::ImportIsolatedPages(e.into()))?;
+        }
+
+        Ok(())
     }
 
     #[cfg(target_arch = "x86_64")]
