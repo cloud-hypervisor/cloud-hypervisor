@@ -198,10 +198,20 @@ prepare_linux() {
     fi
 }
 
-download_ovmf() {
-    OVMF_FW_TAG="ch-13b4963ec4"
+download_amd64_ovmf() {
+    OVMF_FW_TAG="ch-1e1b96f126"
     OVMF_FW_URL="https://github.com/cloud-hypervisor/edk2/releases/download/$OVMF_FW_TAG/CLOUDHV.fd"
     OVMF_FW="$WORKLOADS_DIR/CLOUDHV.fd"
+    pushd "$WORKLOADS_DIR" || exit
+    rm -f "$OVMF_FW"
+    download_with_retries $OVMF_FW_URL || exit 1
+    popd || exit
+}
+
+download_aarch64_ovmf() {
+    OVMF_FW_TAG="ch-1e1b96f126"
+    OVMF_FW_URL="https://github.com/cloud-hypervisor/edk2/releases/download/$OVMF_FW_TAG/CLOUDHV_EFI.fd"
+    OVMF_FW="$WORKLOADS_DIR/CLOUDHV_EFI.fd"
     pushd "$WORKLOADS_DIR" || exit
     rm -f "$OVMF_FW"
     download_with_retries $OVMF_FW_URL || exit 1

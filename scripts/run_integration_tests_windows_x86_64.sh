@@ -17,7 +17,8 @@ WIN_IMAGE_FILE="/root/workloads/windows-server-2022-amd64-2.raw"
 
 WORKLOADS_DIR="/root/workloads"
 
-download_ovmf
+# Download amd64 ovmf
+download_amd64_ovmf
 
 CFLAGS=""
 if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then
