@@ -131,14 +131,14 @@ impl VhostUserBlkThread {
             let len = match Request::parse(&mut desc_chain, None) {
                 Ok(mut request) => {
                     debug!("element is a valid request");
-                    request.set_writeback(self.writeback.load(Ordering::Acquire));
+                    request.writeback = self.writeback.load(Ordering::Acquire);
                     let (status, len) = match request.execute(
                         &mut self.disk_image.lock().unwrap().deref_mut(),
                         self.disk_nsectors,
                         desc_chain.memory(),
                         &self.serial,
                     ) {
-                        Ok(_) if request.request_type == RequestType::GetDeviceId => {
+                        Ok(_) if request.request_type() == RequestType::GetDeviceId => {
                             (VIRTIO_BLK_S_OK as u8, self.serial.len() as u32 + 1)
                         }
                         Ok(l) => (VIRTIO_BLK_S_OK as u8, l + 1),
@@ -146,7 +146,7 @@ impl VhostUserBlkThread {
                     };
                     desc_chain
                         .memory()
-                        .write_obj(status, request.status_addr)
+                        .write_obj(status, request.status_addr())
                         .unwrap();
                     len
                 }

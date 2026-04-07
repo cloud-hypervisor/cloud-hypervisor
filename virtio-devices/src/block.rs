@@ -182,7 +182,7 @@ impl BlockEpollHandler {
         request: &Request,
         disable_sector0_writes: bool,
     ) -> result::Result<(), ExecuteError> {
-        let request_type = request.request_type;
+        let request_type = request.request_type();
         if (has_feature(features, VIRTIO_BLK_F_RO.into()))
             && !(request_type == RequestType::In
                 || request_type == RequestType::GetDeviceId
@@ -197,7 +197,7 @@ impl BlockEpollHandler {
             return Err(ExecuteError::ReadOnly);
         }
 
-        if request_type == RequestType::Out && disable_sector0_writes && request.sector == 0 {
+        if request_type == RequestType::Out && disable_sector0_writes && request.sector() == 0 {
             warn!(
                 "Attempting to write to sector 0 on a raw disk without specifying image_type=raw"
             );
@@ -262,7 +262,7 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                 warn!("Request check failed: {request:x?} {e:?}");
                 desc_chain
                     .memory()
-                    .write_obj(VIRTIO_BLK_S_IOERR, request.status_addr)
+                    .write_obj(VIRTIO_BLK_S_IOERR, request.status_addr())
                     .map_err(Error::RequestStatus)?;
 
                 // If no asynchronous operation has been submitted, we can
@@ -286,11 +286,11 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                     break;
                 }
                 // Exercise the rate limiter only if this request is of data transfer type.
-                if request.request_type == RequestType::In
-                    || request.request_type == RequestType::Out
+                if request.request_type() == RequestType::In
+                    || request.request_type() == RequestType::Out
                 {
                     let mut bytes = Wrapping(0);
-                    for (_, data_len) in &request.data_descriptors {
+                    for (_, data_len) in request.data_descriptors() {
                         bytes += Wrapping(*data_len as u64);
                     }
 
@@ -307,7 +307,7 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                 }
             }
 
-            request.set_writeback(self.writeback.load(Ordering::Acquire));
+            request.writeback = self.writeback.load(Ordering::Acquire);
 
             let result = request.execute_async(
                 desc_chain.memory(),
@@ -329,7 +329,7 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                         _ => {
                             unreachable!(
                                 "Unexpected batch request type: {:?}",
-                                request.request_type
+                                request.request_type()
                             )
                         }
                     }
@@ -346,11 +346,11 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
 
                 desc_chain
                     .memory()
-                    .write_obj(status as u8, request.status_addr)
+                    .write_obj(status as u8, request.status_addr())
                     .map_err(Error::RequestStatus)?;
 
                 let len = if status == VIRTIO_BLK_S_OK
-                    && request.request_type == RequestType::GetDeviceId
+                    && request.request_type() == RequestType::GetDeviceId
                 {
                     self.serial.len() as u32 + 1
                 } else {
@@ -377,7 +377,7 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                     warn!("Request failed with batch submission: {request:x?} {e:?}");
                     let desc_index = user_data;
                     let mem = self.mem.memory();
-                    mem.write_obj(VIRTIO_BLK_S_IOERR as u8, request.status_addr)
+                    mem.write_obj(VIRTIO_BLK_S_IOERR as u8, request.status_addr())
                         .map_err(Error::RequestStatus)?;
                     queue
                         .add_used(mem.deref(), desc_index, 1)
@@ -454,7 +454,7 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
 
             request.complete_async().map_err(Error::RequestCompleting)?;
 
-            let latency = request.start.elapsed().as_micros() as u64;
+            let latency = request.start().elapsed().as_micros() as u64;
             let read_ops_last = self.counters.read_ops.load(Ordering::Relaxed);
             let write_ops_last = self.counters.write_ops.load(Ordering::Relaxed);
             let read_max = self.counters.read_latency_max.load(Ordering::Relaxed);
@@ -462,9 +462,9 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
             let mut read_avg = self.counters.read_latency_avg.load(Ordering::Relaxed);
             let mut write_avg = self.counters.write_latency_avg.load(Ordering::Relaxed);
             let (status, len) = if result >= 0 {
-                match request.request_type {
+                match request.request_type() {
                     RequestType::In => {
-                        for (_, data_len) in &request.data_descriptors {
+                        for (_, data_len) in request.data_descriptors() {
                             read_bytes += Wrapping(*data_len as u64);
                         }
                         read_ops += Wrapping(1);
@@ -496,7 +496,7 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                         if !request.writeback {
                             self.disk_image.fsync(None).map_err(Error::Fsync)?;
                         }
-                        for (_, data_len) in &request.data_descriptors {
+                        for (_, data_len) in request.data_descriptors() {
                             write_bytes += Wrapping(*data_len as u64);
                         }
                         write_ops += Wrapping(1);
@@ -535,7 +535,7 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                     .write_latency_avg
                     .store(write_avg, Ordering::Relaxed);
 
-                let len = if request.request_type == RequestType::In {
+                let len = if request.request_type() == RequestType::In {
                     result as u32 + 1
                 } else {
                     1
@@ -550,7 +550,7 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                 (VIRTIO_BLK_S_IOERR as u8, 1)
             };
 
-            mem.write_obj(status, request.status_addr)
+            mem.write_obj(status, request.status_addr())
                 .map_err(Error::RequestStatus)?;
 
             let queue = &mut self.queue;
