@@ -30,7 +30,14 @@ cargo build --features mshv --all --release --target "$BUILD_TARGET"
 export RUST_BACKTRACE=1
 export RUSTFLAGS="$RUSTFLAGS"
 
+# Run VFIO tests using legacy vfio interface with container/group
 time cargo nextest run --no-tests=pass --test-threads=1 "vfio::test_nvidia" -- ${test_binary_args[*]}
 RES=$?
+
+# Run VFIO tests using vfio cdev interface backed by iommufd
+if [ $RES -eq 0 ]; then
+    time cargo nextest run --no-tests=pass --test-threads=1 "vfio::test_iommufd" -- ${test_binary_args[*]}
+    RES=$?
+fi
 
 exit $RES
