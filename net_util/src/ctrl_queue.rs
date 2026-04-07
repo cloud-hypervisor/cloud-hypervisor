@@ -100,14 +100,16 @@ impl CtrlQueue {
                 .read_obj(
                     ctrl_desc
                         .addr()
-                        .translate_gva(access_platform, ctrl_desc.len() as usize),
+                        .translate_gva(access_platform, ctrl_desc.len() as usize)
+                        .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?,
                 )
                 .map_err(Error::GuestMemory)?;
             let data_desc = desc_chain.next().ok_or(Error::NoDataDescriptor)?;
 
             let data_desc_addr = data_desc
                 .addr()
-                .translate_gva(access_platform, data_desc.len() as usize);
+                .translate_gva(access_platform, data_desc.len() as usize)
+                .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?;
 
             let status_desc = desc_chain.next().ok_or(Error::NoStatusDescriptor)?;
 
@@ -168,7 +170,8 @@ impl CtrlQueue {
                     if ok { VIRTIO_NET_OK } else { VIRTIO_NET_ERR } as u8,
                     status_desc
                         .addr()
-                        .translate_gva(access_platform, status_desc.len() as usize),
+                        .translate_gva(access_platform, status_desc.len() as usize)
+                        .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?,
                 )
                 .map_err(Error::GuestMemory)?;
             // Per virtio spec 2.6.8, used_len is the number of bytes written

@@ -123,7 +123,8 @@ impl Request {
             .memory()
             .read_obj(
                 desc.addr()
-                    .translate_gva(access_platform, desc.len() as usize),
+                    .translate_gva(access_platform, desc.len() as usize)
+                    .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?,
             )
             .map_err(Error::GuestMemory)?;
 
@@ -147,7 +148,8 @@ impl Request {
             type_: request_type,
             status_addr: status_desc
                 .addr()
-                .translate_gva(access_platform, status_desc.len() as usize),
+                .translate_gva(access_platform, status_desc.len() as usize)
+                .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?,
         })
     }
 }

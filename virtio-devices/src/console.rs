@@ -221,7 +221,10 @@ impl ConsoleEpollHandler {
                     .write_slice(
                         &source_slice[..],
                         desc.addr()
-                            .translate_gva(self.access_platform.as_deref(), desc.len() as usize),
+                            .translate_gva(self.access_platform.as_deref(), desc.len() as usize)
+                            .map_err(|e| {
+                                Error::GuestMemoryWrite(vm_memory::GuestMemoryError::IOError(e))
+                            })?,
                     )
                     .map_err(Error::GuestMemoryWrite)?;
 
@@ -259,10 +262,11 @@ impl ConsoleEpollHandler {
                     desc_chain
                         .memory()
                         .write_volatile_to(
-                            desc.addr().translate_gva(
-                                self.access_platform.as_deref(),
-                                desc.len() as usize,
-                            ),
+                            desc.addr()
+                                .translate_gva(self.access_platform.as_deref(), desc.len() as usize)
+                                .map_err(|e| {
+                                    Error::GuestMemoryRead(vm_memory::GuestMemoryError::IOError(e))
+                                })?,
                             &mut buf,
                             desc.len() as usize,
                         )

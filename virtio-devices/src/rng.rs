@@ -78,7 +78,10 @@ impl RngEpollHandler {
                 .memory()
                 .read_volatile_from(
                     desc.addr()
-                        .translate_gva(self.access_platform.as_deref(), desc.len() as usize),
+                        .translate_gva(self.access_platform.as_deref(), desc.len() as usize)
+                        .map_err(|e| {
+                            Error::GuestMemoryWrite(vm_memory::GuestMemoryError::IOError(e))
+                        })?,
                     &mut self.random_file,
                     desc.len() as usize,
                 )

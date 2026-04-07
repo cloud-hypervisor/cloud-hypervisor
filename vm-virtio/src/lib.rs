@@ -101,32 +101,60 @@ pub trait AccessPlatform: Send + Sync + Debug {
 }
 
 pub trait Translatable {
-    fn translate_gva(&self, access_platform: Option<&dyn AccessPlatform>, len: usize) -> Self;
-    fn translate_gpa(&self, access_platform: Option<&dyn AccessPlatform>, len: usize) -> Self;
+    fn translate_gva(
+        &self,
+        access_platform: Option<&dyn AccessPlatform>,
+        len: usize,
+    ) -> std::result::Result<Self, std::io::Error>
+    where
+        Self: Sized;
+    fn translate_gpa(
+        &self,
+        access_platform: Option<&dyn AccessPlatform>,
+        len: usize,
+    ) -> std::result::Result<Self, std::io::Error>
+    where
+        Self: Sized;
 }
 
 impl Translatable for GuestAddress {
-    fn translate_gva(&self, access_platform: Option<&dyn AccessPlatform>, len: usize) -> Self {
-        GuestAddress(self.0.translate_gva(access_platform, len))
+    fn translate_gva(
+        &self,
+        access_platform: Option<&dyn AccessPlatform>,
+        len: usize,
+    ) -> std::result::Result<Self, std::io::Error> {
+        Ok(GuestAddress(self.0.translate_gva(access_platform, len)?))
     }
-    fn translate_gpa(&self, access_platform: Option<&dyn AccessPlatform>, len: usize) -> Self {
-        GuestAddress(self.0.translate_gpa(access_platform, len))
+    fn translate_gpa(
+        &self,
+        access_platform: Option<&dyn AccessPlatform>,
+        len: usize,
+    ) -> std::result::Result<Self, std::io::Error> {
+        Ok(GuestAddress(self.0.translate_gpa(access_platform, len)?))
     }
 }
 
 impl Translatable for u64 {
-    fn translate_gva(&self, access_platform: Option<&dyn AccessPlatform>, len: usize) -> Self {
+    fn translate_gva(
+        &self,
+        access_platform: Option<&dyn AccessPlatform>,
+        len: usize,
+    ) -> std::result::Result<Self, std::io::Error> {
         if let Some(access_platform) = access_platform {
-            access_platform.translate_gva(*self, len as u64).unwrap()
+            access_platform.translate_gva(*self, len as u64)
         } else {
-            *self
+            Ok(*self)
         }
     }
-    fn translate_gpa(&self, access_platform: Option<&dyn AccessPlatform>, len: usize) -> Self {
+    fn translate_gpa(
+        &self,
+        access_platform: Option<&dyn AccessPlatform>,
+        len: usize,
+    ) -> std::result::Result<Self, std::io::Error> {
         if let Some(access_platform) = access_platform {
-            access_platform.translate_gpa(*self, len as u64).unwrap()
+            access_platform.translate_gpa(*self, len as u64)
         } else {
-            *self
+            Ok(*self)
         }
     }
 }

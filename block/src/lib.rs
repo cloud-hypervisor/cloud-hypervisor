@@ -312,7 +312,8 @@ impl Request {
 
         let hdr_desc_addr = hdr_desc
             .addr()
-            .translate_gva(access_platform, hdr_desc.len() as usize);
+            .translate_gva(access_platform, hdr_desc.len() as usize)
+            .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?;
 
         let mut req = Request {
             request_type: request_type(desc_chain.memory(), hdr_desc_addr)?,
@@ -353,7 +354,8 @@ impl Request {
 
                 req.data_descriptors.push((
                     desc.addr()
-                        .translate_gva(access_platform, desc.len() as usize),
+                        .translate_gva(access_platform, desc.len() as usize)
+                        .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?,
                     desc.len(),
                 ));
                 desc = desc_chain
@@ -384,7 +386,8 @@ impl Request {
 
         req.status_addr = status_desc
             .addr()
-            .translate_gva(access_platform, status_desc.len() as usize);
+            .translate_gva(access_platform, status_desc.len() as usize)
+            .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?;
 
         Ok(req)
     }
