@@ -8240,7 +8240,15 @@ mod vfio {
     use crate::*;
     const NVIDIA_VFIO_DEVICE: &str = "/sys/bus/pci/devices/0002:00:01.0";
 
-    fn test_nvidia_card_memory_hotplug(hotplug_method: &str) {
+    fn platform_cfg(iommufd: bool) -> String {
+        if iommufd {
+            "iommufd=on,vfio_p2p_dma=off".to_string()
+        } else {
+            "iommufd=off".to_string()
+        }
+    }
+
+    fn test_nvidia_card_memory_hotplug(hotplug_method: &str, iommufd: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
@@ -8252,6 +8260,7 @@ mod vfio {
                 format!("size=4G,hotplug_size=4G,hotplug_method={hotplug_method}").as_str(),
             ])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--platform", &platform_cfg(iommufd)])
             .args(["--device", format!("path={NVIDIA_VFIO_DEVICE}").as_str()])
             .args(["--api-socket", &api_socket])
             .default_disks()
@@ -8285,16 +8294,25 @@ mod vfio {
 
     #[test]
     fn test_nvidia_card_memory_hotplug_acpi() {
-        test_nvidia_card_memory_hotplug("acpi");
+        test_nvidia_card_memory_hotplug("acpi", false);
     }
 
     #[test]
     fn test_nvidia_card_memory_hotplug_virtio_mem() {
-        test_nvidia_card_memory_hotplug("virtio-mem");
+        test_nvidia_card_memory_hotplug("virtio-mem", false);
     }
 
     #[test]
-    fn test_nvidia_card_pci_hotplug() {
+    fn test_iommufd_nvidia_card_memory_hotplug_acpi() {
+        test_nvidia_card_memory_hotplug("acpi", true);
+    }
+
+    #[test]
+    fn test_iommufd_nvidia_card_memory_hotplug_virtio_mem() {
+        test_nvidia_card_memory_hotplug("virtio-mem", true);
+    }
+
+    fn test_nvidia_card_pci_hotplug_common(iommufd: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
@@ -8303,6 +8321,7 @@ mod vfio {
             .args(["--cpus", "boot=4"])
             .args(["--memory", "size=4G"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--platform", &platform_cfg(iommufd)])
             .args(["--api-socket", &api_socket])
             .default_disks()
             .default_net()
@@ -8338,7 +8357,16 @@ mod vfio {
     }
 
     #[test]
-    fn test_nvidia_card_reboot() {
+    fn test_nvidia_card_pci_hotplug() {
+        test_nvidia_card_pci_hotplug_common(false);
+    }
+
+    #[test]
+    fn test_iommufd_nvidia_card_pci_hotplug() {
+        test_nvidia_card_pci_hotplug_common(true);
+    }
+
+    fn test_nvidia_card_reboot_common(iommufd: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
@@ -8346,6 +8374,7 @@ mod vfio {
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
             .args(["--memory", "size=4G"])
+            .args(["--platform", &platform_cfg(iommufd)])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args([
                 "--device",
@@ -8377,20 +8406,31 @@ mod vfio {
     }
 
     #[test]
-    fn test_nvidia_card_iommu_address_width() {
+    fn test_nvidia_card_reboot() {
+        test_nvidia_card_reboot_common(false);
+    }
+
+    #[test]
+    fn test_iommufd_nvidia_card_reboot() {
+        test_nvidia_card_reboot_common(true);
+    }
+
+    fn test_nvidia_card_iommu_address_width_common(iommufd: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let platform = format!(
+            "num_pci_segments=2,iommu_segments=1,iommu_address_width=42,{}",
+            platform_cfg(iommufd)
+        );
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
             .args(["--memory", "size=4G"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args(["--device", format!("path={NVIDIA_VFIO_DEVICE}").as_str()])
-            .args([
-                "--platform",
-                "num_pci_segments=2,iommu_segments=1,iommu_address_width=42",
-            ])
+            .args(["--platform", &platform])
             .args(["--api-socket", &api_socket])
             .default_disks()
             .default_net()
@@ -8416,7 +8456,16 @@ mod vfio {
     }
 
     #[test]
-    fn test_nvidia_guest_numa_generic_initiator() {
+    fn test_nvidia_card_iommu_address_width() {
+        test_nvidia_card_iommu_address_width_common(false);
+    }
+
+    #[test]
+    fn test_iommufd_nvidia_card_iommu_address_width() {
+        test_nvidia_card_iommu_address_width_common(true);
+    }
+
+    fn test_nvidia_guest_numa_generic_initiator_common(iommufd: bool) {
         // Skip test if VFIO device is not available or not ready
         if !std::path::Path::new(NVIDIA_VFIO_DEVICE).exists() {
             println!("SKIPPED: VFIO device {NVIDIA_VFIO_DEVICE} not found");
@@ -8453,6 +8502,7 @@ mod vfio {
                 "guest_numa_id=1,cpus=[2-3],distances=[0@20,2@30],memory_zones=mem1",
                 "guest_numa_id=2,device_id=vfio0,distances=[0@25,1@30]",
             ])
+            .args(["--platform", &platform_cfg(iommufd)])
             .args([
                 "--device",
                 &format!("id=vfio0,path={NVIDIA_VFIO_DEVICE},iommu=on"),
@@ -8524,6 +8574,16 @@ mod vfio {
         let output = child.wait_with_output().unwrap();
 
         handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_nvidia_guest_numa_generic_initiator() {
+        test_nvidia_guest_numa_generic_initiator_common(false);
+    }
+
+    #[test]
+    fn test_iommufd_nvidia_guest_numa_generic_initiator() {
+        test_nvidia_guest_numa_generic_initiator_common(true);
     }
 }
 
