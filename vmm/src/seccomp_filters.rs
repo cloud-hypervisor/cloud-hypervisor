@@ -112,6 +112,7 @@ mod kvm {
     pub const KVM_GET_NESTED_STATE: u64 = 3229658814;
     pub const KVM_SET_NESTED_STATE: u64 = 1082175167;
     pub const KVM_SEV_SNP_LAUNCH_START: u64 = 0x4018_aeb4;
+    pub const KVM_SEV_SNP_LAUNCH_UPDATE: u64 = 0x8018_aeb5;
 }
 
 mod iommufd {
@@ -269,6 +270,7 @@ fn create_vmm_ioctl_seccomp_rule_common_kvm() -> Result<Vec<SeccompRule>, Backen
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_GET_NESTED_STATE)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SET_NESTED_STATE)?],
         and![Cond::new(1, ArgLen::Dword, Eq, KVM_SEV_SNP_LAUNCH_START)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, KVM_SEV_SNP_LAUNCH_UPDATE)?],
     ])
 }
 
