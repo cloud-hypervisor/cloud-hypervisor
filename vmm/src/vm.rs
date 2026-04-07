@@ -47,6 +47,8 @@ use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
 use hypervisor::{HypervisorVmConfig, HypervisorVmError, VmOps};
+#[cfg(feature = "sev_snp")]
+use igvm_defs::SnpPolicy;
 use libc::{SIGWINCH, termios};
 use linux_loader::cmdline::Cmdline;
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
@@ -534,6 +536,19 @@ pub struct Vm {
 impl Vm {
     pub const HANDLED_SIGNALS: [i32; 1] = [SIGWINCH];
 
+    #[cfg(feature = "sev_snp")]
+    pub fn get_default_sev_snp_guest_policy() -> SnpPolicy {
+        SnpPolicy::new()
+            .with_abi_minor(0)
+            .with_abi_major(0)
+            // SMT permitted: allows the guest to run on an SMT-enabled host.
+            // This is the permissive default; future work can expose this as a
+            // configurable platform option.
+            .with_smt(1)
+            .with_reserved_must_be_one(1)
+            .with_migrate_ma(0)
+    }
+
     #[allow(clippy::needless_pass_by_value)]
     #[allow(clippy::too_many_arguments)]
     pub fn new_from_memory_manager(
@@ -982,7 +997,8 @@ impl Vm {
             .map_err(Error::CpuManager)?;
 
         // Initialize SEV-SNP - transitions guest into secure state
-        vm.sev_snp_init().map_err(Error::InitializeSevSnpVm)?;
+        vm.sev_snp_init(Self::get_default_sev_snp_guest_policy())
+            .map_err(Error::InitializeSevSnpVm)?;
 
         // Load payload for SEV-SNP (IGVM parser needs cpu_manager for cpuid)
         let load_payload_handle = if snapshot.is_none() {
