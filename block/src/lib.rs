@@ -10,6 +10,7 @@
 
 pub mod async_io;
 pub mod disk_file;
+pub mod engine;
 pub mod error;
 pub mod fcntl;
 pub mod fixed_vhd;
