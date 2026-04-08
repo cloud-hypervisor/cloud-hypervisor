@@ -145,9 +145,60 @@ ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 #[cfg(feature = "sev_snp")]
 use igvm_defs::PAGE_SIZE_4K;
 #[cfg(feature = "sev_snp")]
-use kvm_bindings::{KVM_MEMORY_ATTRIBUTE_PRIVATE, KVM_X86_SNP_VM, kvm_memory_attributes};
+use kvm_bindings::{
+    KVM_MEMORY_ATTRIBUTE_PRIVATE, KVM_X86_SNP_VM, kvm_memory_attributes, kvm_segment as Segment,
+};
+use vm_memory::GuestAddress;
 #[cfg(feature = "sev_snp")]
 use x86_64::sev;
+
+// Hardcoded GPA of a bootloader and VMSA page for KVM
+// TODO: Derive these from the IGVM file's PageData/SnpVpContext directives
+// instead of using fixed constants, to support arbitrary bootloader layouts.
+pub const BOOTLOADER_START: GuestAddress = GuestAddress(0xffc0_0000);
+pub const BOOTLOADER_SIZE: usize = 0x40_0000; // 4 MiB
+pub const KVM_VMSA_PAGE_ADDRESS: GuestAddress = GuestAddress(0xffff_ffff_f000);
+pub const KVM_VMSA_PAGE_SIZE: usize = 0x1000; // 4 KiB
+
+#[cfg(feature = "sev_snp")]
+#[bitfield_struct::bitfield(u32)]
+#[derive(PartialEq, Eq)]
+/// AMD VMCB segment attributes
+/// linux/arch/x86/include/asm/svm.h
+pub struct SegAccess {
+    #[bits(4)]
+    pub seg_type: u8,
+    pub s_code_data: bool,
+    #[bits(2)]
+    pub priv_level: u8,
+    pub present: bool,
+    pub available: bool,
+    pub l_64bit: bool,
+    pub db_size_32: bool,
+    pub granularity: bool,
+    #[bits(20)]
+    _reserved: u32,
+}
+
+#[cfg(feature = "sev_snp")]
+fn make_segment(sev_selector: igvm::snp_defs::SevSelector) -> Segment {
+    let flags = SegAccess::from_bits(sev_selector.attrib.into());
+    Segment {
+        base: sev_selector.base,
+        limit: sev_selector.limit,
+        selector: sev_selector.selector,
+        type_: flags.seg_type(),
+        s: flags.s_code_data() as u8,
+        dpl: flags.priv_level(),
+        present: flags.present() as u8,
+        avl: flags.available() as u8,
+        db: flags.db_size_32() as u8,
+        g: flags.granularity() as u8,
+        l: flags.l_64bit() as u8,
+        unusable: 0,
+        ..Default::default()
+    }
+}
 
 #[cfg(feature = "tdx")]
 const KVM_EXIT_TDX: u32 = 50;
@@ -3237,6 +3288,81 @@ impl cpu::Vcpu for KvmVcpu {
             }
             Ok(_) => Ok(()),
         }
+    }
+
+    #[cfg(feature = "sev_snp")]
+    fn set_sev_control_register(&self, _vmsa_pfn: u64) -> cpu::Result<()> {
+        Ok(())
+    }
+
+    #[cfg(feature = "sev_snp")]
+    fn setup_sev_snp_regs(&self, vmsa: igvm::snp_defs::SevVmsa) -> cpu::Result<()> {
+        let mut sregs = self
+            .fd
+            .get_sregs()
+            .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::GetSpecialRegs(e.into()))?;
+        sregs.cs = make_segment(vmsa.cs);
+        sregs.ds = make_segment(vmsa.ds);
+        sregs.es = make_segment(vmsa.es);
+        sregs.fs = make_segment(vmsa.fs);
+        sregs.gs = make_segment(vmsa.gs);
+        sregs.ss = make_segment(vmsa.ss);
+        sregs.tr = make_segment(vmsa.tr);
+        sregs.ldt = make_segment(vmsa.ldtr);
+
+        sregs.cr0 = vmsa.cr0;
+        sregs.cr4 = vmsa.cr4;
+        sregs.cr3 = vmsa.cr3;
+        sregs.efer = vmsa.efer;
+
+        sregs.idt.base = vmsa.idtr.base;
+        sregs.idt.limit = vmsa
+            .idtr
+            .limit
+            .try_into()
+            .map_err(|e: std::num::TryFromIntError| {
+                cpu::HypervisorCpuError::SetSpecialRegs(anyhow!(e))
+            })?;
+        sregs.gdt.base = vmsa.gdtr.base;
+        sregs.gdt.limit = vmsa
+            .gdtr
+            .limit
+            .try_into()
+            .map_err(|e: std::num::TryFromIntError| {
+                cpu::HypervisorCpuError::SetSpecialRegs(anyhow!(e))
+            })?;
+        self.fd
+            .set_sregs(&sregs)
+            .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::SetSpecialRegs(e.into()))?;
+
+        let mut regs = self
+            .fd
+            .get_regs()
+            .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::GetRegister(e.into()))?;
+        regs.rip = vmsa.rip;
+        regs.rdx = vmsa.rdx;
+        regs.rflags = vmsa.rflags;
+        regs.rsp = vmsa.rsp;
+        regs.rax = vmsa.rax;
+        regs.rbx = vmsa.rbx;
+        regs.rcx = vmsa.rcx;
+        regs.rbp = vmsa.rbp;
+        regs.rsi = vmsa.rsi;
+        regs.rdi = vmsa.rdi;
+        regs.r8 = vmsa.r8;
+        regs.r9 = vmsa.r9;
+        regs.r10 = vmsa.r10;
+        regs.r11 = vmsa.r11;
+        regs.r12 = vmsa.r12;
+        regs.r13 = vmsa.r13;
+        regs.r14 = vmsa.r14;
+        regs.r15 = vmsa.r15;
+
+        self.fd
+            .set_regs(&regs)
+            .map_err(|e: kvm_ioctls::Error| cpu::HypervisorCpuError::SetRegister(e.into()))?;
+
+        Ok(())
     }
 }
 

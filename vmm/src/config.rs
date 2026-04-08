@@ -352,6 +352,9 @@ pub enum ValidationError {
     #[cfg(feature = "sev_snp")]
     #[error("Invalid host data format")]
     InvalidHostData,
+    #[cfg(all(feature = "sev_snp", feature = "igvm"))]
+    #[error("SEV-SNP requires an IGVM payload (--payload igvm=<path>)")]
+    SevSnpRequiresIgvm,
     /// Restore expects all net ids that have fds
     #[error("Net id {0} is associated with FDs and is required")]
     RestoreMissingRequiredNetId(String),
@@ -2823,12 +2826,25 @@ impl VmConfig {
 
         #[cfg(feature = "sev_snp")]
         {
-            let host_data_opt = &self.payload.as_ref().unwrap().host_data;
-
-            if let Some(host_data) = host_data_opt
-                && host_data.len() != 64
-            {
-                return Err(ValidationError::InvalidHostData);
+            let sev_snp_enabled = self.platform.as_ref().is_some_and(|p| p.sev_snp);
+            if sev_snp_enabled {
+                let host_data_opt = &self.payload.as_ref().unwrap().host_data;
+                if let Some(host_data) = host_data_opt
+                    && host_data.len() != 64
+                {
+                    return Err(ValidationError::InvalidHostData);
+                }
+                // KVM SEV-SNP requires an IGVM payload to initialise the VMSA.
+                // Without IGVM the vCPU register state is undefined and VM entry fails.
+                #[cfg(feature = "igvm")]
+                if self
+                    .payload
+                    .as_ref()
+                    .and_then(|p| p.igvm.as_ref())
+                    .is_none()
+                {
+                    return Err(ValidationError::SevSnpRequiresIgvm);
+                }
             }
         }
         // The 'conflict' check is introduced in commit 24438e0390d3
