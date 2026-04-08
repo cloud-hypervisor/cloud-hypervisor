@@ -46,6 +46,10 @@ use gdbstub_arch::aarch64::reg::AArch64CoreRegs as CoreRegs;
 use gdbstub_arch::x86::reg::X86_64CoreRegs as CoreRegs;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
+#[cfg(all(feature = "kvm", feature = "sev_snp"))]
+use hypervisor::kvm::{
+    BOOTLOADER_SIZE, BOOTLOADER_START, KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE,
+};
 use hypervisor::{HypervisorVmConfig, HypervisorVmError, VmOps};
 #[cfg(feature = "igvm")]
 use igvm::IgvmFile;
@@ -1039,6 +1043,9 @@ impl Vm {
             )
             .map_err(Error::DeviceManager)?;
 
+        #[cfg(feature = "fw_cfg")]
+        Self::create_fw_cfg_if_enabled(config, device_manager)?;
+
         Ok(load_payload_handle)
     }
 
@@ -1509,6 +1516,16 @@ impl Vm {
         Ok(EntryPoint { entry_addr })
     }
 
+    #[cfg(all(feature = "kvm", feature = "sev_snp"))]
+    fn reserve_bootloader_regions(memory_manager: &Arc<Mutex<MemoryManager>>) -> Result<()> {
+        let mut mm = memory_manager.lock().unwrap();
+        mm.add_ram_region(BOOTLOADER_START, BOOTLOADER_SIZE)
+            .map_err(Error::MemoryManager)?;
+        mm.add_ram_region(KVM_VMSA_PAGE_ADDRESS, KVM_VMSA_PAGE_SIZE)
+            .map_err(Error::MemoryManager)?;
+        Ok(())
+    }
+
     #[cfg(feature = "igvm")]
     #[allow(clippy::needless_pass_by_value)]
     fn load_igvm(
@@ -1517,6 +1534,13 @@ impl Vm {
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
     ) -> Result<EntryPoint> {
+        // Only reserve bootloader/VMSA regions for KVM + SEV-SNP; other hypervisors
+        // (e.g. MSHV) handle this through their own import path.
+        #[cfg(all(feature = "kvm", feature = "sev_snp"))]
+        if cpu_manager.lock().unwrap().sev_snp_enabled() {
+            Self::reserve_bootloader_regions(&memory_manager)?;
+        }
+
         let res = igvm_loader::load_igvm(
             igvm_file,
             memory_manager,

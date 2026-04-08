@@ -917,6 +917,7 @@ fn vcpu_thread_rules(
         (libc::SYS_sendto, vec![]),
         (libc::SYS_shutdown, vec![]),
         (libc::SYS_sigaltstack, vec![]),
+        (libc::SYS_statx, vec![]),
         (libc::SYS_tgkill, vec![]),
         (libc::SYS_tkill, vec![]),
         #[cfg(target_arch = "x86_64")]
