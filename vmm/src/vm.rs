@@ -942,8 +942,6 @@ impl Vm {
                 config,
                 #[cfg(feature = "igvm")]
                 cpu_manager,
-                #[cfg(feature = "sev_snp")]
-                false,
             )?
         } else {
             None
@@ -1007,7 +1005,6 @@ impl Vm {
                 config,
                 #[cfg(feature = "igvm")]
                 cpu_manager,
-                true,
             )?
         } else {
             None
@@ -1583,19 +1580,19 @@ impl Vm {
         payload: &PayloadConfig,
         memory_manager: Arc<Mutex<MemoryManager>>,
         #[cfg(feature = "igvm")] cpu_manager: Arc<Mutex<cpu::CpuManager>>,
-        #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
     ) -> Result<EntryPoint> {
         trace_scoped!("load_payload");
         #[cfg(feature = "igvm")]
         {
             if let Some(_igvm_file) = &payload.igvm {
                 let igvm = File::open(_igvm_file).map_err(Error::IgvmFile)?;
-                #[cfg(feature = "sev_snp")]
-                if sev_snp_enabled {
-                    return Self::load_igvm(igvm, memory_manager, cpu_manager, &payload.host_data);
-                }
-                #[cfg(not(feature = "sev_snp"))]
-                return Self::load_igvm(igvm, memory_manager, cpu_manager);
+                return Self::load_igvm(
+                    igvm,
+                    memory_manager,
+                    cpu_manager,
+                    #[cfg(feature = "sev_snp")]
+                    &payload.host_data,
+                );
             }
         }
         match (&payload.firmware, &payload.kernel) {
@@ -1639,7 +1636,6 @@ impl Vm {
         memory_manager: &Arc<Mutex<MemoryManager>>,
         config: &Arc<Mutex<VmConfig>>,
         #[cfg(feature = "igvm")] cpu_manager: &Arc<Mutex<cpu::CpuManager>>,
-        #[cfg(feature = "sev_snp")] sev_snp_enabled: bool,
     ) -> Result<Option<thread::JoinHandle<Result<EntryPoint>>>> {
         // Kernel with TDX is loaded in a different manner
         #[cfg(feature = "tdx")]
@@ -1666,8 +1662,6 @@ impl Vm {
                             memory_manager,
                             #[cfg(feature = "igvm")]
                             cpu_manager,
-                            #[cfg(feature = "sev_snp")]
-                            sev_snp_enabled,
                         )
                     })
                     .map_err(Error::KernelLoadThreadSpawn)
