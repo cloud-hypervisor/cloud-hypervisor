@@ -653,7 +653,10 @@ enum ReceiveMigrationState {
     Configured(ReceiveMigrationConfiguredData),
 
     /// Memory is populated and we received the state. The VM is ready to go.
-    StateReceived,
+    StateReceived {
+        /// The timestamp where the VMM started to receive the final state.
+        state_receive_begin: Instant,
+    },
 
     /// The migration is successful.
     Completed,
@@ -938,18 +941,43 @@ impl Vmm {
                     Ok(Configured(config_data))
                 }
                 Command::State => {
+                    let state_receive_begin = Instant::now();
                     config_data.connections.cleanup()?;
-                    self.vm_receive_state(req, socket, config_data.memory_manager)?;
-                    Ok(StateReceived)
+                    let (recv_state_dur, restore_vm_dur) =
+                        self.vm_receive_state(req, socket, config_data.memory_manager)?;
+                    debug!(
+                        "Migration (incoming): recv_snapshot:{}ms restore:{}ms",
+                        recv_state_dur.as_millis(),
+                        restore_vm_dur.as_millis(),
+                    );
+                    Ok(StateReceived {
+                        state_receive_begin,
+                    })
                 }
                 _ => invalid_command(),
             },
-            StateReceived => match req.command() {
+            StateReceived {
+                state_receive_begin,
+            } => match req.command() {
                 Command::Complete => {
                     // The unwrap is safe, because the state machine makes sure we called
                     // vm_receive_state before, which creates the VM.
                     let vm = self.vm.as_mut().unwrap();
-                    vm.resume()?;
+                    let (_, resume_duration) = measure_ok(|| vm.resume())?;
+                    debug!(
+                        "Migration (incoming): resume:{}ms",
+                        resume_duration.as_millis()
+                    );
+                    // This logs the downtime without the final memory delta, so
+                    // it does not reflect the actual downtime. While we could
+                    // pass along the timestamp from when the VM was paused,
+                    // that would rely on both VM hosts having synchronized
+                    // clocks, which we cannot guarantee. For that reason, this
+                    // is logged as debug! rather than info!.
+                    debug!(
+                        "Migration (incoming): Receiving final state and resuming the VM took {}ms",
+                        state_receive_begin.elapsed().as_millis()
+                    );
                     Ok(Completed)
                 }
                 _ => invalid_command(),
@@ -1046,23 +1074,33 @@ impl Vmm {
         Ok(memory_manager)
     }
 
+    /// Receives the final VM state (devices, vCPUs) and restores the VM.
+    ///
+    /// Measures the time for each step.
     fn vm_receive_state<T>(
         &mut self,
         req: &Request,
         socket: &mut T,
         mm: Arc<Mutex<MemoryManager>>,
-    ) -> std::result::Result<(), MigratableError>
+    ) -> std::result::Result<
+        (
+            Duration, /* state receive + deserialize */
+            Duration, /* restoring */
+        ),
+        MigratableError,
+    >
     where
         T: Read,
     {
-        // Read in state data
-        let mut data: Vec<u8> = Vec::new();
-        data.resize_with(req.length() as usize, Default::default);
-        socket
-            .read_exact(&mut data)
-            .map_err(MigratableError::MigrateSocket)?;
-        let snapshot: Snapshot = serde_json::from_slice(&data).map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error deserialising snapshot: {e}"))
+        let (snapshot, receive_duration): (Snapshot, Duration) = measure_ok(|| {
+            let mut data: Vec<u8> = Vec::new();
+            data.resize_with(req.length() as usize, Default::default);
+            socket
+                .read_exact(&mut data)
+                .map_err(MigratableError::MigrateSocket)?;
+            serde_json::from_slice(&data).map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error deserialising snapshot: {e}"))
+            })
         })?;
 
         let exit_evt = self.exit_evt.try_clone().map_err(|e| {
@@ -1079,38 +1117,44 @@ impl Vmm {
             MigratableError::MigrateReceive(anyhow!("Error cloning activate EventFd: {e}"))
         })?;
 
-        #[cfg(not(target_arch = "riscv64"))]
-        let timestamp = Instant::now();
-        let hypervisor_vm = mm.lock().unwrap().vm.clone();
-        let mut vm = Vm::new_from_memory_manager(
-            self.vm_config.clone().unwrap(),
-            mm,
-            hypervisor_vm,
-            exit_evt,
-            reset_evt,
-            #[cfg(feature = "guest_debug")]
-            debug_evt,
-            &self.seccomp_action,
-            self.hypervisor.clone(),
-            activate_evt,
+        let (vm, restore_duration) = measure_ok(|| {
             #[cfg(not(target_arch = "riscv64"))]
-            timestamp,
-            self.console_info.clone(),
-            self.console_resize_pipe.clone(),
-            Arc::clone(&self.original_termios_opt),
-            Some(&snapshot),
-        )
-        .map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {e:?}"))
+            let timestamp = Instant::now();
+            let hypervisor_vm = mm.lock().unwrap().vm.clone();
+
+            let mut vm = Vm::new_from_memory_manager(
+                self.vm_config.clone().unwrap(),
+                mm,
+                hypervisor_vm,
+                exit_evt,
+                reset_evt,
+                #[cfg(feature = "guest_debug")]
+                debug_evt,
+                &self.seccomp_action,
+                self.hypervisor.clone(),
+                activate_evt,
+                #[cfg(not(target_arch = "riscv64"))]
+                timestamp,
+                self.console_info.clone(),
+                self.console_resize_pipe.clone(),
+                Arc::clone(&self.original_termios_opt),
+                Some(&snapshot),
+            )
+            .map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {e:?}"))
+            })?;
+
+            // Create VM
+            vm.restore().map_err(|e| {
+                MigratableError::MigrateReceive(anyhow!("Failed restoring the Vm: {e}"))
+            })?;
+
+            Ok(vm)
         })?;
 
-        // Create VM
-        vm.restore().map_err(|e| {
-            MigratableError::MigrateReceive(anyhow!("Failed restoring the Vm: {e}"))
-        })?;
         self.vm = Some(vm);
 
-        Ok(())
+        Ok((receive_duration, restore_duration))
     }
 
     /// Performs the initial memory transmission (iteration zero) plus a
