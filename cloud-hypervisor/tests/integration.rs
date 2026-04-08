@@ -10247,41 +10247,73 @@ mod live_migration {
 
         use super::*;
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not yet supported on mshv arm64"
+        )]
         fn test_live_migration_basic() {
             _test_live_migration(false, false);
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not yet supported on mshv arm64"
+        )]
         fn test_live_migration_local() {
             _test_live_migration(false, true);
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not yet supported on mshv arm64"
+        )]
         fn test_live_migration_tcp() {
             _test_live_migration_tcp(NonZeroU32::new(1).unwrap());
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not yet supported on mshv arm64"
+        )]
         fn test_live_migration_tcp_parallel_connections() {
             _test_live_migration_tcp(NonZeroU32::new(8).unwrap());
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not yet supported on mshv arm64"
+        )]
         fn test_live_migration_tcp_timeout_cancel() {
             _test_live_migration_tcp_timeout(TimeoutStrategy::Cancel);
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not yet supported on mshv arm64"
+        )]
         fn test_live_migration_tcp_timeout_ignore() {
             _test_live_migration_tcp_timeout(TimeoutStrategy::Ignore);
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not yet supported on mshv arm64"
+        )]
         fn test_live_migration_watchdog() {
             _test_live_migration_watchdog(false, false);
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not yet supported on mshv arm64"
+        )]
         fn test_live_migration_watchdog_local() {
             _test_live_migration_watchdog(false, true);
         }
@@ -10334,11 +10366,19 @@ mod live_migration {
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not yet supported on mshv arm64"
+        )]
         fn test_live_migration_balloon() {
             _test_live_migration_balloon(false, false);
         }
 
         #[test]
+        #[cfg_attr(
+            all(feature = "mshv", target_arch = "aarch64"),
+            ignore = "live migration not yet supported on mshv arm64"
+        )]
         fn test_live_migration_balloon_local() {
             _test_live_migration_balloon(false, true);
         }
