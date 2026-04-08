@@ -504,7 +504,37 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         .args(args)
 }
 
-fn start_vmm(cmd_arguments: &ArgMatches) -> Result<Option<String>, Error> {
+fn parse_api_socket(cmd_arguments: &ArgMatches) -> Result<(Option<String>, Option<RawFd>), Error> {
+    if let Some(socket_config) = cmd_arguments.get_one::<String>("api-socket") {
+        let mut parser = OptionParser::new();
+        parser.add("path").add("fd");
+        parser.parse(socket_config).unwrap_or_default();
+
+        if let Some(fd) = parser.get("fd") {
+            Ok((
+                None,
+                Some(fd.parse::<RawFd>().map_err(Error::ParsingApiSocket)?),
+            ))
+        } else if let Some(path) = parser.get("path") {
+            Ok((Some(path), None))
+        } else {
+            Ok((
+                cmd_arguments
+                    .get_one::<String>("api-socket")
+                    .map(|s| s.to_string()),
+                None,
+            ))
+        }
+    } else {
+        Ok((None, None))
+    }
+}
+
+fn start_vmm(
+    cmd_arguments: &ArgMatches,
+    api_socket_path: &Option<String>,
+    api_socket_fd: Option<RawFd>,
+) -> Result<(), Error> {
     let log_level = match cmd_arguments.get_count("v") {
         0 => LevelFilter::Warn,
         1 => LevelFilter::Info,
@@ -526,31 +556,6 @@ fn start_vmm(cmd_arguments: &ArgMatches) -> Result<Option<String>, Error> {
     }))
     .map(|()| log::set_max_level(log_level))
     .map_err(Error::LoggerSetup)?;
-
-    let (api_socket_path, api_socket_fd) =
-        if let Some(socket_config) = cmd_arguments.get_one::<String>("api-socket") {
-            let mut parser = OptionParser::new();
-            parser.add("path").add("fd");
-            parser.parse(socket_config).unwrap_or_default();
-
-            if let Some(fd) = parser.get("fd") {
-                (
-                    None,
-                    Some(fd.parse::<RawFd>().map_err(Error::ParsingApiSocket)?),
-                )
-            } else if let Some(path) = parser.get("path") {
-                (Some(path), None)
-            } else {
-                (
-                    cmd_arguments
-                        .get_one::<String>("api-socket")
-                        .map(|s| s.to_string()),
-                    None,
-                )
-            }
-        } else {
-            (None, None)
-        };
 
     let (api_request_sender, api_request_receiver) = channel();
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
@@ -712,7 +717,7 @@ fn start_vmm(cmd_arguments: &ArgMatches) -> Result<Option<String>, Error> {
 
     let vmm_thread_handle = vmm::start_vmm_thread(
         vmm::VmmVersionInfo::new(env!("BUILD_VERSION"), env!("CARGO_PKG_VERSION")),
-        &api_socket_path,
+        api_socket_path,
         api_socket_fd,
         #[cfg(feature = "dbus_api")]
         dbus_options,
@@ -798,7 +803,7 @@ fn start_vmm(cmd_arguments: &ArgMatches) -> Result<Option<String>, Error> {
         dbus_api_graceful_shutdown(chs);
     }
 
-    r.map(|_| api_socket_path)
+    r
 }
 
 // This is a best-effort solution to the latency induced by the RCU
@@ -904,9 +909,22 @@ fn main() {
         warn!("Error expanding FD table: {e}");
     }
 
-    let exit_code = match start_vmm(&cmd_arguments) {
-        Ok(path) => {
-            path.map(|s| std::fs::remove_file(s).ok());
+    let (api_socket_path, api_socket_fd) = match parse_api_socket(&cmd_arguments) {
+        Ok(p) => p,
+        Err(top_error) => {
+            cloud_hypervisor::cli_print_error_chain(&top_error, "Cloud Hypervisor", |_, _, _| None);
+            std::process::exit(1);
+        }
+    };
+
+    let vmm_result = start_vmm(&cmd_arguments, &api_socket_path, api_socket_fd);
+
+    if let Some(ref p) = api_socket_path {
+        let _ = std::fs::remove_file(p);
+    }
+
+    let exit_code = match vmm_result {
+        Ok(()) => {
             info!("Cloud Hypervisor exited successfully");
             0
         }
