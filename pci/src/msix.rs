@@ -21,7 +21,6 @@ use crate::{PciCapability, PciCapabilityId};
 
 const MAX_MSIX_VECTORS_PER_DEVICE: u16 = 2048;
 const MSIX_TABLE_ENTRIES_MODULO: u64 = 16;
-const MSIX_PBA_ENTRIES_MODULO: u64 = 8;
 const BITS_PER_PBA_ENTRY: usize = 64;
 const FUNCTION_MASK_BIT: u8 = 14;
 const MSIX_ENABLE_BIT: u8 = 15;
@@ -416,48 +415,8 @@ impl MsixConfig {
         }
     }
 
-    pub fn read_pba(&mut self, offset: u64, data: &mut [u8]) {
-        assert!(data.len() == 4 || data.len() == 8);
-
-        let index: usize = (offset / MSIX_PBA_ENTRIES_MODULO) as usize;
-        let modulo_offset = offset % MSIX_PBA_ENTRIES_MODULO;
-
-        if index >= self.pba_entries.len() {
-            debug!("Invalid MSI-X PBA entry index {index}");
-            data.copy_from_slice(&[0xff; 8][..data.len()]);
-            return;
-        }
-
-        match data.len() {
-            4 => {
-                let value: u32 = match modulo_offset {
-                    0x0 => (self.pba_entries[index] & 0xffff_ffffu64) as u32,
-                    0x4 => (self.pba_entries[index] >> 32) as u32,
-                    _ => {
-                        error!("invalid offset");
-                        0
-                    }
-                };
-
-                debug!("MSI_R PBA offset 0x{offset:x} data 0x{value:x}");
-                LittleEndian::write_u32(data, value);
-            }
-            8 => {
-                let value: u64 = match modulo_offset {
-                    0x0 => self.pba_entries[index],
-                    _ => {
-                        error!("invalid offset");
-                        0
-                    }
-                };
-
-                debug!("MSI_R PBA offset 0x{offset:x} data 0x{value:x}");
-                LittleEndian::write_u64(data, value);
-            }
-            _ => {
-                error!("invalid data length");
-            }
-        }
+    pub fn read_pba(&mut self, _offset: u64, _data: &mut [u8]) {
+        panic!("does anything ever hit this?");
     }
 
     pub fn write_pba(&mut self, _offset: u64, _data: &[u8]) {
