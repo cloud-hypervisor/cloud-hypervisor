@@ -32,6 +32,8 @@ use anyhow::anyhow;
 #[cfg(feature = "sev_snp")]
 use kvm_bindings::kvm_create_guest_memfd;
 use kvm_ioctls::{NoDatamatch, VcpuFd, VmFd};
+#[cfg(feature = "sev_snp")]
+use log::debug;
 #[cfg(target_arch = "x86_64")]
 use log::warn;
 use vmm_sys_util::errno;
@@ -140,6 +142,8 @@ use crate::kvm::x86_64::XsaveStateError;
 #[cfg(target_arch = "x86_64")]
 ioctl_io_nr!(KVM_NMI, kvm_bindings::KVMIO, 0x9a);
 
+#[cfg(feature = "sev_snp")]
+use igvm_defs::PAGE_SIZE_4K;
 #[cfg(feature = "sev_snp")]
 use kvm_bindings::{KVM_MEMORY_ATTRIBUTE_PRIVATE, KVM_X86_SNP_VM, kvm_memory_attributes};
 #[cfg(feature = "sev_snp")]
@@ -774,6 +778,8 @@ impl vm::Vm for KvmVm {
             hyperv_synic: AtomicBool::new(false),
             #[cfg(target_arch = "x86_64")]
             xsave_size,
+            #[cfg(feature = "sev_snp")]
+            vm_fd: self.fd.clone(),
         };
         Ok(Box::new(vcpu))
     }
@@ -1643,6 +1649,8 @@ pub struct KvmVcpu {
     hyperv_synic: AtomicBool,
     #[cfg(target_arch = "x86_64")]
     xsave_size: i32,
+    #[cfg(feature = "sev_snp")]
+    vm_fd: Arc<VmFd>,
 }
 
 /// Implementation of Vcpu trait for KVM
@@ -2302,6 +2310,49 @@ impl cpu::Vcpu for KvmVcpu {
                 #[cfg(feature = "tdx")]
                 VcpuExit::Unsupported(KVM_EXIT_TDX) => Ok(cpu::VmExit::Tdx),
                 VcpuExit::Debug(_) => Ok(cpu::VmExit::Debug),
+                #[cfg(feature = "sev_snp")]
+                VcpuExit::Hypercall(hypercall) => {
+                    // https://docs.kernel.org/virt/kvm/x86/hypercalls.html#kvm-hc-map-gpa-range
+                    const KVM_HC_MAP_GPA_RANGE: u64 = 12;
+                    // 4th bit of attributes argument is encrypted page bit
+                    match hypercall.nr {
+                        KVM_HC_MAP_GPA_RANGE => {
+                            // guest physical address of start page
+                            let address = hypercall.args[0];
+                            // num pages to map from start address
+                            let num_pages = hypercall.args[1];
+                            // bits[0-3]  = page size encoding
+                            // bits[4]   = 1 if private, 0 if shared
+                            // bits[5-63] = zero
+                            let attributes = hypercall.args[2];
+                            // TODO: Add 2mb page support
+                            let size = num_pages * PAGE_SIZE_4K;
+                            // bit 4 = private attribute encoding
+                            const PRIVATE_ENCODING_BITMASK: u64 = 0b10000;
+                            debug!(
+                                "KVM_HC_MAP_GPA_RANGE: address={address:#x}, pages={num_pages}, attributes={attributes:#x}"
+                            );
+                            let set_private_attr = if attributes & PRIVATE_ENCODING_BITMASK > 0 {
+                                KVM_MEMORY_ATTRIBUTE_PRIVATE as u64
+                            } else {
+                                // the only attribute available is private, o/w 0
+                                // https://docs.kernel.org/virt/kvm/api.html#kvm-set-memory-attributes
+                                0u64
+                            };
+                            let mem_attributes = kvm_memory_attributes {
+                                address,
+                                size,
+                                attributes: set_private_attr,
+                                ..Default::default()
+                            };
+                            self.vm_fd
+                                .set_memory_attributes(mem_attributes)
+                                .map(|_| cpu::VmExit::Ignore)
+                                .map_err(|e| cpu::HypervisorCpuError::RunVcpu(e.into()))
+                        }
+                        _ => Ok(cpu::VmExit::Ignore),
+                    }
+                }
 
                 r => Err(cpu::HypervisorCpuError::RunVcpu(anyhow!(
                     "Unexpected exit reason on vcpu run: {r:?}"
