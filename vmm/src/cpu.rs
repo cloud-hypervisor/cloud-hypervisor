@@ -212,6 +212,9 @@ pub enum Error {
     #[cfg(feature = "sev_snp")]
     #[error("Failed to set sev control register")]
     SetSevControlRegister(#[source] hypervisor::HypervisorCpuError),
+    #[cfg(feature = "sev_snp")]
+    #[error("Failed to set up SEV-SNP vCPU registers")]
+    SetupSevSnpRegs(#[source] hypervisor::HypervisorCpuError),
 
     #[cfg(target_arch = "x86_64")]
     #[error("Failed to inject NMI")]
@@ -642,6 +645,13 @@ impl Vcpu {
         self.vcpu
             .set_sev_control_register(vmsa_pfn)
             .map_err(Error::SetSevControlRegister)
+    }
+
+    #[cfg(feature = "sev_snp")]
+    pub fn setup_sev_snp_regs(&self, vmsa: igvm::snp_defs::SevVmsa) -> Result<()> {
+        self.vcpu
+            .setup_sev_snp_regs(vmsa)
+            .map_err(Error::SetupSevSnpRegs)
     }
 
     ///
@@ -2199,7 +2209,7 @@ impl CpuManager {
         &self.vcpus_kill_signalled
     }
 
-    #[cfg(feature = "igvm")]
+    #[cfg(all(feature = "igvm", feature = "mshv"))]
     pub(crate) fn get_cpuid_leaf(
         &self,
         cpu_id: u8,
@@ -2220,6 +2230,11 @@ impl CpuManager {
     #[cfg(feature = "sev_snp")]
     pub(crate) fn sev_snp_enabled(&self) -> bool {
         self.sev_snp_enabled
+    }
+
+    #[cfg(feature = "igvm")]
+    pub(crate) fn hypervisor_type(&self) -> hypervisor::HypervisorType {
+        self.hypervisor.hypervisor_type()
     }
 
     pub(crate) fn nmi(&mut self) -> Result<()> {
