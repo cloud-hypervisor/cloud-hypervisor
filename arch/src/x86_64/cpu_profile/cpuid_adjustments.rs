@@ -231,6 +231,13 @@ impl CpuidOutputRegisterAdjustments {
     }
 }
 
+/// Data describing CPUID adjustments related to a CPU Profile.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CpuIdProfileData {
+    /// Adjustments necessary to become compatible with the desired target.
+    pub adjustments: Vec<(Parameters, CpuidOutputRegisterAdjustments)>,
+}
+
 #[cfg(test)]
 mod unit_tests {
     use proptest::prelude::*;
