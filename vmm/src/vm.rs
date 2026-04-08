@@ -1675,7 +1675,11 @@ impl Vm {
     }
 
     #[cfg(target_arch = "x86_64")]
-    fn configure_system(&mut self, rsdp_addr: GuestAddress, entry_addr: EntryPoint) -> Result<()> {
+    fn configure_system(
+        &mut self,
+        rsdp_addr: Option<GuestAddress>,
+        entry_addr: EntryPoint,
+    ) -> Result<()> {
         trace_scoped!("configure_system");
         info!("Configuring system");
         let mem = self.memory_manager.lock().unwrap().boot_guest_memory();
@@ -1686,7 +1690,6 @@ impl Vm {
         };
 
         let boot_vcpus = self.cpu_manager.lock().unwrap().boot_vcpus();
-        let rsdp_addr = Some(rsdp_addr);
 
         let serial_number = self
             .config
@@ -1738,7 +1741,7 @@ impl Vm {
     #[cfg(target_arch = "aarch64")]
     fn configure_system(
         &mut self,
-        _rsdp_addr: GuestAddress,
+        _rsdp_addr: Option<GuestAddress>,
         _entry_addr: EntryPoint,
     ) -> Result<()> {
         let cmdline = Self::generate_cmdline(
@@ -2775,16 +2778,11 @@ impl Vm {
         let rsdp_addr = self.create_acpi_tables();
 
         #[cfg(not(target_arch = "riscv64"))]
-        {
-            #[cfg(not(any(feature = "sev_snp", feature = "tdx")))]
-            assert!(rsdp_addr.is_some());
-            // Configure shared state based on loaded kernel
-            if let Some(rsdp_adr) = rsdp_addr {
-                entry_point
-                    .map(|entry_point| self.configure_system(rsdp_adr, entry_point))
-                    .transpose()?;
-            }
-        }
+        // Configure shared state based on loaded kernel
+        entry_point
+            .map(|entry_point| self.configure_system(rsdp_addr, entry_point))
+            .transpose()?;
+
         #[cfg(target_arch = "riscv64")]
         self.configure_system().unwrap();
 
