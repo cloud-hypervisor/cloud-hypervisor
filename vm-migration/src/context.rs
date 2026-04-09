@@ -54,13 +54,13 @@ pub struct MemoryMigrationContext {
     /// This includes the transmission, all logging, and update of any metrics.
     ///
     /// This is only `None` for iteration 0.
-    iteration_duration: Option<Duration>,
+    pub iteration_duration: Option<Duration>,
     /// Begin of the current transfer.
     transfer_begin: Instant,
     /// Duration of the current transfer.
     ///
     /// This is only `None` for iteration 0.
-    transfer_duration: Option<Duration>,
+    pub transfer_duration: Option<Duration>,
 }
 
 impl MemoryMigrationContext {
@@ -178,6 +178,22 @@ impl MemoryMigrationContext {
             bytes as f64 / duration.as_secs_f64()
         }
     }
+
+    /// Calculates the overhead of an iteration.
+    ///
+    /// This is the additional time next to the transfer time and includes
+    /// fetching and parsing the dirty log, for example.
+    fn iteration_overhead(&self) -> Duration {
+        self.iteration_duration
+            .and_then(|iter| {
+                self.transfer_duration.map(|tr| {
+                    // This is guaranteed by update_metrics_after_transfer()
+                    assert!(iter >= tr);
+                    iter - tr
+                })
+            })
+            .unwrap_or_default()
+    }
 }
 
 impl Default for MemoryMigrationContext {
@@ -207,16 +223,7 @@ impl Display for MemoryMigrationContext {
 
         // Transfer duration and iteration overhead
         let transfer_s = self.transfer_duration.map_or(0.0, |d| d.as_secs_f64());
-        let iteration_overhead_ms = self
-            .iteration_duration
-            .and_then(|iter| {
-                self.transfer_duration.map(|tr| {
-                    // This is guaranteed by update_metrics_after_transfer()
-                    assert!(iter >= tr);
-                    (iter - tr).as_millis()
-                })
-            })
-            .unwrap_or(0);
+        let iteration_overhead_ms = self.iteration_overhead().as_millis();
 
         let est_downtime_ms = self.estimated_downtime.map_or(0, |d| d.as_millis());
 
