@@ -17,8 +17,10 @@ ivshmem = ["devices/ivshmem"]
 kvm = [
   "arch/kvm",
   "hypervisor/kvm",
+  "iommufd-ioctls",
   "pci/kvm",
   "vfio-ioctls/kvm",
+  "vfio-ioctls/vfio_cdev",
   "virtio-devices/kvm",
   "vm-device/kvm",
 ]
@@ -55,6 +57,7 @@ hex = { version = "0.4.3", optional = true }
 hypervisor = { path = "../hypervisor" }
 igvm = { workspace = true, optional = true }
 igvm_defs = { workspace = true, optional = true }
+iommufd-ioctls = { workspace = true, optional = true }
 landlock = "0.4.4"
 libc = { workspace = true }
 linux-loader = { workspace = true, features = ["bzimage", "elf", "pe"] }
