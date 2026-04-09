@@ -76,6 +76,8 @@ use event_monitor::event;
 use hypervisor::IoEventAddress;
 #[cfg(target_arch = "aarch64")]
 use hypervisor::arch::aarch64::regs::AARCH64_PMU_IRQ;
+#[cfg(feature = "kvm")]
+use iommufd_ioctls::IommuFd;
 use libc::{
     MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED, O_TMPFILE, PROT_READ, PROT_WRITE, TCSANOW, tcsetattr,
     termios,
@@ -90,6 +92,8 @@ use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracer::trace_scoped;
+#[cfg(feature = "kvm")]
+use vfio_ioctls::VfioIommufd;
 use vfio_ioctls::{VfioContainer, VfioDevice, VfioDeviceFd, VfioOps};
 use virtio_devices::transport::{VirtioPciDevice, VirtioPciDeviceActivator, VirtioTransport};
 use virtio_devices::vhost_user::VhostUserConfig;
@@ -360,6 +364,15 @@ pub enum DeviceManagerError {
     /// Error getting pty peer
     #[error("Error getting pty peer")]
     GetPtyPeer(#[source] vmm_sys_util::errno::Error),
+
+    /// Cannot create iommufd
+    #[cfg(feature = "kvm")]
+    #[error("Cannot create iommufd")]
+    IommufdCreate(#[source] iommufd_ioctls::IommufdError),
+
+    /// iommufd is not supported
+    #[error("iommufd is not supported without the kvm feature")]
+    IommufdNotSupported,
 
     /// Cannot create a VFIO device
     #[error("Cannot create a VFIO device")]
@@ -3803,9 +3816,31 @@ impl DeviceManager {
             .try_clone()
             .map_err(DeviceManagerError::VfioCreate)?;
 
-        Ok(Arc::new(
-            VfioContainer::new(Some(Arc::new(dup))).map_err(DeviceManagerError::VfioCreate)?,
-        ))
+        let iommufd = self
+            .config
+            .lock()
+            .unwrap()
+            .platform
+            .as_ref()
+            .is_some_and(|p| p.iommufd);
+
+        if iommufd {
+            #[cfg(feature = "kvm")]
+            {
+                info!("Using vfio cdev mode with iommufd.");
+                let iommufd = IommuFd::new().map_err(DeviceManagerError::IommufdCreate)?;
+                let vfio_iommufd = VfioIommufd::new(Arc::new(iommufd), None, Some(Arc::new(dup)))
+                    .map_err(DeviceManagerError::VfioCreate)?;
+                Ok(Arc::new(vfio_iommufd))
+            }
+            #[cfg(not(feature = "kvm"))]
+            Err(DeviceManagerError::IommufdNotSupported)
+        } else {
+            info!("Using vfio legacy mode with vfio container/group.");
+            Ok(Arc::new(
+                VfioContainer::new(Some(Arc::new(dup))).map_err(DeviceManagerError::VfioCreate)?,
+            ))
+        }
     }
 
     fn add_vfio_device(
