@@ -40,8 +40,8 @@ use vm_memory::GuestMemoryAtomic;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_migration::protocol::*;
 use vm_migration::{
-    MemoryMigrationContext, Migratable, MigratableError, Pausable, Snapshot, Snapshottable,
-    Transportable,
+    MemoryMigrationContext, Migratable, MigratableError, OngoingMigrationContext, Pausable,
+    Snapshot, Snapshottable, Transportable,
 };
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::unblock_signal;
@@ -1260,23 +1260,30 @@ impl Vmm {
     /// - initial memory - VM is running
     /// - multiple memory delta transmissions - VM is running
     /// - final memory iteration - VM is paused
+    ///
+    /// Stores the [finalized] [`MemoryMigrationContext`] in the provided
+    /// [`OngoingMigrationContext`].
+    ///
+    /// [finalized]: MemoryMigrationContext::finalize
     fn do_memory_migration(
         vm: &mut Vm,
         socket: &mut SocketStream,
         send_data_migration: &VmSendMigrationData,
         mem_send: &mut SendAdditionalConnections,
+        ctx: &mut OngoingMigrationContext,
     ) -> result::Result<(), MigratableError> {
-        let mut ctx = MemoryMigrationContext::new();
+        let mut mem_ctx = MemoryMigrationContext::new();
 
         vm.start_dirty_log()?;
         let remaining = Self::do_memory_iterations(
             vm,
             socket,
-            &mut ctx,
+            &mut mem_ctx,
             // We bind send_data_migration to the callback
             |ctx| Self::is_precopy_converged(ctx, send_data_migration),
             mem_send,
         )?;
+        let downtime_begin = Instant::now();
         vm.pause()?;
 
         // Send last batch of dirty pages: final iteration
@@ -1286,26 +1293,31 @@ impl Vmm {
             let mut final_table = vm.dirty_log()?;
             final_table.extend(remaining);
 
-            ctx.update_metrics_before_transfer(iteration_begin, &final_table);
+            mem_ctx.update_metrics_before_transfer(iteration_begin, &final_table);
             let transfer_begin = Instant::now();
             mem_send.send_memory(final_table, socket)?;
             let transfer_duration = transfer_begin.elapsed();
-            ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
-            ctx.iteration += 1;
+            mem_ctx.update_metrics_after_transfer(transfer_begin, transfer_duration);
+            mem_ctx.iteration += 1;
         }
-        ctx.finalize();
-
-        info!("Precopy complete: {ctx}");
+        mem_ctx.finalize();
+        info!("Precopy complete: {mem_ctx}");
+        ctx.set_vm_paused(downtime_begin, mem_ctx)
+            .expect("migration context should transition to VmPaused after memory migration");
 
         Ok(())
     }
 
+    /// Performs a migration including all its phases.
     fn send_migration(
         vm: &mut Vm,
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         hypervisor: &dyn hypervisor::Hypervisor,
         send_data_migration: &VmSendMigrationData,
     ) -> result::Result<(), MigratableError> {
+        // State machine that is updated with more context as we progress.
+        let mut ctx = OngoingMigrationContext::new();
+
         // Set up the socket connection
         let mut socket =
             migration_transport::send_migration_socket(&send_data_migration.destination_url)?;
@@ -1373,7 +1385,14 @@ impl Vmm {
 
         if send_data_migration.local {
             // Now pause VM
+            let downtime_begin = Instant::now();
             vm.pause()?;
+            ctx.set_vm_paused(
+                downtime_begin,
+                // No memory was transferred
+                MemoryMigrationContext::empty_finalized(),
+            )
+            .expect("migration context should transition to VmPaused for local migration");
         } else {
             let mut mem_send = migration_transport::SendAdditionalConnections::new(
                 &send_data_migration.destination_url,
@@ -1381,14 +1400,20 @@ impl Vmm {
                 &vm.guest_memory(),
             )?;
 
-            Self::do_memory_migration(vm, &mut socket, send_data_migration, &mut mem_send)
-                .inspect_err(|_| {
-                    // Calling cleanup multiple times is fine, thus here we just make sure
-                    // that it is called.
-                    if let Err(e) = mem_send.cleanup() {
-                        warn!("Error cleaning up migration connections: {e}");
-                    }
-                })?;
+            Self::do_memory_migration(
+                vm,
+                &mut socket,
+                send_data_migration,
+                &mut mem_send,
+                &mut ctx,
+            )
+            .inspect_err(|_| {
+                // Calling cleanup multiple times is fine, thus here we just make sure
+                // that it is called.
+                if let Err(e) = mem_send.cleanup() {
+                    warn!("Error cleaning up migration connections: {e}");
+                }
+            })?;
 
             mem_send.cleanup()?;
         }
@@ -1399,22 +1424,38 @@ impl Vmm {
             .map_err(|e| MigratableError::UnlockError(anyhow!("{e}")))?;
 
         // Capture snapshot and send it
-        let vm_snapshot = vm.snapshot()?;
-        migration_transport::send_state(&mut socket, &vm_snapshot)?;
-        // Complete the migration
-        // At this step, the receiving VMM will acquire disk locks again.
-        migration_transport::send_request_expect_ok(
-            &mut socket,
-            Request::complete(),
-            MigratableError::MigrateSend(anyhow!("Error completing migration")),
-        )?;
+        let (vm_snapshot, snapshot_duration) = measure_ok(|| vm.snapshot())?;
+        let (_, send_snapshot_duration) =
+            measure_ok(|| migration_transport::send_state(&mut socket, &vm_snapshot))?;
+
+        // Complete the migration.
+        // When this returns, we know the VM was resumed (if it was running
+        // before the migration) and that the receiving VMM acquired disk
+        // locks again.
+        let (_, complete_duration) = measure_ok(|| {
+            migration_transport::send_request_expect_ok(
+                &mut socket,
+                Request::complete(),
+                MigratableError::MigrateSend(anyhow!("Error completing migration")),
+            )
+        })?;
+
+        let ctx = ctx
+            .finalize(snapshot_duration, send_snapshot_duration, complete_duration)
+            .expect("migration context should finalize after memory migration completed");
+
+        info!(
+            "Migration completed after {:.1}s with a downtime of {}ms (goal was {}ms)",
+            ctx.migration_dur.as_secs_f32(),
+            ctx.downtime_ctx.effective_downtime.as_millis(),
+            send_data_migration.downtime().as_millis()
+        );
+        debug!("Downtime breakdown: {}", ctx.downtime_ctx);
 
         // Stop logging dirty pages
         if !send_data_migration.local {
             vm.stop_dirty_log()?;
         }
-
-        info!("Migration complete");
 
         // Let every Migratable object know about the migration being complete
         vm.complete_migration()
