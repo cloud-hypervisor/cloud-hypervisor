@@ -113,6 +113,10 @@ pub fn default_platformconfig_iommu_address_width_bits() -> u8 {
     DEFAULT_IOMMU_ADDRESS_WIDTH_BITS
 }
 
+pub fn default_platformconfig_vfio_p2p_dma() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct PlatformConfig {
     #[serde(default = "default_platformconfig_num_pci_segments")]
@@ -135,6 +139,8 @@ pub struct PlatformConfig {
     pub sev_snp: bool,
     #[serde(default)]
     pub iommufd: bool,
+    #[serde(default = "default_platformconfig_vfio_p2p_dma")]
+    pub vfio_p2p_dma: bool,
 }
 
 pub const DEFAULT_PCI_SEGMENT_APERTURE_WEIGHT: u32 = 1;

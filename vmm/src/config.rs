@@ -315,6 +315,9 @@ pub enum ValidationError {
     /// On a IOMMU segment but not behind IOMMU
     #[error("Device is on an IOMMU PCI segment ({0}) but not placed behind IOMMU")]
     OnIommuSegment(u16),
+    /// GPUDirect clique requires P2P DMA
+    #[error("Device with x_nv_gpudirect_clique requires vfio_p2p_dma=on")]
+    GpuDirectCliqueRequiresP2pDma,
     // On a IOMMU segment but IOMMU not supported
     #[error(
         "Device is on an IOMMU PCI segment ({0}) but does not support being placed behind IOMMU"
@@ -804,7 +807,8 @@ impl PlatformConfig {
             let mut syntax = "Platform configuration parameters \
             \"num_pci_segments=<num_pci_segments>,iommu_segments=<list_of_segments>,\
             iommu_address_width=<bits>,serial_number=<dmi_device_serial_number>,\
-            uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>,iommufd=on|off"
+            uuid=<dmi_device_uuid>,oem_strings=<list_of_strings>,iommufd=on|off,\
+            vfio_p2p_dma=on|off"
                 .to_string();
 
             if cfg!(feature = "tdx") {
@@ -832,7 +836,8 @@ impl PlatformConfig {
             .add("serial_number")
             .add("uuid")
             .add("oem_strings")
-            .add("iommufd");
+            .add("iommufd")
+            .add("vfio_p2p_dma");
         #[cfg(feature = "tdx")]
         parser.add("tdx");
         #[cfg(feature = "sev_snp")]
@@ -864,6 +869,11 @@ impl PlatformConfig {
             .map_err(Error::ParsePlatform)?
             .unwrap_or(Toggle(false))
             .0;
+        let vfio_p2p_dma = parser
+            .convert::<Toggle>("vfio_p2p_dma")
+            .map_err(Error::ParsePlatform)?
+            .unwrap_or(Toggle(true))
+            .0;
         #[cfg(feature = "tdx")]
         let tdx = parser
             .convert::<Toggle>("tdx")
@@ -884,6 +894,7 @@ impl PlatformConfig {
             uuid,
             oem_strings,
             iommufd,
+            vfio_p2p_dma,
             #[cfg(feature = "tdx")]
             tdx,
             #[cfg(feature = "sev_snp")]
@@ -2274,6 +2285,13 @@ impl DeviceConfig {
                 && !self.iommu
             {
                 return Err(ValidationError::OnIommuSegment(self.pci_segment));
+            }
+        }
+
+        if self.x_nv_gpudirect_clique.is_some() {
+            let vfio_p2p_dma = vm_config.platform.as_ref().is_none_or(|p| p.vfio_p2p_dma);
+            if !vfio_p2p_dma {
+                return Err(ValidationError::GpuDirectCliqueRequiresP2pDma);
             }
         }
 
@@ -4832,6 +4850,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             uuid: None,
             oem_strings: None,
             iommufd: false,
+            vfio_p2p_dma: default_platformconfig_vfio_p2p_dma(),
             #[cfg(feature = "tdx")]
             tdx: false,
             #[cfg(feature = "sev_snp")]
@@ -5571,6 +5590,41 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             });
             config_with_invalid_host_data.validate().unwrap_err();
         }
+
+        // x_nv_gpudirect_clique with vfio_p2p_dma=off should fail
+        let mut invalid_config = valid_config.clone();
+        invalid_config.platform = Some(PlatformConfig {
+            vfio_p2p_dma: false,
+            ..platform_fixture()
+        });
+        invalid_config.devices = Some(vec![DeviceConfig {
+            x_nv_gpudirect_clique: Some(0),
+            ..device_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::GpuDirectCliqueRequiresP2pDma)
+        );
+
+        // x_nv_gpudirect_clique with vfio_p2p_dma=on should pass
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.platform = Some(PlatformConfig {
+            vfio_p2p_dma: true,
+            ..platform_fixture()
+        });
+        still_valid_config.devices = Some(vec![DeviceConfig {
+            x_nv_gpudirect_clique: Some(0),
+            ..device_fixture()
+        }]);
+        still_valid_config.validate().unwrap();
+
+        // x_nv_gpudirect_clique with no platform config (default p2p_dma=on) should pass
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.devices = Some(vec![DeviceConfig {
+            x_nv_gpudirect_clique: Some(0),
+            ..device_fixture()
+        }]);
+        still_valid_config.validate().unwrap();
 
         let mut still_valid_config = valid_config;
         // SAFETY: Safe as the file was just opened

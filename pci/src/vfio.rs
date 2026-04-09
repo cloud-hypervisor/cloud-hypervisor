@@ -1471,6 +1471,9 @@ pub struct VfioPciDevice {
     vfio_ops: Arc<dyn VfioOps>,
     common: VfioCommon,
     iommu_attached: bool,
+    // Whether to map VFIO device MMIO BARs into the host IOMMU address space.
+    // Required for peer-to-peer DMA between VFIO devices.
+    p2p_dma: bool,
     memory_slot_allocator: MemorySlotAllocator,
     bdf: PciBdf,
     device_path: PathBuf,
@@ -1487,6 +1490,7 @@ impl VfioPciDevice {
         msi_interrupt_manager: Arc<dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>>,
         legacy_interrupt_group: Option<Arc<dyn InterruptSourceGroup>>,
         iommu_attached: bool,
+        p2p_dma: bool,
         bdf: PciBdf,
         memory_slot_allocator: MemorySlotAllocator,
         snapshot: Option<&Snapshot>,
@@ -1515,6 +1519,7 @@ impl VfioPciDevice {
             vfio_ops,
             common,
             iommu_attached,
+            p2p_dma,
             memory_slot_allocator,
             bdf,
             device_path,
@@ -1719,7 +1724,9 @@ impl VfioPciDevice {
                     }
                     .map_err(VfioPciError::CreateUserMemoryRegion)?;
 
-                    if !self.iommu_attached {
+                    // Map the MMIO BAR into the host IOMMU address space via VfioOps
+                    // Only needed if p2p_dma is enabled.
+                    if !self.iommu_attached && self.p2p_dma {
                         // vfio_dma_map should be unsafe but isn't.
                         #[allow(unused_unsafe)]
                         // SAFETY: MmapRegion invariants guarantee that
@@ -1749,7 +1756,9 @@ impl VfioPciDevice {
                 let len = user_memory_region.mapping.len();
                 let host_addr = user_memory_region.mapping.addr();
                 // Unmap MMIO region from the host IOMMU address space via VfioOps
+                // Only needed if p2p_dma is enabled.
                 if !self.iommu_attached
+                    && self.p2p_dma
                     && let Err(e) = self
                         .vfio_ops
                         .vfio_dma_unmap(user_memory_region.start, len)
@@ -1907,7 +1916,9 @@ impl PciDevice for VfioPciDevice {
                     let len = user_memory_region.mapping.len();
                     let host_addr = user_memory_region.mapping.addr();
                     // Unmap the old MMIO region from the host IOMMU address space via VfioOps
+                    // Only needed if p2p_dma is enabled.
                     if !self.iommu_attached
+                        && self.p2p_dma
                         && let Err(e) = self
                             .vfio_ops
                             .vfio_dma_unmap(user_memory_region.start, len)
@@ -1961,7 +1972,8 @@ iova 0x{:x}, size 0x{:x}: {}, ",
                     .map_err(io::Error::other)?;
 
                     // Map the moved MMIO region into the host IOMMU address space via VfioOps
-                    if !self.iommu_attached {
+                    // Only needed if p2p_dma is enabled.
+                    if !self.iommu_attached && self.p2p_dma {
                         // vfio_dma_map is unsound and ought to be marked as unsafe
                         #[allow(unused_unsafe)]
                         // SAFETY: MmapRegion invariants guarantee that
