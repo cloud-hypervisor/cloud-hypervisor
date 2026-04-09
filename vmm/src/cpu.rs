@@ -729,13 +729,17 @@ impl TryFrom<i32> for CoreSchedulingLeader {
     }
 }
 
+/// Management structure for a vCPU (thread).
 #[derive(Default)]
 struct VcpuState {
     inserting: bool,
     removing: bool,
     pending_removal: Arc<AtomicBool>,
+    /// Handle to the vCPU thread.
     handle: Option<thread::JoinHandle<()>>,
+    /// Instructs the thread to exit the run-vCPU loop.
     kill: Arc<AtomicBool>,
+    /// Used to ACK interruption from the run vCPU loop to the CPU Manager.
     vcpu_run_interrupted: Arc<AtomicBool>,
     /// Used to ACK state changes from the run vCPU loop to the CPU Manager.
     paused: Arc<AtomicBool>,
@@ -750,6 +754,13 @@ impl VcpuState {
     ///
     /// Please call [`Self::wait_until_signal_acknowledged`] afterward to block
     /// until the vCPU thread has acknowledged the signal.
+    ///
+    /// If the thread is in KVM_RUN (or MSHV_RUN_VP or equivalent), this kicks
+    /// the thread out of kernel space. If the thread is in user-space, the
+    /// thread will just handle the event eventually. If the thread is in
+    /// user-space but about to enter kernel-space, the user-space signal
+    /// handler will make sure that the next kernel entry of the given
+    /// vCPU thread immediately exits to handle the event in user-space.
     fn signal_thread(&self) {
         if let Some(handle) = self.handle.as_ref() {
             // SAFETY: FFI call with correct arguments
@@ -1532,10 +1543,10 @@ impl CpuManager {
         }
     }
 
-    /// Signal to the spawned threads (vCPUs and console signal handler).
+    /// Signals all vCPU threads and waits for them to ACK the interruption.
     ///
-    /// For the vCPU threads this will interrupt the KVM_RUN ioctl() allowing
-    /// the loop to check the shared state booleans.
+    /// Calls [`VcpuState::signal_thread`] and
+    /// [`VcpuState::wait_until_signal_acknowledged`] for each vCPU.
     fn signal_vcpus(&mut self) -> Result<()> {
         // Holding the lock for the whole operation is correct:
         let vcpu_states = self.vcpu_states.lock().unwrap();
