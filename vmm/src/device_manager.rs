@@ -3963,6 +3963,14 @@ impl DeviceManager {
 
         let memory_manager = self.memory_manager.clone();
 
+        let vfio_p2p_dma = self
+            .config
+            .lock()
+            .unwrap()
+            .platform
+            .as_ref()
+            .is_none_or(|p| p.vfio_p2p_dma);
+
         let vfio_pci_device = VfioPciDevice::new(
             vfio_name.clone(),
             self.address_manager.vm.clone(),
@@ -3971,6 +3979,7 @@ impl DeviceManager {
             self.msi_interrupt_manager.clone(),
             legacy_interrupt_group,
             device_cfg.iommu,
+            vfio_p2p_dma,
             pci_device_bdf,
             memory_manager.lock().unwrap().memory_slot_allocator(),
             vm_migration::snapshot_from_id(self.snapshot.as_ref(), vfio_name.as_str()),

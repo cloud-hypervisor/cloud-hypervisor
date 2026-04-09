@@ -797,6 +797,9 @@ components:
         iommufd:
           type: boolean
           default: false
+        vfio_p2p_dma:
+          type: boolean
+          default: true
 
     MemoryZoneConfig:
       required:
