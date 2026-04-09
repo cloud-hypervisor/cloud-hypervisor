@@ -4,12 +4,11 @@
 //
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::io::{Read, Seek, SeekFrom};
 use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 
 use igvm::snp_defs::SevVmsa;
-use igvm::{IgvmDirectiveHeader, IgvmFile, IgvmPlatformHeader, IsolationType};
+use igvm::{IgvmDirectiveHeader, IgvmFile, IgvmPlatformHeader};
 #[cfg(feature = "sev_snp")]
 use igvm_defs::{IGVM_VHS_MEMORY_MAP_ENTRY, MemoryMapEntryType};
 use igvm_defs::{
@@ -51,6 +50,8 @@ pub enum Error {
     FailedToDecodeHostData(#[source] hex::FromHexError),
     #[error("Error allocating address space")]
     MemoryManager(MemoryManagerError),
+    #[error("IGVM file not provided")]
+    MissingIgvm,
 }
 
 #[allow(dead_code)]
@@ -135,7 +136,7 @@ fn import_parameter(
 /// any isolation.
 #[allow(clippy::needless_pass_by_value)]
 pub fn load_igvm(
-    mut file: &std::fs::File,
+    igvm_file: IgvmFile,
     memory_manager: Arc<Mutex<MemoryManager>>,
     cpu_manager: Arc<Mutex<CpuManager>>,
     cmdline: &str,
@@ -143,7 +144,6 @@ pub fn load_igvm(
 ) -> Result<Box<IgvmLoadedInfo>, Error> {
     let mut loaded_info: Box<IgvmLoadedInfo> = Box::default();
     let command_line = CString::new(cmdline).map_err(Error::InvalidCommandLine)?;
-    let mut file_contents = Vec::new();
     let memory = memory_manager.lock().as_ref().unwrap().guest_memory();
     let mut gpas: Vec<GpaPages> = Vec::new();
     let proc_count = cpu_manager.lock().unwrap().vcpus().len() as u32;
@@ -155,12 +155,6 @@ pub fn load_igvm(
         hex::decode_to_slice(host_data_str, &mut host_data_contents as &mut [u8])
             .map_err(Error::FailedToDecodeHostData)?;
     }
-
-    file.seek(SeekFrom::Start(0)).map_err(Error::Igvm)?;
-    file.read_to_end(&mut file_contents).map_err(Error::Igvm)?;
-
-    let igvm_file = IgvmFile::new_from_binary(&file_contents, Some(IsolationType::Snp))
-        .map_err(Error::InvalidIgvmFile)?;
 
     let mask = match &igvm_file.platforms()[0] {
         IgvmPlatformHeader::SupportedPlatform(info) => {
