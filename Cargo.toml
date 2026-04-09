@@ -91,6 +91,7 @@ env_logger = "0.11.10"
 epoll = "4.4.0"
 flume = "0.12.0"
 itertools = "0.14.0"
+jiff = { version = "0.2.23", default-features = false, features = ["std"] }
 libc = "0.2.183"
 log = "0.4.29"
 signal-hook = "0.4.3"

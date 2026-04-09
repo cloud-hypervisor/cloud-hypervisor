@@ -606,8 +606,8 @@ fn start_vmm(cmd_arguments: &ArgMatches) -> Result<Option<String>, Error> {
             error!("Error blocking signals: {e}");
         }
     }
-
-    info!("{} starting", env!("BUILD_VERSION"));
+    info!("Starting Cloud Hypervisor {}", env!("BUILD_VERSION"));
+    info!("Startup timestamp: {}", jiff::Timestamp::now());
 
     let hypervisor = hypervisor::new().map_err(Error::CreateHypervisor)?;
 
@@ -896,7 +896,6 @@ fn main() {
         if cmd_arguments.get_count("v") != 0 {
             println!("Enabled features: {:?}", vmm::feature_list());
         }
-
         return;
     }
 

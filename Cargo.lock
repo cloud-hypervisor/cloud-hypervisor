@@ -439,6 +439,7 @@ dependencies = [
  "epoll",
  "event_monitor",
  "hypervisor",
+ "jiff",
  "libc",
  "log",
  "net_util",
