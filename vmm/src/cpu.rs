@@ -682,8 +682,8 @@ pub struct CpuManager {
     reset_evt: EventFd,
     #[cfg(feature = "guest_debug")]
     vm_debug_evt: EventFd,
+    // Shared with AcpiCpuHotplugController
     vcpu_states: Arc<Mutex<Vec<VcpuState>>>,
-    selected_cpu: u32,
     vcpus: Vec<Arc<Mutex<Vcpu>>>,
     seccomp_action: SeccompAction,
     vm_ops: Arc<dyn VmOps>,
@@ -698,14 +698,6 @@ pub struct CpuManager {
     // State of the core scheduling group leader election (VM mode).
     core_scheduling_group_leader: Arc<AtomicI32>,
 }
-
-const CPU_ENABLE_FLAG: usize = 0;
-const CPU_INSERTING_FLAG: usize = 1;
-const CPU_REMOVING_FLAG: usize = 2;
-const CPU_EJECT_FLAG: usize = 3;
-
-const CPU_STATUS_OFFSET: u64 = 4;
-const CPU_SELECTION_OFFSET: u64 = 0;
 
 /// State of the core scheduling group leader election for VM-wide cookie
 /// sharing.
@@ -734,85 +726,6 @@ impl TryFrom<i32> for CoreSchedulingLeader {
             -2 => Ok(Self::Error),
             _ => Err(()),
         }
-    }
-}
-
-impl BusDevice for CpuManager {
-    fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
-        // The Linux kernel, quite reasonably, doesn't zero the memory it gives us.
-        data.fill(0);
-        let vcpu_states = self.vcpu_states.lock().unwrap();
-
-        match offset {
-            CPU_SELECTION_OFFSET => {
-                assert!(data.len() >= core::mem::size_of::<u32>());
-                data[0..core::mem::size_of::<u32>()]
-                    .copy_from_slice(&self.selected_cpu.to_le_bytes());
-            }
-            CPU_STATUS_OFFSET => {
-                if self.selected_cpu < self.max_vcpus() {
-                    let state = &vcpu_states[usize::try_from(self.selected_cpu).unwrap()];
-                    if state.active() {
-                        data[0] |= 1 << CPU_ENABLE_FLAG;
-                    }
-                    if state.inserting {
-                        data[0] |= 1 << CPU_INSERTING_FLAG;
-                    }
-                    if state.removing {
-                        data[0] |= 1 << CPU_REMOVING_FLAG;
-                    }
-                } else {
-                    warn!("Out of range vCPU id: {}", self.selected_cpu);
-                }
-            }
-            _ => {
-                warn!("Unexpected offset for accessing CPU manager device: {offset:#}");
-            }
-        }
-    }
-
-    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
-        match offset {
-            CPU_SELECTION_OFFSET => {
-                assert!(data.len() >= core::mem::size_of::<u32>());
-                self.selected_cpu =
-                    u32::from_le_bytes(data[0..core::mem::size_of::<u32>()].try_into().unwrap());
-            }
-            CPU_STATUS_OFFSET => {
-                if self.selected_cpu < self.max_vcpus() {
-                    let eject = {
-                        // This structure is not shared with the vCPU thread, therefore, holding the
-                        // lock for the entire function doesn't cause any deadlock.
-                        let mut vcpu_states = self.vcpu_states.lock().unwrap();
-                        let state = &mut vcpu_states[usize::try_from(self.selected_cpu).unwrap()];
-
-                        if (data[0] & (1 << CPU_INSERTING_FLAG) == 1 << CPU_INSERTING_FLAG)
-                            && state.inserting
-                        {
-                            state.inserting = false;
-                        }
-
-                        if (data[0] & (1 << CPU_REMOVING_FLAG) == 1 << CPU_REMOVING_FLAG)
-                            && state.removing
-                        {
-                            state.removing = false;
-                        }
-
-                        data[0] & (1 << CPU_EJECT_FLAG) == 1 << CPU_EJECT_FLAG
-                    };
-
-                    if eject && let Err(e) = self.remove_vcpu(self.selected_cpu) {
-                        error!("Error removing vCPU: {e:?}");
-                    }
-                } else {
-                    warn!("Out of range vCPU id: {}", self.selected_cpu);
-                }
-            }
-            _ => {
-                warn!("Unexpected offset for accessing CPU manager device: {offset:#}");
-            }
-        }
-        None
     }
 }
 
@@ -965,7 +878,6 @@ impl CpuManager {
             reset_evt,
             #[cfg(feature = "guest_debug")]
             vm_debug_evt,
-            selected_cpu: 0,
             vcpus: Vec::with_capacity(max_vcpus),
             seccomp_action,
             vm_ops,
@@ -1541,23 +1453,6 @@ impl CpuManager {
             }
         }
         false
-    }
-
-    fn remove_vcpu(&mut self, cpu_id: u32) -> Result<()> {
-        info!("Removing vCPU: cpu_id = {cpu_id}");
-        let mut vcpu_states = self.vcpu_states.lock().unwrap();
-        let state = &mut vcpu_states[usize::try_from(cpu_id).unwrap()];
-        state.kill.store(true, Ordering::SeqCst);
-        state.signal_thread();
-        state.wait_until_signal_acknowledged()?;
-        state.join_thread()?;
-        state.handle = None;
-
-        // Once the thread has exited, clear the "kill" so that it can reused
-        state.kill.store(false, Ordering::SeqCst);
-        state.pending_removal.store(false, Ordering::SeqCst);
-
-        Ok(())
     }
 
     pub fn create_boot_vcpus(
@@ -3200,6 +3095,132 @@ impl CpuElf64Writable for CpuManager {
         }
 
         Ok(())
+    }
+}
+
+/// MMIO-accessible controller for handling ACPI hotplug and unplug events.
+///
+/// Shares state about the vCPUs with the [`CpuManager`].
+pub struct AcpiCpuHotplugController {
+    /// The currently selected CPU by the guest.
+    selected_cpu: u32,
+    /// Shared vCPU state with [`CpuManager`].
+    vcpu_states: Arc<Mutex<Vec<VcpuState>>>,
+    /// Maximum number of vCPUS of the VM.
+    max_vcpus: u32,
+}
+
+impl AcpiCpuHotplugController {
+    const CPU_ENABLE_FLAG: usize = 0;
+    const CPU_INSERTING_FLAG: usize = 1;
+    const CPU_REMOVING_FLAG: usize = 2;
+    const CPU_EJECT_FLAG: usize = 3;
+
+    const CPU_SELECTION_OFFSET: u64 = 0;
+    const CPU_STATUS_OFFSET: u64 = 4;
+
+    /// Creates a new [`AcpiCpuHotplugController`].
+    pub fn new(cpu_manager: &CpuManager) -> AcpiCpuHotplugController {
+        Self {
+            max_vcpus: cpu_manager.config.max_vcpus,
+            selected_cpu: 0,
+            vcpu_states: cpu_manager.vcpu_states.clone(),
+        }
+    }
+
+    /// Removes a vCPU from the guest.
+    ///
+    /// The corresponding vCPU thread will be gracefully stopped and joined.
+    fn remove_vcpu(cpu_id: u32, state: &mut VcpuState) -> Result<()> {
+        info!("Removing vCPU: cpu_id = {cpu_id}");
+        state.kill.store(true, Ordering::SeqCst);
+        state.signal_thread();
+        state.wait_until_signal_acknowledged()?;
+        state.join_thread()?;
+        state.handle = None;
+
+        // Once the thread has exited, clear the "kill" so that it can reused
+        state.kill.store(false, Ordering::SeqCst);
+        state.pending_removal.store(false, Ordering::SeqCst);
+
+        Ok(())
+    }
+}
+
+impl BusDevice for AcpiCpuHotplugController {
+    fn read(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
+        // The Linux kernel, quite reasonably, doesn't zero the memory it gives us.
+        data.fill(0);
+        let vcpu_states = self.vcpu_states.lock().unwrap();
+
+        match offset {
+            Self::CPU_SELECTION_OFFSET => {
+                assert!(data.len() >= core::mem::size_of::<u32>());
+                data[0..core::mem::size_of::<u32>()]
+                    .copy_from_slice(&self.selected_cpu.to_le_bytes());
+            }
+            Self::CPU_STATUS_OFFSET => {
+                if self.selected_cpu < self.max_vcpus {
+                    let state = &vcpu_states[usize::try_from(self.selected_cpu).unwrap()];
+                    if state.active() {
+                        data[0] |= 1 << Self::CPU_ENABLE_FLAG;
+                    }
+                    if state.inserting {
+                        data[0] |= 1 << Self::CPU_INSERTING_FLAG;
+                    }
+                    if state.removing {
+                        data[0] |= 1 << Self::CPU_REMOVING_FLAG;
+                    }
+                } else {
+                    warn!("Out of range vCPU id: {}", self.selected_cpu);
+                }
+            }
+            _ => {
+                warn!("Unexpected offset for accessing CPU manager device: {offset:#}");
+            }
+        }
+    }
+
+    fn write(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+        match offset {
+            Self::CPU_SELECTION_OFFSET => {
+                assert!(data.len() >= core::mem::size_of::<u32>());
+                self.selected_cpu =
+                    u32::from_le_bytes(data[0..core::mem::size_of::<u32>()].try_into().unwrap());
+            }
+            Self::CPU_STATUS_OFFSET => {
+                if self.selected_cpu < self.max_vcpus {
+                    // This structure is not shared with the vCPU thread, therefore, holding the
+                    // lock for the entire function doesn't cause any deadlock.
+                    let mut vcpu_states = self.vcpu_states.lock().unwrap();
+                    let state = &mut vcpu_states[usize::try_from(self.selected_cpu).unwrap()];
+                    // The ACPI code writes back a 1 to acknowledge the insertion
+                    if (data[0] & (1 << Self::CPU_INSERTING_FLAG) == 1 << Self::CPU_INSERTING_FLAG)
+                        && state.inserting
+                    {
+                        state.inserting = false;
+                    }
+                    // Ditto for removal
+                    if (data[0] & (1 << Self::CPU_REMOVING_FLAG) == 1 << Self::CPU_REMOVING_FLAG)
+                        && state.removing
+                    {
+                        state.removing = false;
+                    }
+                    // Trigger removal of vCPU:
+                    if data[0] & (1 << Self::CPU_EJECT_FLAG) == 1 << Self::CPU_EJECT_FLAG
+                        && let Err(e) = Self::remove_vcpu(self.selected_cpu, state)
+                    {
+                        error!("Error removing vCPU: {e:?}");
+                    }
+                } else {
+                    warn!("Out of range vCPU id: {}", self.selected_cpu);
+                }
+            }
+            _ => {
+                warn!("Unexpected offset for accessing CPU manager device: {offset:#}");
+            }
+        }
+        None
     }
 }
 
