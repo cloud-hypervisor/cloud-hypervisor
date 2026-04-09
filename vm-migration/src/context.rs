@@ -3,13 +3,212 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
-//! Module for [`MemoryMigrationContext`].
+//! Module for context and metrics of migrations.
+//!
+//! Main exports:
+//! - [`OngoingMigrationContext`]
+//! - [`CompletedMigrationContext`]
+//! - [`MemoryMigrationContext`]
 
 use std::fmt;
-use std::fmt::Display;
+use std::fmt::{Display, Formatter};
 use std::time::{Duration, Instant};
 
+use thiserror::Error;
+
 use crate::protocol::MemoryRangeTable;
+
+/// Metrics of the VM downtime during a migration.
+///
+/// By downtime, we mean the time between the VM pause() and the corresponding
+/// resume() on the destination. This downtime covers the time when the vCPUs
+/// didn't execute a single instruction. The network downtime might be longer
+/// and is not covered by this type.
+///
+/// This metric is only relevant for the migration of running VMs.
+#[derive(Debug, PartialEq)]
+pub struct DowntimeContext {
+    /// The effective downtime Cloud Hypervisor observed (from the migration sender).
+    ///
+    /// This is roughly the sum of all the other durations.
+    pub effective_downtime: Duration,
+    /// The time of the final memory iteration.
+    pub final_memory_iteration_dur: Duration,
+    /// The time needed to aggregate the final VM state (i.e., snapshotting it).
+    pub state_dur: Duration,
+    /// The time needed to send the final VM state including deserializing it on
+    /// the destination
+    pub send_state_dur: Duration,
+    /// The time of the completion request. This includes resuming the VM (if it
+    /// was running before the migration).
+    pub complete_dur: Duration,
+}
+
+impl Display for DowntimeContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            // Caution: This format is specifically crafted for the VMM log
+            "{}ms (final_iter:{}ms state:{}ms send_state:{}ms complete:{}ms)",
+            self.effective_downtime.as_millis(),
+            self.final_memory_iteration_dur.as_millis(),
+            self.state_dur.as_millis(),
+            self.send_state_dur.as_millis(),
+            self.complete_dur.as_millis()
+        )
+    }
+}
+
+/// The internal metrics of a completed migration.
+///
+/// The properties of this type help to investigate timings of the migration,
+/// with specific focus on the VM downtime.
+///
+/// This type is static once it was created and should not change.
+#[derive(Debug, PartialEq)]
+pub struct CompletedMigrationContext {
+    /// Total duration of the migration.
+    pub migration_dur: Duration,
+    pub downtime_ctx: DowntimeContext,
+    /// The finalized context of the memory migration.
+    pub memory_ctx: MemoryMigrationContext,
+}
+
+impl CompletedMigrationContext {
+    fn new(
+        migration_dur: Duration,
+        effective_downtime: Duration,
+        state_dur: Duration,
+        send_state_dur: Duration,
+        complete_dur: Duration,
+        memory_ctx: MemoryMigrationContext,
+    ) -> Self {
+        Self {
+            migration_dur,
+            downtime_ctx: DowntimeContext {
+                effective_downtime,
+                final_memory_iteration_dur: memory_ctx.iteration_duration.unwrap_or_default(),
+                state_dur,
+                send_state_dur,
+                complete_dur,
+            },
+            memory_ctx,
+        }
+    }
+}
+
+/// Error returned when the migration context is advanced in an invalid order.
+#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+pub enum MigrationContextError {
+    /// The memory migration context was not finalized before transition.
+    #[error("memory migration context should be finalized before pausing the VM")]
+    MemoryContextNotFinalized,
+    /// The transition to `VmPaused` was attempted from an invalid state.
+    #[error("memory migration should only advance from the Begin state")]
+    InvalidVmPausedTransition,
+    /// Finalization was attempted before memory migration completed.
+    #[error("migration should only finalize after memory migration completed")]
+    InvalidFinalizeTransition,
+}
+
+/// Holds context and metrics about the current ongoing migration.
+///
+/// This is a state-machine to properly reflect the intermediate states and
+/// their properties. This machine does not have a `Completed` variant in favor
+/// of [`CompletedMigrationContext`], which is easier to work with.
+#[derive(Debug, PartialEq)]
+pub enum OngoingMigrationContext {
+    /// Migration started.
+    Begin {
+        /// Begin of the migration.
+        migration_begin: Instant,
+    },
+    /// VM memory fully transferred to the destination and the VM is paused.
+    VmPaused {
+        /// Begin of the migration.
+        migration_begin: Instant,
+        /// Downtime begin of the migration.
+        downtime_begin: Instant,
+        /// The finalized context of the memory migration.
+        finalized_memory_ctx: MemoryMigrationContext,
+    },
+}
+
+impl OngoingMigrationContext {
+    /// Creates a new context.
+    pub fn new() -> Self {
+        Self::Begin {
+            migration_begin: Instant::now(),
+        }
+    }
+
+    /// Marks the memory migration as completed and records when downtime
+    /// started. The VM is now in paused state.
+    pub fn set_vm_paused(
+        &mut self,
+        downtime_begin: Instant,
+        finalized_memory_ctx: MemoryMigrationContext,
+    ) -> Result<(), MigrationContextError> {
+        if finalized_memory_ctx.migration_duration.is_none() {
+            return Err(MigrationContextError::MemoryContextNotFinalized);
+        }
+        let migration_begin = match self {
+            Self::Begin { migration_begin } => *migration_begin,
+            _ => return Err(MigrationContextError::InvalidVmPausedTransition),
+        };
+        *self = Self::VmPaused {
+            migration_begin,
+            downtime_begin,
+            finalized_memory_ctx,
+        };
+        Ok(())
+    }
+
+    /// Finalizes the metrics and returns a [`CompletedMigrationContext`].
+    ///
+    /// This should be called right after the completed migration was
+    /// acknowledged by the receiver. From now on, the metrics are considered
+    /// finalized and should not be modified. They can be stored for further
+    /// analysis.
+    ///
+    /// # Arguments
+    /// - `state_dur`: The time needed to aggregate the final VM state (i.e.,
+    ///   snapshotting it).
+    /// - `send_state_dur`:  The time needed to send the final VM state
+    ///   including deserializing it on the destination.
+    /// - `complete_dur`: The time of the completion request. This includes
+    ///   resuming the VM (if it was running before the migration).
+    pub fn finalize(
+        self,
+        state_dur: Duration,
+        send_state_dur: Duration,
+        complete_dur: Duration,
+    ) -> Result<CompletedMigrationContext, MigrationContextError> {
+        let (migration_begin, downtime_begin, finalized_memory_ctx) = match self {
+            Self::VmPaused {
+                migration_begin,
+                downtime_begin,
+                finalized_memory_ctx,
+            } => (migration_begin, downtime_begin, finalized_memory_ctx),
+            _ => return Err(MigrationContextError::InvalidFinalizeTransition),
+        };
+
+        Ok(CompletedMigrationContext::new(
+            migration_begin.elapsed(),
+            downtime_begin.elapsed(),
+            state_dur,
+            send_state_dur,
+            complete_dur,
+            finalized_memory_ctx,
+        ))
+    }
+}
+
+impl Default for OngoingMigrationContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Internal metrics for the precopy migration phase.
 ///
@@ -246,6 +445,75 @@ impl Display for MemoryMigrationContext {
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+
+    /// Tests for [`CompletedMigrationContext`] and [`OngoingMigrationContext`].
+    mod migration_ctx_tests {
+        use super::*;
+
+        #[test]
+        fn memory_migrated_and_vm_paused_records_transition() {
+            let mut ctx = OngoingMigrationContext::new();
+            let downtime_begin = Instant::now();
+
+            let mut memory_ctx = MemoryMigrationContext::new();
+            memory_ctx.finalize();
+
+            ctx.set_vm_paused(downtime_begin, memory_ctx)
+                .expect("migration context should transition to VmPaused after memory migration");
+
+            assert!(matches!(
+                ctx,
+                OngoingMigrationContext::VmPaused {
+                    downtime_begin: recorded_downtime_begin,
+                    ..
+                } if recorded_downtime_begin == downtime_begin
+            ));
+        }
+
+        #[test]
+        fn finalize_returns_completed_context() {
+            let mut ctx = OngoingMigrationContext::new();
+            let downtime_begin = Instant::now() - Duration::from_millis(10);
+
+            let mut memory_ctx = MemoryMigrationContext::new();
+            memory_ctx.finalize();
+
+            ctx.set_vm_paused(downtime_begin, memory_ctx)
+                .expect("migration context should transition to VmPaused after memory migration");
+
+            let completed = ctx
+                .finalize(
+                    Duration::from_millis(1),
+                    Duration::from_millis(2),
+                    Duration::from_millis(3),
+                )
+                .expect("migration context should finalize after memory migration completed");
+
+            assert_eq!(completed.downtime_ctx.state_dur, Duration::from_millis(1));
+            assert_eq!(
+                completed.downtime_ctx.send_state_dur,
+                Duration::from_millis(2)
+            );
+            assert_eq!(
+                completed.downtime_ctx.complete_dur,
+                Duration::from_millis(3)
+            );
+            assert!(completed.downtime_ctx.effective_downtime >= Duration::from_millis(10));
+            assert!(completed.migration_dur > Duration::ZERO);
+            assert!(completed.memory_ctx.migration_duration.is_some());
+        }
+
+        #[test]
+        fn finalize_errors_before_memory_migration_completed() {
+            let err = OngoingMigrationContext::new()
+                .finalize(Duration::ZERO, Duration::ZERO, Duration::ZERO)
+                .unwrap_err();
+
+            assert_eq!(err, MigrationContextError::InvalidFinalizeTransition);
+        }
+    }
+
+    /// Tests for [`MemoryMigrationContext`].
     mod memory_migration_ctx_tests {
         use std::time::{Duration, Instant};
 

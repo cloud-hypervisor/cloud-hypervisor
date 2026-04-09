@@ -4,7 +4,10 @@
 //
 
 use anyhow::anyhow;
-pub use context::MemoryMigrationContext;
+pub use context::{
+    CompletedMigrationContext, DowntimeContext, MemoryMigrationContext, MigrationContextError,
+    OngoingMigrationContext,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
