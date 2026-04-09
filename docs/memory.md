@@ -214,11 +214,12 @@ struct MemoryZoneConfig {
     hotplug_size: Option<u64>,
     hotplugged_size: Option<u64>,
     prefault: bool,
+    mergeable: bool,
 }
 ```
 
 ```
---memory-zone <memory-zone>	User defined memory zone parameters "size=<guest_memory_region_size>,file=<backing_file>,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,host_numa_node=<node_id>,id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off"
+--memory-zone <memory-zone>	User defined memory zone parameters "size=<guest_memory_region_size>,file=<backing_file>,shared=on|off,hugepages=on|off,hugepage_size=<hugepage_size>,host_numa_node=<node_id>,id=<zone_identifier>,hotplug_size=<hotpluggable_memory_size>,hotplugged_size=<hotplugged_memory_size>,prefault=on|off,mergeable=on|off"
 ```
 
 This parameter expects one or more occurrences, allowing for a list of memory
@@ -420,6 +421,34 @@ _Example_
 ```
 --memory size=0
 --memory-zone id=mem0,size=1G,prefault=on
+```
+
+### `mergeable`
+
+Specifies if the pages from this memory zone must be marked as _mergeable_,
+enabling Kernel Same-page Merging (KSM) for this zone.
+
+This is the per-zone equivalent of the top-level `--memory mergeable=on` option.
+It allows KSM to be enabled selectively — for example, enabling it only on a
+hotplug zone while leaving boot memory unaffected:
+
+```
+--memory size=2G,mergeable=off
+--memory-zone id=hotplug,size=0,hotplug_size=8G,mergeable=on
+```
+
+For KSM to have any effect, the host kernel must have KSM enabled:
+```
+echo 1 > /sys/kernel/mm/ksm/run
+```
+
+By default this option is turned off.
+
+_Example_
+
+```
+--memory size=0
+--memory-zone id=mem0,size=1G,mergeable=on
 ```
 
 ## NUMA settings

@@ -159,7 +159,7 @@ pub struct PciSegmentConfig {
     pub mmio64_aperture_weight: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct MemoryZoneConfig {
     pub id: String,
     pub size: u64,
@@ -179,6 +179,8 @@ pub struct MemoryZoneConfig {
     pub hotplugged_size: Option<u64>,
     #[serde(default)]
     pub prefault: bool,
+    #[serde(default)]
+    pub mergeable: bool,
 }
 
 impl ApplyLandlock for MemoryZoneConfig {

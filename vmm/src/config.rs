@@ -1006,7 +1006,8 @@ impl MemoryConfig {
                     .add("host_numa_node")
                     .add("hotplug_size")
                     .add("hotplugged_size")
-                    .add("prefault");
+                    .add("prefault")
+                    .add("mergeable");
                 parser.parse(memory_zone).map_err(Error::ParseMemoryZone)?;
 
                 let id = parser.get("id").ok_or(Error::ParseMemoryZoneIdMissing)?;
@@ -1047,6 +1048,11 @@ impl MemoryConfig {
                     .map_err(Error::ParseMemoryZone)?
                     .unwrap_or(Toggle(false))
                     .0;
+                let mergeable = parser
+                    .convert::<Toggle>("mergeable")
+                    .map_err(Error::ParseMemoryZone)?
+                    .unwrap_or(Toggle(mergeable))
+                    .0;
 
                 zones.push(MemoryZoneConfig {
                     id,
@@ -1059,6 +1065,7 @@ impl MemoryConfig {
                     hotplug_size,
                     hotplugged_size,
                     prefault,
+                    mergeable,
                 });
             }
             Some(zones)
@@ -3747,6 +3754,87 @@ mod unit_tests {
         // Invalid value should error
         CpusConfig::parse("boot=1,core_scheduling=invalid").unwrap_err();
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_mem_zone_parsing() -> Result<()> {
+        // mergeable defaults to false
+        assert_eq!(
+            MemoryConfig::parse("size=0", Some(vec!["id=mem0,size=1G"]))?,
+            MemoryConfig {
+                size: 0,
+                zones: Some(vec![MemoryZoneConfig {
+                    id: "mem0".to_string(),
+                    size: 1 << 30,
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }
+        );
+        // mergeable=on
+        assert_eq!(
+            MemoryConfig::parse("size=0", Some(vec!["id=mem0,size=1G,mergeable=on"]))?,
+            MemoryConfig {
+                size: 0,
+                zones: Some(vec![MemoryZoneConfig {
+                    id: "mem0".to_string(),
+                    size: 1 << 30,
+                    mergeable: true,
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }
+        );
+        // mergeable=off is explicit false
+        assert_eq!(
+            MemoryConfig::parse("size=0", Some(vec!["id=mem0,size=1G,mergeable=off"]))?,
+            MemoryConfig {
+                size: 0,
+                zones: Some(vec![MemoryZoneConfig {
+                    id: "mem0".to_string(),
+                    size: 1 << 30,
+                    mergeable: false,
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }
+        );
+        // per-zone mergeable independent of global mergeable
+        assert_eq!(
+            MemoryConfig::parse(
+                "size=1G,mergeable=off",
+                Some(vec!["id=hotplug,size=0,hotplug_size=4G,mergeable=on"])
+            )?,
+            MemoryConfig {
+                size: 1 << 30,
+                mergeable: false,
+                hotplug_method: HotplugMethod::Acpi,
+                zones: Some(vec![MemoryZoneConfig {
+                    id: "hotplug".to_string(),
+                    size: 0,
+                    hotplug_size: Some(4 << 30),
+                    mergeable: true,
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }
+        );
+        // global mergeable=on inherited by zone with no explicit mergeable
+        assert_eq!(
+            MemoryConfig::parse("size=0,mergeable=on", Some(vec!["id=mem0,size=1G"]))?,
+            MemoryConfig {
+                size: 0,
+                mergeable: true,
+                zones: Some(vec![MemoryZoneConfig {
+                    id: "mem0".to_string(),
+                    size: 1 << 30,
+                    mergeable: true,
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }
+        );
         Ok(())
     }
 

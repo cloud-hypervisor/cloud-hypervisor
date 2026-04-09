@@ -138,16 +138,18 @@ pub struct MemoryZone {
     shared: bool,
     hugepages: bool,
     backing_page_size: u64,
+    mergeable: bool,
 }
 
 impl MemoryZone {
-    fn new(shared: bool, hugepages: bool, backing_page_size: u64) -> Self {
+    fn new(shared: bool, hugepages: bool, backing_page_size: u64, mergeable: bool) -> Self {
         Self {
             regions: Vec::new(),
             virtio_mem_zone: None,
             shared,
             hugepages,
             backing_page_size,
+            mergeable,
         }
     }
 
@@ -607,7 +609,7 @@ impl MemoryManager {
         // Add zone id to the list of memory zones.
         memory_zones.insert(
             zone.id.clone(),
-            MemoryZone::new(zone.shared, zone.hugepages, zone_align_size),
+            MemoryZone::new(zone.shared, zone.hugepages, zone_align_size, zone.mergeable),
         );
 
         for ram_region in ram_regions.iter() {
@@ -701,7 +703,12 @@ impl MemoryManager {
                     }
                     memory_zones.insert(
                         zone.id.clone(),
-                        MemoryZone::new(zone.shared, zone.hugepages, zone_align_size),
+                        MemoryZone::new(
+                            zone.shared,
+                            zone.hugepages,
+                            zone_align_size,
+                            zone.mergeable,
+                        ),
                     );
                 }
 
@@ -733,7 +740,12 @@ impl MemoryManager {
             let zone_page_size = memory_zone_get_align_size(zone_config)?;
             memory_zones.insert(
                 zone_config.id.clone(),
-                MemoryZone::new(zone_config.shared, zone_config.hugepages, zone_page_size),
+                MemoryZone::new(
+                    zone_config.shared,
+                    zone_config.hugepages,
+                    zone_page_size,
+                    zone_config.mergeable,
+                ),
             );
         }
 
@@ -1295,6 +1307,7 @@ impl MemoryManager {
                 hotplug_size: config.hotplug_size,
                 hotplugged_size: config.hotplugged_size,
                 prefault: config.prefault,
+                mergeable: config.mergeable,
             }];
 
             Ok((config.size, zones, allow_mem_hotplug))
@@ -1316,10 +1329,10 @@ impl MemoryManager {
                 regions.push((virtio_mem_zone.region().clone(), true));
             }
 
-            list.push((zone_id.clone(), regions));
+            list.push((zone_id.clone(), regions, memory_zone.mergeable));
         }
 
-        for (zone_id, regions) in list {
+        for (zone_id, regions, zone_mergeable) in list {
             for (region, virtio_mem) in regions {
                 // SAFETY: guaranteed by GuestRegionMmap invariants
                 let slot = unsafe {
@@ -1327,7 +1340,7 @@ impl MemoryManager {
                         region.start_addr().raw_value(),
                         region.len().try_into().unwrap(),
                         region.as_ptr(),
-                        self.mergeable,
+                        zone_mergeable,
                         false,
                         self.log_dirty,
                     )
@@ -2087,7 +2100,9 @@ impl MemoryManager {
                 region.start_addr().0,
                 region.len().try_into().unwrap(),
                 region.as_ptr(),
-                self.mergeable,
+                self.memory_zones
+                    .get(DEFAULT_MEMORY_ZONE)
+                    .map_or(self.mergeable, |z| z.mergeable),
                 false,
                 self.log_dirty,
             )
