@@ -59,7 +59,7 @@ jobs:
         env:
           MI_CLIENT_ID: ${{ secrets.MI_CLIENT_ID }}
         run: |
-          set -e
+          set -eufo pipefail
           echo "Installing Azure CLI if not already installed"
           if ! command -v az &>/dev/null; then
             curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
@@ -76,7 +76,7 @@ jobs:
           SKU: ${{ inputs.VM_SKU }}
           STORAGE_ACCOUNT_PATHS: ${{ secrets.STORAGE_ACCOUNT_PATHS }}
         run: |
-          set -e
+          set -eufo pipefail
           # Extract vCPU count from SKU (e.g., "Standard_D2s_v3" => 2)
           vcpu=$(echo "$SKU" | sed -n 's/^Standard_[A-Za-z]\+\([0-9]\+\).*/\1/p')
           if [[ -z "$vcpu" ]]; then
@@ -114,7 +114,7 @@ jobs:
           RG: ${{ inputs.RG }}
           STORAGE_ACCOUNT_PATHS: ${{ secrets.STORAGE_ACCOUNT_PATHS }}
         run: |
-          set -e
+          set -eufo pipefail
           echo "Creating Resource Group: $RG"
           # Create the resource group
           echo "Creating resource group in location: ${LOCATION}"
@@ -127,7 +127,7 @@ jobs:
         env:
           KEY: ${{ inputs.KEY }}
         run: |
-          set -e
+          set -eufo pipefail
           echo "Generating SSH key: $KEY"
           mkdir -p ~/.ssh
           ssh-keygen -t rsa -b 4096 -f ~/.ssh/"${KEY}" -N ""
@@ -145,7 +145,7 @@ jobs:
           VM_IMAGE_NAME: ${{ inputs.ARCH }}_${{ steps.get-location.outputs.location }}_image
           VM_NAME: ${{ inputs.ARCH }}_${{ steps.get-location.outputs.location }}_${{ github.run_id }}
         run: |
-          set -e
+          set -eufo pipefail
           echo "Creating $VM_SKU VM: $VM_NAME"
 
           # Extract subnet ID from the runner VM
@@ -192,7 +192,7 @@ jobs:
           RG: ${{ inputs.RG }}
           VM_NAME: ${{ inputs.ARCH }}_${{ steps.get-location.outputs.location }}_${{ github.run_id }}
         run: |
-          set -e
+          set -eufo pipefail
           echo "Retrieving VM Private IP address..."
           # Retrieve VM Private IP address
           PRIVATE_IP=$(az vm show -g "${RG}" -n "${VM_NAME}" -d --query privateIps -o tsv)
@@ -216,7 +216,7 @@ jobs:
         env:
           PRIVATE_IP: ${{ steps.get-vm-ip.outputs.PRIVATE_IP }}
         run: |
-          set -e
+          set -eufo pipefail
           echo "Removing the old host key"
           ssh-keygen -R "$PRIVATE_IP"
 
@@ -226,9 +226,9 @@ jobs:
           PRIVATE_IP: ${{ steps.get-vm-ip.outputs.PRIVATE_IP }}
           USERNAME: ${{ secrets.USERNAME }}
         run: |
-          set -e
+          set -eufo pipefail
           ssh -i ~/.ssh/"${KEY}" -o StrictHostKeyChecking=no -- "${USERNAME}@${PRIVATE_IP}" << EOF
-            set -e
+            set -eufo pipefail
             echo "Logged in successfully."
             echo "Installing dependencies..."
             sudo tdnf install -y git moby-engine moby-cli clang llvm pkg-config make gcc glibc-devel

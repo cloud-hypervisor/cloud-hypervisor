@@ -17,6 +17,7 @@ jobs:
       - name: Install Docker
         if: ${{ github.event_name != 'pull_request' }}
         run: |
+          set -eufo pipefail
           sudo apt-get update
           sudo apt-get -y install ca-certificates curl gnupg
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
@@ -27,6 +28,7 @@ jobs:
       - name: Install Azure CLI
         if: ${{ github.event_name != 'pull_request' }}
         run: |
+          set -eufo pipefail
           sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg
           curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
           echo "deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ jammy main" | sudo tee /etc/apt/sources.list.d/azure-cli.list
@@ -35,6 +37,7 @@ jobs:
       - name: Download Windows image
         if: ${{ github.event_name != 'pull_request' }}
         run: |
+          set -eufo pipefail
           mkdir $HOME/workloads
           az storage blob download --container-name private-images --file "$HOME/workloads/windows-server-2022-amd64-2.raw" --name windows-server-2022-amd64-2.raw --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
       - name: Run Windows guest integration tests

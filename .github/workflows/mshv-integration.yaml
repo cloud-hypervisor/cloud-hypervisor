@@ -36,7 +36,7 @@ jobs:
           RG: MSHV-${{ github.run_id }}
           USERNAME: ${{ secrets.MSHV_USERNAME }}
         run: |
-          set -e
+          set -eufo pipefail
           echo "Connecting to the VM via SSH..."
           ssh -i ~/.ssh/"${KEY}" -o StrictHostKeyChecking=no -- "${USERNAME}@${PRIVATE_IP}" << EOF
             set -e
@@ -96,7 +96,7 @@ jobs:
           RG_NAME: ${{ needs.infra-setup.outputs.RG_NAME }}
           VM_NAME: ${{ needs.infra-setup.outputs.VM_NAME }}
         run: |
-          set -e
+          set -eufo pipefail
           az vm boot-diagnostics get-boot-log --name "${VM_NAME}" --resource-group "${RG_NAME}" | jq -r
 
   cleanup:
