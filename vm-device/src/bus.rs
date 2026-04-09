@@ -147,6 +147,9 @@ impl Bus {
         None
     }
 
+    /// Inserts a bus device into the bus.
+    ///
+    /// The bus will only hold a weak reference to the object.
     #[allow(clippy::needless_pass_by_value)]
     pub fn insert(&self, device: Arc<dyn BusDeviceSync>, base: u64, len: u64) -> Result<()> {
         if len == 0 {
