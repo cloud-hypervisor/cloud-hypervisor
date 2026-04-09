@@ -78,11 +78,11 @@ jobs:
         run: |
           set -eufo pipefail
           # Extract vCPU count from SKU (e.g., "Standard_D2s_v3" => 2)
-          vcpu=$(echo "$SKU" | sed -n 's/^Standard_[A-Za-z]\+\([0-9]\+\).*/\1/p')
-          if [[ -z "$vcpu" ]]; then
-            echo "Cannot extract vCPU count from SKU: $SKU"
+          if ! [[ "$SKU" =~ ^Standard_[A-Za-z]+([1-9][0-9]*) ]]; then
+            printf 'Cannot extract vCPU count from SKU: %q\n' "$SKU"
             exit 1
           fi
+          vcpu=${BASH_REMATCH[1]}
 
           SUPPORTED_LOCATIONS=$(echo "$STORAGE_ACCOUNT_PATHS" | jq -r 'to_entries[] | .key')
 
