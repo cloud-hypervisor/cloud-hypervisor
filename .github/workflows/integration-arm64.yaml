@@ -52,7 +52,7 @@ jobs:
           popd
           mkdir -p "$HOME/workloads"
           az storage blob download --container-name private-images --file "$IMG_GZ_PATH" --name "$IMG_GZ_BLOB_NAME" --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
-          gzip -d $IMG_GZ_PATH
+          gzip -d "$IMG_GZ_PATH"
       - name: Run Windows guest integration tests
         if: ${{ github.event_name != 'pull_request' }}
         timeout-minutes: 30

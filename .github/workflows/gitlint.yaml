@@ -22,4 +22,4 @@ jobs:
         pip install --upgrade gitlint
     - name: Lint git commit messages
       run: |
-        gitlint --commits origin/$GITHUB_BASE_REF..
+        gitlint --commits "origin/$GITHUB_BASE_REF.."

@@ -68,7 +68,7 @@ jobs:
           fi
           az --version
           echo "Logging into Azure CLI using Managed Identity"
-          az login --identity --client-id ${MI_CLIENT_ID}
+          az login --identity --client-id "${MI_CLIENT_ID}"
 
       - name: Get Location
         id: get-location
@@ -118,7 +118,7 @@ jobs:
           echo "Creating Resource Group: $RG"
           # Create the resource group
           echo "Creating resource group in location: ${LOCATION}"
-          az group create --name ${RG} --location ${LOCATION}
+          az group create --name "${RG}" --location "${LOCATION}"
           echo "RG_NAME=${RG}" >> $GITHUB_OUTPUT
           echo "Resource group created successfully."
 
@@ -130,7 +130,7 @@ jobs:
           set -e
           echo "Generating SSH key: $KEY"
           mkdir -p ~/.ssh
-          ssh-keygen -t rsa -b 4096 -f ~/.ssh/${KEY} -N ""
+          ssh-keygen -t rsa -b 4096 -f ~/.ssh/"${KEY}" -N ""
 
       - name: Create VM
         id: vm-setup
@@ -150,7 +150,7 @@ jobs:
 
           # Extract subnet ID from the runner VM
           echo "Retrieving subnet ID..."
-          SUBNET_ID=$(az network vnet list --resource-group ${RUNNER_RG} --query "[?contains(location, '${LOCATION}')].{SUBNETS:subnets}" | jq -r ".[0].SUBNETS[0].id")
+          SUBNET_ID=$(az network vnet list --resource-group "$RUNNER_RG" --query "[?contains(location, '${LOCATION}')].{SUBNETS:subnets}" | jq -r ".[0].SUBNETS[0].id")
           if [[ -z "${SUBNET_ID}" ]]; then
             echo "ERROR: Failed to retrieve Subnet ID."
             exit 1
@@ -158,7 +158,7 @@ jobs:
 
           # Extract image ID from the runner VM
           echo "Retrieving image ID..."
-          IMAGE_ID=$(az image show --resource-group ${RUNNER_RG} --name ${VM_IMAGE_NAME} --query "id" -o tsv)
+          IMAGE_ID=$(az image show --resource-group "$RUNNER_RG" --name "$VM_IMAGE_NAME" --query "id" -o tsv)
           if [[ -z "${IMAGE_ID}" ]]; then
             echo "ERROR: Failed to retrieve Image ID."
             exit 1
@@ -166,24 +166,24 @@ jobs:
 
           # Create VM
           az vm create \
-            --resource-group ${RG} \
-            --name ${VM_NAME} \
-            --subnet ${SUBNET_ID} \
-            --size ${VM_SKU} \
-            --location ${LOCATION} \
-            --image ${IMAGE_ID} \
-            --os-disk-size-gb ${OS_DISK_SIZE} \
+            --resource-group "${RG}" \
+            --name "${VM_NAME}" \
+            --subnet "${SUBNET_ID}" \
+            --size "${VM_SKU}" \
+            --location "${LOCATION}" \
+            --image "${IMAGE_ID}" \
+            --os-disk-size-gb "${OS_DISK_SIZE}" \
             --public-ip-sku Standard \
             --storage-sku Premium_LRS \
             --public-ip-address "" \
-            --admin-username ${USERNAME} \
-            --ssh-key-value  ~/.ssh/${KEY}.pub \
+            --admin-username "${USERNAME}" \
+            --ssh-key-value  ~/.ssh/"${KEY}".pub \
             --security-type Standard \
             --output json
 
-          az vm boot-diagnostics enable --name ${VM_NAME} --resource-group ${RG}
+          az vm boot-diagnostics enable --name "${VM_NAME}" --resource-group "${RG}"
 
-          echo "VM_NAME=${VM_NAME}" >> $GITHUB_OUTPUT
+          echo "VM_NAME=${VM_NAME}" >> "$GITHUB_OUTPUT"
           echo "VM creation process completed successfully."
 
       - name: Get VM Private IP
@@ -195,12 +195,12 @@ jobs:
           set -e
           echo "Retrieving VM Private IP address..."
           # Retrieve VM Private IP address
-          PRIVATE_IP=$(az vm show -g ${RG} -n ${VM_NAME} -d --query privateIps -o tsv)
+          PRIVATE_IP=$(az vm show -g "${RG}" -n "${VM_NAME}" -d --query privateIps -o tsv)
           if [[ -z "$PRIVATE_IP" ]]; then
             echo "ERROR: Failed to retrieve private IP address."
             exit 1
           fi
-          echo "PRIVATE_IP=$PRIVATE_IP" >> $GITHUB_OUTPUT
+          echo "PRIVATE_IP=$PRIVATE_IP" >> "$GITHUB_OUTPUT"
 
       - name: Wait for SSH availability
         env:
@@ -209,7 +209,7 @@ jobs:
           USERNAME: ${{ secrets.USERNAME }}
         run: |
           echo "Waiting for SSH to be accessible..."
-          timeout 120 bash -c 'until ssh -o StrictHostKeyChecking=no -i ~/.ssh/${KEY} ${USERNAME}@${PRIVATE_IP} "exit" 2>/dev/null; do sleep 5; done'
+          timeout 120 bash -c 'until ssh -o StrictHostKeyChecking=no -i ~/.ssh/"${KEY}" -- "${USERNAME}@${PRIVATE_IP}" "exit" 2>/dev/null; do sleep 5; done'
           echo "VM is accessible!"
 
       - name: Remove Old Host Key
@@ -218,7 +218,7 @@ jobs:
         run: |
           set -e
           echo "Removing the old host key"
-          ssh-keygen -R $PRIVATE_IP
+          ssh-keygen -R "$PRIVATE_IP"
 
       - name: SSH into VM and Install Dependencies
         env:
@@ -227,7 +227,7 @@ jobs:
           USERNAME: ${{ secrets.USERNAME }}
         run: |
           set -e
-          ssh -i ~/.ssh/${KEY} -o StrictHostKeyChecking=no ${USERNAME}@${PRIVATE_IP} << EOF
+          ssh -i ~/.ssh/"${KEY}" -o StrictHostKeyChecking=no -- "${USERNAME}@${PRIVATE_IP}" << EOF
             set -e
             echo "Logged in successfully."
             echo "Installing dependencies..."
@@ -243,6 +243,6 @@ jobs:
             sudo systemctl enable containerd.service
             sudo systemctl start docker
             sudo groupadd -f docker
-            sudo usermod -a -G docker ${USERNAME}
+            sudo usermod -a -G docker "${USERNAME}"
             sudo systemctl restart docker
           EOF
