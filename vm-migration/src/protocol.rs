@@ -115,6 +115,7 @@ pub enum Command {
     Config,
     State,
     Memory,
+    /// Finalizes the migration and resumes the VM on the guest.
     Complete,
     Abandon,
     MemoryFd,
