@@ -286,6 +286,15 @@ impl MemoryMigrationContext {
         }
     }
 
+    /// Returns an empty finalized block.
+    ///
+    /// This can be used if no memory was transferred (e.g., local migration).
+    pub fn empty_finalized() -> Self {
+        let mut this = Self::new();
+        this.finalize();
+        this
+    }
+
     /// Updates the metrics right before the transfer over the wire.
     ///
     /// Supposed to be called once per precopy memory iteration.
