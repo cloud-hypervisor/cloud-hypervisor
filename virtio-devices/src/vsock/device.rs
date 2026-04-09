@@ -218,6 +218,13 @@ where
         helper.add_event(self.queue_evts[1].as_raw_fd(), TX_QUEUE_EVENT)?;
         helper.add_event(self.queue_evts[2].as_raw_fd(), EVT_QUEUE_EVENT)?;
         helper.add_event(self.backend.read().unwrap().get_polled_fd(), BACKEND_EVENT)?;
+
+        if self.backend.read().unwrap().has_pending_rx() {
+            self.process_rx().map_err(|e| {
+                EpollHelperError::HandleEvent(anyhow!("Failed to process RX queue on start: {e:?}"))
+            })?;
+        }
+
         helper.run(paused, paused_sync, self)?;
 
         Ok(())
