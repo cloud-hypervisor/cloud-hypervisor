@@ -1372,9 +1372,9 @@ impl MemoryManager {
         Ok(())
     }
 
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
     pub fn add_uefi_flash(&mut self) -> Result<(), Error> {
-        // On AArch64, the UEFI binary requires a flash device at address 0.
+        // The UEFI binary requires a flash device at address 0.
         // 4 MiB memory is mapped to simulate the flash.
         let uefi_mem_slot = self.allocate_memory_slot();
         let uefi_region = GuestRegionMmap::new(

@@ -899,14 +899,6 @@ impl Vm {
             .allocate_address_space()
             .map_err(Error::MemoryManager)?;
 
-        // Add UEFI flash for aarch64
-        #[cfg(target_arch = "aarch64")]
-        memory_manager
-            .lock()
-            .unwrap()
-            .add_uefi_flash()
-            .map_err(Error::MemoryManager)?;
-
         // Load payload asynchronously
         let load_payload_handle = if snapshot.is_none() {
             Self::load_payload_async(
@@ -1405,7 +1397,11 @@ impl Vm {
         mut firmware: &File,
         memory_manager: Arc<Mutex<MemoryManager>>,
     ) -> Result<EntryPoint> {
-        let uefi_flash = memory_manager.lock().as_ref().unwrap().uefi_flash();
+        let mut memory_manager = memory_manager.lock().unwrap();
+        memory_manager
+            .add_uefi_flash()
+            .map_err(Error::MemoryManager)?;
+        let uefi_flash = memory_manager.uefi_flash();
         let mem = uefi_flash.memory();
         arch::uefi::load_uefi(mem.deref(), arch::layout::UEFI_START, &mut firmware)
             .map_err(Error::UefiLoad)?;
