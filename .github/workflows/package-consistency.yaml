@@ -27,6 +27,7 @@ jobs:
 
       - name: Check Rust VMM Package Consistency of fuzz Workspace
         run: |
+          set -eufo pipefail
           pushd fuzz
           python3 ../scripts/package-consistency-check.py github.com/rust-vmm
           popd

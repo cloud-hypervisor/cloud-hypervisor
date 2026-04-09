@@ -44,7 +44,7 @@ jobs:
       - name: Bisectability Check (default features)
         if: ${{ github.event_name == 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu' }}
         run: |
-          set -e
+          set -eufo pipefail
           commits=$(git rev-list origin/${{ github.base_ref }}..${{ github.sha }})
           for commit in $commits; do git checkout $commit; cargo check --tests --examples --all --target=${{ matrix.target }}; done
           git checkout ${{ github.sha }}

@@ -20,6 +20,7 @@ jobs:
       # NEW STEP: Print all changed-files outputs for verification
       - name: Verify Changed Files
         run: |
+          set -eufo pipefail
           echo "--- tj-actions/changed-files Outputs ---"
           echo "any_changed: ${{ steps.changed-files.outputs.any_changed }}"
           echo "all_changed_files: ${{ steps.changed-files.outputs.all_changed_files }}"

@@ -23,6 +23,7 @@ jobs:
       - name: Install Docker
         if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
         run: |
+          set -eufo pipefail
           sudo apt-get update
           sudo apt-get -y install ca-certificates curl gnupg
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg

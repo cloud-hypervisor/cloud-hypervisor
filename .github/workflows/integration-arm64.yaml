@@ -31,6 +31,7 @@ jobs:
       - name: Install Azure CLI
         if: ${{ github.event_name != 'pull_request' }}
         run: |
+          set -eufo pipefail
           sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg
           curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
           echo "deb [arch=arm64] https://packages.microsoft.com/repos/azure-cli/ bookworm main" | sudo tee /etc/apt/sources.list.d/azure-cli.list
@@ -40,6 +41,7 @@ jobs:
         if: ${{ github.event_name != 'pull_request' }}
         shell: bash
         run: |
+          set -eufo pipefail
           IMG_BASENAME=windows-11-iot-enterprise-aarch64.raw
           IMG_PATH=$HOME/workloads/$IMG_BASENAME
           IMG_GZ_PATH=$HOME/workloads/$IMG_BASENAME.gz
