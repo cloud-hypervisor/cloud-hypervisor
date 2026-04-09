@@ -340,7 +340,13 @@ impl Pausable for VirtioCommon {
             "Pausing virtio-{}",
             VirtioDeviceType::from(self.device_type)
         );
-        self.paused.store(true, Ordering::SeqCst);
+
+        // If already paused, return early to avoid deadlock waiting on barrier
+        // for worker threads that are already parked.
+        if self.paused.swap(true, Ordering::SeqCst) {
+            return Ok(());
+        }
+
         if let Some(pause_evt) = &self.pause_evt {
             pause_evt
                 .write(1)
