@@ -1161,6 +1161,8 @@ impl Vmm {
                 self.console_resize_pipe.clone(),
                 Arc::clone(&self.original_termios_opt),
                 Some(&snapshot),
+                #[cfg(feature = "igvm")]
+                None,
             )
             .map_err(|e| {
                 MigratableError::MigrateReceive(anyhow!("Error creating VM from snapshot: {e:?}"))
