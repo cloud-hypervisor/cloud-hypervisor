@@ -13,7 +13,7 @@ on:
       OS_DISK_SIZE:
         description: 'OS Disk Size in GB'
         required: true
-        type: string
+        type: number
       RG:
         description: 'Resource Group Name'
         required: true
