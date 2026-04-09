@@ -563,6 +563,17 @@ pub fn start_vmm_thread(
     })
 }
 
+/// Measures the time of the callback, in case it returns `Ok`.
+fn measure_ok<T, E, F>(f: F) -> result::Result<(T, Duration), E>
+where
+    F: FnOnce() -> result::Result<T, E>,
+{
+    let begin = Instant::now();
+    let value = f()?;
+    let duration = begin.elapsed();
+    Ok((value, duration))
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 struct VmMigrationConfig {
     vm_config: Arc<Mutex<VmConfig>>,
