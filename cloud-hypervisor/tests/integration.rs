@@ -1941,7 +1941,7 @@ mod common_parallel {
             .args([
                 "--cmdline",
                 DIRECT_KERNEL_BOOT_CMDLINE
-                    .replace("console=hvc0 ", console_str)
+                    .replace("console=hvc0", console_str)
                     .as_str(),
             ])
             .default_disks()
@@ -1997,7 +1997,7 @@ mod common_parallel {
             .args([
                 "--cmdline",
                 DIRECT_KERNEL_BOOT_CMDLINE
-                    .replace("console=hvc0 ", console_str)
+                    .replace("console=hvc0", console_str)
                     .as_str(),
             ])
             .default_disks()
@@ -2055,7 +2055,7 @@ mod common_parallel {
             .args([
                 "--cmdline",
                 DIRECT_KERNEL_BOOT_CMDLINE
-                    .replace("console=hvc0 ", console_str)
+                    .replace("console=hvc0", console_str)
                     .as_str(),
             ])
             .default_disks()
@@ -2613,7 +2613,7 @@ mod common_parallel {
             .args([
                 "--cmdline",
                 DIRECT_KERNEL_BOOT_CMDLINE
-                    .replace("console=hvc0 ", console_str)
+                    .replace("console=hvc0", console_str)
                     .as_str(),
             ])
             .args(["--serial", "tty"])
@@ -5621,7 +5621,7 @@ mod common_parallel {
             .args([
                 "--cmdline",
                 DIRECT_KERNEL_BOOT_CMDLINE
-                    .replace("console=hvc0 ", tty_str)
+                    .replace("console=hvc0", tty_str)
                     .as_str(),
             ])
             .capture_output()
