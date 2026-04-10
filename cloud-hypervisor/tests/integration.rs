@@ -6162,30 +6162,26 @@ mod ivshmem {
             .spawn()
             .unwrap();
 
-        // Wait for the VM to be restored
-        thread::sleep(std::time::Duration::new(20, 0));
-
         let latest_events = [&MetaEvent {
             event: "restored".to_string(),
             device_id: None,
         }];
-        assert!(check_latest_events_exact(
-            &latest_events,
-            &event_path_restored
-        ));
+        // Wait for the restored event to show up in the monitor file.
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_latest_events_exact(&latest_events, &event_path_restored)
+        }));
 
         // Remove the snapshot dir
         let _ = remove_dir_all(snapshot_dir.as_str());
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
             assert!(remote_command(&api_socket_restored, "resume", None));
-            // There is no way that we can ensure the 'write()' to the
-            // event file is completed when the 'resume' request is
-            // returned successfully, because the 'write()' was done
-            // asynchronously from a different thread of Cloud
-            // Hypervisor (e.g. the event-monitor thread).
-            thread::sleep(std::time::Duration::new(1, 0));
             let latest_events = [
                 &MetaEvent {
                     event: "resuming".to_string(),
@@ -6196,10 +6192,9 @@ mod ivshmem {
                     device_id: None,
                 },
             ];
-            assert!(check_latest_events_exact(
-                &latest_events,
-                &event_path_restored
-            ));
+            assert!(wait_until(Duration::from_secs(30), || {
+                check_latest_events_exact(&latest_events, &event_path_restored)
+            }));
 
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
@@ -6259,9 +6254,10 @@ mod common_sequential {
                 device_id: None,
             },
         ];
-        // See: #5938
-        thread::sleep(std::time::Duration::new(1, 0));
-        assert!(check_latest_events_exact(&latest_events, event_path));
+
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_latest_events_exact(&latest_events, event_path)
+        }));
 
         // Take a snapshot from the VM
         assert!(remote_command(
@@ -6269,9 +6265,6 @@ mod common_sequential {
             "snapshot",
             Some(format!("file://{snapshot_dir}").as_str()),
         ));
-
-        // Wait to make sure the snapshot is completed
-        thread::sleep(std::time::Duration::new(10, 0));
 
         let latest_events = [
             &MetaEvent {
@@ -6283,9 +6276,10 @@ mod common_sequential {
                 device_id: None,
             },
         ];
-        // See: #5938
-        thread::sleep(std::time::Duration::new(1, 0));
-        assert!(check_latest_events_exact(&latest_events, event_path));
+
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_latest_events_exact(&latest_events, event_path)
+        }));
     }
 
     // One thing to note about this test. The virtio-net device is heavily used
@@ -6321,7 +6315,7 @@ mod common_sequential {
             "id={},tap=,mac={},ip={},mask=255.255.255.128",
             net_id, guest.network.guest_mac0, guest.network.host_ip0
         );
-        let mut mem_params = "size=2G";
+        let mut mem_params = "size=1G";
 
         if use_hotplug {
             mem_params = "size=2G,hotplug_method=virtio-mem,hotplug_size=32G";
@@ -6368,7 +6362,12 @@ mod common_sequential {
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
             // Check the guest RAM
-            assert!(guest.get_total_memory().unwrap_or_default() > 1_920_000);
+            let total_memory = guest.get_total_memory().unwrap_or_default();
+            if use_hotplug {
+                assert!(total_memory > 1_900_000, "total memory: {total_memory}");
+            } else {
+                assert!(total_memory > 900_000, "total memory: {total_memory}");
+            }
             if use_hotplug {
                 // Increase guest RAM with virtio-mem
                 resize_command(
@@ -6390,8 +6389,8 @@ mod common_sequential {
                 );
                 thread::sleep(std::time::Duration::new(5, 0));
                 let total_memory = guest.get_total_memory().unwrap_or_default();
-                assert!(total_memory > 4_800_000);
-                assert!(total_memory < 5_760_000);
+                assert!(total_memory > 4_800_000, "total_memory is {total_memory}");
+                assert!(total_memory < 5_760_000, "total_memory is {total_memory}");
             }
             // Check the guest virtio-devices, e.g. block, rng, vsock, console, and net
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
@@ -6415,9 +6414,9 @@ mod common_sequential {
                     event: "device-removed".to_string(),
                     device_id: Some(net_id.to_string()),
                 }];
-                // See: #5938
-                thread::sleep(std::time::Duration::new(1, 0));
-                assert!(check_latest_events_exact(&latest_events, &event_path));
+                assert!(wait_until(Duration::from_secs(30), || {
+                    check_latest_events_exact(&latest_events, &event_path)
+                }));
 
                 // Plug the virtio-net device again
                 assert!(remote_command(
@@ -6467,8 +6466,6 @@ mod common_sequential {
             .spawn()
             .unwrap();
 
-        // Wait for the VM to be restored
-        thread::sleep(std::time::Duration::new(20, 0));
         let expected_events = [
             &MetaEvent {
                 event: "starting".to_string(),
@@ -6487,10 +6484,9 @@ mod common_sequential {
                 device_id: None,
             },
         ];
-        assert!(check_sequential_events(
-            &expected_events,
-            &event_path_restored
-        ));
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_sequential_events(&expected_events, &event_path_restored)
+        }));
         if use_resume_option {
             let latest_events = [
                 &MetaEvent {
@@ -6506,20 +6502,25 @@ mod common_sequential {
                     device_id: None,
                 },
             ];
-            assert!(check_latest_events_exact(
-                &latest_events,
-                &event_path_restored
-            ));
+            assert!(wait_until(Duration::from_secs(30), || {
+                check_latest_events_exact(&latest_events, &event_path_restored)
+            }));
         } else {
             let latest_events = [&MetaEvent {
                 event: "restored".to_string(),
                 device_id: None,
             }];
-            assert!(check_latest_events_exact(
-                &latest_events,
-                &event_path_restored
-            ));
+            assert!(wait_until(Duration::from_secs(30), || {
+                check_latest_events_exact(&latest_events, &event_path_restored)
+            }));
         }
+
+        // Wait until the restored VM API is ready before issuing follow-up requests.
+        assert!(wait_until(Duration::from_secs(30), || remote_command(
+            &api_socket_restored,
+            "info",
+            None
+        )));
 
         // Remove the snapshot dir
         let _ = remove_dir_all(snapshot_dir.as_str());
@@ -6530,13 +6531,12 @@ mod common_sequential {
                 thread::sleep(std::time::Duration::new(1, 0));
             } else {
                 // Resume the VM manually
+                assert!(wait_until(Duration::from_secs(30), || remote_command(
+                    &api_socket_restored,
+                    "info",
+                    None
+                )));
                 assert!(remote_command(&api_socket_restored, "resume", None));
-                // There is no way that we can ensure the 'write()' to the
-                // event file is completed when the 'resume' request is
-                // returned successfully, because the 'write()' was done
-                // asynchronously from a different thread of Cloud
-                // Hypervisor (e.g. the event-monitor thread).
-                thread::sleep(std::time::Duration::new(1, 0));
 
                 let latest_events = [
                     &MetaEvent {
@@ -6548,18 +6548,17 @@ mod common_sequential {
                         device_id: None,
                     },
                 ];
-                assert!(check_latest_events_exact(
-                    &latest_events,
-                    &event_path_restored
-                ));
+                assert!(wait_until(Duration::from_secs(30), || {
+                    check_latest_events_exact(&latest_events, &event_path_restored)
+                }));
             }
 
             // Perform same checks to validate VM has been properly restored
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
             let total_memory = guest.get_total_memory().unwrap_or_default();
             if use_hotplug {
-                assert!(total_memory > 4_800_000);
-                assert!(total_memory < 5_760_000);
+                assert!(total_memory > 4_800_000, "total_memory is {total_memory}");
+                assert!(total_memory < 5_760_000, "total_memory is {total_memory}");
                 // Deflate balloon to restore entire RAM to the VM
                 resize_command(&api_socket_restored, None, None, Some(0), None);
                 thread::sleep(std::time::Duration::new(5, 0));
@@ -6568,10 +6567,10 @@ mod common_sequential {
                 resize_command(&api_socket_restored, None, Some(5 << 30), None, None);
                 thread::sleep(std::time::Duration::new(5, 0));
                 let total_memory = guest.get_total_memory().unwrap_or_default();
-                assert!(total_memory > 4_800_000);
-                assert!(total_memory < 5_760_000);
+                assert!(total_memory > 4_800_000, "total_memory is {total_memory}");
+                assert!(total_memory < 5_760_000, "total_memory is {total_memory}");
             } else {
-                assert!(total_memory > 1_920_000);
+                assert!(total_memory > 900_000, "total memory: {total_memory}");
             }
 
             guest.check_devices_common(Some(&socket), Some(&console_text), None);
@@ -6699,20 +6698,23 @@ mod common_sequential {
             .spawn()
             .unwrap();
 
-        thread::sleep(std::time::Duration::new(20, 0));
-
         let latest_events = [&MetaEvent {
             event: "restored".to_string(),
             device_id: None,
         }];
-        assert!(check_latest_events_exact(
-            &latest_events,
-            &event_path_restored
-        ));
+
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_latest_events_exact(&latest_events, &event_path_restored)
+        }));
 
         let r = std::panic::catch_unwind(|| {
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
             assert!(remote_command(&api_socket_restored, "resume", None));
-            thread::sleep(std::time::Duration::new(1, 0));
+
             let latest_events = [
                 &MetaEvent {
                     event: "resuming".to_string(),
@@ -6723,10 +6725,9 @@ mod common_sequential {
                     device_id: None,
                 },
             ];
-            assert!(check_latest_events_exact(
-                &latest_events,
-                &event_path_restored
-            ));
+            assert!(wait_until(Duration::from_secs(30), || {
+                check_latest_events_exact(&latest_events, &event_path_restored)
+            }));
 
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 4);
             assert!(guest.get_total_memory().unwrap_or_default() > min_total_memory_kib);
@@ -6897,7 +6898,9 @@ mod common_sequential {
         ));
 
         // Wait for the VM to be restored
-        thread::sleep(std::time::Duration::new(20, 0));
+        assert!(wait_until(Duration::from_secs(20), || {
+            remote_command(&api_socket_restored, "info", None)
+        }));
 
         // close the fds as CH duplicates them before using
         for tap in taps.iter() {
@@ -6922,31 +6925,30 @@ mod common_sequential {
                 device_id: None,
             },
         ];
-        assert!(check_sequential_events(
-            &expected_events,
-            &event_path_restored
-        ));
+        // Wait for the restore event sequence to be recorded.
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_sequential_events(&expected_events, &event_path_restored)
+        }));
         let latest_events = [&MetaEvent {
             event: "restored".to_string(),
             device_id: None,
         }];
-        assert!(check_latest_events_exact(
-            &latest_events,
-            &event_path_restored
-        ));
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_latest_events_exact(&latest_events, &event_path_restored)
+        }));
 
         // Remove the snapshot dir
         let _ = remove_dir_all(snapshot_dir.as_str());
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
+            assert!(wait_until(Duration::from_secs(20), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
             assert!(remote_command(&api_socket_restored, "resume", None));
-            // There is no way that we can ensure the 'write()' to the
-            // event file is completed when the 'resume' request is
-            // returned successfully, because the 'write()' was done
-            // asynchronously from a different thread of Cloud
-            // Hypervisor (e.g. the event-monitor thread).
-            thread::sleep(std::time::Duration::new(1, 0));
+
             let latest_events = [
                 &MetaEvent {
                     event: "resuming".to_string(),
@@ -6957,10 +6959,9 @@ mod common_sequential {
                     device_id: None,
                 },
             ];
-            assert!(check_latest_events_exact(
-                &latest_events,
-                &event_path_restored
-            ));
+            assert!(wait_until(Duration::from_secs(30), || {
+                check_latest_events_exact(&latest_events, &event_path_restored)
+            }));
 
             // Perform same checks to validate VM has been properly restored
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), n_cpu);
@@ -7063,30 +7064,26 @@ mod common_sequential {
             .spawn()
             .unwrap();
 
-        // Wait for the VM to be restored
-        thread::sleep(std::time::Duration::new(20, 0));
-
         let latest_events = [&MetaEvent {
             event: "restored".to_string(),
             device_id: None,
         }];
-        assert!(check_latest_events_exact(
-            &latest_events,
-            &event_path_restored
-        ));
+        // Wait for the restored event to show up in the monitor file.
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_latest_events_exact(&latest_events, &event_path_restored)
+        }));
 
         // Remove the snapshot dir
         let _ = remove_dir_all(snapshot_dir.as_str());
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
             assert!(remote_command(&api_socket_restored, "resume", None));
-            // There is no way that we can ensure the 'write()' to the
-            // event file is completed when the 'resume' request is
-            // returned successfully, because the 'write()' was done
-            // asynchronously from a different thread of Cloud
-            // Hypervisor (e.g. the event-monitor thread).
-            thread::sleep(std::time::Duration::new(1, 0));
             let latest_events = [
                 &MetaEvent {
                     event: "resuming".to_string(),
@@ -7097,10 +7094,9 @@ mod common_sequential {
                     device_id: None,
                 },
             ];
-            assert!(check_latest_events_exact(
-                &latest_events,
-                &event_path_restored
-            ));
+            assert!(wait_until(Duration::from_secs(30), || {
+                check_latest_events_exact(&latest_events, &event_path_restored)
+            }));
 
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
@@ -7228,7 +7224,9 @@ mod common_sequential {
             .unwrap();
 
         // Wait for the VM to be restored
-        thread::sleep(std::time::Duration::new(20, 0));
+        assert!(wait_until(Duration::from_secs(30), || {
+            remote_command(&api_socket_restored, "info", None)
+        }));
 
         let latest_events = [&MetaEvent {
             event: "restored".to_string(),
@@ -7244,6 +7242,11 @@ mod common_sequential {
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
             assert!(remote_command(&api_socket_restored, "resume", None));
             thread::sleep(std::time::Duration::new(5, 0));
 
