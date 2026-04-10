@@ -12,6 +12,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 
 use crate::async_io::{AsyncIo, AsyncIoError};
+use crate::engine::Completion;
 
 /// Tests punching a hole in the middle of a 4 MB file and verifying data
 /// integrity around the hole.
@@ -25,11 +26,17 @@ pub fn test_punch_hole(async_io: &mut dyn AsyncIo, file: &mut File) {
     let offset = 1024 * 1024;
     let length = 1024 * 1024;
     async_io.punch_hole(offset, length, 1).unwrap();
+    super::engine::wait_eventfd(async_io.notifier());
 
     // Check completion
-    let (user_data, result) = async_io.next_completed_request().unwrap();
+    let Completion {
+        user_data,
+        result,
+        iobuf,
+    } = async_io.next_completed_request().unwrap();
     assert_eq!(user_data, 1);
     assert_eq!(result, 0);
+    assert!(iobuf.is_none());
 
     // Verify the hole reads as zeros
     file.seek(SeekFrom::Start(offset)).unwrap();
@@ -82,20 +89,29 @@ pub fn test_write_zeroes(async_io: &mut dyn AsyncIo, file: &mut File) {
         return;
     }
     write_zeroes_result.unwrap();
+    super::engine::wait_eventfd(async_io.notifier());
 
     // Check completion
-    let (user_data, result) = async_io.next_completed_request().unwrap();
+    let Completion {
+        user_data,
+        result,
+        iobuf,
+    } = async_io.next_completed_request().unwrap();
     assert_eq!(user_data, 2);
-    assert_eq!(result, 0);
-
-    // Verify the zeroed region reads as zeros
-    file.seek(SeekFrom::Start(offset)).unwrap();
-    let mut read_buf = vec![0; length as usize];
-    file.read_exact(&mut read_buf).unwrap();
-    assert!(
-        read_buf.iter().all(|&b| b == 0),
-        "Zeroed region should read as zeros"
-    );
+    assert!(iobuf.is_none());
+    if result == 0 {
+        // Verify the zeroed region reads as zeros
+        file.seek(SeekFrom::Start(offset)).unwrap();
+        let mut read_buf = vec![0; length as usize];
+        file.read_exact(&mut read_buf).unwrap();
+        assert!(
+            read_buf.iter().all(|&b| b == 0),
+            "Zeroed region should read as zeros"
+        );
+    } else {
+        eprintln!("Skipping test_write_zeroes: filesystem doesn't support FALLOC_FL_ZERO_RANGE");
+        assert!(result == -libc::EOPNOTSUPP || result == -libc::ENOTSUP);
+    }
 
     // Verify data before zeroed region is intact
     file.seek(SeekFrom::Start(offset - 1024)).unwrap();
@@ -132,19 +148,32 @@ pub fn test_punch_hole_multiple_operations(async_io: &mut dyn AsyncIo, file: &mu
     async_io
         .punch_hole(5 * 1024 * 1024, 512 * 1024, 12)
         .unwrap();
-
-    // Check all completions
-    let (user_data, result) = async_io.next_completed_request().unwrap();
-    assert_eq!(user_data, 10);
-    assert_eq!(result, 0);
-
-    let (user_data, result) = async_io.next_completed_request().unwrap();
-    assert_eq!(user_data, 11);
-    assert_eq!(result, 0);
-
-    let (user_data, result) = async_io.next_completed_request().unwrap();
-    assert_eq!(user_data, 12);
-    assert_eq!(result, 0);
+    let mut seen_arr = [false; 3];
+    let mut seen_count = 0;
+    loop {
+        let Some(Completion {
+            user_data,
+            result,
+            iobuf,
+        }) = async_io.next_completed_request()
+        else {
+            super::engine::wait_eventfd(async_io.notifier());
+            continue;
+        };
+        assert!(iobuf.is_none());
+        assert_eq!(result, 0);
+        let index = match user_data {
+            10..=12 => usize::try_from(user_data).unwrap() - 10,
+            _ => panic!("bad user data"),
+        };
+        assert!(!seen_arr[index], "seen more than once");
+        seen_arr[index] = true;
+        seen_count += 1;
+        if seen_count == seen_arr.len() {
+            break;
+        }
+    }
+    assert!(async_io.next_completed_request().is_none());
 
     // Verify all holes read as zeros
     file.seek(SeekFrom::Start(1024 * 1024)).unwrap();

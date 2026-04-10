@@ -21,6 +21,7 @@ use std::{io, result};
 use anyhow::anyhow;
 use block::async_io::{AsyncIo, AsyncIoError};
 use block::disk_file::DiskBackend;
+use block::engine::Completion;
 use block::error::BlockError;
 use block::fcntl::{LockError, LockGranularity, LockGranularityChoice, LockType, get_lock_state};
 use block::{
@@ -360,7 +361,7 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
             }
         }
 
-        match self.disk_image.submit_batch_requests(&batch_requests) {
+        match self.disk_image.submit_batch_requests(batch_requests) {
             Ok(()) => {
                 self.inflight_requests.extend(batch_inflight_requests);
             }
@@ -440,7 +441,12 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
         let mut read_ops = Wrapping(0);
         let mut write_ops = Wrapping(0);
 
-        while let Some((user_data, result)) = self.disk_image.next_completed_request() {
+        while let Some(Completion {
+            user_data,
+            result,
+            iobuf: _,
+        }) = self.disk_image.next_completed_request()
+        {
             let desc_index = user_data as u16;
 
             let mut request = self.find_inflight_request(desc_index)?;

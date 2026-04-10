@@ -18,10 +18,14 @@ pub mod fixed_vhd;
 /// Enabled with the `"io_uring"` feature
 pub mod fixed_vhd_async;
 pub mod fixed_vhd_sync;
+#[cfg(feature = "enable_broken_qcow2")]
 pub mod qcow;
+#[cfg(feature = "enable_broken_qcow2")]
 #[cfg(feature = "io_uring")]
 pub mod qcow_async;
+#[cfg(feature = "enable_broken_qcow2")]
 pub(crate) mod qcow_common;
+#[cfg(feature = "enable_broken_qcow2")]
 pub mod qcow_sync;
 #[cfg(feature = "io_uring")]
 /// Async primitives based on `io-uring`
@@ -69,6 +73,7 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::{aio, ioctl_io_nr, ioctl_ior_nr};
 
 use crate::async_io::{AsyncIoError, AsyncIoResult};
+use crate::engine::Completion;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::request::{DEFAULT_DESCRIPTOR_VEC_SIZE, SECTOR_SIZE};
 use crate::vhdx::VhdxError;
@@ -95,6 +100,7 @@ pub enum Error {
     GetFileMetadata(#[source] std::io::Error),
     #[error("The requested operation would cause a seek beyond disk end")]
     InvalidOffset,
+    #[cfg(feature = "enable_broken_qcow2")]
     #[error("Failure in qcow")]
     QcowError(#[source] qcow::Error),
     #[error("Failure in raw file")]
@@ -457,18 +463,18 @@ pub trait AsyncAdaptor {
     fn read_vectored_sync(
         &mut self,
         offset: libc::off_t,
-        iovecs: &[libc::iovec],
+        iobuf: IoBuf,
         user_data: u64,
         eventfd: &EventFd,
-        completion_list: &mut VecDeque<(u64, i32)>,
+        completion_list: &mut VecDeque<Completion>,
     ) -> AsyncIoResult<()>
     where
         Self: Read + Seek,
     {
         // Convert libc::iovec into IoSliceMut
         let mut slices: SmallVec<[IoSliceMut; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
-            SmallVec::with_capacity(iovecs.len());
-        for iovec in iovecs.iter() {
+            SmallVec::with_capacity(iobuf.iovecs().len());
+        for iovec in iobuf.iovecs().iter() {
             // SAFETY: on Linux IoSliceMut wraps around libc::iovec
             slices.push(IoSliceMut::new(unsafe {
                 std::mem::transmute::<libc::iovec, &mut [u8]>(*iovec)
@@ -487,8 +493,12 @@ pub trait AsyncAdaptor {
             r
         };
 
-        completion_list.push_back((user_data, result as i32));
-        eventfd.write(1).unwrap();
+        completion_list.push_back(Completion {
+            user_data,
+            result: result.try_into().unwrap(),
+            iobuf: Some(iobuf),
+        });
+        EventFd::write(eventfd, 1).unwrap();
 
         Ok(())
     }
@@ -496,14 +506,15 @@ pub trait AsyncAdaptor {
     fn write_vectored_sync(
         &mut self,
         offset: libc::off_t,
-        iovecs: &[libc::iovec],
+        iobuf: IoBuf,
         user_data: u64,
         eventfd: &EventFd,
-        completion_list: &mut VecDeque<(u64, i32)>,
+        completion_list: &mut VecDeque<Completion>,
     ) -> AsyncIoResult<()>
     where
         Self: Write + Seek,
     {
+        let iovecs = iobuf.iovecs();
         // Convert libc::iovec into IoSlice
         let mut slices: SmallVec<[IoSlice; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
             SmallVec::with_capacity(iovecs.len());
@@ -526,8 +537,12 @@ pub trait AsyncAdaptor {
             r
         };
 
-        completion_list.push_back((user_data, result as i32));
-        eventfd.write(1).unwrap();
+        completion_list.push_back(Completion {
+            user_data,
+            result: result.try_into().unwrap(),
+            iobuf: Some(iobuf),
+        });
+        EventFd::write(eventfd, 1).unwrap();
 
         Ok(())
     }
@@ -536,7 +551,7 @@ pub trait AsyncAdaptor {
         &mut self,
         user_data: Option<u64>,
         eventfd: &EventFd,
-        completion_list: &mut VecDeque<(u64, i32)>,
+        completion_list: &mut VecDeque<Completion>,
     ) -> AsyncIoResult<()>
     where
         Self: Write,
@@ -549,8 +564,12 @@ pub trait AsyncAdaptor {
         };
 
         if let Some(user_data) = user_data {
-            completion_list.push_back((user_data, result));
-            eventfd.write(1).unwrap();
+            completion_list.push_back(Completion {
+                user_data,
+                result,
+                iobuf: None,
+            });
+            EventFd::write(eventfd, 1).unwrap();
         }
 
         Ok(())

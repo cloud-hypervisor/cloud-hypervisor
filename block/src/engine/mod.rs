@@ -17,6 +17,7 @@ mod aio;
 #[cfg(feature = "io_uring")]
 mod io_uring;
 mod tracker;
+mod wrapper;
 
 pub type SubmitResult = Result<(), (bool, AsyncIoError)>;
 
@@ -44,6 +45,9 @@ pub struct InnerCompletion {
 pub use aio::AioEngine;
 #[cfg(feature = "io_uring")]
 pub use io_uring::IoUringEngine;
+#[cfg(test)]
+pub(crate) use tracker::wait_eventfd;
+pub use wrapper::{RawFileDisk, Wrapper};
 
 /// An engine that can be created from a given queue depth.
 pub trait CreatableEngine: AsyncIoEngine + Sized {

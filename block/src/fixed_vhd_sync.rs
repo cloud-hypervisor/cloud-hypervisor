@@ -8,10 +8,11 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
+use crate::engine::Completion;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::fixed_vhd::FixedVhd;
 use crate::raw_sync::RawFileSync;
-use crate::{BlockBackend, disk_file};
+use crate::{BlockBackend, IoBuf, disk_file};
 
 #[derive(Debug)]
 pub struct FixedVhdDiskSync(FixedVhd);
@@ -100,7 +101,7 @@ impl AsyncIo for FixedVhdSync {
     fn read_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: &[libc::iovec],
+        request: IoBuf,
         user_data: u64,
     ) -> AsyncIoResult<()> {
         if offset as u64 >= self.size {
@@ -113,13 +114,13 @@ impl AsyncIo for FixedVhdSync {
             )));
         }
 
-        self.raw_file_sync.read_vectored(offset, iovecs, user_data)
+        self.raw_file_sync.read_vectored(offset, request, user_data)
     }
 
     fn write_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: &[libc::iovec],
+        iobuf: IoBuf,
         user_data: u64,
     ) -> AsyncIoResult<()> {
         if offset as u64 >= self.size {
@@ -132,14 +133,14 @@ impl AsyncIo for FixedVhdSync {
             )));
         }
 
-        self.raw_file_sync.write_vectored(offset, iovecs, user_data)
+        self.raw_file_sync.write_vectored(offset, iobuf, user_data)
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
         self.raw_file_sync.fsync(user_data)
     }
 
-    fn next_completed_request(&mut self) -> Option<(u64, i32)> {
+    fn next_completed_request(&mut self) -> Option<Completion> {
         self.raw_file_sync.next_completed_request()
     }
 

@@ -8,7 +8,8 @@ use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::{BatchRequest, DiskTopology, SECTOR_SIZE};
+use crate::engine::Completion;
+use crate::{BatchRequest, DiskTopology, IoBuf, SECTOR_SIZE};
 
 #[derive(Error, Debug)]
 pub enum DiskFileError {
@@ -128,23 +129,23 @@ pub trait AsyncIo: Send {
     fn read_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: &[libc::iovec],
+        iobuf: IoBuf,
         user_data: u64,
     ) -> AsyncIoResult<()>;
     fn write_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: &[libc::iovec],
+        iobuf: IoBuf,
         user_data: u64,
     ) -> AsyncIoResult<()>;
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()>;
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()>;
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()>;
-    fn next_completed_request(&mut self) -> Option<(u64, i32)>;
+    fn next_completed_request(&mut self) -> Option<Completion>;
     fn batch_requests_enabled(&self) -> bool {
         false
     }
-    fn submit_batch_requests(&mut self, _batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
+    fn submit_batch_requests(&mut self, _batch_request: Vec<BatchRequest>) -> AsyncIoResult<()> {
         Ok(())
     }
     fn alignment(&self) -> u64 {

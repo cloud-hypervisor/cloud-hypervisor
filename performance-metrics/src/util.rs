@@ -15,6 +15,7 @@ use block::async_io::AsyncIo;
 use block::qcow::{BackingFileConfig, ImageType, QcowFile, RawFile};
 use block::qcow_async::QcowDiskAsync;
 use block::qcow_sync::QcowDiskSync;
+use block::{HostIovecs, IoBuf};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::tempfile::TempFile;
 
@@ -111,19 +112,28 @@ pub fn deterministic_permutation(n: usize) -> Vec<usize> {
 }
 
 /// Submit `count` sequential read_vectored calls at `stride`-byte intervals.
-pub fn submit_reads(async_io: &mut dyn AsyncIo, count: usize, stride: u64, iovec: &[libc::iovec]) {
+pub fn submit_reads(async_io: &mut dyn AsyncIo, count: usize, stride: u64, buf: Vec<u8>) {
+    let iovec = HostIovecs::new(vec![buf]);
     for i in 0..count {
         async_io
-            .read_vectored((i as u64 * stride) as libc::off_t, iovec, i as u64)
+            .read_vectored(
+                (i as u64 * stride) as libc::off_t,
+                iovec.clone().into(),
+                i as u64,
+            )
             .expect("read_vectored failed");
     }
 }
 
 /// Submit `count` sequential write_vectored calls at `stride`-byte intervals.
-pub fn submit_writes(async_io: &mut dyn AsyncIo, count: usize, stride: u64, iovec: &[libc::iovec]) {
+pub fn submit_writes(async_io: &mut dyn AsyncIo, count: usize, stride: u64, buf: Vec<u8>) {
     for i in 0..count {
         async_io
-            .write_vectored((i as u64 * stride) as libc::off_t, iovec, i as u64)
+            .write_vectored(
+                (i as u64 * stride) as libc::off_t,
+                IoBuf::from(buf.clone()),
+                i as u64,
+            )
             .expect("write_vectored failed");
     }
 }

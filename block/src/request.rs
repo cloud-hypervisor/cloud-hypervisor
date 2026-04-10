@@ -99,6 +99,7 @@ impl GuestIovecs {
 // SAFETY: The DescChain keeps the iovec pointers valid.
 unsafe impl Send for GuestIovecs {}
 
+#[derive(Clone)]
 pub struct HostIovecs {
     // This only keeps the pointers alive.
     #[allow(dead_code)]
@@ -130,6 +131,27 @@ pub enum IoBuf {
     Guest(GuestIovecs),
     /// Data from the host
     Host(HostIovecs),
+}
+
+impl IoBuf {
+    pub fn len(&self) -> usize {
+        let iovecs = self.iovecs();
+        let mut out = 0usize;
+        for iovec in iovecs {
+            out = out.checked_add(iovec.iov_len).unwrap();
+        }
+        out
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl HostIovecs {
+    pub fn get_vecs(self) -> Vec<Vec<u8>> {
+        self.data
+    }
 }
 
 impl From<HostIovecs> for IoBuf {
@@ -499,7 +521,7 @@ impl Request {
                     disk_image
                         .read_vectored(
                             batch_request.offset,
-                            batch_request.iobuf.iovecs(),
+                            batch_request.iobuf,
                             batch_request.user_data,
                         )
                         .map_err(ExecuteError::AsyncRead)?;
@@ -518,7 +540,7 @@ impl Request {
                     disk_image
                         .write_vectored(
                             batch_request.offset,
-                            batch_request.iobuf.iovecs(),
+                            batch_request.iobuf,
                             batch_request.user_data,
                         )
                         .map_err(ExecuteError::AsyncWrite)?;

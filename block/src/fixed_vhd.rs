@@ -17,6 +17,10 @@ pub struct FixedVhd {
 }
 
 impl FixedVhd {
+    pub fn get_file(&self) -> std::io::Result<File> {
+        self.file.try_clone()
+    }
+
     pub fn new(mut file: File) -> std::io::Result<Self> {
         let footer = VhdFooter::new(&mut file)?;
 

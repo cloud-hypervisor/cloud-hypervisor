@@ -13,7 +13,7 @@ use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
-use crate::disk_file;
+use crate::engine::Completion;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::backing::shared_backing_from;
 use crate::qcow::metadata::{
@@ -25,6 +25,7 @@ use crate::qcow_common::{
     AlignedBuf, aligned_pread, aligned_pwrite, gather_from_iovecs, gather_from_iovecs_into,
     pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
 };
+use crate::{IoBuf, disk_file};
 
 pub struct QcowDiskSync {
     metadata: Arc<QcowMetadata>,
@@ -157,7 +158,7 @@ pub struct QcowSync {
     /// O_DIRECT alignment requirement (0 = no alignment needed).
     alignment: usize,
     eventfd: EventFd,
-    completion_list: VecDeque<(u64, i32)>,
+    completion_list: VecDeque<Completion>,
 }
 
 impl QcowSync {
@@ -189,11 +190,11 @@ impl AsyncIo for QcowSync {
     fn read_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: &[libc::iovec],
+        mut iovecs: IoBuf,
         user_data: u64,
     ) -> AsyncIoResult<()> {
         let address = offset as u64;
-        let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
+        let total_len: usize = iovecs.len();
 
         let has_backing = self.backing_file.is_some();
         let mappings = self
@@ -206,7 +207,7 @@ impl AsyncIo for QcowSync {
             match mapping {
                 ClusterReadMapping::Zero { length } => {
                     // SAFETY: iovecs point to valid guest memory buffers
-                    unsafe { zero_fill_iovecs(iovecs, buf_offset, length as usize) };
+                    zero_fill_iovecs(&mut iovecs, buf_offset, length as usize);
                     buf_offset += length as usize;
                 }
                 ClusterReadMapping::Allocated {
@@ -226,21 +227,21 @@ impl AsyncIo for QcowSync {
                         )
                         .map_err(AsyncIoError::ReadVectored)?;
                         // SAFETY: iovecs point to valid guest memory buffers
-                        unsafe { scatter_to_iovecs(iovecs, buf_offset, abuf.as_slice(len)) };
+                        scatter_to_iovecs(&mut iovecs, buf_offset, abuf.as_slice(len));
                     } else {
                         // No O_DIRECT, plain buffer is fine.
                         let mut buf = vec![0u8; len];
                         pread_exact(self.data_file.as_raw_fd(), &mut buf, host_offset)
                             .map_err(AsyncIoError::ReadVectored)?;
                         // SAFETY: iovecs point to valid guest memory buffers
-                        unsafe { scatter_to_iovecs(iovecs, buf_offset, &buf) };
+                        scatter_to_iovecs(&mut iovecs, buf_offset, &buf);
                     }
                     buf_offset += len;
                 }
                 ClusterReadMapping::Compressed { data } => {
                     let len = data.len();
                     // SAFETY: iovecs point to valid guest memory buffers
-                    unsafe { scatter_to_iovecs(iovecs, buf_offset, &data) };
+                    scatter_to_iovecs(&mut iovecs, buf_offset, &data);
                     buf_offset += len;
                 }
                 ClusterReadMapping::Backing {
@@ -254,7 +255,7 @@ impl AsyncIo for QcowSync {
                         .read_at(backing_offset, &mut buf)
                         .map_err(AsyncIoError::ReadVectored)?;
                     // SAFETY: iovecs point to valid guest memory buffers
-                    unsafe { scatter_to_iovecs(iovecs, buf_offset, &buf) };
+                    scatter_to_iovecs(&mut iovecs, buf_offset, &buf);
                     buf_offset += length as usize;
                 }
             }
@@ -269,11 +270,11 @@ impl AsyncIo for QcowSync {
     fn write_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: &[libc::iovec],
+        mut iovecs: IoBuf,
         user_data: u64,
     ) -> AsyncIoResult<()> {
         let address = offset as u64;
-        let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
+        let total_len: usize = iovecs.len();
         let mut buf_offset = 0usize;
 
         while buf_offset < total_len {
@@ -314,9 +315,7 @@ impl AsyncIo for QcowSync {
                         let mut abuf = AlignedBuf::new(count, self.alignment)
                             .map_err(AsyncIoError::WriteVectored)?;
                         // SAFETY: iovecs point to valid guest memory buffers
-                        unsafe {
-                            gather_from_iovecs_into(iovecs, buf_offset, abuf.as_mut_slice(count));
-                        }
+                        gather_from_iovecs_into(&mut iovecs, buf_offset, abuf.as_mut_slice(count));
                         aligned_pwrite(
                             self.data_file.as_raw_fd(),
                             abuf.as_slice(count),
@@ -327,7 +326,7 @@ impl AsyncIo for QcowSync {
                     } else {
                         // No O_DIRECT, plain buffer is fine.
                         // SAFETY: iovecs point to valid guest memory buffers
-                        let buf = unsafe { gather_from_iovecs(iovecs, buf_offset, count) };
+                        let buf = gather_from_iovecs(&mut iovecs, buf_offset, count);
                         pwrite_all(self.data_file.as_raw_fd(), &buf, host_offset)
                             .map_err(AsyncIoError::WriteVectored)?;
                     }
@@ -345,13 +344,17 @@ impl AsyncIo for QcowSync {
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
         self.metadata.flush().map_err(AsyncIoError::Fsync)?;
         if let Some(user_data) = user_data {
-            self.completion_list.push_back((user_data, 0));
+            self.completion_list.push_back(Completion {
+                user_data,
+                result: 0,
+                iobuf: None,
+            });
             self.eventfd.write(1).unwrap();
         }
         Ok(())
     }
 
-    fn next_completed_request(&mut self) -> Option<(u64, i32)> {
+    fn next_completed_request(&mut self) -> Option<Completion> {
         self.completion_list.pop_front()
     }
 
@@ -392,7 +395,11 @@ impl AsyncIo for QcowSync {
                         }
                     }
                 }
-                self.completion_list.push_back((user_data, 0));
+                self.completion_list.push_back(Completion {
+                    user_data,
+                    result: 0,
+                    iobuf: None,
+                });
                 self.eventfd.write(1).unwrap();
                 Ok(())
             }
@@ -402,7 +409,11 @@ impl AsyncIo for QcowSync {
                 } else {
                     -libc::EIO
                 };
-                self.completion_list.push_back((user_data, errno));
+                self.completion_list.push_back(Completion {
+                    user_data,
+                    result: errno,
+                    iobuf: None,
+                });
                 self.eventfd.write(1).unwrap();
                 Ok(())
             }
@@ -425,7 +436,9 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
+    use crate::HostIovecs;
     use crate::disk_file::{AsyncDiskFile, DiskSize, Resizable};
+    use crate::engine::Completion;
     use crate::qcow::{BackingFileConfig, ImageType, QcowFile, RawFile};
 
     fn create_disk_with_data(
@@ -455,32 +468,46 @@ mod unit_tests {
 
     fn async_read(disk: &QcowDiskSync, offset: u64, len: usize) -> Vec<u8> {
         let mut async_io = disk.new_async_io(1).unwrap();
-        let mut buf = vec![0xFFu8; len];
-        let iovec = libc::iovec {
-            iov_base: buf.as_mut_ptr() as *mut libc::c_void,
-            iov_len: buf.len(),
-        };
         async_io
-            .read_vectored(offset as libc::off_t, &[iovec], 1)
+            .read_vectored(
+                offset as libc::off_t,
+                IoBuf::Host(HostIovecs::new(vec![vec![0xFFu8; len]])),
+                1,
+            )
             .unwrap();
-        let (user_data, result) = async_io.next_completed_request().unwrap();
+        let Completion {
+            user_data,
+            result,
+            iobuf: Some(IoBuf::Host(iobuf)),
+        } = async_io.next_completed_request().unwrap()
+        else {
+            panic!("Bad response type!");
+        };
         assert_eq!(user_data, 1);
         assert_eq!(result as usize, len, "read should return requested length");
-        buf
+        let mut vecs = iobuf.get_vecs();
+        assert_eq!(vecs.len(), 1);
+        vecs.pop().unwrap()
     }
 
     fn async_write(disk: &QcowDiskSync, offset: u64, data: &[u8]) {
         let mut async_io = disk.new_async_io(1).unwrap();
-        let iovec = libc::iovec {
-            iov_base: data.as_ptr() as *mut libc::c_void,
-            iov_len: data.len(),
-        };
         async_io
-            .write_vectored(offset as libc::off_t, &[iovec], 1)
+            .write_vectored(offset as libc::off_t, IoBuf::from(data.to_owned()), 1)
             .unwrap();
-        let (user_data, result) = async_io.next_completed_request().unwrap();
+        let Completion {
+            user_data,
+            result,
+            iobuf: Some(IoBuf::Host(iobuf)),
+        } = async_io.next_completed_request().unwrap()
+        else {
+            panic!("No host iobuf");
+        };
         assert_eq!(user_data, 1);
         assert_eq!(result as usize, data.len());
+        let iobuf = iobuf.get_vecs();
+        assert_eq!(iobuf.len(), 1);
+        assert!(iobuf[0] == data);
     }
 
     #[test]
@@ -491,9 +518,14 @@ mod unit_tests {
 
         let mut async_io = disk.new_async_io(1).unwrap();
         async_io.punch_hole(offset, data.len() as u64, 100).unwrap();
-        let (user_data, result) = async_io.next_completed_request().unwrap();
+        let Completion {
+            user_data,
+            result,
+            iobuf,
+        } = async_io.next_completed_request().unwrap();
         assert_eq!(user_data, 100);
         assert_eq!(result, 0, "punch_hole should succeed");
+        assert!(iobuf.is_none());
         drop(async_io);
 
         let read_buf = async_read(&disk, offset, data.len());
@@ -513,9 +545,14 @@ mod unit_tests {
         async_io
             .write_zeroes(offset, data.len() as u64, 200)
             .unwrap();
-        let (user_data, result) = async_io.next_completed_request().unwrap();
+        let Completion {
+            user_data,
+            result,
+            iobuf,
+        } = async_io.next_completed_request().unwrap();
         assert_eq!(user_data, 200);
         assert_eq!(result, 0, "write_zeroes should succeed");
+        assert!(iobuf.is_none());
         drop(async_io);
 
         let read_buf = async_read(&disk, offset, data.len());
@@ -552,15 +589,19 @@ mod unit_tests {
         async_io.punch_hole(128 * 1024, 64 * 1024, 2).unwrap();
         async_io.punch_hole(256 * 1024, 64 * 1024, 3).unwrap();
 
-        let (ud, res) = async_io.next_completed_request().unwrap();
-        assert_eq!(ud, 1);
-        assert_eq!(res, 0);
-        let (ud, res) = async_io.next_completed_request().unwrap();
-        assert_eq!(ud, 2);
-        assert_eq!(res, 0);
-        let (ud, res) = async_io.next_completed_request().unwrap();
-        assert_eq!(ud, 3);
-        assert_eq!(res, 0);
+        let mut has_been_seen = [false; 3];
+        for _ in 0..3 {
+            let Completion {
+                user_data,
+                result,
+                iobuf,
+            } = async_io.next_completed_request().unwrap();
+            assert_eq!(result, 0);
+            assert!(iobuf.is_none());
+            let index = usize::try_from(user_data).unwrap() - 1;
+            assert!(!has_been_seen[index]);
+            has_been_seen[index] = true;
+        }
         assert!(async_io.next_completed_request().is_none());
     }
 
@@ -575,9 +616,14 @@ mod unit_tests {
         async_io1
             .punch_hole(offset, data.len() as u64, 100)
             .unwrap();
-        let (user_data, result) = async_io1.next_completed_request().unwrap();
+        let Completion {
+            user_data,
+            result,
+            iobuf,
+        } = async_io1.next_completed_request().unwrap();
         assert_eq!(user_data, 100);
-        assert_eq!(result, 0);
+        assert_eq!(result, 0, "punch_hole should succeed");
+        assert!(iobuf.is_none());
         drop(async_io1);
 
         // Read via second async_io, should see zeros
@@ -598,9 +644,14 @@ mod unit_tests {
         // Punch hole to simulate DISCARD
         let mut async_io1 = disk.new_async_io(1).unwrap();
         async_io1.punch_hole(offset, data.len() as u64, 1).unwrap();
-        let (user_data, result) = async_io1.next_completed_request().unwrap();
+        let Completion {
+            user_data,
+            result,
+            iobuf,
+        } = async_io1.next_completed_request().unwrap();
         assert_eq!(user_data, 1);
         assert_eq!(result, 0, "punch_hole should succeed");
+        assert!(iobuf.is_none());
         drop(async_io1);
 
         // Read from the same location to verify
@@ -621,9 +672,14 @@ mod unit_tests {
 
         let mut async_io = disk.new_async_io(1).unwrap();
         async_io.fsync(Some(10)).unwrap();
-        let (ud, res) = async_io.next_completed_request().unwrap();
-        assert_eq!(ud, 10);
-        assert_eq!(res, 0);
+        let Completion {
+            user_data,
+            result,
+            iobuf,
+        } = async_io.next_completed_request().unwrap();
+        assert_eq!(user_data, 10);
+        assert_eq!(result, 0);
+        assert!(iobuf.is_none());
         drop(async_io);
 
         let read_buf = async_read(&disk, offset, data.len());
@@ -1372,9 +1428,14 @@ mod unit_tests {
         {
             let mut async_io = disk.new_async_io(1).unwrap();
             async_io.punch_hole(0, cluster_size, 42).unwrap();
-            let (ud, res) = async_io.next_completed_request().unwrap();
-            assert_eq!(ud, 42);
-            assert_eq!(res, 0);
+            let Completion {
+                user_data,
+                result,
+                iobuf,
+            } = async_io.next_completed_request().unwrap();
+            assert_eq!(user_data, 42);
+            assert_eq!(result, 0);
+            assert!(iobuf.is_none());
         }
 
         // Now read should return backing data, not zeros
@@ -1530,9 +1591,14 @@ mod unit_tests {
         {
             let mut aio = disk.new_async_io(1).unwrap();
             aio.punch_hole(punch_offset, punch_len, 10).unwrap();
-            let (ud, res) = aio.next_completed_request().unwrap();
-            assert_eq!(ud, 10);
-            assert_eq!(res, 0);
+            let Completion {
+                user_data,
+                result,
+                iobuf,
+            } = aio.next_completed_request().unwrap();
+            assert_eq!(user_data, 10);
+            assert_eq!(result, 0);
+            assert!(iobuf.is_none());
         }
 
         let buf = async_read(&disk, 0, 2 * cluster_size as usize);
@@ -1646,54 +1712,41 @@ mod unit_tests {
         let a = vec![0xAAu8; 16 * 1024];
         let b = vec![0xBBu8; 32 * 1024];
         let c = vec![0xCCu8; 16 * 1024];
-        let iovecs_w = [
-            libc::iovec {
-                iov_base: a.as_ptr() as *mut libc::c_void,
-                iov_len: a.len(),
-            },
-            libc::iovec {
-                iov_base: b.as_ptr() as *mut libc::c_void,
-                iov_len: b.len(),
-            },
-            libc::iovec {
-                iov_base: c.as_ptr() as *mut libc::c_void,
-                iov_len: c.len(),
-            },
-        ];
         let total = a.len() + b.len() + c.len();
+        let iovecs_r = vec![a.clone(), b.clone(), c.clone()];
 
         let mut aio = disk.new_async_io(1).unwrap();
-        aio.write_vectored(0, &iovecs_w, 1).unwrap();
-        let (ud, res) = aio.next_completed_request().unwrap();
-        assert_eq!(ud, 1);
-        assert_eq!(res as usize, total);
+        aio.write_vectored(0, IoBuf::Host(HostIovecs::new(iovecs_r)), 1)
+            .unwrap();
+
+        let Completion {
+            user_data,
+            result,
+            iobuf,
+        } = aio.next_completed_request().unwrap();
+        assert_eq!(user_data, 1);
+        assert_eq!(result as usize, total);
+        assert!(iobuf.is_none());
         aio.fsync(Some(2)).unwrap();
         drop(aio);
 
         // Read back into 3 iovecs of different sizes
-        let mut r1 = vec![0u8; 8 * 1024];
-        let mut r2 = vec![0u8; 48 * 1024];
-        let mut r3 = vec![0u8; 8 * 1024];
-        let iovecs_r = [
-            libc::iovec {
-                iov_base: r1.as_mut_ptr() as *mut libc::c_void,
-                iov_len: r1.len(),
-            },
-            libc::iovec {
-                iov_base: r2.as_mut_ptr() as *mut libc::c_void,
-                iov_len: r2.len(),
-            },
-            libc::iovec {
-                iov_base: r3.as_mut_ptr() as *mut libc::c_void,
-                iov_len: r3.len(),
-            },
-        ];
+        let r1 = vec![0u8; 8 * 1024];
+        let r2 = vec![0u8; 48 * 1024];
+        let r3 = vec![0u8; 8 * 1024];
+        let iovecs_r = vec![r1.clone(), r2.clone(), r3.clone()];
 
         let mut aio = disk.new_async_io(1).unwrap();
-        aio.read_vectored(0, &iovecs_r, 10).unwrap();
-        let (ud, res) = aio.next_completed_request().unwrap();
-        assert_eq!(ud, 10);
-        assert_eq!(res as usize, total);
+        aio.read_vectored(0, IoBuf::Host(HostIovecs::new(iovecs_r)), 10)
+            .unwrap();
+        let Completion {
+            user_data,
+            result,
+            iobuf,
+        } = aio.next_completed_request().unwrap();
+        assert_eq!(user_data, 10);
+        assert_eq!(result as usize, total);
+        assert!(iobuf.is_none());
         drop(aio);
 
         // Reassemble the read buffers into a flat vec
