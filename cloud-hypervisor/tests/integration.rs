@@ -7518,37 +7518,19 @@ mod windows {
             ))
         }
 
-        fn wait_for_boot(&self) -> bool {
-            let cmd = "dir /b c:\\ | find \"Windows\"";
-            let tmo_max = 180;
-            // The timeout increase by n*1+n*2+n*3+..., therefore the initial
-            // interval must be small.
-            let tmo_int = 2;
-            let out = ssh_command_ip_with_auth_retry(
-                cmd,
+        fn wait_for_boot(&self) -> Result<(), WaitForSshError> {
+            let out = wait_for_ssh(
+                "dir /b c:\\ | find \"Windows\"",
                 &self.auth,
                 &self.guest.network.guest_ip0,
-                {
-                    let mut ret = 1;
-                    let mut tmo_acc = 0;
-                    loop {
-                        tmo_acc += tmo_int * ret;
-                        if tmo_acc >= tmo_max {
-                            break;
-                        }
-                        ret += 1;
-                    }
-                    ret
-                },
-                tmo_int,
-            )
-            .unwrap();
+                Duration::from_secs(180),
+            )?;
 
-            if "Windows" == out.trim() {
-                return true;
+            if out.trim() == "Windows" {
+                Ok(())
+            } else {
+                panic!("Unexpected Windows boot probe output: {:?}", out.trim());
             }
-
-            false
         }
     }
 
@@ -7617,7 +7599,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Wait to make sure Windows boots up
-            assert!(windows_guest.wait_for_boot());
+            windows_guest.wait_for_boot().unwrap();
 
             windows_guest.shutdown();
         });
@@ -7682,7 +7664,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Wait to make sure Windows boots up
-            assert!(windows_guest.wait_for_boot());
+            windows_guest.wait_for_boot().unwrap();
 
             windows_guest.shutdown();
         });
@@ -7733,7 +7715,7 @@ mod windows {
         let mut child_dnsmasq = windows_guest.run_dnsmasq();
 
         // Wait to make sure Windows boots up
-        assert!(windows_guest.wait_for_boot());
+        windows_guest.wait_for_boot().unwrap();
 
         let snapshot_dir = temp_snapshot_dir_path(&tmp_dir);
 
@@ -7747,8 +7729,11 @@ mod windows {
             Some(format!("file://{snapshot_dir}").as_str()),
         ));
 
-        // Wait to make sure the snapshot is completed
-        thread::sleep(std::time::Duration::new(30, 0));
+        let snapshot_state_path = std::path::Path::new(&snapshot_dir).join("state.json");
+        let snapshot_config_path = std::path::Path::new(&snapshot_dir).join("config.json");
+        assert!(wait_until(Duration::from_secs(30), || {
+            snapshot_state_path.exists() && snapshot_config_path.exists()
+        }));
 
         let _ = child.kill();
         child.wait().unwrap();
@@ -7767,10 +7752,17 @@ mod windows {
             .unwrap();
 
         // Wait for the VM to be restored
-        thread::sleep(std::time::Duration::new(20, 0));
+        assert!(wait_until(Duration::from_secs(30), || {
+            remote_command(&api_socket_restored, "info", None)
+        }));
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
             assert!(remote_command(&api_socket_restored, "resume", None));
 
             windows_guest.shutdown();
@@ -7816,7 +7808,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Wait to make sure Windows boots up
-            assert!(windows_guest.wait_for_boot());
+            windows_guest.wait_for_boot().unwrap();
 
             let vcpu_num = 2;
             // Check the initial number of CPUs the guest sees
@@ -7827,8 +7819,10 @@ mod windows {
             let vcpu_num = 6;
             // Hotplug some CPUs
             resize_command(&api_socket, Some(vcpu_num), None, None, None);
-            // Wait to make sure CPUs are added
-            thread::sleep(std::time::Duration::new(10, 0));
+            // Wait for Windows to report the hotplugged CPUs.
+            assert!(wait_until(Duration::from_secs(10), || windows_guest
+                .cpu_count()
+                == vcpu_num));
             // Check the guest sees the correct number
             assert_eq!(windows_guest.cpu_count(), vcpu_num);
             // Check the CH process has the correct number of vcpu threads
@@ -7837,12 +7831,16 @@ mod windows {
             let vcpu_num = 4;
             // Remove some CPUs. Note that Windows doesn't support hot-remove.
             resize_command(&api_socket, Some(vcpu_num), None, None, None);
-            // Wait to make sure CPUs are removed
             thread::sleep(std::time::Duration::new(10, 0));
+
             // Reboot to let Windows catch up
             windows_guest.reboot();
-            // Wait to make sure Windows completely rebooted
-            thread::sleep(std::time::Duration::new(60, 0));
+            // Wait for Windows to come back after the reboot.
+            windows_guest.wait_for_boot().unwrap();
+            // Wait for Windows to reflect the unplugged CPU count.
+            assert!(wait_until(Duration::from_secs(60), || windows_guest
+                .cpu_count()
+                == vcpu_num));
             // Check the guest sees the correct number
             assert_eq!(windows_guest.cpu_count(), vcpu_num);
             // Check the CH process has the correct number of vcpu threads
@@ -7891,7 +7889,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Wait to make sure Windows boots up
-            assert!(windows_guest.wait_for_boot());
+            windows_guest.wait_for_boot().unwrap();
 
             let ram_size = 2 * 1024 * 1024 * 1024;
             // Check the initial number of RAM the guest sees
@@ -7906,20 +7904,22 @@ mod windows {
             let ram_size = 4 * 1024 * 1024 * 1024;
             // Hotplug some RAM
             resize_command(&api_socket, None, Some(ram_size), None, None);
-            // Wait to make sure RAM has been added
-            thread::sleep(std::time::Duration::new(10, 0));
-            // Check the guest sees the correct number
-            assert_eq!(windows_guest.ram_size(), ram_size - reserved_ram_size);
+            // Wait for Windows to report the hotplugged memory.
+            assert!(wait_until(Duration::from_secs(10), || windows_guest
+                .ram_size()
+                == ram_size - reserved_ram_size));
 
             let ram_size = 3 * 1024 * 1024 * 1024;
             // Unplug some RAM. Note that hot-remove most likely won't work.
             resize_command(&api_socket, None, Some(ram_size), None, None);
-            // Wait to make sure RAM has been added
-            thread::sleep(std::time::Duration::new(10, 0));
             // Reboot to let Windows catch up
             windows_guest.reboot();
-            // Wait to make sure guest completely rebooted
-            thread::sleep(std::time::Duration::new(60, 0));
+            // Wait for Windows to come back after the reboot.
+            windows_guest.wait_for_boot().unwrap();
+            // Wait for Windows to reflect the unplugged RAM amount.
+            assert!(wait_until(Duration::from_secs(60), || windows_guest
+                .ram_size()
+                == ram_size - reserved_ram_size));
             // Check the guest sees the correct number
             assert_eq!(windows_guest.ram_size(), ram_size - reserved_ram_size);
 
@@ -7965,7 +7965,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Wait to make sure Windows boots up
-            assert!(windows_guest.wait_for_boot());
+            windows_guest.wait_for_boot().unwrap();
 
             // Initially present network device
             let netdev_num = 1;
@@ -7980,7 +7980,11 @@ mod windows {
             );
             assert!(cmd_success);
             assert!(String::from_utf8_lossy(&cmd_output).contains("\"id\":\"_net2\""));
-            thread::sleep(std::time::Duration::new(5, 0));
+            // Wait for Windows to enumerate the added network device.
+            assert!(wait_until(Duration::from_secs(5), || windows_guest
+                .netdev_count()
+                == 2
+                && netdev_ctrl_threads_count(child.id()) == 2));
             // Verify the device  is on the system
             let netdev_num = 2;
             assert_eq!(windows_guest.netdev_count(), netdev_num);
@@ -7989,7 +7993,11 @@ mod windows {
             // Remove network device
             let cmd_success = remote_command(&api_socket, "remove-device", Some("_net2"));
             assert!(cmd_success);
-            thread::sleep(std::time::Duration::new(5, 0));
+            // Wait for Windows to drop the removed network device.
+            assert!(wait_until(Duration::from_secs(5), || windows_guest
+                .netdev_count()
+                == 1
+                && netdev_ctrl_threads_count(child.id()) == 1));
             // Verify the device has been removed
             let netdev_num = 1;
             assert_eq!(windows_guest.netdev_count(), netdev_num);
@@ -8041,7 +8049,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Wait to make sure Windows boots up
-            assert!(windows_guest.wait_for_boot());
+            windows_guest.wait_for_boot().unwrap();
 
             // Initially present disk device
             let disk_num = 1;
@@ -8056,10 +8064,14 @@ mod windows {
             );
             assert!(cmd_success);
             assert!(String::from_utf8_lossy(&cmd_output).contains("\"id\":\"_disk2\""));
-            thread::sleep(std::time::Duration::new(5, 0));
             // Online disk device
             windows_guest.disks_set_rw();
             windows_guest.disks_online();
+            // Wait for Windows to enumerate the added disk.
+            assert!(wait_until(Duration::from_secs(5), || windows_guest
+                .disk_count()
+                == 2
+                && disk_ctrl_threads_count(child.id()) == 2));
             // Verify the device is on the system
             let disk_num = 2;
             assert_eq!(windows_guest.disk_count(), disk_num);
@@ -8072,7 +8084,11 @@ mod windows {
             // Unmount disk device
             let cmd_success = remote_command(&api_socket, "remove-device", Some("_disk2"));
             assert!(cmd_success);
-            thread::sleep(std::time::Duration::new(5, 0));
+            // Wait for Windows to drop the removed disk.
+            assert!(wait_until(Duration::from_secs(5), || windows_guest
+                .disk_count()
+                == 1
+                && disk_ctrl_threads_count(child.id()) == 1));
             // Verify the device has been removed
             let disk_num = 1;
             assert_eq!(windows_guest.disk_count(), disk_num);
@@ -8085,7 +8101,11 @@ mod windows {
                 Some(format!("path={disk},readonly=off").as_str()),
             );
             assert!(cmd_success);
-            thread::sleep(std::time::Duration::new(5, 0));
+            // Wait for Windows to mount the re-added disk again.
+            assert!(wait_until(Duration::from_secs(5), || windows_guest
+                .disk_file_read(fname)
+                .trim()
+                == data));
             let out = windows_guest.disk_file_read(fname);
             assert_eq!(data, out.trim());
 
@@ -8151,7 +8171,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Wait to make sure Windows boots up
-            assert!(windows_guest.wait_for_boot());
+            windows_guest.wait_for_boot().unwrap();
 
             // Initially present disk device
             let disk_num = 1;
@@ -8161,6 +8181,10 @@ mod windows {
             for it in &disk_test_data {
                 let disk_id = it[0].as_str();
                 let disk = it[1].as_str();
+
+                let expected_disk_num = windows_guest.disk_count() + 1;
+                let expected_ctrl_threads = disk_ctrl_threads_count(child.id()) + 1;
+
                 // Hotplug disk device
                 let (cmd_success, cmd_output) = remote_command_w_output(
                     &api_socket,
@@ -8172,7 +8196,13 @@ mod windows {
                     String::from_utf8_lossy(&cmd_output)
                         .contains(format!("\"id\":\"{disk_id}\"").as_str())
                 );
-                thread::sleep(std::time::Duration::new(5, 0));
+
+                // Wait for disk to appear
+                assert!(wait_until(Duration::from_secs(5), || {
+                    windows_guest.disk_count() == expected_disk_num
+                        && disk_ctrl_threads_count(child.id()) == expected_ctrl_threads
+                }));
+
                 // Online disk devices
                 windows_guest.disks_set_rw();
                 windows_guest.disks_online();
@@ -8194,9 +8224,13 @@ mod windows {
                 let disk_id = it[0].as_str();
                 let cmd_success = remote_command(&api_socket, "remove-device", Some(disk_id));
                 assert!(cmd_success);
-                thread::sleep(std::time::Duration::new(5, 0));
             }
 
+            // Wait for Windows to drop all removed disks.
+            assert!(wait_until(Duration::from_secs(5), || windows_guest
+                .disk_count()
+                == 1
+                && disk_ctrl_threads_count(child.id()) == 1));
             // Verify the devices have been removed
             let disk_num = 1;
             assert_eq!(windows_guest.disk_count(), disk_num);
@@ -8211,9 +8245,12 @@ mod windows {
                     Some(format!("path={disk},readonly=off").as_str()),
                 );
                 assert!(cmd_success);
-                thread::sleep(std::time::Duration::new(5, 0));
             }
 
+            // Wait for Windows to enumerate the re-added disks.
+            assert!(wait_until(Duration::from_secs(5), || {
+                windows_guest.disk_count() == 4 && disk_ctrl_threads_count(child.id()) == 4
+            }));
             // Check the files exists with the expected contents
             for it in &disk_test_data {
                 let fname = it[2].as_str();
@@ -8273,7 +8310,7 @@ mod windows {
 
         let r = std::panic::catch_unwind(|| {
             // Wait to make sure Windows boots up
-            assert!(windows_guest.wait_for_boot());
+            windows_guest.wait_for_boot().unwrap();
 
             let netdev_num = 3;
             assert_eq!(windows_guest.netdev_count(), netdev_num);
