@@ -14,6 +14,7 @@ inherits = "release"
 strip = false
 
 [workspace]
+exclude = ["vhost_user_block"]
 members = [
   "api_client",
   "arch",
@@ -30,7 +31,6 @@ members = [
   "serial_buffer",
   "test_infra",
   "tracer",
-  "vhost_user_block",
   "vhost_user_net",
   "virtio-devices",
   "vm-allocator",
