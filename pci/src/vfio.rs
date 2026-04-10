@@ -157,11 +157,14 @@ impl VfioMsix {
 
         // Update "Message Control" word
         if offset == 2 && data.len() == 2 {
-            self.bar.set_msg_ctl(LittleEndian::read_u16(data));
+            let data = LittleEndian::read_u16(data);
+            self.bar.set_msg_ctl(data);
+            self.cap.set_msg_ctl(data);
         } else if offset == 0 && data.len() == 4 {
             // Some guests update MSI-X control through the dword config write path.
-            self.bar
-                .set_msg_ctl((LittleEndian::read_u32(data) >> 16) as u16);
+            let data = (LittleEndian::read_u32(data) >> 16) as u16;
+            self.bar.set_msg_ctl(data);
+            self.cap.set_msg_ctl(data);
         }
 
         let new_enabled = self.bar.enabled();
