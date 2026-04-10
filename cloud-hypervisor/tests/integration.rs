@@ -282,17 +282,25 @@ mod common_parallel {
             guest.enable_memory_hotplug();
 
             resize_zone_command(&api_socket, "mem0", "3G");
-            thread::sleep(std::time::Duration::new(5, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 4_800_000);
+            assert!(wait_until(Duration::from_secs(5), || guest
+                .get_total_memory()
+                .unwrap_or_default()
+                > 4_800_000));
             resize_zone_command(&api_socket, "mem2", "3G");
-            thread::sleep(std::time::Duration::new(5, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 6_720_000);
+            assert!(wait_until(Duration::from_secs(5), || guest
+                .get_total_memory()
+                .unwrap_or_default()
+                > 6_720_000));
             resize_zone_command(&api_socket, "mem0", "2G");
-            thread::sleep(std::time::Duration::new(5, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
+            assert!(wait_until(Duration::from_secs(5), || guest
+                .get_total_memory()
+                .unwrap_or_default()
+                > 5_760_000));
             resize_zone_command(&api_socket, "mem2", "2G");
-            thread::sleep(std::time::Duration::new(5, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 4_800_000);
+            assert!(wait_until(Duration::from_secs(5), || guest
+                .get_total_memory()
+                .unwrap_or_default()
+                > 4_800_000));
 
             guest.reboot_linux(0);
 
@@ -302,11 +310,15 @@ mod common_parallel {
 
             // Check if we can still resize down to the initial 'boot'size
             resize_zone_command(&api_socket, "mem0", "1G");
-            thread::sleep(std::time::Duration::new(5, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() < 4_800_000);
+            assert!(wait_until(Duration::from_secs(5), || guest
+                .get_total_memory()
+                .unwrap_or_default()
+                < 4_800_000));
             resize_zone_command(&api_socket, "mem2", "1G");
-            thread::sleep(std::time::Duration::new(5, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() < 3_840_000);
+            assert!(wait_until(Duration::from_secs(5), || guest
+                .get_total_memory()
+                .unwrap_or_default()
+                < 3_840_000));
         });
 
         kill_child(&mut child);
@@ -2332,11 +2344,28 @@ mod common_parallel {
             .spawn()
             .unwrap();
 
-        thread::sleep(std::time::Duration::new(30, 0));
+        guest.wait_for_ssh(Duration::from_secs(30)).unwrap();
 
         let r = std::panic::catch_unwind(|| {
             guest.ssh_command_l1("sudo systemctl start vfio").unwrap();
-            thread::sleep(std::time::Duration::new(120, 0));
+            let auth = PasswordAuth {
+                username: String::from("cloud"),
+                password: String::from("cloud123"),
+            };
+            wait_for_ssh(
+                "true",
+                &auth,
+                &guest.network.l2_guest_ip1,
+                Duration::from_secs(120),
+            )
+            .unwrap();
+            wait_for_ssh(
+                "true",
+                &auth,
+                &guest.network.l2_guest_ip2,
+                Duration::from_secs(120),
+            )
+            .unwrap();
 
             // We booted our cloud hypervisor L2 guest with a "VFIOTAG" tag
             // added to its kernel command line.
@@ -2395,7 +2424,18 @@ mod common_parallel {
                 1
             ));
 
-            thread::sleep(std::time::Duration::new(10, 0));
+            wait_for_ssh(
+                "true",
+                &auth,
+                &guest.network.l2_guest_ip3,
+                Duration::from_secs(10),
+            )
+            .unwrap();
+            assert!(wait_until(Duration::from_secs(10), || {
+                guest
+                    .ssh_command_l2_1("ls /sys/bus/pci/devices")
+                    .is_ok_and(|output| check_lines_count(output.trim(), 9))
+            }));
 
             // Let's also verify from the third virtio-net device passed to
             // the L2 VM. This third device has been hotplugged through the L2
@@ -2427,7 +2467,11 @@ mod common_parallel {
                  remove-device vfio123",
                 )
                 .unwrap();
-            thread::sleep(std::time::Duration::new(10, 0));
+            assert!(wait_until(Duration::from_secs(10), || {
+                guest
+                    .ssh_command_l2_1("ls /sys/bus/pci/devices")
+                    .is_ok_and(|output| check_lines_count(output.trim(), 8))
+            }));
 
             // Check the amount of PCI devices appearing in L2 VM is back down
             // to 8 devices.
@@ -2596,11 +2640,9 @@ mod common_parallel {
             guest
                 .ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu3/online")
                 .unwrap();
-            thread::sleep(std::time::Duration::new(10, 0));
-            assert_eq!(
-                guest.get_cpu_count().unwrap_or_default(),
-                u32::from(desired_vcpus)
-            );
+            assert!(wait_until(Duration::from_secs(10), || {
+                guest.get_cpu_count().unwrap_or_default() == u32::from(desired_vcpus)
+            }));
 
             guest.reboot_linux(0);
 
@@ -2613,11 +2655,9 @@ mod common_parallel {
             let desired_vcpus = 2;
             resize_command(&api_socket, Some(desired_vcpus), None, None, None);
 
-            thread::sleep(std::time::Duration::new(10, 0));
-            assert_eq!(
-                guest.get_cpu_count().unwrap_or_default(),
-                u32::from(desired_vcpus)
-            );
+            assert!(wait_until(Duration::from_secs(10), || {
+                guest.get_cpu_count().unwrap_or_default() == u32::from(desired_vcpus)
+            }));
 
             // Resize the VM back up to 4
             let desired_vcpus = 4;
@@ -2629,11 +2669,9 @@ mod common_parallel {
             guest
                 .ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu3/online")
                 .unwrap();
-            thread::sleep(std::time::Duration::new(10, 0));
-            assert_eq!(
-                guest.get_cpu_count().unwrap_or_default(),
-                u32::from(desired_vcpus)
-            );
+            assert!(wait_until(Duration::from_secs(10), || {
+                guest.get_cpu_count().unwrap_or_default() == u32::from(desired_vcpus)
+            }));
         });
 
         kill_child(&mut child);
@@ -2681,16 +2719,18 @@ mod common_parallel {
             let desired_ram = 1024 << 20;
             resize_command(&api_socket, None, Some(desired_ram), None, None);
 
-            thread::sleep(std::time::Duration::new(10, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
+            assert!(wait_until(Duration::from_secs(10), || {
+                guest.get_total_memory().unwrap_or_default() > 960_000
+            }));
 
             // Use balloon to remove RAM from the VM
             let desired_balloon = 512 << 20;
             resize_command(&api_socket, None, None, Some(desired_balloon), None);
 
-            thread::sleep(std::time::Duration::new(10, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-            assert!(guest.get_total_memory().unwrap_or_default() < 960_000);
+            assert!(wait_until(Duration::from_secs(10), || {
+                let total_memory = guest.get_total_memory().unwrap_or_default();
+                total_memory > 480_000 && total_memory < 960_000
+            }));
 
             guest.reboot_linux(0);
 
@@ -2700,9 +2740,9 @@ mod common_parallel {
             let desired_balloon = 0;
             resize_command(&api_socket, None, None, Some(desired_balloon), None);
 
-            thread::sleep(std::time::Duration::new(10, 0));
-
-            assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
+            assert!(wait_until(Duration::from_secs(10), || {
+                guest.get_total_memory().unwrap_or_default() > 960_000
+            }));
 
             guest.enable_memory_hotplug();
 
@@ -2710,8 +2750,9 @@ mod common_parallel {
             let desired_ram = 2048 << 20;
             resize_command(&api_socket, None, Some(desired_ram), None, None);
 
-            thread::sleep(std::time::Duration::new(10, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 1_920_000);
+            assert!(wait_until(Duration::from_secs(10), || {
+                guest.get_total_memory().unwrap_or_default() > 1_920_000
+            }));
 
             // Remove RAM to the VM (only applies after reboot)
             let desired_ram = 1024 << 20;
@@ -2764,23 +2805,26 @@ mod common_parallel {
             let desired_ram = 1024 << 20;
             resize_command(&api_socket, None, Some(desired_ram), None, None);
 
-            thread::sleep(std::time::Duration::new(10, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
+            assert!(wait_until(Duration::from_secs(10), || {
+                guest.get_total_memory().unwrap_or_default() > 960_000
+            }));
 
             // Add RAM to the VM
             let desired_ram = 2048 << 20;
             resize_command(&api_socket, None, Some(desired_ram), None, None);
 
-            thread::sleep(std::time::Duration::new(10, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 1_920_000);
+            assert!(wait_until(Duration::from_secs(10), || {
+                guest.get_total_memory().unwrap_or_default() > 1_920_000
+            }));
 
             // Remove RAM from the VM
             let desired_ram = 1024 << 20;
             resize_command(&api_socket, None, Some(desired_ram), None, None);
 
-            thread::sleep(std::time::Duration::new(10, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
-            assert!(guest.get_total_memory().unwrap_or_default() < 1_920_000);
+            assert!(wait_until(Duration::from_secs(10), || {
+                let total_memory = guest.get_total_memory().unwrap_or_default();
+                total_memory > 960_000 && total_memory < 1_920_000
+            }));
 
             guest.reboot_linux(0);
 
@@ -2791,9 +2835,10 @@ mod common_parallel {
             // Check we can still resize to 512MiB
             let desired_ram = 512 << 20;
             resize_command(&api_socket, None, Some(desired_ram), None, None);
-            thread::sleep(std::time::Duration::new(10, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 480_000);
-            assert!(guest.get_total_memory().unwrap_or_default() < 960_000);
+            assert!(wait_until(Duration::from_secs(10), || {
+                let total_memory = guest.get_total_memory().unwrap_or_default();
+                total_memory > 480_000 && total_memory < 960_000
+            }));
         });
 
         kill_child(&mut child);
@@ -2849,11 +2894,9 @@ mod common_parallel {
             guest
                 .ssh_command("echo 1 | sudo tee /sys/bus/cpu/devices/cpu3/online")
                 .unwrap();
-            thread::sleep(std::time::Duration::new(10, 0));
-            assert_eq!(
-                guest.get_cpu_count().unwrap_or_default(),
-                u32::from(desired_vcpus)
-            );
+            assert!(wait_until(Duration::from_secs(10), || {
+                guest.get_cpu_count().unwrap_or_default() == u32::from(desired_vcpus)
+            }));
 
             assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
         });
@@ -4779,18 +4822,16 @@ mod common_parallel {
                 .unwrap();
             });
 
-            // Wait for 50 seconds to make sure the stress command is consuming
-            // the expected amount of memory.
-            thread::sleep(std::time::Duration::new(50, 0));
+            // Wait for guest memory consumption to reach the expected level.
+            assert!(wait_until(Duration::from_secs(60), || process_rss_kib(pid) >= 2097152));
             let rss = process_rss_kib(pid);
             println!("RSS {rss} >= 2097152");
             assert!(rss >= 2097152);
 
-            // Wait for an extra minute to make sure the stress command has
-            // completed and that the guest reported the free pages to the VMM
-            // through the virtio-balloon device. We expect the RSS to be under
-            // 2GiB.
-            thread::sleep(std::time::Duration::new(60, 0));
+            // Wait for stress to complete and free-page reporting to shrink RSS again.
+            assert!(wait_until(Duration::from_secs(120), || process_rss_kib(
+                pid
+            ) < 2097152));
             let rss = process_rss_kib(pid);
             println!("RSS {rss} < 2097152");
             assert!(rss < 2097152);
@@ -4914,18 +4955,12 @@ mod common_parallel {
 
             assert!(remote_command(&api_socket, "remove-device", Some("test0")));
 
-            thread::sleep(std::time::Duration::new(20, 0));
-
-            // Check device has gone away
-            assert_eq!(
+            // Wait for the pmem device to disappear from lsblk.
+            assert!(wait_until(Duration::from_secs(20), || {
                 guest
                     .ssh_command("lsblk | grep -c pmem0.*128M || true")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or(1),
-                0
-            );
+                    .is_ok_and(|output| output.trim().parse::<u32>().unwrap_or(1) == 0)
+            }));
 
             guest.reboot_linux(1);
 
@@ -5174,8 +5209,12 @@ mod common_parallel {
                 .unwrap();
             });
 
-            // Wait for the server to be listening
-            thread::sleep(std::time::Duration::new(5, 0));
+            guest1
+                .wait_for_ssh_command(
+                    "ss -ltnH | awk '{print $4}' | grep -q ':12345$'",
+                    Duration::from_secs(20),
+                )
+                .unwrap();
 
             // Check the connection fails this time
             guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap_err();
@@ -5196,8 +5235,10 @@ mod common_parallel {
                 Some(format!("file://{snapshot_dir}").as_str()),
             ));
 
-            // Wait to make sure the snapshot is completed
-            thread::sleep(std::time::Duration::new(10, 0));
+            // Wait for the source VM snapshot artifacts to be ready.
+            assert!(wait_until(Duration::from_secs(10), || {
+                std::path::Path::new(&snapshot_dir).exists()
+            }));
         });
 
         // Shutdown the source VM
@@ -5224,12 +5265,17 @@ mod common_parallel {
             .spawn()
             .unwrap();
 
-        // Wait for the VM to be restored
-        thread::sleep(std::time::Duration::new(10, 0));
+        // Wait for the restored VM to accept SSH again after resume.
 
         let r = std::panic::catch_unwind(|| {
             // Resume the VM
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
             assert!(remote_command(&api_socket_restored, "resume", None));
+            guest2.wait_for_ssh(Duration::from_secs(30)).unwrap();
 
             // Spawn a new netcat listener in the first VM
             let guest_ip = guest1.network.guest_ip0.clone();
@@ -5243,8 +5289,12 @@ mod common_parallel {
                 .unwrap();
             });
 
-            // Wait for the server to be listening
-            thread::sleep(std::time::Duration::new(5, 0));
+            guest1
+                .wait_for_ssh_command(
+                    "ss -ltnH | awk '{print $4}' | grep -q ':12345$'",
+                    Duration::from_secs(20),
+                )
+                .unwrap();
 
             // And check the connection is still functional after restore
             guest2.ssh_command("nc -vz 172.100.0.1 12345").unwrap();
@@ -5370,18 +5420,14 @@ mod common_parallel {
                     .contains("{\"id\":\"vfio_user0\",\"bdf\":\"0000:00:05.0\"}")
             );
 
-            thread::sleep(std::time::Duration::new(10, 0));
-
             // Check both if /dev/nvme exists and if the block size is 128M.
-            assert_eq!(
+            assert!(wait_until(Duration::from_secs(10), || {
                 guest
                     .ssh_command("lsblk | grep nvme0n1 | grep -c 128M")
-                    .unwrap()
-                    .trim()
-                    .parse::<u32>()
-                    .unwrap_or_default(),
-                1
-            );
+                    .ok()
+                    .and_then(|output| output.trim().parse::<u32>().ok())
+                    == Some(1)
+            }));
 
             // Check changes persist after reboot
             assert_eq!(
@@ -5528,7 +5574,9 @@ mod common_parallel {
 
         // Start swtpm daemon
         let mut swtpm_child = swtpm_command.spawn().unwrap();
-        thread::sleep(std::time::Duration::new(10, 0));
+        assert!(wait_until(Duration::from_secs(10), || {
+            std::path::Path::new(&swtpm_socket_path).exists()
+        }));
         let mut child = guest_cmd.spawn().unwrap();
         let r = std::panic::catch_unwind(|| {
             guest.wait_vm_boot().unwrap();
@@ -5634,17 +5682,13 @@ mod common_parallel {
 
             assert!(remote_command(&api_socket, "nmi", None));
 
-            // Wait a while for guest
-            thread::sleep(std::time::Duration::new(3, 0));
-
             let expected_sequential_events = [&MetaEvent {
                 event: "panic".to_string(),
                 device_id: None,
             }];
-            assert!(check_latest_events_exact(
-                &expected_sequential_events,
-                &event_path
-            ));
+            assert!(wait_until(Duration::from_secs(3), || {
+                check_latest_events_exact(&expected_sequential_events, &event_path)
+            }));
         });
 
         kill_child(&mut child);
@@ -8296,11 +8340,13 @@ mod vfio {
             // Add RAM to the VM
             let desired_ram = 6 << 30;
             resize_command(&api_socket, None, Some(desired_ram), None, None);
-            thread::sleep(std::time::Duration::new(30, 0));
+            assert!(wait_until(Duration::from_secs(5), || {
+                guest.get_total_memory().unwrap_or_default() > 5_760_000
+            }));
             assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
 
             // Check the VFIO device works when RAM is increased to 6GiB
-            guest.check_nvidia_gpu();
+            assert!(guest.check_nvidia_gpu());
         });
 
         let _ = child.kill();
@@ -8361,10 +8407,8 @@ mod vfio {
                     .contains("{\"id\":\"vfio0\",\"bdf\":\"0000:00:06.0\"}")
             );
 
-            thread::sleep(std::time::Duration::new(10, 0));
-
             // Check the VFIO device works after hotplug
-            guest.check_nvidia_gpu();
+            assert!(wait_until(Duration::from_secs(10), || guest.check_nvidia_gpu()));
         });
 
         let _ = child.kill();
@@ -8408,12 +8452,12 @@ mod vfio {
             guest.wait_vm_boot().unwrap();
 
             // Check the VFIO device works after boot
-            guest.check_nvidia_gpu();
+            assert!(guest.check_nvidia_gpu());
 
             guest.reboot_linux(0);
 
             // Check the VFIO device works after reboot
-            guest.check_nvidia_gpu();
+            assert!(guest.check_nvidia_gpu());
         });
 
         let _ = child.kill();
@@ -8841,7 +8885,9 @@ mod live_migration {
                     "remove-device",
                     Some(net_id),
                 ));
-                thread::sleep(std::time::Duration::new(10, 0));
+                assert!(wait_until(Duration::from_secs(10), || {
+                    guest.wait_for_ssh(Duration::from_secs(1)).is_err()
+                }));
 
                 // Plug the virtio-net device again
                 assert!(remote_command(
@@ -8849,7 +8895,7 @@ mod live_migration {
                     "add-net",
                     Some(net_params.as_str()),
                 ));
-                thread::sleep(std::time::Duration::new(10, 0));
+                guest.wait_for_ssh(Duration::from_secs(10)).unwrap();
             }
 
             // Start the live-migration
@@ -8993,11 +9039,16 @@ mod live_migration {
             assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
             // Increase the guest RAM
             resize_command(&src_api_socket, None, Some(6 << 30), None, None);
-            thread::sleep(std::time::Duration::new(5, 0));
+            assert!(wait_until(Duration::from_secs(30), || {
+                guest.get_total_memory().unwrap_or_default() > 5_760_000
+            }));
             assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
             // Use balloon to remove RAM from the VM
             resize_command(&src_api_socket, None, None, Some(1 << 30), None);
-            thread::sleep(std::time::Duration::new(5, 0));
+            assert!(wait_until(Duration::from_secs(5), || {
+                let total_memory = guest.get_total_memory().unwrap_or_default();
+                total_memory > 4_800_000 && total_memory < 5_760_000
+            }));
             let total_memory = guest.get_total_memory().unwrap_or_default();
             assert!(total_memory > 4_800_000);
             assert!(total_memory < 5_760_000);
@@ -9015,7 +9066,9 @@ mod live_migration {
                     "remove-device",
                     Some(net_id),
                 ));
-                thread::sleep(std::time::Duration::new(10, 0));
+                assert!(wait_until(Duration::from_secs(10), || {
+                    guest.wait_for_ssh(Duration::from_secs(1)).is_err()
+                }));
 
                 // Plug the virtio-net device again
                 assert!(remote_command(
@@ -9023,7 +9076,7 @@ mod live_migration {
                     "add-net",
                     Some(net_params.as_str()),
                 ));
-                thread::sleep(std::time::Duration::new(10, 0));
+                guest.wait_for_ssh(Duration::from_secs(10)).unwrap();
             }
 
             // Start the live-migration
@@ -9233,7 +9286,9 @@ mod live_migration {
                     "remove-device",
                     Some(net_id),
                 ));
-                thread::sleep(std::time::Duration::new(10, 0));
+                assert!(wait_until(Duration::from_secs(10), || {
+                    guest.wait_for_ssh(Duration::from_secs(1)).is_err()
+                }));
 
                 // Plug the virtio-net device again
                 assert!(remote_command(
@@ -9241,7 +9296,7 @@ mod live_migration {
                     "add-net",
                     Some(net_params.as_str()),
                 ));
-                thread::sleep(std::time::Duration::new(10, 0));
+                guest.wait_for_ssh(Duration::from_secs(10)).unwrap();
             }
 
             // Start the live-migration
@@ -9429,7 +9484,9 @@ mod live_migration {
                     "remove-device",
                     Some(net_id),
                 ));
-                thread::sleep(std::time::Duration::new(10, 0));
+                assert!(wait_until(Duration::from_secs(10), || {
+                    guest.wait_for_ssh(Duration::from_secs(1)).is_err()
+                }));
 
                 // Plug the virtio-net device again
                 assert!(remote_command(
@@ -9437,7 +9494,7 @@ mod live_migration {
                     "add-net",
                     Some(net_params.as_str()),
                 ));
-                thread::sleep(std::time::Duration::new(10, 0));
+                guest.wait_for_ssh(Duration::from_secs(10)).unwrap();
             }
 
             // Enable watchdog and ensure its functional
@@ -9938,14 +9995,16 @@ mod live_migration {
                     "remove-device",
                     Some(net_id),
                 ));
-                thread::sleep(Duration::new(10, 0));
+                assert!(wait_until(Duration::from_secs(10), || {
+                    guest.wait_for_ssh(Duration::from_secs(1)).is_err()
+                }));
                 // Re-add the virtio-net device
                 assert!(remote_command(
                     &src_api_socket,
                     "add-net",
                     Some(net_params.as_str()),
                 ));
-                thread::sleep(Duration::new(10, 0));
+                guest.wait_for_ssh(Duration::from_secs(10)).unwrap();
             }
             // Start TCP live migration
             assert!(

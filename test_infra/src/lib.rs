@@ -1439,19 +1439,25 @@ impl Guest {
     }
 
     #[cfg(target_arch = "x86_64")]
-    pub fn check_nvidia_gpu(&self) {
+    pub fn check_nvidia_gpu(&self) -> bool {
         let output = self.ssh_command("nvidia-smi").unwrap();
-        if !output.contains("NVIDIA L40S") {
-            let dmesg = self
-                .ssh_command("sudo dmesg")
-                .unwrap_or_else(|e| format!("Failed to get dmesg: {e:?}"));
-            eprintln!(
-                "\n\n==== Guest dmesg (nvidia-smi check failed) ====\n\n\
-                 {dmesg}\n\
-                 \n==== End guest dmesg ====\n\n"
-            );
-            panic!("nvidia-smi output did not contain 'NVIDIA L40S': {output}");
+
+        if output.contains("NVIDIA L40S") {
+            return true;
         }
+
+        let dmesg = self
+            .ssh_command("sudo dmesg")
+            .unwrap_or_else(|e| format!("Failed to get dmesg: {e:?}"));
+
+        eprintln!(
+            "\n\n==== Guest dmesg (nvidia-smi check failed) ====\n\n\
+         {dmesg}\n\
+         \n==== End guest dmesg ====\n\n"
+        );
+        eprintln!("nvidia-smi output did not contain 'NVIDIA L40S': {output}");
+
+        false
     }
 
     pub fn reboot_linux(&self, current_reboot_count: u32) {
