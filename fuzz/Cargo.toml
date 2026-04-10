@@ -21,7 +21,7 @@ block = { path = "../block" }
 devices = { path = "../devices" }
 epoll = "4.4.0"
 hypervisor = { path = "../hypervisor", features = ["mshv_emulator"] }
-libc = "0.2.183"
+libc = "0.2.184"
 libfuzzer-sys = "0.4.12"
 linux-loader = { version = "0.13.2", features = ["bzimage", "elf", "pe"] }
 micro_http = { git = "https://github.com/firecracker-microvm/micro-http", branch = "main" }
