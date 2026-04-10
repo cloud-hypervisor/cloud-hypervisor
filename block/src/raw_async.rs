@@ -252,6 +252,8 @@ impl AsyncIo for RawFileAsync {
         let mut submitted = false;
 
         for req in batch_request {
+            let iovecs = req.iobuf.iovecs();
+            let offset = req.offset;
             match req.request_type {
                 RequestType::In => {
                     // SAFETY: we know the file descriptor is valid and we
@@ -260,10 +262,10 @@ impl AsyncIo for RawFileAsync {
                         sq.push(
                             &opcode::Readv::new(
                                 types::Fd(self.fd),
-                                req.iovecs.as_ptr(),
-                                req.iovecs.len() as u32,
+                                iovecs.as_ptr(),
+                                iovecs.len() as u32,
                             )
-                            .offset(req.offset as u64)
+                            .offset(offset as u64)
                             .build()
                             .user_data(req.user_data),
                         )
@@ -280,10 +282,10 @@ impl AsyncIo for RawFileAsync {
                         sq.push(
                             &opcode::Writev::new(
                                 types::Fd(self.fd),
-                                req.iovecs.as_ptr(),
-                                req.iovecs.len() as u32,
+                                iovecs.as_ptr(),
+                                iovecs.len() as u32,
                             )
-                            .offset(req.offset as u64)
+                            .offset(offset as u64)
                             .build()
                             .user_data(req.user_data),
                         )

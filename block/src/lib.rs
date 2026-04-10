@@ -55,8 +55,8 @@ use libc::{
 };
 use log::{debug, info, warn};
 pub use request::{
-    AlignedOperation, BatchRequest, ExecuteAsync, MAX_DISCARD_WRITE_ZEROES_SEG, Request,
-    RequestType,
+    AlignedOperation, BatchRequest, ExecuteAsync, GuestIovecs, HostIovecs, IoBuf,
+    MAX_DISCARD_WRITE_ZEROES_SEG, Request, RequestType,
 };
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;

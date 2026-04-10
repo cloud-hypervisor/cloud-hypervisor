@@ -13,6 +13,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::mem;
 use std::time::Instant;
 
+use libc::iovec;
 use log::{error, warn};
 use smallvec::SmallVec;
 use virtio_bindings::virtio_blk::{
@@ -23,7 +24,7 @@ use virtio_queue::DescriptorChain;
 use vm_memory::bitmap::Bitmap;
 use vm_memory::{
     Address as _, Bytes as _, GuestAddress, GuestMemory as _, GuestMemoryError,
-    GuestMemoryLoadGuard,
+    GuestMemoryLoadGuard, GuestRegionCollection, GuestRegionMmap,
 };
 use vm_virtio::{AccessPlatform, Translatable as _};
 
@@ -63,10 +64,114 @@ pub enum RequestType {
 }
 
 pub const DEFAULT_DESCRIPTOR_VEC_SIZE: usize = 32;
+
+/// A vector of pointers to guest memory, along with a reference to the
+/// snapshot of the memory keeping them alove.
+pub struct GuestIovecs {
+    // DO NOT USE SMALLVEC HERE!!!!!!
+    //
+    // The io_uring code submits *pointers to arrays of iovec* to the kernel.
+    // Therefore, the pointers *must remain stable*.  This means they must be
+    // behind an indirection, rather than being stored inline in the HashMap.
+    // SmallVec stores the iovecs inline, so pointers to them become invalid
+    // when the iovec resizes.
+    //
+    // See https://github.com/tokio-rs/io-uring/issues/391#issuecomment-4241517187
+    // for the diagnosis.  This took two days to find.
+    iovecs: Vec<libc::iovec>,
+    // This only serves to keep the memory backing the pointers alive.
+    #[allow(dead_code)]
+    desc_chain: DescChain,
+}
+
+impl GuestIovecs {
+    /// Returns a reference to an iovec.
+    ///
+    /// The pointer this reference refers to is guaranteed to be behind
+    /// an indirection.  In other words, the iovecs will not move even if
+    /// this object is moved.  It is not safe to use the reference after
+    /// that, but it can be converted to a pointer first.
+    pub fn iovecs(&self) -> &[libc::iovec] {
+        &self.iovecs
+    }
+}
+
+// SAFETY: The DescChain keeps the iovec pointers valid.
+unsafe impl Send for GuestIovecs {}
+
+pub struct HostIovecs {
+    // This only keeps the pointers alive.
+    #[allow(dead_code)]
+    data: Vec<Vec<u8>>,
+    iovecs: Vec<iovec>,
+}
+
+impl HostIovecs {
+    pub fn new(mut data: Vec<Vec<u8>>) -> Self {
+        Self {
+            iovecs: data
+                .iter_mut()
+                .map(|v| iovec {
+                    iov_base: v.as_mut_ptr().cast(),
+                    iov_len: v.len(),
+                })
+                .collect(),
+            data,
+        }
+    }
+}
+
+// SAFETY: we own the pointers in the iovec
+unsafe impl Send for HostIovecs {}
+
+/// I/O buffer.
+pub enum IoBuf {
+    /// Data from the guest
+    Guest(GuestIovecs),
+    /// Data from the host
+    Host(HostIovecs),
+}
+
+impl From<HostIovecs> for IoBuf {
+    fn from(host: HostIovecs) -> Self {
+        Self::Host(host)
+    }
+}
+
+impl From<Vec<u8>> for IoBuf {
+    fn from(host: Vec<u8>) -> Self {
+        Self::Host(HostIovecs::new(vec![host]))
+    }
+}
+
+// SAFETY: we own the pointers in the iovec
+unsafe impl Send for IoBuf {}
+
+impl From<GuestIovecs> for IoBuf {
+    fn from(guest: GuestIovecs) -> Self {
+        Self::Guest(guest)
+    }
+}
+
+impl IoBuf {
+    /// Returns a reference to the iovecs.
+    ///
+    /// The pointer this reference refers to is guaranteed to be behind
+    /// an indirection.  In other words, the iovecs will not move even if
+    /// this object is moved.  It is not safe to use the reference after
+    /// that, but it can be converted to a pointer first.
+    pub fn iovecs(&self) -> &[iovec] {
+        match self {
+            Self::Guest(guest) => guest.iovecs(),
+            Self::Host(host) => &host.iovecs,
+        }
+    }
+}
+
 pub struct BatchRequest {
     pub offset: libc::off_t,
-    pub iovecs: SmallVec<[libc::iovec; DEFAULT_DESCRIPTOR_VEC_SIZE]>,
     pub user_data: u64,
+    pub iobuf: IoBuf,
     pub request_type: RequestType,
 }
 
@@ -77,22 +182,49 @@ pub struct ExecuteAsync {
     pub batch_request: Option<BatchRequest>,
 }
 
-#[derive(Debug)]
+type BackingBitmap = vm_memory::bitmap::AtomicBitmap;
+
+type DescChain = DescriptorChain<
+    GuestMemoryLoadGuard<
+        vm_memory::GuestRegionCollection<vm_memory::GuestRegionMmap<BackingBitmap>>,
+    >,
+>;
+
 pub struct Request {
     pub request_type: RequestType,
     pub sector: u64,
     pub data_descriptors: SmallVec<[(GuestAddress, u32); DEFAULT_DESCRIPTOR_VEC_SIZE]>,
     pub status_addr: GuestAddress,
     pub writeback: bool,
-    pub aligned_operations: SmallVec<[AlignedOperation; DEFAULT_DESCRIPTOR_VEC_SIZE]>,
+    aligned_operations: SmallVec<[AlignedOperation; DEFAULT_DESCRIPTOR_VEC_SIZE]>,
     pub start: Instant,
+    desc_chain: DescChain,
+}
+
+impl std::fmt::Debug for Request {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Request")
+            .field("request_type", &self.request_type)
+            .field("sector", &self.sector)
+            .field("data_descriptors", &self.data_descriptors)
+            .field("status_addr", &self.status_addr)
+            .field("writeback", &self.writeback)
+            .field("aligned_operations", &self.aligned_operations)
+            .field("start", &self.start)
+            .field("desc_chain", &self.desc_chain)
+            .finish()
+    }
 }
 
 impl Request {
-    pub fn parse<B: Bitmap + 'static>(
-        desc_chain: &mut DescriptorChain<GuestMemoryLoadGuard<vm_memory::GuestMemoryMmap<B>>>,
+    pub fn memory(&self) -> &GuestRegionCollection<GuestRegionMmap<BackingBitmap>> {
+        self.desc_chain.memory()
+    }
+
+    pub fn parse(
+        mut desc_chain: DescChain,
         access_platform: Option<&dyn AccessPlatform>,
-    ) -> Result<Request, Error> {
+    ) -> Result<Self, Error> {
         let hdr_desc = desc_chain
             .next()
             .ok_or(Error::DescriptorChainTooShort)
@@ -118,10 +250,12 @@ impl Request {
             writeback: true,
             aligned_operations: SmallVec::with_capacity(DEFAULT_DESCRIPTOR_VEC_SIZE),
             start: Instant::now(),
+            desc_chain,
         };
 
         let status_desc;
-        let mut desc = desc_chain
+        let mut desc = req
+            .desc_chain
             .next()
             .ok_or(Error::DescriptorChainTooShort)
             .inspect_err(|_| {
@@ -153,7 +287,8 @@ impl Request {
                         .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?,
                     desc.len(),
                 ));
-                desc = desc_chain
+                desc = req
+                    .desc_chain
                     .next()
                     .ok_or(Error::DescriptorChainTooShort)
                     .inspect_err(|_| {
@@ -187,16 +322,16 @@ impl Request {
         Ok(req)
     }
 
-    pub fn execute<T: Seek + Read + Write, B: Bitmap + 'static>(
+    pub fn execute<T: Seek + Read + Write>(
         &self,
         disk: &mut T,
         disk_nsectors: u64,
-        mem: &vm_memory::GuestMemoryMmap<B>,
         serial: &[u8],
     ) -> Result<u32, ExecuteError> {
         disk.seek(SeekFrom::Start(self.sector << SECTOR_SHIFT))
             .map_err(ExecuteError::Seek)?;
         let mut len = 0;
+        let mem = self.desc_chain.memory();
         for (data_addr, data_len) in &self.data_descriptors {
             let mut top: u64 = u64::from(*data_len) / SECTOR_SIZE;
             if u64::from(*data_len) % SECTOR_SIZE != 0 {
@@ -250,22 +385,20 @@ impl Request {
         Ok(len)
     }
 
-    pub fn execute_async<B: Bitmap + 'static>(
+    pub fn execute_async(
         &mut self,
-        mem: &vm_memory::GuestMemoryMmap<B>,
         disk_nsectors: u64,
         disk_image: &mut dyn AsyncIo,
         serial: &[u8],
         disable_sector0_writes: bool,
-        user_data: u64,
     ) -> Result<ExecuteAsync, ExecuteError> {
         let sector = self.sector;
-        let request_type = self.request_type;
         let offset = (sector << SECTOR_SHIFT) as libc::off_t;
         let alignment = disk_image.alignment();
+        let user_data = self.desc_chain.head_index() as u64;
+        let desc_chain = self.desc_chain.clone();
 
-        let mut iovecs: SmallVec<[libc::iovec; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
-            SmallVec::with_capacity(self.data_descriptors.len());
+        let mut iovecs = Vec::<iovec>::with_capacity(self.data_descriptors.len());
         for &(data_addr, data_len) in &self.data_descriptors {
             let _: u32 = data_len; // compiler-checked documentation
             const _: () = assert!(
@@ -287,7 +420,9 @@ impl Request {
                 return Err(ExecuteError::BadRequest(Error::InvalidOffset));
             }
 
-            let origin_ptr = mem
+            let origin_ptr = self
+                .desc_chain
+                .memory()
                 .get_slice(data_addr, data_len)
                 .map_err(ExecuteError::GetHostAddress)?;
             assert!(origin_ptr.len() >= data_len);
@@ -312,7 +447,7 @@ impl Request {
 
                 // We need to perform the copy beforehand in case we're writing
                 // data out.
-                if request_type == RequestType::Out {
+                if self.request_type == RequestType::Out {
                     // SAFETY: destination buffer has been allocated with
                     // the proper size.
                     unsafe { std::ptr::copy(origin_ptr.as_ptr(), aligned_ptr, data_len) };
@@ -341,8 +476,10 @@ impl Request {
             async_complete: true,
             batch_request: None,
         };
+        let request_type = self.request_type;
+        let mem = self.desc_chain.memory();
         // Queue operations expected to be submitted.
-        match request_type {
+        match self.request_type {
             RequestType::In => {
                 for (data_addr, data_len) in &self.data_descriptors {
                     mem.get_slice(*data_addr, *data_len as usize)
@@ -350,30 +487,40 @@ impl Request {
                         .bitmap()
                         .mark_dirty(0, *data_len as usize);
                 }
+                let batch_request = BatchRequest {
+                    offset,
+                    request_type,
+                    user_data,
+                    iobuf: IoBuf::Guest(GuestIovecs { iovecs, desc_chain }),
+                };
                 if disk_image.batch_requests_enabled() {
-                    ret.batch_request = Some(BatchRequest {
-                        offset,
-                        iovecs,
-                        user_data,
-                        request_type,
-                    });
+                    ret.batch_request = Some(batch_request);
                 } else {
                     disk_image
-                        .read_vectored(offset, &iovecs, user_data)
+                        .read_vectored(
+                            batch_request.offset,
+                            batch_request.iobuf.iovecs(),
+                            batch_request.user_data,
+                        )
                         .map_err(ExecuteError::AsyncRead)?;
                 }
             }
             RequestType::Out => {
+                let batch_request = BatchRequest {
+                    request_type,
+                    offset,
+                    user_data,
+                    iobuf: IoBuf::Guest(GuestIovecs { iovecs, desc_chain }),
+                };
                 if disk_image.batch_requests_enabled() {
-                    ret.batch_request = Some(BatchRequest {
-                        offset,
-                        iovecs,
-                        user_data,
-                        request_type,
-                    });
+                    ret.batch_request = Some(batch_request);
                 } else {
                     disk_image
-                        .write_vectored(offset, &iovecs, user_data)
+                        .write_vectored(
+                            batch_request.offset,
+                            batch_request.iobuf.iovecs(),
+                            batch_request.user_data,
+                        )
                         .map_err(ExecuteError::AsyncWrite)?;
                 }
             }
@@ -545,7 +692,9 @@ impl Request {
             // the aligned buffer in case we're reading data in.
             if self.request_type == RequestType::In {
                 // SAFETY: origin buffer has been allocated with the
-                // proper size.
+                // proper size. It is still alive because we hold
+                // the descriptor chain, which means that the backing
+                // memory is still present.
                 unsafe {
                     std::ptr::copy(
                         aligned_operation.aligned_ptr as *const u8,
