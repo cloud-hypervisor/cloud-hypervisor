@@ -360,7 +360,7 @@ impl Aml for PciSegment {
         pci_dsdt_inner_data.push(&adr);
         let seg = aml::Name::new("_SEG".into(), &self.id);
         pci_dsdt_inner_data.push(&seg);
-        let uid = aml::Name::new("_UID".into(), &aml::ZERO);
+        let uid = aml::Name::new("_UID".into(), &self.id);
         pci_dsdt_inner_data.push(&uid);
         let cca = aml::Name::new("_CCA".into(), &aml::ONE);
         pci_dsdt_inner_data.push(&cca);
