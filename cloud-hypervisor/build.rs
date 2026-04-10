@@ -19,8 +19,8 @@ fn main() {
     }
 
     // Append CH_EXTRA_VERSION to version if it is set.
+    println!("cargo:rerun-if-env-changed=CH_EXTRA_VERSION");
     if let Ok(extra_version) = env::var("CH_EXTRA_VERSION") {
-        println!("cargo:rerun-if-env-changed=CH_EXTRA_VERSION");
         version.push_str(&format!("-{extra_version}"));
     }
 
