@@ -5069,7 +5069,7 @@ mod common_parallel {
 
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=4"])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .default_disks()
             .args(["--net", guest.default_net_string().as_str()])
@@ -5117,7 +5117,7 @@ mod common_parallel {
 
         let mut cmd = GuestCommand::new(&guest);
         cmd.args(["--cpus", "boot=4"])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .default_disks()
             .args(["--net", guest.default_net_string().as_str()])
@@ -8420,7 +8420,7 @@ mod vfio {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args(["--platform", &platform_cfg(iommufd)])
             .args(["--api-socket", &api_socket])
@@ -8472,7 +8472,7 @@ mod vfio {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--platform", &platform_cfg(iommufd)])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args([
@@ -8526,7 +8526,7 @@ mod vfio {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", "boot=4"])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
             .args(["--device", format!("path={NVIDIA_VFIO_DEVICE}").as_str()])
             .args(["--platform", &platform])
@@ -10711,7 +10711,7 @@ mod rate_limiter {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("boot={}", num_queues / 2)])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .default_disks()
@@ -10787,7 +10787,7 @@ mod rate_limiter {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("boot={num_queues}")])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args([
@@ -10897,7 +10897,7 @@ mod rate_limiter {
 
         let mut child = GuestCommand::new(&guest)
             .args(["--cpus", &format!("boot={}", num_queues * num_disks)])
-            .args(["--memory", "size=4G"])
+            .args(["--memory", "size=1G"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
             .args(["--rate-limit-group", &rate_limit_group_arg])
