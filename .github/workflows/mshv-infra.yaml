@@ -94,7 +94,7 @@ jobs:
             fi
 
             remaining=$(az vm list-usage --location "$location" --query "[?name.value=='$family'] | [0]" -o json |
-                        jq '.limit + 0 - .currentValue >= $ARGS.positional[0]' --jsonargs "$vcpu")
+                        jq '(.limit | tonumber) - (.currentValue | tonumber) >= ($ARGS.positional[0] | tonumber)' --jsonargs "$vcpu")
             if [[ "$remaining" = true ]]; then
               echo "Sufficient quota found in $location"
               echo "location=$location" >> "$GITHUB_OUTPUT"
