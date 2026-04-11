@@ -8274,6 +8274,9 @@ mod vfio {
 
             assert!(guest.get_total_memory().unwrap_or_default() > 3_840_000);
 
+            // Verify the VFIO device works before memory hotplug
+            guest.check_nvidia_gpu();
+
             guest.enable_memory_hotplug();
 
             // Add RAM to the VM
@@ -8447,6 +8450,9 @@ mod vfio {
                     .unwrap()
                     .contains("input address: 42 bits")
             );
+
+            // Check the VFIO device works after boot
+            guest.check_nvidia_gpu();
         });
 
         let _ = child.kill();
