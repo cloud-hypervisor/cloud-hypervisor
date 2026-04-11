@@ -7638,7 +7638,7 @@ mod windows {
 
     #[test]
     #[cfg(not(feature = "mshv"))]
-    #[cfg_attr(target_arch = "aarch64", ignore = "See #4327")]
+    #[ignore = "See #4327 and #7994"]
     fn test_windows_guest_snapshot_restore() {
         let windows_guest = WindowsGuest::new();
 
