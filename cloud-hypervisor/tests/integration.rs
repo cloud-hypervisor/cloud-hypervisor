@@ -489,6 +489,20 @@ mod common_parallel {
                     .unwrap_or_default(),
                 TEST_DISK_NODE
             );
+
+            // Each PNP0A08 host bridge in the DSDT must expose a unique
+            // _UID matching its PCI segment id. Linux surfaces the
+            // evaluated _UID via /sys/bus/acpi/devices/PNP0A08:*/uid.
+            // This test uses firmware boot on aarch64, so ACPI is
+            // available on both supported architectures.
+            let mut uids: Vec<u16> = guest
+                .ssh_command("cat /sys/bus/acpi/devices/PNP0A08:*/uid")
+                .unwrap()
+                .lines()
+                .filter_map(|l| l.trim().parse::<u16>().ok())
+                .collect();
+            uids.sort();
+            assert_eq!(uids, vec![0u16, 1u16]);
         });
 
         kill_child(&mut child);
