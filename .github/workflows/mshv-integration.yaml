@@ -67,12 +67,12 @@ jobs:
 
             echo "Setting permissions..."
             for i in 0 1 2; do
-              dev="/dev/vhost-vdpa-$i"
-              if [ -e "$dev" ]; then
-                sudo chown $USER:$USER "$dev"
-                sudo chmod 660 "$dev"
+              dev="/dev/vhost-vdpa-\$i"
+              if [ -e "\$dev" ]; then
+                sudo chown \$USER:\$USER "\$dev"
+                sudo chmod 660 "\$dev"
               else
-                echo "Warning: Device $dev not found"
+                echo "Warning: Device \$dev not found"
               fi
             done
 
