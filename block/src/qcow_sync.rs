@@ -1769,4 +1769,24 @@ mod unit_tests {
         let expected: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
         assert_eq!(buf, &expected[..]);
     }
+
+    #[test]
+    fn test_aligned_pread_unaligned_offset() {
+        // Read at an offset that is not a multiple of alignment.
+        // aligned_pread should round down the offset, read an aligned
+        // region, then copy the correct slice into the caller buffer.
+        let file_size = 8192usize;
+        let (_tf, fd) = create_pattern_file(file_size);
+        let alignment = 512;
+
+        let offset = 100u64;
+        let len = 200usize;
+        let mut buf = vec![0u8; len];
+        aligned_pread(fd, &mut buf, offset, alignment).unwrap();
+
+        let expected: Vec<u8> = (offset as usize..offset as usize + len)
+            .map(|i| (i % 251) as u8)
+            .collect();
+        assert_eq!(buf, expected);
+    }
 }
