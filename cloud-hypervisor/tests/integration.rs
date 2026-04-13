@@ -7286,7 +7286,7 @@ mod windows {
         }
 
         fn ssh_cmd(&self, cmd: &str) -> String {
-            ssh_command_ip_with_auth(
+            ssh_command_ip_with_auth_retry(
                 cmd,
                 &self.auth,
                 &self.guest.network.guest_ip0,
@@ -7477,7 +7477,7 @@ mod windows {
             // The timeout increase by n*1+n*2+n*3+..., therefore the initial
             // interval must be small.
             let tmo_int = 2;
-            let out = ssh_command_ip_with_auth(
+            let out = ssh_command_ip_with_auth_retry(
                 cmd,
                 &self.auth,
                 &self.guest.network.guest_ip0,

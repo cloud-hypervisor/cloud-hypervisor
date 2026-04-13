@@ -764,50 +764,63 @@ pub fn scp_to_guest(
     )
 }
 
+/// Executes a command on a remote host via SSH using password authentication.
+/// Returns the stdout output on success, or an [`SshCommandError`] on any
+/// connection, authentication, or execution failure.
 pub fn ssh_command_ip_with_auth(
     command: &str,
     auth: &PasswordAuth,
     ip: &str,
-    retries: u8,
-    timeout: u8,
 ) -> Result<String, SshCommandError> {
     let mut s = String::new();
+    let tcp = TcpStream::connect(format!("{ip}:22")).map_err(SshCommandError::Connection)?;
+    let mut sess = Session::new().unwrap();
+    sess.set_tcp_stream(tcp);
+    sess.handshake().map_err(SshCommandError::Handshake)?;
+    sess.userauth_password(&auth.username, &auth.password)
+        .map_err(SshCommandError::Authentication)?;
+    assert!(sess.authenticated());
+    let mut channel = sess
+        .channel_session()
+        .map_err(SshCommandError::ChannelSession)?;
+    channel.exec(command).map_err(SshCommandError::Command)?;
+    // Intentionally ignore these results here as their failure
+    // does not precipitate a repeat
+    let _ = channel.read_to_string(&mut s);
+    let _ = channel.close();
+    let _ = channel.wait_close();
+    let status = channel.exit_status().map_err(SshCommandError::ExitStatus)?;
+    if status != 0 {
+        Err(SshCommandError::NonZeroExitStatus(status))
+    } else {
+        Ok(s)
+    }
+}
 
+/// Executes a command on a remote host via SSH using password authentication,
+/// retrying on failure with linear backoff.
+///
+/// Delegates each attempt to [`ssh_command_ip_with_auth`]. After the
+/// *n*-th consecutive failure the function sleeps for `timeout_s * n` seconds
+/// before the next attempt. Once `retries` attempts are exhausted the command
+/// output and error are printed to stderr and the last error is returned.
+///
+/// Note that `timeout_s` is not a per-attempt deadline — individual connection
+/// and I/O operations may block for as long as the OS or SSH layer allows.
+// TODO since we have we probably want to migrate every single invocation to a
+// more graceful combination of wait_until() and ssh_command_ip_with_auth().
+pub fn ssh_command_ip_with_auth_retry(
+    command: &str,
+    auth: &PasswordAuth,
+    ip: &str,
+    retries: u8,
+    // Base unit for the inter-retry sleep duration, in seconds.
+    timeout_s: u8,
+) -> Result<String, SshCommandError> {
     let mut counter = 0;
     loop {
-        let mut closure = || -> Result<(), SshCommandError> {
-            let tcp =
-                TcpStream::connect(format!("{ip}:22")).map_err(SshCommandError::Connection)?;
-            let mut sess = Session::new().unwrap();
-            sess.set_tcp_stream(tcp);
-            sess.handshake().map_err(SshCommandError::Handshake)?;
-
-            sess.userauth_password(&auth.username, &auth.password)
-                .map_err(SshCommandError::Authentication)?;
-            assert!(sess.authenticated());
-
-            let mut channel = sess
-                .channel_session()
-                .map_err(SshCommandError::ChannelSession)?;
-            channel.exec(command).map_err(SshCommandError::Command)?;
-
-            // Intentionally ignore these results here as their failure
-            // does not precipitate a repeat
-            let _ = channel.read_to_string(&mut s);
-            let _ = channel.close();
-            let _ = channel.wait_close();
-
-            let status = channel.exit_status().map_err(SshCommandError::ExitStatus)?;
-
-            if status != 0 {
-                Err(SshCommandError::NonZeroExitStatus(status))
-            } else {
-                Ok(())
-            }
-        };
-
-        match closure() {
-            Ok(_) => break,
+        match ssh_command_ip_with_auth(command, auth, ip) {
+            Ok(s) => return Ok(s),
             Err(e) => {
                 counter += 1;
                 if counter >= retries {
@@ -816,27 +829,28 @@ pub fn ssh_command_ip_with_auth(
                          command=\"{command}\"\n\
                          auth=\"{auth:#?}\"\n\
                          ip=\"{ip}\"\n\
-                         output=\"{s}\"\n\
                          error=\"{e:?}\"\n\
-                         \n==== End ssh command outout ====\n\n"
+                         \n==== End ssh command output ====\n\n"
                     );
-
                     return Err(e);
                 }
             }
         }
-        thread::sleep(std::time::Duration::new((timeout * counter).into(), 0));
+        thread::sleep(std::time::Duration::new((timeout_s * counter).into(), 0));
     }
-    Ok(s)
 }
 
+/// Executes a command on a remote host via SSH using password authentication,
+/// retrying on failure with linear backoff.
+///
+/// Wrapper around [`ssh_command_ip_with_auth_retry`].
 pub fn ssh_command_ip(
     command: &str,
     ip: &str,
     retries: u8,
     timeout: u8,
 ) -> Result<String, SshCommandError> {
-    ssh_command_ip_with_auth(
+    ssh_command_ip_with_auth_retry(
         command,
         &PasswordAuth {
             username: String::from("cloud"),
@@ -856,7 +870,7 @@ pub fn wait_for_ssh(
     timeout: Duration,
 ) -> Result<String, WaitForSshError> {
     wait_until_succeeds(timeout, || {
-        ssh_command_ip_with_auth(command, auth, ip, 1, 1)
+        ssh_command_ip_with_auth_retry(command, auth, ip, 1, 1)
     })
     .map_err(|source| WaitForSshError::Timeout {
         command: command.to_string(),
