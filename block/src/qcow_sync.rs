@@ -1752,4 +1752,21 @@ mod unit_tests {
         let expected: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
         assert_eq!(abuf.as_slice(size), &expected[..]);
     }
+
+    #[test]
+    fn test_aligned_pread_bounce_unaligned_buffer() {
+        // Force a misaligned buffer so aligned_pread must take the
+        // bounce path. A plain vec![0u8; 4096] is often page-aligned
+        // by the allocator, which would skip the bounce entirely.
+        let size = 4096usize;
+        let (_tf, fd) = create_pattern_file(size);
+        let alignment = 512;
+
+        let mut backing = vec![0u8; size + 1];
+        let buf = &mut backing[1..size + 1];
+        aligned_pread(fd, buf, 0, alignment).unwrap();
+
+        let expected: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+        assert_eq!(buf, &expected[..]);
+    }
 }
