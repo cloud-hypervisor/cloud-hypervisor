@@ -1636,4 +1636,87 @@ mod unit_tests {
             "size should be unchanged after failed resize"
         );
     }
+
+    fn test_multi_iovec_read_write_impl(direct_io: bool) {
+        // Exercise scatter/gather with multiple iovecs per operation.
+        let (_temp, disk) = create_disk_with_data(100 * 1024 * 1024, &[], 0, true, direct_io);
+
+        // Write: 3 iovecs with distinct patterns
+        let a = vec![0xAAu8; 16 * 1024];
+        let b = vec![0xBBu8; 32 * 1024];
+        let c = vec![0xCCu8; 16 * 1024];
+        let iovecs_w = [
+            libc::iovec {
+                iov_base: a.as_ptr() as *mut libc::c_void,
+                iov_len: a.len(),
+            },
+            libc::iovec {
+                iov_base: b.as_ptr() as *mut libc::c_void,
+                iov_len: b.len(),
+            },
+            libc::iovec {
+                iov_base: c.as_ptr() as *mut libc::c_void,
+                iov_len: c.len(),
+            },
+        ];
+        let total = a.len() + b.len() + c.len();
+
+        let mut aio = disk.new_async_io(1).unwrap();
+        aio.write_vectored(0, &iovecs_w, 1).unwrap();
+        let (ud, res) = aio.next_completed_request().unwrap();
+        assert_eq!(ud, 1);
+        assert_eq!(res as usize, total);
+        aio.fsync(Some(2)).unwrap();
+        drop(aio);
+
+        // Read back into 3 iovecs of different sizes
+        let mut r1 = vec![0u8; 8 * 1024];
+        let mut r2 = vec![0u8; 48 * 1024];
+        let mut r3 = vec![0u8; 8 * 1024];
+        let iovecs_r = [
+            libc::iovec {
+                iov_base: r1.as_mut_ptr() as *mut libc::c_void,
+                iov_len: r1.len(),
+            },
+            libc::iovec {
+                iov_base: r2.as_mut_ptr() as *mut libc::c_void,
+                iov_len: r2.len(),
+            },
+            libc::iovec {
+                iov_base: r3.as_mut_ptr() as *mut libc::c_void,
+                iov_len: r3.len(),
+            },
+        ];
+
+        let mut aio = disk.new_async_io(1).unwrap();
+        aio.read_vectored(0, &iovecs_r, 10).unwrap();
+        let (ud, res) = aio.next_completed_request().unwrap();
+        assert_eq!(ud, 10);
+        assert_eq!(res as usize, total);
+        drop(aio);
+
+        // Reassemble the read buffers into a flat vec
+        let mut got = Vec::with_capacity(total);
+        got.extend_from_slice(&r1);
+        got.extend_from_slice(&r2);
+        got.extend_from_slice(&r3);
+
+        // Build expected from the write buffers
+        let mut expected = Vec::with_capacity(total);
+        expected.extend_from_slice(&a);
+        expected.extend_from_slice(&b);
+        expected.extend_from_slice(&c);
+
+        assert_eq!(got, expected, "Multi iovec read should match written data");
+    }
+
+    #[test]
+    fn test_multi_iovec_read_write() {
+        test_multi_iovec_read_write_impl(false);
+    }
+
+    #[test]
+    fn test_multi_iovec_read_write_direct_io() {
+        test_multi_iovec_read_write_impl(true);
+    }
 }
