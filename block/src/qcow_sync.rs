@@ -1789,4 +1789,22 @@ mod unit_tests {
             .collect();
         assert_eq!(buf, expected);
     }
+
+    #[test]
+    fn test_aligned_pwrite_pass_through() {
+        // When buffer address, length, and offset are all aligned,
+        // aligned_pwrite should take the fast path.
+        let size = 4096usize;
+        let (_tf, fd) = create_pattern_file(size);
+        let alignment = 512;
+
+        let data: Vec<u8> = (0..size).map(|i| ((i + 1) % 251) as u8).collect();
+        let mut abuf = AlignedBuf::new(size, alignment).unwrap();
+        abuf.as_mut_slice(size).copy_from_slice(&data);
+        aligned_pwrite(fd, abuf.as_slice(size), 0, alignment).unwrap();
+
+        let mut readback = vec![0u8; size];
+        pread_exact(fd, &mut readback, 0).unwrap();
+        assert_eq!(readback, data);
+    }
 }
