@@ -1807,4 +1807,22 @@ mod unit_tests {
         pread_exact(fd, &mut readback, 0).unwrap();
         assert_eq!(readback, data);
     }
+
+    #[test]
+    fn test_aligned_pwrite_bounce_unaligned_buffer() {
+        // Force a misaligned buffer so aligned_pwrite must take the
+        // bounce path. A plain vec![0u8; 4096] is often page-aligned
+        // by the allocator, which would skip the bounce entirely.
+        let size = 4096usize;
+        let (_tf, fd) = create_pattern_file(size);
+        let alignment = 512;
+
+        let backing: Vec<u8> = (0..size + 1).map(|i| ((i + 1) % 251) as u8).collect();
+        let data = &backing[1..size + 1];
+        aligned_pwrite(fd, data, 0, alignment).unwrap();
+
+        let mut readback = vec![0u8; size];
+        pread_exact(fd, &mut readback, 0).unwrap();
+        assert_eq!(readback, data);
+    }
 }
