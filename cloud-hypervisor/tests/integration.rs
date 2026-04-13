@@ -6125,7 +6125,7 @@ mod ivshmem {
             // Check the number of vCPUs
             assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
 
-            common_sequential::snapshot_and_check_events(
+            snapshot_restore_common::snapshot_and_check_events(
                 &api_socket_source,
                 &snapshot_dir,
                 &event_path,
@@ -6224,18 +6224,56 @@ mod ivshmem {
     fn test_live_migration_ivshmem_local() {
         _test_live_migration_ivshmem(true);
     }
-}
-
-mod common_sequential {
-    use std::fs::remove_dir_all;
-
-    use crate::*;
 
     #[test]
     #[cfg(not(feature = "mshv"))]
-    fn test_memory_mergeable_on() {
-        test_memory_mergeable(true);
+    fn test_snapshot_restore_hotplug_virtiomem() {
+        snapshot_restore_common::_test_snapshot_restore(true, false);
     }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))] // See issue #7437
+    fn test_snapshot_restore_basic() {
+        snapshot_restore_common::_test_snapshot_restore(false, false);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_with_resume() {
+        snapshot_restore_common::_test_snapshot_restore(false, true);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_uffd() {
+        snapshot_restore_common::_test_snapshot_restore_uffd("size=2G", &[], 1_920_000);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_uffd_shared_memory() {
+        snapshot_restore_common::_test_snapshot_restore_uffd("size=512M,shared=on", &[], 480_000);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))] // See issue #7437
+    #[cfg(target_arch = "x86_64")]
+    fn test_snapshot_restore_pvpanic() {
+        snapshot_restore_common::_test_snapshot_restore_devices(true);
+    }
+
+    #[test]
+    fn test_virtio_pmem_persist_writes() {
+        test_virtio_pmem(false, false);
+    }
+}
+
+#[cfg(not(feature = "mshv"))]
+mod snapshot_restore_common {
+    use std::fs::remove_dir_all;
+    use std::process::Command;
+
+    use crate::*;
 
     pub(crate) fn snapshot_and_check_events(
         api_socket: &str,
@@ -6282,28 +6320,7 @@ mod common_sequential {
         }));
     }
 
-    // One thing to note about this test. The virtio-net device is heavily used
-    // through each ssh command. There's no need to perform a dedicated test to
-    // verify the migration went well for virtio-net.
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_snapshot_restore_hotplug_virtiomem() {
-        _test_snapshot_restore(true, false);
-    }
-
-    #[test]
-    #[cfg(not(feature = "mshv"))] // See issue #7437
-    fn test_snapshot_restore_basic() {
-        _test_snapshot_restore(false, false);
-    }
-
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_snapshot_restore_with_resume() {
-        _test_snapshot_restore(false, true);
-    }
-
-    fn _test_snapshot_restore(use_hotplug: bool, use_resume_option: bool) {
+    pub(crate) fn _test_snapshot_restore(use_hotplug: bool, use_resume_option: bool) {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(disk_config));
         let kernel_path = direct_kernel_boot_path();
@@ -6427,7 +6444,11 @@ mod common_sequential {
                 thread::sleep(std::time::Duration::new(10, 0));
             }
 
-            snapshot_and_check_events(&api_socket_source, &snapshot_dir, &event_path);
+            snapshot_restore_common::snapshot_and_check_events(
+                &api_socket_source,
+                &snapshot_dir,
+                &event_path,
+            );
         });
 
         // Shutdown the source VM and check console output
@@ -6587,38 +6608,7 @@ mod common_sequential {
         handle_child_output(r, &output);
     }
 
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_snapshot_restore_uffd() {
-        _test_snapshot_restore_uffd("size=2G", &[], 1_920_000);
-    }
-
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_snapshot_restore_uffd_shared_memory() {
-        _test_snapshot_restore_uffd("size=512M,shared=on", &[], 480_000);
-    }
-
-    #[test]
-    #[cfg(not(feature = "mshv"))]
-    fn test_snapshot_restore_uffd_hugepage_zone() {
-        if !exec_host_command_status(
-            "grep -q '^Hugepagesize:[[:space:]]*2048 kB' /proc/meminfo && test $(awk '/HugePages_Free/ {print $2}' /proc/meminfo) -ge 256",
-        )
-        .success()
-        {
-            println!("SKIPPED: not enough free 2MiB hugepages for UFFD restore test");
-            return;
-        }
-
-        _test_snapshot_restore_uffd(
-            "size=0",
-            &["id=mem0,size=512M,hugepages=on,hugepage_size=2M"],
-            480_000,
-        );
-    }
-
-    fn _test_snapshot_restore_uffd(
+    pub(crate) fn _test_snapshot_restore_uffd(
         memory_config: &str,
         memory_zone_config: &[&str],
         min_total_memory_kib: u32,
@@ -6757,6 +6747,169 @@ mod common_sequential {
         let _ = remove_dir_all(snapshot_dir.as_str());
     }
 
+    pub(crate) fn _test_snapshot_restore_devices(pvpanic: bool) {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = direct_kernel_boot_path();
+
+        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
+
+        let device_params = {
+            let mut data = vec![];
+            if pvpanic {
+                data.push(String::from("--pvpanic"));
+            }
+            data
+        };
+
+        let socket = temp_vsock_path(&guest.tmp_dir);
+        let event_path = temp_event_monitor_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_source])
+            .args(["--event-monitor", format!("path={event_path}").as_str()])
+            .args(["--cpus", "boot=2"])
+            .args(["--memory", "size=1G"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .default_disks()
+            .default_net()
+            .args(["--vsock", format!("cid=3,socket={socket}").as_str()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(device_params)
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let console_text = String::from("On a branch floating down river a cricket, singing.");
+        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
+
+            snapshot_and_check_events(&api_socket_source, &snapshot_dir, &event_path);
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        Command::new("rm")
+            .arg("-f")
+            .arg(socket.as_str())
+            .output()
+            .unwrap();
+
+        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
+        let event_path_restored = format!("{}.2", temp_event_monitor_path(&guest.tmp_dir));
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket_restored])
+            .args([
+                "--event-monitor",
+                format!("path={event_path_restored}").as_str(),
+            ])
+            .args([
+                "--restore",
+                format!("source_url=file://{snapshot_dir}").as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let latest_events = [&MetaEvent {
+            event: "restored".to_string(),
+            device_id: None,
+        }];
+        assert!(wait_until(Duration::from_secs(30), || {
+            check_latest_events_exact(&latest_events, &event_path_restored)
+        }));
+
+        let _ = remove_dir_all(snapshot_dir.as_str());
+
+        let r = std::panic::catch_unwind(|| {
+            assert!(wait_until(Duration::from_secs(30), || remote_command(
+                &api_socket_restored,
+                "info",
+                None
+            )));
+            assert!(remote_command(&api_socket_restored, "resume", None));
+            let latest_events = [
+                &MetaEvent {
+                    event: "resuming".to_string(),
+                    device_id: None,
+                },
+                &MetaEvent {
+                    event: "resumed".to_string(),
+                    device_id: None,
+                },
+            ];
+            assert!(wait_until(Duration::from_secs(30), || {
+                check_latest_events_exact(&latest_events, &event_path_restored)
+            }));
+
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
+            guest.check_devices_common(Some(&socket), Some(&console_text), None);
+
+            if pvpanic {
+                make_guest_panic(&guest);
+                thread::sleep(std::time::Duration::new(10, 0));
+
+                let expected_sequential_events = [&MetaEvent {
+                    event: "panic".to_string(),
+                    device_id: None,
+                }];
+                assert!(check_latest_events_exact(
+                    &expected_sequential_events,
+                    &event_path_restored
+                ));
+            }
+        });
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let r = std::panic::catch_unwind(|| {
+            assert!(String::from_utf8_lossy(&output.stdout).contains(&console_text));
+        });
+
+        handle_child_output(r, &output);
+    }
+}
+
+mod common_sequential {
+    #[cfg(not(feature = "mshv"))]
+    use std::fs::remove_dir_all;
+
+    #[cfg(not(feature = "mshv"))]
+    use crate::*;
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_memory_mergeable_on() {
+        test_memory_mergeable(true);
+    }
+
+    #[test]
+    #[cfg(not(feature = "mshv"))]
+    fn test_snapshot_restore_uffd_hugepage_zone() {
+        if !exec_host_command_status(
+            "grep -q '^Hugepagesize:[[:space:]]*2048 kB' /proc/meminfo && test $(awk '/HugePages_Free/ {print $2}' /proc/meminfo) -ge 256",
+        )
+        .success()
+        {
+            println!("SKIPPED: not enough free 2MiB hugepages for UFFD restore test");
+            return;
+        }
+
+        snapshot_restore_common::_test_snapshot_restore_uffd(
+            "size=0",
+            &["id=mem0,size=512M,hugepages=on,hugepage_size=2M"],
+            480_000,
+        );
+    }
+
     #[test]
     #[cfg(not(feature = "mshv"))] // See issue #7437
     #[ignore = "See #6970"]
@@ -6843,7 +6996,11 @@ mod common_sequential {
             // Check the guest virtio-devices, e.g. block, rng, vsock, console, and net
             guest.check_devices_common(None, Some(&console_text), None);
 
-            snapshot_and_check_events(&api_socket_source, &snapshot_dir, &event_path);
+            snapshot_restore_common::snapshot_and_check_events(
+                &api_socket_source,
+                &snapshot_dir,
+                &event_path,
+            );
         });
 
         // Shutdown the source VM and check console output
@@ -6982,155 +7139,6 @@ mod common_sequential {
     }
 
     #[test]
-    #[cfg(not(feature = "mshv"))] // See issue #7437
-    #[cfg(target_arch = "x86_64")]
-    fn test_snapshot_restore_pvpanic() {
-        _test_snapshot_restore_devices(true);
-    }
-
-    fn _test_snapshot_restore_devices(pvpanic: bool) {
-        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
-        let guest = Guest::new(Box::new(disk_config));
-        let kernel_path = direct_kernel_boot_path();
-
-        let api_socket_source = format!("{}.1", temp_api_path(&guest.tmp_dir));
-
-        let device_params = {
-            let mut data = vec![];
-            if pvpanic {
-                data.push(String::from("--pvpanic"));
-            }
-            data
-        };
-
-        let socket = temp_vsock_path(&guest.tmp_dir);
-        let event_path = temp_event_monitor_path(&guest.tmp_dir);
-
-        let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket_source])
-            .args(["--event-monitor", format!("path={event_path}").as_str()])
-            .args(["--cpus", "boot=2"])
-            .args(["--memory", "size=1G"])
-            .args(["--kernel", kernel_path.to_str().unwrap()])
-            .default_disks()
-            .default_net()
-            .args(["--vsock", format!("cid=3,socket={socket}").as_str()])
-            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
-            .args(device_params)
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let console_text = String::from("On a branch floating down river a cricket, singing.");
-        // Create the snapshot directory
-        let snapshot_dir = temp_snapshot_dir_path(&guest.tmp_dir);
-
-        let r = std::panic::catch_unwind(|| {
-            guest.wait_vm_boot().unwrap();
-
-            // Check the number of vCPUs
-            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
-
-            snapshot_and_check_events(&api_socket_source, &snapshot_dir, &event_path);
-        });
-
-        // Shutdown the source VM and check console output
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-        handle_child_output(r, &output);
-
-        // Remove the vsock socket file.
-        Command::new("rm")
-            .arg("-f")
-            .arg(socket.as_str())
-            .output()
-            .unwrap();
-
-        let api_socket_restored = format!("{}.2", temp_api_path(&guest.tmp_dir));
-        let event_path_restored = format!("{}.2", temp_event_monitor_path(&guest.tmp_dir));
-
-        // Restore the VM from the snapshot
-        let mut child = GuestCommand::new(&guest)
-            .args(["--api-socket", &api_socket_restored])
-            .args([
-                "--event-monitor",
-                format!("path={event_path_restored}").as_str(),
-            ])
-            .args([
-                "--restore",
-                format!("source_url=file://{snapshot_dir}").as_str(),
-            ])
-            .capture_output()
-            .spawn()
-            .unwrap();
-
-        let latest_events = [&MetaEvent {
-            event: "restored".to_string(),
-            device_id: None,
-        }];
-        // Wait for the restored event to show up in the monitor file.
-        assert!(wait_until(Duration::from_secs(30), || {
-            check_latest_events_exact(&latest_events, &event_path_restored)
-        }));
-
-        // Remove the snapshot dir
-        let _ = remove_dir_all(snapshot_dir.as_str());
-
-        let r = std::panic::catch_unwind(|| {
-            // Resume the VM
-            assert!(wait_until(Duration::from_secs(30), || remote_command(
-                &api_socket_restored,
-                "info",
-                None
-            )));
-            assert!(remote_command(&api_socket_restored, "resume", None));
-            let latest_events = [
-                &MetaEvent {
-                    event: "resuming".to_string(),
-                    device_id: None,
-                },
-                &MetaEvent {
-                    event: "resumed".to_string(),
-                    device_id: None,
-                },
-            ];
-            assert!(wait_until(Duration::from_secs(30), || {
-                check_latest_events_exact(&latest_events, &event_path_restored)
-            }));
-
-            // Check the number of vCPUs
-            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 2);
-            guest.check_devices_common(Some(&socket), Some(&console_text), None);
-
-            if pvpanic {
-                // Trigger guest a panic
-                make_guest_panic(&guest);
-                // Wait a while for guest
-                thread::sleep(std::time::Duration::new(10, 0));
-
-                let expected_sequential_events = [&MetaEvent {
-                    event: "panic".to_string(),
-                    device_id: None,
-                }];
-                assert!(check_latest_events_exact(
-                    &expected_sequential_events,
-                    &event_path_restored
-                ));
-            }
-        });
-        // Shutdown the target VM and check console output
-        kill_child(&mut child);
-        let output = child.wait_with_output().unwrap();
-        handle_child_output(r, &output);
-
-        let r = std::panic::catch_unwind(|| {
-            assert!(String::from_utf8_lossy(&output.stdout).contains(&console_text));
-        });
-
-        handle_child_output(r, &output);
-    }
-
-    #[test]
     #[cfg(not(feature = "mshv"))]
     fn test_snapshot_restore_virtio_fs() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
@@ -7189,8 +7197,11 @@ mod common_sequential {
                     "sudo bash -c 'echo snapshot_test_data > mount_dir/snapshot_test_file'",
                 )
                 .unwrap();
-
-            snapshot_and_check_events(&api_socket_source, &snapshot_dir, &event_path);
+            snapshot_restore_common::snapshot_and_check_events(
+                &api_socket_source,
+                &snapshot_dir,
+                &event_path,
+            );
         });
 
         // Shutdown the source VM
@@ -7287,11 +7298,6 @@ mod common_sequential {
         let _ = daemon_child.wait();
         let _ = std::fs::remove_file(shared_dir.join("snapshot_test_file"));
         let _ = std::fs::remove_file(shared_dir.join("post_restore_file"));
-    }
-
-    #[test]
-    fn test_virtio_pmem_persist_writes() {
-        test_virtio_pmem(false, false);
     }
 }
 
