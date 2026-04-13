@@ -8337,6 +8337,73 @@ mod windows {
 
         handle_child_output(r, &output);
     }
+
+    #[test]
+    fn test_windows_guest_qcow2_backing_direct() {
+        let windows_guest = WindowsGuest::new();
+
+        let qcow2_path = windows_guest.guest().disk_config.qcow2_disk().unwrap();
+
+        let mut child = GuestCommand::new(windows_guest.guest())
+            .args(["--cpus", "boot=2,kvm_hyperv=on"])
+            .args(["--memory", "size=4G"])
+            .args(["--kernel", edk2_path().to_str().unwrap()])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
+            .args([
+                "--disk",
+                format!("path={qcow2_path},image_type=qcow2,backing_files=on,direct=on").as_str(),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let fd = child.stdout.as_ref().unwrap().as_raw_fd();
+        let pipesize = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
+        let fd = child.stderr.as_ref().unwrap().as_raw_fd();
+        let pipesize1 = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
+
+        assert!(pipesize >= PIPE_SIZE && pipesize1 >= PIPE_SIZE);
+
+        let mut child_dnsmasq = windows_guest.run_dnsmasq();
+
+        let r = std::panic::catch_unwind(|| {
+            windows_guest.wait_for_boot().unwrap();
+
+            // Write and read back files through qcow2 + direct I/O.
+            for i in 0..5 {
+                let fname = format!("c:\\test-dio-{i}.bin");
+                let fname2 = format!("c:\\test-dio-{i}-copy.bin");
+                let size = (i + 1) * 4 * 1024 * 1024;
+                windows_guest.ssh_cmd(&format!(
+                    "powershell -Command \"\
+                    $r = New-Object byte[] {size}; \
+                    (New-Object Random {i}).NextBytes($r); \
+                    [IO.File]::WriteAllBytes('{fname}', $r)\""
+                ));
+                let hash_write = windows_guest.ssh_cmd(&format!(
+                    "powershell -Command \"(Get-FileHash '{fname}' -Algorithm SHA256).Hash\""
+                ));
+                windows_guest.ssh_cmd(&format!("copy {fname} {fname2}"));
+                let hash_read = windows_guest.ssh_cmd(&format!(
+                    "powershell -Command \"(Get-FileHash '{fname2}' -Algorithm SHA256).Hash\""
+                ));
+                assert_eq!(hash_write.trim(), hash_read.trim());
+            }
+
+            windows_guest.shutdown();
+        });
+
+        let _ = child.wait_timeout(std::time::Duration::from_secs(60));
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        let _ = child_dnsmasq.kill();
+        let _ = child_dnsmasq.wait();
+
+        handle_child_output(r, &output);
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
