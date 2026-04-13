@@ -10,7 +10,7 @@ use std::ops::DerefMut;
 use std::sync::{Arc, Barrier, Mutex};
 
 use byteorder::{ByteOrder, LittleEndian};
-use log::error;
+use log::warn;
 use thiserror::Error;
 use vm_device::{Bus, BusDevice, BusDeviceSync};
 
@@ -280,10 +280,15 @@ impl PciConfigIo {
                     device.deref_mut(),
                     params.region_type,
                 ) {
-                    error!(
-                        "Failed moving device BAR: {}: 0x{:x}->0x{:x}(0x{:x})",
+                    warn!(
+                        "Failed moving device BAR: {}: 0x{:x}->0x{:x}(0x{:x}), keeping old BAR",
                         e, params.old_base, params.new_base, params.len
                     );
+                    // Rollback: the config register was already updated to
+                    // new_base by detect_bar_reprogramming(). Restore it by
+                    // writing back the old address so device state stays
+                    // consistent with the MMIO bus mapping.
+                    device.restore_bar_addr(params);
                 }
             }
 
@@ -405,10 +410,11 @@ impl PciConfigMmio {
                     device.deref_mut(),
                     params.region_type,
                 ) {
-                    error!(
-                        "Failed moving device BAR: {}: 0x{:x}->0x{:x}(0x{:x})",
+                    warn!(
+                        "Failed moving device BAR: {}: 0x{:x}->0x{:x}(0x{:x}), keeping old BAR",
                         e, params.old_base, params.new_base, params.len
                     );
+                    device.restore_bar_addr(params);
                 }
             }
         }
