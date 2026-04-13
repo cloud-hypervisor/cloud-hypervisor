@@ -2034,6 +2034,10 @@ iova 0x{:x}, size 0x{:x}: {}, ",
         Ok(())
     }
 
+    fn restore_bar_addr(&mut self, params: &BarReprogrammingParams) {
+        self.common.configuration.restore_bar_addr(params);
+    }
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
