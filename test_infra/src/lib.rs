@@ -771,11 +771,15 @@ pub fn ssh_command_ip_with_auth(
     command: &str,
     auth: &PasswordAuth,
     ip: &str,
+    timeout: Option<Duration>,
 ) -> Result<String, SshCommandError> {
     let mut s = String::new();
     let tcp = TcpStream::connect(format!("{ip}:22")).map_err(SshCommandError::Connection)?;
     let mut sess = Session::new().unwrap();
     sess.set_tcp_stream(tcp);
+    if let Some(timeout) = timeout {
+        sess.set_timeout(timeout.as_millis() as u32);
+    }
     sess.handshake().map_err(SshCommandError::Handshake)?;
     sess.userauth_password(&auth.username, &auth.password)
         .map_err(SshCommandError::Authentication)?;
@@ -819,7 +823,7 @@ pub fn ssh_command_ip_with_auth_retry(
 ) -> Result<String, SshCommandError> {
     let mut counter = 0;
     loop {
-        match ssh_command_ip_with_auth(command, auth, ip) {
+        match ssh_command_ip_with_auth(command, auth, ip, None) {
             Ok(s) => return Ok(s),
             Err(e) => {
                 counter += 1;
@@ -870,7 +874,7 @@ pub fn wait_for_ssh(
     timeout: Duration,
 ) -> Result<String, WaitForSshError> {
     wait_until_succeeds(timeout, || {
-        ssh_command_ip_with_auth_retry(command, auth, ip, 1, 1)
+        ssh_command_ip_with_auth(command, auth, ip, Some(timeout))
     })
     .map_err(|source| WaitForSshError::Timeout {
         command: command.to_string(),
