@@ -125,6 +125,10 @@ impl RawFile {
         self.direct_io
     }
 
+    pub fn alignment(&self) -> usize {
+        self.alignment
+    }
+
     /// Returns true if the file was opened with write access.
     pub fn is_writable(&self) -> bool {
         // SAFETY: fcntl with F_GETFL is safe and doesn't modify the file descriptor
