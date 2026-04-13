@@ -1856,4 +1856,32 @@ mod unit_tests {
         let after: Vec<u8> = (after_start..file_size).map(|i| (i % 251) as u8).collect();
         assert_eq!(&whole[after_start..], &after[..]);
     }
+
+    #[test]
+    fn test_aligned_pread_pwrite_4096_alignment() {
+        // Exercise aligned I/O with 4096 byte alignment.
+        let file_size = 16384usize;
+        let (_tf, fd) = create_pattern_file(file_size);
+        let alignment = 4096;
+
+        // Write 4096 bytes at offset 4096 via unaligned Vec<u8>.
+        let offset = 4096u64;
+        let len = 4096usize;
+        let data: Vec<u8> = (0..len).map(|i| ((i + 1) % 239) as u8).collect();
+        aligned_pwrite(fd, &data, offset, alignment).unwrap();
+
+        // Read back the written region via unaligned Vec<u8>.
+        let mut buf = vec![0u8; len];
+        aligned_pread(fd, &mut buf, offset, alignment).unwrap();
+        assert_eq!(buf, data);
+
+        // Verify untouched regions.
+        let mut whole = vec![0u8; file_size];
+        pread_exact(fd, &mut whole, 0).unwrap();
+        let before: Vec<u8> = (0..offset as usize).map(|i| (i % 251) as u8).collect();
+        assert_eq!(&whole[..offset as usize], &before[..]);
+        let after_start = offset as usize + len;
+        let after: Vec<u8> = (after_start..file_size).map(|i| (i % 251) as u8).collect();
+        assert_eq!(&whole[after_start..], &after[..]);
+    }
 }
