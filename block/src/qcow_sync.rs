@@ -419,6 +419,7 @@ impl AsyncIo for QcowSync {
 #[cfg(test)]
 mod unit_tests {
     use std::io::{Seek, SeekFrom, Write};
+    use std::os::fd::RawFd;
     use std::thread;
 
     use vmm_sys_util::tempfile::TempFile;
@@ -1718,5 +1719,37 @@ mod unit_tests {
     #[test]
     fn test_multi_iovec_read_write_direct_io() {
         test_multi_iovec_read_write_impl(true);
+    }
+
+    // -- Low level aligned I/O function tests --
+    //
+    // Test aligned_pread and aligned_pwrite directly with controlled
+    // alignment values on a plain temp file.
+
+    /// Create a temp file filled with a repeating pattern of the given size.
+    /// Returns the TempFile (must be kept alive) and the raw fd.
+    fn create_pattern_file(size: usize) -> (TempFile, RawFd) {
+        let tf = TempFile::new().unwrap();
+        let pattern: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+        tf.as_file().write_all(&pattern).unwrap();
+        tf.as_file().sync_all().unwrap();
+        let fd = tf.as_file().as_raw_fd();
+        (tf, fd)
+    }
+
+    #[test]
+    fn test_aligned_pread_pass_through() {
+        // When buffer address, length, and offset are all aligned,
+        // aligned_pread should take the fast path (no bounce buffer).
+        let size = 4096usize;
+        let (_tf, fd) = create_pattern_file(size);
+        let alignment = 512;
+
+        // Use AlignedBuf to guarantee buffer address alignment.
+        let mut abuf = AlignedBuf::new(size, alignment).unwrap();
+        aligned_pread(fd, abuf.as_mut_slice(size), 0, alignment).unwrap();
+
+        let expected: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+        assert_eq!(abuf.as_slice(size), &expected[..]);
     }
 }
