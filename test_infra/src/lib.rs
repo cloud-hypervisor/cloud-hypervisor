@@ -226,6 +226,9 @@ pub trait DiskConfig {
     fn prepare_files(&mut self, tmp_dir: &TempDir, network: &GuestNetworkConfig);
     fn prepare_cloudinit(&self, tmp_dir: &TempDir, network: &GuestNetworkConfig) -> String;
     fn disk(&self, disk_type: DiskType) -> Option<String>;
+    fn qcow2_disk(&self) -> Option<String> {
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -248,6 +251,7 @@ impl UbuntuDiskConfig {
 pub struct WindowsDiskConfig {
     image_name: String,
     osdisk_path: String,
+    osdisk_qcow2_path: String,
     loopback_device: String,
     windows_snapshot_cow: String,
     windows_snapshot: String,
@@ -258,6 +262,7 @@ impl WindowsDiskConfig {
         WindowsDiskConfig {
             image_name,
             osdisk_path: String::new(),
+            osdisk_qcow2_path: String::new(),
             loopback_device: String::new(),
             windows_snapshot_cow: String::new(),
             windows_snapshot: String::new(),
@@ -286,6 +291,10 @@ impl Drop for WindowsDiskConfig {
             .args(["-d", self.loopback_device.as_str()])
             .output()
             .expect("Expect removing loopback device to succeed");
+
+        if !self.osdisk_qcow2_path.is_empty() {
+            let _ = fs::remove_file(&self.osdisk_qcow2_path);
+        }
     }
 }
 
@@ -451,7 +460,7 @@ impl DiskConfig for WindowsDiskConfig {
         let mut osdisk_path = workload_path;
         osdisk_path.push(&self.image_name);
 
-        let osdisk_blk_size = fs::metadata(osdisk_path)
+        let osdisk_blk_size = fs::metadata(&osdisk_path)
             .expect("Expect retrieving Windows image metadata")
             .len()
             >> 9;
@@ -530,6 +539,27 @@ impl DiskConfig for WindowsDiskConfig {
         self.osdisk_path = format!("/dev/mapper/{windows_snapshot}");
         self.windows_snapshot_cow = windows_snapshot_cow;
         self.windows_snapshot = windows_snapshot;
+
+        // Create a qcow2 overlay backed by the raw image.
+        let mut workload_path = dirs::home_dir().unwrap();
+        workload_path.push("workloads");
+        let qcow2_name = format!("windows-qcow2-{}.qcow2", random_extension.to_str().unwrap());
+        let qcow2_path = workload_path.join(&qcow2_name);
+        let output = Command::new("qemu-img")
+            .args([
+                "create",
+                "-f",
+                "qcow2",
+                "-b",
+                osdisk_path.to_str().unwrap(),
+                "-F",
+                "raw",
+                qcow2_path.to_str().unwrap(),
+            ])
+            .output()
+            .expect("Expect creating qcow2 overlay to succeed");
+        assert!(output.status.success(), "qemu-img create failed");
+        self.osdisk_qcow2_path = qcow2_path.to_str().unwrap().to_string();
     }
 
     fn disk(&self, disk_type: DiskType) -> Option<String> {
@@ -537,6 +567,10 @@ impl DiskConfig for WindowsDiskConfig {
             DiskType::OperatingSystem => Some(self.osdisk_path.clone()),
             DiskType::CloudInit => None,
         }
+    }
+
+    fn qcow2_disk(&self) -> Option<String> {
+        Some(self.osdisk_qcow2_path.clone())
     }
 }
 
