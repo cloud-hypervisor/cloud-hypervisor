@@ -1825,4 +1825,35 @@ mod unit_tests {
         pread_exact(fd, &mut readback, 0).unwrap();
         assert_eq!(readback, data);
     }
+
+    #[test]
+    fn test_aligned_pwrite_unaligned_offset() {
+        // Write at an offset that is not a multiple of alignment.
+        // aligned_pwrite should do read-modify-write and preserve
+        // surrounding data.
+        let file_size = 8192usize;
+        let (_tf, fd) = create_pattern_file(file_size);
+        let alignment = 512;
+
+        let offset = 100u64;
+        let len = 200usize;
+        let data: Vec<u8> = (0..len).map(|i| ((i + 1) % 239) as u8).collect();
+        aligned_pwrite(fd, &data, offset, alignment).unwrap();
+
+        // Read entire file and verify the written region plus untouched areas.
+        let mut whole = vec![0u8; file_size];
+        pread_exact(fd, &mut whole, 0).unwrap();
+
+        // Before the write region: original pattern.
+        let before: Vec<u8> = (0..offset as usize).map(|i| (i % 251) as u8).collect();
+        assert_eq!(&whole[..offset as usize], &before[..]);
+
+        // The written region.
+        assert_eq!(&whole[offset as usize..offset as usize + len], &data[..]);
+
+        // After the write region: original pattern.
+        let after_start = offset as usize + len;
+        let after: Vec<u8> = (after_start..file_size).map(|i| (i % 251) as u8).collect();
+        assert_eq!(&whole[after_start..], &after[..]);
+    }
 }
