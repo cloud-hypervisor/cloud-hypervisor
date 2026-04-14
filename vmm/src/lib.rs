@@ -1171,7 +1171,7 @@ impl Vmm {
                 MigratableError::MigrateReceive(anyhow!("Failed restoring the Vm: {e}"))
             })?;
 
-            Ok(vm)
+            Ok::<Vm, MigratableError>(vm)
         })?;
 
         self.vm = Some(vm);

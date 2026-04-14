@@ -16,6 +16,7 @@ use crate::protocol::MemoryRangeTable;
 mod bitpos_iterator;
 mod context;
 pub mod protocol;
+pub mod tls;
 
 #[derive(Error, Debug)]
 pub enum UffdError {
@@ -92,6 +93,9 @@ pub enum MigratableError {
 
     #[error("Failed to release a disk lock")]
     UnlockError(#[source] anyhow::Error),
+
+    #[error("TLS error")]
+    Tls(#[from] tls::TlsError),
 }
 
 /// A Pausable component can be paused and resumed.
