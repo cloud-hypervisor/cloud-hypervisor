@@ -26,7 +26,7 @@ use vm_memory::{
     VolatileSlice, WriteVolatile,
 };
 use vm_migration::protocol::{Command, MemoryRangeTable, Request, Response};
-use vm_migration::tls::TlsStream;
+use vm_migration::tls::{TlsServerConfig, TlsStream};
 use vm_migration::{MigratableError, Snapshot};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -42,6 +42,7 @@ pub(crate) const MAX_MIGRATION_CONNECTIONS: u32 = 128;
 pub(crate) enum ReceiveListener {
     Tcp(TcpListener),
     Unix(UnixListener),
+    Tls(TcpListener, TlsServerConfig),
 }
 
 impl ReceiveListener {
@@ -57,6 +58,15 @@ impl ReceiveListener {
                 .accept()
                 .map(|(socket, _)| SocketStream::Unix(socket))
                 .context("Failed to accept Unix migration connection")
+                .map_err(MigratableError::MigrateReceive),
+            ReceiveListener::Tls(listener, config) => listener
+                .accept()
+                .map(|(socket, _)| TlsStream::new_server(socket, config))
+                .context("Failed to accept TCP connection")
+                .map_err(MigratableError::MigrateReceive)?
+                .map(Box::new)
+                .map(SocketStream::Tls)
+                .context("Failed to accept TLS migration connection")
                 .map_err(MigratableError::MigrateReceive),
         }
     }
@@ -91,6 +101,11 @@ impl ReceiveListener {
                 .map(ReceiveListener::Unix)
                 .context("Failed to clone Unix listener")
                 .map_err(MigratableError::MigrateReceive),
+            ReceiveListener::Tls(listener, config) => listener
+                .try_clone()
+                .map(|listener| ReceiveListener::Tls(listener, config.clone()))
+                .context("Failed to clone TLS listener")
+                .map_err(MigratableError::MigrateReceive),
         }
     }
 }
@@ -100,6 +115,7 @@ impl AsFd for ReceiveListener {
         match self {
             ReceiveListener::Tcp(listener) => listener.as_fd(),
             ReceiveListener::Unix(listener) => listener.as_fd(),
+            ReceiveListener::Tls(listener, _) => listener.as_fd(),
         }
     }
 }
