@@ -95,6 +95,7 @@ itertools = "0.14.0"
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 libc = "0.2.186"
 log = "0.4.30"
+rustls = { version = "0.23.40", features = ["ring"] }
 sha2 = "0.11.0"
 signal-hook = "0.4.4"
 thiserror = "2.0.18"
