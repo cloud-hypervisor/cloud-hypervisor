@@ -8391,8 +8391,10 @@ mod vfio {
             }));
             assert!(guest.get_total_memory().unwrap_or_default() > 5_760_000);
 
-            // Check the VFIO device works when RAM is increased to 6GiB
-            assert!(guest.check_nvidia_gpu());
+            // Check the VFIO device works when RAM is increased to 6GiB.
+            // After guest memory hotplug, the VMM must refresh VFIO/iommufd DMA
+            // mappings for the passthrough GPU.
+            assert!(wait_until(Duration::from_secs(10), || guest.check_nvidia_gpu()));
         });
 
         let _ = child.kill();
