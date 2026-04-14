@@ -230,6 +230,12 @@ impl AsyncIo for RawFileAsync {
         let mut submitted = false;
 
         for req in batch_request {
+            static TIMESPEC: libc::timespec = libc::timespec {
+                tv_sec: 0,
+                tv_nsec: 10000,
+            };
+            // SAFETY: FFI with valid parameters
+            let _ = unsafe { libc::nanosleep(&raw const TIMESPEC, std::ptr::null_mut()) };
             match req.request_type {
                 RequestType::In => {
                     // SAFETY: we know the file descriptor is valid and we
