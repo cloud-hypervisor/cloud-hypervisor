@@ -1884,4 +1884,23 @@ mod unit_tests {
         let after: Vec<u8> = (after_start..file_size).map(|i| (i % 251) as u8).collect();
         assert_eq!(&whole[after_start..], &after[..]);
     }
+
+    #[test]
+    fn test_aligned_buf_allocation_and_access() {
+        for alignment in [512, 4096] {
+            let size = 1024usize;
+            let mut abuf = AlignedBuf::new(size, alignment).unwrap();
+            let aligned_size = size.next_multiple_of(alignment);
+
+            assert!(
+                (abuf.ptr() as usize).is_multiple_of(alignment),
+                "ptr not aligned to {alignment}"
+            );
+            assert!(abuf.as_slice(aligned_size).iter().all(|&b| b == 0));
+
+            let pattern: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+            abuf.as_mut_slice(size).copy_from_slice(&pattern);
+            assert_eq!(abuf.as_slice(size), &pattern[..]);
+        }
+    }
 }
