@@ -72,6 +72,12 @@ $ cd cloud-hypervisor
 $ ./scripts/dev_cli.sh build --release
 ```
 
+On Apple Silicon hosts, use `--arch x86_64` to build the x86_64 Linux binary:
+
+```shell
+$ ./scripts/dev_cli.sh build --release --arch x86_64
+```
+
 With `dev_cli.sh`, one can also run the Cloud Hypervisor CI locally. This can be
 very convenient for debugging CI errors without having to fully rely on the
 Cloud Hypervisor CI infrastructure.
