@@ -588,10 +588,12 @@ mod unit_tests {
 
         assert_eq!(split_commas("\"\"").unwrap(), vec!["\"\""]);
         parser.parse("size=128M,hanging_param").unwrap_err();
-        parser
-            .parse("size=128M,too_many_equals=foo=bar")
-            .unwrap_err();
         parser.parse("size=128M,file=/dev/shm").unwrap_err();
+
+        // Equals signs within a value are fine (splitn(2, '=') keeps them)
+        parser.add("extra");
+        parser.parse("extra=foo=bar").unwrap();
+        assert_eq!(parser.get("extra"), Some("foo=bar".to_owned()));
 
         parser.parse("size=128M").unwrap();
         assert_eq!(parser.get("size"), Some("128M".to_owned()));
