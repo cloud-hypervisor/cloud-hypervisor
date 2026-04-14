@@ -73,7 +73,7 @@ pub enum OptionParserError {
     #[error("unknown option: {0}")]
     UnknownOption(String),
     /// The input string has invalid syntax (unbalanced quotes/brackets, missing `=`).
-    #[error("unknown option: {0}")]
+    #[error("invalid syntax: {0}")]
     InvalidSyntax(String),
     /// A value could not be converted to the requested type.
     #[error("unable to convert {1} for {0}")]
