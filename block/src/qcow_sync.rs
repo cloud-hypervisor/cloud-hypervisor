@@ -1903,4 +1903,13 @@ mod unit_tests {
             assert_eq!(abuf.as_slice(size), &pattern[..]);
         }
     }
+
+    #[test]
+    fn test_aligned_buf_size_rounds_up() {
+        let abuf = AlignedBuf::new(1, 512).unwrap();
+        assert_eq!(abuf.layout().size(), 512);
+
+        let abuf = AlignedBuf::new(513, 512).unwrap();
+        assert_eq!(abuf.layout().size(), 1024);
+    }
 }
