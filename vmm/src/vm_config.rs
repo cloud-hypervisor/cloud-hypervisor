@@ -757,6 +757,12 @@ pub enum PayloadConfigError {
     /// FwCfg missing initramfs
     #[error("Error --fw-cfg-config: missing --initramfs")]
     FwCfgMissingInitramfs,
+    #[cfg(feature = "fw_cfg")]
+    /// Invalid fw_cfg item content
+    #[error(
+        "Error --fw-cfg-config: invalid item '{0}' (exactly one of 'file' or 'string' is required)"
+    )]
+    FwCfgInvalidItem(String),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -817,7 +823,9 @@ pub struct FwCfgItem {
     #[serde(default)]
     pub name: String,
     #[serde(default)]
-    pub file: PathBuf,
+    pub file: Option<PathBuf>,
+    #[serde(default)]
+    pub string: Option<String>,
 }
 
 #[cfg(feature = "fw_cfg")]
