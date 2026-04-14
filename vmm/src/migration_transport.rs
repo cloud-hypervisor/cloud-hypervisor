@@ -26,6 +26,7 @@ use vm_memory::{
     VolatileSlice, WriteVolatile,
 };
 use vm_migration::protocol::{Command, MemoryRangeTable, Request, Response};
+use vm_migration::tls::TlsStream;
 use vm_migration::{MigratableError, Snapshot};
 use vmm_sys_util::eventfd::EventFd;
 
@@ -107,6 +108,7 @@ impl AsFd for ReceiveListener {
 pub(crate) enum SocketStream {
     Unix(UnixStream),
     Tcp(TcpStream),
+    Tls(Box<TlsStream>),
 }
 
 impl Read for SocketStream {
@@ -114,6 +116,7 @@ impl Read for SocketStream {
         match self {
             SocketStream::Unix(stream) => stream.read(buf),
             SocketStream::Tcp(stream) => stream.read(buf),
+            SocketStream::Tls(stream) => stream.read(buf),
         }
     }
 }
@@ -123,6 +126,7 @@ impl Write for SocketStream {
         match self {
             SocketStream::Unix(stream) => stream.write(buf),
             SocketStream::Tcp(stream) => stream.write(buf),
+            SocketStream::Tls(stream) => stream.write(buf),
         }
     }
 
@@ -130,6 +134,7 @@ impl Write for SocketStream {
         match self {
             SocketStream::Unix(stream) => stream.flush(),
             SocketStream::Tcp(stream) => stream.flush(),
+            SocketStream::Tls(stream) => stream.flush(),
         }
     }
 }
@@ -139,6 +144,7 @@ impl AsFd for SocketStream {
         match self {
             SocketStream::Unix(s) => s.as_fd(),
             SocketStream::Tcp(s) => s.as_fd(),
+            SocketStream::Tls(s) => s.as_fd(),
         }
     }
 }
@@ -151,6 +157,7 @@ impl ReadVolatile for SocketStream {
         match self {
             SocketStream::Unix(s) => s.read_volatile(buf),
             SocketStream::Tcp(s) => s.read_volatile(buf),
+            SocketStream::Tls(s) => s.read_volatile(buf),
         }
     }
 }
@@ -163,6 +170,7 @@ impl WriteVolatile for SocketStream {
         match self {
             SocketStream::Unix(s) => s.write_volatile(buf),
             SocketStream::Tcp(s) => s.write_volatile(buf),
+            SocketStream::Tls(s) => s.write_volatile(buf),
         }
     }
 }
