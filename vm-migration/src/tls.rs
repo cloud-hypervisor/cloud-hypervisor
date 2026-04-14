@@ -278,7 +278,7 @@ impl WriteVolatile for TlsStream {
 
 /// Carries a TLS server configuration. Intended to be turned into a [`TlsStream`]
 /// when paired with a [`TcpStream`].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TlsServerConfig {
     /// This config is shared between all server connections.
     config: Arc<ServerConfig>,
