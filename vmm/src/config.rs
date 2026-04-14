@@ -373,18 +373,6 @@ pub enum ValidationError {
     /// Invalid block device serial length
     #[error("Block device serial length ({0}) exceeds maximum allowed length ({1})")]
     InvalidSerialLength(usize, usize),
-    #[cfg(feature = "fw_cfg")]
-    /// FwCfg missing kernel
-    #[error("Error --fw-cfg-config: missing --kernel")]
-    FwCfgMissingKernel,
-    #[cfg(feature = "fw_cfg")]
-    /// FwCfg missing cmdline
-    #[error("Error --fw-cfg-config: missing --cmdline")]
-    FwCfgMissingCmdline,
-    #[cfg(feature = "fw_cfg")]
-    /// FwCfg missing initramfs
-    #[error("Error --fw-cfg-config: missing --initramfs")]
-    FwCfgMissingInitramfs,
     #[cfg(feature = "ivshmem")]
     /// Invalid Ivshmem input size
     #[error("Invalid ivshmem input size")]
@@ -2038,14 +2026,13 @@ impl FwCfgConfig {
             items,
         })
     }
-    pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
-        let payload = vm_config.payload.as_ref().unwrap();
+    pub fn validate(&self, payload: &PayloadConfig) -> std::result::Result<(), PayloadConfigError> {
         if self.kernel && payload.kernel.is_none() {
-            return Err(ValidationError::FwCfgMissingKernel);
+            return Err(PayloadConfigError::FwCfgMissingKernel);
         } else if self.cmdline && payload.cmdline.is_none() {
-            return Err(ValidationError::FwCfgMissingCmdline);
+            return Err(PayloadConfigError::FwCfgMissingCmdline);
         } else if self.initramfs && payload.initramfs.is_none() {
-            return Err(ValidationError::FwCfgMissingInitramfs);
+            return Err(PayloadConfigError::FwCfgMissingInitramfs);
         }
         Ok(())
     }
