@@ -647,4 +647,234 @@ mod unit_tests {
     fn check_dequote() {
         assert_eq!(dequote("a\u{3b2}\"a\"\"\""), "a\u{3b2}a\"");
     }
+
+    #[test]
+    fn test_empty_input() {
+        let mut parser = OptionParser::new();
+        parser.add("foo");
+        parser.parse("").unwrap();
+        parser.parse("   ").unwrap();
+        assert!(!parser.is_set("foo"));
+    }
+
+    #[test]
+    fn test_parse_subset_ignores_unknown() {
+        let mut parser = OptionParser::new();
+        parser.add("known");
+        parser.parse_subset("known=val,unknown=other").unwrap();
+        assert_eq!(parser.get("known"), Some("val".to_owned()));
+        assert!(!parser.is_set("unknown"));
+    }
+
+    #[test]
+    fn test_add_all() {
+        let mut parser = OptionParser::new();
+        parser.add_all(&["a", "b", "c"]);
+        parser.parse("a=1,b=2,c=3").unwrap();
+        assert_eq!(parser.get("a"), Some("1".to_owned()));
+        assert_eq!(parser.get("b"), Some("2".to_owned()));
+        assert_eq!(parser.get("c"), Some("3".to_owned()));
+    }
+
+    #[test]
+    fn test_add_valueless() {
+        let mut parser = OptionParser::new();
+        parser.add_valueless("readonly");
+        parser.add("path");
+        parser.parse("path=/dev/sda,readonly").unwrap();
+        assert!(parser.is_set("readonly"));
+        assert_eq!(parser.get("readonly"), None);
+        assert_eq!(parser.get("path"), Some("/dev/sda".to_owned()));
+    }
+
+    #[test]
+    fn test_convert_integer() {
+        let mut parser = OptionParser::new();
+        parser.add("count");
+        parser.parse("count=42").unwrap();
+        assert_eq!(parser.convert::<u64>("count").unwrap(), Some(42));
+        assert_eq!(parser.convert::<u32>("count").unwrap(), Some(42));
+    }
+
+    #[test]
+    fn test_convert_unset_returns_none() {
+        let mut parser = OptionParser::new();
+        parser.add("count");
+        assert_eq!(parser.convert::<u64>("count").unwrap(), None);
+    }
+
+    #[test]
+    fn test_convert_invalid_returns_error() {
+        let mut parser = OptionParser::new();
+        parser.add("count");
+        parser.parse("count=notanumber").unwrap();
+        parser.convert::<u64>("count").unwrap_err();
+    }
+
+    #[test]
+    fn test_toggle() {
+        for (input, expected) in [
+            ("on", true),
+            ("off", false),
+            ("true", true),
+            ("false", false),
+            ("ON", true),
+            ("OFF", false),
+            ("True", true),
+            ("False", false),
+        ] {
+            let mut parser = OptionParser::new();
+            parser.add("flag");
+            parser.parse(&format!("flag={input}")).unwrap();
+            let toggle = parser.convert::<Toggle>("flag").unwrap().unwrap();
+            assert_eq!(toggle.0, expected, "Toggle({input}) should be {expected}");
+        }
+    }
+
+    #[test]
+    fn test_toggle_invalid() {
+        let mut parser = OptionParser::new();
+        parser.add("flag");
+        parser.parse("flag=maybe").unwrap();
+        assert!(parser.convert::<Toggle>("flag").is_err());
+    }
+
+    #[test]
+    fn test_byte_sized() {
+        let cases = [
+            ("1024", 1024u64),
+            ("1K", 1024),
+            ("2M", 2 * 1024 * 1024),
+            ("4G", 4 * 1024 * 1024 * 1024),
+            ("0K", 0),
+        ];
+        for (input, expected) in cases {
+            let mut parser = OptionParser::new();
+            parser.add("size");
+            parser.parse(&format!("size={input}")).unwrap();
+            let bs = parser.convert::<ByteSized>("size").unwrap().unwrap();
+            assert_eq!(bs.0, expected, "ByteSized({input}) should be {expected}");
+        }
+    }
+
+    #[test]
+    fn test_byte_sized_invalid() {
+        assert!("xyzK".parse::<ByteSized>().is_err());
+        assert!("".parse::<ByteSized>().is_err());
+    }
+
+    #[test]
+    fn test_integer_list_single_values() {
+        let list = IntegerList::from_str("[1,3,5]").unwrap();
+        assert_eq!(list.0, vec![1, 3, 5]);
+    }
+
+    #[test]
+    fn test_integer_list_ranges() {
+        let list = IntegerList::from_str("[0,2-4,7]").unwrap();
+        assert_eq!(list.0, vec![0, 2, 3, 4, 7]);
+    }
+
+    #[test]
+    fn test_integer_list_invalid_range() {
+        assert!(IntegerList::from_str("[5-3]").is_err());
+        assert!(IntegerList::from_str("[5-5]").is_err());
+    }
+
+    #[test]
+    fn test_integer_list_too_many_dashes() {
+        assert!(IntegerList::from_str("[1-2-3]").is_err());
+    }
+
+    #[test]
+    fn test_integer_list_display() {
+        let list = IntegerList(vec![1, 2, 3]);
+        assert_eq!(format!("{list}"), "[1,2,3]");
+
+        let empty = IntegerList(vec![]);
+        assert_eq!(format!("{empty}"), "[]");
+
+        let single = IntegerList(vec![42]);
+        assert_eq!(format!("{single}"), "[42]");
+    }
+
+    #[test]
+    fn test_string_list() {
+        let list = StringList::from_str("[foo,bar,baz]").unwrap();
+        assert_eq!(list.0, vec!["foo", "bar", "baz"]);
+    }
+
+    #[test]
+    fn test_string_list_no_brackets() {
+        let list = StringList::from_str("foo,bar").unwrap();
+        assert_eq!(list.0, vec!["foo", "bar"]);
+    }
+
+    #[test]
+    fn test_tuple_single_pair() {
+        let t = Tuple::<String, u64>::from_str("[foo@42]").unwrap();
+        assert_eq!(t, Tuple(vec![("foo".to_owned(), 42)]));
+    }
+
+    #[test]
+    fn test_tuple_multiple_pairs() {
+        let t = Tuple::<String, Vec<u64>>::from_str("[a@[1,2],b@[3,4]]").unwrap();
+        assert_eq!(
+            t,
+            Tuple(vec![
+                ("a".to_owned(), vec![1, 2]),
+                ("b".to_owned(), vec![3, 4]),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_tuple_missing_at_separator() {
+        Tuple::<String, u64>::from_str("[foo42]").unwrap_err();
+    }
+
+    #[test]
+    fn test_tuple_missing_brackets() {
+        Tuple::<String, u64>::from_str("foo@42").unwrap_err();
+    }
+
+    #[test]
+    fn test_split_commas_unbalanced_bracket() {
+        split_commas("[a,b").unwrap_err();
+        split_commas("a]").unwrap_err();
+    }
+
+    #[test]
+    fn test_split_commas_unbalanced_quote() {
+        split_commas("\"abc").unwrap_err();
+    }
+
+    #[test]
+    fn test_quoted_value_with_commas() {
+        let mut parser = OptionParser::new();
+        parser.add("cmd");
+        parser.parse("cmd=\"a,b,c\"").unwrap();
+        assert_eq!(parser.get("cmd"), Some("a,b,c".to_owned()));
+    }
+
+    #[test]
+    #[should_panic(expected = "forbidden character")]
+    fn test_add_option_with_equals() {
+        let mut parser = OptionParser::new();
+        parser.add("bad=name");
+    }
+
+    #[test]
+    #[should_panic(expected = "forbidden character")]
+    fn test_add_option_with_comma() {
+        let mut parser = OptionParser::new();
+        parser.add("bad,name");
+    }
+
+    #[test]
+    #[should_panic(expected = "forbidden character")]
+    fn test_add_option_with_bracket() {
+        let mut parser = OptionParser::new();
+        parser.add("bad[name");
+    }
 }
