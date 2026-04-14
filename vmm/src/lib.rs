@@ -1434,9 +1434,9 @@ impl Vmm {
                     // Proceed with sending memory file descriptors over UNIX socket
                     vm.send_memory_fds(unix_socket)?;
                 }
-                SocketStream::Tcp(_tcp_socket) => {
+                _ => {
                     return Err(MigratableError::MigrateSend(anyhow!(
-                        "--local option is not supported with TCP sockets",
+                        "--local option is only supported with UNIX sockets",
                     )));
                 }
             }
