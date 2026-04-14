@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 
+use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use log::{error, info, warn};
 use virtio_queue::Queue;
@@ -215,6 +216,7 @@ pub struct VirtioCommon {
     pub paused_sync: Option<Arc<Barrier>>,
     pub epoll_threads: Option<Vec<thread::JoinHandle<()>>>,
     pub queue_sizes: Vec<u16>,
+    pub queue_evts: Vec<EventFd>,
     pub device_type: u32,
     pub min_queues: u16,
     pub access_platform: Option<Arc<dyn AccessPlatform>>,
@@ -252,6 +254,21 @@ impl VirtioCommon {
             return Err(ActivateError::BadActivate);
         }
 
+        // Do not retain virtio-net queue eventfds here. Signaling them on
+        // resume would break its `driver_awake` workaround.
+        self.queue_evts = match VirtioDeviceType::from(self.device_type) {
+            VirtioDeviceType::Net => Vec::new(),
+            _ => queues
+                .iter()
+                .map(|(_, _, queue_evt)| {
+                    queue_evt.try_clone().map_err(|e| {
+                        error!("failed cloning queue EventFd: {e}");
+                        ActivateError::BadActivate
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        };
+
         let kill_evt = EventFd::new(EFD_NONBLOCK).map_err(|e| {
             error!("failed creating kill EventFd: {e}");
             ActivateError::BadActivate
@@ -272,6 +289,8 @@ impl VirtioCommon {
     }
 
     pub fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
+        self.queue_evts.clear();
+
         // We first must resume the virtio thread if it was paused.
         if self.pause_evt.take().is_some() {
             self.resume().ok()?;
@@ -353,6 +372,16 @@ impl Pausable for VirtioCommon {
             for t in epoll_threads.iter() {
                 t.thread().unpark();
             }
+        }
+
+        // Signal each activated queue eventfd so workers process restored queues
+        // that may already contain pending requests.
+        for queue_evt in &self.queue_evts {
+            queue_evt.write(1).map_err(|e| {
+                MigratableError::Resume(anyhow!(
+                    "Could not notify restored virtio worker on resume: {e}"
+                ))
+            })?;
         }
 
         Ok(())
