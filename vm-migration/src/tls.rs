@@ -3,7 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use std::io::{self, Read, Write};
 use std::net::TcpStream;
+use std::os::fd::{AsFd, BorrowedFd};
 use std::path::Path;
 use std::result;
 use std::sync::Arc;
@@ -14,6 +16,8 @@ use rustls::{
     ClientConfig, ClientConnection, RootCertStore, ServerConfig, ServerConnection, StreamOwned,
 };
 use thiserror::Error;
+use vm_memory::bitmap::BitmapSlice;
+use vm_memory::{ReadVolatile, VolatileMemoryError, VolatileSlice, WriteVolatile};
 
 use crate::MigratableError;
 
@@ -46,9 +50,17 @@ enum TlsStreamParticipant {
 /// Server/Client-agnostic TLS stream.
 pub struct TlsStream {
     stream: TlsStreamParticipant,
+    /// We have to implement [`ReadVolatile`] and [`WriteVolatile`] for
+    /// [`TlsStream`]. We use this buffer to avoid allocating a new buffer for
+    /// every volatile read or write.
+    buf: Vec<u8>,
 }
 
 impl TlsStream {
+    /// The maximum size of [`TlsStream::buf`]. This keeps the reusable buffer
+    /// from growing without bound.
+    const CHUNK_SIZE: usize = 64 << 10;
+
     /// Creates a client [`TlsStream`]. Encrypts and decrypts data sent through
     /// this stream using the CA certificate from `ca-cert.pem` in the given
     /// directory. The given hostname must match a subject name in the server
@@ -89,6 +101,7 @@ impl TlsStream {
 
         Ok(Self {
             stream: TlsStreamParticipant::Client(tls),
+            buf: Vec::new(),
         })
     }
 
@@ -116,7 +129,117 @@ impl TlsStream {
 
         Ok(Self {
             stream: TlsStreamParticipant::Server(tls),
+            buf: Vec::new(),
         })
+    }
+}
+
+impl Read for TlsStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match &mut self.stream {
+            TlsStreamParticipant::Client(s) => Read::read(s, buf),
+            TlsStreamParticipant::Server(s) => Read::read(s, buf),
+        }
+    }
+}
+
+impl Write for TlsStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match &mut self.stream {
+            TlsStreamParticipant::Client(s) => Write::write(s, buf),
+            TlsStreamParticipant::Server(s) => Write::write(s, buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match &mut self.stream {
+            TlsStreamParticipant::Client(s) => Write::flush(s),
+            TlsStreamParticipant::Server(s) => Write::flush(s),
+        }
+    }
+}
+
+// Reading from or writing to these FDs would break the connection, because
+// those reads or writes wouldn't go through rustls. But the FD is necessary to
+// listen for incoming connections.
+impl AsFd for TlsStream {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        match &self.stream {
+            TlsStreamParticipant::Client(s) => s.get_ref().as_fd(),
+            TlsStreamParticipant::Server(s) => s.get_ref().as_fd(),
+        }
+    }
+}
+
+impl ReadVolatile for TlsStream {
+    fn read_volatile<B: BitmapSlice>(
+        &mut self,
+        vs: &mut VolatileSlice<B>,
+    ) -> result::Result<usize, VolatileMemoryError> {
+        let len = vs.len().min(Self::CHUNK_SIZE);
+
+        if len == 0 {
+            return Ok(0);
+        }
+
+        if self.buf.len() < len {
+            self.buf.resize(len, 0);
+        }
+
+        let n = {
+            let (stream, buf) = (&mut self.stream, &mut self.buf[..len]);
+
+            match stream {
+                TlsStreamParticipant::Client(s) => Read::read(s, buf),
+                TlsStreamParticipant::Server(s) => Read::read(s, buf),
+            }
+            .map_err(VolatileMemoryError::IOError)?
+        };
+
+        if n == 0 {
+            return Ok(0);
+        }
+
+        vs.copy_from(&self.buf[..n]);
+        self.buf.clear();
+        Ok(n)
+    }
+}
+
+impl WriteVolatile for TlsStream {
+    fn write_volatile<B: BitmapSlice>(
+        &mut self,
+        vs: &VolatileSlice<B>,
+    ) -> Result<usize, VolatileMemoryError> {
+        let len = vs.len().min(Self::CHUNK_SIZE);
+
+        if len == 0 {
+            return Ok(0);
+        }
+
+        if self.buf.len() < len {
+            self.buf.resize(len, 0);
+        }
+
+        let buf = &mut self.buf[..len];
+        let n = vs.copy_to(&mut buf[..len]);
+
+        if n == 0 {
+            return Ok(0);
+        }
+
+        let n = {
+            let stream = &mut self.stream;
+
+            match stream {
+                TlsStreamParticipant::Client(s) => Write::write(s, buf),
+                TlsStreamParticipant::Server(s) => Write::write(s, buf),
+            }
+            .map_err(VolatileMemoryError::IOError)?
+        };
+
+        self.buf.clear();
+        Ok(n)
     }
 }
 
