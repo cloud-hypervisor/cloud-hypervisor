@@ -153,16 +153,6 @@ impl ReadVolatile for SocketStream {
             SocketStream::Tcp(s) => s.read_volatile(buf),
         }
     }
-
-    fn read_exact_volatile<B: BitmapSlice>(
-        &mut self,
-        buf: &mut VolatileSlice<B>,
-    ) -> Result<(), VolatileMemoryError> {
-        match self {
-            SocketStream::Unix(s) => s.read_exact_volatile(buf),
-            SocketStream::Tcp(s) => s.read_exact_volatile(buf),
-        }
-    }
 }
 
 impl WriteVolatile for SocketStream {
@@ -173,16 +163,6 @@ impl WriteVolatile for SocketStream {
         match self {
             SocketStream::Unix(s) => s.write_volatile(buf),
             SocketStream::Tcp(s) => s.write_volatile(buf),
-        }
-    }
-
-    fn write_all_volatile<B: BitmapSlice>(
-        &mut self,
-        buf: &VolatileSlice<B>,
-    ) -> Result<(), VolatileMemoryError> {
-        match self {
-            SocketStream::Unix(s) => s.write_all_volatile(buf),
-            SocketStream::Tcp(s) => s.write_all_volatile(buf),
         }
     }
 }
