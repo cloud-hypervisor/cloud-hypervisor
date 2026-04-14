@@ -2646,12 +2646,13 @@ impl DeviceManager {
         disk_cfg: &mut DiskConfig,
         is_hotplug: bool,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &disk_cfg.pci_common.id {
-            id.clone()
-        } else {
-            let id = self.next_device_name(DISK_DEVICE_NAME_PREFIX)?;
-            disk_cfg.pci_common.id = Some(id.clone());
-            id
+        let id = match disk_cfg.pci_common.id.as_ref() {
+            Some(id) => id.clone(),
+            None => disk_cfg
+                .pci_common
+                .id
+                .insert(self.next_device_name(DISK_DEVICE_NAME_PREFIX)?)
+                .clone(),
         };
 
         info!("Creating virtio-block device: {disk_cfg:?}");
@@ -2945,12 +2946,13 @@ impl DeviceManager {
         &mut self,
         net_cfg: &mut NetConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &net_cfg.pci_common.id {
-            id.clone()
-        } else {
-            let id = self.next_device_name(NET_DEVICE_NAME_PREFIX)?;
-            net_cfg.pci_common.id = Some(id.clone());
-            id
+        let id = match net_cfg.pci_common.id.as_ref() {
+            Some(id) => id.clone(),
+            None => net_cfg
+                .pci_common
+                .id
+                .insert(self.next_device_name(NET_DEVICE_NAME_PREFIX)?)
+                .clone(),
         };
         info!("Creating virtio-net device: {net_cfg:?}");
 
@@ -3158,12 +3160,13 @@ impl DeviceManager {
         &mut self,
         generic_vhost_user_cfg: &mut GenericVhostUserConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &generic_vhost_user_cfg.pci_common.id {
-            id.clone()
-        } else {
-            let id = self.next_device_name(GENERIC_VHOST_USER_DEVICE_NAME_PREFIX)?;
-            generic_vhost_user_cfg.pci_common.id = Some(id.clone());
-            id
+        let id = match generic_vhost_user_cfg.pci_common.id.as_ref() {
+            Some(id) => id.clone(),
+            None => generic_vhost_user_cfg
+                .pci_common
+                .id
+                .insert(self.next_device_name(GENERIC_VHOST_USER_DEVICE_NAME_PREFIX)?)
+                .clone(),
         };
 
         info!("Creating generic vhost-user device: {generic_vhost_user_cfg:?}");
@@ -3222,12 +3225,13 @@ impl DeviceManager {
         &mut self,
         fs_cfg: &mut FsConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &fs_cfg.pci_common.id {
-            id.clone()
-        } else {
-            let id = self.next_device_name(FS_DEVICE_NAME_PREFIX)?;
-            fs_cfg.pci_common.id = Some(id.clone());
-            id
+        let id = match fs_cfg.pci_common.id.as_ref() {
+            Some(id) => id.clone(),
+            None => fs_cfg
+                .pci_common
+                .id
+                .insert(self.next_device_name(FS_DEVICE_NAME_PREFIX)?)
+                .clone(),
         };
 
         info!("Creating virtio-fs device: {fs_cfg:?}");
@@ -3286,12 +3290,13 @@ impl DeviceManager {
         &mut self,
         pmem_cfg: &mut PmemConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &pmem_cfg.pci_common.id {
-            id.clone()
-        } else {
-            let id = self.next_device_name(PMEM_DEVICE_NAME_PREFIX)?;
-            pmem_cfg.pci_common.id = Some(id.clone());
-            id
+        let id = match pmem_cfg.pci_common.id.as_ref() {
+            Some(id) => id.clone(),
+            None => pmem_cfg
+                .pci_common
+                .id
+                .insert(self.next_device_name(PMEM_DEVICE_NAME_PREFIX)?)
+                .clone(),
         };
 
         info!("Creating virtio-pmem device: {pmem_cfg:?}");
@@ -3471,12 +3476,13 @@ impl DeviceManager {
         &mut self,
         vsock_cfg: &mut VsockConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &vsock_cfg.pci_common.id {
-            id.clone()
-        } else {
-            let id = self.next_device_name(VSOCK_DEVICE_NAME_PREFIX)?;
-            vsock_cfg.pci_common.id = Some(id.clone());
-            id
+        let id = match vsock_cfg.pci_common.id.as_ref() {
+            Some(id) => id.clone(),
+            None => vsock_cfg
+                .pci_common
+                .id
+                .insert(self.next_device_name(VSOCK_DEVICE_NAME_PREFIX)?)
+                .clone(),
         };
 
         info!("Creating virtio-vsock device: {vsock_cfg:?}");
@@ -3718,12 +3724,13 @@ impl DeviceManager {
         &mut self,
         vdpa_cfg: &mut VdpaConfig,
     ) -> DeviceManagerResult<MetaVirtioDevice> {
-        let id = if let Some(id) = &vdpa_cfg.pci_common.id {
-            id.clone()
-        } else {
-            let id = self.next_device_name(VDPA_DEVICE_NAME_PREFIX)?;
-            vdpa_cfg.pci_common.id = Some(id.clone());
-            id
+        let id = match vdpa_cfg.pci_common.id.as_ref() {
+            Some(id) => id.clone(),
+            None => vdpa_cfg
+                .pci_common
+                .id
+                .insert(self.next_device_name(VDPA_DEVICE_NAME_PREFIX)?)
+                .clone(),
         };
 
         info!("Creating vDPA device: {vdpa_cfg:?}");
