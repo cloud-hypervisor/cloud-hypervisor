@@ -26,8 +26,10 @@ use std::sync::Arc;
 use log::warn;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, InvalidDnsNameError, PrivateKeyDer, ServerName};
-use rustls::server::VerifierBuilderError;
-use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
+use rustls::server::{VerifierBuilderError, WebPkiClientVerifier};
+use rustls::{
+    ClientConfig, ClientConnection, RootCertStore, ServerConfig, ServerConnection, StreamOwned,
+};
 use thiserror::Error;
 
 use crate::MigratableError;
@@ -35,6 +37,8 @@ use crate::MigratableError;
 const CA_CERT_FILE: &str = "ca-cert.pem";
 const CLIENT_CERT_FILE: &str = "client-cert.pem";
 const CLIENT_KEY_FILE: &str = "client-key.pem";
+const SERVER_CERT_FILE: &str = "server-cert.pem";
+const SERVER_KEY_FILE: &str = "server-key.pem";
 
 /// Errors that can occur when establishing a TLS-encrypted migration channel.
 #[derive(Error, Debug)]
@@ -67,6 +71,7 @@ pub enum TlsError {
 #[derive(Debug)]
 enum TlsStreamParticipant {
     Client(StreamOwned<ClientConnection, TcpStream>),
+    Server(StreamOwned<ServerConnection, TcpStream>),
 }
 
 /// Server/Client-agnostic TLS stream.
@@ -121,6 +126,72 @@ impl TlsStream {
         Ok(Self {
             stream: TlsStreamParticipant::Client(tls),
         })
+    }
+
+    /// Creates a server [`TlsStream`]. Encrypts and decrypts data sent through
+    /// this stream using the certificates and key from the provided
+    /// [`TlsServerConfig`].
+    pub fn new_server(
+        socket: TcpStream,
+        config: &TlsServerConfig,
+    ) -> result::Result<Self, MigratableError> {
+        let conn = ServerConnection::new(config.config.clone())
+            .map_err(TlsError::RustlsError)
+            .map_err(MigratableError::Tls)?;
+
+        let mut tls = StreamOwned::new(conn, socket);
+        while tls.conn.is_handshaking() {
+            let (rd, wr) = tls
+                .conn
+                .complete_io(&mut tls.sock)
+                .map_err(TlsError::RustlsIoError)
+                .map_err(MigratableError::Tls)?;
+            // No handshake progress on a connection that should be handshaking, we treat
+            // that as a failure.
+            if rd == 0 && wr == 0 {
+                Err(MigratableError::Tls(TlsError::HandshakeError))?;
+            }
+        }
+
+        Ok(Self {
+            stream: TlsStreamParticipant::Server(tls),
+        })
+    }
+}
+
+/// Carries a TLS server configuration. Intended to be turned into a [`TlsStream`]
+/// when paired with a [`TcpStream`].
+#[derive(Debug)]
+pub struct TlsServerConfig {
+    /// This config is shared between all server connections.
+    config: Arc<ServerConfig>,
+}
+
+impl TlsServerConfig {
+    /// Creates a [`TlsServerConfig`] from the certificate chain in
+    /// `server-cert.pem`, the private key in `server-key.pem`, and the client
+    /// trust anchors in `ca-cert.pem`.
+    ///
+    /// Client certificates presented during the TLS handshake must chain to a CA in
+    /// `ca-cert.pem`.
+    pub fn new(cert_dir: &Path) -> result::Result<Self, MigratableError> {
+        let server_certs = load_cert_chain(&cert_dir.join(SERVER_CERT_FILE))?;
+        let server_key = load_private_key(&cert_dir.join(SERVER_KEY_FILE))?;
+        // Trust anchors used to verify client certificates for mTLS.
+        let client_roots = Arc::new(load_root_store(&cert_dir.join(CA_CERT_FILE))?);
+
+        let client_verifier = WebPkiClientVerifier::builder(client_roots)
+            .build()
+            .map_err(TlsError::RustlsVerifierBuilderError)
+            .map_err(MigratableError::Tls)?;
+
+        let config = ServerConfig::builder()
+            .with_client_cert_verifier(client_verifier)
+            .with_single_cert(server_certs, server_key)
+            .map_err(TlsError::RustlsError)
+            .map_err(MigratableError::Tls)?;
+        let config = Arc::new(config);
+        Ok(Self { config })
     }
 }
 
