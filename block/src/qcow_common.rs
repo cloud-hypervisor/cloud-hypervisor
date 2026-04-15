@@ -9,6 +9,7 @@
 //! Position-independent I/O (`pread_exact`, `pwrite_all`) and iovec
 //! scatter/gather helpers used by both `qcow_sync` and `qcow_async`.
 
+use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::cmp::min;
 use std::os::fd::RawFd;
 use std::{io, ptr, slice};
@@ -65,6 +66,98 @@ pub fn pwrite_all(fd: RawFd, buf: &[u8], offset: u64) -> io::Result<()> {
         total += ret as usize;
     }
     Ok(())
+}
+
+/// RAII wrapper for an aligned heap buffer required by O_DIRECT.
+pub struct AlignedBuf {
+    ptr: *mut u8,
+    layout: Layout,
+}
+
+impl AlignedBuf {
+    pub fn new(size: usize, alignment: usize) -> io::Result<Self> {
+        let size = size.max(1).next_multiple_of(alignment);
+        let layout = Layout::from_size_align(size, alignment)
+            .map_err(|e| io::Error::other(format!("invalid aligned layout: {e}")))?;
+        // SAFETY: layout has non-zero size.
+        let ptr = unsafe { alloc_zeroed(layout) };
+        if ptr.is_null() {
+            return Err(io::Error::new(
+                io::ErrorKind::OutOfMemory,
+                "aligned allocation failed",
+            ));
+        }
+        Ok(AlignedBuf { ptr, layout })
+    }
+
+    pub fn as_mut_slice(&mut self, len: usize) -> &mut [u8] {
+        let len = len.min(self.layout.size());
+        // SAFETY: ptr is valid for layout.size() bytes; len <= layout.size().
+        unsafe { slice::from_raw_parts_mut(self.ptr, len) }
+    }
+
+    pub fn as_slice(&self, len: usize) -> &[u8] {
+        let len = len.min(self.layout.size());
+        // SAFETY: ptr is valid for layout.size() bytes; len <= layout.size().
+        unsafe { slice::from_raw_parts(self.ptr, len) }
+    }
+
+    #[cfg(test)]
+    pub fn layout(&self) -> &Layout {
+        &self.layout
+    }
+
+    #[cfg(test)]
+    pub fn ptr(&self) -> *const u8 {
+        self.ptr
+    }
+}
+
+impl Drop for AlignedBuf {
+    fn drop(&mut self) {
+        // SAFETY: ptr was allocated by alloc_zeroed with self.layout.
+        unsafe { dealloc(self.ptr, self.layout) };
+    }
+}
+
+/// Read into `buf` via an aligned bounce buffer when O_DIRECT requires it.
+pub fn aligned_pread(fd: RawFd, buf: &mut [u8], offset: u64, alignment: usize) -> io::Result<()> {
+    if alignment == 0
+        || ((buf.as_ptr() as usize).is_multiple_of(alignment)
+            && buf.len().is_multiple_of(alignment)
+            && (offset as usize).is_multiple_of(alignment))
+    {
+        return pread_exact(fd, buf, offset);
+    }
+
+    let aligned_offset = offset & !(alignment as u64 - 1);
+    let head = (offset - aligned_offset) as usize;
+    let aligned_len = (head + buf.len()).next_multiple_of(alignment);
+    let mut bounce = AlignedBuf::new(aligned_len, alignment)?;
+    pread_exact(fd, bounce.as_mut_slice(aligned_len), aligned_offset)?;
+    buf.copy_from_slice(&bounce.as_slice(aligned_len)[head..head + buf.len()]);
+    Ok(())
+}
+
+/// Write `buf` via an aligned bounce buffer when O_DIRECT requires it.
+pub fn aligned_pwrite(fd: RawFd, buf: &[u8], offset: u64, alignment: usize) -> io::Result<()> {
+    if alignment == 0
+        || ((buf.as_ptr() as usize).is_multiple_of(alignment)
+            && buf.len().is_multiple_of(alignment)
+            && (offset as usize).is_multiple_of(alignment))
+    {
+        return pwrite_all(fd, buf, offset);
+    }
+
+    let aligned_offset = offset & !(alignment as u64 - 1);
+    let head = (offset - aligned_offset) as usize;
+    let aligned_len = (head + buf.len()).next_multiple_of(alignment);
+    let mut bounce = AlignedBuf::new(aligned_len, alignment)?;
+
+    // Read-modify-write: read the existing aligned region, overlay our data.
+    pread_exact(fd, bounce.as_mut_slice(aligned_len), aligned_offset)?;
+    bounce.as_mut_slice(aligned_len)[head..head + buf.len()].copy_from_slice(buf);
+    pwrite_all(fd, bounce.as_slice(aligned_len), aligned_offset)
 }
 
 // -- iovec helper functions --
@@ -129,33 +222,43 @@ pub unsafe fn zero_fill_iovecs(iovecs: &[libc::iovec], start: usize, len: usize)
     }
 }
 
-/// Gather bytes from iovecs starting at the given byte offset into a Vec.
+/// Gather bytes from iovecs starting at the given byte offset into `dst`.
 ///
 /// # Safety
 /// Caller must ensure iovecs point to valid, readable memory of sufficient size.
-pub unsafe fn gather_from_iovecs(iovecs: &[libc::iovec], start: usize, len: usize) -> Vec<u8> {
-    let mut result = Vec::with_capacity(len);
-    let mut remaining = len;
+pub unsafe fn gather_from_iovecs_into(iovecs: &[libc::iovec], start: usize, dst: &mut [u8]) {
+    let len = dst.len();
+    let mut written = 0usize;
     let mut pos = 0usize;
     for iov in iovecs {
         let iov_end = pos + iov.iov_len;
-        if iov_end <= start || remaining == 0 {
+        if iov_end <= start || written == len {
             pos = iov_end;
             continue;
         }
         let iov_start = start.saturating_sub(pos);
         let available = iov.iov_len - iov_start;
-        let count = min(available, remaining);
+        let count = min(available, len - written);
         // SAFETY: iov_base is valid for iov_len bytes per caller contract.
         unsafe {
             let src = (iov.iov_base as *const u8).add(iov_start);
-            result.extend_from_slice(slice::from_raw_parts(src, count));
+            ptr::copy_nonoverlapping(src, dst.as_mut_ptr().add(written), count);
         }
-        remaining -= count;
-        if remaining == 0 {
+        written += count;
+        if written == len {
             break;
         }
         pos = iov_end;
     }
+}
+
+/// Gather bytes from iovecs starting at the given byte offset into a Vec.
+///
+/// # Safety
+/// Caller must ensure iovecs point to valid, readable memory of sufficient size.
+pub unsafe fn gather_from_iovecs(iovecs: &[libc::iovec], start: usize, len: usize) -> Vec<u8> {
+    let mut result = vec![0u8; len];
+    // SAFETY: caller guarantees iovecs are valid; result has len bytes.
+    unsafe { gather_from_iovecs_into(iovecs, start, &mut result) };
     result
 }
