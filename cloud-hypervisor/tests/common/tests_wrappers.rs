@@ -663,7 +663,6 @@ pub(crate) fn test_vhost_user_net(
     kill_child(&mut child);
     let output = child.wait_with_output().unwrap();
 
-    thread::sleep(std::time::Duration::new(5, 0));
     let _ = daemon_child.kill();
     let _ = daemon_child.wait();
 
@@ -806,7 +805,6 @@ pub(crate) fn test_vhost_user_blk(
     let output = child.wait_with_output().unwrap();
 
     if let Some(mut daemon_child) = daemon_child {
-        thread::sleep(std::time::Duration::new(5, 0));
         let _ = daemon_child.kill();
         let _ = daemon_child.wait();
     }
@@ -876,7 +874,6 @@ pub(crate) fn test_boot_from_vhost_user_blk(
     let output = child.wait_with_output().unwrap();
 
     if let Some(mut daemon_child) = daemon_child {
-        thread::sleep(std::time::Duration::new(5, 0));
         let _ = daemon_child.kill();
         let _ = daemon_child.wait();
     }
