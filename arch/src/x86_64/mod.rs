@@ -508,11 +508,27 @@ impl CpuidFeatureEntry {
         features
     }
 
-    // The function returns `Error` (a.k.a. "incompatible"), when the CPUID features from `src_vm_cpuid`
-    // is not a subset of those of the `dest_vm_cpuid`.
+    /// The function returns `Error` (a.k.a. "incompatible"), when the CPUID features from `src_vm_cpuid`
+    /// is not a subset of those of the `dest_vm_cpuid`.
     pub fn check_cpuid_compatibility(
         src_vm_cpuid: &[CpuIdEntry],
         dest_vm_cpuid: &[CpuIdEntry],
+    ) -> Result<(), Error> {
+        Self::check_cpuid_compatibility_with_descriptions(
+            src_vm_cpuid,
+            "source VM",
+            dest_vm_cpuid,
+            "destination VM",
+        )
+    }
+
+    /// Similar to `check_cpuid_compatibility`, but with the possibility to change
+    /// the description of the source and destination for logging purposes.
+    fn check_cpuid_compatibility_with_descriptions(
+        src_vm_cpuid: &[CpuIdEntry],
+        src_description: &str,
+        dest_vm_cpuid: &[CpuIdEntry],
+        dest_description: &str,
     ) -> Result<(), Error> {
         let feature_entry_list = &Self::checked_feature_entry_list();
         let src_vm_features = Self::get_features_from_cpuid(src_vm_cpuid, feature_entry_list);
@@ -539,7 +555,7 @@ impl CpuidFeatureEntry {
             if !entry_compatible {
                 error!(
                     "Detected incompatible CPUID entry: leaf={:#02x} (subleaf={:#02x}), register='{:?}', \
-                    compatible_check='{:?}', source VM feature='{:#04x}', destination VM feature'{:#04x}'.",
+                    compatible_check='{:?}', {src_description} feature='{:#04x}', {dest_description} feature'{:#04x}'.",
                     entry.function,
                     entry.index,
                     entry.feature_reg,
