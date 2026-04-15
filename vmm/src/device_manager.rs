@@ -1154,9 +1154,28 @@ pub struct DeviceManager {
     // ivshmem device
     ivshmem_device: Option<Arc<Mutex<devices::IvshmemDevice>>>,
 
+    /// Shared context for ACPI PCI hot-unplug teardown.
+    _pci_hotplug_backend: Arc<PciHotplugBackend>,
+
     /// Owned version needed to keep the bus device alive (the bus only holds
     /// a weak reference).
     _acpi_pci_hotplug_controller: Arc<Mutex<AcpiPciHotplugController>>,
+}
+
+/// Non-register context needed to tear down PCI devices during ACPI hot-unplug.
+///
+/// Unlike [`PciHotplugSharedState`], this state is not part of the ACPI hotplug
+/// register model. It groups the broader `DeviceManager` internals that the
+/// controller must access when unplugging a device.
+struct PciHotplugBackend {
+    /// Allocators and buses used to free and unregister PCI resources.
+    address_manager: Arc<AddressManager>,
+    /// Guest memory state needed for DMA teardown and userspace unmapping.
+    memory_manager: Arc<Mutex<MemoryManager>>,
+    /// Device topology used to remove unplugged devices and their children.
+    device_tree: Arc<Mutex<DeviceTree>>,
+    /// Tracked MMIO regions for VFIO-backed devices.
+    mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
 }
 
 /// MMIO-accessible controller for handling ACPI PCI hotplug and unplug events.
@@ -1165,10 +1184,7 @@ pub struct DeviceManager {
 pub struct AcpiPciHotplugController {
     shared_state: Arc<Mutex<PciHotplugSharedState>>,
     selected_segment: usize,
-    address_manager: Arc<AddressManager>,
-    memory_manager: Arc<Mutex<MemoryManager>>,
-    device_tree: Arc<Mutex<DeviceTree>>,
-    mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
+    backend: Arc<PciHotplugBackend>,
 }
 
 /// Create per-PCI-segment MMIO allocators over the range `[start, end]`.
@@ -1212,18 +1228,12 @@ fn create_mmio_allocators(
 impl AcpiPciHotplugController {
     fn new(
         shared_state: Arc<Mutex<PciHotplugSharedState>>,
-        address_manager: Arc<AddressManager>,
-        memory_manager: Arc<Mutex<MemoryManager>>,
-        device_tree: Arc<Mutex<DeviceTree>>,
-        mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
+        backend: Arc<PciHotplugBackend>,
     ) -> Self {
         Self {
             shared_state,
             selected_segment: 0,
-            address_manager,
-            memory_manager,
-            device_tree,
-            mmio_regions,
+            backend,
         }
     }
 
@@ -1251,7 +1261,7 @@ impl AcpiPciHotplugController {
 
         let (pci_device_handle, id) = {
             // Remove the device from the device tree along with its children.
-            let mut device_tree = self.device_tree.lock().unwrap();
+            let mut device_tree = self.backend.device_tree.lock().unwrap();
             let pci_device_node = device_tree
                 .remove_node_by_pci_bdf(pci_device_bdf)
                 .ok_or(DeviceManagerError::MissingPciDevice)?;
@@ -1292,7 +1302,7 @@ impl AcpiPciHotplugController {
                 // updates the device's region addresses but not the
                 // DeviceManager's cloned copies.
                 let device_regions = vfio_pci_device.lock().unwrap().mmio_regions().clone();
-                let mut mmio_regions = self.mmio_regions.lock().unwrap();
+                let mut mmio_regions = self.backend.mmio_regions.lock().unwrap();
                 for device_region in &device_regions {
                     mmio_regions.retain(|x| !x.has_matching_slots(device_region));
                 }
@@ -1309,7 +1319,8 @@ impl AcpiPciHotplugController {
                 let bar_addr = dev.config_bar_addr();
                 for (event, addr) in dev.ioeventfds(bar_addr) {
                     let io_addr = IoEventAddress::Mmio(addr);
-                    self.address_manager
+                    self.backend
+                        .address_manager
                         .vm
                         .unregister_ioevent(event, &io_addr)
                         .map_err(|e| DeviceManagerError::UnRegisterIoevent(e.into()))?;
@@ -1318,7 +1329,14 @@ impl AcpiPciHotplugController {
                 if let Some(dma_handler) = dev.dma_handler()
                     && !iommu_attached
                 {
-                    for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+                    for (_, zone) in self
+                        .backend
+                        .memory_manager
+                        .lock()
+                        .unwrap()
+                        .memory_zones()
+                        .iter()
+                    {
                         for region in zone.regions() {
                             dma_handler
                                 .unmap(region.start_addr().0, region.len())
@@ -1336,7 +1354,14 @@ impl AcpiPciHotplugController {
             }
             PciDeviceHandle::VfioUser(vfio_user_pci_device) => {
                 let mut dev = vfio_user_pci_device.lock().unwrap();
-                for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+                for (_, zone) in self
+                    .backend
+                    .memory_manager
+                    .lock()
+                    .unwrap()
+                    .memory_zones()
+                    .iter()
+                {
                     for region in zone.regions() {
                         dev.dma_unmap(region)
                             .map_err(DeviceManagerError::VfioUserDmaUnmap)?;
@@ -1368,7 +1393,7 @@ impl AcpiPciHotplugController {
             .lock()
             .unwrap()
             .free_bars(
-                &mut self.address_manager.allocator.lock().unwrap(),
+                &mut self.backend.address_manager.allocator.lock().unwrap(),
                 &mut shared_state.pci_segments[pci_segment_id as usize]
                     .mem32_allocator
                     .lock()
@@ -1389,13 +1414,15 @@ impl AcpiPciHotplugController {
 
         #[cfg(target_arch = "x86_64")]
         // Remove the device from the IO bus.
-        self.address_manager
+        self.backend
+            .address_manager
             .io_bus
             .remove_by_device(bus_device.as_ref())
             .map_err(DeviceManagerError::RemoveDeviceFromIoBus)?;
 
         // Remove the device from the MMIO bus.
-        self.address_manager
+        self.backend
+            .address_manager
             .mmio_bus
             .remove_by_device(bus_device.as_ref())
             .map_err(DeviceManagerError::RemoveDeviceFromMmioBus)?;
@@ -1412,7 +1439,8 @@ impl AcpiPciHotplugController {
                 // TODO: do not rely on the correctness of all the code in this
                 // file for this to hold.
                 unsafe {
-                    self.memory_manager
+                    self.backend
+                        .memory_manager
                         .lock()
                         .unwrap()
                         .remove_userspace_mapping(
@@ -1603,12 +1631,15 @@ impl DeviceManager {
             iommu_attached_devices: None,
             virtio_mem_devices: Vec::new(),
         }));
+        let pci_hotplug_backend = Arc::new(PciHotplugBackend {
+            address_manager: Arc::clone(&address_manager),
+            memory_manager: Arc::clone(&memory_manager),
+            device_tree: Arc::clone(&device_tree),
+            mmio_regions: Arc::clone(&mmio_regions),
+        });
         let acpi_pci_hotplug_controller = Arc::new(Mutex::new(AcpiPciHotplugController::new(
             Arc::clone(&shared_state),
-            Arc::clone(&address_manager),
-            Arc::clone(&memory_manager),
-            Arc::clone(&device_tree),
-            Arc::clone(&mmio_regions),
+            Arc::clone(&pci_hotplug_backend),
         )));
         let acpi_pci_hotplug_bus_device = Arc::clone(&acpi_pci_hotplug_controller);
 
@@ -1712,6 +1743,7 @@ impl DeviceManager {
             fw_cfg: None,
             #[cfg(feature = "ivshmem")]
             ivshmem_device: None,
+            _pci_hotplug_backend: pci_hotplug_backend,
             _acpi_cpu_hotplug_controller: acpi_cpu_hotplug_controller,
             _acpi_pci_hotplug_controller: acpi_pci_hotplug_controller,
         };
