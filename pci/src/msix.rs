@@ -212,7 +212,7 @@ impl MsixConfig {
         let mut entries = self.pba_entries.clone();
         for (offset, entry) in entries.iter_mut().enumerate() {
             let mut data = [0u8; 8];
-            self.read_pba(offset.try_into().unwrap(), &mut data[..]);
+            self.read_pba(offset as u64 * MSIX_PBA_ENTRIES_MODULO, &mut data[..]);
             *entry |= LittleEndian::read_u64(&data[..]);
         }
         MsixConfigState {
@@ -418,12 +418,14 @@ impl MsixConfig {
     // TODO: if set_notifier is called this cache needs to be invalidated.
     #[cold]
     pub fn read_pba(&self, offset: u64, data: &mut [u8]) {
+        const POLLIN: i16 = libc::POLLIN as libc::c_short;
         let len = data.len();
         let index: usize = (offset / MSIX_PBA_ENTRIES_MODULO) as usize;
         let short_read = len == MSIX_PBA_ENTRIES_MODULO as usize / 2;
         let mut pba_entry = if let Some(&pba_entry) = self.pba_entries.get(index)
             && (short_read || len == MSIX_PBA_ENTRIES_MODULO as usize)
             && offset & (len as u64 - 1) == 0
+            && offset < u64::from(MAX_MSIX_VECTORS_PER_DEVICE) / MSIX_PBA_ENTRIES_MODULO
         {
             pba_entry
         } else {
@@ -433,23 +435,19 @@ impl MsixConfig {
         };
         // Either 32 or 0
         let shift = ((offset & 4) * 8) as usize;
-        // Create an iterator that iterates over the bits in the data being
-        // requested, and also yields the bit in the PBA entry being looked at.
-        let bit_iterator = {
-            let bits_in_result = len * 8;
-            move || (0..bits_in_result).map(move |i| (i, 1u64 << (i + shift)))
-        };
         let mut buf = Vec::new();
         let mut mask = 0u64;
-        for (index, bit) in bit_iterator() {
-            let table_offset = offset as usize + index;
-            let Some(entry) = self.table_entries.get(table_offset) else {
+        for msix in index * 8..index * 8 + len {
+            let bit = 1u64 << (msix - index * 8 + shift);
+            let Some(entry) = self.table_entries.get(msix) else {
                 // No entry, so PBA cleared.
                 pba_entry &= !bit;
                 continue;
             };
-            if !self.masked && entry.masked() {
-                // Not masked, so PBA cleared.
+            if !self.masked && !entry.masked() {
+                // Fully unmasked. If there is an irqfd, it is active,
+                // so the interrupt has been delivered. Therefore, no
+                // interrupt can be pending.
                 pba_entry &= !bit;
                 continue;
             }
@@ -457,7 +455,7 @@ impl MsixConfig {
                 // PBA bit already set, so no need to poll the FD.
                 continue;
             }
-            let Some(fd) = self.interrupt_source_group.notifier(table_offset as _) else {
+            let Some(fd) = self.interrupt_source_group.notifier(msix as _) else {
                 // No FD, so PBA can't be set.
                 continue;
             };
@@ -465,7 +463,7 @@ impl MsixConfig {
             // SAFETY: zero is valid for libc types
             let mut data: libc::pollfd = unsafe { std::mem::zeroed() };
             data.fd = fd.as_raw_fd();
-            data.events = libc::POLLIN as _;
+            data.events = POLLIN;
             buf.push(data);
         }
 
@@ -486,10 +484,10 @@ impl MsixConfig {
         }
 
         let mut iter = buf.iter();
-        for (_, bit) in bit_iterator() {
-            if mask & bit != 0 && libc::POLLIN as libc::c_short & iter.next().unwrap().revents != 0
-            {
-                pba_entry |= 1u64 << bit;
+        for bit_index in 0..len {
+            let bit = 1u64 << (bit_index + shift);
+            if mask & bit != 0 && POLLIN & iter.next().unwrap().revents != 0 {
+                pba_entry |= bit;
             }
         }
 
