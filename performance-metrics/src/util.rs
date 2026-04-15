@@ -89,6 +89,24 @@ pub fn write_iovec(buf: &[u8]) -> libc::iovec {
     }
 }
 
+/// Build a deterministic pseudo-random permutation of `[0, n)`.
+///
+/// Uses a Fisher-Yates shuffle seeded by `DefaultHasher` so the
+/// permutation is identical across runs.
+pub fn deterministic_permutation(n: usize) -> Vec<usize> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut indices: Vec<usize> = (0..n).collect();
+    for i in (1..n).rev() {
+        let mut h = DefaultHasher::new();
+        i.hash(&mut h);
+        let j = h.finish() as usize % (i + 1);
+        indices.swap(i, j);
+    }
+    indices
+}
+
 /// Submit `count` sequential read_vectored calls at `stride`-byte intervals.
 pub fn submit_reads(async_io: &mut dyn AsyncIo, count: usize, stride: u64, iovec: &[libc::iovec]) {
     for i in 0..count {
