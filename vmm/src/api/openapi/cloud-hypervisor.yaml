@@ -1374,6 +1374,12 @@ components:
       properties:
         receiver_url:
           type: string
+        tls_dir:
+          type: string
+          description: >
+            Directory containing the TLS server certificate (server-cert.pem)
+            and TLS server key (server-key.pem). TLS is only supported with
+            tcp:<host>:<port> receiver URLs.
 
     TimeoutStrategy:
       type: string
