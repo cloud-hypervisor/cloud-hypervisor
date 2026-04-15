@@ -11,11 +11,30 @@ license of those projects.
 New code should be under the [Apache v2
 License](https://opensource.org/licenses/Apache-2.0).
 
-## Coding Style
+## Coding Style & Code Comments
 
-We follow the [Rust Style](https://github.com/rust-lang/rust/tree/HEAD/src/doc/style-guide/src)
-convention and enforce it through the Continuous Integration (CI) process calling into `rustfmt`,
-`clippy`, and other well-known code quality tool of the ecosystem for each submitted Pull Request (PR).
+We use the [Rust Style] guide and enforce formatting and linting in CI,
+including `rustfmt`, `clippy`, and other common Rust quality checks, for every
+pull request. We adapt to best practices, new lints and new tooling as the
+ecosystem evolves.
+
+Code should **speak for itself** (for example, by using descriptive identifiers)
+and be **easy to read and maintain**. Beyond the conventions and tooling
+described above, contributors have _some_ room to apply their own style and
+preferred structure. Maintainers may still suggest refactorings where they
+believe readability, consistency, or maintainability can be improved.
+
+For new code, add documentation and comments where they **provide additional value**:
+
+* **Rustdoc** explains the API to its users.
+* **Inline comments** explain the code the reader, especially *why* it is
+  written that way.
+* **Commit messages** explain the broader context of a change (for more
+  information on commit messages, see below).
+
+Comments should be concise and add additional context or information to the code.
+
+[Rust Style]: https://github.com/rust-lang/rust/tree/HEAD/src/doc/style-guide/src
 
 ## Basic Checks
 
