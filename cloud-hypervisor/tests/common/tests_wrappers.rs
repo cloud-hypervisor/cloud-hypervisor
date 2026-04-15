@@ -2714,18 +2714,12 @@ pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool) {
                 .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
         );
 
-        thread::sleep(std::time::Duration::new(10, 0));
-
-        // Check that /dev/vdc exists and the block size is 16M.
-        assert_eq!(
+        // Wait for the hotplugged disk to appear in the guest
+        assert!(wait_until(Duration::from_secs(10), || {
             guest
                 .ssh_command("lsblk | grep vdc | grep -c 16M")
-                .unwrap()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or_default(),
-            1
-        );
+                .is_ok_and(|s| s.trim().parse::<u32>().unwrap_or_default() == 1)
+        }));
         // And check the block device can be read.
         guest
             .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
@@ -2733,17 +2727,10 @@ pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool) {
 
         // Let's remove it the extra disk.
         assert!(remote_command(&api_socket, "remove-device", Some("test0")));
-        thread::sleep(std::time::Duration::new(5, 0));
-        // And check /dev/vdc is not there
-        assert_eq!(
-            guest
-                .ssh_command("lsblk | grep -c vdc.*16M || true")
-                .unwrap()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or(1),
-            0
-        );
+        // Wait for the disk to disappear
+        assert!(wait_until(Duration::from_secs(10), || guest
+            .ssh_command("lsblk | grep -c vdc.*16M || true")
+            .is_ok_and(|s| s.trim().parse::<u32>().unwrap_or(1) == 0)));
 
         // And add it back to validate unplug did work correctly.
         let (cmd_success, cmd_output) = remote_command_w_output(
@@ -2763,18 +2750,12 @@ pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool) {
                 .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}")
         );
 
-        thread::sleep(std::time::Duration::new(10, 0));
-
-        // Check that /dev/vdc exists and the block size is 16M.
-        assert_eq!(
+        // Wait for the hotplugged disk to appear in the guest
+        assert!(wait_until(Duration::from_secs(10), || {
             guest
                 .ssh_command("lsblk | grep vdc | grep -c 16M")
-                .unwrap()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or_default(),
-            1
-        );
+                .is_ok_and(|s| s.trim().parse::<u32>().unwrap_or_default() == 1)
+        }));
         // And check the block device can be read.
         guest
             .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
@@ -2796,18 +2777,10 @@ pub(crate) fn _test_disk_hotplug(guest: &Guest, landlock_enabled: bool) {
 
         assert!(remote_command(&api_socket, "remove-device", Some("test0")));
 
-        thread::sleep(std::time::Duration::new(20, 0));
-
-        // Check device has gone away
-        assert_eq!(
-            guest
-                .ssh_command("lsblk | grep -c vdc.*16M || true")
-                .unwrap()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or(1),
-            0
-        );
+        // Wait for the disk to disappear
+        assert!(wait_until(Duration::from_secs(20), || guest
+            .ssh_command("lsblk | grep -c vdc.*16M || true")
+            .is_ok_and(|s| s.trim().parse::<u32>().unwrap_or(1) == 0)));
 
         guest.reboot_linux(1);
 
@@ -3483,14 +3456,10 @@ pub(crate) fn _test_vdpa_block(guest: &Guest) {
                 .contains("{\"id\":\"myvdpa0\",\"bdf\":\"0001:00:01.0\"}")
         );
 
-        thread::sleep(std::time::Duration::new(10, 0));
-
-        // Check IOMMU setup
-        assert!(
-            guest
-                .does_device_vendor_pair_match("0x1057", "0x1af4")
-                .unwrap_or_default()
-        );
+        // Wait for the hotplugged device to appear
+        assert!(wait_until(Duration::from_secs(10), || guest
+            .does_device_vendor_pair_match("0x1057", "0x1af4")
+            .unwrap_or_default()));
         assert!(
             guest
                 .ssh_command("ls /sys/kernel/iommu_groups/*/devices")
@@ -3523,18 +3492,11 @@ pub(crate) fn _test_vdpa_block(guest: &Guest) {
         // Unplug the device
         let cmd_success = remote_command(&api_socket, "remove-device", Some("myvdpa0"));
         assert!(cmd_success);
-        thread::sleep(std::time::Duration::new(10, 0));
 
-        // Check /dev/vdd doesn't exist anymore
-        assert_eq!(
-            guest
-                .ssh_command("lsblk | grep -c vdd || true")
-                .unwrap()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or(1),
-            0
-        );
+        // Wait for the device to disappear
+        assert!(wait_until(Duration::from_secs(10), || guest
+            .ssh_command("lsblk | grep -c vdd || true")
+            .is_ok_and(|s| s.trim().parse::<u32>().unwrap_or(1) == 0)));
     });
 
     kill_child(&mut child);
