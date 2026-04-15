@@ -27,7 +27,8 @@ use crate::qcow::metadata::{
 use crate::qcow::qcow_raw_file::QcowRawFile;
 use crate::qcow::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
 use crate::qcow_common::{
-    gather_from_iovecs, pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
+    AlignedBuf, aligned_pread, aligned_pwrite, gather_from_iovecs_into, pread_exact, pwrite_all,
+    scatter_to_iovecs, zero_fill_iovecs,
 };
 use crate::{BatchRequest, RequestType, disk_file};
 
@@ -172,6 +173,8 @@ pub struct QcowAsync {
     data_file: QcowRawFile,
     backing_file: Option<Arc<dyn BackingRead>>,
     sparse: bool,
+    /// O_DIRECT alignment requirement (0 = no alignment needed).
+    alignment: usize,
     io_uring: IoUring,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
@@ -185,6 +188,7 @@ impl QcowAsync {
         sparse: bool,
         ring_depth: u32,
     ) -> io::Result<Self> {
+        let alignment = data_file.file().alignment();
         let io_uring = IoUring::new(ring_depth)?;
         let eventfd = EventFd::new(libc::EFD_NONBLOCK)?;
         io_uring.submitter().register_eventfd(eventfd.as_raw_fd())?;
@@ -194,6 +198,7 @@ impl QcowAsync {
             data_file,
             backing_file,
             sparse,
+            alignment,
             io_uring,
             eventfd,
             completion_list: VecDeque::new(),
@@ -241,6 +246,7 @@ impl AsyncIo for QcowAsync {
             offset as u64,
             iovecs,
             total_len,
+            self.alignment,
         )? {
             let fd = self.data_file.as_raw_fd();
             let (submitter, mut sq, _) = self.io_uring.split();
@@ -285,6 +291,7 @@ impl AsyncIo for QcowAsync {
             &self.metadata,
             &self.data_file,
             &self.backing_file,
+            self.alignment,
         )?;
 
         let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
@@ -377,6 +384,7 @@ impl AsyncIo for QcowAsync {
                         req.offset as u64,
                         &req.iovecs,
                         total_len,
+                        self.alignment,
                     )? {
                         let fd = self.data_file.as_raw_fd();
                         // SAFETY: fd is valid and iovecs point to valid guest memory.
@@ -408,6 +416,7 @@ impl AsyncIo for QcowAsync {
                         &self.metadata,
                         &self.data_file,
                         &self.backing_file,
+                        self.alignment,
                     )?;
                     sync_completions.push((req.user_data, total_len as i32));
                 }
@@ -448,6 +457,7 @@ impl QcowAsync {
         address: u64,
         iovecs: &[libc::iovec],
         total_len: usize,
+        alignment: usize,
     ) -> AsyncIoResult<Option<u64>> {
         let has_backing = backing_file.is_some();
         let mappings = metadata
@@ -464,7 +474,7 @@ impl QcowAsync {
             return Ok(Some(*host_offset));
         }
 
-        Self::scatter_read_sync(mappings, iovecs, data_file, backing_file)?;
+        Self::scatter_read_sync(mappings, iovecs, data_file, backing_file, alignment)?;
         Ok(None)
     }
 
@@ -474,6 +484,7 @@ impl QcowAsync {
         iovecs: &[libc::iovec],
         data_file: &QcowRawFile,
         backing_file: &Option<Arc<dyn BackingRead>>,
+        alignment: usize,
     ) -> AsyncIoResult<()> {
         let mut buf_offset = 0usize;
         for mapping in mappings {
@@ -489,12 +500,27 @@ impl QcowAsync {
                     offset: host_offset,
                     length,
                 } => {
-                    let mut buf = vec![0u8; length as usize];
-                    pread_exact(data_file.as_raw_fd(), &mut buf, host_offset)
+                    let len = length as usize;
+                    if alignment > 0 {
+                        let mut abuf =
+                            AlignedBuf::new(len, alignment).map_err(AsyncIoError::ReadVectored)?;
+                        aligned_pread(
+                            data_file.as_raw_fd(),
+                            abuf.as_mut_slice(len),
+                            host_offset,
+                            alignment,
+                        )
                         .map_err(AsyncIoError::ReadVectored)?;
-                    // SAFETY: iovecs point to valid guest memory buffers.
-                    unsafe { scatter_to_iovecs(iovecs, buf_offset, &buf) };
-                    buf_offset += length as usize;
+                        // SAFETY: iovecs point to valid guest memory buffers.
+                        unsafe { scatter_to_iovecs(iovecs, buf_offset, abuf.as_slice(len)) };
+                    } else {
+                        let mut buf = vec![0u8; len];
+                        pread_exact(data_file.as_raw_fd(), &mut buf, host_offset)
+                            .map_err(AsyncIoError::ReadVectored)?;
+                        // SAFETY: iovecs point to valid guest memory buffers.
+                        unsafe { scatter_to_iovecs(iovecs, buf_offset, &buf) };
+                    }
+                    buf_offset += len;
                 }
                 ClusterReadMapping::Compressed { data } => {
                     let len = data.len();
@@ -528,6 +554,7 @@ impl QcowAsync {
         metadata: &QcowMetadata,
         data_file: &QcowRawFile,
         backing_file: &Option<Arc<dyn BackingRead>>,
+        alignment: usize,
     ) -> AsyncIoResult<()> {
         let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
         let cluster_size = metadata.cluster_size();
@@ -561,10 +588,31 @@ impl QcowAsync {
                 ClusterWriteMapping::Allocated {
                     offset: host_offset,
                 } => {
-                    // SAFETY: iovecs point to valid guest memory buffers.
-                    let buf = unsafe { gather_from_iovecs(iovecs, buf_offset, count) };
-                    pwrite_all(data_file.as_raw_fd(), &buf, host_offset)
+                    if alignment > 0 {
+                        // O_DIRECT, gather directly into aligned buffer.
+                        let mut abuf = AlignedBuf::new(count, alignment)
+                            .map_err(AsyncIoError::WriteVectored)?;
+                        // SAFETY: iovecs point to valid guest memory buffers
+                        unsafe {
+                            gather_from_iovecs_into(iovecs, buf_offset, abuf.as_mut_slice(count));
+                        }
+                        aligned_pwrite(
+                            data_file.as_raw_fd(),
+                            abuf.as_slice(count),
+                            host_offset,
+                            alignment,
+                        )
                         .map_err(AsyncIoError::WriteVectored)?;
+                    } else {
+                        // No O_DIRECT, plain buffer is fine.
+                        let mut buf = vec![0u8; count];
+                        // SAFETY: iovecs point to valid guest memory buffers.
+                        unsafe {
+                            gather_from_iovecs_into(iovecs, buf_offset, &mut buf);
+                        }
+                        pwrite_all(data_file.as_raw_fd(), &buf, host_offset)
+                            .map_err(AsyncIoError::WriteVectored)?;
+                    }
                 }
             }
             buf_offset += count;
