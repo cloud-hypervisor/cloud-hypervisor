@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::string::String;
 use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
 
 use block::ImageType;
 use net_util::MacAddr;
@@ -28,10 +29,9 @@ pub(crate) fn _test_api_create_boot(target_api: &TargetApi, guest: &Guest) {
         .spawn()
         .unwrap();
 
-    thread::sleep(std::time::Duration::new(1, 0));
-
-    // Verify API server is running
-    assert!(target_api.remote_command("ping", None));
+    // Wait for API server to be ready
+    assert!(wait_until(Duration::from_secs(5), || target_api
+        .remote_command("ping", None)));
 
     // Create the VM first
     let request_body = guest.api_create_body();
@@ -68,10 +68,9 @@ pub(crate) fn _test_api_shutdown(target_api: &TargetApi, guest: &Guest) {
         .spawn()
         .unwrap();
 
-    thread::sleep(std::time::Duration::new(1, 0));
-
-    // Verify API server is running
-    assert!(target_api.remote_command("ping", None));
+    // Wait for API server to be ready
+    assert!(wait_until(Duration::from_secs(5), || target_api
+        .remote_command("ping", None)));
 
     // Create the VM first
     let request_body = guest.api_create_body();
@@ -98,7 +97,7 @@ pub(crate) fn _test_api_shutdown(target_api: &TargetApi, guest: &Guest) {
         guest.ssh_command("sudo shutdown -H now").unwrap();
 
         // Wait for the guest to be fully shutdown
-        thread::sleep(std::time::Duration::new(20, 0));
+        assert!(guest.wait_for_ssh_unresponsive(Duration::from_secs(20)));
 
         // Then shut it down
         assert!(target_api.remote_command("shutdown", None));
@@ -129,10 +128,9 @@ pub(crate) fn _test_api_delete(target_api: &TargetApi, guest: &Guest) {
         .spawn()
         .unwrap();
 
-    thread::sleep(std::time::Duration::new(1, 0));
-
-    // Verify API server is running
-    assert!(target_api.remote_command("ping", None));
+    // Wait for API server to be ready
+    assert!(wait_until(Duration::from_secs(5), || target_api
+        .remote_command("ping", None)));
 
     // Create the VM first
     let request_body = guest.api_create_body();
@@ -159,7 +157,7 @@ pub(crate) fn _test_api_delete(target_api: &TargetApi, guest: &Guest) {
         guest.ssh_command("sudo shutdown -H now").unwrap();
 
         // Wait for the guest to be fully shutdown
-        thread::sleep(std::time::Duration::new(20, 0));
+        assert!(guest.wait_for_ssh_unresponsive(Duration::from_secs(20)));
 
         // Then delete it
         assert!(target_api.remote_command("delete", None));
@@ -193,10 +191,9 @@ pub(crate) fn _test_api_pause_resume(target_api: &TargetApi, guest: &Guest) {
         .spawn()
         .unwrap();
 
-    thread::sleep(std::time::Duration::new(1, 0));
-
-    // Verify API server is running
-    assert!(target_api.remote_command("ping", None));
+    // Wait for API server to be ready
+    assert!(wait_until(Duration::from_secs(5), || target_api
+        .remote_command("ping", None)));
 
     // Create the VM first
     let request_body = guest.api_create_body();
@@ -209,9 +206,10 @@ pub(crate) fn _test_api_pause_resume(target_api: &TargetApi, guest: &Guest) {
 
     // Then boot it
     assert!(target_api.remote_command("boot", None));
-    thread::sleep(std::time::Duration::new(20, 0));
 
     let r = std::panic::catch_unwind(|| {
+        guest.wait_vm_boot().unwrap();
+
         // Check that the VM booted as expected
         guest.validate_cpu_count(None);
         guest.validate_memory(None);

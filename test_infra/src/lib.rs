@@ -1251,6 +1251,17 @@ impl Guest {
         )
     }
 
+    /// Waits until the guest's SSH port is no longer reachable, indicating
+    /// the guest has probably shutdown.
+    pub fn wait_for_ssh_unresponsive(&self, timeout: Duration) -> bool {
+        let addr = format!("{}:22", self.network.guest_ip0)
+            .parse::<std::net::SocketAddr>()
+            .unwrap();
+        wait_until(timeout, || {
+            std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2)).is_err()
+        })
+    }
+
     pub fn api_create_body(&self) -> String {
         let mut body = serde_json::json!({
             "cpus": {
