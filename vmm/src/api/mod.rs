@@ -35,6 +35,7 @@ pub mod http;
 
 use std::io;
 use std::num::{NonZeroU32, NonZeroU64};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::mpsc::{RecvError, SendError, Sender, channel};
 use std::time::Duration;
@@ -372,13 +373,17 @@ pub struct VmSendMigrationData {
     /// Must be between 1 and `MAX_MIGRATION_CONNECTIONS` inclusive.
     #[serde(default = "VmSendMigrationData::default_connections")]
     pub connections: NonZeroU32,
+    /// Path to the directory containing the TLS root CA certificate (ca-cert.pem)
+    #[serde(default)]
+    pub tls_dir: Option<PathBuf>,
 }
 
 impl VmSendMigrationData {
     pub const SYNTAX: &'static str = "VM send migration parameters \
         \"destination_url=<url>[,local=on|off,\
         downtime_ms=<milliseconds>,timeout_s=<seconds>,\
-        timeout_strategy=cancel|ignore,connections=<amount>]\"";
+        timeout_strategy=cancel|ignore,connections=<amount>,\
+        tls_dir=<path>]\"";
 
     // Same as QEMU.
     pub const DEFAULT_DOWNTIME: Duration = Duration::from_millis(300);
@@ -406,7 +411,8 @@ impl VmSendMigrationData {
             .add("downtime_ms")
             .add("timeout_s")
             .add("timeout_strategy")
-            .add("connections");
+            .add("connections")
+            .add("tls_dir");
         parser
             .parse(migration)
             .map_err(VmSendMigrationConfigError::ParseError)?;
@@ -458,6 +464,10 @@ impl VmSendMigrationData {
             })?,
             None => Self::default_connections(),
         };
+        let tls_dir = parser
+            .convert::<String>("tls_dir")
+            .map_err(VmSendMigrationConfigError::ParseError)?
+            .map(|path| PathBuf::from(&path));
 
         let data = Self {
             destination_url,
@@ -466,6 +476,7 @@ impl VmSendMigrationData {
             timeout_s,
             timeout_strategy,
             connections,
+            tls_dir,
         };
 
         data.validate()?;
@@ -499,6 +510,11 @@ impl VmSendMigrationData {
                         .to_string(),
                 ));
             }
+            if self.tls_dir.is_some() {
+                return Err(VmSendMigrationConfigError::ValidationError(
+                    "UNIX sockets and TLS encryption cannot be used at the same time.".to_string(),
+                ));
+            }
         } else {
             return Err(VmSendMigrationConfigError::ValidationError(
                 "destination_url must use tcp:<host>:<port> or unix:<path>.".to_string(),
@@ -524,6 +540,17 @@ impl VmSendMigrationData {
                         .to_string(),
                 ));
             }
+        }
+
+        // The TLS implementation checks for all necessary files. Here we only
+        // check whether the path exists and points to a directory.
+        if let Some(tls_dir) = &self.tls_dir
+            && !tls_dir.is_dir()
+        {
+            return Err(VmSendMigrationConfigError::ValidationError(format!(
+                "tls_dir must point to a directory. Path: {}",
+                tls_dir.display()
+            )));
         }
 
         Ok(())
@@ -1891,12 +1918,14 @@ mod unit_tests {
                 timeout_s: VmSendMigrationData::default_timeout_s(),
                 timeout_strategy: Default::default(),
                 connections: VmSendMigrationData::default_connections(),
+                tls_dir: None,
             }
         );
 
         // Happy path, fully specified
+        let tls_dir = std::env::temp_dir();
         let data =
-            VmSendMigrationData::parse("destination_url=tcp:192.168.1.1:8080,downtime_ms=150,timeout_s=900,timeout_strategy=ignore,connections=4")
+            VmSendMigrationData::parse(&format!("destination_url=tcp:192.168.1.1:8080,downtime_ms=150,timeout_s=900,timeout_strategy=ignore,connections=4,tls_dir={}", tls_dir.display()))
                 .unwrap();
         assert_eq!(
             data,
@@ -1907,6 +1936,7 @@ mod unit_tests {
                 timeout_s: NonZeroU64::new(900).unwrap(),
                 timeout_strategy: TimeoutStrategy::Ignore,
                 connections: NonZeroU32::new(4).unwrap(),
+                tls_dir: Some(tls_dir),
             }
         );
     }

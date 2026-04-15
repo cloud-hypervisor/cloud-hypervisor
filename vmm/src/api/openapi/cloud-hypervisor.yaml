@@ -1421,6 +1421,11 @@ components:
             The number of parallel TCP connections to use for migration.
             Must be between 1 and 128. Multiple connections are not supported
             with local UNIX-socket migration.
+        tls_dir:
+          type: string
+          description: >
+            Directory containing the TLS root CA certificate (ca-cert.pem).
+            TLS is only supported with tcp:<host>:<port> destination URLs.
 
     VmAddUserDevice:
       required:
