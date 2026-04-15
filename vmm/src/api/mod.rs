@@ -53,7 +53,7 @@ pub use self::http::{start_http_fd_thread, start_http_path_thread};
 use crate::Error as VmmError;
 use crate::config::RestoreConfig;
 use crate::device_tree::DeviceTree;
-use crate::migration_transport::MAX_MIGRATION_CONNECTIONS;
+use crate::migration_transport::{MAX_MIGRATION_CONNECTIONS, tcp_address_to_server_name};
 use crate::vm::{Error as VmError, VmState};
 use crate::vm_config::{
     DeviceConfig, DiskConfig, FsConfig, GenericVhostUserConfig, NetConfig, PmemConfig,
@@ -440,26 +440,27 @@ impl VmSendMigrationData {
     }
 
     pub fn validate(&self) -> Result<(), VmSendMigrationConfigError> {
-        match self.destination_url.as_str() {
-            url if url
-                .strip_prefix("tcp:")
-                .is_some_and(|addr| !addr.is_empty()) => {}
-            url if url
-                .strip_prefix("unix:")
-                .is_some_and(|path| !path.is_empty()) =>
-            {
-                if self.connections.get() > 1 {
-                    return Err(VmSendMigrationConfigError::ValidationError(
-                        "UNIX sockets and connections option cannot be used at the same time."
-                            .to_string(),
-                    ));
-                }
-            }
-            _ => {
+        if let Some(addr) = self.destination_url.strip_prefix("tcp:") {
+            tcp_address_to_server_name(addr).map_err(|e| {
+                VmSendMigrationConfigError::ValidationError(format!(
+                    "destination_url must use tcp:<host>:<port> or unix:<path>: {e}."
+                ))
+            })?;
+        } else if self
+            .destination_url
+            .strip_prefix("unix:")
+            .is_some_and(|path| !path.is_empty())
+        {
+            if self.connections.get() > 1 {
                 return Err(VmSendMigrationConfigError::ValidationError(
-                    "destination_url must use tcp:<host>:<port> or unix:<path>.".to_string(),
+                    "UNIX sockets and connections option cannot be used at the same time."
+                        .to_string(),
                 ));
             }
+        } else {
+            return Err(VmSendMigrationConfigError::ValidationError(
+                "destination_url must use tcp:<host>:<port> or unix:<path>.".to_string(),
+            ));
         }
 
         if self.connections.get() > MAX_MIGRATION_CONNECTIONS {
@@ -1781,6 +1782,14 @@ mod unit_tests {
         assert_eq!(data.timeout_strategy, TimeoutStrategy::default());
         assert_eq!(data.connections, VmSendMigrationData::default_connections());
 
+        let data = VmSendMigrationData::parse("destination_url=tcp:[2001:db8::1]:8080")
+            .expect("IPv6 migration string should parse");
+        assert_eq!(data.destination_url, "tcp:[2001:db8::1]:8080");
+
+        let data = VmSendMigrationData::parse("destination_url=tcp:destination.example:8080")
+            .expect("hostname migration string should parse");
+        assert_eq!(data.destination_url, "tcp:destination.example:8080");
+
         // Missing destination_url is an error
         VmSendMigrationData::parse("local=on,downtime_ms=200").unwrap_err();
 
@@ -1817,6 +1826,8 @@ mod unit_tests {
 
         // Invalid destination URL scheme is rejected
         VmSendMigrationData::parse("destination_url=file:///tmp/migration").unwrap_err();
+        VmSendMigrationData::parse("destination_url=tcp:192.168.1.1").unwrap_err();
+        VmSendMigrationData::parse("destination_url=tcp:[2001:db8::1]").unwrap_err();
 
         // Local migration requires a UNIX socket destination
         VmSendMigrationData::parse("destination_url=tcp:192.168.1.1:8080,local=yes").unwrap_err();

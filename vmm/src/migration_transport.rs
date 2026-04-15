@@ -782,6 +782,43 @@ fn socket_url_to_path(url: &str) -> Result<PathBuf, anyhow::Error> {
         .map(|s| s.into())
 }
 
+/// Extract the server name from a TCP address. This function assumes that
+/// `tcp:` has already been stripped.
+///
+/// The expected format is `<host>:<port>` for hostnames and IPv4 addresses, or
+/// `[<ipv6-address>]:<port>` for IPv6 addresses. The host and port must both be
+/// present, and the port must parse as a `u16`.
+pub fn tcp_address_to_server_name(address: &str) -> Result<&str, anyhow::Error> {
+    let (host, port) = if let Some(rest) = address.strip_prefix('[') {
+        let (host, rest) = rest
+            .split_once(']')
+            .ok_or_else(|| anyhow!("missing closing ']' for bracketed IPv6 address".to_string()))?;
+
+        let port = rest
+            .strip_prefix(':')
+            .ok_or_else(|| anyhow!("missing port separator after bracketed host".to_string()))?;
+
+        (host, port)
+    } else {
+        address
+            .rsplit_once(':')
+            .ok_or_else(|| anyhow!("missing TCP port".to_string()))?
+    };
+
+    if host.is_empty() {
+        return Err(anyhow!("host must not be empty".to_string()));
+    }
+
+    if port.is_empty() {
+        return Err(anyhow!("port must not be empty".to_string()));
+    }
+
+    port.parse::<u16>()
+        .map_err(|_| anyhow!(format!("invalid TCP port: {port}")))?;
+
+    Ok(host)
+}
+
 /// Connect to a migration endpoint and return the established stream.
 pub(crate) fn send_migration_socket(
     destination_url: &str,
@@ -974,4 +1011,79 @@ pub(crate) fn receive_memory_ranges(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tcp_address_to_server_name;
+
+    #[test]
+    fn test_tcp_address_to_server_name() {
+        assert_eq!(
+            tcp_address_to_server_name("example.com:1234").unwrap(),
+            "example.com"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("192.0.2.1:1234").unwrap(),
+            "192.0.2.1"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("[2001:db8::1]:1234").unwrap(),
+            "2001:db8::1"
+        );
+    }
+
+    #[test]
+    fn test_tcp_address_to_server_name_rejects_invalid_addresses() {
+        assert_eq!(
+            tcp_address_to_server_name("192.168.1.1")
+                .unwrap_err()
+                .to_string(),
+            "missing TCP port"
+        );
+        assert_eq!(
+            tcp_address_to_server_name(":8080").unwrap_err().to_string(),
+            "host must not be empty"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("host:").unwrap_err().to_string(),
+            "port must not be empty"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("host:not-a-port")
+                .unwrap_err()
+                .to_string(),
+            "invalid TCP port: not-a-port"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("[2001:db8::1")
+                .unwrap_err()
+                .to_string(),
+            "missing closing ']' for bracketed IPv6 address"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("[]:8080")
+                .unwrap_err()
+                .to_string(),
+            "host must not be empty"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("[2001:db8::1]")
+                .unwrap_err()
+                .to_string(),
+            "missing port separator after bracketed host"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("[2001:db8::1]:")
+                .unwrap_err()
+                .to_string(),
+            "port must not be empty"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("[2001:db8::1]:99999")
+                .unwrap_err()
+                .to_string(),
+            "invalid TCP port: 99999"
+        );
+    }
 }
