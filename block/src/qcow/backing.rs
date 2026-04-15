@@ -48,7 +48,7 @@ impl BackingRead for RawBacking {
 /// tables, refcounts) before reading the underlying data. Read only
 /// because backing files never receive writes. Nested backing chains
 /// are handled recursively via the optional `backing_file` field.
-pub(crate) struct Qcow2MetadataBacking {
+pub(crate) struct Qcow2Backing {
     pub(crate) metadata: Arc<QcowMetadata>,
     pub(crate) data_fd: OwnedFd,
     pub(crate) backing_file: Option<Arc<dyn BackingRead>>,
@@ -56,9 +56,9 @@ pub(crate) struct Qcow2MetadataBacking {
 
 // SAFETY: All reads go through QcowMetadata which uses RwLock
 // and pread64 which is position independent and thread safe.
-unsafe impl Sync for Qcow2MetadataBacking {}
+unsafe impl Sync for Qcow2Backing {}
 
-impl BackingRead for Qcow2MetadataBacking {
+impl BackingRead for Qcow2Backing {
     fn read_at(&self, address: u64, buf: &mut [u8]) -> io::Result<()> {
         let virtual_size = self.metadata.virtual_size();
         if address >= virtual_size {
@@ -75,7 +75,7 @@ impl BackingRead for Qcow2MetadataBacking {
     }
 }
 
-impl Qcow2MetadataBacking {
+impl Qcow2Backing {
     /// Resolve cluster mappings via metadata then read allocated clusters
     /// with pread64.
     fn read_clusters(&self, address: u64, buf: &mut [u8]) -> io::Result<()> {
@@ -125,7 +125,7 @@ impl Qcow2MetadataBacking {
     }
 }
 
-impl Drop for Qcow2MetadataBacking {
+impl Drop for Qcow2Backing {
     fn drop(&mut self) {
         self.metadata.shutdown();
     }
@@ -152,7 +152,7 @@ pub fn shared_backing_from(bf: BackingFile) -> BlockResult<Arc<dyn BackingRead>>
         }
         BackingKind::Qcow { inner, backing } => {
             let data_fd = dup_fd(inner.raw_file.as_fd())?;
-            Ok(Arc::new(Qcow2MetadataBacking {
+            Ok(Arc::new(Qcow2Backing {
                 metadata: Arc::new(QcowMetadata::new(*inner)),
                 data_fd,
                 backing_file: backing.map(|bf| shared_backing_from(*bf)).transpose()?,

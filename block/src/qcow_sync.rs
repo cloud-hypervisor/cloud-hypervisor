@@ -783,7 +783,7 @@ mod unit_tests {
 
     #[test]
     fn test_multi_queue_concurrent_reads_qcow2_backing() {
-        // Same as above but reads go through a Qcow2MetadataBacking,
+        // Same as above but reads go through a Qcow2Backing,
         // exercising concurrent metadata resolution + pread64 in the backing.
         let backing_temp = TempFile::new().unwrap();
         let cluster_size = 1u64 << 16;
@@ -1123,7 +1123,7 @@ mod unit_tests {
     #[test]
     fn test_qcow2_backing_cross_cluster_read() {
         // Read spanning a cluster boundary through qcow2 backing.
-        // Exercises the read_clusters loop in Qcow2MetadataBacking.
+        // Exercises the read_clusters loop in Qcow2Backing.
         let cluster_size = 1u64 << 16;
         let file_size = cluster_size * 4;
         let pattern: Vec<u8> = (0..file_size as usize).map(|i| (i % 251) as u8).collect();
