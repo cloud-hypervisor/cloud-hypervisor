@@ -35,10 +35,21 @@
 //! [special HTTP library]: https://github.com/firecracker-microvm/micro-http
 
 use std::fs::File;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender, SyncSender};
+use std::sync::{LazyLock, Mutex};
 
 use micro_http::{Body, Method, Request, Response, StatusCode, Version};
 use vmm_sys_util::eventfd::EventFd;
+
+/// Helper to make the VmSendMigration call blocking as long as a migration is ongoing.
+#[allow(clippy::type_complexity)]
+pub static ONGOING_LIVEMIGRATION: LazyLock<(
+    SyncSender<Result<(), vm_migration::MigratableError>>,
+    Mutex<Receiver<Result<(), vm_migration::MigratableError>>>,
+)> = LazyLock::new(|| {
+    let (sender, receiver) = std::sync::mpsc::sync_channel(0);
+    (sender, Mutex::new(receiver))
+});
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::api::VmCoredump;
@@ -430,7 +441,6 @@ vm_action_put_handler_body!(VmResizeDisk);
 vm_action_put_handler_body!(VmResizeZone);
 vm_action_put_handler_body!(VmSnapshot);
 vm_action_put_handler_body!(VmReceiveMigration);
-vm_action_put_handler_body!(VmSendMigration);
 
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 vm_action_put_handler_body!(VmCoredump);
@@ -458,6 +468,44 @@ impl PutHandler for VmAddNet {
 }
 
 impl GetHandler for VmAddNet {}
+
+// Special Handling for virtio-net Devices Backed by Network File Descriptors
+//
+// See above.
+impl PutHandler for VmReceiveMigration {
+    fn handle_request(
+        &'static self,
+        api_notifier: EventFd,
+        api_sender: Sender<ApiRequest>,
+        body: &Option<Body>,
+        files: Vec<File>,
+    ) -> std::result::Result<Option<Body>, HttpError> {
+        if let Some(body) = body {
+            let mut net_cfg: VmReceiveMigrationData = serde_json::from_slice(body.raw())?;
+            if let Some(cfgs) = &mut net_cfg.net_fds {
+                let mut cfgs = cfgs.iter_mut().collect::<Vec<&mut _>>();
+                let cfgs = cfgs.as_mut_slice();
+                apply_new_fds_to_cfg::<RestoredNetConfig>(
+                    files,
+                    cfgs,
+                    &|cfg| Some(&cfg.id),
+                    &|cfg| cfg.num_fds,
+                    &|cfg| cfg.fds.as_deref(),
+                    &|cfg, value| {
+                        cfg.fds = value;
+                    },
+                )?;
+            }
+
+            self.send(api_notifier, api_sender, net_cfg)
+                .map_err(HttpError::ApiError)
+        } else {
+            Err(HttpError::BadRequest)
+        }
+    }
+}
+
+impl GetHandler for VmReceiveMigration {}
 
 impl PutHandler for VmResize {
     fn handle_request(
