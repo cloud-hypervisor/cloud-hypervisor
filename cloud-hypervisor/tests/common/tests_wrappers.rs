@@ -2928,18 +2928,12 @@ pub(crate) fn _test_net_hotplug(
             );
         }
 
-        thread::sleep(std::time::Duration::new(5, 0));
-
-        // 2 network interfaces + default localhost ==> 3 interfaces
-        assert_eq!(
+        // Wait for the hotplugged network interface to appear
+        assert!(wait_until(Duration::from_secs(10), || {
             guest
                 .ssh_command("ip -o link | wc -l")
-                .unwrap()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or_default(),
-            3
-        );
+                .is_ok_and(|s| s.trim().parse::<u32>().unwrap_or_default() == 3)
+        }));
 
         // Test the same using the added network interface's IP
         assert_eq!(
@@ -2956,9 +2950,13 @@ pub(crate) fn _test_net_hotplug(
             3
         );
 
-        // Remove network
+        // Remove network and wait for it to disappear
         assert!(remote_command(&api_socket, "remove-device", Some("test0"),));
-        thread::sleep(std::time::Duration::new(5, 0));
+        assert!(wait_until(Duration::from_secs(10), || {
+            guest
+                .ssh_command("ip -o link | wc -l")
+                .is_ok_and(|s| s.trim().parse::<u32>().unwrap_or_default() == 2)
+        }));
 
         // Add network
         let (cmd_success, cmd_output) = remote_command_w_output(
@@ -2991,18 +2989,12 @@ pub(crate) fn _test_net_hotplug(
             );
         }
 
-        thread::sleep(std::time::Duration::new(5, 0));
-
-        // 2 network interfaces + default localhost ==> 3 interfaces
-        assert_eq!(
+        // Wait for the hotplugged network interface to appear
+        assert!(wait_until(Duration::from_secs(10), || {
             guest
                 .ssh_command("ip -o link | wc -l")
-                .unwrap()
-                .trim()
-                .parse::<u32>()
-                .unwrap_or_default(),
-            3
-        );
+                .is_ok_and(|s| s.trim().parse::<u32>().unwrap_or_default() == 3)
+        }));
 
         guest.reboot_linux(0);
 
@@ -3345,10 +3337,12 @@ pub(crate) fn _test_macvtap(
     let mut child = guest_command.capture_output().spawn().unwrap();
 
     if hotplug {
-        // Give some time to the VMM process to listen to the API
-        // socket. This is the only requirement to avoid the following
-        // call to ch-remote from failing.
-        thread::sleep(std::time::Duration::new(10, 0));
+        // Wait for the VMM process to listen to the API socket
+        assert!(wait_until(Duration::from_secs(10), || remote_command(
+            &api_socket,
+            "ping",
+            None
+        )));
         // Hotplug the virtio-net device
         let (cmd_success, cmd_output) =
             remote_command_w_output(&api_socket, "add-net", Some(&net_params));
