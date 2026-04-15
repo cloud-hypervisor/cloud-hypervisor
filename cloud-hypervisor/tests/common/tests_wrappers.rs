@@ -906,6 +906,7 @@ pub(crate) fn _test_virtio_fs(
     let disk_config = UbuntuDiskConfig::new(focal_image);
     let guest = Guest::new(Box::new(disk_config));
     let api_socket = temp_api_path(&guest.tmp_dir);
+    let event_path = temp_event_monitor_path(&guest.tmp_dir);
 
     let mut workload_path = dirs::home_dir().unwrap();
     workload_path.push("workloads");
@@ -933,7 +934,8 @@ pub(crate) fn _test_virtio_fs(
         .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
         .default_disks()
         .default_net()
-        .args(["--api-socket", &api_socket]);
+        .args(["--api-socket", &api_socket])
+        .args(["--event-monitor", format!("path={event_path}").as_str()]);
     if pci_segment.is_some() {
         guest_command.args([
             "--platform",
@@ -993,13 +995,14 @@ pub(crate) fn _test_virtio_fs(
                         .contains("{\"id\":\"myfs0\",\"bdf\":\"0000:00:06.0\"}")
                 );
             }
-
-            thread::sleep(std::time::Duration::new(10, 0));
         }
 
         // Mount shared directory through virtio_fs filesystem
         guest
-            .ssh_command("mkdir -p mount_dir && sudo mount -t virtiofs myfs mount_dir/")
+            .wait_for_ssh_command(
+                "mkdir -p mount_dir && sudo mount -t virtiofs myfs mount_dir/",
+                Duration::from_secs(10),
+            )
             .unwrap();
 
         // Check file1 exists and its content is "foo"
@@ -1044,11 +1047,19 @@ pub(crate) fn _test_virtio_fs(
             // Remove from VM
             guest.ssh_command("sudo umount mount_dir").unwrap();
             assert!(remote_command(&api_socket, "remove-device", Some("myfs0")));
+
+            // Wait for the device to be fully removed before re-adding
+            let removed_event = MetaEvent {
+                event: "device-removed".to_string(),
+                device_id: Some("myfs0".to_string()),
+            };
+            assert!(wait_until(Duration::from_secs(10), || {
+                check_sequential_events(&[&removed_event], &event_path)
+            }));
         }
     });
 
     let (r, hotplug_daemon_child) = if r.is_ok() && hotplug {
-        thread::sleep(std::time::Duration::new(10, 0));
         let (daemon_child, virtiofsd_socket_path) =
             prepare_daemon(&guest.tmp_dir, shared_dir.to_str().unwrap());
 
@@ -1088,10 +1099,13 @@ pub(crate) fn _test_virtio_fs(
                 );
             }
 
-            thread::sleep(std::time::Duration::new(10, 0));
-            // Mount shared directory through virtio_fs filesystem
+            // Mount shared directory through virtio_fs filesystem, retrying
+            // until the hotplugged device is recognized by the guest
             guest
-                .ssh_command("mkdir -p mount_dir && sudo mount -t virtiofs myfs mount_dir/")
+                .wait_for_ssh_command(
+                    "mkdir -p mount_dir && sudo mount -t virtiofs myfs mount_dir/",
+                    Duration::from_secs(10),
+                )
                 .unwrap();
 
             // Check file1 exists and its content is "foo"
