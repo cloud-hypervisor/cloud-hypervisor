@@ -569,13 +569,19 @@ pub(crate) fn test_vhost_user_net(
 
     if client_mode_daemon {
         child = ch_command.spawn().unwrap();
-        // Make sure the VMM is waiting for the backend to connect
-        thread::sleep(std::time::Duration::new(10, 0));
+        // Wait for the VMM to create the socket before starting the daemon
+        assert!(wait_until(Duration::from_secs(10), || Path::new(
+            &vunet_socket_path
+        )
+        .exists()));
         daemon_child = daemon_command.spawn().unwrap();
     } else {
         daemon_child = daemon_command.spawn().unwrap();
-        // Make sure the backend is waiting for the VMM to connect
-        thread::sleep(std::time::Duration::new(10, 0));
+        // Wait for the daemon to create the socket before starting the VMM
+        assert!(wait_until(Duration::from_secs(10), || Path::new(
+            &vunet_socket_path
+        )
+        .exists()));
         child = ch_command.spawn().unwrap();
     }
 
@@ -1043,7 +1049,11 @@ pub(crate) fn _test_virtio_fs(
             prepare_daemon(&guest.tmp_dir, shared_dir.to_str().unwrap());
 
         let r = std::panic::catch_unwind(|| {
-            thread::sleep(std::time::Duration::new(10, 0));
+            // Wait for the daemon socket to be ready
+            assert!(wait_until(Duration::from_secs(10), || Path::new(
+                &virtiofsd_socket_path
+            )
+            .exists()));
             let fs_params = format!(
                 "id=myfs0,socket={},{}{}",
                 virtiofsd_socket_path,
