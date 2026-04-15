@@ -912,7 +912,7 @@ fn create_acpi_tables_internal(
     }
 
     // MCFG
-    let mcfg = create_mcfg_table(&device_manager.pci_segments());
+    let mcfg = device_manager.with_pci_segments(create_mcfg_table);
     let mcfg_addr = prev_tbl_addr.checked_add(prev_tbl_len).unwrap();
     tables_bytes.extend_from_slice(mcfg.as_slice());
     xsdt_table_pointers.push(mcfg_addr.0);
@@ -994,7 +994,7 @@ fn create_acpi_tables_internal(
 
     #[cfg(target_arch = "aarch64")]
     {
-        let iort = create_iort_table(&device_manager.pci_segments());
+        let iort = device_manager.with_pci_segments(create_iort_table);
         let iort_addr = prev_tbl_addr.checked_add(prev_tbl_len).unwrap();
         tables_bytes.extend_from_slice(iort.as_slice());
         xsdt_table_pointers.push(iort_addr.0);
@@ -1146,7 +1146,7 @@ pub fn create_acpi_tables_tdx(
     tables.push(cpu_manager.create_madt());
 
     // MCFG
-    tables.push(create_mcfg_table(&device_manager.pci_segments()));
+    device_manager.with_pci_segments(create_mcfg_table);
 
     // SRAT and SLIT
     // Only created if the NUMA nodes list is not empty.

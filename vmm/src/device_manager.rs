@@ -13,7 +13,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
-use std::ops::Deref;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 #[cfg(not(target_arch = "riscv64"))]
@@ -894,30 +893,6 @@ struct PciHotplugSharedState {
     iommu_attached_devices: Option<(PciBdf, Vec<PciBdf>)>,
     // Possible handle to the virtio-mem device
     virtio_mem_devices: Vec<Arc<Mutex<virtio_devices::Mem>>>,
-}
-
-pub(crate) struct PciSegmentsGuard<'a> {
-    shared_state: std::sync::MutexGuard<'a, PciHotplugSharedState>,
-}
-
-impl Deref for PciSegmentsGuard<'_> {
-    type Target = [PciSegment];
-
-    fn deref(&self) -> &Self::Target {
-        &self.shared_state.pci_segments
-    }
-}
-
-pub struct IommuAttachedDevicesGuard<'a> {
-    shared_state: std::sync::MutexGuard<'a, PciHotplugSharedState>,
-}
-
-impl Deref for IommuAttachedDevicesGuard<'_> {
-    type Target = Option<(PciBdf, Vec<PciBdf>)>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.shared_state.iommu_attached_devices
-    }
 }
 
 #[derive(Debug)]
@@ -4518,10 +4493,9 @@ impl DeviceManager {
             .map(|ic| ic.clone() as Arc<Mutex<dyn InterruptController>>)
     }
 
-    pub(crate) fn pci_segments(&self) -> PciSegmentsGuard<'_> {
-        PciSegmentsGuard {
-            shared_state: self.shared_state(),
-        }
+    pub(crate) fn with_pci_segments<T>(&self, f: impl FnOnce(&[PciSegment]) -> T) -> T {
+        let shared_state = self.shared_state();
+        f(&shared_state.pci_segments)
     }
 
     // Get the guest PCI BDF for a device ID.
@@ -5206,10 +5180,8 @@ impl DeviceManager {
             .map_err(DeviceManagerError::PowerButtonNotification);
     }
 
-    pub fn iommu_attached_devices(&self) -> IommuAttachedDevicesGuard<'_> {
-        IommuAttachedDevicesGuard {
-            shared_state: self.shared_state(),
-        }
+    pub fn iommu_attached_devices(&self) -> Option<(PciBdf, Vec<PciBdf>)> {
+        self.shared_state().iommu_attached_devices.clone()
     }
 
     fn validate_identifier(&self, id: &Option<String>) -> DeviceManagerResult<()> {
@@ -5364,7 +5336,7 @@ impl Aml for DeviceManager {
         use arch::riscv64::DeviceInfoForFdt;
 
         let mut pci_scan_methods = Vec::new();
-        let pci_segment_count = self.pci_segments().len();
+        let pci_segment_count = self.with_pci_segments(|segments| segments.len());
         for i in 0..pci_segment_count {
             pci_scan_methods.push(aml::MethodCall::new(
                 format!("\\_SB_.PC{i:02X}.PCNT").as_str().into(),
@@ -5435,19 +5407,23 @@ impl Aml for DeviceManager {
         )
         .to_aml_bytes(sink);
 
-        for segment in self.pci_segments().iter() {
-            segment.to_aml_bytes(sink);
-        }
+        self.with_pci_segments(|segments| {
+            for segment in segments {
+                segment.to_aml_bytes(sink);
+            }
+        });
 
         let mut mbrd_memory = Vec::new();
 
-        for segment in self.pci_segments().iter() {
-            mbrd_memory.push(aml::Memory32Fixed::new(
-                true,
-                segment.mmio_config_address as u32,
-                layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT as u32,
-            ));
-        }
+        self.with_pci_segments(|segments| {
+            for segment in segments {
+                mbrd_memory.push(aml::Memory32Fixed::new(
+                    true,
+                    segment.mmio_config_address as u32,
+                    layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT as u32,
+                ));
+            }
+        });
 
         let mut mbrd_memory_refs = Vec::new();
         for mbrd_memory_ref in &mbrd_memory {
