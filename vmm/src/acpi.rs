@@ -912,7 +912,7 @@ fn create_acpi_tables_internal(
     }
 
     // MCFG
-    let mcfg = create_mcfg_table(device_manager.pci_segments());
+    let mcfg = create_mcfg_table(&device_manager.pci_segments());
     let mcfg_addr = prev_tbl_addr.checked_add(prev_tbl_len).unwrap();
     tables_bytes.extend_from_slice(mcfg.as_slice());
     xsdt_table_pointers.push(mcfg_addr.0);
@@ -994,7 +994,7 @@ fn create_acpi_tables_internal(
 
     #[cfg(target_arch = "aarch64")]
     {
-        let iort = create_iort_table(device_manager.pci_segments());
+        let iort = create_iort_table(&device_manager.pci_segments());
         let iort_addr = prev_tbl_addr.checked_add(prev_tbl_len).unwrap();
         tables_bytes.extend_from_slice(iort.as_slice());
         xsdt_table_pointers.push(iort_addr.0);
@@ -1003,7 +1003,7 @@ fn create_acpi_tables_internal(
     }
 
     // VIOT
-    if let Some((iommu_bdf, devices_bdf)) = device_manager.iommu_attached_devices() {
+    if let Some((iommu_bdf, devices_bdf)) = device_manager.iommu_attached_devices().as_ref() {
         let viot = create_viot_table(iommu_bdf, devices_bdf);
 
         let viot_addr = prev_tbl_addr.checked_add(prev_tbl_len).unwrap();
@@ -1146,7 +1146,7 @@ pub fn create_acpi_tables_tdx(
     tables.push(cpu_manager.create_madt());
 
     // MCFG
-    tables.push(create_mcfg_table(device_manager.pci_segments()));
+    tables.push(create_mcfg_table(&device_manager.pci_segments()));
 
     // SRAT and SLIT
     // Only created if the NUMA nodes list is not empty.
@@ -1167,7 +1167,7 @@ pub fn create_acpi_tables_tdx(
     }
 
     // VIOT
-    if let Some((iommu_bdf, devices_bdf)) = device_manager.iommu_attached_devices() {
+    if let Some((iommu_bdf, devices_bdf)) = device_manager.iommu_attached_devices().as_ref() {
         tables.push(create_viot_table(iommu_bdf, devices_bdf));
     }
 
