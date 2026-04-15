@@ -3165,17 +3165,14 @@ pub(crate) fn _test_pvpanic(guest: &Guest) {
         // Trigger guest a panic
         make_guest_panic(guest);
 
-        // Wait a while for guest
-        thread::sleep(std::time::Duration::new(10, 0));
-
+        // Wait for the panic event to be recorded
         let expected_sequential_events = [&MetaEvent {
             event: "panic".to_string(),
             device_id: None,
         }];
-        assert!(check_latest_events_exact(
-            &expected_sequential_events,
-            &event_path
-        ));
+        assert!(wait_until(Duration::from_secs(10), || {
+            check_latest_events_exact(&expected_sequential_events, &event_path)
+        }));
     });
 
     kill_child(&mut child);
