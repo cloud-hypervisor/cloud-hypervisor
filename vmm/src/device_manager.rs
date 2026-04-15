@@ -907,7 +907,7 @@ struct DeviceManagerState {
     device_id_cnt: Wrapping<usize>,
 }
 
-struct DeviceManagerSharedState {
+struct PciHotplugSharedState {
     pci_segments: Vec<PciSegment>,
     // List of bus devices
     // Let the DeviceManager keep strong references to the BusDevice devices.
@@ -1059,7 +1059,7 @@ pub struct DeviceManager {
     // Counter to keep track of the consumed device IDs.
     device_id_cnt: Wrapping<usize>,
 
-    shared_state: Arc<Mutex<DeviceManagerSharedState>>,
+    shared_state: Arc<Mutex<PciHotplugSharedState>>,
 
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     // MSI Interrupt Manager
@@ -1163,7 +1163,7 @@ pub struct DeviceManager {
 ///
 /// Shares PCI hotplug state with the [`DeviceManager`].
 pub struct AcpiPciHotplugController {
-    shared_state: Arc<Mutex<DeviceManagerSharedState>>,
+    shared_state: Arc<Mutex<PciHotplugSharedState>>,
     selected_segment: usize,
     address_manager: Arc<AddressManager>,
     memory_manager: Arc<Mutex<MemoryManager>>,
@@ -1211,7 +1211,7 @@ fn create_mmio_allocators(
 
 impl AcpiPciHotplugController {
     fn new(
-        shared_state: Arc<Mutex<DeviceManagerSharedState>>,
+        shared_state: Arc<Mutex<PciHotplugSharedState>>,
         address_manager: Arc<AddressManager>,
         memory_manager: Arc<Mutex<MemoryManager>>,
         device_tree: Arc<Mutex<DeviceTree>>,
@@ -1227,7 +1227,7 @@ impl AcpiPciHotplugController {
         }
     }
 
-    fn cleanup_vfio_ops(shared_state: &mut DeviceManagerSharedState) {
+    fn cleanup_vfio_ops(shared_state: &mut PciHotplugSharedState) {
         if let Some(1) = shared_state.vfio_ops.as_ref().map(Arc::strong_count) {
             debug!("Drop VfioOps given no active VFIO devices.");
             shared_state.vfio_ops = None;
@@ -1450,7 +1450,7 @@ impl AcpiPciHotplugController {
 }
 
 impl DeviceManager {
-    fn shared_state(&self) -> std::sync::MutexGuard<'_, DeviceManagerSharedState> {
+    fn shared_state(&self) -> std::sync::MutexGuard<'_, PciHotplugSharedState> {
         self.shared_state.lock().unwrap()
     }
 
@@ -1596,7 +1596,7 @@ impl DeviceManager {
 
         let device_tree = Arc::clone(&device_tree);
         let mmio_regions = Arc::new(Mutex::new(Vec::new()));
-        let shared_state = Arc::new(Mutex::new(DeviceManagerSharedState {
+        let shared_state = Arc::new(Mutex::new(PciHotplugSharedState {
             pci_segments,
             bus_devices: Vec::new(),
             vfio_ops: None,
