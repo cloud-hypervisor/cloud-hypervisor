@@ -909,7 +909,6 @@ struct DeviceManagerState {
 
 struct DeviceManagerSharedState {
     pci_segments: Vec<PciSegment>,
-    selected_segment: usize,
     // List of bus devices
     // Let the DeviceManager keep strong references to the BusDevice devices.
     // This allows the IO and MMIO buses to be provided with Weak references,
@@ -1165,6 +1164,7 @@ pub struct DeviceManager {
 /// Shares PCI hotplug state with the [`DeviceManager`].
 pub struct AcpiPciHotplugController {
     shared_state: Arc<Mutex<DeviceManagerSharedState>>,
+    selected_segment: usize,
     address_manager: Arc<AddressManager>,
     memory_manager: Arc<Mutex<MemoryManager>>,
     device_tree: Arc<Mutex<DeviceTree>>,
@@ -1219,6 +1219,7 @@ impl AcpiPciHotplugController {
     ) -> Self {
         Self {
             shared_state,
+            selected_segment: 0,
             address_manager,
             memory_manager,
             device_tree,
@@ -1597,7 +1598,6 @@ impl DeviceManager {
         let mmio_regions = Arc::new(Mutex::new(Vec::new()));
         let shared_state = Arc::new(Mutex::new(DeviceManagerSharedState {
             pci_segments,
-            selected_segment: 0,
             bus_devices: Vec::new(),
             vfio_ops: None,
             iommu_attached_devices: None,
@@ -5772,7 +5772,7 @@ const PSEG_FIELD_SIZE: usize = 4;
 impl BusDevice for AcpiPciHotplugController {
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
         let mut shared_state = self.shared_state.lock().unwrap();
-        let selected_segment = shared_state.selected_segment;
+        let selected_segment = self.selected_segment;
         match offset {
             PCIU_FIELD_OFFSET => {
                 assert!(data.len() == PCIU_FIELD_SIZE);
@@ -5814,7 +5814,7 @@ impl BusDevice for AcpiPciHotplugController {
         match offset {
             B0EJ_FIELD_OFFSET => {
                 assert!(data.len() == B0EJ_FIELD_SIZE);
-                let selected_segment = self.shared_state.lock().unwrap().selected_segment as u16;
+                let selected_segment = self.selected_segment as u16;
                 let mut data_array: [u8; 4] = [0, 0, 0, 0];
                 data_array.copy_from_slice(data);
                 let mut slot_bitmap = u32::from_le_bytes(data_array);
@@ -5832,7 +5832,7 @@ impl BusDevice for AcpiPciHotplugController {
                 let mut data_array: [u8; 4] = [0, 0, 0, 0];
                 data_array.copy_from_slice(data);
                 let selected_segment = u32::from_le_bytes(data_array) as usize;
-                let mut shared_state = self.shared_state.lock().unwrap();
+                let shared_state = self.shared_state.lock().unwrap();
                 if selected_segment >= shared_state.pci_segments.len() {
                     error!(
                         "Segment selection out of range: {} >= {}",
@@ -5841,7 +5841,8 @@ impl BusDevice for AcpiPciHotplugController {
                     );
                     return None;
                 }
-                shared_state.selected_segment = selected_segment;
+                drop(shared_state);
+                self.selected_segment = selected_segment;
             }
             _ => error!("Accessing unknown location at base 0x{base:x}, offset 0x{offset:x}"),
         }
