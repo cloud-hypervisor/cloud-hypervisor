@@ -1604,7 +1604,6 @@ pub(crate) fn _test_simple_launch(guest: &Guest) {
         let _ = guest.ssh_command("sudo systemctl stop snapd");
 
         guest.ssh_command("sudo poweroff").unwrap();
-        thread::sleep(std::time::Duration::new(20, 0));
         let latest_events = [
             &MetaEvent {
                 event: "shutdown".to_string(),
@@ -1619,7 +1618,9 @@ pub(crate) fn _test_simple_launch(guest: &Guest) {
                 device_id: None,
             },
         ];
-        assert!(check_latest_events_exact(&latest_events, &event_path));
+        assert!(wait_until(Duration::from_secs(20), || {
+            check_latest_events_exact(&latest_events, &event_path)
+        }));
     });
 
     kill_child(&mut child);
