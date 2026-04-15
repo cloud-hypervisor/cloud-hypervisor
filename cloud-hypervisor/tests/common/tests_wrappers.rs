@@ -657,12 +657,13 @@ pub(crate) fn test_vhost_user_net(
             let desired_ram = 1024 << 20;
             resize_command(&api_socket, None, Some(desired_ram), None, None);
 
-            thread::sleep(std::time::Duration::new(10, 0));
-
             // Here by simply checking the size (through ssh), we validate
             // the connection is still working, which means vhost-user-net
             // keeps working after the resize.
-            assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
+            assert!(wait_until(Duration::from_secs(10), || guest
+                .get_total_memory()
+                .unwrap_or_default()
+                > 960_000));
         }
     });
 
@@ -790,9 +791,10 @@ pub(crate) fn test_vhost_user_blk(
             let desired_ram = 1024 << 20;
             resize_command(&api_socket, None, Some(desired_ram), None, None);
 
-            thread::sleep(std::time::Duration::new(10, 0));
-
-            assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
+            assert!(wait_until(Duration::from_secs(10), || guest
+                .get_total_memory()
+                .unwrap_or_default()
+                > 960_000));
 
             // Check again the content of the block device after the resize
             // has been performed.
@@ -1025,8 +1027,10 @@ pub(crate) fn _test_virtio_fs(
             let desired_ram = 1024 << 20;
             resize_command(&api_socket, None, Some(desired_ram), None, None);
 
-            thread::sleep(std::time::Duration::new(30, 0));
-            assert!(guest.get_total_memory().unwrap_or_default() > 960_000);
+            assert!(wait_until(Duration::from_secs(30), || guest
+                .get_total_memory()
+                .unwrap_or_default()
+                > 960_000));
 
             // After the resize, check again that file1 exists and its
             // content is "foo".
