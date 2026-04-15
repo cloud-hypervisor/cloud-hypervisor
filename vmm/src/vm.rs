@@ -1723,25 +1723,28 @@ impl Vm {
             .get_device_info()
             .clone();
 
-        for pci_segment in self.device_manager.lock().unwrap().pci_segments().iter() {
-            let pci_space = PciSpaceInfo {
-                pci_segment_id: pci_segment.id,
-                mmio_config_address: pci_segment.mmio_config_address,
-                pci_device_space_start: pci_segment.start_of_mem64_area,
-                pci_device_space_size: pci_segment.end_of_mem64_area
-                    - pci_segment.start_of_mem64_area
-                    + 1,
-            };
-            pci_space_info.push(pci_space);
-        }
+        self.device_manager
+            .lock()
+            .unwrap()
+            .with_pci_segments(|segments| {
+                for pci_segment in segments {
+                    pci_space_info.push(PciSpaceInfo {
+                        pci_segment_id: pci_segment.id,
+                        mmio_config_address: pci_segment.mmio_config_address,
+                        pci_device_space_start: pci_segment.start_of_mem64_area,
+                        pci_device_space_size: pci_segment.end_of_mem64_area
+                            - pci_segment.start_of_mem64_area
+                            + 1,
+                    });
+                }
+            });
 
         let virtio_iommu_bdf = self
             .device_manager
             .lock()
             .unwrap()
             .iommu_attached_devices()
-            .as_ref()
-            .map(|(v, _)| *v);
+            .map(|(v, _)| v);
 
         let vgic = self
             .device_manager
@@ -1809,17 +1812,21 @@ impl Vm {
             .get_device_info()
             .clone();
 
-        for pci_segment in self.device_manager.lock().unwrap().pci_segments().iter() {
-            let pci_space = PciSpaceInfo {
-                pci_segment_id: pci_segment.id,
-                mmio_config_address: pci_segment.mmio_config_address,
-                pci_device_space_start: pci_segment.start_of_mem64_area,
-                pci_device_space_size: pci_segment.end_of_mem64_area
-                    - pci_segment.start_of_mem64_area
-                    + 1,
-            };
-            pci_space_info.push(pci_space);
-        }
+        self.device_manager
+            .lock()
+            .unwrap()
+            .with_pci_segments(|segments| {
+                for pci_segment in segments {
+                    pci_space_info.push(PciSpaceInfo {
+                        pci_segment_id: pci_segment.id,
+                        mmio_config_address: pci_segment.mmio_config_address,
+                        pci_device_space_start: pci_segment.start_of_mem64_area,
+                        pci_device_space_size: pci_segment.end_of_mem64_area
+                            - pci_segment.start_of_mem64_area
+                            + 1,
+                    });
+                }
+            });
 
         // TODO: IOMMU for riscv64 is not yet support in kernel.
 
@@ -2508,11 +2515,14 @@ impl Vm {
         .map_err(Error::PopulateHob)?;
 
         // Loop over the ACPI tables and copy them to the HOB.
+        let device_manager = self.device_manager.lock().unwrap();
+        let cpu_manager = self.cpu_manager.lock().unwrap();
+        let memory_manager = self.memory_manager.lock().unwrap();
 
         for acpi_table in crate::acpi::create_acpi_tables_tdx(
-            &self.device_manager.lock().unwrap(),
-            &self.cpu_manager.lock().unwrap(),
-            &self.memory_manager.lock().unwrap(),
+            &device_manager,
+            &cpu_manager,
+            &memory_manager,
             &self.numa_nodes,
         ) {
             hob.add_acpi_table(&mem, acpi_table.as_slice())
@@ -2568,13 +2578,16 @@ impl Vm {
         if self.config.lock().unwrap().is_tdx_enabled() {
             return None;
         }
-        let mem = self.memory_manager.lock().unwrap().guest_memory().memory();
+        let memory_manager = self.memory_manager.lock().unwrap();
+        let mem = memory_manager.guest_memory().memory();
+        let device_manager = self.device_manager.lock().unwrap();
+        let cpu_manager = self.cpu_manager.lock().unwrap();
         let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
         let rsdp_addr = crate::acpi::create_acpi_tables(
             &mem,
-            &self.device_manager.lock().unwrap(),
-            &self.cpu_manager.lock().unwrap(),
-            &self.memory_manager.lock().unwrap(),
+            &device_manager,
+            &cpu_manager,
+            &memory_manager,
             &self.numa_nodes,
             tpm_enabled,
         );
@@ -2637,11 +2650,14 @@ impl Vm {
                 Self::populate_fw_cfg(&fw_cfg_config, &self.device_manager, &self.config)?;
 
                 if fw_cfg_config.acpi_tables {
+                    let device_manager = self.device_manager.lock().unwrap();
+                    let cpu_manager = self.cpu_manager.lock().unwrap();
+                    let memory_manager = self.memory_manager.lock().unwrap();
                     let tpm_enabled = self.config.lock().unwrap().tpm.is_some();
                     crate::acpi::create_acpi_tables_for_fw_cfg(
-                        &self.device_manager.lock().unwrap(),
-                        &self.cpu_manager.lock().unwrap(),
-                        &self.memory_manager.lock().unwrap(),
+                        &device_manager,
+                        &cpu_manager,
+                        &memory_manager,
                         &self.numa_nodes,
                         tpm_enabled,
                     )?;

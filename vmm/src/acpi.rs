@@ -2,6 +2,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+use std::sync::Arc;
 use std::time::Instant;
 
 use acpi_tables::Aml;
@@ -191,7 +192,7 @@ bitflags! {
 
 impl MemoryAffinity {
     fn from_region(
-        region: &GuestRegionMmap,
+        region: &Arc<GuestRegionMmap>,
         proximity_domain: u32,
         flags: MemAffinityFlags,
     ) -> Self {
@@ -283,34 +284,32 @@ fn create_facp_table(dsdt_offset: GuestAddress, device_manager: &DeviceManager) 
     // Revision 6 of the ACPI FADT table is 276 bytes long
     let mut facp = Sdt::new(*b"FACP", 276, 6, *b"CLOUDH", *b"CHFACP  ", 1);
 
+    if let Some(address) = device_manager.acpi_platform_addresses().reset_reg_address {
+        // RESET_REG
+        facp.write(116, address);
+        // RESET_VALUE
+        facp.write(128, 1u8);
+    }
+
+    if let Some(address) = device_manager
+        .acpi_platform_addresses()
+        .sleep_control_reg_address
     {
-        if let Some(address) = device_manager.acpi_platform_addresses().reset_reg_address {
-            // RESET_REG
-            facp.write(116, address);
-            // RESET_VALUE
-            facp.write(128, 1u8);
-        }
+        // SLEEP_CONTROL_REG
+        facp.write(244, address);
+    }
 
-        if let Some(address) = device_manager
-            .acpi_platform_addresses()
-            .sleep_control_reg_address
-        {
-            // SLEEP_CONTROL_REG
-            facp.write(244, address);
-        }
+    if let Some(address) = device_manager
+        .acpi_platform_addresses()
+        .sleep_status_reg_address
+    {
+        // SLEEP_STATUS_REG
+        facp.write(256, address);
+    }
 
-        if let Some(address) = device_manager
-            .acpi_platform_addresses()
-            .sleep_status_reg_address
-        {
-            // SLEEP_STATUS_REG
-            facp.write(256, address);
-        }
-
-        if let Some(address) = device_manager.acpi_platform_addresses().pm_timer_address {
-            // X_PM_TMR_BLK
-            facp.write(208, address);
-        }
+    if let Some(address) = device_manager.acpi_platform_addresses().pm_timer_address {
+        // X_PM_TMR_BLK
+        facp.write(208, address);
     }
 
     // aarch64 specific fields
@@ -912,7 +911,7 @@ fn create_acpi_tables_internal(
     }
 
     // MCFG
-    let mcfg = create_mcfg_table(&device_manager.pci_segments());
+    let mcfg = device_manager.with_pci_segments(create_mcfg_table);
     let mcfg_addr = prev_tbl_addr.checked_add(prev_tbl_len).unwrap();
     tables_bytes.extend_from_slice(mcfg.as_slice());
     xsdt_table_pointers.push(mcfg_addr.0);
@@ -994,7 +993,7 @@ fn create_acpi_tables_internal(
 
     #[cfg(target_arch = "aarch64")]
     {
-        let iort = create_iort_table(&device_manager.pci_segments());
+        let iort = device_manager.with_pci_segments(create_iort_table);
         let iort_addr = prev_tbl_addr.checked_add(prev_tbl_len).unwrap();
         tables_bytes.extend_from_slice(iort.as_slice());
         xsdt_table_pointers.push(iort_addr.0);
@@ -1003,8 +1002,8 @@ fn create_acpi_tables_internal(
     }
 
     // VIOT
-    if let Some((iommu_bdf, devices_bdf)) = device_manager.iommu_attached_devices().as_ref() {
-        let viot = create_viot_table(iommu_bdf, devices_bdf);
+    if let Some((iommu_bdf, devices_bdf)) = device_manager.iommu_attached_devices() {
+        let viot = create_viot_table(&iommu_bdf, &devices_bdf);
 
         let viot_addr = prev_tbl_addr.checked_add(prev_tbl_len).unwrap();
         tables_bytes.extend_from_slice(viot.as_slice());
@@ -1146,7 +1145,7 @@ pub fn create_acpi_tables_tdx(
     tables.push(cpu_manager.create_madt());
 
     // MCFG
-    tables.push(create_mcfg_table(&device_manager.pci_segments()));
+    tables.push(device_manager.with_pci_segments(create_mcfg_table));
 
     // SRAT and SLIT
     // Only created if the NUMA nodes list is not empty.
@@ -1167,8 +1166,8 @@ pub fn create_acpi_tables_tdx(
     }
 
     // VIOT
-    if let Some((iommu_bdf, devices_bdf)) = device_manager.iommu_attached_devices().as_ref() {
-        tables.push(create_viot_table(iommu_bdf, devices_bdf));
+    if let Some((iommu_bdf, devices_bdf)) = device_manager.iommu_attached_devices() {
+        tables.push(create_viot_table(&iommu_bdf, &devices_bdf));
     }
 
     tables
