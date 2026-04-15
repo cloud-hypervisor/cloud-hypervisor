@@ -9,7 +9,7 @@ use std::num::NonZeroU32;
 use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::result::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, SyncSender, TrySendError, channel, sync_channel};
@@ -507,6 +507,7 @@ impl SendAdditionalConnections {
     pub(crate) fn new(
         destination: &str,
         connections: NonZeroU32,
+        tls_dir: Option<&Path>,
         guest_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
     ) -> Result<Self, MigratableError> {
         let mut threads = Vec::new();
@@ -533,7 +534,7 @@ impl SendAdditionalConnections {
         // the memory chunks to the workers, but does not send memory anymore. Thus in
         // this case we create one additional thread for each connection.
         for n in 0..configured_connections {
-            let mut socket = send_migration_socket(destination)?;
+            let mut socket = send_migration_socket(destination, tls_dir)?;
             let guest_memory = guest_memory.clone();
             let message_rx = message_rx.clone();
             let worker_error = worker_error.clone();
@@ -779,9 +780,40 @@ fn socket_url_to_path(url: &str) -> Result<PathBuf, anyhow::Error> {
         .map(|s| s.into())
 }
 
+/// Extract the server name from a TCP address. This function assumes that
+/// `tcp:` has already been stripped.
+fn tcp_address_to_server_name(address: &str) -> Result<&str, anyhow::Error> {
+    if let Some(rest) = address.strip_prefix('[') {
+        let (host, port) = rest
+            .split_once(']')
+            .ok_or_else(|| anyhow!("Could not extract host from TCP address: {address}"))?;
+
+        if host.is_empty() || !port.starts_with(':') || port.len() == 1 {
+            return Err(anyhow!(
+                "Could not extract host from TCP address: {address}"
+            ));
+        }
+
+        Ok(host)
+    } else {
+        let (host, port) = address
+            .rsplit_once(':')
+            .ok_or_else(|| anyhow!("Could not extract host from TCP address: {address}"))?;
+
+        if host.is_empty() || port.is_empty() {
+            return Err(anyhow!(
+                "Could not extract host from TCP address: {address}"
+            ));
+        }
+
+        Ok(host)
+    }
+}
+
 /// Connect to a migration endpoint and return the established stream.
 pub(crate) fn send_migration_socket(
     destination_url: &str,
+    tls_dir: Option<&Path>,
 ) -> Result<SocketStream, MigratableError> {
     if let Some(address) = destination_url.strip_prefix("tcp:") {
         info!("Connecting to TCP socket at {address}");
@@ -790,7 +822,18 @@ pub(crate) fn send_migration_socket(
             MigratableError::MigrateSend(anyhow!("Error connecting to TCP socket: {e}"))
         })?;
 
-        Ok(SocketStream::Tcp(socket))
+        if let Some(tls_dir) = tls_dir {
+            let server_name = tcp_address_to_server_name(address)
+                .context("Error extracting TLS server name from destination URL")
+                .map_err(MigratableError::MigrateSend)?;
+            TlsStream::new_client(socket, tls_dir, server_name)
+                .map(Box::new)
+                .map(SocketStream::Tls)
+                .context("Error creating TLS migration stream")
+                .map_err(MigratableError::MigrateSend)
+        } else {
+            Ok(SocketStream::Tcp(socket))
+        }
     } else {
         let path = socket_url_to_path(destination_url).map_err(MigratableError::MigrateSend)?;
         info!("Connecting to UNIX socket at {path:?}");
@@ -806,12 +849,21 @@ pub(crate) fn send_migration_socket(
 /// Bind a migration listener for the receiver side.
 pub(crate) fn receive_migration_listener(
     receiver_url: &str,
+    tls_dir: Option<&Path>,
 ) -> Result<ReceiveListener, MigratableError> {
     if let Some(address) = receiver_url.strip_prefix("tcp:") {
-        TcpListener::bind(address)
-            .map(ReceiveListener::Tcp)
+        let listener = TcpListener::bind(address)
             .context("Error binding to TCP socket")
-            .map_err(MigratableError::MigrateReceive)
+            .map_err(MigratableError::MigrateReceive)?;
+
+        if let Some(tls_dir) = tls_dir {
+            let config = TlsServerConfig::new(tls_dir)
+                .context("Error creating TLS server config")
+                .map_err(MigratableError::MigrateReceive)?;
+            Ok(ReceiveListener::Tls(listener, config))
+        } else {
+            Ok(ReceiveListener::Tcp(listener))
+        }
     } else {
         let path = socket_url_to_path(receiver_url).map_err(MigratableError::MigrateReceive)?;
         UnixListener::bind(&path)
@@ -971,4 +1023,33 @@ pub(crate) fn receive_memory_ranges(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tcp_address_to_server_name;
+
+    #[test]
+    fn test_tcp_address_to_server_name() {
+        assert_eq!(
+            tcp_address_to_server_name("example.com:1234").unwrap(),
+            "example.com"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("192.0.2.1:1234").unwrap(),
+            "192.0.2.1"
+        );
+        assert_eq!(
+            tcp_address_to_server_name("[2001:db8::1]:1234").unwrap(),
+            "2001:db8::1"
+        );
+    }
+
+    #[test]
+    fn test_tcp_address_to_server_name_rejects_invalid_addresses() {
+        tcp_address_to_server_name("example.com").unwrap_err();
+        tcp_address_to_server_name(":1234").unwrap_err();
+        tcp_address_to_server_name("[2001:db8::1]").unwrap_err();
+        tcp_address_to_server_name("[2001:db8::1]1234").unwrap_err();
+    }
 }
