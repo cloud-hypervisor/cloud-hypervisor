@@ -4752,8 +4752,9 @@ mod common_parallel {
             // Wait for balloon memory's initialization and check its size.
             // The virtio-balloon driver might take a few seconds to report the
             // balloon effective size back to the VMM.
-            thread::sleep(std::time::Duration::new(20, 0));
-
+            assert!(wait_until(Duration::from_secs(20), || {
+                balloon_size(&api_socket) == 2147483648
+            }));
             let orig_balloon = balloon_size(&api_socket);
             println!("The original balloon memory size is {orig_balloon} bytes");
             assert!(orig_balloon == 2147483648);
@@ -4766,7 +4767,9 @@ mod common_parallel {
 
             // Give some time for the OOM to happen in the guest and be reported
             // back to the host.
-            thread::sleep(std::time::Duration::new(20, 0));
+            assert!(wait_until(Duration::from_secs(20), || {
+                balloon_size(&api_socket) < 2147483648
+            }));
 
             // 2nd: check balloon_mem's value to verify balloon has been automatically deflated
             let deflated_balloon = balloon_size(&api_socket);
