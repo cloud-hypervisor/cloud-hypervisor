@@ -927,6 +927,23 @@ struct PciHotplugSharedState {
     virtio_mem_devices: Vec<Arc<Mutex<virtio_devices::Mem>>>,
 }
 
+impl PciHotplugSharedState {
+    fn push_bus_device(&mut self, bus_device: Arc<dyn BusDeviceSync>) {
+        self.bus_devices.push(bus_device);
+    }
+
+    fn remove_bus_device(&mut self, bus_device: &Arc<dyn BusDeviceSync>) {
+        self.bus_devices.retain(|dev| !Arc::ptr_eq(dev, bus_device));
+    }
+
+    fn cleanup_vfio_ops(&mut self) {
+        if let Some(1) = self.vfio_ops.as_ref().map(Arc::strong_count) {
+            debug!("Drop VfioOps given no active VFIO devices.");
+            self.vfio_ops = None;
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct PtyPair {
     pub main: File,
@@ -1237,13 +1254,6 @@ impl AcpiPciHotplugController {
         }
     }
 
-    fn cleanup_vfio_ops(shared_state: &mut PciHotplugSharedState) {
-        if let Some(1) = shared_state.vfio_ops.as_ref().map(Arc::strong_count) {
-            debug!("Drop VfioOps given no active VFIO devices.");
-            shared_state.vfio_ops = None;
-        }
-    }
-
     fn eject_device(&mut self, pci_segment_id: u16, device_id: u8) -> DeviceManagerResult<()> {
         info!("Ejecting device_id = {device_id} on segment_id={pci_segment_id}");
 
@@ -1455,10 +1465,8 @@ impl AcpiPciHotplugController {
         }
 
         let mut shared_state = self.shared_state.lock().unwrap();
-        shared_state
-            .bus_devices
-            .retain(|dev| !Arc::ptr_eq(dev, &bus_device));
-        Self::cleanup_vfio_ops(&mut shared_state);
+        shared_state.remove_bus_device(&bus_device);
+        shared_state.cleanup_vfio_ops();
         drop(shared_state);
 
         // At this point, the device has been removed from all the list and
@@ -1481,10 +1489,6 @@ impl AcpiPciHotplugController {
 impl DeviceManager {
     fn shared_state(&self) -> std::sync::MutexGuard<'_, PciHotplugSharedState> {
         self.shared_state.lock().unwrap()
-    }
-
-    fn push_bus_device(&self, bus_device: Arc<dyn BusDeviceSync>) {
-        self.shared_state().bus_devices.push(bus_device);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1842,7 +1846,8 @@ impl DeviceManager {
         #[cfg(not(target_arch = "riscv64"))]
         if let Some(tpm) = self.config.clone().lock().unwrap().tpm.as_ref() {
             let tpm_dev = self.add_tpm_device(&tpm.socket)?;
-            self.push_bus_device(Arc::clone(&tpm_dev) as Arc<dyn BusDeviceSync>);
+            self.shared_state()
+                .push_bus_device(Arc::clone(&tpm_dev) as Arc<dyn BusDeviceSync>);
         }
         self.legacy_interrupt_manager = Some(legacy_interrupt_manager);
 
@@ -1880,7 +1885,8 @@ impl DeviceManager {
 
         self.fw_cfg = Some(fw_cfg.clone());
 
-        self.push_bus_device(Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>);
 
         #[cfg(target_arch = "x86_64")]
         self.address_manager
@@ -2062,7 +2068,7 @@ impl DeviceManager {
             })
             .collect();
         for bus_device in pci_config_devices {
-            self.push_bus_device(bus_device);
+            self.shared_state().push_bus_device(bus_device);
         }
 
         Ok(())
@@ -2184,7 +2190,8 @@ impl DeviceManager {
             .insert(interrupt_controller.clone(), IOAPIC_START.0, IOAPIC_SIZE)
             .map_err(DeviceManagerError::BusError)?;
 
-        self.push_bus_device(Arc::clone(&interrupt_controller) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&interrupt_controller) as Arc<dyn BusDeviceSync>);
 
         // Fill the device tree with a new node. In case of restore, we
         // know there is nothing to do, so we can simply override the
@@ -2215,7 +2222,8 @@ impl DeviceManager {
             vcpus_kill_signalled,
         )));
 
-        self.push_bus_device(Arc::clone(&shutdown_device) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&shutdown_device) as Arc<dyn BusDeviceSync>);
 
         #[cfg(target_arch = "x86_64")]
         {
@@ -2277,11 +2285,13 @@ impl DeviceManager {
                 devices::acpi::GED_DEVICE_ACPI_SIZE as u64,
             )
             .map_err(DeviceManagerError::BusError)?;
-        self.push_bus_device(Arc::clone(&ged_device) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&ged_device) as Arc<dyn BusDeviceSync>);
 
         let pm_timer_device = Arc::new(Mutex::new(devices::AcpiPmTimerDevice::new()));
 
-        self.push_bus_device(Arc::clone(&pm_timer_device) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&pm_timer_device) as Arc<dyn BusDeviceSync>);
 
         #[cfg(target_arch = "x86_64")]
         {
@@ -2320,7 +2330,8 @@ impl DeviceManager {
             vcpus_kill_signalled.clone(),
         )));
 
-        self.push_bus_device(Arc::clone(&i8042) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&i8042) as Arc<dyn BusDeviceSync>);
 
         self.address_manager
             .io_bus
@@ -2347,7 +2358,8 @@ impl DeviceManager {
                 Some(vcpus_kill_signalled),
             )));
 
-            self.push_bus_device(Arc::clone(&cmos) as Arc<dyn BusDeviceSync>);
+            self.shared_state()
+                .push_bus_device(Arc::clone(&cmos) as Arc<dyn BusDeviceSync>);
 
             self.address_manager
                 .io_bus
@@ -2356,7 +2368,8 @@ impl DeviceManager {
 
             let fwdebug = Arc::new(Mutex::new(devices::legacy::FwDebugDevice::new()));
 
-            self.push_bus_device(Arc::clone(&fwdebug) as Arc<dyn BusDeviceSync>);
+            self.shared_state()
+                .push_bus_device(Arc::clone(&fwdebug) as Arc<dyn BusDeviceSync>);
 
             self.address_manager
                 .io_bus
@@ -2366,7 +2379,8 @@ impl DeviceManager {
 
         // 0x80 debug port
         let debug_port = Arc::new(Mutex::new(devices::legacy::DebugPort::new(self.timestamp)));
-        self.push_bus_device(Arc::clone(&debug_port) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&debug_port) as Arc<dyn BusDeviceSync>);
         self.address_manager
             .io_bus
             .insert(debug_port, 0x80, 0x1)
@@ -2391,7 +2405,8 @@ impl DeviceManager {
 
         let rtc_device = Arc::new(Mutex::new(devices::legacy::Rtc::new()));
 
-        self.push_bus_device(Arc::clone(&rtc_device) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&rtc_device) as Arc<dyn BusDeviceSync>);
 
         let addr = arch::layout::LEGACY_RTC_MAPPED_IO_START;
 
@@ -2432,7 +2447,8 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
-        self.push_bus_device(Arc::clone(&gpio_device) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&gpio_device) as Arc<dyn BusDeviceSync>);
 
         let addr = arch::layout::LEGACY_GPIO_MAPPED_IO_START;
 
@@ -2480,7 +2496,8 @@ impl DeviceManager {
             .iobase
             .map_or(debug_console::DEFAULT_PORT, |port| port as u64);
 
-        self.push_bus_device(Arc::clone(&debug_console) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&debug_console) as Arc<dyn BusDeviceSync>);
 
         self.address_manager
             .allocator
@@ -2530,7 +2547,8 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
-        self.push_bus_device(Arc::clone(&serial) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&serial) as Arc<dyn BusDeviceSync>);
 
         self.address_manager
             .allocator
@@ -2586,7 +2604,8 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
-        self.push_bus_device(Arc::clone(&serial) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&serial) as Arc<dyn BusDeviceSync>);
 
         let addr = arch::layout::LEGACY_SERIAL_MAPPED_IO_START;
 
@@ -2648,7 +2667,8 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
-        self.push_bus_device(Arc::clone(&serial) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&serial) as Arc<dyn BusDeviceSync>);
 
         let addr = arch::layout::LEGACY_SERIAL_MAPPED_IO_START;
 
@@ -4438,7 +4458,7 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::AddPciDevice)?;
         }
 
-        shared_state.bus_devices.push(bus_device);
+        shared_state.push_bus_device(bus_device);
 
         let mut new_resources = Vec::new();
         for bar in bars {
