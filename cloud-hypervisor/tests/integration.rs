@@ -6740,7 +6740,7 @@ mod common_parallel {
             .args([
                 &format!("--api-socket={dest_api_socket}"),
                 "receive-migration",
-                &format!("tcp:0.0.0.0:{migration_port}"),
+                &format!("receiver_url=tcp:0.0.0.0:{migration_port}"),
             ])
             .stdin(Stdio::null())
             .stderr(Stdio::piped())
@@ -7077,7 +7077,7 @@ mod common_parallel {
                 .args([
                     &format!("--api-socket={dest_api_socket}"),
                     "receive-migration",
-                    &format!("tcp:0.0.0.0:{migration_port}"),
+                    &format!("receiver_url=tcp:0.0.0.0:{migration_port}"),
                 ])
                 .stdin(Stdio::null())
                 .stderr(Stdio::piped())
