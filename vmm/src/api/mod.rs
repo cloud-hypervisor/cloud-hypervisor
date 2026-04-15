@@ -271,6 +271,42 @@ pub struct VmReceiveMigrationData {
     pub receiver_url: String,
 }
 
+/// Validates the host and port portion of a TCP migration URL.
+///
+/// The expected format is `<host>:<port>` for hostnames and IPv4 addresses, or
+/// `[<ipv6-address>]:<port>` for IPv6 addresses. The host and port must both be
+/// present, and the port must parse as a `u16`.
+fn validate_tcp_migration_address(address: &str) -> Result<(), String> {
+    let (host, port) = if let Some(rest) = address.strip_prefix('[') {
+        let (host, rest) = rest
+            .split_once(']')
+            .ok_or_else(|| "missing closing ']' for bracketed IPv6 address".to_string())?;
+
+        let port = rest
+            .strip_prefix(':')
+            .ok_or_else(|| "missing port separator after bracketed host".to_string())?;
+
+        (host, port)
+    } else {
+        address
+            .rsplit_once(':')
+            .ok_or_else(|| "missing TCP port".to_string())?
+    };
+
+    if host.is_empty() {
+        return Err("host must not be empty".to_string());
+    }
+
+    if port.is_empty() {
+        return Err("port must not be empty".to_string());
+    }
+
+    port.parse::<u16>()
+        .map_err(|_| format!("invalid TCP port: {port}"))?;
+
+    Ok(())
+}
+
 #[derive(Copy, Clone, Default, Deserialize, Serialize, Debug, PartialEq, Eq)]
 /// The migration timeout strategy.
 ///
@@ -440,26 +476,27 @@ impl VmSendMigrationData {
     }
 
     pub fn validate(&self) -> Result<(), VmSendMigrationConfigError> {
-        match self.destination_url.as_str() {
-            url if url
-                .strip_prefix("tcp:")
-                .is_some_and(|addr| !addr.is_empty()) => {}
-            url if url
-                .strip_prefix("unix:")
-                .is_some_and(|path| !path.is_empty()) =>
-            {
-                if self.connections.get() > 1 {
-                    return Err(VmSendMigrationConfigError::ValidationError(
-                        "UNIX sockets and connections option cannot be used at the same time."
-                            .to_string(),
-                    ));
-                }
-            }
-            _ => {
+        if let Some(addr) = self.destination_url.strip_prefix("tcp:") {
+            validate_tcp_migration_address(addr).map_err(|e| {
+                VmSendMigrationConfigError::ValidationError(format!(
+                    "destination_url must use tcp:<host>:<port> or unix:<path>: {e}."
+                ))
+            })?;
+        } else if self
+            .destination_url
+            .strip_prefix("unix:")
+            .is_some_and(|path| !path.is_empty())
+        {
+            if self.connections.get() > 1 {
                 return Err(VmSendMigrationConfigError::ValidationError(
-                    "destination_url must use tcp:<host>:<port> or unix:<path>.".to_string(),
+                    "UNIX sockets and connections option cannot be used at the same time."
+                        .to_string(),
                 ));
             }
+        } else {
+            return Err(VmSendMigrationConfigError::ValidationError(
+                "destination_url must use tcp:<host>:<port> or unix:<path>.".to_string(),
+            ));
         }
 
         if self.connections.get() > MAX_MIGRATION_CONNECTIONS {
@@ -1759,6 +1796,57 @@ mod unit_tests {
     use super::*;
 
     #[test]
+    fn test_validate_tcp_migration_address() {
+        for address in [
+            "192.168.1.1:8080",
+            "destination.example:8080",
+            "[2001:db8::1]:8080",
+            "[::1]:0",
+            "localhost:65535",
+        ] {
+            validate_tcp_migration_address(address)
+                .unwrap_or_else(|e| panic!("expected {address} to be valid, got: {e}"));
+        }
+
+        assert_eq!(
+            validate_tcp_migration_address("192.168.1.1").unwrap_err(),
+            "missing TCP port"
+        );
+        assert_eq!(
+            validate_tcp_migration_address(":8080").unwrap_err(),
+            "host must not be empty"
+        );
+        assert_eq!(
+            validate_tcp_migration_address("host:").unwrap_err(),
+            "port must not be empty"
+        );
+        assert_eq!(
+            validate_tcp_migration_address("host:not-a-port").unwrap_err(),
+            "invalid TCP port: not-a-port"
+        );
+        assert_eq!(
+            validate_tcp_migration_address("[2001:db8::1").unwrap_err(),
+            "missing closing ']' for bracketed IPv6 address"
+        );
+        assert_eq!(
+            validate_tcp_migration_address("[]:8080").unwrap_err(),
+            "host must not be empty"
+        );
+        assert_eq!(
+            validate_tcp_migration_address("[2001:db8::1]").unwrap_err(),
+            "missing port separator after bracketed host"
+        );
+        assert_eq!(
+            validate_tcp_migration_address("[2001:db8::1]:").unwrap_err(),
+            "port must not be empty"
+        );
+        assert_eq!(
+            validate_tcp_migration_address("[2001:db8::1]:99999").unwrap_err(),
+            "invalid TCP port: 99999"
+        );
+    }
+
+    #[test]
     fn test_vm_send_migration_data_parse() {
         // Fully specified
         let data = VmSendMigrationData::parse(
@@ -1780,6 +1868,14 @@ mod unit_tests {
         assert_eq!(data.timeout_s, VmSendMigrationData::default_timeout_s());
         assert_eq!(data.timeout_strategy, TimeoutStrategy::default());
         assert_eq!(data.connections, VmSendMigrationData::default_connections());
+
+        let data = VmSendMigrationData::parse("destination_url=tcp:[2001:db8::1]:8080")
+            .expect("IPv6 migration string should parse");
+        assert_eq!(data.destination_url, "tcp:[2001:db8::1]:8080");
+
+        let data = VmSendMigrationData::parse("destination_url=tcp:destination.example:8080")
+            .expect("hostname migration string should parse");
+        assert_eq!(data.destination_url, "tcp:destination.example:8080");
 
         // Missing destination_url is an error
         VmSendMigrationData::parse("local=on,downtime_ms=200").unwrap_err();
@@ -1817,6 +1913,8 @@ mod unit_tests {
 
         // Invalid destination URL scheme is rejected
         VmSendMigrationData::parse("destination_url=file:///tmp/migration").unwrap_err();
+        VmSendMigrationData::parse("destination_url=tcp:192.168.1.1").unwrap_err();
+        VmSendMigrationData::parse("destination_url=tcp:[2001:db8::1]").unwrap_err();
 
         // Local migration requires a UNIX socket destination
         VmSendMigrationData::parse("destination_url=tcp:192.168.1.1:8080,local=yes").unwrap_err();
