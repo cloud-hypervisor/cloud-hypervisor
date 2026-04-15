@@ -5753,7 +5753,7 @@ mod dbus_api {
             guest.ssh_command("sudo shutdown -H now").unwrap();
 
             // Wait for the guest to be fully shutdown
-            thread::sleep(std::time::Duration::new(20, 0));
+            assert!(guest.wait_for_ssh_unresponsive(Duration::from_secs(20)));
 
             // Then shutdown the VM
             assert!(dbus_api.remote_command("shutdown", None));
