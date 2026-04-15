@@ -1249,11 +1249,24 @@ impl AcpiPciHotplugController {
 
         // Convert the device ID into the corresponding b/d/f.
         let pci_device_bdf = PciBdf::new(pci_segment_id, 0, device_id, 0);
-        let mut shared_state = self.shared_state.lock().unwrap();
+        let (pci_bus, mem32_allocator, mem64_allocator, virtio_mem_devices, iommu_attached) = {
+            let shared_state = self.shared_state.lock().unwrap();
+            let pci_segment = &shared_state.pci_segments[pci_segment_id as usize];
+
+            (
+                Arc::clone(&pci_segment.pci_bus),
+                Arc::clone(&pci_segment.mem32_allocator),
+                Arc::clone(&pci_segment.mem64_allocator),
+                shared_state.virtio_mem_devices.clone(),
+                shared_state
+                    .iommu_attached_devices
+                    .as_ref()
+                    .is_some_and(|(_, devices)| devices.contains(&pci_device_bdf)),
+            )
+        };
 
         // Give the PCI device ID back to the PCI bus.
-        shared_state.pci_segments[pci_segment_id as usize]
-            .pci_bus
+        pci_bus
             .lock()
             .unwrap()
             .put_device_id(device_id as usize)
@@ -1286,11 +1299,6 @@ impl AcpiPciHotplugController {
 
             (pci_device_handle, id)
         };
-
-        let iommu_attached = shared_state
-            .iommu_attached_devices
-            .as_ref()
-            .is_some_and(|(_, devices)| devices.contains(&pci_device_bdf));
 
         let (pci_device, bus_device, virtio_device, remove_dma_handler) = match pci_device_handle {
             // VirtioMemMappingSource::Container cleanup is handled by
@@ -1378,7 +1386,7 @@ impl AcpiPciHotplugController {
         };
 
         if remove_dma_handler {
-            for virtio_mem_device in &shared_state.virtio_mem_devices {
+            for virtio_mem_device in &virtio_mem_devices {
                 let source = VirtioMemMappingSource::Device(pci_device_bdf.into());
                 virtio_mem_device
                     .lock()
@@ -1394,19 +1402,12 @@ impl AcpiPciHotplugController {
             .unwrap()
             .free_bars(
                 &mut self.backend.address_manager.allocator.lock().unwrap(),
-                &mut shared_state.pci_segments[pci_segment_id as usize]
-                    .mem32_allocator
-                    .lock()
-                    .unwrap(),
-                &mut shared_state.pci_segments[pci_segment_id as usize]
-                    .mem64_allocator
-                    .lock()
-                    .unwrap(),
+                &mut mem32_allocator.lock().unwrap(),
+                &mut mem64_allocator.lock().unwrap(),
             )
             .map_err(DeviceManagerError::FreePciBars)?;
 
-        shared_state.pci_segments[pci_segment_id as usize]
-            .pci_bus
+        pci_bus
             .lock()
             .unwrap()
             .remove_by_device(&pci_device)
@@ -1429,10 +1430,6 @@ impl AcpiPciHotplugController {
 
         // Remove the device from the list of BusDevice held by the
         // DeviceManager.
-        shared_state
-            .bus_devices
-            .retain(|dev| !Arc::ptr_eq(dev, &bus_device));
-
         if let Some(virtio_device) = virtio_device {
             for mapping in virtio_device.lock().unwrap().userspace_mappings() {
                 // SAFETY: userspace_mappings only has valid mappings.
@@ -1457,6 +1454,10 @@ impl AcpiPciHotplugController {
             virtio_device.lock().unwrap().shutdown();
         }
 
+        let mut shared_state = self.shared_state.lock().unwrap();
+        shared_state
+            .bus_devices
+            .retain(|dev| !Arc::ptr_eq(dev, &bus_device));
         Self::cleanup_vfio_ops(&mut shared_state);
         drop(shared_state);
 
