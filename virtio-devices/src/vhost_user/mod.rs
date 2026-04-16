@@ -231,7 +231,8 @@ impl<S: VhostUserFrontendReqHandler> VhostUserEpollHandler<S> {
         )
         .map_err(|e| {
             EpollHelperError::IoError(std::io::Error::other(format!(
-                "failed connecting vhost-user backend {e:?}"
+                "failed connecting vhost-user backend for socket {}: {e:?}",
+                self.socket_path
             )))
         })?;
 
@@ -282,7 +283,8 @@ impl<S: VhostUserFrontendReqHandler> EpollHelperHandler for VhostUserEpollHandle
             HUP_CONNECTION_EVENT => {
                 self.reconnect(helper).map_err(|e| {
                     EpollHelperError::HandleEvent(anyhow!(
-                        "failed to reconnect vhost-user backend: {e:?}"
+                        "failed to reconnect vhost-user backend for socket {}: {e:?}",
+                        self.socket_path
                     ))
                 })?;
             }
@@ -370,7 +372,7 @@ impl VhostUserCommon {
             };
 
         if self.vu.is_none() {
-            error!("Missing vhost-user handle");
+            error!("Missing vhost-user handle for socket {}", self.socket_path);
             return Err(ActivateError::BadActivate);
         }
         let vu = self.vu.as_ref().unwrap();

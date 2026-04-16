@@ -254,7 +254,11 @@ impl VirtioDevice for Blk {
                 .set_config(offset as u32, VhostUserConfigFlags::WRITABLE, data)
                 .map_err(Error::VhostUserSetConfig)
         {
-            error!("Failed setting vhost-user-blk configuration: {e:?}");
+            error!(
+                "Failed setting vhost-user-blk configuration for socket {} at offset 0x{offset:x} with length {}: {e:?}",
+                self.vu_common.socket_path,
+                data.len()
+            );
         }
     }
 
@@ -313,7 +317,10 @@ impl VirtioDevice for Blk {
         if let Some(vu) = &self.vu_common.vu
             && let Err(e) = vu.lock().unwrap().reset_vhost_user()
         {
-            error!("Failed to reset vhost-user daemon: {e:?}");
+            error!(
+                "Failed to reset vhost-user daemon for socket {}: {e:?}",
+                self.vu_common.socket_path
+            );
             return None;
         }
 
