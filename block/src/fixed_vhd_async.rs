@@ -26,7 +26,9 @@ impl FixedVhdDiskAsync {
 
 impl disk_file::DiskSize for FixedVhdDiskAsync {
     fn logical_size(&self) -> BlockResult<u64> {
-        Ok(self.0.logical_size().unwrap())
+        self.0
+            .logical_size()
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))
     }
 }
 
@@ -69,13 +71,12 @@ impl disk_file::AsyncDiskFile for FixedVhdDiskAsync {
     }
 
     fn new_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
+        let size = self
+            .0
+            .logical_size()
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
         Ok(Box::new(
-            FixedVhdAsync::new(
-                self.0.as_raw_fd(),
-                ring_depth,
-                self.0.logical_size().unwrap(),
-            )
-            .map_err(|e| {
+            FixedVhdAsync::new(self.0.as_raw_fd(), ring_depth, size).map_err(|e| {
                 BlockError::new(BlockErrorKind::Io, DiskFileError::NewAsyncIo(e))
                     .with_op(ErrorOp::Open)
             })?,
