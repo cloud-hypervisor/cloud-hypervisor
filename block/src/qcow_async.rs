@@ -1053,4 +1053,22 @@ mod unit_tests {
             "sub-sector O_DIRECT read should return written data"
         );
     }
+
+    #[test]
+    fn test_qcow_async_direct_io_write_read_roundtrip() {
+        let temp_file = TempFile::new().unwrap();
+        let disk = match try_create_direct_io_disk(&temp_file, 100 * 1024 * 1024) {
+            Some(d) => d,
+            None => {
+                eprintln!("skipping: O_DIRECT not supported on this filesystem");
+                return;
+            }
+        };
+
+        let pattern: Vec<u8> = (0..128 * 1024).map(|i| (i % 251) as u8).collect();
+        async_write(&disk, 0, &pattern);
+
+        let buf = async_read(&disk, 0, pattern.len());
+        assert_eq!(buf, pattern, "O_DIRECT roundtrip should match");
+    }
 }
