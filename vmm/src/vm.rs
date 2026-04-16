@@ -129,7 +129,13 @@ pub enum Error {
     UefiLoad(#[source] arch::riscv64::uefi::Error),
 
     #[error("Cannot load the initramfs into memory")]
-    InitramfsLoad,
+    InitramfsLoad(#[source] std::io::Error),
+
+    #[error("Cannot determine initramfs load address")]
+    InitramfsAddress(#[source] arch::Error),
+
+    #[error("Cannot read initramfs into guest memory")]
+    InitramfsRead(#[source] vm_memory::GuestMemoryError),
 
     #[error("Cannot load the kernel command line in memory")]
     LoadCmdLine(#[source] linux_loader::loader::Error),
@@ -334,7 +340,7 @@ pub enum Error {
     IgvmLoad(#[source] igvm_loader::Error),
 
     #[error("Error injecting NMI")]
-    ErrorNmi,
+    ErrorNmi(#[source] cpu::Error),
 
     #[error("Error resuming the VM")]
     ResumeVm(#[source] hypervisor::HypervisorVmError),
@@ -1362,18 +1368,18 @@ impl Vm {
         let initramfs = self.initramfs.as_mut().unwrap();
         let size: usize = initramfs
             .seek(SeekFrom::End(0))
-            .map_err(|_| Error::InitramfsLoad)?
+            .map_err(Error::InitramfsLoad)?
             .try_into()
             .unwrap();
-        initramfs.rewind().map_err(|_| Error::InitramfsLoad)?;
+        initramfs.rewind().map_err(Error::InitramfsLoad)?;
 
         let address =
-            arch::initramfs_load_addr(guest_mem, size).map_err(|_| Error::InitramfsLoad)?;
+            arch::initramfs_load_addr(guest_mem, size).map_err(Error::InitramfsAddress)?;
         let address = GuestAddress(address);
 
         guest_mem
             .read_volatile_from(address, initramfs, size)
-            .map_err(|_| Error::InitramfsLoad)?;
+            .map_err(Error::InitramfsRead)?;
 
         info!("Initramfs loaded: address = 0x{:x}", address.0);
         Ok(arch::InitramfsConfig { address, size })
@@ -3032,7 +3038,7 @@ impl Vm {
             .lock()
             .unwrap()
             .nmi()
-            .map_err(|_| Error::ErrorNmi);
+            .map_err(Error::ErrorNmi);
     }
 }
 
