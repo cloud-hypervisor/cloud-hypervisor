@@ -294,7 +294,10 @@ impl VirtioDevice for Fs {
         if let Some(vu) = &self.vu_common.vu
             && let Err(e) = vu.lock().unwrap().reset_vhost_user()
         {
-            error!("Failed to reset vhost-user daemon: {e:?}");
+            error!(
+                "Failed to reset vhost-user daemon for socket {}: {e:?}",
+                self.vu_common.socket_path
+            );
             return None;
         }
 

@@ -428,7 +428,9 @@ impl VhostUserHandle {
                 }
             };
 
-            error!("Failed connecting the backend after trying for 1 minute: {err:?}");
+            error!(
+                "Failed connecting the backend after trying for 1 minute for socket {socket_path}: {err:?}"
+            );
             Err(Error::VhostUserConnect)
         }
     }
