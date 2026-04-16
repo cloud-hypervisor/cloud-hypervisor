@@ -657,6 +657,10 @@ pub enum DeviceManagerError {
     #[error("Invalid identifier: {0}")]
     InvalidIdentifier(String),
 
+    /// vfio-user socket path already in use by another user device.
+    #[error("vfio-user socket path already in use: {0:?}")]
+    UserDeviceSocketInUse(std::path::PathBuf),
+
     /// Error activating virtio device
     #[error("Error activating virtio device")]
     VirtioActivate(#[source] ActivateError),
@@ -4706,6 +4710,17 @@ impl DeviceManager {
         device_cfg: &mut UserDeviceConfig,
     ) -> DeviceManagerResult<PciDeviceInfo> {
         self.validate_identifier(&device_cfg.pci_common.id)?;
+
+        // Reject duplicate socket up-front: libvfio-user servers accept a
+        // single client, so a second Client::new() on the same socket blocks
+        // indefinitely in the handshake recvmsg() and hangs the VMM thread.
+        if let Some(existing) = &self.config.lock().unwrap().user_devices
+            && existing.iter().any(|d| d.socket == device_cfg.socket)
+        {
+            return Err(DeviceManagerError::UserDeviceSocketInUse(
+                device_cfg.socket.clone(),
+            ));
+        }
 
         let (bdf, device_name) = self.add_vfio_user_device(device_cfg)?;
 
