@@ -53,7 +53,6 @@ jobs:
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
-          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "kvm" -- -D warnings
@@ -62,7 +61,6 @@ jobs:
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
-          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv" -- -D warnings
@@ -71,7 +69,6 @@ jobs:
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
-          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv,kvm" -- -D warnings
@@ -80,7 +77,6 @@ jobs:
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
-          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples -- -D warnings
@@ -89,7 +85,6 @@ jobs:
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
-          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples --features "guest_debug" -- -D warnings
@@ -98,7 +93,6 @@ jobs:
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
-          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples --features "pvmemcontrol" -- -D warnings
@@ -107,7 +101,6 @@ jobs:
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
-          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples --features "tracing" -- -D warnings
@@ -122,7 +115,6 @@ jobs:
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
-          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples --features "ivshmem" -- -D warnings
@@ -132,7 +124,6 @@ jobs:
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
-          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "sev_snp" -- -D warnings
@@ -142,7 +133,6 @@ jobs:
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
-          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "igvm" -- -D warnings
@@ -152,7 +142,6 @@ jobs:
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
-          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
           toolchain: ${{ matrix.rust }}
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --no-default-features --tests --examples --features "tdx,kvm" -- -D warnings
