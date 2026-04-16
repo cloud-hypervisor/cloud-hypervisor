@@ -1309,6 +1309,96 @@ mod common_parallel {
                 .expect("Failed to read back data after discard stress");
         });
     }
+
+    #[test]
+    fn test_virtio_block_qcow2_uefi_direct_io() {
+        // Regression test for #8007.
+        // Place the QCOW2 OS image on a 4096 byte sector filesystem so
+        // O_DIRECT forces 4096 byte alignment on all I/O buffers.
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = edk2_path();
+
+        let mut workloads_path = dirs::home_dir().unwrap();
+        workloads_path.push("workloads");
+        let img_dir = TempDir::new_in(workloads_path.as_path()).unwrap();
+        let fs_img_path = img_dir.as_path().join("fs_4ksec.img");
+
+        assert!(
+            exec_host_command_output(&format!("truncate -s 4G {}", fs_img_path.to_str().unwrap()))
+                .status
+                .success(),
+            "truncate failed"
+        );
+
+        let loop_dev_path = create_loop_device(fs_img_path.to_str().unwrap(), 4096, 5);
+
+        assert!(
+            exec_host_command_output(&format!("mkfs.ext4 -q {loop_dev_path}"))
+                .status
+                .success(),
+            "mkfs.ext4 failed"
+        );
+
+        let mnt_dir = img_dir.as_path().join("mnt");
+        fs::create_dir_all(&mnt_dir).unwrap();
+        assert!(
+            exec_host_command_output(&format!(
+                "mount {} {}",
+                &loop_dev_path,
+                mnt_dir.to_str().unwrap()
+            ))
+            .status
+            .success(),
+            "mount failed"
+        );
+
+        let src_qcow2 = guest.disk_config.disk(DiskType::OperatingSystem).unwrap();
+        let dest_qcow2 = mnt_dir.join("os.qcow2");
+        assert!(
+            exec_host_command_output(&format!(
+                "cp {} {}",
+                &src_qcow2,
+                dest_qcow2.to_str().unwrap()
+            ))
+            .status
+            .success(),
+            "cp failed"
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .default_cpus()
+            .default_memory()
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args([
+                "--disk",
+                &format!(
+                    "path={},direct=on,image_type=qcow2",
+                    dest_qcow2.to_str().unwrap()
+                ),
+                &format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                ),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        let _ = exec_host_command_output(&format!("umount {}", mnt_dir.to_str().unwrap()));
+        let _ = exec_host_command_output(&format!("losetup -d {loop_dev_path}"));
+
+        handle_child_output(r, &output);
+    }
+
     #[test]
     fn test_virtio_block_qcow2_dirty_bit_unclean_shutdown() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
