@@ -500,9 +500,9 @@ pub enum DeviceManagerError {
     #[error("Could not reserve the PCI device ID")]
     ReservePciDeviceId(#[source] pci::PciRootError),
 
-    /// Could not give the PCI device ID back.
-    #[error("Could not give the PCI device ID back")]
-    PutPciDeviceId(#[source] pci::PciRootError),
+    /// Could not free the PCI device ID.
+    #[error("Could not free PCI device ID")]
+    FreePciDeviceId(#[source] pci::PciRootError),
 
     /// No disk path was specified when one was expected
     #[error("No disk path was specified when one was expected")]
@@ -4877,8 +4877,8 @@ impl DeviceManager {
             .pci_bus
             .lock()
             .unwrap()
-            .put_device_id(device_id as usize)
-            .map_err(DeviceManagerError::PutPciDeviceId)?;
+            .free_device_id(device_id)
+            .map_err(DeviceManagerError::FreePciDeviceId)?;
 
         let (pci_device_handle, id) = {
             // Remove the device from the device tree along with its children.
