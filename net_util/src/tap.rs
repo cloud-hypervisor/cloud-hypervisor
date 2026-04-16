@@ -489,6 +489,16 @@ impl Tap {
         unsafe { Self::ioctl_with_ref(&self.tap_file, libc::TUNSETVNETHDRSZ as c_ulong, &size) }
     }
 
+    /// Tap send buffer size (4MB). The kernel default is ~212KB which limits
+    /// throughput on high-bandwidth workloads.
+    pub const SNDBUF_SIZE: c_int = 4 * 1024 * 1024;
+
+    /// Set the tap send buffer size.
+    pub fn set_sndbuf(&self, size: c_int) -> Result<()> {
+        // SAFETY: ioctl is safe. Called with a valid tap fd, and we check the return.
+        unsafe { Self::ioctl_with_ref(&self.tap_file, libc::TUNSETSNDBUF as c_ulong, &size) }
+    }
+
     fn get_ifreq(&self) -> libc::ifreq {
         let mut ifreq: libc::ifreq = libc::ifreq {
             ifr_name: [0; libc::IFNAMSIZ],

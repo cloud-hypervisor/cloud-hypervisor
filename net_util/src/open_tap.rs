@@ -33,6 +33,8 @@ pub enum Error {
     TapSetVnetHdrSize(#[source] TapError),
     #[error("Setting MTU failed")]
     TapSetMtu(#[source] TapError),
+    #[error("Setting send buffer size failed")]
+    TapSetSndbuf(#[source] TapError),
     #[error("Enabling tap interface failed")]
     TapEnable(#[source] TapError),
 }
@@ -102,6 +104,9 @@ fn open_tap_rx_q_0(
     tap.set_vnet_hdr_size(vnet_hdr_len() as i32)
         .map_err(Error::TapSetVnetHdrSize)?;
 
+    tap.set_sndbuf(Tap::SNDBUF_SIZE)
+        .map_err(Error::TapSetSndbuf)?;
+
     Ok(tap)
 }
 
@@ -140,6 +145,9 @@ pub fn open_tap(
 
             tap.set_vnet_hdr_size(vnet_hdr_len() as i32)
                 .map_err(Error::TapSetVnetHdrSize)?;
+
+            tap.set_sndbuf(Tap::SNDBUF_SIZE)
+                .map_err(Error::TapSetSndbuf)?;
         }
         taps.push(tap);
     }
