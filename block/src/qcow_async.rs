@@ -1032,4 +1032,25 @@ mod unit_tests {
         let async_io = disk.new_async_io(1).unwrap();
         assert!(async_io.alignment() >= SECTOR_SIZE);
     }
+
+    #[test]
+    fn test_qcow_async_sub_sector_read_with_direct_io() {
+        let temp_file = TempFile::new().unwrap();
+        let disk = match try_create_direct_io_disk(&temp_file, 100 * 1024 * 1024) {
+            Some(d) => d,
+            None => {
+                eprintln!("skipping: O_DIRECT not supported on this filesystem");
+                return;
+            }
+        };
+
+        let pattern = vec![0xAB; 65536];
+        async_write(&disk, 0, &pattern);
+
+        let buf = async_read(&disk, 0, 512);
+        assert!(
+            buf.iter().all(|&b| b == 0xAB),
+            "sub-sector O_DIRECT read should return written data"
+        );
+    }
 }
