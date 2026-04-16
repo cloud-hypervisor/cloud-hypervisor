@@ -630,7 +630,7 @@ mod unit_tests {
     use super::*;
     use crate::disk_file::AsyncDiskFile;
     use crate::qcow::{QcowFile, RawFile};
-    use crate::{BatchRequest, RequestType};
+    use crate::{BatchRequest, RequestType, SECTOR_SIZE};
 
     fn create_disk_with_data(
         file_size: u64,
@@ -994,5 +994,19 @@ mod unit_tests {
                 "cluster {i} mismatch"
             );
         }
+    }
+
+    #[test]
+    fn test_qcow_async_alignment_without_direct_io() {
+        let file_size = 100 * 1024 * 1024;
+        let temp_file = TempFile::new().unwrap();
+        {
+            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
+            QcowFile::new(raw_file, 3, file_size, true).unwrap();
+        }
+        let disk = QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), false, false, true)
+            .unwrap();
+        let async_io = disk.new_async_io(1).unwrap();
+        assert_eq!(async_io.alignment(), SECTOR_SIZE);
     }
 }
