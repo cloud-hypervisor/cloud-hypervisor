@@ -702,7 +702,7 @@ pub enum WaitForSshError {
     },
 }
 
-fn default_guest_auth() -> PasswordAuth {
+pub fn default_guest_auth() -> PasswordAuth {
     PasswordAuth {
         username: String::from("cloud"),
         password: String::from("cloud123"),
