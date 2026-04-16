@@ -243,12 +243,19 @@ impl PciBus {
         }
     }
 
-    pub fn put_device_id(&mut self, id: usize) -> Result<()> {
-        if id < NUM_DEVICE_IDS as usize {
-            self.device_ids[id] = DeviceIdState::Free;
+    /// Frees a PCI device ID on the bus.
+    ///
+    /// - `id`: ID to free on the bus.
+    ///
+    /// ## Errors
+    /// * Returns [`PciRootError::InvalidPciDeviceSlot`] if the slot
+    ///   exceeds [`NUM_DEVICE_IDS`].
+    pub fn free_device_id(&mut self, id: u8) -> Result<()> {
+        if id < NUM_DEVICE_IDS {
+            self.device_ids[id as usize] = DeviceIdState::Free;
             Ok(())
         } else {
-            Err(PciRootError::InvalidPciDeviceSlot(id))
+            Err(PciRootError::InvalidPciDeviceSlot(id as usize))
         }
     }
 }
