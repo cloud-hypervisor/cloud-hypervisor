@@ -1309,6 +1309,43 @@ mod common_parallel {
                 .expect("Failed to read back data after discard stress");
         });
     }
+
+    #[test]
+    fn test_virtio_block_qcow2_uefi_direct_io() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let kernel_path = edk2_path();
+
+        let mut child = GuestCommand::new(&guest)
+            .default_cpus()
+            .default_memory()
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args([
+                "--disk",
+                &format!(
+                    "path={},direct=on,image_type=qcow2",
+                    guest.disk_config.disk(DiskType::OperatingSystem).unwrap()
+                ),
+                &format!(
+                    "path={}",
+                    guest.disk_config.disk(DiskType::CloudInit).unwrap()
+                ),
+            ])
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
     #[test]
     fn test_virtio_block_qcow2_dirty_bit_unclean_shutdown() {
         let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME_QCOW2.to_string());
