@@ -1009,4 +1009,27 @@ mod unit_tests {
         let async_io = disk.new_async_io(1).unwrap();
         assert_eq!(async_io.alignment(), SECTOR_SIZE);
     }
+
+    /// Returns None if O_DIRECT is not supported (e.g. tmpfs).
+    fn try_create_direct_io_disk(temp_file: &TempFile, file_size: u64) -> Option<QcowDiskAsync> {
+        {
+            let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
+            QcowFile::new(raw_file, 3, file_size, true).unwrap();
+        }
+        QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), true, false, true).ok()
+    }
+
+    #[test]
+    fn test_qcow_async_alignment_with_direct_io() {
+        let temp_file = TempFile::new().unwrap();
+        let disk = match try_create_direct_io_disk(&temp_file, 100 * 1024 * 1024) {
+            Some(d) => d,
+            None => {
+                eprintln!("skipping: O_DIRECT not supported on this filesystem");
+                return;
+            }
+        };
+        let async_io = disk.new_async_io(1).unwrap();
+        assert!(async_io.alignment() >= SECTOR_SIZE);
+    }
 }
