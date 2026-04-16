@@ -2681,6 +2681,97 @@ mod common_parallel {
     }
 
     #[test]
+    #[ignore = "requires host with 288+ logical CPUs"]
+    #[cfg(target_arch = "x86_64")]
+    fn test_large_vcpu_count() {
+        // Validates 255+ vCPU support (issue #7341). Requires a host with
+        // at least 288 logical CPUs. The test boots with 256 vCPUs, then
+        // hotplugs to 288 and back down to 240 to cross the 255 boundary
+        // in both directions.
+        let disk_config = UbuntuDiskConfig::new(JAMMY_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let kernel_path = direct_kernel_boot_path();
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=256,max=288"])
+            .args(["--memory", "size=4096M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args([
+                "--cmdline",
+                DIRECT_KERNEL_BOOT_CMDLINE
+                    .replace("console=hvc0 ", "console=ttyS0")
+                    .as_str(),
+            ])
+            .args(["--serial", "tty"])
+            .args(["--console", "off"])
+            .default_disks()
+            .default_net()
+            .args(["--api-socket", &api_socket])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // Verify all 256 boot vCPUs are online.
+            assert_eq!(guest.get_cpu_count().unwrap_or_default(), 256);
+
+            // Hotplug above 255: resize to 288 vCPUs.
+            let desired_vcpus = 288;
+            resize_command(&api_socket, Some(desired_vcpus), None, None, None);
+
+            // Online the newly added vCPUs.
+            for cpu_id in 256..desired_vcpus {
+                guest
+                    .ssh_command(&format!(
+                        "echo 1 | sudo tee /sys/bus/cpu/devices/cpu{cpu_id}/online"
+                    ))
+                    .unwrap();
+            }
+            thread::sleep(std::time::Duration::new(10, 0));
+            assert_eq!(
+                guest.get_cpu_count().unwrap_or_default(),
+                u32::from(desired_vcpus)
+            );
+
+            // Hotunplug below 255: resize to 240 vCPUs.
+            let desired_vcpus = 240;
+            resize_command(&api_socket, Some(desired_vcpus), None, None, None);
+
+            thread::sleep(std::time::Duration::new(10, 0));
+            assert_eq!(
+                guest.get_cpu_count().unwrap_or_default(),
+                u32::from(desired_vcpus)
+            );
+
+            // Scale back up across the 255 boundary: resize to 260.
+            let desired_vcpus = 260;
+            resize_command(&api_socket, Some(desired_vcpus), None, None, None);
+
+            for cpu_id in 240..desired_vcpus {
+                guest
+                    .ssh_command(&format!(
+                        "echo 1 | sudo tee /sys/bus/cpu/devices/cpu{cpu_id}/online"
+                    ))
+                    .unwrap();
+            }
+            thread::sleep(std::time::Duration::new(10, 0));
+            assert_eq!(
+                guest.get_cpu_count().unwrap_or_default(),
+                u32::from(desired_vcpus)
+            );
+        });
+
+        kill_child(&mut child);
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
     fn test_memory_hotplug() {
         #[cfg(target_arch = "aarch64")]
         let focal_image = FOCAL_IMAGE_UPDATE_KERNEL_NAME.to_string();
