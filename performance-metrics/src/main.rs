@@ -1297,8 +1297,9 @@ fn run_test_with_timeout(
 }
 
 fn cleanup_stale_processes() {
-    for proc in &["cloud-hypervisor", "iperf3", "ethr"] {
-        let _ = Command::new("pkill").args(["-9", "-f", proc]).status();
+    // "cloud-hyperviso" - process name truncated to 15 chars by the kernel
+    for proc in &["cloud-hyperviso", "iperf3", "ethr"] {
+        let _ = Command::new("pkill").args(["-9", proc]).status();
     }
     thread::sleep(Duration::from_secs(2));
 }
