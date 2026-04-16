@@ -6,7 +6,7 @@
 
 //! QCOW2 async disk backend.
 
-use std::cmp::min;
+use std::cmp::{max, min};
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::Error;
@@ -30,7 +30,7 @@ use crate::qcow_common::{
     AlignedBuf, aligned_pread, aligned_pwrite, gather_from_iovecs_into, pread_exact, pwrite_all,
     scatter_to_iovecs, zero_fill_iovecs,
 };
-use crate::{BatchRequest, RequestType, disk_file};
+use crate::{BatchRequest, RequestType, SECTOR_SIZE, disk_file};
 
 /// Device level handle for a QCOW2 image.
 ///
@@ -175,6 +175,8 @@ pub struct QcowAsync {
     sparse: bool,
     /// O_DIRECT alignment requirement (0 = no alignment needed).
     alignment: usize,
+    /// I/O alignment for the AsyncIo trait (at least SECTOR_SIZE).
+    io_alignment: u64,
     io_uring: IoUring,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
@@ -189,6 +191,7 @@ impl QcowAsync {
         ring_depth: u32,
     ) -> io::Result<Self> {
         let alignment = data_file.file().alignment();
+        let io_alignment = max(alignment as u64, SECTOR_SIZE);
         let io_uring = IoUring::new(ring_depth)?;
         let eventfd = EventFd::new(libc::EFD_NONBLOCK)?;
         io_uring.submitter().register_eventfd(eventfd.as_raw_fd())?;
@@ -199,6 +202,7 @@ impl QcowAsync {
             backing_file,
             sparse,
             alignment,
+            io_alignment,
             io_uring,
             eventfd,
             completion_list: VecDeque::new(),
@@ -367,6 +371,10 @@ impl AsyncIo for QcowAsync {
         true
     }
 
+    fn alignment(&self) -> u64 {
+        self.io_alignment
+    }
+
     fn submit_batch_requests(&mut self, batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
         let (submitter, mut sq, _) = self.io_uring.split();
         let mut needs_submit = false;
@@ -464,7 +472,15 @@ impl QcowAsync {
             .map_clusters_for_read(address, total_len, has_backing)
             .map_err(AsyncIoError::ReadVectored)?;
 
-        if mappings.len() == 1
+        // The fast path returns a host offset so the caller can submit a
+        // single io_uring readv with the original iovecs.  This only works
+        // without O_DIRECT because it requires I/O
+        // size and file offset to be multiples of the device sector size.
+        // Guest requests can be smaller (e.g. 512 byte UEFI reads on a
+        // 4096 byte sector device), so O_DIRECT reads fall through to the
+        // alignment aware synchronous path instead.
+        if alignment == 0
+            && mappings.len() == 1
             && let ClusterReadMapping::Allocated {
                 offset: host_offset,
                 length,
