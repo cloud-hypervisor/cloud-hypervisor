@@ -36,7 +36,7 @@ impl disk_file::PhysicalSize for FixedVhdDiskSync {
             crate::Error::GetFileMetadata(io) => {
                 BlockError::new(BlockErrorKind::Io, crate::Error::GetFileMetadata(io))
             }
-            _ => BlockError::new(BlockErrorKind::Io, e),
+            _ => unreachable!("unexpected error from FixedVhd::physical_size(): {e}"),
         })
     }
 }
