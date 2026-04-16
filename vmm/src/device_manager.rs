@@ -229,6 +229,14 @@ pub enum DeviceManagerError {
     #[error("Cannot create virtio-pmem device")]
     CreateVirtioPmem(#[source] io::Error),
 
+    /// Cannot create vhost-net device
+    #[error("Cannot create vhost-net device")]
+    CreateVhostNet(#[source] virtio_devices::vhost_net::Error),
+
+    /// Invalid network device configuration
+    #[error("Invalid net config: {0}")]
+    InvalidNetConfig(String),
+
     /// Cannot create vDPA device
     #[error("Cannot create vdpa device")]
     CreateVdpa(#[source] virtio_devices::vdpa::Error),
@@ -3000,7 +3008,41 @@ impl DeviceManager {
         };
         info!("Creating virtio-net device: {net_cfg:?}");
 
-        let (virtio_device, migratable_device) = if net_cfg.vhost_user {
+        if net_cfg.vhost_net && net_cfg.vhost_user {
+            return Err(DeviceManagerError::InvalidNetConfig(
+                "vhost_net and vhost_user are mutually exclusive".to_string(),
+            ));
+        }
+
+        let (virtio_device, migratable_device) = if net_cfg.vhost_net {
+            let mem = self.memory_manager.lock().unwrap().guest_memory();
+            let vhost_net = Arc::new(Mutex::new(
+                virtio_devices::vhost_net::VhostNet::new(
+                    id.clone(),
+                    net_cfg.tap.as_deref(),
+                    net_cfg.ip,
+                    net_cfg.mask,
+                    Some(net_cfg.mac),
+                    &mut net_cfg.host_mac,
+                    net_cfg.mtu,
+                    self.force_iommu | net_cfg.pci_common.iommu,
+                    net_cfg.num_queues,
+                    net_cfg.queue_size,
+                    net_cfg.offload_tso,
+                    net_cfg.offload_ufo,
+                    net_cfg.offload_csum,
+                    mem,
+                    state_from_id(self.snapshot.as_ref(), id.as_str())
+                        .map_err(DeviceManagerError::RestoreGetState)?,
+                )
+                .map_err(DeviceManagerError::CreateVhostNet)?,
+            ));
+
+            (
+                Arc::clone(&vhost_net) as Arc<Mutex<dyn virtio_devices::VirtioDevice>>,
+                vhost_net as Arc<Mutex<dyn Migratable>>,
+            )
+        } else if net_cfg.vhost_user {
             let socket = net_cfg.vhost_socket.as_ref().unwrap().clone();
             let vu_cfg = VhostUserConfig {
                 socket,

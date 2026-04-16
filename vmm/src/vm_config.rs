@@ -368,6 +368,8 @@ pub struct NetConfig {
     pub queue_size: u16,
     #[serde(default)]
     pub vhost_user: bool,
+    #[serde(default)]
+    pub vhost_net: bool,
     pub vhost_socket: Option<String>,
     #[serde(default)]
     pub vhost_mode: VhostMode,
