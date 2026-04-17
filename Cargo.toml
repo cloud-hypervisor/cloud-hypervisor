@@ -127,3 +127,6 @@ unnecessary_semicolon = "deny"
 [workspace.lints.rust]
 # `level = warn` is irrelevant here but mandatory for rustc/cargo
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(devcli_testenv)'] }
+
+[patch.crates-io]
+vfio-ioctls = { git = "https://github.com/saravan2/vfio.git", branch = "vfio-ioctls" }
