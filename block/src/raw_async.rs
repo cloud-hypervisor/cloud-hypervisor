@@ -108,8 +108,7 @@ impl disk_file::AsyncDiskFile for RawFileDisk {
     }
 
     fn new_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
-        let mut raw = RawFileAsync::new(self.file.as_raw_fd(), ring_depth)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::NewAsyncIo(e)))?;
+        let mut raw = RawFileAsync::new(self.file.as_raw_fd(), ring_depth)?;
         raw.alignment =
             DiskTopology::probe(&self.file).map_or(SECTOR_SIZE, |t| t.logical_block_size);
         Ok(Box::new(raw) as Box<dyn AsyncIo>)
@@ -124,13 +123,18 @@ pub struct RawFileAsync {
 }
 
 impl RawFileAsync {
-    pub fn new(fd: RawFd, ring_depth: u32) -> std::io::Result<Self> {
-        let io_uring = IoUring::new(ring_depth)?;
-        let eventfd = EventFd::new(libc::EFD_NONBLOCK)?;
+    pub fn new(fd: RawFd, ring_depth: u32) -> BlockResult<Self> {
+        let io_uring =
+            IoUring::new(ring_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+        let eventfd =
+            EventFd::new(libc::EFD_NONBLOCK).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
 
         // Register the io_uring eventfd that will notify when something in
         // the completion queue is ready.
-        io_uring.submitter().register_eventfd(eventfd.as_raw_fd())?;
+        io_uring
+            .submitter()
+            .register_eventfd(eventfd.as_raw_fd())
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
 
         Ok(RawFileAsync {
             fd,
