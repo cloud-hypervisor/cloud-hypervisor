@@ -53,7 +53,7 @@ impl disk_file::PhysicalSize for VhdxDiskSync {
                 Error::GetFileMetadata(io) => {
                     BlockError::new(BlockErrorKind::Io, Error::GetFileMetadata(io))
                 }
-                _ => BlockError::new(BlockErrorKind::Io, e),
+                _ => unreachable!("unexpected error from Vhdx::physical_size(): {e}"),
             })
     }
 }
