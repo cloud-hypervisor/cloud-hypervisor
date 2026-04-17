@@ -19,7 +19,7 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Generic trait for decoding zlib/zstd formats
-pub trait Decoder {
+pub trait Decoder: Send + Sync {
     fn decode(&self, input: &[u8], output: &mut [u8]) -> Result<usize>;
 }
 
