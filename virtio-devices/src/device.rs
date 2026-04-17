@@ -16,6 +16,7 @@ use std::thread;
 use anyhow::anyhow;
 use libc::EFD_NONBLOCK;
 use log::{error, info, warn};
+use virtio_bindings::virtio_config::VIRTIO_F_ACCESS_PLATFORM;
 use virtio_queue::Queue;
 use vm_device::UserspaceMapping;
 use vm_memory::{GuestAddress, GuestMemoryAtomic};
@@ -331,6 +332,15 @@ impl VirtioCommon {
         // Indirect descriptors feature is not supported when the device
         // requires the addresses held by the descriptors to be translated.
         self.avail_features &= !(1 << VIRTIO_F_RING_INDIRECT_DESC);
+    }
+
+    /// Returns the access platform only if the feature has been acked.
+    pub fn access_platform(&self) -> Option<Arc<dyn AccessPlatform>> {
+        if self.feature_acked(VIRTIO_F_ACCESS_PLATFORM as u64) {
+            self.access_platform.clone()
+        } else {
+            None
+        }
     }
 }
 
