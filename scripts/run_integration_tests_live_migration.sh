@@ -8,6 +8,7 @@ source "$(dirname "$0")"/test-util.sh
 
 WORKLOADS_DIR="$HOME/workloads"
 mkdir -p "$WORKLOADS_DIR"
+mkdir -p "$WORKLOADS_DIR/junit"
 
 process_common_args "$@"
 
@@ -87,16 +88,7 @@ sudo chmod a+rwX /dev/hugepages
 export RUST_BACKTRACE=1
 export RUSTFLAGS="$RUSTFLAGS"
 
-time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "live_migration_parallel::$test_filter" -- ${test_binary_args[*]}
+time cargo nextest run $test_features --profile live_migration --no-tests=pass --test-threads=$(($(nproc) / 4)) "$test_filter" -- ${test_binary_args[*]}
 
 RES=$?
-
-# Run some tests in sequence since the result could be affected by other tests
-# running in parallel.
-if [ $RES -eq 0 ]; then
-    export RUST_BACKTRACE=1
-    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=1 "live_migration_sequential::$test_filter" -- ${test_binary_args[*]}
-    RES=$?
-fi
-
 exit $RES
