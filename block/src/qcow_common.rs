@@ -296,10 +296,15 @@ pub unsafe fn gather_from_iovecs(iovecs: &[libc::iovec], start: usize, len: usiz
 pub(crate) mod unit_tests {
     use std::fs::File;
     use std::io::{Read, Seek, SeekFrom, Write};
+    use std::os::unix::fs::FileExt;
+    use std::os::unix::io::AsRawFd;
 
     use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-    use flate2::write::DeflateEncoder;
     use flate2::Compression;
+    use flate2::write::DeflateEncoder;
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::pread_alloc;
 
     const COMPRESSED_FLAG: u64 = 1 << 62;
     const CLUSTER_USED_FLAG: u64 = 1 << 63;
@@ -400,5 +405,21 @@ pub(crate) mod unit_tests {
         }
 
         file.flush().unwrap();
+    }
+
+    #[test]
+    fn test_pread_alloc() {
+        let temp = TempFile::new().unwrap();
+        let file = temp.as_file();
+        let data: Vec<u8> = (0..=255).cycle().take(4096).collect();
+        file.write_all_at(&data, 0).unwrap();
+
+        let buf = pread_alloc(file.as_raw_fd(), 0, 4096).unwrap();
+        assert_eq!(buf, data);
+
+        let buf = pread_alloc(file.as_raw_fd(), 100, 200).unwrap();
+        assert_eq!(buf, &data[100..300]);
+
+        pread_alloc(file.as_raw_fd(), 4000, 200).unwrap_err();
     }
 }
