@@ -2353,6 +2353,7 @@ mod unit_tests {
 
     use super::util::{COMPRESSED_FLAG, ZERO_FLAG};
     use super::*;
+    use crate::qcow_common::unit_tests::compress_allocated_clusters;
 
     fn valid_header_v3() -> Vec<u8> {
         vec![
@@ -4589,5 +4590,28 @@ mod unit_tests {
             let qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
             assert_eq!(qcow.header.version, 2);
         });
+    }
+
+    #[test]
+    fn test_compressed_read() {
+        let cluster_size = 65536usize;
+        let data: Vec<u8> = (0..=255).cycle().take(cluster_size).collect();
+        let temp = TempFile::new().unwrap();
+        {
+            let raw_file = RawFile::new(temp.as_file().try_clone().unwrap(), false);
+            let mut qcow = QcowFile::new(raw_file, 3, 100 * 1024 * 1024, false).unwrap();
+            qcow.seek(SeekFrom::Start(0)).unwrap();
+            qcow.write_all(&data).unwrap();
+            qcow.flush().unwrap();
+        }
+
+        compress_allocated_clusters(&mut temp.as_file().try_clone().unwrap());
+
+        let raw_file = RawFile::new(temp.as_file().try_clone().unwrap(), false);
+        let mut qcow = QcowFile::from(raw_file).unwrap();
+        qcow.seek(SeekFrom::Start(0)).unwrap();
+        let mut buf = vec![0u8; cluster_size];
+        qcow.read_exact(&mut buf).unwrap();
+        assert_eq!(buf, data);
     }
 }
