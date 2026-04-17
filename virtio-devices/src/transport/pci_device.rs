@@ -404,7 +404,7 @@ impl VirtioPciDevice {
         memory: GuestMemoryAtomic<GuestMemoryMmap>,
         device: Arc<Mutex<dyn VirtioDevice>>,
         msix_num: u16,
-        access_platform: Option<Arc<dyn AccessPlatform>>,
+        access_platform: Option<&Arc<dyn AccessPlatform>>,
         interrupt_manager: &dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>,
         pci_device_bdf: u32,
         activate_evt: EventFd,
@@ -422,7 +422,7 @@ impl VirtioPciDevice {
         }
         let num_queues = locked_device.queue_max_sizes().len();
 
-        if let Some(access_platform) = &access_platform {
+        if let Some(access_platform) = access_platform {
             locked_device.set_access_platform(access_platform.clone());
         }
 
@@ -518,7 +518,7 @@ impl VirtioPciDevice {
             })?;
 
         let common_config = if let Some(common_config_state) = common_config_state {
-            VirtioPciCommonConfig::new(common_config_state, access_platform)
+            VirtioPciCommonConfig::new(common_config_state, device.clone())
         } else {
             VirtioPciCommonConfig::new(
                 VirtioPciCommonConfigState {
@@ -530,7 +530,7 @@ impl VirtioPciDevice {
                     msix_config: VIRTQ_MSI_NO_VECTOR,
                     msix_queues: vec![VIRTQ_MSI_NO_VECTOR; num_queues],
                 },
-                access_platform,
+                device.clone(),
             )
         };
 
@@ -1139,12 +1139,10 @@ impl PciDevice for VirtioPciDevice {
 
     fn read_bar(&mut self, _base: u64, offset: u64, data: &mut [u8]) {
         match offset {
-            o if o < COMMON_CONFIG_BAR_OFFSET + COMMON_CONFIG_SIZE => self.common_config.read(
-                o - COMMON_CONFIG_BAR_OFFSET,
-                data,
-                &self.queues,
-                self.device.clone(),
-            ),
+            o if o < COMMON_CONFIG_BAR_OFFSET + COMMON_CONFIG_SIZE => {
+                self.common_config
+                    .read(o - COMMON_CONFIG_BAR_OFFSET, data, &self.queues);
+            }
             o if (ISR_CONFIG_BAR_OFFSET..ISR_CONFIG_BAR_OFFSET + ISR_CONFIG_SIZE).contains(&o) => {
                 if let Some(v) = data.get_mut(0) {
                     // Reading this register resets it to 0.
@@ -1185,12 +1183,10 @@ impl PciDevice for VirtioPciDevice {
     fn write_bar(&mut self, _base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         let initial_ready = self.is_driver_ready();
         match offset {
-            o if o < COMMON_CONFIG_BAR_OFFSET + COMMON_CONFIG_SIZE => self.common_config.write(
-                o - COMMON_CONFIG_BAR_OFFSET,
-                data,
-                &mut self.queues,
-                self.device.clone(),
-            ),
+            o if o < COMMON_CONFIG_BAR_OFFSET + COMMON_CONFIG_SIZE => {
+                self.common_config
+                    .write(o - COMMON_CONFIG_BAR_OFFSET, data, &mut self.queues);
+            }
             o if (ISR_CONFIG_BAR_OFFSET..ISR_CONFIG_BAR_OFFSET + ISR_CONFIG_SIZE).contains(&o) => {
                 if let Some(v) = data.first() {
                     self.interrupt_status

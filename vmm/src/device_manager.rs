@@ -4392,7 +4392,7 @@ impl DeviceManager {
                 memory,
                 virtio_device,
                 msix_num,
-                access_platform,
+                access_platform.as_ref(),
                 self.msi_interrupt_manager.as_ref(),
                 pci_device_bdf.into(),
                 self.activate_evt
