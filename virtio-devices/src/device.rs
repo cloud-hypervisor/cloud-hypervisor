@@ -188,6 +188,12 @@ pub trait VirtioDevice: Send {
     /// Set the access platform trait to let the device perform address
     /// translations if needed.
     fn set_access_platform(&mut self, _access_platform: Arc<dyn AccessPlatform>) {}
+
+    /// Returns the access platform only if VIRTIO_F_ACCESS_PLATFORM was
+    /// negotiated with the guest.
+    fn access_platform(&self) -> Option<Arc<dyn AccessPlatform>> {
+        None
+    }
 }
 
 /// Trait to define address translation for devices managed by virtio-iommu
