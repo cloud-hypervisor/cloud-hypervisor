@@ -86,6 +86,7 @@ const VFIO_DEVICE_RESET: u64 = 0x3b6f;
 const VFIO_IOMMU_MAP_DMA: u64 = 0x3b71;
 const VFIO_IOMMU_UNMAP_DMA: u64 = 0x3b72;
 const VFIO_DEVICE_IOEVENTFD: u64 = 0x3b74;
+const VFIO_DEVICE_FEATURE: u64 = 0x3b75;
 
 // See include/uapi/linux/kvm.h in the kernel code.
 #[cfg(feature = "kvm")]
@@ -381,6 +382,7 @@ fn create_vmm_ioctl_seccomp_rule_common(
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_MAP_DMA)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_IOMMU_UNMAP_DMA)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VFIO_DEVICE_IOEVENTFD)?],
+        and![Cond::new(1, ArgLen::Dword, Eq, VFIO_DEVICE_FEATURE)?],
         and![Cond::new(1, ArgLen::Dword, Eq, VHOST_GET_FEATURES())?],
         and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_FEATURES())?],
         and![Cond::new(1, ArgLen::Dword, Eq, VHOST_SET_OWNER())?],
