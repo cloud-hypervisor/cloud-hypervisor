@@ -49,6 +49,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
         BALLOON_SIZE,
         true,
         true,
+        false,
         SeccompAction::Allow,
         EventFd::new(EFD_NONBLOCK).unwrap(),
         None,
