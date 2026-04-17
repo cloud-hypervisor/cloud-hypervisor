@@ -3529,12 +3529,7 @@ mod common_parallel {
             "truncate failed"
         );
 
-        let loop_dev = exec_host_command_output(&format!(
-            "losetup --find --show --sector-size 4096 {}",
-            fs_img_path.to_str().unwrap()
-        ));
-        assert!(loop_dev.status.success(), "losetup failed");
-        let loop_dev_path = String::from_utf8_lossy(&loop_dev.stdout).trim().to_string();
+        let loop_dev_path = create_loop_device(fs_img_path.to_str().unwrap(), 4096, 5);
 
         assert!(
             exec_host_command_output(&format!("mkfs.ext4 -q {loop_dev_path}"))
