@@ -747,6 +747,24 @@ pub enum PayloadConfigError {
     /// Specifying a kernel or firmware is not supported when an igvm is provided.
     #[error("Specifying a kernel or firmware is not supported when an igvm is provided")]
     IgvmPlusOtherPayloads,
+    #[cfg(feature = "fw_cfg")]
+    /// FwCfg missing kernel
+    #[error("Error --fw-cfg-config: missing --kernel")]
+    FwCfgMissingKernel,
+    #[cfg(feature = "fw_cfg")]
+    /// FwCfg missing cmdline
+    #[error("Error --fw-cfg-config: missing --cmdline")]
+    FwCfgMissingCmdline,
+    #[cfg(feature = "fw_cfg")]
+    /// FwCfg missing initramfs
+    #[error("Error --fw-cfg-config: missing --initramfs")]
+    FwCfgMissingInitramfs,
+    #[cfg(feature = "fw_cfg")]
+    /// Invalid fw_cfg item content
+    #[error(
+        "Error --fw-cfg-config: invalid item '{0}' (exactly one of 'file' or 'string' is required)"
+    )]
+    FwCfgInvalidItem(String),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -807,7 +825,9 @@ pub struct FwCfgItem {
     #[serde(default)]
     pub name: String,
     #[serde(default)]
-    pub file: PathBuf,
+    pub file: Option<PathBuf>,
+    #[serde(default)]
+    pub string: Option<String>,
 }
 
 #[cfg(feature = "fw_cfg")]
@@ -871,6 +891,11 @@ impl PayloadConfig {
             (None, Some(_kernel)) => Ok(()),
             (None, None) => Err(PayloadConfigError::MissingBootitem),
         }?;
+
+        #[cfg(feature = "fw_cfg")]
+        if let Some(fw_cfg_config) = &self.fw_cfg_config {
+            fw_cfg_config.validate(self)?;
+        }
 
         Ok(())
     }

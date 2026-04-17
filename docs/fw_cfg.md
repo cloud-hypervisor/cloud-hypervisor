@@ -39,9 +39,10 @@ The `fw_cfg` device is configured using the `--fw-cfg-config` command-line optio
 *   `cmdline=on|off`: (Default: `on`) Whether to add the kernel command line (specified by `--cmdline`) to `fw_cfg`.
 *   `initramfs=on|off`: (Default: `on`) Whether to add the initramfs image (specified by `--initramfs`) to `fw_cfg`.
 *   `acpi_table=on|off`: (Default: `on`) Whether to add generated ACPI tables to `fw_cfg`.
-*   `items=[... : ...]`: A list of custom key-value pairs to be exposed via `fw_cfg`.
+*   `items=[... : ...]`: A list of custom key-value pairs to be exposed via `fw_cfg`. Multiple items are separated by `:`.
     *   `name=<guest_sysfs_path>`: The path under which the item will appear in the guest's sysfs (e.g., `opt/org.example/my-data`).
-    *   `file=<host_file_path>`: The path to the file on the host whose content will be provided to the guest for this item.
+    *   `file=<host_file_path>`: The path to a file on the host whose content will be provided to the guest for this item.
+    *   `string=<value>`: An inline string value to provide to the guest for this item. Each item must have exactly one of `file` or `string`, not both.
 
 **Example Usage:**
 
@@ -57,7 +58,19 @@ The `fw_cfg` device is configured using the `--fw-cfg-config` command-line optio
     ```
     In the guest, `/tmp/guest_setup.txt` from the host will be accessible at `/sys/firmware/qemu_fw_cfg/by_name/opt/org.mycorp/setup_info/raw`.
 
-2.  **Disabling `fw_cfg` explicitly:**
+2.  **Inline string items (e.g., OVMF MMIO64 configuration for GPU passthrough):**
+
+    ```bash
+    cloud-hypervisor \
+        --firmware /path/to/OVMF.fd \
+        --disk path=/path/to/rootfs.img \
+        --device path=/sys/bus/pci/devices/0000:41:00.0 \
+        --fw-cfg-config items=[name=opt/ovmf/X-PciMmio64Mb,string=262144] \
+        ...
+    ```
+    The string `262144` is passed directly to the guest as the content of `opt/ovmf/X-PciMmio64Mb`.
+
+3.  **Disabling `fw_cfg` explicitly:**
 
     ```bash
     cloud-hypervisor \

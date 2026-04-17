@@ -910,6 +910,32 @@ mod unit_tests {
     }
 
     #[test]
+    fn test_string_item() {
+        let gm = GuestMemoryAtomic::new(
+            GuestMemoryMmap::from_ranges(&[(GuestAddress(0), RAM_64BIT_START.0 as usize)]).unwrap(),
+        );
+
+        let mut fw_cfg = FwCfg::new(gm);
+
+        // Simulate OVMF X-PciMmio64Mb string item for GPU CC passthrough
+        let item = FwCfgItem {
+            name: "opt/ovmf/X-PciMmio64Mb".to_owned(),
+            content: FwCfgContent::Bytes("262144".as_bytes().to_vec()),
+        };
+        fw_cfg.add_item(item).unwrap();
+
+        let expected = b"262144";
+        let mut data = vec![0u8];
+
+        // Select the first file item (FW_CFG_FILE_FIRST = 0x20)
+        fw_cfg.write(0, SELECTOR_OFFSET, &[FW_CFG_FILE_FIRST as u8, 0]);
+        for &byte in expected.iter() {
+            fw_cfg.read(0, DATA_OFFSET, &mut data);
+            assert_eq!(data[0], byte);
+        }
+    }
+
+    #[test]
     fn test_dma() {
         let code = [
             0xba, 0xf8, 0x03, 0x00, 0xd8, 0x04, b'0', 0xee, 0xb0, b'\n', 0xee, 0xf4,
