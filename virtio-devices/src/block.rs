@@ -734,7 +734,7 @@ impl Block {
         mut disk_image: DiskBackend,
         disk_path: PathBuf,
         read_only: bool,
-        iommu: bool,
+        access_platform_enabled: bool,
         num_queues: usize,
         queue_size: u16,
         serial: Option<String>,
@@ -793,7 +793,7 @@ impl Block {
                     warn!("sparse=on requested but backend does not support sparse operations");
                 }
 
-                if iommu {
+                if access_platform_enabled {
                     avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
                 }
 

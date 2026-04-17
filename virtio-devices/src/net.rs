@@ -468,7 +468,7 @@ impl Net {
         id: String,
         taps: Vec<Tap>,
         guest_mac: Option<MacAddr>,
-        iommu: bool,
+        access_platform_enabled: bool,
         num_queues: usize,
         queue_size: u16,
         seccomp_action: SeccompAction,
@@ -499,7 +499,7 @@ impl Net {
                 | (1 << VIRTIO_RING_F_EVENT_IDX)
                 | (1 << VIRTIO_F_VERSION_1);
 
-            if iommu {
+            if access_platform_enabled {
                 avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
             }
 
@@ -587,7 +587,7 @@ impl Net {
         guest_mac: Option<MacAddr>,
         host_mac: &mut Option<MacAddr>,
         mtu: Option<u16>,
-        iommu: bool,
+        access_platform_enabled: bool,
         num_queues: usize,
         queue_size: u16,
         seccomp_action: SeccompAction,
@@ -613,7 +613,7 @@ impl Net {
             id,
             taps,
             guest_mac,
-            iommu,
+            access_platform_enabled,
             num_queues,
             queue_size,
             seccomp_action,
@@ -632,7 +632,7 @@ impl Net {
         fds: &[RawFd],
         guest_mac: Option<MacAddr>,
         mtu: Option<u16>,
-        iommu: bool,
+        access_platform_enabled: bool,
         queue_size: u16,
         seccomp_action: SeccompAction,
         rate_limiter_config: Option<RateLimiterConfig>,
@@ -666,7 +666,7 @@ impl Net {
             id,
             taps,
             guest_mac,
-            iommu,
+            access_platform_enabled,
             num_queue_pairs * 2,
             queue_size,
             seccomp_action,

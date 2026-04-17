@@ -42,7 +42,7 @@ pub struct GenericVhostUser {
     seccomp_action: SeccompAction,
     guest_memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     exit_evt: EventFd,
-    iommu: bool,
+    access_platform_enabled: bool,
     cfg_warning: AtomicBool,
 }
 
@@ -57,7 +57,7 @@ impl GenericVhostUser {
         cache: Option<(VirtioSharedMemoryList, MmapRegion)>,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
-        iommu: bool,
+        access_platform_enabled: bool,
         state: Option<State>,
     ) -> Result<GenericVhostUser> {
         // Calculate the actual number of queues needed.
@@ -159,7 +159,7 @@ since the backend only supports {backend_num_queues}\n",
             seccomp_action,
             guest_memory: None,
             exit_evt,
-            iommu,
+            access_platform_enabled,
             cfg_warning: AtomicBool::new(false),
         })
     }
@@ -201,7 +201,7 @@ impl VirtioDevice for GenericVhostUser {
 
     fn features(&self) -> u64 {
         let mut features = self.vu_common.virtio_common.avail_features;
-        if self.iommu {
+        if self.access_platform_enabled {
             features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
         }
         features
