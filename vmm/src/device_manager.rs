@@ -1126,8 +1126,8 @@ pub struct DeviceManager {
     // pvpanic device
     pvpanic_device: Option<Arc<Mutex<devices::PvPanicDevice>>>,
 
-    // Flag to force setting the iommu on virtio devices
-    force_iommu: bool,
+    // Force VIRTIO_F_ACCESS_PLATFORM on all virtio devices (e.g. for TDX/SEV-SNP)
+    force_access_platform: bool,
 
     // io_uring availability if detected
     io_uring_supported: Option<bool>,
@@ -1215,7 +1215,7 @@ impl DeviceManager {
         seccomp_action: SeccompAction,
         numa_nodes: NumaNodes,
         activate_evt: &EventFd,
-        force_iommu: bool,
+        force_access_platform: bool,
         boot_id_list: BTreeSet<String>,
         #[cfg(not(target_arch = "riscv64"))] timestamp: Instant,
         snapshot: Option<&Snapshot>,
@@ -1429,7 +1429,7 @@ impl DeviceManager {
             #[cfg(feature = "pvmemcontrol")]
             pvmemcontrol_devices: None,
             pvpanic_device: None,
-            force_iommu,
+            force_access_platform,
             io_uring_supported: None,
             aio_supported: None,
             boot_id_list,
@@ -2434,7 +2434,7 @@ impl DeviceManager {
             self.console_resize_pipe
                 .as_ref()
                 .map(|p| p.try_clone().unwrap()),
-            self.force_iommu | console_config.iommu,
+            self.force_access_platform | console_config.iommu,
             self.seccomp_action.clone(),
             self.exit_evt
                 .try_clone()
@@ -2697,7 +2697,7 @@ impl DeviceManager {
                     self.exit_evt
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
-                    self.force_iommu,
+                    self.force_access_platform,
                     state_from_id(self.snapshot.as_ref(), id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
                 ) {
@@ -2924,7 +2924,7 @@ impl DeviceManager {
                     .ok_or(DeviceManagerError::NoDiskPath)?
                     .clone(),
                 disk_cfg.readonly,
-                self.force_iommu | disk_cfg.pci_common.iommu,
+                self.force_access_platform | disk_cfg.pci_common.iommu,
                 disk_cfg.num_queues,
                 disk_cfg.queue_size,
                 disk_cfg.serial.clone(),
@@ -3026,7 +3026,7 @@ impl DeviceManager {
                     self.exit_evt
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
-                    self.force_iommu,
+                    self.force_access_platform,
                     state_from_id(self.snapshot.as_ref(), id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
                     net_cfg.offload_tso,
@@ -3057,7 +3057,7 @@ impl DeviceManager {
                         Some(net_cfg.mac),
                         &mut net_cfg.host_mac,
                         net_cfg.mtu,
-                        self.force_iommu | net_cfg.pci_common.iommu,
+                        self.force_access_platform | net_cfg.pci_common.iommu,
                         net_cfg.num_queues,
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
@@ -3078,7 +3078,7 @@ impl DeviceManager {
                     fds,
                     Some(net_cfg.mac),
                     net_cfg.mtu,
-                    self.force_iommu | net_cfg.pci_common.iommu,
+                    self.force_access_platform | net_cfg.pci_common.iommu,
                     net_cfg.queue_size,
                     self.seccomp_action.clone(),
                     net_cfg.rate_limiter_config,
@@ -3108,7 +3108,7 @@ impl DeviceManager {
                         Some(net_cfg.mac),
                         &mut net_cfg.host_mac,
                         net_cfg.mtu,
-                        self.force_iommu | net_cfg.pci_common.iommu,
+                        self.force_access_platform | net_cfg.pci_common.iommu,
                         net_cfg.num_queues,
                         net_cfg.queue_size,
                         self.seccomp_action.clone(),
@@ -3171,7 +3171,7 @@ impl DeviceManager {
                 virtio_devices::Rng::new(
                     id.clone(),
                     rng_path,
-                    self.force_iommu | rng_config.iommu,
+                    self.force_access_platform | rng_config.iommu,
                     self.seccomp_action.clone(),
                     self.exit_evt
                         .try_clone()
@@ -3233,7 +3233,7 @@ impl DeviceManager {
                     self.exit_evt
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
-                    self.force_iommu,
+                    self.force_access_platform,
                     state_from_id(self.snapshot.as_ref(), id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
                 )
@@ -3299,7 +3299,7 @@ impl DeviceManager {
                     self.exit_evt
                         .try_clone()
                         .map_err(DeviceManagerError::EventFd)?,
-                    self.force_iommu,
+                    self.force_access_platform,
                     state_from_id(self.snapshot.as_ref(), id.as_str())
                         .map_err(DeviceManagerError::RestoreGetState)?,
                 )
@@ -3478,7 +3478,7 @@ impl DeviceManager {
                 file,
                 GuestAddress(region_base),
                 mapping,
-                self.force_iommu | pmem_cfg.pci_common.iommu,
+                self.force_access_platform | pmem_cfg.pci_common.iommu,
                 self.seccomp_action.clone(),
                 self.exit_evt
                     .try_clone()
@@ -3549,7 +3549,7 @@ impl DeviceManager {
                 vsock_cfg.cid,
                 vsock_cfg.socket.clone(),
                 backend,
-                self.force_iommu | vsock_cfg.pci_common.iommu,
+                self.force_access_platform | vsock_cfg.pci_common.iommu,
                 self.seccomp_action.clone(),
                 self.exit_evt
                     .try_clone()

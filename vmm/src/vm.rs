@@ -567,8 +567,8 @@ impl Vm {
         let numa_nodes =
             Self::create_numa_nodes(config.lock().unwrap().numa.as_deref(), &memory_manager)?;
 
-        // Determine if IOMMU should be forced based on confidential computing features
-        let force_iommu = Self::should_force_iommu(&config);
+        // Determine if VIRTIO_F_ACCESS_PLATFORM should be forced (e.g. for TDX/SEV-SNP)
+        let force_access_platform = Self::should_force_access_platform(&config);
 
         let stop_on_boot = Self::should_stop_on_boot(&config);
 
@@ -615,7 +615,7 @@ impl Vm {
             seccomp_action.clone(),
             numa_nodes.clone(),
             &activate_evt,
-            force_iommu,
+            force_access_platform,
             boot_id_list,
             #[cfg(not(target_arch = "riscv64"))]
             timestamp,
@@ -694,8 +694,9 @@ impl Vm {
         })
     }
 
-    /// Determine if IOMMU should be forced based on confidential computing features.
-    fn should_force_iommu(_config: &Arc<Mutex<VmConfig>>) -> bool {
+    /// Determine if VIRTIO_F_ACCESS_PLATFORM should be forced based on
+    /// confidential computing features.
+    fn should_force_access_platform(_config: &Arc<Mutex<VmConfig>>) -> bool {
         #[cfg(feature = "tdx")]
         if _config.lock().unwrap().is_tdx_enabled() {
             return true;
@@ -802,7 +803,7 @@ impl Vm {
         seccomp_action: SeccompAction,
         numa_nodes: NumaNodes,
         activate_evt: &EventFd,
-        force_iommu: bool,
+        force_access_platform: bool,
         boot_id_list: BTreeSet<String>,
         #[cfg(not(target_arch = "riscv64"))] timestamp: Instant,
         snapshot: Option<&Snapshot>,
@@ -825,7 +826,7 @@ impl Vm {
             seccomp_action,
             numa_nodes,
             activate_evt,
-            force_iommu,
+            force_access_platform,
             boot_id_list,
             #[cfg(not(target_arch = "riscv64"))]
             timestamp,
