@@ -53,6 +53,46 @@ CARGO_TARGET_DIR="${CLH_BUILD_DIR}/cargo_target"
 # Let tests know that the special environment is set up.
 RUSTFLAGS="${RUSTFLAGS} --cfg devcli_testenv"
 
+# Container name used for cleanup on signal. The PID makes it unique per
+# invocation so parallel runs do not collide.
+CLH_CTR_NAME="clh-dev-$$"
+
+# PID of the docker run process launched by run_container().
+CLH_CTR_PID=""
+
+# Cleanup handler: kill the running container (if any) and all child
+# processes, then exit.
+cleanup() {
+    echo "[$CLI_NAME] Caught signal, terminating..."
+    # Disable the trap to prevent recursion
+    trap - INT TERM
+    # Kill the Docker/Podman container by name
+    $DOCKER_RUNTIME kill "$CLH_CTR_NAME" 2>/dev/null
+    $DOCKER_RUNTIME kill "${CLH_CTR_NAME}-fix" 2>/dev/null
+    # Kill the docker run process tracked by run_container()
+    [ -n "$CLH_CTR_PID" ] && kill -TERM "$CLH_CTR_PID" 2>/dev/null
+    # Kill any remaining child processes
+    pkill -TERM -P $$ 2>/dev/null
+    wait 2>/dev/null
+    exit 1
+}
+
+trap cleanup INT TERM
+
+# Run a command in the background and wait for it.  Bash defers trap
+# handling while a foreground process is running, which makes Ctrl+C
+# unresponsive during long-running container commands (wget, qemu-img,
+# cargo build, etc).  By backgrounding the command and using `wait`,
+# the trap fires immediately when a signal arrives.
+run_container() {
+    "$@" &
+    CLH_CTR_PID=$!
+    wait $CLH_CTR_PID
+    local rc=$?
+    CLH_CTR_PID=""
+    return $rc
+}
+
 # Send a decorated message to stdout, followed by a new line
 #
 say() {
@@ -146,6 +186,7 @@ fix_dir_perms() {
     # Yes, running Docker to get elevated privileges, just to chown some files
     # is a dirty hack.
     $DOCKER_RUNTIME run \
+        --name "${CLH_CTR_NAME}-fix" \
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
         --volume /dev:/dev \
@@ -314,7 +355,8 @@ cmd_build() {
         rustflags="$rustflags -C link-args=-Wl,-Bstatic -C link-args=-lc"
     fi
 
-    $DOCKER_RUNTIME run \
+    run_container "$DOCKER_RUNTIME" run \
+        --name "$CLH_CTR_NAME" \
         --user "$(id -u):$(id -g)" \
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
@@ -335,7 +377,8 @@ cmd_clean() {
     ensure_build_dir
     ensure_latest_ctr
 
-    $DOCKER_RUNTIME run \
+    run_container "$DOCKER_RUNTIME" run \
+        --name "$CLH_CTR_NAME" \
         --user "$(id -u):$(id -g)" \
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
@@ -432,7 +475,8 @@ cmd_tests() {
 
     if [[ "$unit" = true ]]; then
         say "Running unit tests for $target..."
-        $DOCKER_RUNTIME run \
+        run_container "$DOCKER_RUNTIME" run \
+            --name "$CLH_CTR_NAME" \
             --workdir "$CTR_CLH_ROOT_DIR" \
             --rm \
             --device $exported_device \
@@ -451,7 +495,8 @@ cmd_tests() {
 
     if [ "$integration" = true ]; then
         say "Running integration tests for $target..."
-        $DOCKER_RUNTIME run \
+        run_container "$DOCKER_RUNTIME" run \
+            --name "$CLH_CTR_NAME" \
             --workdir "$CTR_CLH_ROOT_DIR" \
             --rm \
             --privileged \
@@ -477,7 +522,8 @@ cmd_tests() {
         mkdir -p "$DEST_IGVM_FILES_PATH"
         copy_igvm_files "$SRC_IGVM_FILES_PATH" "$DEST_IGVM_FILES_PATH"
         say "Running CVM integration tests for $target..."
-        $DOCKER_RUNTIME run \
+        run_container "$DOCKER_RUNTIME" run \
+            --name "$CLH_CTR_NAME" \
             --workdir "$CTR_CLH_ROOT_DIR" \
             --rm \
             --privileged \
@@ -502,7 +548,8 @@ cmd_tests() {
 
     if [ "$integration_vfio" = true ]; then
         say "Running VFIO integration tests for $target..."
-        $DOCKER_RUNTIME run \
+        run_container "$DOCKER_RUNTIME" run \
+            --name "$CLH_CTR_NAME" \
             --workdir "$CTR_CLH_ROOT_DIR" \
             --rm \
             --privileged \
@@ -525,7 +572,8 @@ cmd_tests() {
 
     if [ "$integration_windows" = true ]; then
         say "Running Windows integration tests for $target..."
-        $DOCKER_RUNTIME run \
+        run_container "$DOCKER_RUNTIME" run \
+            --name "$CLH_CTR_NAME" \
             --workdir "$CTR_CLH_ROOT_DIR" \
             --rm \
             --privileged \
@@ -548,7 +596,8 @@ cmd_tests() {
 
     if [ "$integration_live_migration" = true ]; then
         say "Running 'live migration' integration tests for $target..."
-        $DOCKER_RUNTIME run \
+        run_container "$DOCKER_RUNTIME" run \
+            --name "$CLH_CTR_NAME" \
             --workdir "$CTR_CLH_ROOT_DIR" \
             --rm \
             --privileged \
@@ -573,7 +622,8 @@ cmd_tests() {
 
     if [ "$integration_rate_limiter" = true ]; then
         say "Running 'rate limiter' integration tests for $target..."
-        $DOCKER_RUNTIME run \
+        run_container "$DOCKER_RUNTIME" run \
+            --name "$CLH_CTR_NAME" \
             --workdir "$CTR_CLH_ROOT_DIR" \
             --rm \
             --privileged \
@@ -596,7 +646,8 @@ cmd_tests() {
 
     if [ "$metrics" = true ]; then
         say "Generating performance metrics for $target..."
-        $DOCKER_RUNTIME run \
+        run_container "$DOCKER_RUNTIME" run \
+            --name "$CLH_CTR_NAME" \
             --workdir "$CTR_CLH_ROOT_DIR" \
             --rm \
             --privileged \
@@ -620,7 +671,8 @@ cmd_tests() {
 
     if [ "$coverage" = true ]; then
         say "Generating code coverage information for $target..."
-        $DOCKER_RUNTIME run \
+        run_container "$DOCKER_RUNTIME" run \
+            --name "$CLH_CTR_NAME" \
             --workdir "$CTR_CLH_ROOT_DIR" \
             --rm \
             --privileged \
@@ -721,6 +773,7 @@ cmd_shell() {
     fi
 
     $DOCKER_RUNTIME run \
+        --name "$CLH_CTR_NAME" \
         $tty_args \
         --workdir "$CTR_CLH_ROOT_DIR" \
         --rm \
