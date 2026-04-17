@@ -75,12 +75,11 @@ impl disk_file::AsyncDiskFile for FixedVhdDiskAsync {
             .0
             .logical_size()
             .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
-        Ok(Box::new(
-            FixedVhdAsync::new(self.0.as_raw_fd(), ring_depth, size).map_err(|e| {
-                BlockError::new(BlockErrorKind::Io, DiskFileError::NewAsyncIo(e))
-                    .with_op(ErrorOp::Open)
-            })?,
-        ))
+        Ok(Box::new(FixedVhdAsync::new(
+            self.0.as_raw_fd(),
+            ring_depth,
+            size,
+        )?))
     }
 }
 
@@ -90,7 +89,7 @@ pub struct FixedVhdAsync {
 }
 
 impl FixedVhdAsync {
-    pub fn new(fd: RawFd, ring_depth: u32, size: u64) -> std::io::Result<Self> {
+    pub fn new(fd: RawFd, ring_depth: u32, size: u64) -> BlockResult<Self> {
         let raw_file_async = RawFileAsync::new(fd, ring_depth)?;
 
         Ok(FixedVhdAsync {
