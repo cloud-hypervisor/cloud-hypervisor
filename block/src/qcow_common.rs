@@ -436,4 +436,11 @@ pub(crate) mod unit_tests {
         let result = decompress_cluster(&compressed, cluster_size, &ZlibDecoder {}).unwrap();
         assert_eq!(result, original);
     }
+
+    #[test]
+    fn test_decompress_cluster_corrupt_input() {
+        let corrupt = vec![0xffu8; 64];
+        let err = decompress_cluster(&corrupt, 65536, &ZlibDecoder {}).unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(libc::EIO));
+    }
 }
