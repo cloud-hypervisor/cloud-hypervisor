@@ -448,6 +448,7 @@ mod unit_tests {
     use super::*;
     use crate::disk_file::{AsyncDiskFile, DiskSize, Resizable};
     use crate::qcow::{BackingFileConfig, ImageType, QcowFile, RawFile};
+    use crate::qcow_common::unit_tests::compress_allocated_clusters;
 
     fn create_disk_with_data(
         file_size: u64,
@@ -1932,5 +1933,21 @@ mod unit_tests {
 
         let abuf = AlignedBuf::new(513, 512).unwrap();
         assert_eq!(abuf.layout().size(), 1024);
+    }
+
+    #[test]
+    fn test_compressed_read() {
+        let cluster_size = 65536usize;
+        let data: Vec<u8> = (0..=255).cycle().take(cluster_size).collect();
+        let (temp, disk) = create_disk_with_data(100 * 1024 * 1024, &data, 0, false, false);
+        drop(disk);
+
+        compress_allocated_clusters(&mut temp.as_file().try_clone().unwrap());
+
+        let disk =
+            QcowDiskSync::new(temp.as_file().try_clone().unwrap(), false, false, false).unwrap();
+
+        let buf = async_read(&disk, 0, cluster_size);
+        assert_eq!(buf, data);
     }
 }
