@@ -8,6 +8,7 @@ version = "0.1.0"
 [dependencies]
 epoll = { workspace = true }
 getrandom = "0.4.2"
+io-uring = { workspace = true, optional = true }
 libc = { workspace = true }
 log = { workspace = true }
 rate_limiter = { path = "../rate_limiter" }
@@ -22,6 +23,9 @@ vm-memory = { workspace = true, features = [
 ] }
 vm-virtio = { path = "../vm-virtio" }
 vmm-sys-util = { workspace = true }
+
+[features]
+io_uring = ["dep:io-uring"]
 
 [dev-dependencies]
 pnet = "0.35.0"

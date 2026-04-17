@@ -7,6 +7,8 @@
 
 mod ctrl_queue;
 mod mac;
+#[cfg(feature = "io_uring")]
+pub mod net_io_uring;
 mod open_tap;
 mod queue_pair;
 mod tap;
