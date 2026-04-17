@@ -8803,7 +8803,76 @@ mod windows {
 #[cfg(target_arch = "x86_64")]
 mod vfio {
     use crate::*;
+
     const NVIDIA_VFIO_DEVICE: &str = "/sys/bus/pci/devices/0002:00:01.0";
+    const IORESOURCE_MEM: u64 = 0x0000_0200;
+
+    fn nvidia_vfio_device_ready() -> bool {
+        if !std::path::Path::new(NVIDIA_VFIO_DEVICE).exists() {
+            println!("SKIPPED: VFIO device {NVIDIA_VFIO_DEVICE} not found");
+            return false;
+        }
+
+        let driver_path = format!("{NVIDIA_VFIO_DEVICE}/driver");
+        if let Ok(driver) = std::fs::read_link(&driver_path) {
+            let driver_name = driver.file_name().unwrap_or_default().to_string_lossy();
+            if driver_name != "vfio-pci" {
+                println!(
+                    "SKIPPED: VFIO device {NVIDIA_VFIO_DEVICE} bound to {driver_name}, not vfio-pci"
+                );
+                return false;
+            }
+        } else {
+            println!("SKIPPED: VFIO device {NVIDIA_VFIO_DEVICE} not bound to any driver");
+            return false;
+        }
+
+        true
+    }
+
+    fn first_nvidia_memory_bar() -> Option<u8> {
+        let resource_path = format!("{NVIDIA_VFIO_DEVICE}/resource");
+        let resource = match std::fs::read_to_string(&resource_path) {
+            Ok(resource) => resource,
+            Err(e) => {
+                println!("SKIPPED: failed to read {resource_path}: {e}");
+                return None;
+            }
+        };
+
+        for (index, line) in resource.lines().take(6).enumerate() {
+            let mut fields = line.split_whitespace();
+            let Some(start) = fields.next() else {
+                continue;
+            };
+            let Some(end) = fields.next() else {
+                continue;
+            };
+            let Some(flags) = fields.next() else {
+                continue;
+            };
+
+            let parse_hex = |value: &str| u64::from_str_radix(value.trim_start_matches("0x"), 16);
+            let Ok(start) = parse_hex(start) else {
+                continue;
+            };
+            let Ok(end) = parse_hex(end) else {
+                continue;
+            };
+            let Ok(flags) = parse_hex(flags) else {
+                continue;
+            };
+
+            if flags & IORESOURCE_MEM == 0 || end < start || (start == 0 && end == 0) {
+                continue;
+            }
+
+            return Some(index as u8);
+        }
+
+        println!("SKIPPED: no non-empty memory BAR found for {NVIDIA_VFIO_DEVICE}");
+        None
+    }
 
     fn platform_cfg(iommufd: bool) -> String {
         if iommufd {
@@ -9038,25 +9107,66 @@ mod vfio {
         test_nvidia_card_iommu_address_width_common(true);
     }
 
-    fn test_nvidia_guest_numa_generic_initiator_common(iommufd: bool) {
-        // Skip test if VFIO device is not available or not ready
-        if !std::path::Path::new(NVIDIA_VFIO_DEVICE).exists() {
-            println!("SKIPPED: VFIO device {NVIDIA_VFIO_DEVICE} not found");
+    fn test_nvidia_card_x_exclude_mmap_bars_common(iommufd: bool) {
+        if !nvidia_vfio_device_ready() {
             return;
         }
 
-        // Check if device is bound to vfio-pci driver
-        let driver_path = format!("{NVIDIA_VFIO_DEVICE}/driver");
-        if let Ok(driver) = std::fs::read_link(&driver_path) {
-            let driver_name = driver.file_name().unwrap_or_default().to_string_lossy();
-            if driver_name != "vfio-pci" {
-                println!(
-                    "SKIPPED: VFIO device {NVIDIA_VFIO_DEVICE} bound to {driver_name}, not vfio-pci"
-                );
-                return;
-            }
-        } else {
-            println!("SKIPPED: VFIO device {NVIDIA_VFIO_DEVICE} not bound to any driver");
+        let Some(bar) = first_nvidia_memory_bar() else {
+            return;
+        };
+
+        let disk_config = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=1G"])
+            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args(["--platform", &platform_cfg(iommufd)])
+            .args([
+                "--device",
+                format!("path={NVIDIA_VFIO_DEVICE},x_exclude_mmap_bars=[{bar}]").as_str(),
+            ])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+            assert!(wait_until(Duration::from_secs(10), || guest.check_nvidia_gpu()));
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert!(
+            stderr.contains("Skipping VFIO BAR mmap"),
+            "Expected x_exclude_mmap_bars log in stderr: {stderr}"
+        );
+        assert!(
+            stderr.contains(format!("BAR {bar}").as_str()),
+            "Expected skipped BAR index in stderr: {stderr}"
+        );
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_nvidia_card_x_exclude_mmap_bars() {
+        test_nvidia_card_x_exclude_mmap_bars_common(false);
+    }
+
+    #[test]
+    fn test_iommufd_nvidia_card_x_exclude_mmap_bars() {
+        test_nvidia_card_x_exclude_mmap_bars_common(true);
+    }
+
+    fn test_nvidia_guest_numa_generic_initiator_common(iommufd: bool) {
+        if !nvidia_vfio_device_ready() {
             return;
         }
 
