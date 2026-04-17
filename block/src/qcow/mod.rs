@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 pub(crate) mod backing;
-mod decoder;
+pub(crate) mod decoder;
 mod header;
 pub(crate) mod metadata;
 pub(crate) mod qcow_raw_file;
