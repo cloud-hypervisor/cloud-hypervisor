@@ -339,7 +339,7 @@ where
         cid: u32,
         path: PathBuf,
         mut backend: B,
-        iommu: bool,
+        access_platform_enabled: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         state: Option<VsockState>,
@@ -353,7 +353,7 @@ where
         } else {
             let mut avail_features = (1u64 << VIRTIO_F_VERSION_1) | (1u64 << VIRTIO_F_IN_ORDER);
 
-            if iommu {
+            if access_platform_enabled {
                 avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
             }
             (avail_features, 0, false)

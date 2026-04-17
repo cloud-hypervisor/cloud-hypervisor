@@ -287,7 +287,7 @@ impl Pmem {
         disk: File,
         addr: GuestAddress,
         mapping: UserspaceMapping,
-        iommu: bool,
+        access_platform_enabled: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         state: Option<PmemState>,
@@ -308,7 +308,7 @@ impl Pmem {
 
             let mut avail_features = 1u64 << VIRTIO_F_VERSION_1;
 
-            if iommu {
+            if access_platform_enabled {
                 avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
             }
             (avail_features, 0, config, false)

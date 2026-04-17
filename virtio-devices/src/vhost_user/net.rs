@@ -48,7 +48,7 @@ pub struct Net {
     ctrl_queue_epoll_thread: Option<thread::JoinHandle<()>>,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
-    iommu: bool,
+    access_platform_enabled: bool,
 }
 
 impl Net {
@@ -62,7 +62,7 @@ impl Net {
         server: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
-        iommu: bool,
+        access_platform_enabled: bool,
         state: Option<State>,
         offload_tso: bool,
         offload_ufo: bool,
@@ -220,7 +220,7 @@ impl Net {
             ctrl_queue_epoll_thread: None,
             seccomp_action,
             exit_evt,
-            iommu,
+            access_platform_enabled,
         })
     }
 
@@ -252,7 +252,7 @@ impl VirtioDevice for Net {
 
     fn features(&self) -> u64 {
         let mut features = self.vu_common.virtio_common.avail_features;
-        if self.iommu {
+        if self.access_platform_enabled {
             features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
         }
         features
