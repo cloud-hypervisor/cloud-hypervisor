@@ -12,6 +12,7 @@ mshv = ["hypervisor/mshv", "vfio-ioctls/mshv"]
 
 [dependencies]
 anyhow = { workspace = true }
+base64 = { workspace = true }
 byteorder = { workspace = true }
 hypervisor = { path = "../hypervisor" }
 libc = { workspace = true }
