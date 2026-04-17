@@ -2419,3 +2419,281 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioDmaMapping<M
             })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::io::FromRawFd;
+    use std::sync::Mutex;
+    use std::thread::JoinHandle;
+
+    use super::*;
+
+    // Trait default behavior and state enum round trip.
+
+    #[test]
+    fn vfio_migration_state_round_trips() {
+        for state in [
+            VfioMigrationState::Error,
+            VfioMigrationState::Stop,
+            VfioMigrationState::Running,
+            VfioMigrationState::StopCopy,
+            VfioMigrationState::Resuming,
+            VfioMigrationState::RunningP2P,
+            VfioMigrationState::PreCopy,
+            VfioMigrationState::PreCopyP2P,
+        ] {
+            let raw = state as u32;
+            assert_eq!(VfioMigrationState::try_from(raw).unwrap(), state);
+        }
+    }
+
+    #[test]
+    fn vfio_migration_state_invalid_errors() {
+        match VfioMigrationState::try_from(999_u32) {
+            Err(VfioError::InvalidMigrationState(999)) => {}
+            other => panic!("expected InvalidMigrationState(999), got {other:?}"),
+        }
+    }
+
+    struct DefaultVfio;
+    impl Vfio for DefaultVfio {}
+
+    #[test]
+    fn default_query_migration_support_returns_none() {
+        assert!(matches!(DefaultVfio.query_migration_support(), Ok(None)));
+    }
+
+    #[test]
+    fn default_set_migration_state_errors() {
+        assert!(matches!(
+            DefaultVfio.set_migration_state(VfioMigrationState::Stop),
+            Err(VfioError::NoMigrationSupport)
+        ));
+    }
+
+    #[test]
+    fn default_get_mig_data_size_errors() {
+        assert!(matches!(
+            DefaultVfio.get_mig_data_size(),
+            Err(VfioError::NoMigrationSupport)
+        ));
+    }
+
+    // Save and load state machine flows, driven through a mock Vfio wrapper
+    // and a libc pipe for the data_fd.
+
+    fn pipe_pair() -> (File, File) {
+        let mut fds = [0i32; 2];
+        // SAFETY: libc::pipe writes exactly two file descriptors into the array.
+        let rc = unsafe { libc::pipe(fds.as_mut_ptr()) };
+        assert_eq!(rc, 0, "pipe(2) failed: {}", std::io::Error::last_os_error());
+        // SAFETY: fds populated by a successful pipe(2) are valid new descriptors.
+        let read = unsafe { File::from_raw_fd(fds[0]) };
+        // SAFETY: same as above.
+        let write = unsafe { File::from_raw_fd(fds[1]) };
+        (read, write)
+    }
+
+    #[derive(Default)]
+    struct MockVfioState {
+        transitions: Vec<VfioMigrationState>,
+        save_blob: Vec<u8>,
+        fail_at: Option<VfioMigrationState>,
+        loaded_reader: Option<JoinHandle<Vec<u8>>>,
+    }
+
+    struct MockVfio {
+        state: Mutex<MockVfioState>,
+    }
+
+    impl MockVfio {
+        fn for_save(blob: Vec<u8>) -> Arc<Self> {
+            Arc::new(Self {
+                state: Mutex::new(MockVfioState {
+                    save_blob: blob,
+                    ..Default::default()
+                }),
+            })
+        }
+
+        fn for_load() -> Arc<Self> {
+            Arc::new(Self {
+                state: Mutex::new(MockVfioState::default()),
+            })
+        }
+
+        fn failing_at(target: VfioMigrationState) -> Arc<Self> {
+            Arc::new(Self {
+                state: Mutex::new(MockVfioState {
+                    fail_at: Some(target),
+                    ..Default::default()
+                }),
+            })
+        }
+
+        fn transitions(&self) -> Vec<VfioMigrationState> {
+            self.state.lock().unwrap().transitions.clone()
+        }
+
+        fn join_loaded(&self) -> Vec<u8> {
+            let handle = self
+                .state
+                .lock()
+                .unwrap()
+                .loaded_reader
+                .take()
+                .expect("no loaded_reader — was Resuming ever entered?");
+            handle.join().unwrap()
+        }
+    }
+
+    impl Vfio for MockVfio {
+        fn set_migration_state(
+            &self,
+            state: VfioMigrationState,
+        ) -> Result<Option<File>, VfioError> {
+            let mut s = self.state.lock().unwrap();
+            s.transitions.push(state);
+            if s.fail_at == Some(state) {
+                return Err(VfioError::NoMigrationSupport);
+            }
+            match state {
+                VfioMigrationState::StopCopy => {
+                    let (read, mut write) = pipe_pair();
+                    std::io::Write::write_all(&mut write, &s.save_blob).unwrap();
+                    drop(write);
+                    Ok(Some(read))
+                }
+                VfioMigrationState::Resuming => {
+                    let (read, write) = pipe_pair();
+                    s.loaded_reader = Some(std::thread::spawn(move || {
+                        let mut buf = Vec::new();
+                        let mut r = read;
+                        std::io::Read::read_to_end(&mut r, &mut buf).unwrap();
+                        buf
+                    }));
+                    Ok(Some(write))
+                }
+                _ => Ok(None),
+            }
+        }
+
+        fn get_mig_data_size(&self) -> Result<u64, VfioError> {
+            Ok(self.state.lock().unwrap().save_blob.len() as u64)
+        }
+
+        fn region_write(&self, _index: u32, _offset: u64, _data: &[u8]) {}
+    }
+
+    struct MockMsiInterruptManager;
+    impl InterruptManager for MockMsiInterruptManager {
+        type GroupConfig = MsiIrqGroupConfig;
+        fn create_group(
+            &self,
+            _: MsiIrqGroupConfig,
+        ) -> std::io::Result<Arc<dyn InterruptSourceGroup>> {
+            unimplemented!("not exercised by the migration-helper tests")
+        }
+        fn destroy_group(&self, _: Arc<dyn InterruptSourceGroup>) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn test_vfio_common(vfio_wrapper: Arc<dyn Vfio>, migration_flags: Option<u64>) -> VfioCommon {
+        let configuration = PciConfiguration::new(
+            0,
+            0,
+            0,
+            PciClassCode::Other,
+            &PciVfioSubclass::VfioSubclass,
+            None,
+            PciHeaderType::Device,
+            0,
+            0,
+            None,
+            None,
+        );
+        VfioCommon {
+            configuration,
+            mmio_regions: Vec::new(),
+            interrupt: Interrupt {
+                intx: None,
+                msi: None,
+                msix: None,
+            },
+            msi_interrupt_manager: Arc::new(MockMsiInterruptManager),
+            legacy_interrupt_group: None,
+            vfio_wrapper,
+            patches: HashMap::new(),
+            x_nv_gpudirect_clique: None,
+            migration_flags,
+        }
+    }
+
+    #[test]
+    fn save_migration_data_happy_path() {
+        let blob = b"hello migration".to_vec();
+        let mock = MockVfio::for_save(blob.clone());
+        let common = test_vfio_common(mock.clone(), Some(1));
+        let got = common.save_migration_data().unwrap();
+        assert_eq!(got, blob);
+        assert_eq!(
+            mock.transitions(),
+            vec![VfioMigrationState::StopCopy, VfioMigrationState::Stop]
+        );
+    }
+
+    #[test]
+    fn save_migration_data_recovers_on_failure() {
+        let mock = MockVfio::failing_at(VfioMigrationState::StopCopy);
+        let common = test_vfio_common(mock.clone(), Some(1));
+        let err = common.save_migration_data().unwrap_err();
+        assert!(matches!(err, MigratableError::Snapshot(_)));
+        assert_eq!(
+            mock.transitions(),
+            vec![VfioMigrationState::StopCopy, VfioMigrationState::Stop]
+        );
+    }
+
+    #[test]
+    fn load_migration_data_happy_path() {
+        let blob = b"restore me".to_vec();
+        let mock = MockVfio::for_load();
+        let common = test_vfio_common(mock.clone(), Some(1));
+        common.load_migration_data(&blob).unwrap();
+        assert_eq!(mock.join_loaded(), blob);
+        // Device is left in RESUMING so resume() can drive it to RUNNING.
+        assert_eq!(mock.transitions(), vec![VfioMigrationState::Resuming]);
+    }
+
+    #[test]
+    fn load_migration_data_recovers_on_failure() {
+        let mock = MockVfio::failing_at(VfioMigrationState::Resuming);
+        let common = test_vfio_common(mock.clone(), Some(1));
+        let err = common.load_migration_data(b"ignored").unwrap_err();
+        assert!(matches!(err, MigratableError::Restore(_)));
+        assert_eq!(
+            mock.transitions(),
+            vec![VfioMigrationState::Resuming, VfioMigrationState::Stop]
+        );
+    }
+
+    // A guest write to a non BAR, non MSI config register must mirror into
+    // the PciConfiguration shadow so a later snapshot() picks up the live
+    // value.
+    #[test]
+    fn write_config_register_mirrors_non_bar_into_shadow() {
+        let mock = MockVfio::for_load();
+        let mut common = test_vfio_common(mock, Some(1));
+
+        // PCI_COMMAND is reg index 1. Write the 16 bit command word only.
+        let cmd: u16 = 0x0406;
+        common.write_config_register(crate::configuration::COMMAND_REG, 0, &cmd.to_le_bytes());
+
+        let got = common
+            .configuration
+            .read_reg(crate::configuration::COMMAND_REG)
+            & 0xFFFF;
+        assert_eq!(got as u16, cmd);
+    }
+}
