@@ -39,6 +39,7 @@ vhost = { workspace = true, features = [
 ] }
 virtio-bindings = { workspace = true }
 virtio-queue = { workspace = true }
+virtio-vhost-user = { path = "../virtio-vhost-user" }
 vm-allocator = { path = "../vm-allocator" }
 vm-device = { path = "../vm-device" }
 vm-memory = { workspace = true, features = [
