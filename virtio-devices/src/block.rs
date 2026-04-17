@@ -1140,7 +1140,7 @@ impl VirtioDevice for Block {
                     .map(|r| r.new_handle())
                     .transpose()
                     .unwrap(),
-                access_platform: self.common.access_platform.clone(),
+                access_platform: self.common.access_platform(),
                 host_cpus: self.queue_affinity.get(&queue_idx).cloned(),
                 acked_features: self.common.acked_features,
                 disable_sector0_writes: self.disable_sector0_writes,
