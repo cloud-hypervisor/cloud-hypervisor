@@ -89,6 +89,8 @@ pub enum VfioPciError {
     RetrievePciConfigurationState(#[source] anyhow::Error),
     #[error("Failed to retrieve VfioCommonState")]
     RetrieveVfioCommonState(#[source] anyhow::Error),
+    #[error("Failed to restore VFIO migration state")]
+    RestoreMigration(#[source] anyhow::Error),
 }
 
 #[derive(Copy, Clone)]
@@ -510,6 +512,10 @@ pub(crate) trait Vfio: Send + Sync {
     fn read_migration_data(&self) -> Result<Vec<u8>, VfioError> {
         Err(VfioError::NoMigrationSupport)
     }
+
+    fn write_migration_data(&self, _data: &[u8]) -> Result<(), VfioError> {
+        Err(VfioError::NoMigrationSupport)
+    }
 }
 
 struct VfioDeviceWrapper {
@@ -568,6 +574,12 @@ impl Vfio for VfioDeviceWrapper {
     fn read_migration_data(&self) -> Result<Vec<u8>, VfioError> {
         self.device
             .read_migration_data_to_end()
+            .map_err(VfioError::KernelVfio)
+    }
+
+    fn write_migration_data(&self, data: &[u8]) -> Result<(), VfioError> {
+        self.device
+            .write_migration_data(data)
             .map_err(VfioError::KernelVfio)
     }
 }
@@ -698,7 +710,13 @@ impl VfioCommon {
         })?;
 
         if let Some(state) = state.as_ref() {
-            vfio_common.set_state(state, msi_state, msix_state)?;
+            let mig: Option<VfioMigrationData> =
+                vm_migration::state_from_id(snapshot, VFIO_MIGRATION_ID).map_err(|e| {
+                    VfioPciError::RestoreMigration(anyhow!(
+                        "Failed to get VfioMigrationData from Snapshot: {e}"
+                    ))
+                })?;
+            vfio_common.set_state(state, msi_state, msix_state, mig)?;
         } else {
             vfio_common.parse_capabilities(bdf);
             vfio_common.initialize_legacy_interrupt()?;
@@ -910,14 +928,19 @@ impl VfioCommon {
                 .set_region_type(region_type)
                 .set_prefetchable(prefetchable);
 
-            if bar_id == VFIO_PCI_ROM_REGION_INDEX {
-                self.configuration
-                    .add_pci_rom_bar(&bar, flags & 0x1)
-                    .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
-            } else {
-                self.configuration
-                    .add_pci_bar(&bar)
-                    .map_err(|e| PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e))?;
+            // Skip on restore as BARs come from the saved PciConfiguration state.
+            if resources.is_none() {
+                if bar_id == VFIO_PCI_ROM_REGION_INDEX {
+                    self.configuration
+                        .add_pci_rom_bar(&bar, flags & 0x1)
+                        .map_err(|e| {
+                            PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e)
+                        })?;
+                } else {
+                    self.configuration.add_pci_bar(&bar).map_err(|e| {
+                        PciDeviceError::IoRegistrationFailed(bar_addr.raw_value(), e)
+                    })?;
+                }
             }
 
             bars.push(bar);
@@ -1552,7 +1575,16 @@ impl VfioCommon {
         state: &VfioCommonState,
         msi_state: Option<MsiConfigState>,
         msix_state: Option<MsixConfigState>,
+        migration_data: Option<VfioMigrationData>,
     ) -> Result<(), VfioPciError> {
+        // A snapshot carrying VFIO migration state cannot be restored onto a
+        // device without migration support.
+        if migration_data.is_some() && self.migration_flags.is_none() {
+            return Err(VfioPciError::RestoreMigration(anyhow!(
+                "snapshot carries VFIO migration state but the device does not support migration"
+            )));
+        }
+
         if let (Some(intx), Some(interrupt_source_group)) =
             (&state.intx_state, self.legacy_interrupt_group.clone())
         {
@@ -1572,6 +1604,39 @@ impl VfioCommon {
 
         if let Some(msix) = &state.msix_state {
             self.initialize_msix(msix.cap, msix.cap_offset, msix.bdf.into(), msix_state);
+        }
+
+        // Replay the opaque device state captured at snapshot. The kernel walks
+        // the intermediate STOP arc internally, so RESUMING is a single write.
+        if let Some(mig) = migration_data {
+            let blob = BASE64_STANDARD.decode(mig.blob.as_bytes()).map_err(|e| {
+                VfioPciError::RestoreMigration(anyhow!(
+                    "Failed to base64-decode migration blob: {e}"
+                ))
+            })?;
+            self.load_migration_data(&blob)
+                .map_err(|e| VfioPciError::RestoreMigration(anyhow!("{e}")))?;
+        }
+
+        // Push PCI_COMMAND to the device. State replay updates the shadow config
+        // space but not the device, so memory decode and bus mastering would
+        // otherwise stay disabled after restore.
+        let cmd = (self.configuration.read_reg(COMMAND_REG) & 0xFFFF) as u16;
+        self.vfio_wrapper.write_config(
+            (COMMAND_REG * PCI_CONFIG_REGISTER_SIZE) as u32,
+            &cmd.to_le_bytes(),
+        );
+
+        // Rearm the kernel interrupt eventfds. State replay restores only the
+        // MSI or MSI-X state in memory, not the VFIO_DEVICE_SET_IRQS wiring.
+        if let Some(msi) = &self.interrupt.msi
+            && msi.cfg.enabled()
+        {
+            self.enable_msi()?;
+        } else if let Some(msix) = &self.interrupt.msix
+            && msix.bar.enabled()
+        {
+            self.enable_msix()?;
         }
 
         Ok(())
@@ -1606,6 +1671,24 @@ impl VfioCommon {
         })?;
         stop?;
         Ok(data)
+    }
+
+    pub(crate) fn load_migration_data(&self, data: &[u8]) -> Result<(), MigratableError> {
+        // Leave the device in RESUMING and resume() drives it back to RUNNING.
+        let result = (|| -> Result<(), MigratableError> {
+            self.transition_migration_state(VfioMigrationState::Resuming)
+                .map_err(MigratableError::Restore)?;
+
+            self.vfio_wrapper.write_migration_data(data).map_err(|e| {
+                MigratableError::Restore(anyhow!("VFIO migration data write failed: {e}"))
+            })?;
+            Ok(())
+        })();
+
+        if result.is_err() {
+            let _ = self.transition_migration_state(VfioMigrationState::Stop);
+        }
+        result
     }
 }
 
