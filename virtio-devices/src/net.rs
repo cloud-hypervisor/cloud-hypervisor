@@ -765,7 +765,7 @@ impl VirtioDevice for Net {
                 ctrl_q: CtrlQueue::new(self.taps.clone()),
                 queue: ctrl_queue,
                 queue_evt: ctrl_queue_evt,
-                access_platform: self.common.access_platform.clone(),
+                access_platform: self.common.access_platform(),
                 queue_index: ctrl_queue_index as u16,
                 interrupt_cb: interrupt_cb.clone(),
             };
@@ -837,7 +837,7 @@ impl VirtioDevice for Net {
                     rx_desc_avail: false,
                     rx_rate_limiter,
                     tx_rate_limiter,
-                    access_platform: self.common.access_platform.clone(),
+                    access_platform: self.common.access_platform(),
                 },
                 mem: mem.clone(),
                 queue_index_base: (i * 2) as u16,

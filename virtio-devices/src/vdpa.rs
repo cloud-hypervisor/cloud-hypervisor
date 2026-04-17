@@ -251,21 +251,21 @@ impl Vdpa {
                 desc_table_addr: queue
                     .desc_table()
                     .translate_gpa(
-                        self.common.access_platform.as_deref(),
+                        self.common.access_platform().as_deref(),
                         queue_size as usize * std::mem::size_of::<RawDescriptor>(),
                     )
                     .map_err(Error::TranslateAddress)?,
                 used_ring_addr: queue
                     .used_ring()
                     .translate_gpa(
-                        self.common.access_platform.as_deref(),
+                        self.common.access_platform().as_deref(),
                         4 + queue_size as usize * 8,
                     )
                     .map_err(Error::TranslateAddress)?,
                 avail_ring_addr: queue
                     .avail_ring()
                     .translate_gpa(
-                        self.common.access_platform.as_deref(),
+                        self.common.access_platform().as_deref(),
                         4 + queue_size as usize * 2,
                     )
                     .map_err(Error::TranslateAddress)?,

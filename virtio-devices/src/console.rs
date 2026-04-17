@@ -751,7 +751,7 @@ impl VirtioDevice for Console {
             self.resize_pipe.as_ref().map(|p| p.try_clone().unwrap()),
             kill_evt,
             pause_evt,
-            self.common.access_platform.clone(),
+            self.common.access_platform(),
         );
 
         let paused = self.common.paused.clone();

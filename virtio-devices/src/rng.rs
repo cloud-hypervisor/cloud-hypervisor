@@ -273,7 +273,7 @@ impl VirtioDevice for Rng {
                 queue_evt,
                 kill_evt,
                 pause_evt,
-                access_platform: self.common.access_platform.clone(),
+                access_platform: self.common.access_platform(),
             };
 
             let paused = self.common.paused.clone();

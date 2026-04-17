@@ -466,7 +466,7 @@ where
             pause_evt,
             interrupt_cb,
             backend: self.backend.clone(),
-            access_platform: self.common.access_platform.clone(),
+            access_platform: self.common.access_platform(),
         };
 
         let paused = self.common.paused.clone();
