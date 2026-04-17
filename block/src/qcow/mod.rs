@@ -57,6 +57,7 @@ use crate::qcow::qcow_raw_file::{BeUint, QcowRawFile};
 pub use crate::qcow::raw_file::RawFile;
 use crate::qcow::refcount::RefCount;
 use crate::qcow::vec_cache::{CacheMap, Cacheable, VecCache};
+use crate::qcow_common::decompress_cluster;
 
 #[sorted]
 #[derive(Debug, Error)]
@@ -322,8 +323,26 @@ impl BackingFile {
                                 .file_mut()
                                 .read_exact(&mut buf[pos..pos + length as usize])?;
                         }
-                        ClusterReadMapping::Compressed { data } => {
-                            buf[pos..pos + data.len()].copy_from_slice(&data);
+                        ClusterReadMapping::Compressed {
+                            host_offset,
+                            compressed_size,
+                            cluster_offset,
+                            length,
+                        } => {
+                            let mut compressed = vec![0u8; compressed_size];
+                            inner
+                                .raw_file
+                                .file_mut()
+                                .seek(SeekFrom::Start(host_offset))?;
+                            inner.raw_file.file_mut().read_exact(&mut compressed)?;
+                            let decompressed = decompress_cluster(
+                                &compressed,
+                                cluster_size as usize,
+                                &*inner.header.get_decoder(),
+                            )?;
+                            buf[pos..pos + length].copy_from_slice(
+                                &decompressed[cluster_offset..cluster_offset + length],
+                            );
                         }
                         ClusterReadMapping::Backing {
                             offset: backing_off,

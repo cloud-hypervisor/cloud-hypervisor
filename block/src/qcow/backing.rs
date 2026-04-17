@@ -11,9 +11,10 @@ use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use std::sync::Arc;
 
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
+use crate::qcow::decoder::Decoder;
 use crate::qcow::metadata::{BackingRead, ClusterReadMapping, QcowMetadata};
 use crate::qcow::{BackingFile, BackingKind, Error as QcowError};
-use crate::qcow_common::pread_exact;
+use crate::qcow_common::{decompress_cluster, pread_alloc, pread_exact};
 
 /// Raw backing file using pread64 on a duplicated fd.
 pub(crate) struct RawBacking {
@@ -52,6 +53,8 @@ pub(crate) struct Qcow2Backing {
     pub(crate) metadata: Arc<QcowMetadata>,
     pub(crate) data_fd: OwnedFd,
     pub(crate) backing_file: Option<Arc<dyn BackingRead>>,
+    pub(crate) cluster_size: u64,
+    pub(crate) decoder: Arc<dyn Decoder>,
 }
 
 // SAFETY: All reads go through QcowMetadata which uses RwLock
@@ -104,10 +107,22 @@ impl Qcow2Backing {
                     )?;
                     buf_offset += length as usize;
                 }
-                ClusterReadMapping::Compressed { data } => {
-                    let len = data.len();
-                    buf[buf_offset..buf_offset + len].copy_from_slice(&data);
-                    buf_offset += len;
+                ClusterReadMapping::Compressed {
+                    host_offset,
+                    compressed_size,
+                    cluster_offset,
+                    length,
+                } => {
+                    let compressed =
+                        pread_alloc(self.data_fd.as_raw_fd(), host_offset, compressed_size)?;
+                    let decompressed = decompress_cluster(
+                        &compressed,
+                        self.cluster_size as usize,
+                        &*self.decoder,
+                    )?;
+                    buf[buf_offset..buf_offset + length]
+                        .copy_from_slice(&decompressed[cluster_offset..cluster_offset + length]);
+                    buf_offset += length;
                 }
                 ClusterReadMapping::Backing {
                     offset: backing_offset,
@@ -152,8 +167,11 @@ pub fn shared_backing_from(bf: BackingFile) -> BlockResult<Arc<dyn BackingRead>>
         }
         BackingKind::Qcow { inner, backing } => {
             let data_fd = dup_fd(inner.raw_file.as_fd())?;
+            let metadata = Arc::new(QcowMetadata::new(*inner));
             Ok(Arc::new(Qcow2Backing {
-                metadata: Arc::new(QcowMetadata::new(*inner)),
+                cluster_size: metadata.cluster_size(),
+                decoder: metadata.decoder(),
+                metadata,
                 data_fd,
                 backing_file: backing.map(|bf| shared_backing_from(*bf)).transpose()?,
             }))
