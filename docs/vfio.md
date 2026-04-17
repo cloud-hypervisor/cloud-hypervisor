@@ -183,3 +183,57 @@ mmio address space is available for use by devices on PCI segment 1.
 --pci-segment pci_segment=0,mmio32_aperture_weight=2
 --pci-segment pci_segment=1,mmio32_aperture_weight=1
 ```
+
+## Snapshot and Restore of VFIO Devices
+
+Cloud Hypervisor supports snapshotting and restoring VFIO devices that advertise
+the kernel VFIO migration v2 protocol. This covers same host snapshot to disk
+and restore from disk. Cross host live migration of VFIO devices is a separate
+effort not covered by this section.
+
+### Requirements
+
+- **Kernel.** Linux 5.18 or newer for the migration v2 ioctls. 6.0 or newer is
+  recommended for the broadest set of state transitions.
+- **Driver.** The device must be bound to a VFIO variant driver that implements
+  migration v2, for example `mlx5_vfio_pci` on Mellanox NICs. The generic
+  `vfio_pci` driver does not implement migration and is treated as non
+  migratable.
+
+### Behavior
+
+At device creation time, Cloud Hypervisor probes the VFIO device for migration
+support via `VFIO_DEVICE_FEATURE_MIGRATION`. The device is classified into one
+of two modes for the lifetime of the guest.
+
+- **Migratable.** The device supports migration v2 with at least STOP_COPY.
+  Cloud Hypervisor drives the full state machine on snapshot and restore.
+  Pausing the guest transitions the device to STOP, snapshot walks
+  STOP_COPY, captures the opaque device state, and returns the device to
+  STOP. On restore, the saved device blob is written through RESUMING in
+  a single transition; the kernel handles the intermediate STOP arc
+  internally. After the blob loads, Cloud Hypervisor pushes the saved
+  PCI_COMMAND to the device and rearms MSI or MSI-X eventfds, because
+  the kernel's view of those is not restored by in memory state replay
+  alone. The device is left in RESUMING and `resume()` drives it to
+  RUNNING when the guest is resumed. This matches QEMU's
+  `vfio_pci_load_config()` behavior.
+- **Non migratable.** The device does not advertise migration v2. Snapshot
+  and restore still work, but the device state that is internal to the
+  hardware is not preserved. Only Cloud Hypervisor side state such as PCI
+  configuration and interrupt routing is captured. This matches the
+  pre existing behavior.
+
+The classification is logged at device init, for example:
+
+```
+INFO  vfio: VFIO device 0000:01:00.0 supports migration v2 (flags=0x7, ...)
+```
+
+Non migratable devices log at debug level.
+
+### Limitations
+
+The current snapshot format stores the blob as base64 inside the snapshot
+JSON. Very large blobs may benefit from a binary transport path in the
+future.
