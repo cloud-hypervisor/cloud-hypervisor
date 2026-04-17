@@ -680,12 +680,15 @@ impl QcowAsync {
 #[cfg(test)]
 mod unit_tests {
     use std::io::{Seek, SeekFrom, Write};
+    use std::sync::Arc;
+    use std::thread;
 
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
     use crate::disk_file::AsyncDiskFile;
     use crate::qcow::{QcowFile, RawFile};
+    use crate::qcow_common::unit_tests::compress_allocated_clusters;
     use crate::{BatchRequest, RequestType, SECTOR_SIZE};
 
     fn create_disk_with_data(
@@ -1126,5 +1129,42 @@ mod unit_tests {
 
         let buf = async_read(&disk, 0, pattern.len());
         assert_eq!(buf, pattern, "O_DIRECT roundtrip should match");
+    }
+
+    #[test]
+    fn test_compressed_read_multi_queue() {
+        let cluster_size = 65536usize;
+        let data: Vec<u8> = (0..=255).cycle().take(cluster_size).collect();
+        let (temp, disk) = create_disk_with_data(100 * 1024 * 1024, &data, 0, false);
+        drop(disk);
+
+        compress_allocated_clusters(&mut temp.as_file().try_clone().unwrap());
+
+        let disk = Arc::new(
+            QcowDiskAsync::new(temp.as_file().try_clone().unwrap(), false, false, false).unwrap(),
+        );
+
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let disk = Arc::clone(&disk);
+                let expected = data.clone();
+                thread::spawn(move || {
+                    let mut async_io = disk.new_async_io(1).unwrap();
+                    let mut buf = vec![0xFFu8; cluster_size];
+                    let iovec = libc::iovec {
+                        iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+                        iov_len: buf.len(),
+                    };
+                    async_io.read_vectored(0, &[iovec], 1).unwrap();
+                    let (_, result) = wait_for_completion(async_io.as_mut());
+                    assert_eq!(result as usize, cluster_size);
+                    assert_eq!(buf, expected);
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
     }
 }
