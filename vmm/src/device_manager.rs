@@ -3698,6 +3698,7 @@ impl DeviceManager {
                     balloon_config.size,
                     balloon_config.deflate_on_oom,
                     balloon_config.free_page_reporting,
+                    self.force_access_platform,
                     self.seccomp_action.clone(),
                     self.exit_evt
                         .try_clone()

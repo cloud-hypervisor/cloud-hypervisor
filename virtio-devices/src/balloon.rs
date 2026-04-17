@@ -34,14 +34,15 @@ use vm_memory::{
     GuestMemoryError, GuestMemoryRegion,
 };
 use vm_migration::{Migratable, MigratableError, Pausable, Snapshot, Snapshottable, Transportable};
+use vm_virtio::{AccessPlatform, Translatable};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::{
     ActivateResult, EPOLL_HELPER_EVENT_LAST, EpollHelper, EpollHelperError, EpollHelperHandler,
-    GuestMemoryMmap, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice, VirtioDeviceType,
-    VirtioInterrupt, VirtioInterruptType,
+    GuestMemoryMmap, VIRTIO_F_ACCESS_PLATFORM, VIRTIO_F_VERSION_1, VirtioCommon, VirtioDevice,
+    VirtioDeviceType, VirtioInterrupt, VirtioInterruptType,
 };
 
 const QUEUE_SIZE: u16 = 128;
@@ -160,6 +161,7 @@ struct BalloonEpollHandler {
     kill_evt: EventFd,
     pause_evt: EventFd,
     pbp: Option<PartiallyBalloonedPage>,
+    access_platform: Option<Arc<dyn AccessPlatform>>,
 }
 
 impl BalloonEpollHandler {
@@ -277,7 +279,12 @@ impl BalloonEpollHandler {
 
             let mut offset = 0u64;
             while offset < desc.len() as u64 {
-                let addr = desc.addr().checked_add(offset).unwrap();
+                let addr = desc
+                    .addr()
+                    .checked_add(offset)
+                    .unwrap()
+                    .translate_gva(self.access_platform.as_deref(), data_chunk_size)
+                    .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?;
                 let pfn: u32 = desc_chain
                     .memory()
                     .read_obj(addr)
@@ -324,7 +331,11 @@ impl BalloonEpollHandler {
             let mut descs_len = 0;
             while let Some(desc) = desc_chain.next() {
                 descs_len += desc.len();
-                Self::release_memory_range(desc_chain.memory(), desc.addr(), desc.len() as usize)?;
+                let addr = desc
+                    .addr()
+                    .translate_gva(self.access_platform.as_deref(), desc.len() as usize)
+                    .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?;
+                Self::release_memory_range(desc_chain.memory(), addr, desc.len() as usize)?;
             }
 
             self.queues[queue_index]
@@ -437,11 +448,13 @@ pub struct Balloon {
 
 impl Balloon {
     // Create a new virtio-balloon.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
         size: u64,
         deflate_on_oom: bool,
         free_page_reporting: bool,
+        access_platform_enabled: bool,
         seccomp_action: SeccompAction,
         exit_evt: EventFd,
         state: Option<BalloonState>,
@@ -463,6 +476,9 @@ impl Balloon {
             }
             if free_page_reporting {
                 avail_features |= 1u64 << VIRTIO_BALLOON_F_REPORTING;
+            }
+            if access_platform_enabled {
+                avail_features |= 1u64 << VIRTIO_F_ACCESS_PLATFORM;
             }
 
             let config = VirtioBalloonConfig {
@@ -628,6 +644,7 @@ impl VirtioDevice for Balloon {
             kill_evt,
             pause_evt,
             pbp: None,
+            access_platform: self.common.access_platform(),
         };
 
         let paused = self.common.paused.clone();
@@ -646,6 +663,14 @@ impl VirtioDevice for Balloon {
 
         event!("virtio-device", "activated", "id", &self.id);
         Ok(())
+    }
+
+    fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
+        self.common.set_access_platform(access_platform);
+    }
+
+    fn access_platform(&self) -> Option<Arc<dyn AccessPlatform>> {
+        self.common.access_platform()
     }
 
     fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
