@@ -15,7 +15,7 @@ use anyhow::anyhow;
 use byteorder::{ByteOrder, LittleEndian};
 use hypervisor::HypervisorVmError;
 use libc::{_SC_PAGESIZE, sysconf};
-use log::{error, info};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use vfio_bindings::bindings::vfio::*;
@@ -436,6 +436,10 @@ pub(crate) trait Vfio: Send + Sync {
     fn unmask_irq(&self, _irq_index: u32) -> Result<(), VfioError> {
         unimplemented!()
     }
+
+    fn query_migration_support(&self) -> Result<Option<u64>, VfioError> {
+        Ok(None)
+    }
 }
 
 struct VfioDeviceWrapper {
@@ -478,6 +482,12 @@ impl Vfio for VfioDeviceWrapper {
             .unmask_irq(irq_index)
             .map_err(VfioError::KernelVfio)
     }
+
+    fn query_migration_support(&self) -> Result<Option<u64>, VfioError> {
+        self.device
+            .query_migration_support()
+            .map_err(VfioError::KernelVfio)
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -501,6 +511,8 @@ pub(crate) struct VfioCommon {
     pub(crate) vfio_wrapper: Arc<dyn Vfio>,
     pub(crate) patches: HashMap<usize, ConfigPatch>,
     x_nv_gpudirect_clique: Option<u8>,
+    #[allow(dead_code)]
+    pub(crate) migration_flags: Option<u64>,
 }
 
 impl VfioCommon {
@@ -534,6 +546,27 @@ impl VfioCommon {
             pci_configuration_state,
         );
 
+        let migration_flags = match vfio_wrapper.query_migration_support() {
+            Ok(Some(flags)) => {
+                info!(
+                    "VFIO device {bdf} supports migration v2 (flags=0x{flags:x}, \
+                     STOP_COPY={}, P2P={}, PRE_COPY={})",
+                    flags & VFIO_MIGRATION_STOP_COPY as u64 != 0,
+                    flags & VFIO_MIGRATION_P2P as u64 != 0,
+                    flags & VFIO_MIGRATION_PRE_COPY as u64 != 0,
+                );
+                Some(flags)
+            }
+            Ok(None) => {
+                debug!("VFIO device {bdf} does not support migration v2");
+                None
+            }
+            Err(e) => {
+                warn!("VFIO device {bdf} migration probe failed, treating as non-migratable: {e}");
+                None
+            }
+        };
+
         let mut vfio_common = VfioCommon {
             mmio_regions: Vec::new(),
             configuration,
@@ -547,6 +580,7 @@ impl VfioCommon {
             vfio_wrapper,
             patches: HashMap::new(),
             x_nv_gpudirect_clique,
+            migration_flags,
         };
 
         let state: Option<VfioCommonState> = snapshot
