@@ -441,6 +441,10 @@ impl VirtioDevice for Pmem {
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {
         self.common.set_access_platform(access_platform);
     }
+
+    fn access_platform(&self) -> Option<Arc<dyn AccessPlatform>> {
+        self.common.access_platform()
+    }
 }
 
 impl Pausable for Pmem {
