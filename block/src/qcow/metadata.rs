@@ -333,11 +333,6 @@ impl QcowMetadata {
     pub fn cluster_size(&self) -> u64 {
         self.inner.read().unwrap().raw_file.cluster_size()
     }
-
-    /// Returns the intra cluster byte offset for a given guest address.
-    pub fn cluster_offset(&self, address: u64) -> u64 {
-        self.inner.read().unwrap().raw_file.cluster_offset(address)
-    }
 }
 
 impl QcowState {

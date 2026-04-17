@@ -177,6 +177,7 @@ pub struct QcowAsync {
     alignment: usize,
     /// I/O alignment for the AsyncIo trait (at least SECTOR_SIZE).
     io_alignment: u64,
+    cluster_size: u64,
     io_uring: IoUring,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
@@ -197,6 +198,7 @@ impl QcowAsync {
         io_uring.submitter().register_eventfd(eventfd.as_raw_fd())?;
 
         Ok(QcowAsync {
+            cluster_size: metadata.cluster_size(),
             metadata,
             data_file,
             backing_file,
@@ -296,6 +298,7 @@ impl AsyncIo for QcowAsync {
             &self.data_file,
             &self.backing_file,
             self.alignment,
+            self.cluster_size,
         )?;
 
         let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
@@ -325,7 +328,7 @@ impl AsyncIo for QcowAsync {
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
         let virtual_size = self.metadata.virtual_size();
-        let cluster_size = self.metadata.cluster_size();
+        let cluster_size = self.cluster_size;
 
         let result = self
             .metadata
@@ -425,6 +428,7 @@ impl AsyncIo for QcowAsync {
                         &self.data_file,
                         &self.backing_file,
                         self.alignment,
+                        self.cluster_size,
                     )?;
                     sync_completions.push((req.user_data, total_len as i32));
                 }
@@ -571,14 +575,14 @@ impl QcowAsync {
         data_file: &QcowRawFile,
         backing_file: &Option<Arc<dyn BackingRead>>,
         alignment: usize,
+        cluster_size: u64,
     ) -> AsyncIoResult<()> {
         let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
-        let cluster_size = metadata.cluster_size();
         let mut buf_offset = 0usize;
 
         while buf_offset < total_len {
             let curr_addr = address + buf_offset as u64;
-            let intra_offset = metadata.cluster_offset(curr_addr);
+            let intra_offset = curr_addr & (cluster_size - 1);
             let remaining_in_cluster = (cluster_size - intra_offset) as usize;
             let count = min(total_len - buf_offset, remaining_in_cluster);
 
