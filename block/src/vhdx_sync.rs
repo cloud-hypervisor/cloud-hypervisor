@@ -11,7 +11,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::vhdx::Vhdx;
+use crate::vhdx::{Vhdx, VhdxError};
 use crate::{AsyncAdaptor, BlockBackend, Error, disk_file};
 
 #[derive(Debug)]
@@ -31,7 +31,15 @@ impl VhdxDiskSync {
     pub fn new(f: File) -> BlockResult<Self> {
         Ok(VhdxDiskSync {
             vhdx_file: Arc::new(Mutex::new(Vhdx::new(f).map_err(|e| {
-                BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::Open)
+                let kind = match &e {
+                    VhdxError::NotVhdx(_)
+                    | VhdxError::ParseVhdxHeader(_)
+                    | VhdxError::ParseVhdxMetadata(_)
+                    | VhdxError::ParseVhdxRegionEntry(_) => BlockErrorKind::InvalidFormat,
+                    VhdxError::ReadBatEntry(_) => BlockErrorKind::CorruptImage,
+                    VhdxError::ReadFailed(_) | VhdxError::WriteFailed(_) => BlockErrorKind::Io,
+                };
+                BlockError::new(kind, e).with_op(ErrorOp::Open)
             })?)),
         })
     }
@@ -53,7 +61,7 @@ impl disk_file::PhysicalSize for VhdxDiskSync {
                 Error::GetFileMetadata(io) => {
                     BlockError::new(BlockErrorKind::Io, Error::GetFileMetadata(io))
                 }
-                _ => BlockError::new(BlockErrorKind::Io, e),
+                _ => unreachable!("unexpected error from Vhdx::physical_size(): {e}"),
             })
     }
 }

@@ -26,7 +26,9 @@ impl FixedVhdDiskSync {
 
 impl disk_file::DiskSize for FixedVhdDiskSync {
     fn logical_size(&self) -> BlockResult<u64> {
-        Ok(self.0.logical_size().unwrap())
+        self.0
+            .logical_size()
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))
     }
 }
 
@@ -36,7 +38,7 @@ impl disk_file::PhysicalSize for FixedVhdDiskSync {
             crate::Error::GetFileMetadata(io) => {
                 BlockError::new(BlockErrorKind::Io, crate::Error::GetFileMetadata(io))
             }
-            _ => BlockError::new(BlockErrorKind::Io, e),
+            _ => unreachable!("unexpected error from FixedVhd::physical_size(): {e}"),
         })
     }
 }
@@ -69,8 +71,12 @@ impl disk_file::AsyncDiskFile for FixedVhdDiskSync {
     }
 
     fn new_async_io(&self, _ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
+        let size = self
+            .0
+            .logical_size()
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
         Ok(Box::new(
-            FixedVhdSync::new(self.0.as_raw_fd(), self.0.logical_size().unwrap()).map_err(|e| {
+            FixedVhdSync::new(self.0.as_raw_fd(), size).map_err(|e| {
                 BlockError::new(BlockErrorKind::Io, DiskFileError::NewAsyncIo(e))
                     .with_op(ErrorOp::Open)
             })?,
