@@ -41,6 +41,9 @@ vmm-sys-util = "0.15.0"
 [workspace]
 members = ["."]
 
+[patch.crates-io]
+vfio-ioctls = { git = "https://github.com/saravan2/vfio.git", branch = "vfio-ioctls" }
+
 [[bin]]
 doc = false
 name = "balloon"

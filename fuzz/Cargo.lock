@@ -4,9 +4,9 @@ version = 4
 
 [[package]]
 name = "acpi_tables"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ad581b2b0fa02638f3df6ff3f852ebc30dc7cfe531e9745d1ca4c0f283a6dbe"
+checksum = "ce821f856a3eb1d033287f2dcfcdf94276d7895dd5bdd8ca45ae17e7d33d4dd9"
 dependencies = [
  "zerocopy",
 ]
@@ -112,6 +112,12 @@ name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
+
+[[package]]
+name = "base64"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bitfield-struct"
@@ -777,7 +783,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 [[package]]
 name = "micro_http"
 version = "0.1.0"
-source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#5c2254d6cf4f32a668d0d8e57ba20bebad9d4fba"
+source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#876f3feccc30e09225f2c77bf95a6b2d46a9259e"
 dependencies = [
  "libc",
  "vmm-sys-util",
@@ -906,13 +912,14 @@ name = "pci"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "byteorder",
  "hypervisor",
  "libc",
  "log",
  "serde",
  "thiserror",
- "vfio-bindings",
+ "vfio-bindings 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "vfio-ioctls",
  "vfio_user",
  "vm-allocator",
@@ -1287,10 +1294,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vfio-bindings"
+version = "0.6.2"
+source = "git+https://github.com/saravan2/vfio.git?branch=vfio-ioctls#68097e9d4a8841c29d2652d667fdb71c785197dd"
+
+[[package]]
 name = "vfio-ioctls"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4b1d98dff7f0d219278e406323e7eda4d426447bd203c7828189baf0d8c07b7"
+source = "git+https://github.com/saravan2/vfio.git?branch=vfio-ioctls#68097e9d4a8841c29d2652d667fdb71c785197dd"
 dependencies = [
  "byteorder",
  "iommufd-bindings",
@@ -1300,7 +1311,7 @@ dependencies = [
  "libc",
  "log",
  "thiserror",
- "vfio-bindings",
+ "vfio-bindings 0.6.2 (git+https://github.com/saravan2/vfio.git?branch=vfio-ioctls)",
  "vm-memory",
  "vmm-sys-util",
 ]
@@ -1318,7 +1329,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "thiserror",
- "vfio-bindings",
+ "vfio-bindings 0.6.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "vm-memory",
  "vmm-sys-util",
 ]
