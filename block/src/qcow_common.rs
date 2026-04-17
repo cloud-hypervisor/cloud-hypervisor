@@ -304,7 +304,8 @@ pub(crate) mod unit_tests {
     use flate2::write::DeflateEncoder;
     use vmm_sys_util::tempfile::TempFile;
 
-    use super::pread_alloc;
+    use super::{decompress_cluster, pread_alloc};
+    use crate::qcow::decoder::ZlibDecoder;
 
     const COMPRESSED_FLAG: u64 = 1 << 62;
     const CLUSTER_USED_FLAG: u64 = 1 << 63;
@@ -421,5 +422,18 @@ pub(crate) mod unit_tests {
         assert_eq!(buf, &data[100..300]);
 
         pread_alloc(file.as_raw_fd(), 4000, 200).unwrap_err();
+    }
+
+    #[test]
+    fn test_decompress_cluster() {
+        let cluster_size = 65536;
+        let original: Vec<u8> = (0..=255).cycle().take(cluster_size).collect();
+
+        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&original).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let result = decompress_cluster(&compressed, cluster_size, &ZlibDecoder {}).unwrap();
+        assert_eq!(result, original);
     }
 }
