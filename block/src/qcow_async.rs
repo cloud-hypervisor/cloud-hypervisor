@@ -21,14 +21,15 @@ use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::backing::shared_backing_from;
+use crate::qcow::decoder::Decoder;
 use crate::qcow::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
 use crate::qcow::qcow_raw_file::QcowRawFile;
 use crate::qcow::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
 use crate::qcow_common::{
-    AlignedBuf, aligned_pread, aligned_pwrite, gather_from_iovecs_into, pread_exact, pwrite_all,
-    scatter_to_iovecs, zero_fill_iovecs,
+    AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, gather_from_iovecs_into,
+    pread_alloc, pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
 };
 use crate::{BatchRequest, RequestType, SECTOR_SIZE, disk_file};
 
@@ -178,6 +179,7 @@ pub struct QcowAsync {
     /// I/O alignment for the AsyncIo trait (at least SECTOR_SIZE).
     io_alignment: u64,
     cluster_size: u64,
+    decoder: Arc<dyn Decoder>,
     io_uring: IoUring,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
@@ -199,6 +201,7 @@ impl QcowAsync {
 
         Ok(QcowAsync {
             cluster_size: metadata.cluster_size(),
+            decoder: metadata.decoder(),
             metadata,
             data_file,
             backing_file,
@@ -253,6 +256,8 @@ impl AsyncIo for QcowAsync {
             iovecs,
             total_len,
             self.alignment,
+            self.cluster_size,
+            &*self.decoder,
         )? {
             let fd = self.data_file.as_raw_fd();
             let (submitter, mut sq, _) = self.io_uring.split();
@@ -396,6 +401,8 @@ impl AsyncIo for QcowAsync {
                         &req.iovecs,
                         total_len,
                         self.alignment,
+                        self.cluster_size,
+                        &*self.decoder,
                     )? {
                         let fd = self.data_file.as_raw_fd();
                         // SAFETY: fd is valid and iovecs point to valid guest memory.
@@ -462,6 +469,7 @@ impl QcowAsync {
     /// Returns `Some(host_offset)` if the entire read falls within a single
     /// allocated cluster (fast path). Otherwise handles the read
     /// synchronously via `scatter_read_sync` and returns `None`.
+    #[allow(clippy::too_many_arguments)]
     fn resolve_read(
         metadata: &QcowMetadata,
         data_file: &QcowRawFile,
@@ -470,6 +478,8 @@ impl QcowAsync {
         iovecs: &[libc::iovec],
         total_len: usize,
         alignment: usize,
+        cluster_size: u64,
+        decoder: &dyn Decoder,
     ) -> AsyncIoResult<Option<u64>> {
         let has_backing = backing_file.is_some();
         let mappings = metadata
@@ -494,7 +504,15 @@ impl QcowAsync {
             return Ok(Some(*host_offset));
         }
 
-        Self::scatter_read_sync(mappings, iovecs, data_file, backing_file, alignment)?;
+        Self::scatter_read_sync(
+            mappings,
+            iovecs,
+            data_file,
+            backing_file,
+            alignment,
+            cluster_size,
+            decoder,
+        )?;
         Ok(None)
     }
 
@@ -505,6 +523,8 @@ impl QcowAsync {
         data_file: &QcowRawFile,
         backing_file: &Option<Arc<dyn BackingRead>>,
         alignment: usize,
+        cluster_size: u64,
+        decoder: &dyn Decoder,
     ) -> AsyncIoResult<()> {
         let mut buf_offset = 0usize;
         for mapping in mappings {
@@ -542,11 +562,27 @@ impl QcowAsync {
                     }
                     buf_offset += len;
                 }
-                ClusterReadMapping::Compressed { data } => {
-                    let len = data.len();
+                ClusterReadMapping::Compressed {
+                    host_offset,
+                    compressed_size,
+                    cluster_offset,
+                    length,
+                } => {
+                    let compressed =
+                        pread_alloc(data_file.as_raw_fd(), host_offset, compressed_size)
+                            .map_err(AsyncIoError::ReadVectored)?;
+                    let decompressed =
+                        decompress_cluster(&compressed, cluster_size as usize, decoder)
+                            .map_err(AsyncIoError::ReadVectored)?;
                     // SAFETY: iovecs point to valid guest memory buffers.
-                    unsafe { scatter_to_iovecs(iovecs, buf_offset, &data) };
-                    buf_offset += len;
+                    unsafe {
+                        scatter_to_iovecs(
+                            iovecs,
+                            buf_offset,
+                            &decompressed[cluster_offset..cluster_offset + length],
+                        );
+                    }
+                    buf_offset += length;
                 }
                 ClusterReadMapping::Backing {
                     offset: backing_offset,
