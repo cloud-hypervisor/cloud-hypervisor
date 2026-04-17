@@ -156,6 +156,7 @@ pub struct QcowSync {
     sparse: bool,
     /// O_DIRECT alignment requirement (0 = no alignment needed).
     alignment: usize,
+    cluster_size: u64,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
 }
@@ -169,6 +170,7 @@ impl QcowSync {
     ) -> Self {
         let alignment = data_file.file().alignment();
         QcowSync {
+            cluster_size: metadata.cluster_size(),
             metadata,
             data_file,
             backing_file,
@@ -278,9 +280,8 @@ impl AsyncIo for QcowSync {
 
         while buf_offset < total_len {
             let curr_addr = address + buf_offset as u64;
-            let cluster_size = self.metadata.cluster_size();
-            let intra_offset = self.metadata.cluster_offset(curr_addr);
-            let remaining_in_cluster = (cluster_size - intra_offset) as usize;
+            let intra_offset = curr_addr & (self.cluster_size - 1);
+            let remaining_in_cluster = (self.cluster_size - intra_offset) as usize;
             let count = min(total_len - buf_offset, remaining_in_cluster);
 
             // Read backing data for COW if this is a partial cluster
@@ -288,10 +289,10 @@ impl AsyncIo for QcowSync {
             let backing_data = if let Some(backing) = self
                 .backing_file
                 .as_ref()
-                .filter(|_| intra_offset != 0 || count < cluster_size as usize)
+                .filter(|_| intra_offset != 0 || count < self.cluster_size as usize)
             {
                 let cluster_begin = curr_addr - intra_offset;
-                let mut data = vec![0u8; cluster_size as usize];
+                let mut data = vec![0u8; self.cluster_size as usize];
                 backing
                     .read_at(cluster_begin, &mut data)
                     .map_err(AsyncIoError::WriteVectored)?;
@@ -357,7 +358,7 @@ impl AsyncIo for QcowSync {
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
         let virtual_size = self.metadata.virtual_size();
-        let cluster_size = self.metadata.cluster_size();
+        let cluster_size = self.cluster_size;
 
         let result = self
             .metadata
