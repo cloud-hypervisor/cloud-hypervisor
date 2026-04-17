@@ -139,9 +139,13 @@ In the example above, the net device with id `net1` will be backed by FDs '23'
 and '24', and the net device with id `net2` will be backed by FDs '25' and '26'
 from the restored VM.
 
-## Limitations
+## VFIO devices
 
-VFIO devices is out of scope.
+Snapshot and restore are supported for VFIO devices that implement the kernel
+VFIO migration v2 protocol (e.g. Mellanox NICs bound to the `mlx5_vfio_pci`
+driver).
+
+See [`vfio.md`](vfio.md) for details on requirements and behavior.
 
 ## Offload Snapshot and Restore
 
