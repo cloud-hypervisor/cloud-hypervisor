@@ -14,6 +14,8 @@ use std::cmp::min;
 use std::os::fd::RawFd;
 use std::{io, ptr, slice};
 
+use crate::qcow::decoder::Decoder;
+
 // -- Position independent I/O helpers --
 //
 // Duplicated file descriptors share the kernel file description and thus the
@@ -42,6 +44,33 @@ pub fn pread_exact(fd: RawFd, buf: &mut [u8], offset: u64) -> io::Result<()> {
         total += ret as usize;
     }
     Ok(())
+}
+
+/// Allocate a buffer and pread exactly `len` bytes at `offset`.
+pub fn pread_alloc(fd: RawFd, offset: u64, len: usize) -> io::Result<Vec<u8>> {
+    let mut buf = vec![0u8; len];
+    pread_exact(fd, &mut buf, offset)?;
+    Ok(buf)
+}
+
+/// Decompress a full QCOW2 cluster from compressed data.
+///
+/// Returns a `cluster_size` byte buffer with the decompressed cluster
+/// content. Fails if the decoder does not produce exactly `cluster_size`
+/// bytes.
+pub fn decompress_cluster(
+    compressed: &[u8],
+    cluster_size: usize,
+    decoder: &dyn Decoder,
+) -> io::Result<Vec<u8>> {
+    let mut decompressed = vec![0u8; cluster_size];
+    let n = decoder
+        .decode(compressed, &mut decompressed)
+        .map_err(|_| io::Error::from_raw_os_error(libc::EIO))?;
+    if n != cluster_size {
+        return Err(io::Error::from_raw_os_error(libc::EIO));
+    }
+    Ok(decompressed)
 }
 
 /// Write all bytes to fd at offset, looping on short writes.
