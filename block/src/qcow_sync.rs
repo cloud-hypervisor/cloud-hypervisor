@@ -16,14 +16,16 @@ use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, Disk
 use crate::disk_file;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::backing::shared_backing_from;
+use crate::qcow::decoder::Decoder;
 use crate::qcow::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
 use crate::qcow::qcow_raw_file::QcowRawFile;
 use crate::qcow::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
 use crate::qcow_common::{
-    AlignedBuf, aligned_pread, aligned_pwrite, gather_from_iovecs, gather_from_iovecs_into,
-    pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
+    AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, gather_from_iovecs,
+    gather_from_iovecs_into, pread_alloc, pread_exact, pwrite_all, scatter_to_iovecs,
+    zero_fill_iovecs,
 };
 
 pub struct QcowDiskSync {
@@ -156,6 +158,8 @@ pub struct QcowSync {
     sparse: bool,
     /// O_DIRECT alignment requirement (0 = no alignment needed).
     alignment: usize,
+    cluster_size: u64,
+    decoder: Arc<dyn Decoder>,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
 }
@@ -169,6 +173,8 @@ impl QcowSync {
     ) -> Self {
         let alignment = data_file.file().alignment();
         QcowSync {
+            cluster_size: metadata.cluster_size(),
+            decoder: metadata.decoder(),
             metadata,
             data_file,
             backing_file,
@@ -237,11 +243,27 @@ impl AsyncIo for QcowSync {
                     }
                     buf_offset += len;
                 }
-                ClusterReadMapping::Compressed { data } => {
-                    let len = data.len();
+                ClusterReadMapping::Compressed {
+                    host_offset,
+                    compressed_size,
+                    cluster_offset,
+                    length,
+                } => {
+                    let compressed =
+                        pread_alloc(self.data_file.as_raw_fd(), host_offset, compressed_size)
+                            .map_err(AsyncIoError::ReadVectored)?;
+                    let decompressed =
+                        decompress_cluster(&compressed, self.cluster_size as usize, &*self.decoder)
+                            .map_err(AsyncIoError::ReadVectored)?;
                     // SAFETY: iovecs point to valid guest memory buffers
-                    unsafe { scatter_to_iovecs(iovecs, buf_offset, &data) };
-                    buf_offset += len;
+                    unsafe {
+                        scatter_to_iovecs(
+                            iovecs,
+                            buf_offset,
+                            &decompressed[cluster_offset..cluster_offset + length],
+                        );
+                    }
+                    buf_offset += length;
                 }
                 ClusterReadMapping::Backing {
                     offset: backing_offset,
@@ -278,9 +300,8 @@ impl AsyncIo for QcowSync {
 
         while buf_offset < total_len {
             let curr_addr = address + buf_offset as u64;
-            let cluster_size = self.metadata.cluster_size();
-            let intra_offset = self.metadata.cluster_offset(curr_addr);
-            let remaining_in_cluster = (cluster_size - intra_offset) as usize;
+            let intra_offset = curr_addr & (self.cluster_size - 1);
+            let remaining_in_cluster = (self.cluster_size - intra_offset) as usize;
             let count = min(total_len - buf_offset, remaining_in_cluster);
 
             // Read backing data for COW if this is a partial cluster
@@ -288,10 +309,10 @@ impl AsyncIo for QcowSync {
             let backing_data = if let Some(backing) = self
                 .backing_file
                 .as_ref()
-                .filter(|_| intra_offset != 0 || count < cluster_size as usize)
+                .filter(|_| intra_offset != 0 || count < self.cluster_size as usize)
             {
                 let cluster_begin = curr_addr - intra_offset;
-                let mut data = vec![0u8; cluster_size as usize];
+                let mut data = vec![0u8; self.cluster_size as usize];
                 backing
                     .read_at(cluster_begin, &mut data)
                     .map_err(AsyncIoError::WriteVectored)?;
@@ -357,7 +378,7 @@ impl AsyncIo for QcowSync {
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
         let virtual_size = self.metadata.virtual_size();
-        let cluster_size = self.metadata.cluster_size();
+        let cluster_size = self.cluster_size;
 
         let result = self
             .metadata
@@ -427,6 +448,7 @@ mod unit_tests {
     use super::*;
     use crate::disk_file::{AsyncDiskFile, DiskSize, Resizable};
     use crate::qcow::{BackingFileConfig, ImageType, QcowFile, RawFile};
+    use crate::qcow_common::unit_tests::compress_allocated_clusters;
 
     fn create_disk_with_data(
         file_size: u64,
@@ -1911,5 +1933,21 @@ mod unit_tests {
 
         let abuf = AlignedBuf::new(513, 512).unwrap();
         assert_eq!(abuf.layout().size(), 1024);
+    }
+
+    #[test]
+    fn test_compressed_read() {
+        let cluster_size = 65536usize;
+        let data: Vec<u8> = (0..=255).cycle().take(cluster_size).collect();
+        let (temp, disk) = create_disk_with_data(100 * 1024 * 1024, &data, 0, false, false);
+        drop(disk);
+
+        compress_allocated_clusters(&mut temp.as_file().try_clone().unwrap());
+
+        let disk =
+            QcowDiskSync::new(temp.as_file().try_clone().unwrap(), false, false, false).unwrap();
+
+        let buf = async_read(&disk, 0, cluster_size);
+        assert_eq!(buf, data);
     }
 }

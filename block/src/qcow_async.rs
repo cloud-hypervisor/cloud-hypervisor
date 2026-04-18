@@ -21,14 +21,15 @@ use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::qcow::backing::shared_backing_from;
+use crate::qcow::decoder::Decoder;
 use crate::qcow::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
 use crate::qcow::qcow_raw_file::QcowRawFile;
 use crate::qcow::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
 use crate::qcow_common::{
-    AlignedBuf, aligned_pread, aligned_pwrite, gather_from_iovecs_into, pread_exact, pwrite_all,
-    scatter_to_iovecs, zero_fill_iovecs,
+    AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, gather_from_iovecs_into,
+    pread_alloc, pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
 };
 use crate::{BatchRequest, RequestType, SECTOR_SIZE, disk_file};
 
@@ -177,6 +178,8 @@ pub struct QcowAsync {
     alignment: usize,
     /// I/O alignment for the AsyncIo trait (at least SECTOR_SIZE).
     io_alignment: u64,
+    cluster_size: u64,
+    decoder: Arc<dyn Decoder>,
     io_uring: IoUring,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
@@ -197,6 +200,8 @@ impl QcowAsync {
         io_uring.submitter().register_eventfd(eventfd.as_raw_fd())?;
 
         Ok(QcowAsync {
+            cluster_size: metadata.cluster_size(),
+            decoder: metadata.decoder(),
             metadata,
             data_file,
             backing_file,
@@ -251,6 +256,8 @@ impl AsyncIo for QcowAsync {
             iovecs,
             total_len,
             self.alignment,
+            self.cluster_size,
+            &*self.decoder,
         )? {
             let fd = self.data_file.as_raw_fd();
             let (submitter, mut sq, _) = self.io_uring.split();
@@ -296,6 +303,7 @@ impl AsyncIo for QcowAsync {
             &self.data_file,
             &self.backing_file,
             self.alignment,
+            self.cluster_size,
         )?;
 
         let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
@@ -325,7 +333,7 @@ impl AsyncIo for QcowAsync {
 
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
         let virtual_size = self.metadata.virtual_size();
-        let cluster_size = self.metadata.cluster_size();
+        let cluster_size = self.cluster_size;
 
         let result = self
             .metadata
@@ -393,6 +401,8 @@ impl AsyncIo for QcowAsync {
                         &req.iovecs,
                         total_len,
                         self.alignment,
+                        self.cluster_size,
+                        &*self.decoder,
                     )? {
                         let fd = self.data_file.as_raw_fd();
                         // SAFETY: fd is valid and iovecs point to valid guest memory.
@@ -425,6 +435,7 @@ impl AsyncIo for QcowAsync {
                         &self.data_file,
                         &self.backing_file,
                         self.alignment,
+                        self.cluster_size,
                     )?;
                     sync_completions.push((req.user_data, total_len as i32));
                 }
@@ -458,6 +469,7 @@ impl QcowAsync {
     /// Returns `Some(host_offset)` if the entire read falls within a single
     /// allocated cluster (fast path). Otherwise handles the read
     /// synchronously via `scatter_read_sync` and returns `None`.
+    #[allow(clippy::too_many_arguments)]
     fn resolve_read(
         metadata: &QcowMetadata,
         data_file: &QcowRawFile,
@@ -466,6 +478,8 @@ impl QcowAsync {
         iovecs: &[libc::iovec],
         total_len: usize,
         alignment: usize,
+        cluster_size: u64,
+        decoder: &dyn Decoder,
     ) -> AsyncIoResult<Option<u64>> {
         let has_backing = backing_file.is_some();
         let mappings = metadata
@@ -490,7 +504,15 @@ impl QcowAsync {
             return Ok(Some(*host_offset));
         }
 
-        Self::scatter_read_sync(mappings, iovecs, data_file, backing_file, alignment)?;
+        Self::scatter_read_sync(
+            mappings,
+            iovecs,
+            data_file,
+            backing_file,
+            alignment,
+            cluster_size,
+            decoder,
+        )?;
         Ok(None)
     }
 
@@ -501,6 +523,8 @@ impl QcowAsync {
         data_file: &QcowRawFile,
         backing_file: &Option<Arc<dyn BackingRead>>,
         alignment: usize,
+        cluster_size: u64,
+        decoder: &dyn Decoder,
     ) -> AsyncIoResult<()> {
         let mut buf_offset = 0usize;
         for mapping in mappings {
@@ -538,11 +562,27 @@ impl QcowAsync {
                     }
                     buf_offset += len;
                 }
-                ClusterReadMapping::Compressed { data } => {
-                    let len = data.len();
+                ClusterReadMapping::Compressed {
+                    host_offset,
+                    compressed_size,
+                    cluster_offset,
+                    length,
+                } => {
+                    let compressed =
+                        pread_alloc(data_file.as_raw_fd(), host_offset, compressed_size)
+                            .map_err(AsyncIoError::ReadVectored)?;
+                    let decompressed =
+                        decompress_cluster(&compressed, cluster_size as usize, decoder)
+                            .map_err(AsyncIoError::ReadVectored)?;
                     // SAFETY: iovecs point to valid guest memory buffers.
-                    unsafe { scatter_to_iovecs(iovecs, buf_offset, &data) };
-                    buf_offset += len;
+                    unsafe {
+                        scatter_to_iovecs(
+                            iovecs,
+                            buf_offset,
+                            &decompressed[cluster_offset..cluster_offset + length],
+                        );
+                    }
+                    buf_offset += length;
                 }
                 ClusterReadMapping::Backing {
                     offset: backing_offset,
@@ -571,14 +611,14 @@ impl QcowAsync {
         data_file: &QcowRawFile,
         backing_file: &Option<Arc<dyn BackingRead>>,
         alignment: usize,
+        cluster_size: u64,
     ) -> AsyncIoResult<()> {
         let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
-        let cluster_size = metadata.cluster_size();
         let mut buf_offset = 0usize;
 
         while buf_offset < total_len {
             let curr_addr = address + buf_offset as u64;
-            let intra_offset = metadata.cluster_offset(curr_addr);
+            let intra_offset = curr_addr & (cluster_size - 1);
             let remaining_in_cluster = (cluster_size - intra_offset) as usize;
             let count = min(total_len - buf_offset, remaining_in_cluster);
 
@@ -640,12 +680,15 @@ impl QcowAsync {
 #[cfg(test)]
 mod unit_tests {
     use std::io::{Seek, SeekFrom, Write};
+    use std::sync::Arc;
+    use std::thread;
 
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
     use crate::disk_file::AsyncDiskFile;
     use crate::qcow::{QcowFile, RawFile};
+    use crate::qcow_common::unit_tests::compress_allocated_clusters;
     use crate::{BatchRequest, RequestType, SECTOR_SIZE};
 
     fn create_disk_with_data(
@@ -1086,5 +1129,42 @@ mod unit_tests {
 
         let buf = async_read(&disk, 0, pattern.len());
         assert_eq!(buf, pattern, "O_DIRECT roundtrip should match");
+    }
+
+    #[test]
+    fn test_compressed_read_multi_queue() {
+        let cluster_size = 65536usize;
+        let data: Vec<u8> = (0..=255).cycle().take(cluster_size).collect();
+        let (temp, disk) = create_disk_with_data(100 * 1024 * 1024, &data, 0, false);
+        drop(disk);
+
+        compress_allocated_clusters(&mut temp.as_file().try_clone().unwrap());
+
+        let disk = Arc::new(
+            QcowDiskAsync::new(temp.as_file().try_clone().unwrap(), false, false, false).unwrap(),
+        );
+
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let disk = Arc::clone(&disk);
+                let expected = data.clone();
+                thread::spawn(move || {
+                    let mut async_io = disk.new_async_io(1).unwrap();
+                    let mut buf = vec![0xFFu8; cluster_size];
+                    let iovec = libc::iovec {
+                        iov_base: buf.as_mut_ptr() as *mut libc::c_void,
+                        iov_len: buf.len(),
+                    };
+                    async_io.read_vectored(0, &[iovec], 1).unwrap();
+                    let (_, result) = wait_for_completion(async_io.as_mut());
+                    assert_eq!(result as usize, cluster_size);
+                    assert_eq!(buf, expected);
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
     }
 }

@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 pub(crate) mod backing;
-mod decoder;
+pub(crate) mod decoder;
 mod header;
 pub(crate) mod metadata;
 pub(crate) mod qcow_raw_file;
@@ -57,6 +57,7 @@ use crate::qcow::qcow_raw_file::{BeUint, QcowRawFile};
 pub use crate::qcow::raw_file::RawFile;
 use crate::qcow::refcount::RefCount;
 use crate::qcow::vec_cache::{CacheMap, Cacheable, VecCache};
+use crate::qcow_common::decompress_cluster;
 
 #[sorted]
 #[derive(Debug, Error)]
@@ -322,8 +323,26 @@ impl BackingFile {
                                 .file_mut()
                                 .read_exact(&mut buf[pos..pos + length as usize])?;
                         }
-                        ClusterReadMapping::Compressed { data } => {
-                            buf[pos..pos + data.len()].copy_from_slice(&data);
+                        ClusterReadMapping::Compressed {
+                            host_offset,
+                            compressed_size,
+                            cluster_offset,
+                            length,
+                        } => {
+                            let mut compressed = vec![0u8; compressed_size];
+                            inner
+                                .raw_file
+                                .file_mut()
+                                .seek(SeekFrom::Start(host_offset))?;
+                            inner.raw_file.file_mut().read_exact(&mut compressed)?;
+                            let decompressed = decompress_cluster(
+                                &compressed,
+                                cluster_size as usize,
+                                &*inner.header.get_decoder(),
+                            )?;
+                            buf[pos..pos + length].copy_from_slice(
+                                &decompressed[cluster_offset..cluster_offset + length],
+                            );
                         }
                         ClusterReadMapping::Backing {
                             offset: backing_off,
@@ -2334,6 +2353,7 @@ mod unit_tests {
 
     use super::util::{COMPRESSED_FLAG, ZERO_FLAG};
     use super::*;
+    use crate::qcow_common::unit_tests::compress_allocated_clusters;
 
     fn valid_header_v3() -> Vec<u8> {
         vec![
@@ -4570,5 +4590,28 @@ mod unit_tests {
             let qcow = QcowFile::from(disk_file.try_clone().unwrap()).unwrap();
             assert_eq!(qcow.header.version, 2);
         });
+    }
+
+    #[test]
+    fn test_compressed_read() {
+        let cluster_size = 65536usize;
+        let data: Vec<u8> = (0..=255).cycle().take(cluster_size).collect();
+        let temp = TempFile::new().unwrap();
+        {
+            let raw_file = RawFile::new(temp.as_file().try_clone().unwrap(), false);
+            let mut qcow = QcowFile::new(raw_file, 3, 100 * 1024 * 1024, false).unwrap();
+            qcow.seek(SeekFrom::Start(0)).unwrap();
+            qcow.write_all(&data).unwrap();
+            qcow.flush().unwrap();
+        }
+
+        compress_allocated_clusters(&mut temp.as_file().try_clone().unwrap());
+
+        let raw_file = RawFile::new(temp.as_file().try_clone().unwrap(), false);
+        let mut qcow = QcowFile::from(raw_file).unwrap();
+        qcow.seek(SeekFrom::Start(0)).unwrap();
+        let mut buf = vec![0u8; cluster_size];
+        qcow.read_exact(&mut buf).unwrap();
+        assert_eq!(buf, data);
     }
 }

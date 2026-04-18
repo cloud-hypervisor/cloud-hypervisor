@@ -19,10 +19,11 @@
 use std::cmp::min;
 use std::io::{self, Seek};
 use std::mem;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use libc::{EINVAL, EIO};
 
+use super::decoder::Decoder;
 use super::qcow_raw_file::QcowRawFile;
 use super::refcount::RefCount;
 use super::util::{
@@ -51,13 +52,16 @@ pub enum ClusterReadMapping {
     /// bounded by cluster boundary and guest request.
     Allocated { offset: u64, length: u64 },
 
-    /// The cluster is compressed. The decompressed data is returned inline
-    /// because decompression is a CPU only operation that was done under the
-    /// write lock to access the raw compressed bytes from disk.
-    ///
-    /// The data field contains exactly the bytes the guest requested, already
-    /// sliced from the decompressed cluster.
-    Compressed { data: Vec<u8> },
+    /// The cluster is compressed. The host file offset and compressed byte
+    /// count are extracted from the L2 entry under the read lock. The caller
+    /// reads the compressed data with pread on its own fd, decompresses
+    /// into a cluster sized buffer, then slices the requested range.
+    Compressed {
+        host_offset: u64,
+        compressed_size: usize,
+        cluster_offset: usize,
+        length: usize,
+    },
 
     /// The cluster is not allocated in this layer but may exist in a backing
     /// file. The caller should delegate to the backing file at the given
@@ -112,6 +116,7 @@ pub enum DeallocAction {
 /// write lock, so contention stays low and queues scale.
 pub struct QcowMetadata {
     inner: RwLock<QcowState>,
+    decoder: Arc<dyn Decoder>,
 }
 
 /// The actual metadata state, accessible only through the RwLock.
@@ -132,6 +137,7 @@ pub(crate) struct QcowState {
 impl QcowMetadata {
     pub(crate) fn new(inner: QcowState) -> Self {
         QcowMetadata {
+            decoder: Arc::from(inner.header.get_decoder()),
             inner: RwLock::new(inner),
         }
     }
@@ -334,9 +340,9 @@ impl QcowMetadata {
         self.inner.read().unwrap().raw_file.cluster_size()
     }
 
-    /// Returns the intra cluster byte offset for a given guest address.
-    pub fn cluster_offset(&self, address: u64) -> u64 {
-        self.inner.read().unwrap().raw_file.cluster_offset(address)
+    /// Returns the shared decoder matching the image compression type.
+    pub fn decoder(&self) -> Arc<dyn Decoder> {
+        Arc::clone(&self.decoder)
     }
 }
 
@@ -378,10 +384,19 @@ impl QcowState {
         let l2_index = self.l2_table_index(address) as usize;
         let l2_entry = l2_table[l2_index];
 
-        // Compressed entries require disk I/O for decompression - can't do
-        // that under a read lock. Fall through to the write lock path.
+        // Compressed entries: extract layout from L2 entry under read lock.
+        // The caller reads and decompresses on its own fd without holding
+        // the metadata lock.
         if l2_entry_is_compressed(l2_entry) {
-            return Ok(None);
+            let (host_offset, compressed_size) =
+                l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
+            let cluster_offset = self.raw_file.cluster_offset(address) as usize;
+            return Ok(Some(ClusterReadMapping::Compressed {
+                host_offset,
+                compressed_size,
+                cluster_offset,
+                length: count,
+            }));
         }
 
         if l2_entry_is_empty(l2_entry) {
@@ -444,17 +459,14 @@ impl QcowState {
         if l2_entry_is_empty(l2_entry) {
             Ok(self.unallocated_read_mapping(address, count, has_backing_file))
         } else if l2_entry_is_compressed(l2_entry) {
-            // Under write lock we can do I/O for decompression
-            let decompressed = self.decompress_l2_cluster(l2_entry)?;
-            let start = self.raw_file.cluster_offset(address) as usize;
-            let end = start
-                .checked_add(count)
-                .ok_or_else(|| io::Error::from_raw_os_error(EINVAL))?;
-            if end > decompressed.len() {
-                return Err(io::Error::from_raw_os_error(EINVAL));
-            }
+            let (host_offset, compressed_size) =
+                l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
+            let cluster_offset = self.raw_file.cluster_offset(address) as usize;
             Ok(ClusterReadMapping::Compressed {
-                data: decompressed[start..end].to_vec(),
+                host_offset,
+                compressed_size,
+                cluster_offset,
+                length: count,
             })
         } else if l2_entry_is_zero(l2_entry) {
             // Match original QcowFile::file_read semantics where zero flagged
