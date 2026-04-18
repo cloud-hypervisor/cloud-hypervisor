@@ -249,6 +249,6 @@ pub fn gather_from_iovecs_into(iovecs: &IoBuf, start: usize, dst: &mut [u8]) {
 /// Gather bytes from iovecs starting at the given byte offset into a Vec.
 pub fn gather_from_iovecs(iovecs: &IoBuf, start: usize, len: usize) -> Vec<u8> {
     let mut result = vec![0u8; len];
-    gather_from_iovecs_into(&iovecs, start, &mut result);
+    gather_from_iovecs_into(iovecs, start, &mut result);
     result
 }

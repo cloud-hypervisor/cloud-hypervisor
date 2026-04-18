@@ -39,9 +39,7 @@ use block::error::BlockError;
 use block::fixed_vhd_async::FixedVhdDiskAsync;
 use block::fixed_vhd_sync::FixedVhdDiskSync;
 #[cfg(feature = "io_uring")]
-#[cfg(feature = "enable_broken_qcow2")]
 use block::qcow_async::QcowDiskAsync;
-#[cfg(feature = "enable_broken_qcow2")]
 use block::qcow_sync::QcowDiskSync;
 use block::raw_sync::RawFileDiskSync;
 use block::vhdx_sync::VhdxDiskSync;
@@ -2847,14 +2845,6 @@ impl DeviceManager {
                         DiskBackend::Next(Box::new(RawFileDiskSync::new(file)))
                     }
                 }
-                #[cfg(not(feature = "enable_broken_qcow2"))]
-                ImageType::Qcow2 => {
-                    return Err(DeviceManagerError::CreateQcowDiskSync(BlockError::new(
-                        block::error::BlockErrorKind::UnsupportedFeature,
-                        std::io::Error::from(std::io::ErrorKind::Unsupported),
-                    )));
-                }
-                #[cfg(feature = "enable_broken_qcow2")]
                 ImageType::Qcow2 => {
                     if cfg!(feature = "io_uring")
                         && !disk_cfg.disable_io_uring

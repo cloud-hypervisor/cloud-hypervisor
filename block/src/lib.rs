@@ -18,14 +18,10 @@ pub mod fixed_vhd;
 /// Enabled with the `"io_uring"` feature
 pub mod fixed_vhd_async;
 pub mod fixed_vhd_sync;
-#[cfg(feature = "enable_broken_qcow2")]
 pub mod qcow;
-#[cfg(feature = "enable_broken_qcow2")]
 #[cfg(feature = "io_uring")]
 pub mod qcow_async;
-#[cfg(feature = "enable_broken_qcow2")]
 pub(crate) mod qcow_common;
-#[cfg(feature = "enable_broken_qcow2")]
 pub mod qcow_sync;
 #[cfg(feature = "io_uring")]
 /// Async primitives based on `io-uring`
@@ -100,7 +96,6 @@ pub enum Error {
     GetFileMetadata(#[source] std::io::Error),
     #[error("The requested operation would cause a seek beyond disk end")]
     InvalidOffset,
-    #[cfg(feature = "enable_broken_qcow2")]
     #[error("Failure in qcow")]
     QcowError(#[source] qcow::Error),
     #[error("Failure in raw file")]

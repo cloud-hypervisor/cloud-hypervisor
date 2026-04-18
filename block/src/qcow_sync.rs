@@ -261,8 +261,11 @@ impl AsyncIo for QcowSync {
             }
         }
 
-        self.completion_list
-            .push_back((user_data, total_len as i32));
+        self.completion_list.push_back(Completion {
+            user_data,
+            result: total_len as i32,
+            iobuf: Some(iovecs),
+        });
         self.eventfd.write(1).unwrap();
         Ok(())
     }
@@ -270,7 +273,7 @@ impl AsyncIo for QcowSync {
     fn write_vectored(
         &mut self,
         offset: libc::off_t,
-        mut iovecs: IoBuf,
+        iovecs: IoBuf,
         user_data: u64,
     ) -> AsyncIoResult<()> {
         let address = offset as u64;
@@ -315,7 +318,7 @@ impl AsyncIo for QcowSync {
                         let mut abuf = AlignedBuf::new(count, self.alignment)
                             .map_err(AsyncIoError::WriteVectored)?;
                         // SAFETY: iovecs point to valid guest memory buffers
-                        gather_from_iovecs_into(&mut iovecs, buf_offset, abuf.as_mut_slice(count));
+                        gather_from_iovecs_into(&iovecs, buf_offset, abuf.as_mut_slice(count));
                         aligned_pwrite(
                             self.data_file.as_raw_fd(),
                             abuf.as_slice(count),
@@ -326,7 +329,7 @@ impl AsyncIo for QcowSync {
                     } else {
                         // No O_DIRECT, plain buffer is fine.
                         // SAFETY: iovecs point to valid guest memory buffers
-                        let buf = gather_from_iovecs(&mut iovecs, buf_offset, count);
+                        let buf = gather_from_iovecs(&iovecs, buf_offset, count);
                         pwrite_all(self.data_file.as_raw_fd(), &buf, host_offset)
                             .map_err(AsyncIoError::WriteVectored)?;
                     }
@@ -335,8 +338,11 @@ impl AsyncIo for QcowSync {
             buf_offset += count;
         }
 
-        self.completion_list
-            .push_back((user_data, total_len as i32));
+        self.completion_list.push_back(Completion {
+            user_data,
+            result: total_len as i32,
+            iobuf: Some(iovecs),
+        });
         self.eventfd.write(1).unwrap();
         Ok(())
     }
@@ -1722,11 +1728,10 @@ mod unit_tests {
         let Completion {
             user_data,
             result,
-            iobuf,
+            iobuf: _,
         } = aio.next_completed_request().unwrap();
         assert_eq!(user_data, 1);
         assert_eq!(result as usize, total);
-        assert!(iobuf.is_none());
         aio.fsync(Some(2)).unwrap();
         drop(aio);
 
@@ -1746,14 +1751,12 @@ mod unit_tests {
         } = aio.next_completed_request().unwrap();
         assert_eq!(user_data, 10);
         assert_eq!(result as usize, total);
-        assert!(iobuf.is_none());
-        drop(aio);
 
-        // Reassemble the read buffers into a flat vec
-        let mut got = Vec::with_capacity(total);
-        got.extend_from_slice(&r1);
-        got.extend_from_slice(&r2);
-        got.extend_from_slice(&r3);
+        // Extract read data from the returned iobuf
+        let got: Vec<u8> = match iobuf.unwrap() {
+            IoBuf::Host(h) => h.get_vecs().into_iter().flatten().collect(),
+            _ => panic!("expected Host iobuf"),
+        };
 
         // Build expected from the write buffers
         let mut expected = Vec::with_capacity(total);
