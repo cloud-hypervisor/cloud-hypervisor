@@ -4953,12 +4953,13 @@ impl DeviceManager {
             // VirtioMemMappingSource::Container cleanup is handled by
             // cleanup_vfio_ops when the last VFIO device is removed.
             PciDeviceHandle::Vfio(vfio_pci_device) => {
-                // Remove this device's MMIO regions from the DeviceManager's
-                // mmio_regions list. We match on UserMemoryRegion slot numbers
-                // rather than MmioRegion start addresses because move_bar()
-                // updates the device's region addresses but not the
-                // DeviceManager's cloned copies.
-                let device_regions = vfio_pci_device.lock().unwrap().mmio_regions().clone();
+                // Drop DeviceManager's cloned MmioRegions for this device so
+                // that VfioPciDevice becomes the sole Arc<MmapRegion> owner
+                // before it is dropped later in this function.
+                // We match on UserMemoryRegion slot numbers rather than
+                // MmioRegion start addresses because move_bar() updates the
+                // device's region addresses but not DeviceManager's copies.
+                let device_regions = vfio_pci_device.lock().unwrap().mmio_regions();
                 let mut mmio_regions = self.mmio_regions.lock().unwrap();
                 for device_region in &device_regions {
                     mmio_regions.retain(|x| !x.has_matching_slots(device_region));
@@ -5865,6 +5866,18 @@ impl BusDevice for DeviceManager {
 
 impl Drop for DeviceManager {
     fn drop(&mut self) {
+        // During VM shutdown, Vm has no explicit Drop impl so its
+        // fields drop in declaration order, which drops DeviceManager.
+        // After this Drop::drop returns, DeviceManager's own fields
+        // drop in declaration order. VfioPciDevice drops later in
+        // that sequence (via device_tree).
+        // DeviceManager and VfioPciDevice share Arc<MmapRegion> for
+        // each VFIO BAR mmap window. Clearing here makes VfioPciDevice
+        // the sole owner, so its drop reaches refcount zero and fires
+        // munmap before VfioDevice::drop issues VFIO_GROUP_UNSET_CONTAINER.
+        // See eject_device() for the device hot-unplug equivalent.
+        self.mmio_regions.lock().unwrap().clear();
+
         // Wake up the DeviceManager threads (mainly virtio device workers),
         // to avoid deadlock on waiting for paused/parked worker threads.
         if let Err(e) = self.resume() {
