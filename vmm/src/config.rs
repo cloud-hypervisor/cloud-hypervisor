@@ -1547,6 +1547,7 @@ impl NetConfig {
             .add("queue_size")
             .add("num_queues")
             .add("vhost_user")
+            .add("vhost_net")
             .add("socket")
             .add("vhost_mode")
             .add("fd")
@@ -1594,6 +1595,11 @@ impl NetConfig {
             .unwrap_or_else(default_netconfig_num_queues);
         let vhost_user = parser
             .convert::<Toggle>("vhost_user")
+            .map_err(Error::ParseNetwork)?
+            .unwrap_or(Toggle(false))
+            .0;
+        let vhost_net = parser
+            .convert::<Toggle>("vhost_net")
             .map_err(Error::ParseNetwork)?
             .unwrap_or(Toggle(false))
             .0;
@@ -1670,6 +1676,7 @@ impl NetConfig {
             num_queues,
             queue_size,
             vhost_user,
+            vhost_net,
             vhost_socket,
             vhost_mode,
             fds,
@@ -4034,6 +4041,7 @@ mod unit_tests {
             num_queues: 2,
             queue_size: 256,
             vhost_user: false,
+            vhost_net: false,
             vhost_socket: None,
             vhost_mode: VhostMode::Client,
             fds: None,
@@ -4116,6 +4124,14 @@ mod unit_tests {
             NetConfig {
                 mask: Some("255.255.255.0".parse().unwrap()),
                 host_mac: None,
+                ..net_fixture()
+            }
+        );
+
+        assert_eq!(
+            NetConfig::parse("mac=de:ad:be:ef:12:34,host_mac=12:34:de:ad:be:ef,vhost_net=on")?,
+            NetConfig {
+                vhost_net: true,
                 ..net_fixture()
             }
         );

@@ -977,6 +977,9 @@ components:
         vhost_user:
           type: boolean
           default: false
+        vhost_net:
+          type: boolean
+          default: false
         vhost_socket:
           type: string
         rate_limiter_config:
@@ -1037,6 +1040,9 @@ components:
           type: integer
           default: 256
         vhost_user:
+          type: boolean
+          default: false
+        vhost_net:
           type: boolean
           default: false
         vhost_socket:
