@@ -1578,6 +1578,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "performance-metrics"
+version = "0.1.0"
+dependencies = [
+ "block",
+ "clap",
+ "dirs",
+ "libc",
+ "serde",
+ "serde_json",
+ "test_infra",
+ "thiserror",
+ "vmm-sys-util",
+]
+
+[[package]]
 name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"

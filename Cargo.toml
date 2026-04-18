@@ -14,7 +14,7 @@ inherits = "release"
 strip = false
 
 [workspace]
-exclude = ["performance-metrics", "vhost_user_block"]
+exclude = ["vhost_user_block"]
 members = [
   "api_client",
   "arch",
@@ -26,6 +26,7 @@ members = [
   "net_util",
   "option_parser",
   "pci",
+  "performance-metrics",
   "rate_limiter",
   "serial_buffer",
   "test_infra",

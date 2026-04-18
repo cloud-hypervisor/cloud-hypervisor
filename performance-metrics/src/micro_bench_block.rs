@@ -17,8 +17,7 @@ use block::{BatchRequest, HostIovecs, IoBuf, RequestType};
 use crate::PerformanceTestControl;
 use crate::util::{
     self, BLOCK_SIZE, L2_ENTRIES_PER_TABLE, QCOW_CLUSTER_SIZE, deterministic_permutation,
-    drain_async_completions, drain_completions, read_iovec, submit_reads, submit_writes,
-    write_iovec,
+    drain_async_completions, drain_completions, submit_reads, submit_writes,
 };
 
 /// Submit num_ops AIO writes, wait for them all to land, then time
@@ -34,7 +33,7 @@ pub fn micro_bench_aio_drain(control: &PerformanceTestControl) -> f64 {
 
     // Submit all writes.
     for i in 0..num_ops {
-        let buf = IoBuf::from([vec![0xA5u8; BLOCK_SIZE as usize]]);
+        let buf = IoBuf::from(vec![0xA5u8; BLOCK_SIZE as usize]);
         aio.write_vectored((i as u64 * BLOCK_SIZE) as libc::off_t as _, buf, i as u64)
             .expect("write_vectored failed");
     }
@@ -65,7 +64,7 @@ pub fn micro_bench_qcow_read(control: &PerformanceTestControl) -> f64 {
     let (_tmp, disk) = util::qcow_tempfile(num_ops);
     let mut async_io = disk.new_async_io(1).expect("new_async_io failed");
 
-    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
+    let buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
 
     let start = Instant::now();
     submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, buf);
@@ -91,15 +90,14 @@ pub fn micro_bench_qcow_random_read(control: &PerformanceTestControl) -> f64 {
 
     let indices = deterministic_permutation(num_ops);
 
-    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
-    let iovec = read_iovec(&mut buf);
+    let buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
 
     let start = Instant::now();
     for (seq, &cluster_idx) in indices.iter().enumerate() {
         async_io
             .read_vectored(
                 (cluster_idx as u64 * QCOW_CLUSTER_SIZE) as libc::off_t,
-                buf,
+                IoBuf::from(buf.clone()),
                 seq as u64,
             )
             .expect("read_vectored failed");
@@ -124,12 +122,9 @@ pub fn micro_bench_qcow_write(control: &PerformanceTestControl) -> f64 {
     let (_tmp, disk) = util::empty_qcow_tempfile(num_ops);
     let mut async_io = disk.new_async_io(1).expect("new_async_io failed");
 
-    let buf = vec![0xA5u8; QCOW_CLUSTER_SIZE as usize];
-    let iovec = write_iovec(&buf);
-
     let start = Instant::now();
     let buf = vec![0xA5u8; BLOCK_SIZE as usize];
-    submit_writes(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, buf);
+    submit_writes(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &buf);
     let elapsed = start.elapsed().as_secs_f64();
 
     // Drain completions so Drop is clean.
@@ -179,12 +174,7 @@ pub fn micro_bench_qcow_fsync(control: &PerformanceTestControl) -> f64 {
 
     // Write num_ops clusters to dirty L2 and refcount metadata.
     let buf = vec![0xA5u8; QCOW_CLUSTER_SIZE as usize];
-    submit_writes(
-        async_io.as_mut(),
-        num_ops,
-        QCOW_CLUSTER_SIZE,
-        HostIovecs::new(vec![buf]),
-    );
+    submit_writes(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &buf);
     // Drain write completions.
     drain_completions(async_io.as_mut(), num_ops);
 
@@ -211,8 +201,7 @@ pub fn micro_bench_qcow_backing_read(control: &PerformanceTestControl) -> f64 {
     let (_backing, _overlay, disk) = util::qcow_overlay_tempfile(num_ops);
     let mut async_io = disk.new_async_io(1).expect("new_async_io failed");
 
-    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
-    let iovec = read_iovec(&mut buf);
+    let buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
 
     let start = Instant::now();
     submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, buf);
@@ -238,11 +227,10 @@ pub fn micro_bench_qcow_cow_write(control: &PerformanceTestControl) -> f64 {
     let mut async_io = disk.new_async_io(1).expect("new_async_io failed");
 
     let buf = vec![0xBBu8; QCOW_CLUSTER_SIZE as usize];
-    let iovec = write_iovec(&buf);
 
     let start = Instant::now();
 
-    submit_writes(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, buf);
+    submit_writes(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &buf);
     let elapsed = start.elapsed().as_secs_f64();
 
     drain_completions(async_io.as_mut(), num_ops);
@@ -262,8 +250,7 @@ pub fn micro_bench_qcow_compressed_read(control: &PerformanceTestControl) -> f64
     let (_tmp, disk) = util::compressed_qcow_tempfile(num_ops);
     let mut async_io = disk.new_async_io(1).expect("new_async_io failed");
 
-    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
-    let iovec = read_iovec(&mut buf);
+    let buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
 
     let start = Instant::now();
     submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, buf);
@@ -291,8 +278,7 @@ pub fn micro_bench_qcow_multi_cluster_read(control: &PerformanceTestControl) -> 
     let mut async_io = disk.new_async_io(1).expect("new_async_io failed");
 
     let read_size = CLUSTERS_PER_READ * QCOW_CLUSTER_SIZE as usize;
-    let mut buf = vec![0u8; read_size];
-    let iovec = read_iovec(&mut buf);
+    let buf = vec![0u8; read_size];
 
     let num_reads = num_ops / CLUSTERS_PER_READ;
     let start = Instant::now();
@@ -318,8 +304,7 @@ pub fn micro_bench_qcow_l2_cache_miss(control: &PerformanceTestControl) -> f64 {
     let (_tmp, disk) = util::sparse_qcow_tempfile(num_ops);
     let mut async_io = disk.new_async_io(1).expect("new_async_io failed");
 
-    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
-    let iovec = read_iovec(&mut buf);
+    let buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
 
     let stride = L2_ENTRIES_PER_TABLE as u64 * QCOW_CLUSTER_SIZE;
     let start = Instant::now();
@@ -346,8 +331,7 @@ pub fn micro_bench_qcow_async_read(control: &PerformanceTestControl) -> f64 {
         .new_async_io(num_ops as u32)
         .expect("new_async_io failed");
 
-    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
-    let iovec = read_iovec(&mut buf);
+    let buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
 
     let start = Instant::now();
     submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, buf);
@@ -401,15 +385,14 @@ pub fn micro_bench_qcow_async_random_read(control: &PerformanceTestControl) -> f
 
     let indices = deterministic_permutation(num_ops);
 
-    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
-    let iovec = read_iovec(&mut buf);
+    let buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
 
     let start = Instant::now();
     for (seq, &cluster_idx) in indices.iter().enumerate() {
         async_io
             .read_vectored(
                 (cluster_idx as u64 * QCOW_CLUSTER_SIZE) as libc::off_t,
-                buf.into(),
+                buf.clone().into(),
                 seq as u64,
             )
             .expect("read_vectored failed");
@@ -436,8 +419,7 @@ pub fn micro_bench_qcow_async_multi_cluster_read(control: &PerformanceTestContro
         .expect("new_async_io failed");
 
     let read_size = CLUSTERS_PER_READ * QCOW_CLUSTER_SIZE as usize;
-    let mut buf = vec![0u8; read_size];
-    let iovec = read_iovec(&mut buf);
+    let buf = vec![0u8; read_size];
 
     let num_reads = num_ops / CLUSTERS_PER_READ;
     let start = Instant::now();
@@ -461,8 +443,7 @@ pub fn micro_bench_qcow_async_backing_read(control: &PerformanceTestControl) -> 
         .new_async_io(num_ops as u32)
         .expect("new_async_io failed");
 
-    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
-    let iovec = read_iovec(&mut buf);
+    let buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
 
     let start = Instant::now();
     submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, buf);
@@ -483,8 +464,7 @@ pub fn micro_bench_qcow_async_compressed_read(control: &PerformanceTestControl) 
         .new_async_io(num_ops as u32)
         .expect("new_async_io failed");
 
-    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
-    let iovec = read_iovec(&mut buf);
+    let buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
 
     let start = Instant::now();
     submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, buf);
@@ -509,11 +489,10 @@ pub fn micro_bench_qcow_async_write(control: &PerformanceTestControl) -> f64 {
         .expect("new_async_io failed");
 
     let buf = vec![0xA5u8; QCOW_CLUSTER_SIZE as usize];
-    let iovec = write_iovec(&buf);
 
     let start = Instant::now();
 
-    submit_writes(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, buf);
+    submit_writes(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &buf);
     drain_async_completions(async_io.as_mut(), num_ops);
     start.elapsed().as_secs_f64()
 }
@@ -529,8 +508,7 @@ pub fn micro_bench_qcow_async_l2_cache_miss(control: &PerformanceTestControl) ->
         .new_async_io(num_ops as u32)
         .expect("new_async_io failed");
 
-    let mut buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
-    let iovec = read_iovec(&mut buf);
+    let buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
 
     let stride = L2_ENTRIES_PER_TABLE as u64 * QCOW_CLUSTER_SIZE;
     let start = Instant::now();
