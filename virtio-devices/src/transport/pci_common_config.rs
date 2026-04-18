@@ -160,6 +160,19 @@ impl VirtioPciCommonConfig {
         }
     }
 
+    /// Returns the common configuration to its power-on state. Per the virtio
+    /// spec a device reset must restore the values that a fresh driver would
+    /// observe.
+    pub fn reset(&mut self) {
+        self.driver_status.store(0, Ordering::Release);
+        self.device_feature_select = 0;
+        self.driver_feature_select = 0;
+        self.queue_select = 0;
+        self.msix_config
+            .store(VIRTQ_MSI_NO_VECTOR, Ordering::Release);
+        self.msix_queues.lock().unwrap().fill(VIRTQ_MSI_NO_VECTOR);
+    }
+
     pub fn read(&mut self, offset: u64, data: &mut [u8], queues: &[Queue]) {
         assert!(data.len() <= 8);
 
@@ -520,5 +533,39 @@ mod unit_tests {
 
         // Write queue_msix_vector — must not panic.
         regs.write(0x1a, &[0xAB, 0xCD], &mut queues);
+    }
+
+    #[test]
+    fn reset_returns_initial_state() {
+        let dev: Arc<Mutex<dyn VirtioDevice>> = Arc::new(Mutex::new(DummyDevice(0)));
+        let mut regs = VirtioPciCommonConfig {
+            device: dev,
+            driver_status: Arc::new(AtomicU8::new(0x55)),
+            config_generation: 0xab,
+            device_feature_select: 1,
+            driver_feature_select: 1,
+            queue_select: 7,
+            msix_config: Arc::new(AtomicU16::new(3)),
+            msix_queues: Arc::new(Mutex::new(vec![1, 2, 3])),
+        };
+
+        regs.reset();
+
+        assert_eq!(regs.driver_status.load(Ordering::Acquire), 0);
+        assert_eq!(regs.config_generation, 0xab); // unchanged across reset
+        assert_eq!(regs.device_feature_select, 0);
+        assert_eq!(regs.driver_feature_select, 0);
+        assert_eq!(regs.queue_select, 0);
+        assert_eq!(
+            regs.msix_config.load(Ordering::Acquire),
+            VIRTQ_MSI_NO_VECTOR
+        );
+        assert!(
+            regs.msix_queues
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|v| *v == VIRTQ_MSI_NO_VECTOR)
+        );
     }
 }

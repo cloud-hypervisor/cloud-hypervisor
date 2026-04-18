@@ -1245,24 +1245,20 @@ impl PciDevice for VirtioPciDevice {
             return Some(barrier);
         }
 
-        // Device has been reset by the driver
-        if self.device_activated.load(Ordering::SeqCst) && self.is_driver_init() {
-            let mut device = self.device.lock().unwrap();
-            if let Some(virtio_interrupt) = device.reset() {
-                // Upon reset the device returns its interrupt EventFD
-                self.virtio_interrupt = Some(virtio_interrupt);
-                self.device_activated.store(false, Ordering::SeqCst);
-
-                // Reset queue readiness (changes queue_enable), queue sizes
-                // and selected_queue as per spec for reset
-                self.queues.iter_mut().for_each(Queue::reset);
-                self.common_config.queue_select = 0;
-            } else {
-                error!("Attempt to reset device when not implemented in underlying device");
-                self.common_config
-                    .driver_status
-                    .store(crate::DEVICE_FAILED as u8, Ordering::SeqCst);
+        // The driver requested a reset by writing 0 to device_status. Per the
+        // virtio spec this is permitted at any point in initialisation.
+        if self.is_driver_init() {
+            if self.device_activated.swap(false, Ordering::SeqCst) {
+                let mut device = self.device.lock().unwrap();
+                if let Some(virtio_interrupt) = device.reset() {
+                    // Upon reset the device returns its interrupt EventFD
+                    self.virtio_interrupt = Some(virtio_interrupt);
+                }
             }
+
+            // Reset queue readiness and the common configuration
+            self.queues.iter_mut().for_each(Queue::reset);
+            self.common_config.reset();
         }
 
         None
