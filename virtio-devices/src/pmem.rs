@@ -115,7 +115,7 @@ impl Request {
             return Err(Error::UnexpectedWriteOnlyDescriptor);
         }
 
-        if desc.len() as usize != size_of::<VirtioPmemReq>() {
+        if (desc.len() as usize) < size_of::<VirtioPmemReq>() {
             return Err(Error::InvalidRequest);
         }
 
