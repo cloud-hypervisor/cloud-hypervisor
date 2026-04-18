@@ -12,7 +12,7 @@ use std::{io, result};
 
 use anyhow::anyhow;
 use event_monitor::event;
-use log::{error, info};
+use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -39,12 +39,6 @@ const QUEUE_AVAIL_EVENT: u16 = EPOLL_HELPER_EVENT_LAST + 1;
 
 #[derive(Error, Debug)]
 enum Error {
-    #[error("Descriptor chain too short")]
-    DescriptorChainTooShort,
-    #[error("Invalid descriptor")]
-    InvalidDescriptor,
-    #[error("Failed to write to guest memory")]
-    GuestMemoryWrite(#[source] vm_memory::guest_memory::Error),
     #[error("Failed adding used index")]
     QueueAddUsed(#[source] virtio_queue::Error),
 }
@@ -66,29 +60,50 @@ impl RngEpollHandler {
 
         let mut used_descs = false;
         while let Some(mut desc_chain) = queue.pop_descriptor_chain(self.mem.memory()) {
-            let desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
-
-            // The descriptor must be write-only and non-zero length
-            if !(desc.is_write_only() && desc.len() > 0) {
-                return Err(Error::InvalidDescriptor);
-            }
-
-            // Fill the read with data from the random device on the host.
-            let len = desc_chain
-                .memory()
-                .read_volatile_from(
-                    desc.addr()
-                        .translate_gva(self.access_platform.as_deref(), desc.len() as usize)
-                        .map_err(|e| {
-                            Error::GuestMemoryWrite(vm_memory::GuestMemoryError::IOError(e))
-                        })?,
+            // virtio-rng has no status byte; on any error along the chain
+            // report a used length of 0 to indicate failure.
+            let mut total_len: usize = 0;
+            while let Some(desc) = desc_chain.next() {
+                if !desc.is_write_only() || desc.len() == 0 {
+                    warn!(
+                        "Skipping descriptor with write_only={} len={}",
+                        desc.is_write_only(),
+                        desc.len()
+                    );
+                    total_len = 0;
+                    break;
+                }
+                let addr = match desc
+                    .addr()
+                    .translate_gva(self.access_platform.as_deref(), desc.len() as usize)
+                {
+                    Ok(a) => a,
+                    Err(e) => {
+                        warn!("Failed to translate descriptor address: {e}");
+                        total_len = 0;
+                        break;
+                    }
+                };
+                match desc_chain.memory().read_volatile_from(
+                    addr,
                     &mut self.random_file,
                     desc.len() as usize,
-                )
-                .map_err(Error::GuestMemoryWrite)?;
+                ) {
+                    Ok(written) => total_len += written,
+                    Err(e) => {
+                        warn!("Failed to read entropy into descriptor: {e}");
+                        total_len = 0;
+                        break;
+                    }
+                }
+            }
 
             queue
-                .add_used(desc_chain.memory(), desc_chain.head_index(), len as u32)
+                .add_used(
+                    desc_chain.memory(),
+                    desc_chain.head_index(),
+                    total_len as u32,
+                )
                 .map_err(Error::QueueAddUsed)?;
             used_descs = true;
         }
