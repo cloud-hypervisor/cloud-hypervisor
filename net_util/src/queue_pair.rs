@@ -97,7 +97,7 @@ impl TxVirtio {
                 next_desc = desc_chain.next();
             }
 
-            let len = if iovecs.is_empty() {
+            let bytes_sent = if iovecs.is_empty() {
                 0
             } else {
                 // SAFETY: FFI call with correct arguments
@@ -129,7 +129,7 @@ impl TxVirtio {
                 self.counter_bytes += Wrapping(result as u64 - vnet_hdr_len() as u64);
                 self.counter_frames += Wrapping(1);
 
-                result as u32
+                result as u64
             };
 
             // For the sake of simplicity (similar to the RX rate limiting), we always
@@ -137,11 +137,14 @@ impl TxVirtio {
             // limit, and simply stop processing oncoming `avail_desc` if any.
             if let Some(rate_limiter) = rate_limiter {
                 rate_limit_reached = !rate_limiter.consume(1, TokenType::Ops)
-                    || !rate_limiter.consume(len as u64, TokenType::Bytes);
+                    || !rate_limiter.consume(bytes_sent, TokenType::Bytes);
             }
 
+            // TX descriptors are device-readable only; the device wrote
+            // nothing back to guest memory, so per the virtio spec the used
+            // length is 0.
             queue
-                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
+                .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
                 .map_err(NetQueuePairError::QueueAddUsed)?;
 
             if !queue
