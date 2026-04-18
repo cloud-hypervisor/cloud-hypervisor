@@ -4942,7 +4942,7 @@ impl DeviceManager {
                 // rather than MmioRegion start addresses because move_bar()
                 // updates the device's region addresses but not the
                 // DeviceManager's cloned copies.
-                let device_regions = vfio_pci_device.lock().unwrap().mmio_regions().clone();
+                let device_regions = vfio_pci_device.lock().unwrap().mmio_regions();
                 let mut mmio_regions = self.mmio_regions.lock().unwrap();
                 for device_region in &device_regions {
                     mmio_regions.retain(|x| !x.has_matching_slots(device_region));
@@ -5848,6 +5848,11 @@ impl BusDevice for DeviceManager {
 
 impl Drop for DeviceManager {
     fn drop(&mut self) {
+        // Explicitly clear the regions owned by this device to ensure
+        // that they are dropped and unmapped before the container is cleared.
+        // See eject_device() for the device hot-unplug equivalent.
+        self.mmio_regions.lock().unwrap().clear();
+
         // Wake up the DeviceManager threads (mainly virtio device workers),
         // to avoid deadlock on waiting for paused/parked worker threads.
         if let Err(e) = self.resume() {
