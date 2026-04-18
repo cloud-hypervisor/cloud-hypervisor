@@ -113,10 +113,11 @@ pub use kvm_bindings::{
 };
 #[cfg(target_arch = "aarch64")]
 use kvm_bindings::{
-    KVM_GUESTDBG_USE_HW, KVM_NR_SPSR, KVM_REG_ARM_CORE, KVM_REG_ARM64, KVM_REG_ARM64_SYSREG,
-    KVM_REG_ARM64_SYSREG_CRM_MASK, KVM_REG_ARM64_SYSREG_CRN_MASK, KVM_REG_ARM64_SYSREG_OP0_MASK,
-    KVM_REG_ARM64_SYSREG_OP1_MASK, KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_SIZE_U32,
-    KVM_REG_SIZE_U64, KVM_REG_SIZE_U128, kvm_regs, user_pt_regs,
+    KVM_GUESTDBG_USE_HW, KVM_NR_SPSR, KVM_REG_ARM_CORE, KVM_REG_ARM64, KVM_REG_ARM64_SVE,
+    KVM_REG_ARM64_SVE_ZREG_BASE, KVM_REG_ARM64_SYSREG, KVM_REG_ARM64_SYSREG_CRM_MASK,
+    KVM_REG_ARM64_SYSREG_CRN_MASK, KVM_REG_ARM64_SYSREG_OP0_MASK, KVM_REG_ARM64_SYSREG_OP1_MASK,
+    KVM_REG_ARM64_SYSREG_OP2_MASK, KVM_REG_SIZE_U32, KVM_REG_SIZE_U64, KVM_REG_SIZE_U128,
+    KVM_REG_SIZE_U2048, kvm_regs, user_pt_regs,
 };
 #[cfg(target_arch = "riscv64")]
 use kvm_bindings::{KVM_REG_RISCV_CORE, kvm_riscv_core};
@@ -1704,6 +1705,21 @@ pub struct KvmVcpu {
     vm_fd: Arc<VmFd>,
 }
 
+// Compute the KVM register ID for SVE Z register `n` (slice 0).
+// Per arch/arm64/include/uapi/asm/kvm.h:
+//   KVM_REG_ARM64_SVE_ZREG(n, i) = KVM_REG_ARM64 | KVM_REG_ARM64_SVE |
+//                                  KVM_REG_ARM64_SVE_ZREG_BASE |
+//                                  KVM_REG_SIZE_U2048 | ((n & 0x1f) << 5) |
+//                                  (i & 0x1f)
+#[cfg(target_arch = "aarch64")]
+fn sve_zreg_id(n: u32) -> u64 {
+    KVM_REG_ARM64 as u64
+        | u64::from(KVM_REG_ARM64_SVE)
+        | u64::from(KVM_REG_ARM64_SVE_ZREG_BASE)
+        | KVM_REG_SIZE_U2048
+        | (u64::from(n & 0x1f) << 5)
+}
+
 /// Implementation of Vcpu trait for KVM
 ///
 /// # Examples
@@ -1820,12 +1836,29 @@ impl cpu::Vcpu for KvmVcpu {
 
         // Now moving on to floating point registers which are stored in the user_fpsimd_state in the kernel:
         // https://elixir.bootlin.com/linux/v4.9.62/source/arch/arm64/include/uapi/asm/kvm.h#L53
+        //
+        // NOTE: When the vcpu is configured with SVE, the kernel refuses to
+        // access the FPSIMD V-registers via KVM_REG_ARM_CORE (returns -EINVAL)
+        // and requires using KVM_REG_ARM64_SVE_ZREG instead. The vregs alias
+        // the low 128 bits of the SVE Z registers, so on EINVAL fall back to
+        // reading the low 128 bits of the corresponding SVE Z register.
         let mut off = offset_of!(kvm_regs, fp_regs.vregs);
         for i in 0..32 {
             let mut bytes = [0_u8; 16];
-            self.fd
+            match self
+                .fd
                 .get_one_reg(arm64_core_reg_id!(KVM_REG_SIZE_U128, off), &mut bytes)
-                .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
+            {
+                Ok(_) => {}
+                Err(e) if e.errno() == libc::EINVAL => {
+                    let mut sve_buf = vec![0u8; 256];
+                    self.fd
+                        .get_one_reg(sve_zreg_id(i as u32), &mut sve_buf)
+                        .map_err(|e| cpu::HypervisorCpuError::GetAarchCoreRegister(e.into()))?;
+                    bytes.copy_from_slice(&sve_buf[..16]);
+                }
+                Err(e) => return Err(cpu::HypervisorCpuError::GetAarchCoreRegister(e.into())),
+            }
             state.fp_regs.vregs[i] = u128::from_le_bytes(bytes);
             off += mem::size_of::<u128>();
         }
@@ -1998,14 +2031,27 @@ impl cpu::Vcpu for KvmVcpu {
             off += std::mem::size_of::<u64>();
         }
 
+        // See the matching comment in get_regs(): on SVE-enabled vcpus, the
+        // kernel rejects KVM_REG_ARM_CORE access to fp_regs.vregs with
+        // -EINVAL. Fall back to writing the low 128 bits of the corresponding
+        // SVE Z register (leaving the upper bits zero).
         let mut off = offset_of!(kvm_regs, fp_regs.vregs);
         for i in 0..32 {
-            self.fd
-                .set_one_reg(
-                    arm64_core_reg_id!(KVM_REG_SIZE_U128, off),
-                    &kvm_regs_state.fp_regs.vregs[i].to_le_bytes(),
-                )
-                .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
+            let res = self.fd.set_one_reg(
+                arm64_core_reg_id!(KVM_REG_SIZE_U128, off),
+                &kvm_regs_state.fp_regs.vregs[i].to_le_bytes(),
+            );
+            match res {
+                Ok(_) => {}
+                Err(e) if e.errno() == libc::EINVAL => {
+                    let mut sve_buf = vec![0u8; 256];
+                    sve_buf[..16].copy_from_slice(&kvm_regs_state.fp_regs.vregs[i].to_le_bytes());
+                    self.fd
+                        .set_one_reg(sve_zreg_id(i as u32), &sve_buf)
+                        .map_err(|e| cpu::HypervisorCpuError::SetAarchCoreRegister(e.into()))?;
+                }
+                Err(e) => return Err(cpu::HypervisorCpuError::SetAarchCoreRegister(e.into())),
+            }
             off += mem::size_of::<u128>();
         }
 

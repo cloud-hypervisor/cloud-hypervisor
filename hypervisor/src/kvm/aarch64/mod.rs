@@ -69,14 +69,14 @@ pub fn is_system_register(regid: u64) -> bool {
         return false;
     }
 
+    // System registers fetched through the generic KVM_GET_REG_LIST path are
+    // always U32 or U64. Other register sizes (e.g. the U2048-sized SVE Z
+    // registers, the U256-sized SVE P registers, the U512-sized SVE VLS
+    // pseudo-register, etc.) are not "system registers" for the purposes of
+    // our save/restore machinery; treat them as non-system so they are
+    // filtered out of the system-register list rather than causing a panic.
     let size = regid & KVM_REG_SIZE_MASK;
-
-    assert!(
-        !(size != KVM_REG_SIZE_U32 && size != KVM_REG_SIZE_U64),
-        "Unexpected register size for system register {size}"
-    );
-
-    true
+    size == KVM_REG_SIZE_U32 || size == KVM_REG_SIZE_U64
 }
 
 pub fn check_required_kvm_extensions(kvm: &Kvm) -> KvmResult<()> {
