@@ -174,12 +174,10 @@ impl CtrlQueue {
                         .map_err(|e| Error::GuestMemory(GuestMemoryError::IOError(e)))?,
                 )
                 .map_err(Error::GuestMemory)?;
-            // Per virtio spec 2.6.8, used_len is the number of bytes written
-            // to device-writable descriptors. Only the status byte is written.
-            let len = status_desc.len();
-
+            // Per the virtio spec the used length is bytes the device wrote
+            // to device-writable descriptors; here just the 1-byte ack.
             queue
-                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
+                .add_used(desc_chain.memory(), desc_chain.head_index(), 1)
                 .map_err(Error::QueueAddUsed)?;
 
             if !queue
