@@ -859,6 +859,7 @@ impl PlatformConfig {
             .add("serial_number")
             .add("uuid")
             .add("oem_strings")
+            .add("oem_string_files")
             .add("iommufd")
             .add("vfio_p2p_dma");
         #[cfg(feature = "tdx")]
@@ -885,6 +886,10 @@ impl PlatformConfig {
         let uuid = parser.convert("uuid").map_err(Error::ParsePlatform)?;
         let oem_strings = parser
             .convert::<StringList>("oem_strings")
+            .map_err(Error::ParsePlatform)?
+            .map(|v| v.0);
+        let oem_string_files = parser
+            .convert::<StringList>("oem_string_files")
             .map_err(Error::ParsePlatform)?
             .map(|v| v.0);
         let iommufd = parser
@@ -916,6 +921,7 @@ impl PlatformConfig {
             serial_number,
             uuid,
             oem_strings,
+            oem_string_files,
             iommufd,
             vfio_p2p_dma,
             #[cfg(feature = "tdx")]
@@ -4876,6 +4882,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             serial_number: None,
             uuid: None,
             oem_strings: None,
+            oem_string_files: None,
             iommufd: false,
             vfio_p2p_dma: default_platformconfig_vfio_p2p_dma(),
             #[cfg(feature = "tdx")]
