@@ -293,7 +293,7 @@ impl Request {
         if desc.is_write_only() {
             return Err(Error::UnexpectedWriteOnlyDescriptor);
         }
-        if desc.len() as usize != size_of::<VirtioMemReq>() {
+        if (desc.len() as usize) < size_of::<VirtioMemReq>() {
             return Err(Error::InvalidRequest);
         }
         let req: VirtioMemReq = desc_chain
