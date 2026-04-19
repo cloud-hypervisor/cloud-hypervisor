@@ -99,118 +99,31 @@ impl GuestIovecs {
 // SAFETY: The DescChain keeps the iovec pointers valid.
 unsafe impl Send for GuestIovecs {}
 
-pub use host_iovecs::HostIovecs;
+#[derive(Clone)]
+pub struct HostIovecs {
+    // This only keeps the pointers alive.
+    #[allow(dead_code)]
+    data: Vec<Vec<u8>>,
+    iovecs: Vec<iovec>,
+}
 
-// This is very fragile unsafe code.
-// Do not modify it if you do not need to.
-mod host_iovecs {
-    use std::mem::{self, ManuallyDrop};
-
-    pub struct HostIovecs {
-        // This only keeps the pointers alive.
-        iovecs_ptr: *mut libc::iovec,
-        iovecs_capacity: usize,
-        capacities: Vec<usize>,
-    }
-
-    // SAFETY: we own the pointers in the iovec
-    unsafe impl Send for HostIovecs {}
-
-    impl HostIovecs {
-        pub fn iovecs(&self) -> &[libc::iovec] {
-            // SAFETY: pointer and length are valid
-            unsafe { std::slice::from_raw_parts(self.iovecs_ptr, self.capacities.len()) }
-        }
-
-        pub fn new(mut data: Vec<Vec<u8>>) -> Self {
-            let len = data.len();
-            let mut capacities = Vec::<usize>::with_capacity(len);
-            // Ensure that this does not get freed.  The memory will be
-            // reclaimed on Drop.
-            let mut iovecs = ManuallyDrop::new(Vec::<libc::iovec>::with_capacity(len));
-            let capacities_ptr = capacities.as_mut_ptr();
-            let iovecs_ptr = iovecs.as_mut_ptr();
-            for (offset, vec) in data.iter_mut().enumerate() {
-                // Overwrite the existing vectors with empty ones
-                // so that their Drop impl becomes a no-op.  Otherwise
-                // it would free the data the iovecs point to.
-                let mut vec = ManuallyDrop::new(mem::take(vec));
-
-                // SAFETY: iovecs was allocated with data.len() entries,
-                // so iovecs.add(offset) is inside its capacity.
-                unsafe {
-                    iovecs_ptr.add(offset).write(libc::iovec {
-                        iov_base: vec.as_mut_ptr().cast(),
-                        iov_len: vec.len(),
-                    });
-                }
-
-                // SAFETY: capacities was allocated with data.len() entries,
-                // so capacities_ptr.add(offset) is inside its capacity.
-                unsafe { capacities_ptr.add(offset).write(vec.capacity()) };
-            }
-            // SAFETY: all data.len() entries of the vector was initialized.
-            unsafe {
-                capacities.set_len(len);
-            }
-            Self {
-                iovecs_ptr,
-                iovecs_capacity: iovecs.capacity(),
-                capacities,
-            }
-        }
-
-        #[cfg(test)] // only use by tests
-        pub fn get_vecs(self) -> Vec<Vec<u8>> {
-            use std::mem;
-
-            let mut rsp_vec = Vec::with_capacity(self.capacities.len());
-            let mut this = mem::ManuallyDrop::new(self);
-            let capacities = mem::take(&mut this.capacities);
-            for (index, &capacity) in capacities.iter().enumerate() {
-                // SAFETY: Pointer is valid and index is in-bounds.
-                let iovec = unsafe { this.iovecs_ptr.add(index).read() };
-                // Create the vec and then drop it.
-                // SAFETY: the base pointer, length, and capacity were
-                // obtained from vec.as_mut_ptr(), vec.len(), and vec.capacity() on a valid vector.
-                rsp_vec.push(unsafe {
-                    Vec::from_raw_parts(iovec.iov_base.cast(), iovec.iov_len, capacity)
-                });
-            }
-            // Drop the iovecs themselves.
-            // SAFETY: iovecs_ptr and iovecs_capacity were set correctly by
-            // the constructor, which obtains them via Vec::into_raw().
-            // The length is set from Vec::len() on the same vector.
-            unsafe {
-                Vec::from_raw_parts(this.iovecs_ptr, this.capacities.len(), this.iovecs_capacity)
-            };
-            rsp_vec
-        }
-    }
-
-    impl Drop for HostIovecs {
-        fn drop(&mut self) {
-            // Drop all the iovec's backing storage.
-            for index in 0..self.capacities.len() {
-                // SAFETY: Pointer is valid and index is in-bounds.
-                let iovec = unsafe { self.iovecs_ptr.add(index).read() };
-                // Create the vec and then drop it.
-                // SAFETY: the base pointer, length, and capacity were
-                // obtained from vec.as_mut_ptr(), vec.len(), and vec.capacity() on a valid vector.
-                unsafe {
-                    Vec::from_raw_parts(iovec.iov_base, iovec.iov_len, self.capacities[index])
-                };
-            }
-            // Drop the iovecs themselves.
-            // SAFETY: iovecs_ptr and iovecs_capacity were set correctly by
-            // the constructor, which obtains them via Vec::into_raw().
-            // The length is set from Vec::len() on the same vector.
-            unsafe {
-                Vec::from_raw_parts(self.iovecs_ptr, self.capacities.len(), self.iovecs_capacity)
-            };
+impl HostIovecs {
+    pub fn new(mut data: Vec<Vec<u8>>) -> Self {
+        Self {
+            iovecs: data
+                .iter_mut()
+                .map(|v| iovec {
+                    iov_base: v.as_mut_ptr().cast(),
+                    iov_len: v.len(),
+                })
+                .collect(),
+            data,
         }
     }
 }
+
+// SAFETY: we own the pointers in the iovec
+unsafe impl Send for HostIovecs {}
 
 /// I/O buffer.
 pub enum IoBuf {
@@ -232,6 +145,12 @@ impl IoBuf {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+impl HostIovecs {
+    pub fn get_vecs(self) -> Vec<Vec<u8>> {
+        self.data
     }
 }
 
@@ -266,7 +185,7 @@ impl IoBuf {
     pub fn iovecs(&self) -> &[iovec] {
         match self {
             Self::Guest(guest) => guest.iovecs(),
-            Self::Host(host) => host.iovecs(),
+            Self::Host(host) => &host.iovecs,
         }
     }
 }
