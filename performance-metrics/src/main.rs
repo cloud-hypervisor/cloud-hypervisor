@@ -17,7 +17,7 @@ use std::{env, fmt, thread};
 use clap::{Arg, ArgAction, Command as ClapCommand};
 use performance_tests::*;
 use serde::{Deserialize, Serialize};
-use test_infra::FioOps;
+use test_infra::{FioOps, ProcessRegistry};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -1719,45 +1719,44 @@ fn run_test_with_timeout(
     let test_iterations = overrides.test_iterations;
     let test_timeout = overrides.test_timeout;
     let overrides = overrides.clone();
-    thread::spawn(move || {
-        println!(
-            "Test '{}' running .. (control: {}, overrides: {})",
-            test.name, test.control, overrides
-        );
+    thread::Builder::new()
+        .name(test.name.into())
+        .spawn(move || {
+            println!(
+                "Test '{}' running .. (control: {}, overrides: {})",
+                test.name, test.control, overrides
+            );
 
-        let output = match std::panic::catch_unwind(|| test.run(&overrides)) {
-            Ok(test_result) => {
-                println!(
-                    "Test '{}' .. ok: mean = {}, std_dev = {}",
-                    test_result.name, test_result.mean, test_result.std_dev
-                );
-                Ok(test_result)
-            }
-            Err(_) => Err(Error::TestFailed),
-        };
+            let output = match std::panic::catch_unwind(|| test.run(&overrides)) {
+                Ok(test_result) => {
+                    println!(
+                        "Test '{}' .. ok: mean = {}, std_dev = {}",
+                        test_result.name, test_result.mean, test_result.std_dev
+                    );
+                    Ok(test_result)
+                }
+                Err(_) => Err(Error::TestFailed),
+            };
 
-        let _ = sender.send(output);
-    });
+            let _ = sender.send(output);
+        })
+        .unwrap();
 
     let test_timeout = test.calc_timeout(&test_iterations, &test_timeout);
-    receiver
+    let result = receiver
         .recv_timeout(Duration::from_secs(test_timeout))
         .map_err(|_| {
             eprintln!(
                 "[Error] Test '{}' time-out after {} seconds",
                 test.name, test_timeout
             );
-            cleanup_stale_processes();
             Error::TestTimeout
-        })?
-}
+        })
+        .and_then(|r| r);
 
-fn cleanup_stale_processes() {
-    // "cloud-hyperviso" - process name truncated to 15 chars by the kernel
-    for proc in &["cloud-hyperviso", "iperf3", "ethr"] {
-        let _ = Command::new("pkill").args(["-9", proc]).status();
-    }
-    thread::sleep(Duration::from_secs(2));
+    ProcessRegistry::cleanup(test.name);
+
+    result
 }
 
 fn settle_host() {
@@ -1914,7 +1913,6 @@ fn main() {
                     metrics_report
                         .results
                         .push(PerformanceTestResult::failed(test.name));
-                    cleanup_stale_processes();
                 } else {
                     eprintln!("Aborting test due to error: '{e:?}'");
                     std::process::exit(1);
