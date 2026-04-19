@@ -1904,15 +1904,16 @@ impl<'a> GuestCommand<'a> {
         }
 
         if self.capture_output {
+            self.command.stderr(Stdio::piped()).stdout(Stdio::piped());
+
             // The caller should call .wait() on the returned child
             #[allow(unknown_lints)]
             #[allow(clippy::zombie_processes)]
-            let child = self
-                .command
-                .stderr(Stdio::piped())
-                .stdout(Stdio::piped())
-                .spawn()
-                .unwrap();
+            let child = if let Some(name) = &self.guest.test_name {
+                ProcessRegistry::spawn(name, &mut self.command)?
+            } else {
+                self.command.spawn().unwrap()
+            };
 
             let fd = child.stdout.as_ref().unwrap().as_raw_fd();
             let pipesize = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
@@ -1936,7 +1937,11 @@ impl<'a> GuestCommand<'a> {
             // The caller should call .wait() on the returned child
             #[allow(unknown_lints)]
             #[allow(clippy::zombie_processes)]
-            self.command.spawn()
+            if let Some(name) = &self.guest.test_name {
+                ProcessRegistry::spawn(name, &mut self.command)
+            } else {
+                self.command.spawn()
+            }
         }
     }
 
@@ -2326,11 +2331,12 @@ pub fn measure_virtio_net_throughput(
         if !bandwidth {
             cmd.args(["-u", "-b", "1T"]);
         }
-        let client = cmd
-            .stderr(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .map_err(Error::Spawn)?;
+        cmd.stderr(Stdio::piped()).stdout(Stdio::piped());
+        let client = if let Some(name) = &guest.test_name {
+            ProcessRegistry::spawn(name, &mut cmd).map_err(Error::Spawn)?
+        } else {
+            cmd.spawn().map_err(Error::Spawn)?
+        };
 
         clients.push(client);
     }
@@ -2425,8 +2431,9 @@ pub fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Ve
         .to_str()
         .unwrap()
         .to_string();
-    let mut c = Command::new(ethr_path)
-        .args([
+    let mut c = {
+        let mut cmd = Command::new(ethr_path);
+        cmd.args([
             "-c",
             &guest.network.guest_ip0,
             "-t",
@@ -2437,9 +2444,13 @@ pub fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Ve
             &format!("{test_timeout}s"),
         ])
         .stderr(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(Error::Spawn)?;
+        .stdout(Stdio::piped());
+        if let Some(name) = &guest.test_name {
+            ProcessRegistry::spawn(name, &mut cmd).map_err(Error::Spawn)?
+        } else {
+            cmd.spawn().map_err(Error::Spawn)?
+        }
+    };
 
     if let Err(e) = child_wait_timeout(&mut c, test_timeout as u64 + 5).map_err(Error::WaitTimeout)
     {
