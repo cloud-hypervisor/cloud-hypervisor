@@ -67,7 +67,7 @@ pub fn micro_bench_qcow_read(control: &PerformanceTestControl) -> f64 {
     let buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
 
     let start = Instant::now();
-    submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, buf);
+    submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &buf);
     let elapsed = start.elapsed().as_secs_f64();
 
     // Drain completions so Drop is clean.
@@ -204,7 +204,7 @@ pub fn micro_bench_qcow_backing_read(control: &PerformanceTestControl) -> f64 {
     let buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
 
     let start = Instant::now();
-    submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, buf);
+    submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &buf);
     let elapsed = start.elapsed().as_secs_f64();
 
     drain_completions(async_io.as_mut(), num_ops);
@@ -253,7 +253,7 @@ pub fn micro_bench_qcow_compressed_read(control: &PerformanceTestControl) -> f64
     let buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
 
     let start = Instant::now();
-    submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, buf);
+    submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &buf);
     let elapsed = start.elapsed().as_secs_f64();
 
     drain_completions(async_io.as_mut(), num_ops);
@@ -282,7 +282,7 @@ pub fn micro_bench_qcow_multi_cluster_read(control: &PerformanceTestControl) -> 
 
     let num_reads = num_ops / CLUSTERS_PER_READ;
     let start = Instant::now();
-    submit_reads(async_io.as_mut(), num_reads, read_size as u64, buf);
+    submit_reads(async_io.as_mut(), num_reads, read_size as u64, &buf);
     let elapsed = start.elapsed().as_secs_f64();
 
     drain_completions(async_io.as_mut(), num_reads);
@@ -308,7 +308,7 @@ pub fn micro_bench_qcow_l2_cache_miss(control: &PerformanceTestControl) -> f64 {
 
     let stride = L2_ENTRIES_PER_TABLE as u64 * QCOW_CLUSTER_SIZE;
     let start = Instant::now();
-    submit_reads(async_io.as_mut(), num_ops, stride, buf);
+    submit_reads(async_io.as_mut(), num_ops, stride, &buf);
     let elapsed = start.elapsed().as_secs_f64();
 
     drain_completions(async_io.as_mut(), num_ops);
@@ -334,7 +334,7 @@ pub fn micro_bench_qcow_async_read(control: &PerformanceTestControl) -> f64 {
     let buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
 
     let start = Instant::now();
-    submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, buf);
+    submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &buf);
 
     // Drain all io_uring completions before stopping the clock.
     drain_async_completions(async_io.as_mut(), num_ops);
@@ -423,7 +423,7 @@ pub fn micro_bench_qcow_async_multi_cluster_read(control: &PerformanceTestContro
 
     let num_reads = num_ops / CLUSTERS_PER_READ;
     let start = Instant::now();
-    submit_reads(async_io.as_mut(), num_reads, read_size as u64, buf);
+    submit_reads(async_io.as_mut(), num_reads, read_size as u64, &buf);
 
     drain_async_completions(async_io.as_mut(), num_reads);
     start.elapsed().as_secs_f64()
@@ -446,7 +446,7 @@ pub fn micro_bench_qcow_async_backing_read(control: &PerformanceTestControl) -> 
     let buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
 
     let start = Instant::now();
-    submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, buf);
+    submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &buf);
 
     drain_async_completions(async_io.as_mut(), num_ops);
     start.elapsed().as_secs_f64()
@@ -467,7 +467,7 @@ pub fn micro_bench_qcow_async_compressed_read(control: &PerformanceTestControl) 
     let buf = vec![0u8; QCOW_CLUSTER_SIZE as usize];
 
     let start = Instant::now();
-    submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, buf);
+    submit_reads(async_io.as_mut(), num_ops, QCOW_CLUSTER_SIZE, &buf);
 
     drain_async_completions(async_io.as_mut(), num_ops);
     start.elapsed().as_secs_f64()
@@ -512,7 +512,7 @@ pub fn micro_bench_qcow_async_l2_cache_miss(control: &PerformanceTestControl) ->
 
     let stride = L2_ENTRIES_PER_TABLE as u64 * QCOW_CLUSTER_SIZE;
     let start = Instant::now();
-    submit_reads(async_io.as_mut(), num_ops, stride, buf);
+    submit_reads(async_io.as_mut(), num_ops, stride, &buf);
 
     drain_async_completions(async_io.as_mut(), num_ops);
     start.elapsed().as_secs_f64()

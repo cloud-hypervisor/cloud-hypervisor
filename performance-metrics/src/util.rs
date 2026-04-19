@@ -96,13 +96,12 @@ pub fn deterministic_permutation(n: usize) -> Vec<usize> {
 }
 
 /// Submit `count` sequential read_vectored calls at `stride`-byte intervals.
-pub fn submit_reads(async_io: &mut dyn AsyncIo, count: usize, stride: u64, buf: Vec<u8>) {
-    let iovec = HostIovecs::new(vec![buf]);
+pub fn submit_reads(async_io: &mut dyn AsyncIo, count: usize, stride: u64, buf: &[u8]) {
     for i in 0..count {
         async_io
             .read_vectored(
                 (i as u64 * stride) as libc::off_t,
-                iovec.clone().into(),
+                IoBuf::Host(HostIovecs::new(vec![buf.to_owned()])),
                 i as u64,
             )
             .expect("read_vectored failed");
