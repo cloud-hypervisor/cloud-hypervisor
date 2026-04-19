@@ -5,6 +5,7 @@
 
 #![allow(clippy::undocumented_unsafe_blocks)]
 
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::fs::OpenOptions;
@@ -12,9 +13,11 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use std::{env, fmt, fs, io, thread};
 
@@ -24,6 +27,101 @@ use ssh2::Session;
 use thiserror::Error;
 use vmm_sys_util::tempdir::TempDir;
 use wait_timeout::ChildExt;
+
+// ---------------------------------------------------------------------------
+// Process group registry, one group per test.
+//
+// Every child process spawned during a test is placed into a shared
+// process group.  The first child creates the group via setpgid(0, 0)
+// and subsequent children join via setpgid(0, pgid).  A single
+// killpg(pgid, SIGKILL) tears down all processes when the test ends.
+//
+// The registry maps test name to the group PID, protected by a mutex
+// so that concurrent tests each get their own independent group.
+//
+// Any Command::spawn() in test helpers should go through
+// ProcessRegistry::spawn so the child is automatically tracked.
+// ---------------------------------------------------------------------------
+
+static PROCESS_REGISTRY: LazyLock<Mutex<HashMap<String, u32>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub struct ProcessRegistry;
+
+impl ProcessRegistry {
+    /// Spawn `cmd` in the process group for `test_name`.
+    ///
+    /// The first spawn creates a new group (group PID = child PID).
+    /// Subsequent spawns join the existing group.
+    pub fn spawn(test_name: &str, cmd: &mut Command) -> io::Result<Child> {
+        let pgid = {
+            let mut reg = PROCESS_REGISTRY.lock().unwrap();
+            let stored = reg.get(test_name).copied();
+            // If the stored group no longer has any live processes,
+            // discard it so the next child creates a fresh group.
+            if let Some(id) = stored {
+                let probe = unsafe { libc::killpg(id as i32, 0) };
+                if probe == -1 && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+                    reg.remove(test_name);
+                    None
+                } else {
+                    stored
+                }
+            } else {
+                None
+            }
+        };
+
+        unsafe {
+            cmd.pre_exec(move || {
+                let target = pgid.unwrap_or(0) as libc::pid_t;
+                // Best effort: may fail with EPERM in containers.
+                let _ = libc::setpgid(0, target);
+                Ok(())
+            });
+        }
+
+        let child = cmd.spawn()?;
+
+        if pgid.is_none() {
+            let actual = unsafe { libc::getpgid(child.id() as i32) };
+            if actual == child.id() as i32 {
+                PROCESS_REGISTRY
+                    .lock()
+                    .unwrap()
+                    .insert(test_name.to_string(), child.id());
+            }
+        }
+
+        Ok(child)
+    }
+
+    /// Kill all processes in the group for `test_name` and remove
+    /// the entry.
+    pub fn cleanup(test_name: &str) -> bool {
+        let pgid = PROCESS_REGISTRY.lock().unwrap().remove(test_name);
+
+        if let Some(pgid) = pgid {
+            let ret = unsafe { libc::killpg(pgid as i32, libc::SIGKILL) };
+            if ret == 0 {
+                eprintln!(
+                    "[cleanup] Sent SIGKILL to process group {pgid} \
+                     (test '{test_name}')"
+                );
+                return true;
+            }
+            let err = io::Error::last_os_error();
+            // ESRCH: all processes already exited.
+            if err.raw_os_error() != Some(libc::ESRCH) {
+                eprintln!(
+                    "[cleanup] Failed to kill process group {pgid} \
+                     (test '{test_name}'): {err}"
+                );
+            }
+        }
+        false
+    }
+}
 
 #[derive(Error, Debug)]
 pub enum WaitTimeoutError {
@@ -1046,6 +1144,8 @@ pub struct Guest {
     pub num_cpu: u32,
     pub nested: bool,
     pub mem_size_str: String,
+    /// Test name, set from the current thread name at construction.
+    pub test_name: Option<String>,
 }
 
 // Return the next id that can be used for this guest. This is stored in a
@@ -1118,6 +1218,7 @@ impl Guest {
             num_cpu: 1u32,
             nested: true,
             mem_size_str: "512M".to_string(),
+            test_name: thread::current().name().map(String::from),
         }
     }
 
