@@ -2652,4 +2652,9 @@ mod unit_tests {
         assert!(!is_alive(pid1));
         assert!(!is_alive(pid2));
     }
+
+    #[test]
+    fn process_registry_cleanup_unknown() {
+        assert!(!ProcessRegistry::cleanup("nonexistent"));
+    }
 }
