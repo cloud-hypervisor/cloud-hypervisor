@@ -2604,3 +2604,26 @@ pub mod aarch64 {
 
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::*;
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    fn is_alive(pid: u32) -> bool {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+
+    #[test]
+    fn process_registry_spawn_and_cleanup() {
+        let name = "test_spawn_and_cleanup";
+        let mut cmd = Command::new("sleep");
+        cmd.arg("60");
+        let mut child = ProcessRegistry::spawn(name, &mut cmd).unwrap();
+        let pid = child.id();
+
+        assert!(is_alive(pid));
+        assert!(ProcessRegistry::cleanup(name));
+        let _ = child.wait();
+        assert!(!is_alive(pid));
+    }
+}
