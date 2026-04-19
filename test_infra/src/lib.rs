@@ -2626,4 +2626,30 @@ mod unit_tests {
         let _ = child.wait();
         assert!(!is_alive(pid));
     }
+
+    #[test]
+    fn process_registry_shared_group() {
+        let name = "test_shared_group";
+
+        let mut cmd1 = Command::new("sleep");
+        cmd1.arg("60");
+        let mut child1 = ProcessRegistry::spawn(name, &mut cmd1).unwrap();
+        let pid1 = child1.id();
+
+        let mut cmd2 = Command::new("sleep");
+        cmd2.arg("60");
+        let mut child2 = ProcessRegistry::spawn(name, &mut cmd2).unwrap();
+        let pid2 = child2.id();
+
+        let pgid1 = unsafe { libc::getpgid(pid1 as i32) };
+        let pgid2 = unsafe { libc::getpgid(pid2 as i32) };
+        assert_eq!(pgid1, pgid2);
+        assert_eq!(pgid1, pid1 as i32);
+
+        assert!(ProcessRegistry::cleanup(name));
+        let _ = child1.wait();
+        let _ = child2.wait();
+        assert!(!is_alive(pid1));
+        assert!(!is_alive(pid2));
+    }
 }
