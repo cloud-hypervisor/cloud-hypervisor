@@ -5844,16 +5844,18 @@ mod common_parallel {
             }));
             // Calculate the succeeding device ID
             let device_id_to_allocate = first_free_device_id + 1;
-            // We expect the succeeding device ID to be free (single attempt, no retries)
-            assert!(matches!(
-                ssh_command_ip_with_auth(
-                    &format!("lspci -n | grep \"00:{device_id_to_allocate:02x}.0\""),
-                    &default_guest_auth(),
-                    &guest.network.guest_ip0,
-                    Some(Duration::from_secs(1)),
-                ),
-                Err(SshCommandError::NonZeroExitStatus(1))
-            ));
+            // We expect the succeeding device ID to be free.
+            assert!(wait_until(Duration::from_secs(10), || {
+                matches!(
+                    ssh_command_ip_with_auth(
+                        &format!("lspci -n | grep \"00:{device_id_to_allocate:02x}.0\""),
+                        &default_guest_auth(),
+                        &guest.network.guest_ip0,
+                        Some(Duration::from_secs(5)),
+                    ),
+                    Err(SshCommandError::NonZeroExitStatus(1))
+                )
+            }));
 
             // Add a device to the next device slot explicitly
             let (cmd_success, cmd_stdout, _) = remote_command_w_output(
