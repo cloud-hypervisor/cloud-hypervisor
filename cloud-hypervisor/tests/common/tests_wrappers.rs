@@ -1060,6 +1060,11 @@ pub(crate) fn _test_virtio_fs(
     });
 
     let (r, hotplug_daemon_child) = if r.is_ok() && hotplug {
+        let _ = daemon_child.kill();
+        let _ = daemon_child.wait();
+        // Remove the stale socket so wait_for_virtiofsd_socket actually waits
+        let _ = std::fs::remove_file(&virtiofsd_socket_path);
+
         let (daemon_child, virtiofsd_socket_path) =
             prepare_daemon(&guest.tmp_dir, shared_dir.to_str().unwrap());
 
