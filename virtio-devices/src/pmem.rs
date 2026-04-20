@@ -191,7 +191,17 @@ impl PmemEpollHandler {
                 Ok(ref req) => {
                     // Currently, there is only one virtio-pmem request, FLUSH.
                     error!("Invalid virtio request type {:?}", req.type_);
-                    0
+                    // The virtio spec requires a status response even on error.
+                    let resp = VirtioPmemResp {
+                        ret: VIRTIO_PMEM_RESP_TYPE_EIO,
+                    };
+                    match desc_chain.memory().write_obj(resp, req.status_addr) {
+                        Ok(()) => size_of::<VirtioPmemResp>() as u32,
+                        Err(e) => {
+                            error!("Bad guest memory address: {e}");
+                            0
+                        }
+                    }
                 }
                 Err(e) => {
                     error!("Failed to parse available descriptor chain: {e:?}");
