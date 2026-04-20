@@ -7,6 +7,11 @@ concurrency:
 jobs:
   build:
     timeout-minutes: 120
+    env:
+      # Our runner has 80 cores (nproc).
+      # We limit parallelism only to avoid exhausting disk space and memory
+      # resources, not to save CPU resources.
+      PARALLEL_INTEGRATION_TESTS_NUM: 25
     name: Tests (ARM64)
     runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'bookworm-arm64' }}
     steps:

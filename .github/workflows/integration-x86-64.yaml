@@ -7,6 +7,11 @@ concurrency:
 jobs:
   build:
     timeout-minutes: 80
+    env:
+      # Our runner has 16 cores (nproc).
+      # We limit parallelism only to avoid exhausting disk space and memory
+      # resources, not to save CPU resources.
+      PARALLEL_INTEGRATION_TESTS_NUM: 12
     strategy:
       fail-fast: false
       matrix:

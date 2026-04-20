@@ -87,7 +87,13 @@ sudo chmod a+rwX /dev/hugepages
 export RUST_BACKTRACE=1
 export RUSTFLAGS="$RUSTFLAGS"
 
-time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "live_migration_parallel::$test_filter" -- ${test_binary_args[*]}
+TEST_THREADS_DEFAULT="$(($(nproc) / 4))"
+if ! [[ "${PARALLEL_INTEGRATION_TESTS_NUM:-}" =~ ^[1-9][0-9]*$ ]]; then
+    PARALLEL_INTEGRATION_TESTS_NUM="${TEST_THREADS_DEFAULT}"
+fi
+echo "nproc:$(nproc), parallel_integration_tests:${PARALLEL_INTEGRATION_TESTS_NUM}"
+
+time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "live_migration_parallel::$test_filter" -- ${test_binary_args[*]}
 
 RES=$?
 
