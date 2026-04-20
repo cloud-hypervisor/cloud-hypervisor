@@ -1129,7 +1129,7 @@ impl VirtioDevice for Block {
                 mem: mem.clone(),
                 disk_image: self
                     .disk_image
-                    .new_async_io(queue_size as u32)
+                    .create_async_io(queue_size as u32)
                     .map_err(|e| {
                         error!("failed to create new AsyncIo: {e}");
                         ActivateError::BadActivate

@@ -95,7 +95,7 @@ impl disk_file::AsyncDiskFile for VhdxDiskSync {
         }))
     }
 
-    fn new_async_io(&self, _ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
+    fn create_async_io(&self, _ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
         Ok(Box::new(VhdxSync::new(Arc::clone(&self.vhdx_file))))
     }
 }

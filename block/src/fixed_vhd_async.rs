@@ -70,7 +70,7 @@ impl disk_file::AsyncDiskFile for FixedVhdDiskAsync {
         Ok(Box::new(FixedVhdDiskAsync(self.0.clone())))
     }
 
-    fn new_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
+    fn create_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
         let size = self
             .0
             .logical_size()

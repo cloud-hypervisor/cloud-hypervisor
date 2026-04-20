@@ -72,7 +72,7 @@ pub trait DiskFile: Send {
     fn logical_size(&mut self) -> DiskFileResult<u64>;
     /// Returns the physical size of the underlying file.
     fn physical_size(&mut self) -> DiskFileResult<u64>;
-    fn new_async_io(&self, ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>>;
+    fn create_async_io(&self, ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>>;
     fn topology(&mut self) -> DiskTopology {
         DiskTopology::default()
     }
