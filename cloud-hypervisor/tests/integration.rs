@@ -5393,9 +5393,20 @@ mod common_parallel {
         kill_child(&mut child2);
 
         let output = child1.wait_with_output().unwrap();
-        child2.wait().unwrap();
+        let output2 = child2.wait_with_output().unwrap();
 
         cleanup_ovs_dpdk();
+
+        if r.is_err() {
+            eprintln!(
+                "\n\n==== Start restored VM stdout ====\n\n{}\n\n==== End restored VM stdout ====",
+                String::from_utf8_lossy(&output2.stdout)
+            );
+            eprintln!(
+                "\n\n==== Start restored VM stderr ====\n\n{}\n\n==== End restored VM stderr ====",
+                String::from_utf8_lossy(&output2.stderr)
+            );
+        }
 
         handle_child_output(r, &output);
     }
