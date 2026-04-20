@@ -5,6 +5,7 @@
 
 #![allow(clippy::undocumented_unsafe_blocks)]
 
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::fs::OpenOptions;
@@ -12,9 +13,11 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::str::FromStr;
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use std::{env, fmt, fs, io, thread};
 
@@ -24,6 +27,101 @@ use ssh2::Session;
 use thiserror::Error;
 use vmm_sys_util::tempdir::TempDir;
 use wait_timeout::ChildExt;
+
+// ---------------------------------------------------------------------------
+// Process group registry, one group per test.
+//
+// Every child process spawned during a test is placed into a shared
+// process group.  The first child creates the group via setpgid(0, 0)
+// and subsequent children join via setpgid(0, pgid).  A single
+// killpg(pgid, SIGKILL) tears down all processes when the test ends.
+//
+// The registry maps test name to the group PID, protected by a mutex
+// so that concurrent tests each get their own independent group.
+//
+// Any Command::spawn() in test helpers should go through
+// ProcessRegistry::spawn so the child is automatically tracked.
+// ---------------------------------------------------------------------------
+
+static PROCESS_REGISTRY: LazyLock<Mutex<HashMap<String, u32>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub struct ProcessRegistry;
+
+impl ProcessRegistry {
+    /// Spawn `cmd` in the process group for `test_name`.
+    ///
+    /// The first spawn creates a new group (group PID = child PID).
+    /// Subsequent spawns join the existing group.
+    pub fn spawn(test_name: &str, cmd: &mut Command) -> io::Result<Child> {
+        let pgid = {
+            let mut reg = PROCESS_REGISTRY.lock().unwrap();
+            let stored = reg.get(test_name).copied();
+            // If the stored group no longer has any live processes,
+            // discard it so the next child creates a fresh group.
+            if let Some(id) = stored {
+                let probe = unsafe { libc::killpg(id as i32, 0) };
+                if probe == -1 && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH) {
+                    reg.remove(test_name);
+                    None
+                } else {
+                    stored
+                }
+            } else {
+                None
+            }
+        };
+
+        unsafe {
+            cmd.pre_exec(move || {
+                let target = pgid.unwrap_or(0) as libc::pid_t;
+                // Best effort: may fail with EPERM in containers.
+                let _ = libc::setpgid(0, target);
+                Ok(())
+            });
+        }
+
+        let child = cmd.spawn()?;
+
+        if pgid.is_none() {
+            let actual = unsafe { libc::getpgid(child.id() as i32) };
+            if actual == child.id() as i32 {
+                PROCESS_REGISTRY
+                    .lock()
+                    .unwrap()
+                    .insert(test_name.to_string(), child.id());
+            }
+        }
+
+        Ok(child)
+    }
+
+    /// Kill all processes in the group for `test_name` and remove
+    /// the entry.
+    pub fn cleanup(test_name: &str) -> bool {
+        let pgid = PROCESS_REGISTRY.lock().unwrap().remove(test_name);
+
+        if let Some(pgid) = pgid {
+            let ret = unsafe { libc::killpg(pgid as i32, libc::SIGKILL) };
+            if ret == 0 {
+                eprintln!(
+                    "[cleanup] Sent SIGKILL to process group {pgid} \
+                     (test '{test_name}')"
+                );
+                return true;
+            }
+            let err = io::Error::last_os_error();
+            // ESRCH: all processes already exited.
+            if err.raw_os_error() != Some(libc::ESRCH) {
+                eprintln!(
+                    "[cleanup] Failed to kill process group {pgid} \
+                     (test '{test_name}'): {err}"
+                );
+            }
+        }
+        false
+    }
+}
 
 #[derive(Error, Debug)]
 pub enum WaitTimeoutError {
@@ -1046,6 +1144,8 @@ pub struct Guest {
     pub num_cpu: u32,
     pub nested: bool,
     pub mem_size_str: String,
+    /// Test name, set from the current thread name at construction.
+    pub test_name: Option<String>,
 }
 
 // Return the next id that can be used for this guest. This is stored in a
@@ -1118,6 +1218,7 @@ impl Guest {
             num_cpu: 1u32,
             nested: true,
             mem_size_str: "512M".to_string(),
+            test_name: thread::current().name().map(String::from),
         }
     }
 
@@ -1803,15 +1904,16 @@ impl<'a> GuestCommand<'a> {
         }
 
         if self.capture_output {
+            self.command.stderr(Stdio::piped()).stdout(Stdio::piped());
+
             // The caller should call .wait() on the returned child
             #[allow(unknown_lints)]
             #[allow(clippy::zombie_processes)]
-            let child = self
-                .command
-                .stderr(Stdio::piped())
-                .stdout(Stdio::piped())
-                .spawn()
-                .unwrap();
+            let child = if let Some(name) = &self.guest.test_name {
+                ProcessRegistry::spawn(name, &mut self.command)?
+            } else {
+                self.command.spawn().unwrap()
+            };
 
             let fd = child.stdout.as_ref().unwrap().as_raw_fd();
             let pipesize = unsafe { libc::fcntl(fd, libc::F_SETPIPE_SZ, PIPE_SIZE) };
@@ -1835,7 +1937,11 @@ impl<'a> GuestCommand<'a> {
             // The caller should call .wait() on the returned child
             #[allow(unknown_lints)]
             #[allow(clippy::zombie_processes)]
-            self.command.spawn()
+            if let Some(name) = &self.guest.test_name {
+                ProcessRegistry::spawn(name, &mut self.command)
+            } else {
+                self.command.spawn()
+            }
         }
     }
 
@@ -2225,11 +2331,12 @@ pub fn measure_virtio_net_throughput(
         if !bandwidth {
             cmd.args(["-u", "-b", "1T"]);
         }
-        let client = cmd
-            .stderr(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .map_err(Error::Spawn)?;
+        cmd.stderr(Stdio::piped()).stdout(Stdio::piped());
+        let client = if let Some(name) = &guest.test_name {
+            ProcessRegistry::spawn(name, &mut cmd).map_err(Error::Spawn)?
+        } else {
+            cmd.spawn().map_err(Error::Spawn)?
+        };
 
         clients.push(client);
     }
@@ -2324,8 +2431,9 @@ pub fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Ve
         .to_str()
         .unwrap()
         .to_string();
-    let mut c = Command::new(ethr_path)
-        .args([
+    let mut c = {
+        let mut cmd = Command::new(ethr_path);
+        cmd.args([
             "-c",
             &guest.network.guest_ip0,
             "-t",
@@ -2336,9 +2444,13 @@ pub fn measure_virtio_net_latency(guest: &Guest, test_timeout: u32) -> Result<Ve
             &format!("{test_timeout}s"),
         ])
         .stderr(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .map_err(Error::Spawn)?;
+        .stdout(Stdio::piped());
+        if let Some(name) = &guest.test_name {
+            ProcessRegistry::spawn(name, &mut cmd).map_err(Error::Spawn)?
+        } else {
+            cmd.spawn().map_err(Error::Spawn)?
+        }
+    };
 
     if let Err(e) = child_wait_timeout(&mut c, test_timeout as u64 + 5).map_err(Error::WaitTimeout)
     {
@@ -2492,3 +2604,82 @@ pub mod aarch64 {
 
 #[cfg(target_arch = "aarch64")]
 pub use aarch64::*;
+
+#[cfg(test)]
+mod unit_tests {
+    use super::*;
+
+    fn is_alive(pid: u32) -> bool {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+
+    #[test]
+    fn process_registry_spawn_and_cleanup() {
+        let name = "test_spawn_and_cleanup";
+        let mut cmd = Command::new("sleep");
+        cmd.arg("60");
+        let mut child = ProcessRegistry::spawn(name, &mut cmd).unwrap();
+        let pid = child.id();
+
+        assert!(is_alive(pid));
+        assert!(ProcessRegistry::cleanup(name));
+        let _ = child.wait();
+        assert!(!is_alive(pid));
+    }
+
+    #[test]
+    fn process_registry_shared_group() {
+        let name = "test_shared_group";
+
+        let mut cmd1 = Command::new("sleep");
+        cmd1.arg("60");
+        let mut child1 = ProcessRegistry::spawn(name, &mut cmd1).unwrap();
+        let pid1 = child1.id();
+
+        let mut cmd2 = Command::new("sleep");
+        cmd2.arg("60");
+        let mut child2 = ProcessRegistry::spawn(name, &mut cmd2).unwrap();
+        let pid2 = child2.id();
+
+        let pgid1 = unsafe { libc::getpgid(pid1 as i32) };
+        let pgid2 = unsafe { libc::getpgid(pid2 as i32) };
+        assert_eq!(pgid1, pgid2);
+        assert_eq!(pgid1, pid1 as i32);
+
+        assert!(ProcessRegistry::cleanup(name));
+        let _ = child1.wait();
+        let _ = child2.wait();
+        assert!(!is_alive(pid1));
+        assert!(!is_alive(pid2));
+    }
+
+    #[test]
+    fn process_registry_cleanup_unknown() {
+        assert!(!ProcessRegistry::cleanup("nonexistent"));
+    }
+
+    #[test]
+    fn process_registry_stale_group_replaced() {
+        let name = "test_stale_group";
+
+        let mut cmd1 = Command::new("sleep");
+        cmd1.arg("0");
+        let mut child1 = ProcessRegistry::spawn(name, &mut cmd1).unwrap();
+        let pid1 = child1.id();
+        let _ = child1.wait();
+
+        // Group is now stale. Next spawn should create a fresh group.
+        let mut cmd2 = Command::new("sleep");
+        cmd2.arg("60");
+        let mut child2 = ProcessRegistry::spawn(name, &mut cmd2).unwrap();
+        let pid2 = child2.id();
+
+        assert_ne!(pid1, pid2);
+        let pgid2 = unsafe { libc::getpgid(pid2 as i32) };
+        assert_eq!(pgid2, pid2 as i32);
+
+        assert!(ProcessRegistry::cleanup(name));
+        let _ = child2.wait();
+        assert!(!is_alive(pid2));
+    }
+}
