@@ -512,6 +512,7 @@ cmd_tests() {
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
             --env TARGET_CC="$target_cc" \
+            --env PARALLEL_INTEGRATION_TESTS_NUM="${PARALLEL_INTEGRATION_TESTS_NUM:-}" \
             --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             "$CTR_IMAGE" \
@@ -613,6 +614,7 @@ cmd_tests() {
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
             --env TARGET_CC="$target_cc" \
+            --env PARALLEL_INTEGRATION_TESTS_NUM="${PARALLEL_INTEGRATION_TESTS_NUM:-}" \
             --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             --env MIGRATABLE_VERSION="$MIGRATABLE_VERSION" \
