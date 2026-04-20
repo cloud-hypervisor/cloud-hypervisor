@@ -161,7 +161,7 @@ cp "$FOCAL_OS_RAW_IMAGE" "$VFIO_DIR"
 cp "$FW" "$VFIO_DIR"
 cp "$VMLINUX_IMAGE" "$VFIO_DIR" || exit 1
 
-cargo build --features mshv --all --release --target "$BUILD_TARGET"
+#cargo build --features mshv --all --release --target "$BUILD_TARGET"
 
 # We always copy a fresh version of our binary for our L2 guest.
 cp target/"$BUILD_TARGET"/release/cloud-hypervisor "$VFIO_DIR"

@@ -1,7 +1,6 @@
 // Copyright © 2021 Intel Corporation
 //
 // SPDX-License-Identifier: Apache-2.0
-
 use std::collections::VecDeque;
 use std::fs::File;
 use std::os::fd::AsRawFd;
@@ -10,9 +9,10 @@ use std::sync::{Arc, Mutex};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
+use crate::engine::Completion;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::vhdx::Vhdx;
-use crate::{AsyncAdaptor, BlockBackend, Error, disk_file};
+use crate::{AsyncAdaptor, BlockBackend, Error, IoBuf, disk_file};
 
 #[derive(Debug)]
 pub struct VhdxDiskSync {
@@ -95,7 +95,7 @@ impl disk_file::AsyncDiskFile for VhdxDiskSync {
 pub struct VhdxSync {
     vhdx_file: Arc<Mutex<Vhdx>>,
     eventfd: EventFd,
-    completion_list: VecDeque<(u64, i32)>,
+    completion_list: VecDeque<Completion>,
 }
 
 impl VhdxSync {
@@ -119,12 +119,12 @@ impl AsyncIo for VhdxSync {
     fn read_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: &[libc::iovec],
+        iobuf: IoBuf,
         user_data: u64,
     ) -> AsyncIoResult<()> {
         self.vhdx_file.lock().unwrap().read_vectored_sync(
             offset,
-            iovecs,
+            iobuf,
             user_data,
             &self.eventfd,
             &mut self.completion_list,
@@ -134,12 +134,12 @@ impl AsyncIo for VhdxSync {
     fn write_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: &[libc::iovec],
+        iobuf: IoBuf,
         user_data: u64,
     ) -> AsyncIoResult<()> {
         self.vhdx_file.lock().unwrap().write_vectored_sync(
             offset,
-            iovecs,
+            iobuf,
             user_data,
             &self.eventfd,
             &mut self.completion_list,
@@ -154,7 +154,7 @@ impl AsyncIo for VhdxSync {
         )
     }
 
-    fn next_completed_request(&mut self) -> Option<(u64, i32)> {
+    fn next_completed_request(&mut self) -> Option<Completion> {
         self.completion_list.pop_front()
     }
 

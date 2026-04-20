@@ -14,6 +14,8 @@ use std::cmp::min;
 use std::os::fd::RawFd;
 use std::{io, ptr, slice};
 
+use crate::IoBuf;
+
 // -- Position independent I/O helpers --
 //
 // Duplicated file descriptors share the kernel file description and thus the
@@ -165,13 +167,10 @@ pub fn aligned_pwrite(fd: RawFd, buf: &[u8], offset: u64, alignment: usize) -> i
 // Operate on the iovec array as a flat byte stream.
 
 /// Copy data into iovecs starting at the given byte offset.
-///
-/// # Safety
-/// Caller must ensure iovecs point to valid, writable memory of sufficient size.
-pub unsafe fn scatter_to_iovecs(iovecs: &[libc::iovec], start: usize, data: &[u8]) {
+pub fn scatter_to_iovecs(iovecs: &mut IoBuf, start: usize, data: &[u8]) {
     let mut remaining = data;
     let mut pos = 0usize;
-    for iov in iovecs {
+    for iov in iovecs.iovecs() {
         let iov_end = pos + iov.iov_len;
         if iov_end <= start || remaining.is_empty() {
             pos = iov_end;
@@ -194,12 +193,10 @@ pub unsafe fn scatter_to_iovecs(iovecs: &[libc::iovec], start: usize, data: &[u8
 }
 
 /// Zero fill iovecs starting at the given byte offset for the given length.
-///
-/// # Safety
-/// Caller must ensure iovecs point to valid, writable memory of sufficient size.
-pub unsafe fn zero_fill_iovecs(iovecs: &[libc::iovec], start: usize, len: usize) {
+pub fn zero_fill_iovecs(iovecs: &mut IoBuf, start: usize, len: usize) {
     let mut remaining = len;
     let mut pos = 0usize;
+    let iovecs = iovecs.iovecs();
     for iov in iovecs {
         let iov_end = pos + iov.iov_len;
         if iov_end <= start || remaining == 0 {
@@ -223,14 +220,11 @@ pub unsafe fn zero_fill_iovecs(iovecs: &[libc::iovec], start: usize, len: usize)
 }
 
 /// Gather bytes from iovecs starting at the given byte offset into `dst`.
-///
-/// # Safety
-/// Caller must ensure iovecs point to valid, readable memory of sufficient size.
-pub unsafe fn gather_from_iovecs_into(iovecs: &[libc::iovec], start: usize, dst: &mut [u8]) {
+pub fn gather_from_iovecs_into(iovecs: &IoBuf, start: usize, dst: &mut [u8]) {
     let len = dst.len();
     let mut written = 0usize;
     let mut pos = 0usize;
-    for iov in iovecs {
+    for iov in iovecs.iovecs() {
         let iov_end = pos + iov.iov_len;
         if iov_end <= start || written == len {
             pos = iov_end;
@@ -253,12 +247,8 @@ pub unsafe fn gather_from_iovecs_into(iovecs: &[libc::iovec], start: usize, dst:
 }
 
 /// Gather bytes from iovecs starting at the given byte offset into a Vec.
-///
-/// # Safety
-/// Caller must ensure iovecs point to valid, readable memory of sufficient size.
-pub unsafe fn gather_from_iovecs(iovecs: &[libc::iovec], start: usize, len: usize) -> Vec<u8> {
+pub fn gather_from_iovecs(iovecs: &IoBuf, start: usize, len: usize) -> Vec<u8> {
     let mut result = vec![0u8; len];
-    // SAFETY: caller guarantees iovecs are valid; result has len bytes.
-    unsafe { gather_from_iovecs_into(iovecs, start, &mut result) };
+    gather_from_iovecs_into(iovecs, start, &mut result);
     result
 }

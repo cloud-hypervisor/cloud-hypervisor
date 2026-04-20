@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::time::Instant;
 use std::{convert, io, process, result};
 
+// Other imports
 use block::qcow::{self, ImageType, QcowFile};
 use block::{Request, VirtioBlockConfig, build_serial};
 use libc::EFD_NONBLOCK;
@@ -123,20 +124,20 @@ impl VhostUserBlkThread {
     ) -> bool {
         let mut used_descs = false;
 
-        while let Some(mut desc_chain) = vring
+        while let Some(desc_chain) = vring
             .get_queue_mut()
             .pop_descriptor_chain(self.mem.memory())
         {
+            let head_index = desc_chain.head_index();
             debug!("got an element in the queue");
             let len;
-            match Request::parse(&mut desc_chain, None) {
+            match Request::parse(desc_chain, None) {
                 Ok(mut request) => {
                     debug!("element is a valid request");
                     request.set_writeback(self.writeback.load(Ordering::Acquire));
                     let status = match request.execute(
                         &mut self.disk_image.lock().unwrap().deref_mut(),
                         self.disk_nsectors,
-                        desc_chain.memory(),
                         &self.serial,
                     ) {
                         Ok(l) => {
@@ -148,7 +149,7 @@ impl VhostUserBlkThread {
                             e.status()
                         }
                     };
-                    desc_chain
+                    self.mem
                         .memory()
                         .write_obj(status, request.status_addr)
                         .unwrap();
@@ -161,7 +162,7 @@ impl VhostUserBlkThread {
 
             vring
                 .get_queue_mut()
-                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
+                .add_used(&*self.mem.memory(), head_index, len)
                 .unwrap();
             used_descs = true;
         }

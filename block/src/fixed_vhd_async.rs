@@ -3,15 +3,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fs::File;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
 
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
+use crate::engine::Completion;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
 use crate::fixed_vhd::FixedVhd;
 use crate::raw_async::RawFileAsync;
-use crate::{BatchRequest, BlockBackend, disk_file};
+use crate::{BatchRequest, BlockBackend, IoBuf, disk_file};
 
 #[derive(Debug)]
 pub struct FixedVhdDiskAsync(FixedVhd);
@@ -71,7 +72,10 @@ impl disk_file::AsyncDiskFile for FixedVhdDiskAsync {
     fn new_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
         Ok(Box::new(
             FixedVhdAsync::new(
-                self.0.as_raw_fd(),
+                self.0.get_file().map_err(|e| {
+                    BlockError::new(BlockErrorKind::Io, DiskFileError::NewAsyncIo(e))
+                        .with_op(ErrorOp::DupBackingFd)
+                })?,
                 ring_depth,
                 self.0.logical_size().unwrap(),
             )
@@ -89,7 +93,7 @@ pub struct FixedVhdAsync {
 }
 
 impl FixedVhdAsync {
-    pub fn new(fd: RawFd, ring_depth: u32, size: u64) -> std::io::Result<Self> {
+    pub fn new(fd: File, ring_depth: u32, size: u64) -> std::io::Result<Self> {
         let raw_file_async = RawFileAsync::new(fd, ring_depth)?;
 
         Ok(FixedVhdAsync {
@@ -107,7 +111,7 @@ impl AsyncIo for FixedVhdAsync {
     fn read_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: &[libc::iovec],
+        request: IoBuf,
         user_data: u64,
     ) -> AsyncIoResult<()> {
         if offset as u64 >= self.size {
@@ -120,13 +124,14 @@ impl AsyncIo for FixedVhdAsync {
             )));
         }
 
-        self.raw_file_async.read_vectored(offset, iovecs, user_data)
+        self.raw_file_async
+            .read_vectored(offset, request, user_data)
     }
 
     fn write_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: &[libc::iovec],
+        request: IoBuf,
         user_data: u64,
     ) -> AsyncIoResult<()> {
         if offset as u64 >= self.size {
@@ -140,14 +145,14 @@ impl AsyncIo for FixedVhdAsync {
         }
 
         self.raw_file_async
-            .write_vectored(offset, iovecs, user_data)
+            .write_vectored(offset, request, user_data)
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
         self.raw_file_async.fsync(user_data)
     }
 
-    fn next_completed_request(&mut self) -> Option<(u64, i32)> {
+    fn next_completed_request(&mut self) -> Option<Completion> {
         self.raw_file_async.next_completed_request()
     }
 
@@ -163,11 +168,7 @@ impl AsyncIo for FixedVhdAsync {
         )))
     }
 
-    fn batch_requests_enabled(&self) -> bool {
-        true
-    }
-
-    fn submit_batch_requests(&mut self, batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
+    fn submit_batch_requests(&mut self, batch_request: Vec<BatchRequest>) -> AsyncIoResult<()> {
         self.raw_file_async.submit_batch_requests(batch_request)
     }
 }

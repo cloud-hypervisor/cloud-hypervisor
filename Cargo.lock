@@ -2369,25 +2369,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vhost_user_block"
-version = "0.1.0"
-dependencies = [
- "block",
- "clap",
- "env_logger",
- "libc",
- "log",
- "option_parser",
- "thiserror",
- "vhost",
- "vhost-user-backend",
- "virtio-bindings",
- "virtio-queue",
- "vm-memory",
- "vmm-sys-util",
-]
-
-[[package]]
 name = "vhost_user_net"
 version = "0.1.0"
 dependencies = [

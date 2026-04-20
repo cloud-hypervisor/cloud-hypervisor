@@ -21,6 +21,7 @@ use std::{io, result};
 use anyhow::anyhow;
 use block::async_io::{AsyncIo, AsyncIoError};
 use block::disk_file::DiskBackend;
+use block::engine::Completion;
 use block::error::BlockError;
 use block::fcntl::{LockError, LockGranularity, LockGranularityChoice, LockType, get_lock_state};
 use block::{
@@ -239,7 +240,7 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
         let mut batch_inflight_requests = Vec::new();
 
         loop {
-            let mut desc_chain = match queue.iter(self.mem.memory()) {
+            let desc_chain = match queue.iter(self.mem.memory()) {
                 Ok(mut iter) => match iter.next() {
                     Some(c) => c,
                     None => break,
@@ -249,7 +250,8 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                     return Ok(());
                 }
             };
-            let mut request = Request::parse(&mut desc_chain, self.access_platform.as_deref())
+            let head_index = desc_chain.head_index();
+            let mut request = Request::parse(desc_chain, self.access_platform.as_deref())
                 .map_err(Error::RequestParsing)?;
 
             // For virtio spec compliance
@@ -260,7 +262,7 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                 Self::check_request(self.acked_features, &request, self.disable_sector0_writes)
             {
                 warn!("Request check failed: {request:x?} {e:?}");
-                desc_chain
+                request
                     .memory()
                     .write_obj(VIRTIO_BLK_S_IOERR, request.status_addr)
                     .map_err(Error::RequestStatus)?;
@@ -268,7 +270,7 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                 // If no asynchronous operation has been submitted, we can
                 // simply return the used descriptor.
                 queue
-                    .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
+                    .add_used(request.memory(), head_index, 0)
                     .map_err(Error::QueueAddUsed)?;
                 queue
                     .enable_notification(self.mem.memory().deref())
@@ -309,13 +311,14 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
 
             request.set_writeback(self.writeback.load(Ordering::Acquire));
 
+            let memory = self.mem.memory();
+            let request_type = request.request_type;
+            let status_addr = request.status_addr;
             let result = request.execute_async(
-                desc_chain.memory(),
                 self.disk_nsectors.load(Ordering::SeqCst),
                 self.disk_image.as_mut(),
                 &self.serial,
                 self.disable_sector0_writes,
-                desc_chain.head_index() as u64,
             );
 
             if let Ok(ExecuteAsync {
@@ -327,32 +330,30 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                     match batch_request.request_type {
                         RequestType::In | RequestType::Out => batch_requests.push(batch_request),
                         _ => {
-                            unreachable!(
-                                "Unexpected batch request type: {:?}",
-                                request.request_type
-                            )
+                            unreachable!("Unexpected batch request type: {:?}", request_type)
                         }
                     }
                 }
-                batch_inflight_requests.push((desc_chain.head_index(), request));
+                batch_inflight_requests.push((head_index, request));
             } else {
                 let status = match result {
                     Ok(_) => VIRTIO_BLK_S_OK,
                     Err(e) => {
-                        warn!("Request failed: {request:x?} {e:?}");
+                        // TODO: better error message (request already moved so cannot be used)
+                        warn!(
+                            "Request failed: type={request_type:?} status_addr={status_addr:?} {e:?}"
+                        );
                         e.status() as u32
                     }
                 };
-
-                desc_chain
-                    .memory()
-                    .write_obj(status as u8, request.status_addr)
+                memory
+                    .write_obj(status as u8, status_addr)
                     .map_err(Error::RequestStatus)?;
 
                 // If no asynchronous operation has been submitted, we can
                 // simply return the used descriptor.
                 queue
-                    .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
+                    .add_used(request.memory(), head_index, 0)
                     .map_err(Error::QueueAddUsed)?;
                 queue
                     .enable_notification(self.mem.memory().deref())
@@ -360,7 +361,7 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
             }
         }
 
-        match self.disk_image.submit_batch_requests(&batch_requests) {
+        match self.disk_image.submit_batch_requests(batch_requests) {
             Ok(()) => {
                 self.inflight_requests.extend(batch_inflight_requests);
             }
@@ -440,7 +441,12 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
         let mut read_ops = Wrapping(0);
         let mut write_ops = Wrapping(0);
 
-        while let Some((user_data, result)) = self.disk_image.next_completed_request() {
+        while let Some(Completion {
+            user_data,
+            result,
+            iobuf: _,
+        }) = self.disk_image.next_completed_request()
+        {
             let desc_index = user_data as u16;
 
             let mut request = self.find_inflight_request(desc_index)?;

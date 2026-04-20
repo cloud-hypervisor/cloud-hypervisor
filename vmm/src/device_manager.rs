@@ -33,20 +33,20 @@ use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use arch::{DeviceType, MmioDeviceInfo};
 use arch::{NumaNodes, layout};
 use block::disk_file::DiskBackend;
+use block::engine::{AioEngine, RawFileDisk};
 use block::error::BlockError;
+#[cfg(feature = "io_uring")]
+use block::fixed_vhd_async::FixedVhdDiskAsync;
 use block::fixed_vhd_sync::FixedVhdDiskSync;
 #[cfg(feature = "io_uring")]
 use block::qcow_async::QcowDiskAsync;
 use block::qcow_sync::QcowDiskSync;
-use block::raw_async_aio::RawFileDiskAio;
 use block::raw_sync::RawFileDiskSync;
 use block::vhdx_sync::VhdxDiskSync;
 use block::{
     ImageType, block_aio_is_supported, block_io_uring_is_supported, detect_image_type,
     open_disk_image, preallocate_disk,
 };
-#[cfg(feature = "io_uring")]
-use block::{fixed_vhd_async::FixedVhdDiskAsync, raw_async::RawFileDisk};
 #[cfg(target_arch = "riscv64")]
 use devices::aia;
 #[cfg(target_arch = "x86_64")]
@@ -2834,11 +2834,12 @@ impl DeviceManager {
                         unreachable!("Checked in if statement above");
                         #[cfg(feature = "io_uring")]
                         {
-                            DiskBackend::Next(Box::new(RawFileDisk::new(file)))
+                            use block::engine::IoUringEngine;
+                            DiskBackend::Next(Box::new(RawFileDisk::<IoUringEngine>::new(file)))
                         }
                     } else if !disk_cfg.disable_aio && self.aio_is_supported() {
                         info!("Using asynchronous RAW disk file (aio)");
-                        DiskBackend::Next(Box::new(RawFileDiskAio::new(file)))
+                        DiskBackend::Next(Box::new(RawFileDisk::<AioEngine>::new(file)))
                     } else {
                         info!("Using synchronous RAW disk file");
                         DiskBackend::Next(Box::new(RawFileDiskSync::new(file)))

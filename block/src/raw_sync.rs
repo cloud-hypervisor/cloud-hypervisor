@@ -11,8 +11,9 @@ use log::warn;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
+use crate::engine::Completion;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
-use crate::{DiskTopology, SECTOR_SIZE, disk_file, probe_sparse_support, query_device_size};
+use crate::{DiskTopology, IoBuf, SECTOR_SIZE, disk_file, probe_sparse_support, query_device_size};
 
 #[derive(Debug)]
 pub struct RawFileDiskSync {
@@ -92,7 +93,7 @@ impl disk_file::AsyncDiskFile for RawFileDiskSync {
 pub struct RawFileSync {
     fd: RawFd,
     eventfd: EventFd,
-    completion_list: VecDeque<(u64, i32)>,
+    completion_list: VecDeque<Completion>,
     alignment: u64,
 }
 
@@ -119,9 +120,10 @@ impl AsyncIo for RawFileSync {
     fn read_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: &[libc::iovec],
+        iobuf: IoBuf,
         user_data: u64,
     ) -> AsyncIoResult<()> {
+        let iovecs = iobuf.iovecs();
         // SAFETY: FFI call with valid arguments
         let result = unsafe {
             libc::preadv(
@@ -135,7 +137,11 @@ impl AsyncIo for RawFileSync {
             return Err(AsyncIoError::ReadVectored(std::io::Error::last_os_error()));
         }
 
-        self.completion_list.push_back((user_data, result as i32));
+        self.completion_list.push_back(Completion {
+            user_data,
+            result: result.try_into().unwrap(),
+            iobuf: Some(iobuf),
+        });
         self.eventfd.write(1).unwrap();
 
         Ok(())
@@ -144,9 +150,10 @@ impl AsyncIo for RawFileSync {
     fn write_vectored(
         &mut self,
         offset: libc::off_t,
-        iovecs: &[libc::iovec],
+        iobuf: IoBuf,
         user_data: u64,
     ) -> AsyncIoResult<()> {
+        let iovecs = iobuf.iovecs();
         // SAFETY: FFI call with valid arguments
         let result = unsafe {
             libc::pwritev(
@@ -160,7 +167,11 @@ impl AsyncIo for RawFileSync {
             return Err(AsyncIoError::WriteVectored(std::io::Error::last_os_error()));
         }
 
-        self.completion_list.push_back((user_data, result as i32));
+        self.completion_list.push_back(Completion {
+            user_data,
+            result: result.try_into().unwrap(),
+            iobuf: Some(iobuf),
+        });
         self.eventfd.write(1).unwrap();
 
         Ok(())
@@ -174,14 +185,18 @@ impl AsyncIo for RawFileSync {
         }
 
         if let Some(user_data) = user_data {
-            self.completion_list.push_back((user_data, result));
+            self.completion_list.push_back(Completion {
+                user_data,
+                result: 0,
+                iobuf: None,
+            });
             self.eventfd.write(1).unwrap();
         }
 
         Ok(())
     }
 
-    fn next_completed_request(&mut self) -> Option<(u64, i32)> {
+    fn next_completed_request(&mut self) -> Option<Completion> {
         self.completion_list.pop_front()
     }
 
@@ -201,7 +216,11 @@ impl AsyncIo for RawFileSync {
             return Err(AsyncIoError::PunchHole(std::io::Error::last_os_error()));
         }
 
-        self.completion_list.push_back((user_data, result));
+        self.completion_list.push_back(Completion {
+            user_data,
+            result: 0,
+            iobuf: None,
+        });
         self.eventfd.write(1).unwrap();
 
         Ok(())
@@ -223,7 +242,11 @@ impl AsyncIo for RawFileSync {
             return Err(AsyncIoError::WriteZeroes(std::io::Error::last_os_error()));
         }
 
-        self.completion_list.push_back((user_data, result));
+        self.completion_list.push_back(Completion {
+            user_data,
+            result,
+            iobuf: None,
+        });
         self.eventfd.write(1).unwrap();
 
         Ok(())
