@@ -268,7 +268,7 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                 // If no asynchronous operation has been submitted, we can
                 // simply return the used descriptor.
                 queue
-                    .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
+                    .add_used(desc_chain.memory(), desc_chain.head_index(), 1)
                     .map_err(Error::QueueAddUsed)?;
                 queue
                     .enable_notification(self.mem.memory().deref())
@@ -349,10 +349,17 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                     .write_obj(status as u8, request.status_addr)
                     .map_err(Error::RequestStatus)?;
 
+                let len = if status == VIRTIO_BLK_S_OK
+                    && request.request_type == RequestType::GetDeviceId
+                {
+                    self.serial.len() as u32 + 1
+                } else {
+                    1
+                };
                 // If no asynchronous operation has been submitted, we can
                 // simply return the used descriptor.
                 queue
-                    .add_used(desc_chain.memory(), desc_chain.head_index(), 0)
+                    .add_used(desc_chain.memory(), desc_chain.head_index(), len)
                     .map_err(Error::QueueAddUsed)?;
                 queue
                     .enable_notification(self.mem.memory().deref())
@@ -373,7 +380,7 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                     mem.write_obj(VIRTIO_BLK_S_IOERR as u8, request.status_addr)
                         .map_err(Error::RequestStatus)?;
                     queue
-                        .add_used(mem.deref(), desc_index, 0)
+                        .add_used(mem.deref(), desc_index, 1)
                         .map_err(Error::QueueAddUsed)?;
                     queue
                         .enable_notification(mem.deref())
@@ -528,14 +535,19 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                     .write_latency_avg
                     .store(write_avg, Ordering::Relaxed);
 
-                (VIRTIO_BLK_S_OK as u8, result as u32)
+                let len = if request.request_type == RequestType::In {
+                    result as u32 + 1
+                } else {
+                    1
+                };
+                (VIRTIO_BLK_S_OK as u8, len)
             } else {
                 warn!(
                     "Request failed: {:x?} {:?}",
                     request,
                     io::Error::from_raw_os_error(-result)
                 );
-                (VIRTIO_BLK_S_IOERR as u8, 0)
+                (VIRTIO_BLK_S_IOERR as u8, 1)
             };
 
             mem.write_obj(status, request.status_addr)
