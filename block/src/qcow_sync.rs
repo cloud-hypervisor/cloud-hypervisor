@@ -140,7 +140,7 @@ impl disk_file::AsyncDiskFile for QcowDiskSync {
 
     // ring_depth is unused - this sync backend performs blocking I/O
     // instead of submitting to an async ring.
-    fn new_async_io(&self, _ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
+    fn create_async_io(&self, _ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
         Ok(Box::new(QcowSync::new(
             Arc::clone(&self.metadata),
             self.data_raw_file.clone(),
@@ -476,7 +476,7 @@ mod unit_tests {
     }
 
     fn async_read(disk: &QcowDiskSync, offset: u64, len: usize) -> Vec<u8> {
-        let mut async_io = disk.new_async_io(1).unwrap();
+        let mut async_io = disk.create_async_io(1).unwrap();
         let mut buf = vec![0xFFu8; len];
         let iovec = libc::iovec {
             iov_base: buf.as_mut_ptr() as *mut libc::c_void,
@@ -492,7 +492,7 @@ mod unit_tests {
     }
 
     fn async_write(disk: &QcowDiskSync, offset: u64, data: &[u8]) {
-        let mut async_io = disk.new_async_io(1).unwrap();
+        let mut async_io = disk.create_async_io(1).unwrap();
         let iovec = libc::iovec {
             iov_base: data.as_ptr() as *mut libc::c_void,
             iov_len: data.len(),
@@ -511,7 +511,7 @@ mod unit_tests {
         let offset = 0u64;
         let (_temp, disk) = create_disk_with_data(100 * 1024 * 1024, &data, offset, true, false);
 
-        let mut async_io = disk.new_async_io(1).unwrap();
+        let mut async_io = disk.create_async_io(1).unwrap();
         async_io.punch_hole(offset, data.len() as u64, 100).unwrap();
         let (user_data, result) = async_io.next_completed_request().unwrap();
         assert_eq!(user_data, 100);
@@ -531,7 +531,7 @@ mod unit_tests {
         let offset = 64 * 1024u64;
         let (_temp, disk) = create_disk_with_data(100 * 1024 * 1024, &data, offset, true, false);
 
-        let mut async_io = disk.new_async_io(1).unwrap();
+        let mut async_io = disk.create_async_io(1).unwrap();
         async_io
             .write_zeroes(offset, data.len() as u64, 200)
             .unwrap();
@@ -568,7 +568,7 @@ mod unit_tests {
         let disk =
             QcowDiskSync::new(_temp.as_file().try_clone().unwrap(), false, false, true).unwrap();
 
-        let mut async_io = disk.new_async_io(1).unwrap();
+        let mut async_io = disk.create_async_io(1).unwrap();
 
         async_io.punch_hole(0, 64 * 1024, 1).unwrap();
         async_io.punch_hole(128 * 1024, 64 * 1024, 2).unwrap();
@@ -593,7 +593,7 @@ mod unit_tests {
         let offset = 0u64;
         let (_temp, disk) = create_disk_with_data(100 * 1024 * 1024, &data, offset, true, false);
 
-        let mut async_io1 = disk.new_async_io(1).unwrap();
+        let mut async_io1 = disk.create_async_io(1).unwrap();
         async_io1
             .punch_hole(offset, data.len() as u64, 100)
             .unwrap();
@@ -611,14 +611,14 @@ mod unit_tests {
     }
 
     #[test]
-    fn test_qcow_disk_sync_punch_hole_with_new_async_io() {
+    fn test_qcow_disk_sync_punch_hole_with_create_async_io() {
         // Simulates the real usage pattern of write data, punch hole, then read back.
         let data = vec![0xCD; 64 * 1024]; // one cluster
         let offset = 1024 * 1024u64; // 1MB offset
         let (_temp, disk) = create_disk_with_data(100 * 1024 * 1024, &data, offset, true, false);
 
         // Punch hole to simulate DISCARD
-        let mut async_io1 = disk.new_async_io(1).unwrap();
+        let mut async_io1 = disk.create_async_io(1).unwrap();
         async_io1.punch_hole(offset, data.len() as u64, 1).unwrap();
         let (user_data, result) = async_io1.next_completed_request().unwrap();
         assert_eq!(user_data, 1);
@@ -629,7 +629,7 @@ mod unit_tests {
         let read_buf = async_read(&disk, offset, data.len());
         assert!(
             read_buf.iter().all(|&b| b == 0),
-            "After punch_hole via new_async_io, read should return zeros"
+            "After punch_hole via create_async_io, read should return zeros"
         );
     }
 
@@ -641,7 +641,7 @@ mod unit_tests {
 
         async_write(&disk, offset, &data);
 
-        let mut async_io = disk.new_async_io(1).unwrap();
+        let mut async_io = disk.create_async_io(1).unwrap();
         async_io.fsync(Some(10)).unwrap();
         let (ud, res) = async_io.next_completed_request().unwrap();
         assert_eq!(ud, 10);
@@ -691,7 +691,7 @@ mod unit_tests {
 
         async_write(&disk, offset, &data);
 
-        let mut async_io = disk.new_async_io(1).unwrap();
+        let mut async_io = disk.create_async_io(1).unwrap();
         async_io.fsync(Some(99)).unwrap();
         drop(async_io);
 
@@ -825,7 +825,7 @@ mod unit_tests {
         let new_data = vec![0xAB; cluster_size as usize];
         async_write(&disk, 0, &new_data);
         {
-            let mut async_io = disk.new_async_io(1).unwrap();
+            let mut async_io = disk.create_async_io(1).unwrap();
             async_io.fsync(Some(99)).unwrap();
         }
 
@@ -1092,7 +1092,7 @@ mod unit_tests {
             async_write(&disk, idx * cluster_size, &written);
         }
         {
-            let mut async_io = disk.new_async_io(1).unwrap();
+            let mut async_io = disk.create_async_io(1).unwrap();
             async_io.fsync(Some(99)).unwrap();
         }
 
@@ -1383,7 +1383,7 @@ mod unit_tests {
         let written = vec![0xFFu8; cluster_size as usize];
         async_write(&disk, 0, &written);
         {
-            let mut async_io = disk.new_async_io(1).unwrap();
+            let mut async_io = disk.create_async_io(1).unwrap();
             async_io.fsync(Some(99)).unwrap();
         }
 
@@ -1392,7 +1392,7 @@ mod unit_tests {
 
         // Punch hole on cluster 0 - should deallocate and fall through to backing
         {
-            let mut async_io = disk.new_async_io(1).unwrap();
+            let mut async_io = disk.create_async_io(1).unwrap();
             async_io.punch_hole(0, cluster_size, 42).unwrap();
             let (ud, res) = async_io.next_completed_request().unwrap();
             assert_eq!(ud, 42);
@@ -1435,7 +1435,7 @@ mod unit_tests {
         let data1 = vec![0xAAu8; cluster_size as usize];
         async_write(&disk, 0, &data1);
         {
-            let mut aio = disk.new_async_io(1).unwrap();
+            let mut aio = disk.create_async_io(1).unwrap();
             aio.fsync(Some(1)).unwrap();
         }
         let buf = async_read(&disk, 0, cluster_size as usize);
@@ -1444,7 +1444,7 @@ mod unit_tests {
         let data2 = vec![0xBBu8; cluster_size as usize];
         async_write(&disk, 0, &data2);
         {
-            let mut aio = disk.new_async_io(1).unwrap();
+            let mut aio = disk.create_async_io(1).unwrap();
             aio.fsync(Some(2)).unwrap();
         }
         let buf = async_read(&disk, 0, cluster_size as usize);
@@ -1496,7 +1496,7 @@ mod unit_tests {
         let write_data = vec![0xEEu8; write_len];
         async_write(&disk, write_offset, &write_data);
         {
-            let mut aio = disk.new_async_io(1).unwrap();
+            let mut aio = disk.create_async_io(1).unwrap();
             aio.fsync(Some(1)).unwrap();
         }
 
@@ -1550,7 +1550,7 @@ mod unit_tests {
         let punch_offset = cluster_size - 4096;
         let punch_len = 8192u64;
         {
-            let mut aio = disk.new_async_io(1).unwrap();
+            let mut aio = disk.create_async_io(1).unwrap();
             aio.punch_hole(punch_offset, punch_len, 10).unwrap();
             let (ud, res) = aio.next_completed_request().unwrap();
             assert_eq!(ud, 10);
@@ -1614,7 +1614,7 @@ mod unit_tests {
         let new_data = vec![0xBB; cluster_size as usize];
         async_write(&disk, initial_size, &new_data);
         {
-            let mut aio = disk.new_async_io(1).unwrap();
+            let mut aio = disk.create_async_io(1).unwrap();
             aio.fsync(Some(1)).unwrap();
         }
         let buf = async_read(&disk, initial_size, cluster_size as usize);
@@ -1684,7 +1684,7 @@ mod unit_tests {
         ];
         let total = a.len() + b.len() + c.len();
 
-        let mut aio = disk.new_async_io(1).unwrap();
+        let mut aio = disk.create_async_io(1).unwrap();
         aio.write_vectored(0, &iovecs_w, 1).unwrap();
         let (ud, res) = aio.next_completed_request().unwrap();
         assert_eq!(ud, 1);
@@ -1711,7 +1711,7 @@ mod unit_tests {
             },
         ];
 
-        let mut aio = disk.new_async_io(1).unwrap();
+        let mut aio = disk.create_async_io(1).unwrap();
         aio.read_vectored(0, &iovecs_r, 10).unwrap();
         let (ud, res) = aio.next_completed_request().unwrap();
         assert_eq!(ud, 10);

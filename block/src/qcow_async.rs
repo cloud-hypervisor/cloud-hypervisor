@@ -146,7 +146,7 @@ impl disk_file::AsyncDiskFile for QcowDiskAsync {
         }))
     }
 
-    fn new_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
+    fn create_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
         Ok(Box::new(
             QcowAsync::new(
                 Arc::clone(&self.metadata),
@@ -731,7 +731,7 @@ mod unit_tests {
     }
 
     fn async_write(disk: &QcowDiskAsync, offset: u64, data: &[u8]) {
-        let mut async_io = disk.new_async_io(1).unwrap();
+        let mut async_io = disk.create_async_io(1).unwrap();
         let iovec = libc::iovec {
             iov_base: data.as_ptr() as *mut libc::c_void,
             iov_len: data.len(),
@@ -749,7 +749,7 @@ mod unit_tests {
     }
 
     fn async_read(disk: &QcowDiskAsync, offset: u64, len: usize) -> Vec<u8> {
-        let mut async_io = disk.new_async_io(1).unwrap();
+        let mut async_io = disk.create_async_io(1).unwrap();
         let mut buf = vec![0xFFu8; len];
         let iovec = libc::iovec {
             iov_base: buf.as_mut_ptr() as *mut libc::c_void,
@@ -770,7 +770,7 @@ mod unit_tests {
         let offset = 0u64;
         let (_temp, disk) = create_disk_with_data(100 * 1024 * 1024, &data, offset, true);
 
-        let mut async_io = disk.new_async_io(1).unwrap();
+        let mut async_io = disk.create_async_io(1).unwrap();
         async_io.punch_hole(offset, data.len() as u64, 100).unwrap();
         let (user_data, result) = async_io.next_completed_request().unwrap();
         assert_eq!(user_data, 100);
@@ -790,7 +790,7 @@ mod unit_tests {
         let offset = 0u64;
         let (_temp, disk) = create_disk_with_data(100 * 1024 * 1024, &data, offset, true);
 
-        let mut async_io = disk.new_async_io(1).unwrap();
+        let mut async_io = disk.create_async_io(1).unwrap();
         async_io
             .write_zeroes(offset, data.len() as u64, 200)
             .unwrap();
@@ -862,7 +862,7 @@ mod unit_tests {
         let disk = QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), false, false, true)
             .unwrap();
 
-        let mut async_io = disk.new_async_io(8).unwrap();
+        let mut async_io = disk.create_async_io(8).unwrap();
 
         // Prepare write data for two regions.
         let write_a = vec![0xAA; 4096];
@@ -917,7 +917,7 @@ mod unit_tests {
             iov_len: read_b.len(),
         };
 
-        let mut async_io = disk.new_async_io(8).unwrap();
+        let mut async_io = disk.create_async_io(8).unwrap();
         let read_batch = vec![
             BatchRequest {
                 offset: offset_a as libc::off_t,
@@ -1012,7 +1012,7 @@ mod unit_tests {
         let buf = async_read(&disk, offset, data.len());
         assert!(buf.iter().all(|&b| b == 0xAA));
 
-        let mut async_io = disk.new_async_io(1).unwrap();
+        let mut async_io = disk.create_async_io(1).unwrap();
         async_io.punch_hole(offset, data.len() as u64, 10).unwrap();
         let (_, result) = wait_for_completion(async_io.as_mut());
         assert_eq!(result, 0);
@@ -1065,7 +1065,7 @@ mod unit_tests {
         }
         let disk = QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), false, false, true)
             .unwrap();
-        let async_io = disk.new_async_io(1).unwrap();
+        let async_io = disk.create_async_io(1).unwrap();
         assert_eq!(async_io.alignment(), SECTOR_SIZE);
     }
 
@@ -1088,7 +1088,7 @@ mod unit_tests {
                 return;
             }
         };
-        let async_io = disk.new_async_io(1).unwrap();
+        let async_io = disk.create_async_io(1).unwrap();
         assert!(async_io.alignment() >= SECTOR_SIZE);
     }
 
@@ -1149,7 +1149,7 @@ mod unit_tests {
                 let disk = Arc::clone(&disk);
                 let expected = data.clone();
                 thread::spawn(move || {
-                    let mut async_io = disk.new_async_io(1).unwrap();
+                    let mut async_io = disk.create_async_io(1).unwrap();
                     let mut buf = vec![0xFFu8; cluster_size];
                     let iovec = libc::iovec {
                         iov_base: buf.as_mut_ptr() as *mut libc::c_void,

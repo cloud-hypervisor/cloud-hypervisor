@@ -24,7 +24,7 @@
 //!         /                                     \
 //! FullDiskFile:                           AsyncDiskFile:
 //!   DiskFile + PhysicalSize +               DiskFile + Unpin
-//!   DiskFd + SparseCapable +               try_clone, new_async_io
+//!   DiskFd + SparseCapable +               try_clone, create_async_io
 //!   Resizable
 //!         \                                     /
 //!          AsyncFullDiskFile: FullDiskFile + AsyncDiskFile
@@ -139,7 +139,7 @@ pub trait AsyncDiskFile: DiskFile + Unpin {
     ///   Callers typically pass the virtio queue size. Must be greater
     ///   than zero. Backends that do not use an async ring (e.g. sync
     ///   fallback implementations) may ignore this value.
-    fn new_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>>;
+    fn create_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>>;
 }
 
 /// Full capability async disk file trait.
@@ -215,12 +215,12 @@ impl DiskBackend {
         }
     }
 
-    pub fn new_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
+    pub fn create_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
         match self {
             Self::Legacy(d) => d
-                .new_async_io(ring_depth)
+                .create_async_io(ring_depth)
                 .map_err(|e| BlockError::new(BlockErrorKind::Io, io::Error::other(e))),
-            Self::Next(d) => d.new_async_io(ring_depth),
+            Self::Next(d) => d.create_async_io(ring_depth),
         }
     }
 
