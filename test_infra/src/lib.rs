@@ -2657,4 +2657,29 @@ mod unit_tests {
     fn process_registry_cleanup_unknown() {
         assert!(!ProcessRegistry::cleanup("nonexistent"));
     }
+
+    #[test]
+    fn process_registry_stale_group_replaced() {
+        let name = "test_stale_group";
+
+        let mut cmd1 = Command::new("sleep");
+        cmd1.arg("0");
+        let mut child1 = ProcessRegistry::spawn(name, &mut cmd1).unwrap();
+        let pid1 = child1.id();
+        let _ = child1.wait();
+
+        // Group is now stale. Next spawn should create a fresh group.
+        let mut cmd2 = Command::new("sleep");
+        cmd2.arg("60");
+        let mut child2 = ProcessRegistry::spawn(name, &mut cmd2).unwrap();
+        let pid2 = child2.id();
+
+        assert_ne!(pid1, pid2);
+        let pgid2 = unsafe { libc::getpgid(pid2 as i32) };
+        assert_eq!(pgid2, pid2 as i32);
+
+        assert!(ProcessRegistry::cleanup(name));
+        let _ = child2.wait();
+        assert!(!is_alive(pid2));
+    }
 }
