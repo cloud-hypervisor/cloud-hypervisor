@@ -20,7 +20,7 @@ use std::time::Instant;
 use std::{convert, io, process, result};
 
 use block::qcow::{self, ImageType, QcowFile};
-use block::{Request, VirtioBlockConfig, build_serial};
+use block::{Request, RequestType, VirtioBlockConfig, build_serial};
 use libc::EFD_NONBLOCK;
 use log::{debug, error, info, warn};
 use option_parser::{OptionParser, OptionParserError, Toggle};
@@ -128,36 +128,33 @@ impl VhostUserBlkThread {
             .pop_descriptor_chain(self.mem.memory())
         {
             debug!("got an element in the queue");
-            let len;
-            match Request::parse(&mut desc_chain, None) {
+            let len = match Request::parse(&mut desc_chain, None) {
                 Ok(mut request) => {
                     debug!("element is a valid request");
                     request.set_writeback(self.writeback.load(Ordering::Acquire));
-                    let status = match request.execute(
+                    let (status, len) = match request.execute(
                         &mut self.disk_image.lock().unwrap().deref_mut(),
                         self.disk_nsectors,
                         desc_chain.memory(),
                         &self.serial,
                     ) {
-                        Ok(l) => {
-                            len = l;
-                            VIRTIO_BLK_S_OK as u8
+                        Ok(_) if request.request_type == RequestType::GetDeviceId => {
+                            (VIRTIO_BLK_S_OK as u8, self.serial.len() as u32 + 1)
                         }
-                        Err(e) => {
-                            len = 1;
-                            e.status()
-                        }
+                        Ok(l) => (VIRTIO_BLK_S_OK as u8, l + 1),
+                        Err(e) => (e.status(), 1),
                     };
                     desc_chain
                         .memory()
                         .write_obj(status, request.status_addr)
                         .unwrap();
+                    len
                 }
                 Err(err) => {
                     error!("failed to parse available descriptor chain: {err:?}");
-                    len = 0;
+                    0
                 }
-            }
+            };
 
             vring
                 .get_queue_mut()
