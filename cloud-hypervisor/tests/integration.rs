@@ -66,6 +66,7 @@ mod common_parallel {
     }
 
     #[test]
+    #[cfg_attr(target_arch = "x86_64", should_panic)]
     fn test_cpu_topology_421() {
         test_cpu_topology(4, 2, 1, false);
     }

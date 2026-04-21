@@ -250,6 +250,9 @@ pub enum ValidationError {
     /// CPU topology count doesn't match max
     #[error("Product of CPU topology parts does not match maximum vCPU")]
     CpuTopologyCount,
+    /// CPU topology uses too many threads per core
+    #[error("CPU topology supports at most 2 threads per core")]
+    CpuTopologyThreadsPerCore,
     /// One part of the CPU topology was zero
     #[error("No part of the CPU topology can be zero")]
     CpuTopologyZeroPart,
@@ -2982,6 +2985,11 @@ impl VmConfig {
                 return Err(ValidationError::CpuTopologyZeroPart);
             }
 
+            #[cfg(target_arch = "x86_64")]
+            if t.threads_per_core > 2 {
+                return Err(ValidationError::CpuTopologyThreadsPerCore);
+            }
+
             // The setting of dies doesn't apply on AArch64.
             // Only '1' value is accepted, so its impact on the vcpu topology
             // setting can be ignored.
@@ -5042,6 +5050,45 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             invalid_config.validate(),
             Err(ValidationError::CpuTopologyCount)
         );
+
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.cpus.max_vcpus = 8;
+        still_valid_config.cpus.boot_vcpus = 8;
+        still_valid_config.cpus.topology = Some(CpuTopology {
+            threads_per_core: 1,
+            cores_per_die: 8,
+            dies_per_package: 1,
+            packages: 1,
+        });
+        still_valid_config.validate().unwrap();
+
+        let mut still_valid_config = valid_config.clone();
+        still_valid_config.cpus.max_vcpus = 8;
+        still_valid_config.cpus.boot_vcpus = 8;
+        still_valid_config.cpus.topology = Some(CpuTopology {
+            threads_per_core: 2,
+            cores_per_die: 4,
+            dies_per_package: 1,
+            packages: 1,
+        });
+        still_valid_config.validate().unwrap();
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let mut invalid_config = valid_config.clone();
+            invalid_config.cpus.max_vcpus = 6;
+            invalid_config.cpus.boot_vcpus = 6;
+            invalid_config.cpus.topology = Some(CpuTopology {
+                threads_per_core: 3,
+                cores_per_die: 2,
+                dies_per_package: 1,
+                packages: 1,
+            });
+            assert_eq!(
+                invalid_config.validate(),
+                Err(ValidationError::CpuTopologyThreadsPerCore)
+            );
+        }
 
         let mut invalid_config = valid_config.clone();
         invalid_config.disks = Some(vec![DiskConfig {
