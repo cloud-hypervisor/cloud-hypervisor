@@ -262,4 +262,24 @@ mod unit_tests {
         let opened = open_disk(&options).unwrap();
         assert_eq!(opened.image_type, ImageType::Raw);
     }
+
+    #[test]
+    fn sync_fallback_when_async_disabled() {
+        let tmp = TempFile::new().unwrap();
+        let size = 1u64 << 20;
+        tmp.as_file().set_len(size).unwrap();
+        let path = tmp.as_path().to_owned();
+        let options = DiskOpenOptions {
+            path: &path,
+            readonly: false,
+            direct: false,
+            sparse: false,
+            backing_files: false,
+            disable_io_uring: true,
+            disable_aio: true,
+        };
+        let opened = open_disk(&options).unwrap();
+        assert_eq!(opened.image_type, ImageType::Raw);
+        assert_eq!(opened.disk.logical_size().unwrap(), size);
+    }
 }
