@@ -32,21 +32,10 @@ use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
 use arch::{DeviceType, MmioDeviceInfo};
 use arch::{NumaNodes, layout};
+use block::ImageType;
 use block::disk_file::DiskBackend;
 use block::error::BlockError;
-use block::fixed_vhd_sync::FixedVhdDiskSync;
-#[cfg(feature = "io_uring")]
-use block::qcow_async::QcowDiskAsync;
-use block::qcow_sync::QcowDiskSync;
-use block::raw_async_aio::RawFileDiskAio;
-use block::raw_sync::RawFileDiskSync;
-use block::vhdx_sync::VhdxDiskSync;
-use block::{
-    ImageType, block_aio_is_supported, block_io_uring_is_supported, detect_image_type,
-    open_disk_image, preallocate_disk,
-};
-#[cfg(feature = "io_uring")]
-use block::{fixed_vhd_async::FixedVhdDiskAsync, raw_async::RawFileDisk};
+use block::factory::{DiskOpenOptions, open_disk};
 #[cfg(target_arch = "riscv64")]
 use devices::aia;
 #[cfg(target_arch = "x86_64")]
@@ -269,10 +258,6 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-watchdog device
     #[error("Cannot create virtio-watchdog device")]
     CreateVirtioWatchdog(#[source] io::Error),
-
-    /// Failed to parse disk image format
-    #[error("Failed to parse disk image format")]
-    DetectImageType(#[source] BlockError),
 
     /// Cannot create serial manager
     #[error("Cannot create serial manager")]
@@ -580,27 +565,6 @@ pub enum DeviceManagerError {
     /// Failed to set O_DIRECT flag to file descriptor
     #[error("Failed to set O_DIRECT flag to file descriptor")]
     SetDirectIo,
-
-    /// Failed to create FixedVhdDiskAsync
-    #[error("Failed to create FixedVhdDiskAsync")]
-    CreateFixedVhdDiskAsync(#[source] BlockError),
-
-    /// Failed to create FixedVhdDiskSync
-    #[error("Failed to create FixedVhdDiskSync")]
-    CreateFixedVhdDiskSync(#[source] BlockError),
-
-    /// Failed to create QcowDiskSync
-    #[error("Failed to create QcowDiskSync")]
-    CreateQcowDiskSync(#[source] BlockError),
-
-    /// Failed to create QcowDiskAsync
-    #[error("Failed to create QcowDiskAsync")]
-    CreateQcowDiskAsync(#[source] BlockError),
-
-    /// Failed to create FixedVhdxDiskSync
-    #[error("Failed to create FixedVhdxDiskSync")]
-    CreateFixedVhdxDiskSync(#[source] BlockError),
-
     /// Failed to add DMA mapping handler to virtio-mem device.
     #[error("Failed to add DMA mapping handler to virtio-mem device")]
     AddDmaMappingHandlerVirtioMem(#[source] virtio_devices::mem::Error),
@@ -1128,13 +1092,6 @@ pub struct DeviceManager {
 
     // Force VIRTIO_F_ACCESS_PLATFORM on all virtio devices (e.g. for TDX/SEV-SNP)
     force_access_platform: bool,
-
-    // io_uring availability if detected
-    io_uring_supported: Option<bool>,
-
-    // aio availability if detected
-    aio_supported: Option<bool>,
-
     // List of unique identifiers provided at boot through the configuration.
     boot_id_list: BTreeSet<String>,
 
@@ -1438,8 +1395,6 @@ impl DeviceManager {
             pvmemcontrol_devices: None,
             pvpanic_device: None,
             force_access_platform,
-            io_uring_supported: None,
-            aio_supported: None,
             boot_id_list,
             #[cfg(not(target_arch = "riscv64"))]
             timestamp,
@@ -2652,29 +2607,6 @@ impl DeviceManager {
 
         Ok(())
     }
-
-    // Cache whether aio is supported to avoid checking for very block device
-    fn aio_is_supported(&mut self) -> bool {
-        if let Some(supported) = self.aio_supported {
-            return supported;
-        }
-
-        let supported = block_aio_is_supported();
-        self.aio_supported = Some(supported);
-        supported
-    }
-
-    // Cache whether io_uring is supported to avoid probing for very block device
-    fn io_uring_is_supported(&mut self) -> bool {
-        if let Some(supported) = self.io_uring_supported {
-            return supported;
-        }
-
-        let supported = block_io_uring_is_supported();
-        self.io_uring_supported = Some(supported);
-        supported
-    }
-
     /// Creates a [`MetaVirtioDevice`] from the provided [`DiskConfig`].
     ///
     /// Depending on the config, this is a [`vhost_user::Blk`] device or a [`virtio_devices::Block`]
@@ -2735,22 +2667,23 @@ impl DeviceManager {
                 vhost_user_block as Arc<Mutex<dyn Migratable>>,
             )
         } else {
-            let mut options = OpenOptions::new();
-            options.read(true);
-            options.write(!disk_cfg.readonly);
-            if disk_cfg.direct {
-                options.custom_flags(libc::O_DIRECT);
-            }
-            // Open block device path
             let disk_path = disk_cfg
                 .path
                 .as_ref()
                 .ok_or(DeviceManagerError::NoDiskPath)?;
-            let mut file: File =
-                open_disk_image(disk_path, &options).map_err(DeviceManagerError::Disk)?;
 
-            let detected_image_type =
-                detect_image_type(&mut file).map_err(DeviceManagerError::DetectImageType)?;
+            let opened = open_disk(&DiskOpenOptions {
+                path: disk_path,
+                readonly: disk_cfg.readonly,
+                direct: disk_cfg.direct,
+                sparse: disk_cfg.sparse,
+                backing_files: disk_cfg.backing_files,
+                disable_io_uring: disk_cfg.disable_io_uring,
+                disable_aio: disk_cfg.disable_aio,
+            })
+            .map_err(DeviceManagerError::Disk)?;
+
+            let detected_image_type = opened.image_type;
             let mut disable_sector0_writes = false;
 
             if disk_cfg.image_type == ImageType::Unknown {
@@ -2786,115 +2719,7 @@ impl DeviceManager {
                 warn!("Enabling backing_files option only applies for QCOW2 files");
             }
 
-            let image = match disk_cfg.image_type {
-                ImageType::FixedVhd => {
-                    // Use asynchronous backend relying on io_uring if the
-                    // syscalls are supported.
-                    if cfg!(feature = "io_uring")
-                        && !disk_cfg.disable_io_uring
-                        && self.io_uring_is_supported()
-                    {
-                        info!("Using asynchronous fixed VHD disk file (io_uring)");
-
-                        #[cfg(not(feature = "io_uring"))]
-                        unreachable!("Checked in if statement above");
-                        #[cfg(feature = "io_uring")]
-                        {
-                            DiskBackend::Next(Box::new(
-                                FixedVhdDiskAsync::new(file)
-                                    .map_err(DeviceManagerError::CreateFixedVhdDiskAsync)?,
-                            ))
-                        }
-                    } else {
-                        info!("Using synchronous fixed VHD disk file");
-                        DiskBackend::Next(Box::new(
-                            FixedVhdDiskSync::new(file)
-                                .map_err(DeviceManagerError::CreateFixedVhdDiskSync)?,
-                        ))
-                    }
-                }
-                ImageType::Raw => {
-                    // For non-sparse RAW disks, preallocate disk space
-                    if !disk_cfg.readonly
-                        && !disk_cfg.sparse
-                        && let Some(path) = &disk_cfg.path
-                    {
-                        preallocate_disk(&file, path);
-                    }
-
-                    // Use asynchronous backend relying on io_uring if the
-                    // syscalls are supported.
-                    if cfg!(feature = "io_uring")
-                        && !disk_cfg.disable_io_uring
-                        && self.io_uring_is_supported()
-                    {
-                        info!("Using asynchronous RAW disk file (io_uring)");
-
-                        #[cfg(not(feature = "io_uring"))]
-                        unreachable!("Checked in if statement above");
-                        #[cfg(feature = "io_uring")]
-                        {
-                            DiskBackend::Next(Box::new(RawFileDisk::new(file)))
-                        }
-                    } else if !disk_cfg.disable_aio && self.aio_is_supported() {
-                        info!("Using asynchronous RAW disk file (aio)");
-                        DiskBackend::Next(Box::new(RawFileDiskAio::new(file)))
-                    } else {
-                        info!("Using synchronous RAW disk file");
-                        DiskBackend::Next(Box::new(RawFileDiskSync::new(file)))
-                    }
-                }
-                ImageType::Qcow2 => {
-                    if cfg!(feature = "io_uring")
-                        && !disk_cfg.disable_io_uring
-                        && self.io_uring_is_supported()
-                    {
-                        info!("Using asynchronous QCOW2 disk file (io_uring)");
-
-                        #[cfg(not(feature = "io_uring"))]
-                        unreachable!("Checked in if statement above");
-                        #[cfg(feature = "io_uring")]
-                        {
-                            DiskBackend::Next(Box::new(
-                                QcowDiskAsync::new(
-                                    file,
-                                    disk_cfg.direct,
-                                    disk_cfg.backing_files,
-                                    disk_cfg.sparse,
-                                )
-                                .map_err(|e| match &disk_cfg.path {
-                                    Some(p) => e.with_path(p),
-                                    None => e,
-                                })
-                                .map_err(DeviceManagerError::CreateQcowDiskAsync)?,
-                            ))
-                        }
-                    } else {
-                        info!("Using synchronous QCOW2 disk file");
-                        DiskBackend::Next(Box::new(
-                            QcowDiskSync::new(
-                                file,
-                                disk_cfg.direct,
-                                disk_cfg.backing_files,
-                                disk_cfg.sparse,
-                            )
-                            .map_err(|e| match &disk_cfg.path {
-                                Some(p) => e.with_path(p),
-                                None => e,
-                            })
-                            .map_err(DeviceManagerError::CreateQcowDiskSync)?,
-                        ))
-                    }
-                }
-                ImageType::Vhdx => {
-                    info!("Using synchronous VHDX disk file");
-                    DiskBackend::Next(Box::new(
-                        VhdxDiskSync::new(file)
-                            .map_err(DeviceManagerError::CreateFixedVhdxDiskSync)?,
-                    ))
-                }
-                ImageType::Unknown => unreachable!(),
-            };
+            let image = DiskBackend::Next(opened.disk);
 
             let rate_limit_group =
                 if let Some(rate_limiter_cfg) = disk_cfg.rate_limiter_config.as_ref() {
