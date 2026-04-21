@@ -251,4 +251,15 @@ mod unit_tests {
         let opened = open_disk(&options).unwrap();
         assert_eq!(opened.image_type, ImageType::Qcow2);
     }
+
+    #[test]
+    fn open_readonly() {
+        let tmp = TempFile::new().unwrap();
+        tmp.as_file().set_len(1 << 20).unwrap();
+        let path = tmp.as_path().to_owned();
+        let mut options = default_options(&path);
+        options.readonly = true;
+        let opened = open_disk(&options).unwrap();
+        assert_eq!(opened.image_type, ImageType::Raw);
+    }
 }
