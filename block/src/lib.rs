@@ -11,6 +11,7 @@
 pub mod async_io;
 pub mod disk_file;
 pub mod error;
+pub mod factory;
 pub mod fcntl;
 pub mod fixed_vhd;
 #[cfg(feature = "io_uring")]
