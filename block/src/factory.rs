@@ -198,11 +198,13 @@ fn open_qcow2(
 
 #[cfg(test)]
 mod unit_tests {
+    use std::io::Write;
     use std::path::Path;
 
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
+    use crate::qcow::{QcowFile, RawFile};
 
     fn default_options(path: &Path) -> DiskOpenOptions<'_> {
         DiskOpenOptions {
@@ -234,5 +236,19 @@ mod unit_tests {
         let options = default_options(&path);
         let opened = open_disk(&options).unwrap();
         assert_eq!(opened.image_type, ImageType::Raw);
+    }
+
+    #[test]
+    fn detect_qcow2_image() {
+        let tmp = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(tmp.as_file().try_clone().unwrap(), false);
+            let mut qcow = QcowFile::new(raw, 3, 100 * 1024 * 1024, true).unwrap();
+            qcow.flush().unwrap();
+        }
+        let path = tmp.as_path().to_owned();
+        let options = default_options(&path);
+        let opened = open_disk(&options).unwrap();
+        assert_eq!(opened.image_type, ImageType::Qcow2);
     }
 }
