@@ -226,6 +226,26 @@ Please disclose LLM use in your commit message and PR description if it
 meaningfully contributed to the submitted code. Again, we recommend careful and
 conservative use of LLMs, guided by common sense.
 
+Use the following tag to disclose LLM assistance in your commit message:
+
+```
+Assisted-by: AGENT_NAME:MODEL_VERSION [TOOL1] [TOOL2]
+```
+
+Where:
+
+- ``AGENT_NAME`` is the name of the AI tool or framework
+- ``MODEL_VERSION`` is the specific model version used
+- ``[TOOL1] [TOOL2]`` are optional specialized analysis tools used
+
+Basic development tools (git, make, editors) should not be listed.
+
+Example:
+
+```
+Assisted-by: Claude:Opus-4.6 CodeQL
+```
+
 Maintainers reserve the right to request additional clarification or decline
 contributions where LLM usage raises concerns. Ultimately, acceptance of any
 contribution is at the maintainers' discretion.
