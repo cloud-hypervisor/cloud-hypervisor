@@ -195,3 +195,32 @@ fn open_qcow2(
             .map_err(|e| e.with_path(options.path))?,
     ))
 }
+
+#[cfg(test)]
+mod unit_tests {
+    use std::path::Path;
+
+    use super::*;
+
+    fn default_options(path: &Path) -> DiskOpenOptions<'_> {
+        DiskOpenOptions {
+            path,
+            readonly: false,
+            direct: false,
+            sparse: false,
+            backing_files: false,
+            disable_io_uring: true,
+            disable_aio: true,
+        }
+    }
+
+    #[test]
+    fn nonexistent_path_returns_error() {
+        let path = Path::new("/tmp/no_such_disk_image.raw");
+        let options = default_options(path);
+        match open_disk(&options) {
+            Err(e) => assert_eq!(e.kind(), BlockErrorKind::Io),
+            Ok(_) => panic!("expected error for nonexistent path"),
+        }
+    }
+}
