@@ -15,7 +15,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::{ffi, io};
 
-use block::disk_file::DiskBackend;
 use block::fcntl::LockGranularityChoice;
 use block::raw_sync::RawFileDiskSync;
 use libfuzzer_sys::{fuzz_target, Corpus};
@@ -55,7 +54,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     let queue_affinity = BTreeMap::new();
     let mut block = Block::new(
         "tmp".to_owned(),
-        DiskBackend::Next(Box::new(RawFileDiskSync::new(disk_file))),
+        Box::new(RawFileDiskSync::new(disk_file)),
         PathBuf::from(""),
         false,
         false,

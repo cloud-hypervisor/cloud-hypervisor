@@ -33,7 +33,6 @@ use arch::layout::{APIC_START, IOAPIC_SIZE, IOAPIC_START};
 use arch::{DeviceType, MmioDeviceInfo};
 use arch::{NumaNodes, layout};
 use block::ImageType;
-use block::disk_file::DiskBackend;
 use block::error::BlockError;
 use block::factory::{DiskOpenOptions, open_disk};
 #[cfg(target_arch = "riscv64")]
@@ -2719,8 +2718,6 @@ impl DeviceManager {
                 warn!("Enabling backing_files option only applies for QCOW2 files");
             }
 
-            let image = DiskBackend::Next(opened.disk);
-
             let rate_limit_group =
                 if let Some(rate_limiter_cfg) = disk_cfg.rate_limiter_config.as_ref() {
                     // Create an anonymous RateLimiterGroup that is dropped when the Disk
@@ -2764,7 +2761,7 @@ impl DeviceManager {
 
             let mut virtio_block = virtio_devices::Block::new(
                 id.clone(),
-                image,
+                opened.disk,
                 disk_cfg
                     .path
                     .as_ref()
