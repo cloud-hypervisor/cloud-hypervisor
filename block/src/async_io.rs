@@ -8,7 +8,7 @@ use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::{BatchRequest, DiskTopology, SECTOR_SIZE};
+use crate::{BatchRequest, SECTOR_SIZE};
 
 #[derive(Error, Debug)]
 pub enum DiskFileError {
@@ -30,10 +30,10 @@ pub enum DiskFileError {
 
 pub type DiskFileResult<T> = std::result::Result<T, DiskFileError>;
 
-/// A wrapper for [`RawFd`] capturing the lifetime of a corresponding [`DiskFile`].
+/// A wrapper for [`RawFd`] capturing the lifetime of a corresponding disk file.
 ///
 /// This fulfills the same role as [`BorrowedFd`] but is tailored to the limitations
-/// by some implementations of [`DiskFile`], which wrap the effective [`File`]
+/// by some disk implementations, which wrap the effective [`File`]
 /// in an `Arc<Mutex<T>>`, making the use of [`BorrowedFd`] impossible.
 ///
 /// [`BorrowedFd`]: std::os::fd::BorrowedFd
@@ -56,47 +56,6 @@ impl AsRawFd for BorrowedDiskFd<'_> {
     fn as_raw_fd(&self) -> RawFd {
         self.raw_fd
     }
-}
-
-/// Abstraction over the effective [`File`] backing up a block device,
-/// with support for synchronous and asynchronous I/O.
-///
-/// This allows abstracting over raw image formats as well as structured
-/// image formats.
-pub trait DiskFile: Send {
-    /// Returns the logical disk size a guest will see.
-    ///
-    /// For raw formats, this is equal to [`Self::physical_size`]. For file formats
-    /// that wrap disk images in a container (e.g. QCOW2), this refers to the
-    /// effective size that the guest will see.
-    fn logical_size(&mut self) -> DiskFileResult<u64>;
-    /// Returns the physical size of the underlying file.
-    fn physical_size(&mut self) -> DiskFileResult<u64>;
-    fn create_async_io(&self, ring_depth: u32) -> DiskFileResult<Box<dyn AsyncIo>>;
-    fn topology(&mut self) -> DiskTopology {
-        DiskTopology::default()
-    }
-    fn resize(&mut self, _size: u64) -> DiskFileResult<()> {
-        Err(DiskFileError::Unsupported)
-    }
-
-    /// Indicates support for sparse operations (punch hole, write zeroes, discard).
-    /// Override to return true when supported.
-    fn supports_sparse_operations(&self) -> bool {
-        false
-    }
-
-    /// Indicates support for zero flag optimization in WRITE_ZEROES. Override
-    /// to return true when supported.
-    fn supports_zero_flag(&self) -> bool {
-        false
-    }
-
-    /// Returns the file descriptor of the underlying disk image file.
-    ///
-    /// The file descriptor is supposed to be used for `fcntl()` calls but no
-    /// other operation.
-    fn fd(&mut self) -> BorrowedDiskFd<'_>;
 }
 
 #[derive(Error, Debug)]
