@@ -200,6 +200,8 @@ fn open_qcow2(
 mod unit_tests {
     use std::path::Path;
 
+    use vmm_sys_util::tempfile::TempFile;
+
     use super::*;
 
     fn default_options(path: &Path) -> DiskOpenOptions<'_> {
@@ -222,5 +224,15 @@ mod unit_tests {
             Err(e) => assert_eq!(e.kind(), BlockErrorKind::Io),
             Ok(_) => panic!("expected error for nonexistent path"),
         }
+    }
+
+    #[test]
+    fn detect_raw_image() {
+        let tmp = TempFile::new().unwrap();
+        tmp.as_file().set_len(1 << 20).unwrap();
+        let path = tmp.as_path().to_owned();
+        let options = default_options(&path);
+        let opened = open_disk(&options).unwrap();
+        assert_eq!(opened.image_type, ImageType::Raw);
     }
 }
