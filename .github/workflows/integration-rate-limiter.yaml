@@ -5,21 +5,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-docs-only:
+    uses: ./.github/workflows/check-docs-only.yaml
+
   build:
+    needs: [check-docs-only]
     name: Tests (Rate-Limiter)
     runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'bare-metal-9950x' }}
     env:
       AUTH_DOWNLOAD_TOKEN: ${{ secrets.AUTH_DOWNLOAD_TOKEN }}
     steps:
+      - name: Skip tests for documentation-only changes
+        if: ${{ needs.check-docs-only.outputs.docs-only == 'true' }}
+        run: echo "Skipping tests for documentation-only changes"
+
       - name: Code checkout
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name != 'pull_request' }}
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Run rate-limiter integration tests
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name != 'pull_request' }}
         timeout-minutes: 20
         run: scripts/dev_cli.sh tests --integration-rate-limiter
       - name: Skipping build for PR
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name == 'pull_request' }}
         run: echo "Skipping build for PR"

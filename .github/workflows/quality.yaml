@@ -5,7 +5,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-docs-only:
+    uses: ./.github/workflows/check-docs-only.yaml
+
   build:
+    needs: [check-docs-only]
     name: Quality (clippy)
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.experimental }}
@@ -28,12 +32,18 @@ jobs:
             experimental: false
 
     steps:
+      - name: Skip clippy for documentation-only changes
+        if: ${{ needs.check-docs-only.outputs.docs-only == 'true' }}
+        run: echo "Skipping clippy for documentation-only changes"
+
       - name: Code checkout
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Install Rust toolchain (${{ matrix.rust }})
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ matrix.rust }}
@@ -42,7 +52,7 @@ jobs:
           components: clippy
 
       - name: Bisectability Check (default features)
-        if: ${{ github.event_name == 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name == 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu' }}
         run: |
           set -eufo pipefail
           commits=$(git rev-list origin/${{ github.base_ref }}..${{ github.sha }})
@@ -50,6 +60,7 @@ jobs:
           git checkout ${{ github.sha }}
 
       - name: Clippy (kvm)
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
@@ -58,6 +69,7 @@ jobs:
           args: --locked --all --all-targets --no-default-features --tests --examples --features "kvm" -- -D warnings
 
       - name: Clippy (mshv)
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
@@ -66,6 +78,7 @@ jobs:
           args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv" -- -D warnings
 
       - name: Clippy (mshv + kvm)
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
@@ -74,6 +87,7 @@ jobs:
           args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv,kvm" -- -D warnings
 
       - name: Clippy (default features)
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
@@ -82,6 +96,7 @@ jobs:
           args: --locked --all --all-targets --tests --examples -- -D warnings
 
       - name: Clippy (default features + guest_debug)
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
@@ -90,6 +105,7 @@ jobs:
           args: --locked --all --all-targets --tests --examples --features "guest_debug" -- -D warnings
 
       - name: Clippy (default features + pvmemcontrol)
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
@@ -98,6 +114,7 @@ jobs:
           args: --locked --all --all-targets --tests --examples --features "pvmemcontrol" -- -D warnings
 
       - name: Clippy (default features + tracing)
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
@@ -105,6 +122,7 @@ jobs:
           target: ${{ matrix.target }}
           args: --locked --all --all-targets --tests --examples --features "tracing" -- -D warnings
       - name: Clippy (default features + fw_cfg)
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ matrix.target != 'x86_64-unknown-linux-gnu' }}
@@ -112,6 +130,7 @@ jobs:
           args: --target=${{ matrix.target }} --locked --all --all-targets --tests --examples --features "fw_cfg" -- -D warnings
 
       - name: Clippy (default features + ivshmem)
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
@@ -120,7 +139,7 @@ jobs:
           args: --locked --all --all-targets --tests --examples --features "ivshmem" -- -D warnings
 
       - name: Clippy (sev_snp)
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
@@ -129,7 +148,7 @@ jobs:
           args: --locked --all --all-targets --no-default-features --tests --examples --features "sev_snp" -- -D warnings
 
       - name: Clippy (igvm)
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
@@ -138,7 +157,7 @@ jobs:
           args: --locked --all --all-targets --no-default-features --tests --examples --features "igvm" -- -D warnings
 
       - name: Clippy (kvm + tdx)
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
@@ -147,7 +166,7 @@ jobs:
           args: --locked --all --all-targets --no-default-features --tests --examples --features "tdx,kvm" -- -D warnings
 
       - name: Clippy (kvm + igvm + sev_snp + fw_cfg)
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
@@ -157,7 +176,7 @@ jobs:
           args: --locked --all --all-targets --no-default-features --tests --examples --features "kvm,igvm,sev_snp,fw_cfg" -- -D warnings
 
       - name: Clippy (default features + sev_snp + igvm + fw_cfg)
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: clippy
@@ -167,6 +186,7 @@ jobs:
           args: --locked --all --all-targets --tests --examples --features "sev_snp,igvm,fw_cfg" -- -D warnings
 
       - name: Check build did not modify any files
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         run: test -z "$(git status --porcelain)"
 
   typos:

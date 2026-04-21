@@ -1,0 +1,38 @@
+name: Check documentation only
+on:
+  workflow_call:
+    outputs:
+      docs-only:
+        description: "true if only documentation files were changed"
+        value: ${{ jobs.check.outputs.docs-only }}
+
+jobs:
+  check:
+    name: Check for doc-only changes
+    runs-on: ubuntu-latest
+    outputs:
+      docs-only: ${{ steps.check.outputs.docs-only }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Documentation file patterns (centralized here — edit only this file)
+          DOC_PATTERN='^(docs/|[^/]*\.md$|\.github/ISSUE_TEMPLATE/|LICENSES/|CODEOWNERS$)'
+
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] || [ "$GITHUB_EVENT_NAME" = "pull_request_target" ]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+            NON_DOC_COUNT=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" \
+              --paginate --jq '.[].filename' | grep -cvE "$DOC_PATTERN" || true)
+          else
+            echo "docs-only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${NON_DOC_COUNT:-0}" -eq 0 ]; then
+            echo "docs-only=true" >> "$GITHUB_OUTPUT"
+            echo "Only documentation files changed — skippable"
+          else
+            echo "docs-only=false" >> "$GITHUB_OUTPUT"
+            echo "Non-documentation files changed — CI required"
+          fi

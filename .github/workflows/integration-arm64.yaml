@@ -5,7 +5,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-docs-only:
+    uses: ./.github/workflows/check-docs-only.yaml
+
   build:
+    needs: [check-docs-only]
     timeout-minutes: 120
     env:
       # Our runner has 80 cores (nproc).
@@ -15,26 +19,30 @@ jobs:
     name: Tests (ARM64)
     runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'bookworm-arm64' }}
     steps:
+      - name: Skip tests for documentation-only changes
+        if: ${{ needs.check-docs-only.outputs.docs-only == 'true' }}
+        run: echo "Skipping tests for documentation-only changes"
+
       - name: Fix workspace permissions
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name != 'pull_request' }}
         run: sudo chown -R runner:runner ${GITHUB_WORKSPACE}
       - name: Code checkout
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name != 'pull_request' }}
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Run unit tests (musl)
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name != 'pull_request' }}
         run: scripts/dev_cli.sh tests --unit --libc musl
       - name: Load openvswitch module
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name != 'pull_request' }}
         run: sudo modprobe openvswitch
       - name: Run integration tests (musl)
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name != 'pull_request' }}
         timeout-minutes: 60
         run: scripts/dev_cli.sh tests --integration --libc musl
       - name: Install Azure CLI
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name != 'pull_request' }}
         run: |
           set -eufo pipefail
           sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg
@@ -43,7 +51,7 @@ jobs:
           sudo apt update
           sudo apt install -y azure-cli
       - name: Download Windows image
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name != 'pull_request' }}
         shell: bash
         run: |
           set -eufo pipefail
@@ -61,9 +69,9 @@ jobs:
           az storage blob download --container-name private-images --file "$IMG_GZ_PATH" --name "$IMG_GZ_BLOB_NAME" --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
           gzip -d "$IMG_GZ_PATH"
       - name: Run Windows guest integration tests
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name != 'pull_request' }}
         timeout-minutes: 30
         run: scripts/dev_cli.sh tests --integration-windows --libc musl
       - name: Skipping build for PR
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name == 'pull_request' }}
         run: echo "Skipping build for PR"
