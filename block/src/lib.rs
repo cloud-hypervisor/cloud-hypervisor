@@ -31,6 +31,7 @@ pub mod raw_async;
 pub mod raw_async_aio;
 #[cfg(test)]
 mod raw_async_io_tests;
+pub mod raw_disk;
 pub mod raw_sync;
 mod request;
 pub mod vhd;
