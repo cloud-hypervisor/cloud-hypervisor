@@ -125,7 +125,7 @@ mod unit_tests {
 
     use super::*;
     use crate::async_io::AsyncIo;
-    use crate::disk_file::{AsyncDiskFile, DiskSize, Resizable};
+    use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize, Resizable};
 
     /// Minimal fixed VHD footer (disk type = 2, current_size = 0x11223344).
     fn fixed_vhd_footer() -> &'static [u8] {
@@ -210,5 +210,13 @@ mod unit_tests {
         let file = make_vhd_file();
         let mut disk = FixedVhdDisk::new(file, false).unwrap();
         assert!(disk.resize(0x2000_0000).is_err());
+    }
+
+    #[test]
+    fn physical_size_includes_footer() {
+        let file = make_vhd_file();
+        let disk = FixedVhdDisk::new(file, false).unwrap();
+        // Data region (0x1122_3344) + VHD footer (0x200).
+        assert_eq!(disk.physical_size().unwrap(), 0x1122_3344 + 0x200);
     }
 }
