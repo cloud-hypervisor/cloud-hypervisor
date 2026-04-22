@@ -118,6 +118,8 @@ const KVM_SNP_PAGE_TYPE_NORMAL: u32 = 1;
 #[cfg(feature = "kvm")]
 const KVM_SNP_PAGE_TYPE_VMSA: u32 = 2;
 #[cfg(feature = "kvm")]
+const KVM_SNP_PAGE_TYPE_ZERO: u32 = 3;
+#[cfg(feature = "kvm")]
 const KVM_SNP_PAGE_TYPE_UNMEASURED: u32 = 4;
 #[cfg(feature = "kvm")]
 const KVM_SNP_PAGE_TYPE_SECRETS: u32 = 5;
@@ -128,6 +130,7 @@ const KVM_SNP_PAGE_TYPE_CPUID: u32 = 6;
 struct PageTypeConfig {
     isolated_page_size_4kb: u32,
     normal: u32,
+    zero: u32,
     unmeasured: u32,
     cpuid: u32,
     secrets: u32,
@@ -250,6 +253,7 @@ pub fn load_igvm(
         HypervisorType::Mshv => PageTypeConfig {
             isolated_page_size_4kb: mshv_bindings::hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
             normal: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_NORMAL,
+            zero: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_NORMAL,
             unmeasured: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_UNMEASURED,
             cpuid: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_NORMAL,
             secrets: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_UNMEASURED,
@@ -259,6 +263,7 @@ pub fn load_igvm(
         HypervisorType::Kvm => PageTypeConfig {
             isolated_page_size_4kb: HV_PAGE_SIZE as u32,
             normal: KVM_SNP_PAGE_TYPE_NORMAL,
+            zero: KVM_SNP_PAGE_TYPE_ZERO,
             unmeasured: KVM_SNP_PAGE_TYPE_UNMEASURED,
             cpuid: KVM_SNP_PAGE_TYPE_CPUID,
             secrets: KVM_SNP_PAGE_TYPE_SECRETS,
@@ -334,9 +339,19 @@ pub fn load_igvm(
                             });
                             BootPageAcceptance::ExclusiveUnmeasured
                         } else {
+                            #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+                            let has_measured_boot_table = measured_boot_hash_block.is_some()
+                                && gpa / HV_PAGE_SIZE == measured_boot_hash_page_base;
+                            #[cfg(not(all(feature = "sev_snp", target_arch = "x86_64")))]
+                            let has_measured_boot_table = false;
+                            let page_type = if data.is_empty() && !has_measured_boot_table {
+                                page_types.zero
+                            } else {
+                                page_types.normal
+                            };
                             gpas.push(GpaPages {
                                 gpa: *gpa,
-                                page_type: page_types.normal,
+                                page_type,
                                 page_size: page_types.isolated_page_size_4kb,
                             });
                             BootPageAcceptance::Exclusive
