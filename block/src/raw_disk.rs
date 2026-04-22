@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
 use std::fs::File;
+use std::io;
+use std::os::unix::fs::FileTypeExt;
 use std::os::unix::io::AsRawFd;
 
 use log::warn;
@@ -75,5 +77,34 @@ impl disk_file::Geometry for RawDisk {
 impl disk_file::SparseCapable for RawDisk {
     fn supports_sparse_operations(&self) -> bool {
         probe_sparse_support(&self.file)
+    }
+}
+
+impl disk_file::Resizable for RawDisk {
+    fn resize(&mut self, size: u64) -> BlockResult<()> {
+        let fd_metadata = self
+            .file
+            .metadata()
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e)))?;
+
+        if fd_metadata.file_type().is_block_device() {
+            // Block devices cannot be resized via ftruncate; they are resized
+            // externally (LVM, losetup, etc.). Verify the size matches.
+            let (actual_size, _) = query_device_size(&self.file)
+                .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e)))?;
+            if actual_size != size {
+                return Err(BlockError::new(
+                    BlockErrorKind::Io,
+                    DiskFileError::ResizeError(io::Error::other(format!(
+                        "Block device size {actual_size} does not match requested size {size}"
+                    ))),
+                ));
+            }
+            Ok(())
+        } else {
+            self.file
+                .set_len(size)
+                .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e)))
+        }
     }
 }
