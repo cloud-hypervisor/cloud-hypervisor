@@ -39,6 +39,13 @@ use crate::cpu::CpuManager;
 use crate::igvm::loader::Loader;
 use crate::igvm::{BootPageAcceptance, HV_PAGE_SIZE, IgvmLoadedInfo, StartupMemoryType};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
+#[cfg(all(
+    feature = "kvm",
+    feature = "sev_snp",
+    feature = "fw_cfg",
+    target_arch = "x86_64"
+))]
+use crate::sev::{MeasuredBootInfo, SEV_HASH_BLOCK_ADDRESS, SEV_HASH_BLOCK_SIZE};
 
 #[cfg(feature = "sev_snp")]
 const ISOLATED_PAGE_SHIFT: u32 = 12;
@@ -96,6 +103,29 @@ pub enum Error {
     MissingIgvm,
     #[error("Error applying VMSA to vCPU registers: {0}")]
     SetVmsa(#[source] crate::cpu::Error),
+    #[cfg(all(
+        feature = "kvm",
+        feature = "sev_snp",
+        feature = "fw_cfg",
+        target_arch = "x86_64"
+    ))]
+    #[error("Error building SEV-SNP measured boot hash block")]
+    MeasuredBoot(#[source] vmm_sys_util::errno::Error),
+    #[cfg(all(
+        feature = "kvm",
+        feature = "sev_snp",
+        feature = "fw_cfg",
+        target_arch = "x86_64"
+    ))]
+    #[error(
+        "igvmfile inserts unmeasured parameter area [0x{region_start:x}, 0x{region_end:x}) over SEV-SNP kernel hashes region [0x{hash_start:x}, 0x{hash_end:x})"
+    )]
+    MeasuredBootHashOverlap {
+        region_start: u64,
+        region_end: u64,
+        hash_start: u64,
+        hash_end: u64,
+    },
 }
 
 // KVM SNP page types — linux/arch/x86/include/uapi/asm/sev-guest.h
@@ -225,6 +255,13 @@ pub fn load_igvm(
     memory_manager: Arc<Mutex<MemoryManager>>,
     cpu_manager: Arc<Mutex<CpuManager>>,
     cmdline: &str,
+    #[cfg(all(
+        feature = "kvm",
+        feature = "sev_snp",
+        feature = "fw_cfg",
+        target_arch = "x86_64"
+    ))]
+    measured_boot: Option<MeasuredBootInfo>,
     #[cfg(feature = "sev_snp")] host_data: &Option<String>,
 ) -> Result<Box<IgvmLoadedInfo>, Error> {
     let hypervisor_type = cpu_manager.lock().unwrap().hypervisor_type();
@@ -275,6 +312,45 @@ pub fn load_igvm(
     let mut loader = Loader::new(memory);
 
     let mut parameter_areas: HashMap<u32, ParameterAreaState> = HashMap::new();
+    #[cfg(all(
+        feature = "kvm",
+        feature = "sev_snp",
+        feature = "fw_cfg",
+        target_arch = "x86_64"
+    ))]
+    let measured_boot_hash_block = if hypervisor_type == HypervisorType::Kvm {
+        measured_boot
+            .as_ref()
+            .map(|measured_boot| {
+                measured_boot
+                    .build_hash_block()
+                    .map_err(Error::MeasuredBoot)
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    #[cfg(all(
+        feature = "kvm",
+        feature = "sev_snp",
+        feature = "fw_cfg",
+        target_arch = "x86_64"
+    ))]
+    let measured_boot_hash_page_base = SEV_HASH_BLOCK_ADDRESS / HV_PAGE_SIZE;
+    #[cfg(all(
+        feature = "kvm",
+        feature = "sev_snp",
+        feature = "fw_cfg",
+        target_arch = "x86_64"
+    ))]
+    let measured_boot_hash_offset = (SEV_HASH_BLOCK_ADDRESS % HV_PAGE_SIZE) as usize;
+    #[cfg(all(
+        feature = "kvm",
+        feature = "sev_snp",
+        feature = "fw_cfg",
+        target_arch = "x86_64"
+    ))]
+    let mut measured_boot_hash_block_inserted = measured_boot_hash_block.is_none();
 
     for header in igvm_file.directives() {
         debug_assert!(header.compatibility_mask().unwrap_or(mask) & mask == mask);
@@ -416,6 +492,34 @@ pub fn load_igvm(
                     loader
                         .import_pages(gpa / HV_PAGE_SIZE, 1, acceptance, new_cp.as_mut_bytes())
                         .map_err(Error::Loader)?;
+                    imported_page = true;
+                }
+                #[cfg(all(
+                    feature = "kvm",
+                    feature = "sev_snp",
+                    feature = "fw_cfg",
+                    target_arch = "x86_64"
+                ))]
+                if let Some(hash_block) = measured_boot_hash_block.as_ref().filter(|_| {
+                    !imported_page && gpa / HV_PAGE_SIZE == measured_boot_hash_page_base
+                }) {
+                    let mut page = if data.is_empty() {
+                        vec![0; HV_PAGE_SIZE as usize]
+                    } else {
+                        let mut page = data.clone();
+                        page.resize(HV_PAGE_SIZE as usize, 0);
+                        page
+                    };
+                    // If a data page from the bootloader contains this range,
+                    // we need to ensure that the measured boot table is injected
+                    // prior to importing the pages
+                    page[measured_boot_hash_offset
+                        ..measured_boot_hash_offset + SEV_HASH_BLOCK_SIZE]
+                        .copy_from_slice(&hash_block[..SEV_HASH_BLOCK_SIZE]);
+                    loader
+                        .import_pages(gpa / HV_PAGE_SIZE, 1, acceptance, &page)
+                        .map_err(Error::Loader)?;
+                    measured_boot_hash_block_inserted = true;
                     imported_page = true;
                 }
                 if !imported_page {
@@ -579,14 +683,37 @@ pub fn load_igvm(
                     .get_mut(parameter_area_index)
                     .expect("igvmfile should be valid");
                 match area {
-                    ParameterAreaState::Allocated { data, max_size } => loader
-                        .import_pages(
-                            gpa / HV_PAGE_SIZE,
-                            *max_size / HV_PAGE_SIZE,
-                            BootPageAcceptance::ExclusiveUnmeasured,
-                            data,
-                        )
-                        .map_err(Error::Loader)?,
+                    ParameterAreaState::Allocated { data, max_size } => {
+                        #[cfg(all(
+                            feature = "kvm",
+                            feature = "sev_snp",
+                            feature = "fw_cfg",
+                            target_arch = "x86_64"
+                        ))]
+                        if measured_boot_hash_block.is_some() {
+                            let region_end = *gpa + *max_size;
+                            let hash_end = SEV_HASH_BLOCK_ADDRESS + SEV_HASH_BLOCK_SIZE as u64;
+                            if *gpa <= SEV_HASH_BLOCK_ADDRESS && hash_end <= region_end {
+                                // In the case of parameter being inserted where the kernel hashes table lies,
+                                // we should reject the igvmfile since it would interfere with the launch digest
+                                return Err(Error::MeasuredBootHashOverlap {
+                                    region_start: *gpa,
+                                    region_end,
+                                    hash_start: SEV_HASH_BLOCK_ADDRESS,
+                                    hash_end,
+                                });
+                            }
+                        }
+
+                        loader
+                            .import_pages(
+                                gpa / HV_PAGE_SIZE,
+                                *max_size / HV_PAGE_SIZE,
+                                BootPageAcceptance::ExclusiveUnmeasured,
+                                data,
+                            )
+                            .map_err(Error::Loader)?;
+                    }
                     ParameterAreaState::Inserted => panic!("igvmfile is invalid, multiple insert"),
                 }
                 *area = ParameterAreaState::Inserted;
@@ -603,6 +730,34 @@ pub fn load_igvm(
                 todo!("Header not supported!!")
             }
         }
+    }
+
+    #[cfg(all(
+        feature = "kvm",
+        feature = "sev_snp",
+        feature = "fw_cfg",
+        target_arch = "x86_64"
+    ))]
+    if let Some(hash_block) = measured_boot_hash_block.as_ref()
+        && !measured_boot_hash_block_inserted
+    {
+        // Fallback to adding kernel hashes after importing if the page data wasn't found previously
+        let mut page = vec![0u8; HV_PAGE_SIZE as usize];
+        page[measured_boot_hash_offset..measured_boot_hash_offset + SEV_HASH_BLOCK_SIZE]
+            .copy_from_slice(&hash_block[..SEV_HASH_BLOCK_SIZE]);
+        loader
+            .import_pages(
+                measured_boot_hash_page_base,
+                1,
+                BootPageAcceptance::Exclusive,
+                &page,
+            )
+            .map_err(Error::Loader)?;
+        gpas.push(GpaPages {
+            gpa: measured_boot_hash_page_base * HV_PAGE_SIZE,
+            page_type: page_types.normal,
+            page_size: page_types.isolated_page_size_4kb,
+        });
     }
 
     #[cfg(feature = "sev_snp")]
