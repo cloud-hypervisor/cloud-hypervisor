@@ -17,6 +17,7 @@ pub mod fixed_vhd;
 #[cfg(feature = "io_uring")]
 /// Enabled with the `"io_uring"` feature
 pub mod fixed_vhd_async;
+pub mod fixed_vhd_disk;
 pub mod fixed_vhd_sync;
 pub mod qcow;
 #[cfg(feature = "io_uring")]
