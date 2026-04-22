@@ -91,6 +91,13 @@ pub mod migration_transport;
 mod pci_segment;
 pub mod seccomp_filters;
 mod serial_manager;
+#[cfg(all(
+    feature = "kvm",
+    feature = "sev_snp",
+    feature = "fw_cfg",
+    target_arch = "x86_64"
+))]
+pub(crate) mod sev;
 mod sigwinch_listener;
 mod sync_utils;
 mod uffd;

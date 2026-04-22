@@ -81,6 +81,7 @@ seccompiler = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 serial_buffer = { path = "../serial_buffer" }
+sha2 = { workspace = true }
 signal-hook = { workspace = true }
 thiserror = { workspace = true }
 tracer = { path = "../tracer" }

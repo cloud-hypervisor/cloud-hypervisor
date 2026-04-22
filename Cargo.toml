@@ -94,6 +94,7 @@ flume = "0.12.0"
 itertools = "0.14.0"
 libc = "0.2.186"
 log = "0.4.29"
+sha2 = "0.11.0"
 signal-hook = "0.4.4"
 thiserror = "2.0.18"
 uuid = { version = "1.23.1" }
