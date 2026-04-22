@@ -2,87 +2,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::fs::File;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::RawFd;
 
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
-use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::fixed_vhd::FixedVhd;
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::raw_sync::RawFileSync;
-use crate::{BlockBackend, disk_file};
-
-#[derive(Debug)]
-pub struct FixedVhdDiskSync(FixedVhd);
-
-impl FixedVhdDiskSync {
-    pub fn new(file: File) -> BlockResult<Self> {
-        Ok(Self(
-            FixedVhd::new(file).map_err(|e| BlockError::from(e).with_op(ErrorOp::Open))?,
-        ))
-    }
-}
-
-impl disk_file::DiskSize for FixedVhdDiskSync {
-    fn logical_size(&self) -> BlockResult<u64> {
-        self.0
-            .logical_size()
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))
-    }
-}
-
-impl disk_file::PhysicalSize for FixedVhdDiskSync {
-    fn physical_size(&self) -> BlockResult<u64> {
-        self.0.physical_size().map_err(|e| match e {
-            crate::Error::GetFileMetadata(io) => {
-                BlockError::new(BlockErrorKind::Io, crate::Error::GetFileMetadata(io))
-            }
-            _ => unreachable!("unexpected error from FixedVhd::physical_size(): {e}"),
-        })
-    }
-}
-
-impl disk_file::DiskFd for FixedVhdDiskSync {
-    fn fd(&self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.0.as_raw_fd())
-    }
-}
-
-impl disk_file::Geometry for FixedVhdDiskSync {}
-
-impl disk_file::SparseCapable for FixedVhdDiskSync {}
-
-impl disk_file::Resizable for FixedVhdDiskSync {
-    fn resize(&mut self, _size: u64) -> BlockResult<()> {
-        Err(BlockError::new(
-            BlockErrorKind::UnsupportedFeature,
-            DiskFileError::ResizeError(std::io::Error::other("resize not supported for fixed VHD")),
-        )
-        .with_op(ErrorOp::Resize))
-    }
-}
-
-impl disk_file::DiskFile for FixedVhdDiskSync {}
-
-impl disk_file::AsyncDiskFile for FixedVhdDiskSync {
-    fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
-        Ok(Box::new(FixedVhdDiskSync(self.0.clone())))
-    }
-
-    fn create_async_io(&self, _ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
-        let size = self
-            .0
-            .logical_size()
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
-        Ok(Box::new(
-            FixedVhdSync::new(self.0.as_raw_fd(), size).map_err(|e| {
-                BlockError::new(BlockErrorKind::Io, DiskFileError::NewAsyncIo(e))
-                    .with_op(ErrorOp::Open)
-            })?,
-        ))
-    }
-}
 
 pub struct FixedVhdSync {
     raw_file_sync: RawFileSync,
