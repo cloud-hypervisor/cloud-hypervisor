@@ -651,6 +651,10 @@ pub fn load_igvm(
                 let area = parameter_areas
                     .get_mut(parameter_area_index)
                     .expect("igvmfile should be valid");
+                let page_count = match area {
+                    ParameterAreaState::Allocated { max_size, .. } => *max_size / HV_PAGE_SIZE,
+                    ParameterAreaState::Inserted => panic!("igvmfile is invalid, multiple insert"),
+                };
                 match area {
                     ParameterAreaState::Allocated { data, max_size } => {
                         #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
@@ -681,11 +685,13 @@ pub fn load_igvm(
                     ParameterAreaState::Inserted => panic!("igvmfile is invalid, multiple insert"),
                 }
                 *area = ParameterAreaState::Inserted;
-                gpas.push(GpaPages {
-                    gpa: *gpa,
-                    page_type: page_types.unmeasured,
-                    page_size: page_types.isolated_page_size_4kb,
-                });
+                for page_index in 0..page_count {
+                    gpas.push(GpaPages {
+                        gpa: *gpa + page_index * HV_PAGE_SIZE,
+                        page_type: page_types.unmeasured,
+                        page_size: page_types.isolated_page_size_4kb,
+                    });
+                }
             }
             IgvmDirectiveHeader::ErrorRange { .. } => {
                 todo!("Error Range not supported")
@@ -730,14 +736,12 @@ pub fn load_igvm(
 
         let mut now = Instant::now();
 
-        // Sort the gpas to group them by the page type
-        gpas.sort_by_key(|a| a.gpa);
-
         let gpas_grouped = gpas
             .iter()
             .fold(Vec::<Vec<GpaPages>>::new(), |mut acc, gpa| {
                 if let Some(last_vec) = acc.last_mut()
                     && last_vec[0].page_type == gpa.page_type
+                    && last_vec[0].page_size == gpa.page_size
                 {
                     last_vec.push(*gpa);
                     return acc;
@@ -746,8 +750,9 @@ pub fn load_igvm(
                 acc
             });
 
-        // Import the pages as a group(by page type) of PFNs to reduce the
-        // hypercall.
+        // Preserve the original IGVM import order for SNP launch updates.
+        // The launch digest is order-sensitive, so only coalesce adjacent pages
+        // that already share the same page type and size.
         for group in gpas_grouped.iter() {
             info!(
                 "Importing {} page{}",
