@@ -124,7 +124,8 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
-    use crate::disk_file::DiskSize;
+    use crate::async_io::AsyncIo;
+    use crate::disk_file::{AsyncDiskFile, DiskSize};
 
     /// Minimal fixed VHD footer (disk type = 2, current_size = 0x11223344).
     fn fixed_vhd_footer() -> &'static [u8] {
@@ -161,5 +162,29 @@ mod unit_tests {
         let file = make_vhd_file();
         let disk = FixedVhdDisk::new(file, false).unwrap();
         assert_eq!(disk.logical_size().unwrap(), 0x1122_3344);
+    }
+
+    fn assert_async_io_from_dyn(disk: &dyn AsyncDiskFile, expect_batch: bool) {
+        let io: Box<dyn AsyncIo> = disk.create_async_io(128).unwrap();
+        assert_eq!(io.batch_requests_enabled(), expect_batch);
+    }
+
+    fn assert_async_io(disk: &FixedVhdDisk, expect_batch: bool) {
+        assert_async_io_from_dyn(disk, expect_batch);
+    }
+
+    #[test]
+    fn sync_backend_disables_batch_requests() {
+        let file = make_vhd_file();
+        let disk = FixedVhdDisk::new(file, false).unwrap();
+        assert_async_io(&disk, false);
+    }
+
+    #[cfg(feature = "io_uring")]
+    #[test]
+    fn io_uring_backend_enables_batch_requests() {
+        let file = make_vhd_file();
+        let disk = FixedVhdDisk::new(file, true).unwrap();
+        assert_async_io(&disk, true);
     }
 }
