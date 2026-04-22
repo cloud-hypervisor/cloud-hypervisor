@@ -115,3 +115,51 @@ impl disk_file::AsyncDiskFile for FixedVhdDisk {
         ))
     }
 }
+
+#[cfg(test)]
+mod unit_tests {
+    use std::fs::File;
+    use std::io::{Seek, SeekFrom, Write};
+
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+    use crate::disk_file::DiskSize;
+
+    /// Minimal fixed VHD footer (disk type = 2, current_size = 0x11223344).
+    fn fixed_vhd_footer() -> &'static [u8] {
+        &[
+            0x63, 0x6f, 0x6e, 0x65, 0x63, 0x74, 0x69, 0x78, // cookie
+            0x00, 0x00, 0x00, 0x02, // features
+            0x00, 0x01, 0x00, 0x00, // file format version
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, // data offset
+            0x27, 0xa6, 0xa6, 0x5d, // time stamp
+            0x71, 0x65, 0x6d, 0x75, // creator application
+            0x00, 0x05, 0x00, 0x03, // creator version
+            0x57, 0x69, 0x32, 0x6b, // creator host os
+            0x00, 0x00, 0x00, 0x00, 0x11, 0x22, 0x33, 0x44, // original size
+            0x00, 0x00, 0x00, 0x00, 0x11, 0x22, 0x33, 0x44, // current size
+            0x11, 0xe0, 0x10, 0x3f, // disk geometry
+            0x00, 0x00, 0x00, 0x02, // disk type
+            0x00, 0x00, 0x00, 0x00, // checksum
+            0x98, 0x7b, 0xb1, 0xcd, 0x84, 0x14, 0x41, 0xfc, // unique id
+            0xa4, 0xab, 0xd0, 0x69, 0x45, 0x2b, 0xf2, 0x23, 0x00, // saved state
+        ]
+    }
+
+    fn make_vhd_file() -> File {
+        let mut file: File = TempFile::new().unwrap().into_file();
+        let data_size: u64 = 0x1122_3344;
+        file.set_len(data_size + 0x200).unwrap();
+        file.seek(SeekFrom::Start(data_size)).unwrap();
+        file.write_all(fixed_vhd_footer()).unwrap();
+        file
+    }
+
+    #[test]
+    fn new_sync_returns_correct_size() {
+        let file = make_vhd_file();
+        let disk = FixedVhdDisk::new(file, false).unwrap();
+        assert_eq!(disk.logical_size().unwrap(), 0x1122_3344);
+    }
+}
