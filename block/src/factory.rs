@@ -18,9 +18,7 @@ use log::info;
 
 use crate::disk_file::AsyncFullDiskFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
-#[cfg(feature = "io_uring")]
-use crate::fixed_vhd_async::FixedVhdDiskAsync;
-use crate::fixed_vhd_sync::FixedVhdDiskSync;
+use crate::fixed_vhd_disk::FixedVhdDisk;
 #[cfg(feature = "io_uring")]
 use crate::qcow_async::QcowDiskAsync;
 use crate::qcow_sync::QcowDiskSync;
@@ -132,7 +130,7 @@ fn open_fixed_vhd(
         if io_uring_supported() {
             info!("Opening fixed VHD disk file with io_uring backend");
             return Ok(Box::new(
-                FixedVhdDiskAsync::new(file).map_err(|e| e.with_path(options.path))?,
+                FixedVhdDisk::new(file, true).map_err(|e| e.with_path(options.path))?,
             ));
         }
         info!("io_uring runtime probe failed for fixed VHD, using synchronous backend");
@@ -140,7 +138,7 @@ fn open_fixed_vhd(
 
     info!("Opening fixed VHD disk file with synchronous backend");
     Ok(Box::new(
-        FixedVhdDiskSync::new(file).map_err(|e| e.with_path(options.path))?,
+        FixedVhdDisk::new(file, false).map_err(|e| e.with_path(options.path))?,
     ))
 }
 
