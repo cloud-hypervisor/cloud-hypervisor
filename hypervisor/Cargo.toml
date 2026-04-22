@@ -25,6 +25,7 @@ igvm_defs = { workspace = true, optional = true }
 kvm-bindings = { workspace = true, optional = true, features = ["serde"] }
 kvm-ioctls = { workspace = true, optional = true }
 libc = { workspace = true }
+linux-loader = { workspace = true, features = ["bzimage"] }
 log = { workspace = true }
 mshv-bindings = { workspace = true, features = [
   "fam-wrappers",
@@ -37,7 +38,9 @@ serde_json = { workspace = true }
 serde_with = { workspace = true, default-features = false, features = [
   "macros",
 ] }
+sha2 = "0.11.0"
 thiserror = { workspace = true }
+uuid = { workspace = true }
 vfio-ioctls = { workspace = true, default-features = false }
 vm-memory = { workspace = true, features = [
   "backend-atomic",

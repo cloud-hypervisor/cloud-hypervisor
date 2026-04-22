@@ -32,7 +32,7 @@ use crate::arch::x86::{
 use crate::kvm::{Cap, Kvm, KvmError, KvmResult};
 
 #[cfg(feature = "sev_snp")]
-pub(crate) mod sev;
+pub mod sev;
 
 ///
 /// Check KVM extension for Linux
