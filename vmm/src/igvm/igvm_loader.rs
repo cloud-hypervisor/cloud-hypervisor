@@ -134,6 +134,8 @@ const KVM_SNP_PAGE_TYPE_NORMAL: u32 = 1;
 #[cfg(feature = "kvm")]
 const KVM_SNP_PAGE_TYPE_VMSA: u32 = 2;
 #[cfg(feature = "kvm")]
+const KVM_SNP_PAGE_TYPE_ZERO: u32 = 3;
+#[cfg(feature = "kvm")]
 const KVM_SNP_PAGE_TYPE_UNMEASURED: u32 = 4;
 #[cfg(feature = "kvm")]
 const KVM_SNP_PAGE_TYPE_SECRETS: u32 = 5;
@@ -144,6 +146,8 @@ const KVM_SNP_PAGE_TYPE_CPUID: u32 = 6;
 struct PageTypeConfig {
     isolated_page_size_4kb: u32,
     normal: u32,
+    #[allow(dead_code)]
+    zero: u32,
     unmeasured: u32,
     cpuid: u32,
     secrets: u32,
@@ -270,6 +274,7 @@ pub fn load_igvm(
         HypervisorType::Mshv => PageTypeConfig {
             isolated_page_size_4kb: mshv_bindings::hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
             normal: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_NORMAL,
+            zero: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_ZERO,
             unmeasured: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_UNMEASURED,
             cpuid: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_CPUID,
             secrets: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_SECRETS,
@@ -279,6 +284,7 @@ pub fn load_igvm(
         HypervisorType::Kvm => PageTypeConfig {
             isolated_page_size_4kb: HV_PAGE_SIZE as u32,
             normal: KVM_SNP_PAGE_TYPE_NORMAL,
+            zero: KVM_SNP_PAGE_TYPE_ZERO,
             unmeasured: KVM_SNP_PAGE_TYPE_UNMEASURED,
             cpuid: KVM_SNP_PAGE_TYPE_CPUID,
             secrets: KVM_SNP_PAGE_TYPE_SECRETS,
@@ -378,9 +384,14 @@ pub fn load_igvm(
                             });
                             BootPageAcceptance::ExclusiveUnmeasured
                         } else {
+                            let page_type = match hypervisor_type {
+                                #[cfg(feature = "kvm")]
+                                HypervisorType::Kvm if data.is_empty() => page_types.zero,
+                                _ => page_types.normal,
+                            };
                             gpas.push(GpaPages {
                                 gpa: *gpa,
-                                page_type: page_types.normal,
+                                page_type,
                                 page_size: page_types.isolated_page_size_4kb,
                             });
                             BootPageAcceptance::Exclusive
@@ -521,6 +532,10 @@ pub fn load_igvm(
                         .map_err(Error::Loader)?;
                     measured_boot_hash_block_inserted = true;
                     imported_page = true;
+                    if let Some(last) = gpas.last_mut() {
+                        debug_assert_eq!(last.gpa, *gpa);
+                        last.page_type = page_types.normal;
+                    }
                 }
                 if !imported_page {
                     loader
