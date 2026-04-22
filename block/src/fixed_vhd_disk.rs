@@ -125,7 +125,7 @@ mod unit_tests {
 
     use super::*;
     use crate::async_io::AsyncIo;
-    use crate::disk_file::{AsyncDiskFile, DiskSize};
+    use crate::disk_file::{AsyncDiskFile, DiskSize, Resizable};
 
     /// Minimal fixed VHD footer (disk type = 2, current_size = 0x11223344).
     fn fixed_vhd_footer() -> &'static [u8] {
@@ -203,5 +203,12 @@ mod unit_tests {
         let disk = FixedVhdDisk::new(file, true).unwrap();
         let cloned = disk.try_clone().unwrap();
         assert_async_io_from_dyn(cloned.as_ref(), true);
+    }
+
+    #[test]
+    fn resize_returns_error() {
+        let file = make_vhd_file();
+        let mut disk = FixedVhdDisk::new(file, false).unwrap();
+        assert!(disk.resize(0x2000_0000).is_err());
     }
 }
