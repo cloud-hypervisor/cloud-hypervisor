@@ -500,6 +500,37 @@ cmd_tests() {
             ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
+    # Copy custom kernel/firmware into the workloads directory on the
+    # host so they are visible inside the container at the default
+    # paths.  Each variable is independent; only set vars are copied.
+    if [ -n "$CH_CUSTOM_KERNEL" ]; then
+        say "Copying custom kernel from $CH_CUSTOM_KERNEL"
+        if [ "$(uname -m)" = "aarch64" ]; then
+            cp "$CH_CUSTOM_KERNEL" "$CLH_INTEGRATION_WORKLOADS/Image-arm64"
+        else
+            cp "$CH_CUSTOM_KERNEL" "$CLH_INTEGRATION_WORKLOADS/vmlinux-x86_64"
+        fi
+    fi
+    if [ -n "$CH_CUSTOM_BZIMAGE" ]; then
+        say "Copying custom bzImage from $CH_CUSTOM_BZIMAGE"
+        if [ "$(uname -m)" = "x86_64" ]; then
+            cp "$CH_CUSTOM_BZIMAGE" "$CLH_INTEGRATION_WORKLOADS/bzImage-x86_64"
+        fi
+    fi
+
+    if [ -n "$CH_CUSTOM_FIRMWARE" ]; then
+        say "Copying custom firmware from $CH_CUSTOM_FIRMWARE"
+        cp "$CH_CUSTOM_FIRMWARE" "$CLH_INTEGRATION_WORKLOADS/hypervisor-fw"
+    fi
+    if [ -n "$CH_CUSTOM_OVMF" ]; then
+        say "Copying custom OVMF from $CH_CUSTOM_OVMF"
+        if [ "$(uname -m)" = "aarch64" ]; then
+            cp "$CH_CUSTOM_OVMF" "$CLH_INTEGRATION_WORKLOADS/CLOUDHV_EFI.fd"
+        else
+            cp "$CH_CUSTOM_OVMF" "$CLH_INTEGRATION_WORKLOADS/CLOUDHV.fd"
+        fi
+    fi
+
     # Extend common_args with integration-specific runtime settings.
     common_args+=(
         --privileged
@@ -514,6 +545,10 @@ cmd_tests() {
     common_env_args+=(
         --env USER="root"
         --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN"
+        --env CH_CUSTOM_KERNEL="$CH_CUSTOM_KERNEL"
+        --env CH_CUSTOM_BZIMAGE="$CH_CUSTOM_BZIMAGE"
+        --env CH_CUSTOM_FIRMWARE="$CH_CUSTOM_FIRMWARE"
+        --env CH_CUSTOM_OVMF="$CH_CUSTOM_OVMF"
     )
 
     if [ "$integration" = true ]; then
