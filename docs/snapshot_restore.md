@@ -139,6 +139,26 @@ In the example above, the net device with id `net1` will be backed by FDs '23'
 and '24', and the net device with id `net2` will be backed by FDs '25' and '26'
 from the restored VM.
 
+## VFIO devices
+
+Snapshot and restore work with VFIO devices, with two modes depending on
+whether the device advertises the kernel VFIO migration v2 protocol:
+
+- **Migratable VFIO devices** (e.g. `mlx5_vfio_pci`):
+  Cloud Hypervisor captures the opaque device state through STOP_COPY during
+  snapshot and replays it through RESUMING during restore. The guest observes
+  the device in the same operational state after restore as before snapshot.
+  Requires Linux 5.18 or newer on the host.
+- **Non migratable VFIO devices** (e.g. generic `vfio_pci`): snapshot and
+  restore still succeed, but device internal state is not captured. Only the
+  PCI configuration and interrupt routing that Cloud Hypervisor owns are
+  preserved. Device behavior after restore depends on whether the device
+  driver inside the guest can recover without explicit reconfiguration.
+
+See [`vfio.md`](vfio.md) for details on requirements and behavior.
+
 ## Limitations
 
-VFIO devices is out of scope.
+Snapshot and restore of VMs with VFIO devices is supported as described above.
+Live Migration support for VFIO devices (including DMA dirty page tracking and
+VMM orchestration) is tracked as a follow up.

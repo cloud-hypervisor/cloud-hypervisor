@@ -82,6 +82,7 @@ serde_with = { version = "3.18.0", default-features = false }
 
 # other crates
 anyhow = "1.0.102"
+base64 = "0.22.1"
 bitflags = "2.11.0"
 byteorder = "1.5.0"
 cfg-if = "1.0.4"
@@ -127,3 +128,6 @@ unnecessary_semicolon = "deny"
 [workspace.lints.rust]
 # `level = warn` is irrelevant here but mandatory for rustc/cargo
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(devcli_testenv)'] }
+
+[patch.crates-io]
+vfio-ioctls = { git = "https://github.com/saravan2/vfio.git", branch = "vfio-ioctls" }
