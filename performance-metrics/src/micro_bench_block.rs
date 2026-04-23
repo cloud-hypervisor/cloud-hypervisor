@@ -334,8 +334,8 @@ pub fn micro_bench_qcow_l2_cache_miss(control: &PerformanceTestControl) -> f64 {
 /// Read num_ops clusters from a prepopulated qcow2 image through the
 /// QcowAsync io_uring path and time the total wall clock.
 ///
-/// Unlike micro_bench_qcow_read which uses QcowDiskSync (blocking),
-/// this uses QcowDiskAsync where single-allocated-cluster reads go
+/// Unlike micro_bench_qcow_read which uses the synchronous backend,
+/// this uses the io_uring backend where single allocated cluster reads go
 /// through io_uring for true asynchronous completion.
 ///
 /// Returns the total read wall clock time in seconds.
