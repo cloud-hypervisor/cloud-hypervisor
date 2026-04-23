@@ -116,9 +116,21 @@ if [ ! -f "$ALPINE_INITRAMFS_IMAGE" ]; then
 fi
 
 pushd "$WORKLOADS_DIR" || exit
-if ! sha1sum sha1sums-x86_64 sha1sums-x86_64-common --check; then
-    echo "sha1sum validation of images failed, remove invalid images to fix the issue."
-    exit 1
+# Skip checksum verification for custom-provided workloads
+sha1_exclude=""
+[ -n "$CH_CUSTOM_FIRMWARE" ] && sha1_exclude="${sha1_exclude}|hypervisor-fw"
+[ -n "$CH_CUSTOM_OVMF" ] && sha1_exclude="${sha1_exclude}|CLOUDHV\\.fd"
+sha1_exclude="${sha1_exclude#|}"
+if [ -n "$sha1_exclude" ]; then
+    if ! cat sha1sums-x86_64 sha1sums-x86_64-common | grep -Ev "$sha1_exclude" | sha1sum --check; then
+        echo "sha1sum validation of images failed, remove invalid images to fix the issue."
+        exit 1
+    fi
+else
+    if ! sha1sum sha1sums-x86_64 sha1sums-x86_64-common --check; then
+        echo "sha1sum validation of images failed, remove invalid images to fix the issue."
+        exit 1
+    fi
 fi
 popd || exit
 
