@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::{ffi, io};
 
 use block::fcntl::LockGranularityChoice;
-use block::raw_sync::RawFileDiskSync;
+use block::raw_disk::{RawBackend, RawDisk};
 use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{Block, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
@@ -54,7 +54,7 @@ fuzz_target!(|bytes: &[u8]| -> Corpus {
     let queue_affinity = BTreeMap::new();
     let mut block = Block::new(
         "tmp".to_owned(),
-        Box::new(RawFileDiskSync::new(disk_file)),
+        Box::new(RawDisk::new(disk_file, RawBackend::Sync)),
         PathBuf::from(""),
         false,
         false,
