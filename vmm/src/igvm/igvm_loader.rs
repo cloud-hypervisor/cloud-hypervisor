@@ -242,9 +242,8 @@ pub fn load_igvm(
     memory_manager: Arc<Mutex<MemoryManager>>,
     cpu_manager: Arc<Mutex<CpuManager>>,
     cmdline: &str,
-    #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))] measured_boot: Option<
-        MeasuredBootInfo,
-    >,
+    #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
+    measured_boot: Option<MeasuredBootInfo>,
     #[cfg(feature = "sev_snp")] host_data: &Option<String>,
 ) -> Result<Box<IgvmLoadedInfo>, Error> {
     let hypervisor_type = cpu_manager.lock().unwrap().hypervisor_type();
@@ -339,10 +338,18 @@ pub fn load_igvm(
                             });
                             BootPageAcceptance::ExclusiveUnmeasured
                         } else {
-                            #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
+                            #[cfg(all(
+                                feature = "sev_snp",
+                                feature = "fw_cfg",
+                                target_arch = "x86_64"
+                            ))]
                             let has_measured_boot_table = measured_boot_hash_block.is_some()
                                 && gpa / HV_PAGE_SIZE == measured_boot_hash_page_base;
-                            #[cfg(not(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64")))]
+                            #[cfg(not(all(
+                                feature = "sev_snp",
+                                feature = "fw_cfg",
+                                target_arch = "x86_64"
+                            )))]
                             let has_measured_boot_table = false;
                             let page_type = if data.is_empty() && !has_measured_boot_table {
                                 page_types.zero
@@ -657,7 +664,11 @@ pub fn load_igvm(
                 };
                 match area {
                     ParameterAreaState::Allocated { data, max_size } => {
-                        #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
+                        #[cfg(all(
+                            feature = "sev_snp",
+                            feature = "fw_cfg",
+                            target_arch = "x86_64"
+                        ))]
                         if measured_boot_hash_block.is_some() {
                             let region_end = *gpa + *max_size;
                             let hash_end = SEV_HASH_BLOCK_ADDRESS + SEV_HASH_BLOCK_SIZE as u64;
