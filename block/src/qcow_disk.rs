@@ -193,7 +193,7 @@ mod unit_tests {
 
     use super::*;
     use crate::async_io::AsyncIo;
-    use crate::disk_file::{AsyncDiskFile, DiskSize};
+    use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize};
     use crate::qcow::{QcowFile, RawFile};
 
     const TEST_SIZE: u64 = 0x5566_7788;
@@ -253,5 +253,14 @@ mod unit_tests {
         let disk = QcowDisk::new(file, false, false, true, true).unwrap();
         let cloned = disk.try_clone().unwrap();
         assert_async_io_from_dyn(cloned.as_ref(), true);
+    }
+
+    #[test]
+    fn physical_size_less_than_logical() {
+        // make_qcow_file() writes no guest data, so the file on disk
+        // only contains QCOW2 headers and metadata tables.
+        let file = make_qcow_file();
+        let disk = QcowDisk::new(file, false, false, true, false).unwrap();
+        assert!(disk.physical_size().unwrap() < disk.logical_size().unwrap());
     }
 }
