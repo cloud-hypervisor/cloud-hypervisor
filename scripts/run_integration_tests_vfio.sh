@@ -16,7 +16,9 @@ process_common_args "$@"
 
 WORKLOADS_DIR="$HOME/workloads"
 
-download_hypervisor_fw
+if [ ! -f "$WORKLOADS_DIR/hypervisor-fw" ]; then
+    download_hypervisor_fw
+fi
 
 CFLAGS=""
 if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then

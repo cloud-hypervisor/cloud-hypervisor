@@ -20,7 +20,9 @@ WIN_IMAGE_FILE="$WORKLOADS_DIR/$WIN_IMAGE_BASENAME"
 
 # Download aarch64 OVMF
 OVMF_FW="$WORKLOADS_DIR/CLOUDHV_EFI.fd"
-download_aarch64_ovmf
+if [ ! -f "$OVMF_FW" ]; then
+    download_aarch64_ovmf
+fi
 
 # Check if the images are present
 if [[ ! -f ${WIN_IMAGE_FILE} || ! -f ${OVMF_FW} ]]; then
