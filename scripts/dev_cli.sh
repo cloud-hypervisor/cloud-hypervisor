@@ -470,18 +470,23 @@ cmd_tests() {
         rustflags="$rustflags -C link-args=-Wl,-Bstatic -C link-args=-lc"
     fi
 
+    # Common base runtime args shared by all test container runs.
+    common_args=(
+        --name "$CLH_CTR_NAME"
+        --workdir "$CTR_CLH_ROOT_DIR"
+        --rm
+        --security-opt seccomp=unconfined
+        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR"
+        ${exported_volumes:+$exported_volumes}
+    )
+
     if [[ "$unit" = true ]]; then
         say "Running unit tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
+            "${common_args[@]}" \
             --device $exported_device \
             --device /dev/net/tun \
             --cap-add net_admin \
-            --security-opt seccomp=unconfined \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+$exported_volumes} \
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
             --env TARGET_CC="$target_cc" \
@@ -490,21 +495,20 @@ cmd_tests() {
             ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
+    # Extend common_args with integration-specific runtime settings.
+    common_args+=(
+        --privileged
+        --ipc=host
+        --net="$CTR_CLH_NET"
+        "--mount" "type=tmpfs,destination=/tmp"
+        --volume /dev:/dev
+        --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS"
+    )
+
     if [ "$integration" = true ]; then
         say "Running integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+$exported_volumes} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
+            "${common_args[@]}" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
@@ -522,19 +526,8 @@ cmd_tests() {
         copy_igvm_files "$SRC_IGVM_FILES_PATH" "$DEST_IGVM_FILES_PATH"
         say "Running CVM integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+            "${common_args[@]}" \
             --volume "$DEST_IGVM_FILES_PATH:$CTR_IGVM_FILES_PATH" \
-            ${exported_volumes:+"$exported_volumes"} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
@@ -548,18 +541,7 @@ cmd_tests() {
     if [ "$integration_vfio" = true ]; then
         say "Running VFIO integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+$exported_volumes} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
+            "${common_args[@]}" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
@@ -572,18 +554,7 @@ cmd_tests() {
     if [ "$integration_windows" = true ]; then
         say "Running Windows integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+$exported_volumes} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
+            "${common_args[@]}" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
@@ -596,18 +567,7 @@ cmd_tests() {
     if [ "$integration_rate_limiter" = true ]; then
         say "Running 'rate limiter' integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+$exported_volumes} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
+            "${common_args[@]}" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
@@ -620,18 +580,7 @@ cmd_tests() {
     if [ "$metrics" = true ]; then
         say "Generating performance metrics for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+$exported_volumes} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
+            "${common_args[@]}" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
@@ -645,18 +594,7 @@ cmd_tests() {
     if [ "$coverage" = true ]; then
         say "Generating code coverage information for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+$exported_volumes} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
+            "${common_args[@]}" \
             --env USER="root" \
             --env BUILD_TARGET="$target" \
             --env RUSTFLAGS="$rustflags" \
