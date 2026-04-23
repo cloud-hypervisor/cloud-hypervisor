@@ -237,4 +237,21 @@ mod unit_tests {
         let disk = QcowDisk::new(file, false, false, true, true).unwrap();
         assert_async_io(&disk, true);
     }
+
+    #[test]
+    fn try_clone_preserves_sync_dispatch() {
+        let file = make_qcow_file();
+        let disk = QcowDisk::new(file, false, false, true, false).unwrap();
+        let cloned = disk.try_clone().unwrap();
+        assert_async_io_from_dyn(cloned.as_ref(), false);
+    }
+
+    #[cfg(feature = "io_uring")]
+    #[test]
+    fn try_clone_preserves_io_uring_dispatch() {
+        let file = make_qcow_file();
+        let disk = QcowDisk::new(file, false, false, true, true).unwrap();
+        let cloned = disk.try_clone().unwrap();
+        assert_async_io_from_dyn(cloned.as_ref(), true);
+    }
 }
