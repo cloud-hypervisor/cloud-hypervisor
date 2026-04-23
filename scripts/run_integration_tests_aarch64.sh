@@ -248,36 +248,12 @@ echo "$PAGE_NUM" | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
 # Run all direct kernel boot (Device Tree) test cases in mod `parallel`
-time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "common_parallel::$test_filter" -- ${test_binary_args[*]}
+time cargo nextest run $test_features --profile common_tests --no-tests=pass --test-threads=$(($(nproc) / 4)) "$test_filter" -- ${test_binary_args[*]}
 RES=$?
-
-# Run some tests in sequence since the result could be affected by other tests
-# running in parallel.
-if [ $RES -eq 0 ]; then
-    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=1 "common_sequential::$test_filter" -- ${test_binary_args[*]}
-    RES=$?
-else
-    exit $RES
-fi
-
-# Run all ACPI test cases
-if [ $RES -eq 0 ]; then
-    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "aarch64_acpi::$test_filter" -- ${test_binary_args[*]}
-    RES=$?
-else
-    exit $RES
-fi
 
 # Run all test cases related to live migration
 if [ $RES -eq 0 ]; then
-    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "live_migration_parallel::$test_filter" -- ${test_binary_args[*]}
-    RES=$?
-else
-    exit $RES
-fi
-
-if [ $RES -eq 0 ]; then
-    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=1 "live_migration_sequential::$test_filter" -- ${test_binary_args[*]}
+    time cargo nextest run $test_features --profile live_migration --no-tests=pass --test-threads=$(($(nproc) / 4)) "$test_filter" -- ${test_binary_args[*]}
     RES=$?
 else
     exit $RES
@@ -288,7 +264,7 @@ if [ $RES -eq 0 ]; then
     cargo build --features "mshv,dbus_api" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
     # integration tests now do not reply on build feature "dbus_api"
-    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "dbus_api::$test_filter" -- ${test_binary_args[*]}
+    time cargo nextest run $test_features --profile dbus --no-tests=pass --test-threads=$(($(nproc) / 4)) "$test_filter" -- ${test_binary_args[*]}
     RES=$?
 fi
 
@@ -296,14 +272,14 @@ fi
 if [ $RES -eq 0 ]; then
     cargo build --features "mshv,fw_cfg" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
-    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "fw_cfg::$test_filter" -- ${test_binary_args[*]}
+    time cargo nextest run $test_features --profile fw_cfg --no-tests=pass --test-threads=$(($(nproc) / 4)) "$test_filter" -- ${test_binary_args[*]}
     RES=$?
 fi
 
 if [ $RES -eq 0 ]; then
     cargo build --features "mshv,ivshmem" --all --release --target "$BUILD_TARGET"
     export RUST_BACKTRACE=1
-    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=$(($(nproc) / 4)) "ivshmem::$test_filter" -- ${test_binary_args[*]}
+    time cargo nextest run $test_features --profile ivshmem --no-tests=pass --test-threads=$(($(nproc) / 4)) "$test_filter" -- ${test_binary_args[*]}
 
     RES=$?
 fi
