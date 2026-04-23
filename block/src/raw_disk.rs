@@ -151,7 +151,7 @@ mod unit_tests {
 
     use super::*;
     use crate::async_io::AsyncIo;
-    use crate::disk_file::{AsyncDiskFile, DiskSize};
+    use crate::disk_file::{AsyncDiskFile, DiskSize, Resizable};
 
     const TEST_SIZE: u64 = 0x1122_3344;
 
@@ -239,5 +239,14 @@ mod unit_tests {
         let file = make_raw_file();
         let disk = RawDisk::new(file, RawBackend::IoUring);
         assert_try_clone(&disk, RawBackend::IoUring);
+    }
+
+    #[test]
+    fn resize_changes_file_size() {
+        let file = make_raw_file();
+        let mut disk = RawDisk::new(file, RawBackend::Aio);
+        let new_size = TEST_SIZE * 2;
+        disk.resize(new_size).unwrap();
+        assert_eq!(disk.logical_size().unwrap(), new_size);
     }
 }
