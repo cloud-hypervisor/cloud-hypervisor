@@ -7,12 +7,10 @@
 //! These run without booting a VM and measure hot path operations
 //! (e.g. AIO completion draining) at the syscall level.
 
-use std::os::unix::io::AsRawFd;
 use std::time::Instant;
 
-use block::async_io::AsyncIo;
 use block::disk_file::AsyncDiskFile;
-use block::raw_async_aio::RawFileAsyncAio;
+use block::raw_disk::{RawBackend, RawDisk};
 use block::{BatchRequest, RequestType};
 
 use crate::PerformanceTestControl;
@@ -29,8 +27,10 @@ use crate::util::{
 pub fn micro_bench_aio_drain(control: &PerformanceTestControl) -> f64 {
     let num_ops = control.num_ops.expect("num_ops required") as usize;
     let tmp = util::sized_tempfile(num_ops);
-    let fd = tmp.as_file().as_raw_fd();
-    let mut aio = RawFileAsyncAio::new(fd, num_ops as u32).expect("failed to create AIO context");
+    let disk = RawDisk::new(tmp.as_file().try_clone().unwrap(), RawBackend::Aio);
+    let mut aio = disk
+        .create_async_io(num_ops as u32)
+        .expect("failed to create AIO context");
 
     let buf = vec![0xA5u8; BLOCK_SIZE as usize];
 
