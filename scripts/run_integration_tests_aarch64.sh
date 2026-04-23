@@ -137,7 +137,9 @@ update_workloads() {
     fi
 
     # Download aarch64 ovmf
-    download_aarch64_ovmf
+    if [ ! -f "$WORKLOADS_DIR/CLOUDHV_EFI.fd" ]; then
+        download_aarch64_ovmf
+    fi
 
     pushd "$WORKLOADS_DIR" || exit
 
