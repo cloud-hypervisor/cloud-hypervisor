@@ -179,3 +179,213 @@ impl MeasuredBootInfo {
         Ok(hash_block)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use super::*;
+
+    fn make_tempfile(data: &[u8]) -> File {
+        let mut f = tempfile::tempfile().unwrap();
+        f.write_all(data).unwrap();
+        f
+    }
+
+    fn make_fake_kernel(setup_sects: u8, kernel_payload: &[u8]) -> File {
+        let effective_sects = if setup_sects == 0 { 4 } else { setup_sects };
+        let setup_len = (usize::from(effective_sects) + 1) * 512;
+        let header_size = size_of::<boot_params>();
+        let file_len = std::cmp::max(setup_len, header_size) + kernel_payload.len();
+
+        let mut buf = vec![0u8; file_len];
+        let bp = boot_params::from_mut_slice(&mut buf[..header_size]).unwrap();
+        bp.hdr.setup_sects = setup_sects;
+        buf[setup_len..setup_len + kernel_payload.len()].copy_from_slice(kernel_payload);
+
+        make_tempfile(&buf)
+    }
+
+    #[test]
+    fn hash_block_deterministic() {
+        let info = MeasuredBootInfo {
+            kernel: make_fake_kernel(1, b"KERNEL_DATA"),
+            initramfs: None,
+            cmdline: CString::new("console=ttyS0").unwrap(),
+        };
+        let block1 = info.build_hash_block().unwrap();
+        let block2 = info.build_hash_block().unwrap();
+        assert_eq!(block1, block2);
+    }
+
+    #[test]
+    fn hash_block_cmdline_includes_nul() {
+        let info = MeasuredBootInfo {
+            kernel: make_fake_kernel(1, b"K"),
+            initramfs: None,
+            cmdline: CString::new("test").unwrap(),
+        };
+        let block = info.build_hash_block().unwrap();
+        let expected: [u8; 32] = Sha256::digest(b"test\0").into();
+        let cmdline_hash_offset = 2 * (size_of::<[u8; 16]>() + size_of::<u16>());
+        assert_eq!(
+            &block[cmdline_hash_offset..cmdline_hash_offset + 32],
+            &expected
+        );
+    }
+
+    #[test]
+    fn hash_block_no_initrd_hashes_empty() {
+        let info = MeasuredBootInfo {
+            kernel: make_fake_kernel(1, b"K"),
+            initramfs: None,
+            cmdline: CString::new("").unwrap(),
+        };
+        let block = info.build_hash_block().unwrap();
+        let expected: [u8; 32] = Sha256::digest([]).into();
+
+        let initrd_hash_offset =
+            2 * (size_of::<[u8; 16]>() + size_of::<u16>()) + size_of::<SevHashTableEntry>();
+        assert_eq!(
+            &block[initrd_hash_offset..initrd_hash_offset + 32],
+            &expected
+        );
+    }
+
+    #[test]
+    fn hash_block_with_initrd() {
+        let info = MeasuredBootInfo {
+            kernel: make_fake_kernel(1, b"K"),
+            initramfs: Some(make_tempfile(b"INITRD_CONTENTS")),
+            cmdline: CString::new("").unwrap(),
+        };
+        let block = info.build_hash_block().unwrap();
+        let expected: [u8; 32] = Sha256::digest(b"INITRD_CONTENTS").into();
+        let initrd_hash_offset =
+            2 * (size_of::<[u8; 16]>() + size_of::<u16>()) + size_of::<SevHashTableEntry>();
+        assert_eq!(
+            &block[initrd_hash_offset..initrd_hash_offset + 32],
+            &expected
+        );
+    }
+
+    #[test]
+    fn hash_block_setup_sects_zero_defaults_to_four() {
+        let info = MeasuredBootInfo {
+            kernel: make_fake_kernel(0, b"PAYLOAD"),
+            initramfs: None,
+            cmdline: CString::new("root=/dev/sda").unwrap(),
+        };
+        info.build_hash_block().unwrap();
+    }
+
+    #[test]
+    fn hash_block_guid_placement() {
+        let info = MeasuredBootInfo {
+            kernel: make_fake_kernel(1, b"K"),
+            initramfs: None,
+            cmdline: CString::new("x").unwrap(),
+        };
+        let block = info.build_hash_block().unwrap();
+        assert_eq!(&block[0..16], SEV_HASH_TABLE_GUID.to_bytes_le());
+        assert_eq!(&block[18..34], SEV_CMDLINE_HASH_GUID.to_bytes_le());
+        let initrd_guid_offset =
+            size_of::<[u8; 16]>() + size_of::<u16>() + size_of::<SevHashTableEntry>();
+        assert_eq!(
+            &block[initrd_guid_offset..initrd_guid_offset + 16],
+            SEV_INITRD_HASH_GUID.to_bytes_le()
+        );
+        let kernel_guid_offset = initrd_guid_offset + size_of::<SevHashTableEntry>();
+        assert_eq!(
+            &block[kernel_guid_offset..kernel_guid_offset + 16],
+            SEV_KERNEL_HASH_GUID.to_bytes_le()
+        );
+    }
+
+    #[test]
+    fn hash_block_struct_sizes() {
+        assert_eq!(size_of::<SevHashTableEntry>(), 16 + 2 + 32);
+        assert_eq!(
+            size_of::<SevHashTable>(),
+            16 + 2 + 3 * size_of::<SevHashTableEntry>()
+        );
+        assert_eq!(size_of::<PaddedSevHashTable>() % 16, 0);
+        assert!(size_of::<PaddedSevHashTable>() <= SEV_HASH_BLOCK_SIZE);
+    }
+
+    #[test]
+    fn hash_block_remainder_is_zeroed() {
+        let info = MeasuredBootInfo {
+            kernel: make_fake_kernel(1, b"K"),
+            initramfs: None,
+            cmdline: CString::new("").unwrap(),
+        };
+        let block = info.build_hash_block().unwrap();
+        let table_end = size_of::<PaddedSevHashTable>();
+        assert!(block[table_end..].iter().all(|&b| b == 0));
+    }
+
+    fn expected_kernel_digest(setup_sects: u8, kernel_payload: &[u8]) -> [u8; 32] {
+        let effective_sects = if setup_sects == 0 { 4 } else { setup_sects };
+        let setup_len = (usize::from(effective_sects) + 1) * 512;
+        let header_size = size_of::<boot_params>();
+        let file_len = std::cmp::max(setup_len, header_size) + kernel_payload.len();
+
+        let mut buf = vec![0u8; file_len];
+        let bp = boot_params::from_mut_slice(&mut buf[..header_size]).unwrap();
+        bp.hdr.setup_sects = setup_sects;
+        buf[setup_len..setup_len + kernel_payload.len()].copy_from_slice(kernel_payload);
+
+        Sha256::digest(&buf).into()
+    }
+
+    fn kernel_hash_offset() -> usize {
+        size_of::<[u8; 16]>()
+            + size_of::<u16>()
+            + 2 * size_of::<SevHashTableEntry>()
+            + size_of::<[u8; 16]>()
+            + size_of::<u16>()
+    }
+
+    #[test]
+    fn hash_block_kernel_digest_setup_sects_1() {
+        let payload = b"KERNEL_DATA";
+        let info = MeasuredBootInfo {
+            kernel: make_fake_kernel(1, payload),
+            initramfs: None,
+            cmdline: CString::new("").unwrap(),
+        };
+        let block = info.build_hash_block().unwrap();
+        let expected = expected_kernel_digest(1, payload);
+        let offset = kernel_hash_offset();
+        assert_eq!(&block[offset..offset + 32], &expected);
+    }
+
+    #[test]
+    fn hash_block_kernel_digest_setup_sects_0() {
+        let payload = b"KERNEL_DATA";
+        let info = MeasuredBootInfo {
+            kernel: make_fake_kernel(0, payload),
+            initramfs: None,
+            cmdline: CString::new("").unwrap(),
+        };
+        let block = info.build_hash_block().unwrap();
+        let expected = expected_kernel_digest(0, payload);
+        let offset = kernel_hash_offset();
+        assert_eq!(&block[offset..offset + 32], &expected);
+    }
+
+    #[test]
+    fn hash_block_kernel_digest_large_setup_sects() {
+        let payload = b"KERNEL_PAYLOAD_LARGE_SETUP";
+        let info = MeasuredBootInfo {
+            kernel: make_fake_kernel(8, payload),
+            initramfs: None,
+            cmdline: CString::new("").unwrap(),
+        };
+        let block = info.build_hash_block().unwrap();
+        let expected = expected_kernel_digest(8, payload);
+        let offset = kernel_hash_offset();
+        assert_eq!(&block[offset..offset + 32], &expected);
+    }
+}
