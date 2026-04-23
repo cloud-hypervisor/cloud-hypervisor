@@ -186,3 +186,30 @@ impl disk_file::AsyncDiskFile for QcowDisk {
         )))
     }
 }
+
+#[cfg(test)]
+mod unit_tests {
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+    use crate::disk_file::DiskSize;
+    use crate::qcow::{QcowFile, RawFile};
+
+    const TEST_SIZE: u64 = 0x5566_7788;
+
+    fn make_qcow_file() -> File {
+        let temp_file = TempFile::new().unwrap();
+        {
+            let raw = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
+            QcowFile::new(raw, 3, TEST_SIZE, true).unwrap();
+        }
+        temp_file.into_file()
+    }
+
+    #[test]
+    fn new_sync_returns_correct_size() {
+        let file = make_qcow_file();
+        let disk = QcowDisk::new(file, false, false, true, false).unwrap();
+        assert_eq!(disk.logical_size().unwrap(), TEST_SIZE);
+    }
+}
