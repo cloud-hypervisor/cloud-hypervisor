@@ -142,3 +142,28 @@ impl disk_file::AsyncDiskFile for RawDisk {
         }
     }
 }
+
+#[cfg(test)]
+mod unit_tests {
+    use std::fs::File;
+
+    use vmm_sys_util::tempfile::TempFile;
+
+    use super::*;
+    use crate::disk_file::DiskSize;
+
+    const TEST_SIZE: u64 = 0x1122_3344;
+
+    fn make_raw_file() -> File {
+        let file: File = TempFile::new().unwrap().into_file();
+        file.set_len(TEST_SIZE).unwrap();
+        file
+    }
+
+    #[test]
+    fn new_sync_returns_correct_size() {
+        let file = make_raw_file();
+        let disk = RawDisk::new(file, RawBackend::Sync);
+        assert_eq!(disk.logical_size().unwrap(), TEST_SIZE);
+    }
+}
