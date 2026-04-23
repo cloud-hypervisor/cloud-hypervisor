@@ -186,7 +186,7 @@ pub struct QcowAsync {
 }
 
 impl QcowAsync {
-    fn new(
+    pub(crate) fn new(
         metadata: Arc<QcowMetadata>,
         data_file: QcowRawFile,
         backing_file: Option<Arc<dyn BackingRead>>,
