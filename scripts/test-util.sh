@@ -187,6 +187,17 @@ download_linux() {
 }
 
 prepare_linux() {
+    if [ "$(uname -m)" = "aarch64" ]; then
+        KERNEL_FILE="$WORKLOADS_DIR/Image-arm64"
+    else
+        KERNEL_FILE="$WORKLOADS_DIR/vmlinux-x86_64"
+        BZIMAGE_FILE="$WORKLOADS_DIR/bzImage-x86_64"
+    fi
+    if [[ -f "$KERNEL_FILE" && -f "$BZIMAGE_FILE" ]]; then
+        echo "Kernel already present at $KERNEL_FILE, skipping"
+        return
+    fi
+
     if [ "$build_kernel" = true ]; then
         echo "Building kernel from source"
         build_custom_linux
