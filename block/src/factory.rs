@@ -16,6 +16,8 @@ use std::{fmt, fs};
 
 use log::info;
 
+#[cfg(feature = "io_uring")]
+use crate::block_io_uring_is_supported;
 use crate::disk_file::AsyncFullDiskFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 #[cfg(feature = "io_uring")]
@@ -24,14 +26,11 @@ use crate::fixed_vhd_sync::FixedVhdDiskSync;
 #[cfg(feature = "io_uring")]
 use crate::qcow_async::QcowDiskAsync;
 use crate::qcow_sync::QcowDiskSync;
-use crate::raw_async_aio::RawFileDiskAio;
-use crate::raw_sync::RawFileDiskSync;
+use crate::raw_disk::{RawBackend, RawDisk};
 use crate::vhdx_sync::VhdxDiskSync;
 use crate::{
     ImageType, block_aio_is_supported, detect_image_type, open_disk_image, preallocate_disk,
 };
-#[cfg(feature = "io_uring")]
-use crate::{block_io_uring_is_supported, raw_async::RawFileDisk};
 
 /// Options for opening a disk image via [`open_disk`].
 pub struct DiskOpenOptions<'a> {
@@ -156,7 +155,7 @@ fn open_raw(
     if !options.disable_io_uring {
         if io_uring_supported() {
             info!("Opening RAW disk file with io_uring backend");
-            return Ok(Box::new(RawFileDisk::new(file)));
+            return Ok(Box::new(RawDisk::new(file, RawBackend::IoUring)));
         }
         info!("io_uring runtime probe failed for RAW, trying next backend");
     }
@@ -164,13 +163,13 @@ fn open_raw(
     if !options.disable_aio {
         if aio_supported() {
             info!("Opening RAW disk file with AIO backend");
-            return Ok(Box::new(RawFileDiskAio::new(file)));
+            return Ok(Box::new(RawDisk::new(file, RawBackend::Aio)));
         }
         info!("AIO runtime probe failed for RAW, using synchronous backend");
     }
 
     info!("Opening RAW disk file with synchronous backend");
-    Ok(Box::new(RawFileDiskSync::new(file)))
+    Ok(Box::new(RawDisk::new(file, RawBackend::Sync)))
 }
 
 fn open_qcow2(

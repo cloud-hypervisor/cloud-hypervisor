@@ -2,118 +2,16 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::fs::File;
-use std::io::{self, Error};
-use std::os::unix::fs::FileTypeExt;
+use std::io::Error;
 use std::os::unix::io::{AsRawFd, RawFd};
 
 use io_uring::{IoUring, opcode, types};
 use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE};
-use log::warn;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
-use crate::{
-    BatchRequest, DiskTopology, RequestType, SECTOR_SIZE, disk_file, probe_sparse_support,
-    query_device_size,
-};
-
-#[derive(Debug)]
-pub struct RawFileDisk {
-    file: File,
-}
-
-impl RawFileDisk {
-    pub fn new(file: File) -> Self {
-        RawFileDisk { file }
-    }
-}
-
-impl disk_file::DiskSize for RawFileDisk {
-    fn logical_size(&self) -> BlockResult<u64> {
-        query_device_size(&self.file)
-            .map(|(logical_size, _)| logical_size)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Size(e)))
-    }
-}
-
-impl disk_file::PhysicalSize for RawFileDisk {
-    fn physical_size(&self) -> BlockResult<u64> {
-        query_device_size(&self.file)
-            .map(|(_, physical_size)| physical_size)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Size(e)))
-    }
-}
-
-impl disk_file::DiskFd for RawFileDisk {
-    fn fd(&self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.file.as_raw_fd())
-    }
-}
-
-impl disk_file::Geometry for RawFileDisk {
-    fn topology(&self) -> DiskTopology {
-        DiskTopology::probe(&self.file).unwrap_or_else(|_| {
-            warn!("Unable to get device topology. Using default topology");
-            DiskTopology::default()
-        })
-    }
-}
-
-impl disk_file::SparseCapable for RawFileDisk {
-    fn supports_sparse_operations(&self) -> bool {
-        probe_sparse_support(&self.file)
-    }
-}
-
-impl disk_file::Resizable for RawFileDisk {
-    fn resize(&mut self, size: u64) -> BlockResult<()> {
-        let fd_metadata = self
-            .file
-            .metadata()
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e)))?;
-
-        if fd_metadata.file_type().is_block_device() {
-            // Block devices cannot be resized via ftruncate - they are resized
-            // externally (LVM, losetup -c, etc.). Verify the size matches.
-            let (actual_size, _) = query_device_size(&self.file)
-                .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e)))?;
-            if actual_size != size {
-                return Err(BlockError::new(
-                    BlockErrorKind::Io,
-                    DiskFileError::ResizeError(io::Error::other(format!(
-                        "Block device size {actual_size} does not match requested size {size}"
-                    ))),
-                ));
-            }
-            Ok(())
-        } else {
-            self.file
-                .set_len(size)
-                .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e)))
-        }
-    }
-}
-
-impl disk_file::DiskFile for RawFileDisk {}
-
-impl disk_file::AsyncDiskFile for RawFileDisk {
-    fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
-        let file = self
-            .file
-            .try_clone()
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Clone(e)))?;
-        Ok(Box::new(RawFileDisk { file }))
-    }
-
-    fn create_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
-        let mut raw = RawFileAsync::new(self.file.as_raw_fd(), ring_depth)?;
-        raw.alignment =
-            DiskTopology::probe(&self.file).map_or(SECTOR_SIZE, |t| t.logical_block_size);
-        Ok(Box::new(raw) as Box<dyn AsyncIo>)
-    }
-}
+use crate::{BatchRequest, RequestType, SECTOR_SIZE};
 
 pub struct RawFileAsync {
     fd: RawFd,

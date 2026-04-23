@@ -24,15 +24,12 @@ pub mod qcow_async;
 pub(crate) mod qcow_common;
 pub mod qcow_sync;
 #[cfg(feature = "io_uring")]
-/// Async primitives based on `io-uring`
-///
-/// Enabled with the `"io_uring"` feature
-pub mod raw_async;
-pub mod raw_async_aio;
+pub(crate) mod raw_async;
+pub(crate) mod raw_async_aio;
 #[cfg(test)]
 mod raw_async_io_tests;
 pub mod raw_disk;
-pub mod raw_sync;
+pub(crate) mod raw_sync;
 mod request;
 pub mod vhd;
 pub mod vhdx;

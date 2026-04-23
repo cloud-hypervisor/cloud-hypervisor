@@ -6,92 +6,15 @@
 //
 
 use std::collections::VecDeque;
-use std::fs::File;
 use std::os::unix::io::{AsRawFd, RawFd};
 
 use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE};
-use log::warn;
 use vmm_sys_util::aio;
 use vmm_sys_util::eventfd::EventFd;
 
-use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
+use crate::SECTOR_SIZE;
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
-use crate::{DiskTopology, SECTOR_SIZE, disk_file, probe_sparse_support, query_device_size};
-
-#[derive(Debug)]
-pub struct RawFileDiskAio {
-    file: File,
-}
-
-impl RawFileDiskAio {
-    pub fn new(file: File) -> Self {
-        RawFileDiskAio { file }
-    }
-}
-
-impl disk_file::DiskSize for RawFileDiskAio {
-    fn logical_size(&self) -> BlockResult<u64> {
-        query_device_size(&self.file)
-            .map(|(logical_size, _)| logical_size)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Size(e)))
-    }
-}
-
-impl disk_file::PhysicalSize for RawFileDiskAio {
-    fn physical_size(&self) -> BlockResult<u64> {
-        query_device_size(&self.file)
-            .map(|(_, physical_size)| physical_size)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Size(e)))
-    }
-}
-
-impl disk_file::DiskFd for RawFileDiskAio {
-    fn fd(&self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.file.as_raw_fd())
-    }
-}
-
-impl disk_file::Geometry for RawFileDiskAio {
-    fn topology(&self) -> DiskTopology {
-        DiskTopology::probe(&self.file).unwrap_or_else(|_| {
-            warn!("Unable to get device topology. Using default topology");
-            DiskTopology::default()
-        })
-    }
-}
-
-impl disk_file::SparseCapable for RawFileDiskAio {
-    fn supports_sparse_operations(&self) -> bool {
-        probe_sparse_support(&self.file)
-    }
-}
-
-impl disk_file::Resizable for RawFileDiskAio {
-    fn resize(&mut self, size: u64) -> BlockResult<()> {
-        self.file
-            .set_len(size)
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e)))
-    }
-}
-
-impl disk_file::DiskFile for RawFileDiskAio {}
-
-impl disk_file::AsyncDiskFile for RawFileDiskAio {
-    fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
-        let file = self
-            .file
-            .try_clone()
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Clone(e)))?;
-        Ok(Box::new(RawFileDiskAio { file }))
-    }
-
-    fn create_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
-        let mut raw = RawFileAsyncAio::new(self.file.as_raw_fd(), ring_depth)?;
-        raw.alignment =
-            DiskTopology::probe(&self.file).map_or(SECTOR_SIZE, |t| t.logical_block_size);
-        Ok(Box::new(raw) as Box<dyn AsyncIo>)
-    }
-}
 
 pub struct RawFileAsyncAio {
     fd: RawFd,
