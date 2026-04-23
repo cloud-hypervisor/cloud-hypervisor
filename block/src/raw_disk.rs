@@ -18,7 +18,7 @@ use crate::raw_sync::RawFileSync;
 use crate::{DiskTopology, disk_file, probe_sparse_support, query_device_size};
 
 /// Selects which async I/O backend a `RawDisk` uses.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RawBackend {
     /// Blocking I/O where the caller waits for completion.
     Sync,
@@ -150,7 +150,8 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
-    use crate::disk_file::DiskSize;
+    use crate::async_io::AsyncIo;
+    use crate::disk_file::{AsyncDiskFile, DiskSize};
 
     const TEST_SIZE: u64 = 0x1122_3344;
 
@@ -165,5 +166,51 @@ mod unit_tests {
         let file = make_raw_file();
         let disk = RawDisk::new(file, RawBackend::Sync);
         assert_eq!(disk.logical_size().unwrap(), TEST_SIZE);
+    }
+
+    fn assert_async_io_from_dyn(disk: &dyn AsyncDiskFile, expect_backend: RawBackend) {
+        let io: Box<dyn AsyncIo> = disk.create_async_io(128).unwrap();
+        assert_eq!(
+            io.batch_requests_enabled(),
+            expect_backend == RawBackend::IoUring
+        );
+    }
+
+    fn assert_sync_backend(disk: &RawDisk) {
+        assert_eq!(disk.backend, RawBackend::Sync);
+        assert_async_io_from_dyn(disk, RawBackend::Sync);
+    }
+
+    fn assert_aio_backend(disk: &RawDisk) {
+        assert_eq!(disk.backend, RawBackend::Aio);
+        assert_async_io_from_dyn(disk, RawBackend::Aio);
+    }
+
+    #[cfg(feature = "io_uring")]
+    fn assert_io_uring_backend(disk: &RawDisk) {
+        assert_eq!(disk.backend, RawBackend::IoUring);
+        assert_async_io_from_dyn(disk, RawBackend::IoUring);
+    }
+
+    #[test]
+    fn sync_backend_disables_batch_requests() {
+        let file = make_raw_file();
+        let disk = RawDisk::new(file, RawBackend::Sync);
+        assert_sync_backend(&disk);
+    }
+
+    #[test]
+    fn aio_backend_disables_batch_requests() {
+        let file = make_raw_file();
+        let disk = RawDisk::new(file, RawBackend::Aio);
+        assert_aio_backend(&disk);
+    }
+
+    #[cfg(feature = "io_uring")]
+    #[test]
+    fn io_uring_backend_enables_batch_requests() {
+        let file = make_raw_file();
+        let disk = RawDisk::new(file, RawBackend::IoUring);
+        assert_io_uring_backend(&disk);
     }
 }
