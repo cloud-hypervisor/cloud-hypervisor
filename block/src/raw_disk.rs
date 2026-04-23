@@ -213,4 +213,31 @@ mod unit_tests {
         let disk = RawDisk::new(file, RawBackend::IoUring);
         assert_io_uring_backend(&disk);
     }
+
+    fn assert_try_clone(disk: &RawDisk, expect_backend: RawBackend) {
+        let cloned = disk.try_clone().unwrap();
+        assert_async_io_from_dyn(cloned.as_ref(), expect_backend);
+    }
+
+    #[test]
+    fn try_clone_preserves_sync_backend() {
+        let file = make_raw_file();
+        let disk = RawDisk::new(file, RawBackend::Sync);
+        assert_try_clone(&disk, RawBackend::Sync);
+    }
+
+    #[test]
+    fn try_clone_preserves_aio_backend() {
+        let file = make_raw_file();
+        let disk = RawDisk::new(file, RawBackend::Aio);
+        assert_try_clone(&disk, RawBackend::Aio);
+    }
+
+    #[cfg(feature = "io_uring")]
+    #[test]
+    fn try_clone_preserves_io_uring_backend() {
+        let file = make_raw_file();
+        let disk = RawDisk::new(file, RawBackend::IoUring);
+        assert_try_clone(&disk, RawBackend::IoUring);
+    }
 }
