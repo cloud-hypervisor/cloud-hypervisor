@@ -115,7 +115,7 @@ use crate::{
     CPU_MANAGER_SNAPSHOT_ID, DEVICE_MANAGER_SNAPSHOT_ID, GuestMemoryMmap,
     MEMORY_MANAGER_SNAPSHOT_ID, PciDeviceInfo, cpu,
 };
-#[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+#[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
 use hypervisor::kvm::x86_64::sev::MeasuredBootInfo;
 
 /// Errors associated with VM management
@@ -1544,7 +1544,7 @@ impl Vm {
         igvm_file: IgvmFile,
         memory_manager: Arc<Mutex<MemoryManager>>,
         cpu_manager: Arc<Mutex<cpu::CpuManager>>,
-        #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))] measured_boot: Option<
+        #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))] measured_boot: Option<
             MeasuredBootInfo,
         >,
         #[cfg(feature = "sev_snp")] host_data: &Option<String>,
@@ -1561,7 +1561,7 @@ impl Vm {
             memory_manager,
             cpu_manager.clone(),
             "",
-            #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+            #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
             measured_boot,
             #[cfg(feature = "sev_snp")]
             host_data,
@@ -1657,7 +1657,7 @@ impl Vm {
             if payload.igvm.is_some() {
                 let igvm_file =
                     igvm_file.ok_or(Error::IgvmLoad(igvm_loader::Error::MissingIgvm))?;
-                #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+                #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
                 let measured_boot = if payload
                     .fw_cfg_config
                     .as_ref()
@@ -1706,7 +1706,7 @@ impl Vm {
                     igvm_file,
                     memory_manager,
                     cpu_manager,
-                    #[cfg(all(feature = "sev_snp", target_arch = "x86_64"))]
+                    #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
                     measured_boot,
                     #[cfg(feature = "sev_snp")]
                     &payload.host_data,
