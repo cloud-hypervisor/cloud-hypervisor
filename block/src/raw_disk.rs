@@ -151,7 +151,7 @@ mod unit_tests {
 
     use super::*;
     use crate::async_io::AsyncIo;
-    use crate::disk_file::{AsyncDiskFile, DiskSize, Resizable};
+    use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize, Resizable};
 
     const TEST_SIZE: u64 = 0x1122_3344;
 
@@ -248,5 +248,13 @@ mod unit_tests {
         let new_size = TEST_SIZE * 2;
         disk.resize(new_size).unwrap();
         assert_eq!(disk.logical_size().unwrap(), new_size);
+    }
+
+    #[test]
+    fn physical_size_reports_allocated_blocks() {
+        let file = make_raw_file();
+        let disk = RawDisk::new(file, RawBackend::Aio);
+        // Sparse file: physical size is less than logical size.
+        assert!(disk.physical_size().unwrap() < disk.logical_size().unwrap());
     }
 }
