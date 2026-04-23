@@ -9,8 +9,12 @@ use std::os::unix::io::AsRawFd;
 
 use log::warn;
 
-use crate::async_io::{BorrowedDiskFd, DiskFileError};
+use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
+#[cfg(feature = "io_uring")]
+use crate::raw_async::RawFileAsync;
+use crate::raw_async_aio::RawFileAsyncAio;
+use crate::raw_sync::RawFileSync;
 use crate::{DiskTopology, disk_file, probe_sparse_support, query_device_size};
 
 /// Selects which async I/O backend a `RawDisk` uses.
@@ -105,6 +109,36 @@ impl disk_file::Resizable for RawDisk {
             self.file
                 .set_len(size)
                 .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e)))
+        }
+    }
+}
+
+impl disk_file::DiskFile for RawDisk {}
+
+impl disk_file::AsyncDiskFile for RawDisk {
+    fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
+        let file = self
+            .file
+            .try_clone()
+            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::Clone(e)))?;
+        Ok(Box::new(RawDisk {
+            file,
+            backend: self.backend,
+        }))
+    }
+
+    fn create_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
+        match self.backend {
+            RawBackend::Sync => Ok(Box::new(RawFileSync::new(self.file.as_raw_fd()))),
+            #[cfg(feature = "io_uring")]
+            RawBackend::IoUring => Ok(Box::new(RawFileAsync::new(
+                self.file.as_raw_fd(),
+                ring_depth,
+            )?)),
+            RawBackend::Aio => Ok(Box::new(RawFileAsyncAio::new(
+                self.file.as_raw_fd(),
+                ring_depth,
+            )?)),
         }
     }
 }
