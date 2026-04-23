@@ -67,6 +67,7 @@ version = "1.21.0"
 
 [dev-dependencies]
 env_logger = { workspace = true }
+tempfile = "3"
 
 [lints]
 workspace = true
