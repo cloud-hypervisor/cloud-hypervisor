@@ -689,6 +689,7 @@ mod unit_tests {
     use crate::disk_file::AsyncDiskFile;
     use crate::qcow::{QcowFile, RawFile};
     use crate::qcow_common::unit_tests::compress_allocated_clusters;
+    use crate::qcow_disk::QcowDisk;
     use crate::{BatchRequest, RequestType, SECTOR_SIZE};
 
     fn create_disk_with_data(
@@ -696,7 +697,7 @@ mod unit_tests {
         data: &[u8],
         offset: u64,
         sparse: bool,
-    ) -> (TempFile, QcowDiskAsync) {
+    ) -> (TempFile, QcowDisk) {
         let temp_file = TempFile::new().unwrap();
         {
             let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
@@ -705,11 +706,12 @@ mod unit_tests {
             qcow_file.write_all(data).unwrap();
             qcow_file.flush().unwrap();
         }
-        let disk = QcowDiskAsync::new(
+        let disk = QcowDisk::new(
             temp_file.as_file().try_clone().unwrap(),
             false,
             false,
             sparse,
+            true,
         )
         .unwrap();
         (temp_file, disk)
@@ -730,7 +732,7 @@ mod unit_tests {
         }
     }
 
-    fn async_write(disk: &QcowDiskAsync, offset: u64, data: &[u8]) {
+    fn async_write(disk: &QcowDisk, offset: u64, data: &[u8]) {
         let mut async_io = disk.create_async_io(1).unwrap();
         let iovec = libc::iovec {
             iov_base: data.as_ptr() as *mut libc::c_void,
@@ -748,7 +750,7 @@ mod unit_tests {
         );
     }
 
-    fn async_read(disk: &QcowDiskAsync, offset: u64, len: usize) -> Vec<u8> {
+    fn async_read(disk: &QcowDisk, offset: u64, len: usize) -> Vec<u8> {
         let mut async_io = disk.create_async_io(1).unwrap();
         let mut buf = vec![0xFFu8; len];
         let iovec = libc::iovec {
@@ -814,8 +816,14 @@ mod unit_tests {
             let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
             QcowFile::new(raw_file, 3, file_size, true).unwrap();
         }
-        let disk = QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), false, false, true)
-            .unwrap();
+        let disk = QcowDisk::new(
+            temp_file.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            true,
+        )
+        .unwrap();
 
         let pattern: Vec<u8> = (0..128 * 1024).map(|i| (i % 251) as u8).collect();
         let offset = 64 * 1024;
@@ -859,8 +867,14 @@ mod unit_tests {
             let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
             QcowFile::new(raw_file, 3, file_size, true).unwrap();
         }
-        let disk = QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), false, false, true)
-            .unwrap();
+        let disk = QcowDisk::new(
+            temp_file.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            true,
+        )
+        .unwrap();
 
         let mut async_io = disk.create_async_io(8).unwrap();
 
@@ -955,8 +969,14 @@ mod unit_tests {
             let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
             QcowFile::new(raw_file, 3, file_size, true).unwrap();
         }
-        let disk = QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), false, false, true)
-            .unwrap();
+        let disk = QcowDisk::new(
+            temp_file.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            true,
+        )
+        .unwrap();
 
         let buf = async_read(&disk, 0, 128 * 1024);
         assert!(
@@ -974,8 +994,14 @@ mod unit_tests {
             let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
             QcowFile::new(raw_file, 3, file_size, true).unwrap();
         }
-        let disk = QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), false, false, true)
-            .unwrap();
+        let disk = QcowDisk::new(
+            temp_file.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            true,
+        )
+        .unwrap();
 
         // Write 4K into the middle of a cluster.
         let write_offset = 4096u64;
@@ -1063,19 +1089,32 @@ mod unit_tests {
             let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
             QcowFile::new(raw_file, 3, file_size, true).unwrap();
         }
-        let disk = QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), false, false, true)
-            .unwrap();
+        let disk = QcowDisk::new(
+            temp_file.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            true,
+        )
+        .unwrap();
         let async_io = disk.create_async_io(1).unwrap();
         assert_eq!(async_io.alignment(), SECTOR_SIZE);
     }
 
     /// Returns None if O_DIRECT is not supported (e.g. tmpfs).
-    fn try_create_direct_io_disk(temp_file: &TempFile, file_size: u64) -> Option<QcowDiskAsync> {
+    fn try_create_direct_io_disk(temp_file: &TempFile, file_size: u64) -> Option<QcowDisk> {
         {
             let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
             QcowFile::new(raw_file, 3, file_size, true).unwrap();
         }
-        QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), true, false, true).ok()
+        QcowDisk::new(
+            temp_file.as_file().try_clone().unwrap(),
+            true,
+            false,
+            true,
+            true,
+        )
+        .ok()
     }
 
     #[test]
@@ -1141,7 +1180,14 @@ mod unit_tests {
         compress_allocated_clusters(&mut temp.as_file().try_clone().unwrap());
 
         let disk = Arc::new(
-            QcowDiskAsync::new(temp.as_file().try_clone().unwrap(), false, false, false).unwrap(),
+            QcowDisk::new(
+                temp.as_file().try_clone().unwrap(),
+                false,
+                false,
+                false,
+                true,
+            )
+            .unwrap(),
         );
 
         let handles: Vec<_> = (0..4)
