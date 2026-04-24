@@ -16,12 +16,12 @@ use crate::fixed_vhd_sync::FixedVhdSync;
 use crate::{BlockBackend, Error, disk_file};
 
 #[derive(Debug)]
-pub struct FixedVhdDisk {
+pub struct VhdDisk {
     inner: FixedVhd,
     use_io_uring: bool,
 }
 
-impl FixedVhdDisk {
+impl VhdDisk {
     pub fn new(file: File, use_io_uring: bool) -> BlockResult<Self> {
         #[cfg(not(feature = "io_uring"))]
         if use_io_uring {
@@ -40,7 +40,7 @@ impl FixedVhdDisk {
     }
 }
 
-impl disk_file::DiskSize for FixedVhdDisk {
+impl disk_file::DiskSize for VhdDisk {
     fn logical_size(&self) -> BlockResult<u64> {
         self.inner
             .logical_size()
@@ -48,7 +48,7 @@ impl disk_file::DiskSize for FixedVhdDisk {
     }
 }
 
-impl disk_file::PhysicalSize for FixedVhdDisk {
+impl disk_file::PhysicalSize for VhdDisk {
     fn physical_size(&self) -> BlockResult<u64> {
         self.inner.physical_size().map_err(|e| match e {
             Error::GetFileMetadata(io) => {
@@ -59,17 +59,17 @@ impl disk_file::PhysicalSize for FixedVhdDisk {
     }
 }
 
-impl disk_file::DiskFd for FixedVhdDisk {
+impl disk_file::DiskFd for VhdDisk {
     fn fd(&self) -> BorrowedDiskFd<'_> {
         BorrowedDiskFd::new(self.inner.as_raw_fd())
     }
 }
 
-impl disk_file::Geometry for FixedVhdDisk {}
+impl disk_file::Geometry for VhdDisk {}
 
-impl disk_file::SparseCapable for FixedVhdDisk {}
+impl disk_file::SparseCapable for VhdDisk {}
 
-impl disk_file::Resizable for FixedVhdDisk {
+impl disk_file::Resizable for VhdDisk {
     fn resize(&mut self, _size: u64) -> BlockResult<()> {
         Err(BlockError::new(
             BlockErrorKind::UnsupportedFeature,
@@ -79,11 +79,11 @@ impl disk_file::Resizable for FixedVhdDisk {
     }
 }
 
-impl disk_file::DiskFile for FixedVhdDisk {}
+impl disk_file::DiskFile for VhdDisk {}
 
-impl disk_file::AsyncDiskFile for FixedVhdDisk {
+impl disk_file::AsyncDiskFile for VhdDisk {
     fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
-        Ok(Box::new(FixedVhdDisk {
+        Ok(Box::new(VhdDisk {
             inner: self.inner.clone(),
             use_io_uring: self.use_io_uring,
         }))
@@ -160,7 +160,7 @@ mod unit_tests {
     #[test]
     fn new_sync_returns_correct_size() {
         let file = make_vhd_file();
-        let disk = FixedVhdDisk::new(file, false).unwrap();
+        let disk = VhdDisk::new(file, false).unwrap();
         assert_eq!(disk.logical_size().unwrap(), 0x1122_3344);
     }
 
@@ -169,14 +169,14 @@ mod unit_tests {
         assert_eq!(io.batch_requests_enabled(), expect_batch);
     }
 
-    fn assert_async_io(disk: &FixedVhdDisk, expect_batch: bool) {
+    fn assert_async_io(disk: &VhdDisk, expect_batch: bool) {
         assert_async_io_from_dyn(disk, expect_batch);
     }
 
     #[test]
     fn sync_backend_disables_batch_requests() {
         let file = make_vhd_file();
-        let disk = FixedVhdDisk::new(file, false).unwrap();
+        let disk = VhdDisk::new(file, false).unwrap();
         assert_async_io(&disk, false);
     }
 
@@ -184,14 +184,14 @@ mod unit_tests {
     #[test]
     fn io_uring_backend_enables_batch_requests() {
         let file = make_vhd_file();
-        let disk = FixedVhdDisk::new(file, true).unwrap();
+        let disk = VhdDisk::new(file, true).unwrap();
         assert_async_io(&disk, true);
     }
 
     #[test]
     fn try_clone_preserves_sync_dispatch() {
         let file = make_vhd_file();
-        let disk = FixedVhdDisk::new(file, false).unwrap();
+        let disk = VhdDisk::new(file, false).unwrap();
         let cloned = disk.try_clone().unwrap();
         assert_async_io_from_dyn(cloned.as_ref(), false);
     }
@@ -200,7 +200,7 @@ mod unit_tests {
     #[test]
     fn try_clone_preserves_io_uring_dispatch() {
         let file = make_vhd_file();
-        let disk = FixedVhdDisk::new(file, true).unwrap();
+        let disk = VhdDisk::new(file, true).unwrap();
         let cloned = disk.try_clone().unwrap();
         assert_async_io_from_dyn(cloned.as_ref(), true);
     }
@@ -208,14 +208,14 @@ mod unit_tests {
     #[test]
     fn resize_returns_error() {
         let file = make_vhd_file();
-        let mut disk = FixedVhdDisk::new(file, false).unwrap();
+        let mut disk = VhdDisk::new(file, false).unwrap();
         assert!(disk.resize(0x2000_0000).is_err());
     }
 
     #[test]
     fn physical_size_includes_footer() {
         let file = make_vhd_file();
-        let disk = FixedVhdDisk::new(file, false).unwrap();
+        let disk = VhdDisk::new(file, false).unwrap();
         // Data region (0x1122_3344) + VHD footer (0x200).
         assert_eq!(disk.physical_size().unwrap(), 0x1122_3344 + 0x200);
     }
