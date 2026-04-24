@@ -16,20 +16,20 @@ use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::sparse::{blkdiscard, blkzeroout};
 use crate::{SECTOR_SIZE, is_block_device};
 
-pub struct RawFileAsync {
+pub struct RawAsync {
     fd: RawFd,
     data_io: UringDataIo,
     alignment: u64,
     is_block_device: bool,
 }
 
-impl RawFileAsync {
+impl RawAsync {
     pub fn new(fd: RawFd, ring_depth: u32) -> BlockResult<Self> {
         let data_io =
             UringDataIo::new(ring_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
         let is_block_device = is_block_device(fd);
 
-        Ok(RawFileAsync {
+        Ok(RawAsync {
             fd,
             data_io,
             alignment: SECTOR_SIZE,
@@ -38,7 +38,7 @@ impl RawFileAsync {
     }
 }
 
-impl AsyncIo for RawFileAsync {
+impl AsyncIo for RawAsync {
     fn notifier(&self) -> &EventFd {
         self.data_io.notifier()
     }
