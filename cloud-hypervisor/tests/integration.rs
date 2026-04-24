@@ -11128,6 +11128,8 @@ mod windows {
 
 #[cfg(target_arch = "x86_64")]
 mod vfio {
+    use std::io;
+
     use crate::*;
 
     const NVIDIA_VFIO_DEVICE: &str = "/sys/bus/pci/devices/0002:00:01.0";
@@ -11391,6 +11393,92 @@ mod vfio {
     #[test]
     fn test_iommufd_nvidia_card_reboot() {
         test_nvidia_card_reboot_common(true);
+    }
+
+    // Pass the NVIDIA card to the guest via an externally-opened
+    // /dev/vfio/devices/<n> FD instead of a sysfs path, and verify it
+    // survives a guest reboot. Mirrors `_test_tap_from_fd` for VFIO.
+    #[test]
+    fn test_iommufd_nvidia_card_reboot_from_fd() {
+        let disk_config = UbuntuDiskConfig::new(JAMMY_VFIO_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(disk_config));
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        // Discover the cdev for the NVIDIA card. The directory has a
+        // single entry whose name (e.g. "vfio0") is also the basename
+        // of the corresponding /dev/vfio/devices/<n> node.
+        let vfio_dev_dir = format!("{NVIDIA_VFIO_DEVICE}/vfio-dev");
+        let cdev_name = fs::read_dir(&vfio_dev_dir)
+            .unwrap_or_else(|e| panic!("read_dir({vfio_dev_dir}) failed: {e}"))
+            .next()
+            .expect("no vfio-dev entry")
+            .unwrap()
+            .file_name();
+        let cdev_path = PathBuf::from("/dev/vfio/devices").join(&cdev_name);
+
+        let cdev_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&cdev_path)
+            .unwrap_or_else(|e| panic!("open({cdev_path:?}) failed: {e}"));
+        let iommufd_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/iommu")
+            .unwrap_or_else(|e| panic!("open(/dev/iommu) failed: {e}"));
+        // OpenOptions sets FD_CLOEXEC by default; clear it for both fds
+        // so they're inherited by the VMM child via spawn().
+        for f in [&cdev_file, &iommufd_file] {
+            // SAFETY: FFI call to fcntl on a valid fd we own.
+            let ret = unsafe { libc::fcntl(f.as_raw_fd(), libc::F_SETFD, 0) };
+            assert!(
+                ret >= 0,
+                "fcntl(F_SETFD, 0) failed: {}",
+                io::Error::last_os_error()
+            );
+        }
+
+        let platform = format!(
+            "{},iommufd_fd={}",
+            platform_cfg(true),
+            iommufd_file.as_raw_fd()
+        );
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=4"])
+            .args(["--memory", "size=1G"])
+            .args(["--platform", &platform])
+            .args(["--kernel", fw_path(FwType::RustHypervisorFirmware).as_str()])
+            .args([
+                "--device",
+                format!("fd={},iommu=on", cdev_file.as_raw_fd()).as_str(),
+            ])
+            .args(["--api-socket", &api_socket])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot().unwrap();
+
+            // VFIO device works after boot from an externally-opened FD.
+            assert!(guest.check_nvidia_gpu());
+
+            guest.reboot_linux(0);
+
+            // Both FDs survive a VM reboot
+            assert!(guest.check_nvidia_gpu());
+        });
+
+        drop(cdev_file);
+        drop(iommufd_file);
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
     }
 
     fn test_nvidia_card_iommu_address_width_common(iommufd: bool) {
