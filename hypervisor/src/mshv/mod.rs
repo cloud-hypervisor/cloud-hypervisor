@@ -720,11 +720,28 @@ impl cpu::Vcpu for MshvVcpu {
                     let gva = info.guest_virtual_address;
                     let gpa = info.guest_physical_address;
 
-                    debug!("Exit ({msg_type:?}) GVA {gva:x} GPA {gpa:x}");
+                    // The GvaGpaValid flag indicates that the GPA in the intercept
+                    // message corresponds to the GVA in the message. If that flag
+                    // is set, and the GVA in the message matches the GVA in the decoded
+                    // instruction, then the emulator can use the GPA provided by
+                    // the hypervisor. Otherwise, the emulator must translate the GVA
+                    // via a hypercall.
+                    // SAFETY: accessing the bitfield union variant.
+                    let gva_gpa_valid =
+                        unsafe { info.memory_access_info.__bindgen_anon_1.gva_gpa_valid() != 0 };
+
+                    debug!(
+                        "Exit ({msg_type:?}) GVA {gva:x} GPA {gpa:x} \
+                         gva_gpa_valid={gva_gpa_valid}"
+                    );
 
                     let mut context = MshvEmulatorContext {
                         vcpu: self,
-                        map: (gva, gpa),
+                        map: if gva_gpa_valid {
+                            (gva, gpa)
+                        } else {
+                            (u64::MAX, 0)
+                        },
                     };
 
                     let old_state = context
