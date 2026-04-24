@@ -20,8 +20,8 @@ use log::info;
 use crate::block_io_uring_is_supported;
 use crate::disk_file::AsyncFullDiskFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
-use crate::fixed_vhd_disk::VhdDisk;
 use crate::formats::raw::{RawBackend, RawDisk};
+use crate::formats::vhd::VhdDisk;
 use crate::qcow_disk::QcowDisk;
 use crate::vhdx_sync::VhdxDisk;
 use crate::{

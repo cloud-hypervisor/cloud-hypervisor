@@ -14,12 +14,6 @@ pub mod factory;
 #[path = "io/mod.rs"]
 mod io_impl;
 pub use io_impl::{async_io, fcntl, request};
-pub mod fixed_vhd;
-#[cfg(feature = "io_uring")]
-/// Enabled with the `"io_uring"` feature
-pub mod fixed_vhd_async;
-pub mod fixed_vhd_disk;
-pub mod fixed_vhd_sync;
 pub mod formats;
 pub mod qcow;
 #[cfg(feature = "io_uring")]
@@ -28,7 +22,6 @@ pub(crate) mod qcow_common;
 pub mod qcow_disk;
 pub(crate) mod qcow_sync;
 pub use formats::raw as raw_disk;
-pub mod vhd;
 pub mod vhdx;
 pub mod vhdx_sync;
 
@@ -630,7 +623,7 @@ pub fn detect_image_type(f: &mut File) -> BlockResult<ImageType> {
     // Check 4 first bytes to get the header value and determine the image type
     let image_type = if u32::from_be_bytes(block[0..4].try_into().unwrap()) == QCOW_MAGIC {
         ImageType::Qcow2
-    } else if vhd::is_fixed_vhd(f)
+    } else if formats::vhd::is_fixed_vhd(f)
         .map_err(|e| BlockError::new(BlockErrorKind::Io, e).with_op(ErrorOp::DetectImageType))?
     {
         ImageType::FixedVhd

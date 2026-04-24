@@ -7,7 +7,11 @@ use std::io::{Seek, SeekFrom};
 
 use crate::{DiskTopology, read_aligned_block_size};
 
+// Production code uses: cookie, file_format_version, data_offset,
+// current_size, disk_type. The remaining fields are parsed for VHD
+// spec completeness and exercised only by unit tests.
 #[derive(Clone, Copy)]
+#[allow(dead_code)]
 pub struct VhdFooter {
     cookie: u64,
     features: u32,
@@ -26,6 +30,7 @@ pub struct VhdFooter {
     saved_state: u8,
 }
 
+#[allow(dead_code)]
 impl VhdFooter {
     pub fn new(file: &mut File) -> std::io::Result<VhdFooter> {
         let blocksize = DiskTopology::probe(file)?.logical_block_size as usize;

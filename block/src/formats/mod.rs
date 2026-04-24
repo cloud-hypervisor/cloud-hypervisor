@@ -8,3 +8,4 @@
 //! format specific internals, and sync/async I/O workers.
 
 pub mod raw;
+pub mod vhd;

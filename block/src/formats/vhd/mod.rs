@@ -2,17 +2,27 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+//! Fixed VHD disk image format.
+//!
+//! Provides [`VhdDisk`], the `DiskFile` wrapper for fixed size VHD
+//! images.
+
+pub(crate) mod internal;
+pub(crate) mod worker;
+
 use std::fs::File;
 use std::io;
 use std::os::unix::io::AsRawFd;
 
+pub use internal::footer::is_fixed_vhd;
+
+use self::internal::fixed::FixedVhd;
+#[cfg(feature = "io_uring")]
+use self::worker::async_uring::FixedVhdAsync;
+use self::worker::sync::FixedVhdSync;
 use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::disk_file::DiskSize;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::fixed_vhd::FixedVhd;
-#[cfg(feature = "io_uring")]
-use crate::fixed_vhd_async::FixedVhdAsync;
-use crate::fixed_vhd_sync::FixedVhdSync;
 use crate::{BlockBackend, Error, disk_file};
 
 #[derive(Debug)]
