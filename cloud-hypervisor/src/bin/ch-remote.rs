@@ -371,14 +371,14 @@ fn rest_api_do_command(matches: &ArgMatches, socket: &mut UnixStream) -> ApiResu
                 .map_err(Error::HttpApiClient)
         }
         Some("add-device") => {
-            let device_config = add_device_config(
+            let (device_config, fds) = add_device_config(
                 matches
                     .subcommand_matches("add-device")
                     .unwrap()
                     .get_one::<String>("device_config")
                     .unwrap(),
             )?;
-            simple_api_command(socket, "PUT", "add-device", Some(&device_config))
+            simple_api_command_with_fds(socket, "PUT", "add-device", Some(&device_config), &fds)
                 .map_err(Error::HttpApiClient)
         }
         Some("remove-device") => {
@@ -609,7 +609,7 @@ fn dbus_api_do_command(matches: &ArgMatches, proxy: &DBusApi1ProxyBlocking<'_>) 
             proxy.api_vm_resize_zone(&resize_zone)
         }
         Some("add-device") => {
-            let device_config = add_device_config(
+            let (device_config, _fds) = add_device_config(
                 matches
                     .subcommand_matches("add-device")
                     .unwrap()
@@ -835,11 +835,21 @@ fn resize_zone_config(id: &str, size: &str) -> Result<String, Error> {
     Ok(serde_json::to_string(&resize_zone).unwrap())
 }
 
-fn add_device_config(config: &str) -> Result<String, Error> {
-    let device_config = DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
+fn add_device_config(config: &str) -> Result<(String, Vec<i32>), Error> {
+    let mut device_config = DeviceConfig::parse(config).map_err(Error::AddDeviceConfig)?;
+
+    // DeviceConfig is modified on purpose here by taking the file
+    // descriptor out. Keeping it and sending it over to the server side
+    // process would not make any sense since the file descriptor may be
+    // represented with different values.
+    let fds = device_config
+        .fd
+        .take()
+        .map(|fd| vec![fd])
+        .unwrap_or_default();
     let device_config = serde_json::to_string(&device_config).unwrap();
 
-    Ok(device_config)
+    Ok((device_config, fds))
 }
 
 fn add_user_device_config(config: &str) -> Result<String, Error> {
