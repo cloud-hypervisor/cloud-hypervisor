@@ -14,7 +14,7 @@ use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::sparse::{blkdiscard, blkzeroout};
 use crate::{BatchRequest, RequestType, SECTOR_SIZE, is_block_device};
 
-pub struct RawFileAsync {
+pub struct RawAsync {
     fd: RawFd,
     io_uring: IoUring,
     eventfd: EventFd,
@@ -22,7 +22,7 @@ pub struct RawFileAsync {
     is_block_device: bool,
 }
 
-impl RawFileAsync {
+impl RawAsync {
     pub fn new(fd: RawFd, ring_depth: u32) -> BlockResult<Self> {
         let io_uring =
             IoUring::new(ring_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
@@ -38,7 +38,7 @@ impl RawFileAsync {
 
         let is_block_device = is_block_device(fd);
 
-        Ok(RawFileAsync {
+        Ok(RawAsync {
             fd,
             io_uring,
             eventfd,
@@ -64,7 +64,7 @@ impl RawFileAsync {
     }
 }
 
-impl AsyncIo for RawFileAsync {
+impl AsyncIo for RawAsync {
     fn notifier(&self) -> &EventFd {
         &self.eventfd
     }

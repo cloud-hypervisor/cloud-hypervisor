@@ -9,16 +9,16 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::BatchRequest;
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::error::BlockResult;
-use crate::raw_async::RawFileAsync;
+use crate::raw_async::RawAsync;
 
 pub struct FixedVhdAsync {
-    raw_file_async: RawFileAsync,
+    raw_file_async: RawAsync,
     size: u64,
 }
 
 impl FixedVhdAsync {
     pub fn new(fd: RawFd, ring_depth: u32, size: u64) -> BlockResult<Self> {
-        let raw_file_async = RawFileAsync::new(fd, ring_depth)?;
+        let raw_file_async = RawAsync::new(fd, ring_depth)?;
 
         Ok(FixedVhdAsync {
             raw_file_async,
