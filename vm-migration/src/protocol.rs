@@ -103,6 +103,7 @@ use crate::bitpos_iterator::BitposIteratorExt;
 ///     Configured --> Configured: Memory
 ///     Configured --> StateReceived: State
 ///     StateReceived --> Completed: Complete
+///     StateReceived --> Completed: CompletePaused
 /// ```
 ///
 /// [live-migration protocol]: super::protocol
@@ -115,10 +116,14 @@ pub enum Command {
     Config,
     State,
     Memory,
-    /// Finalizes the migration and resumes the VM on the guest.
+    /// Finalizes the migration and resumes the VM on the destination.
+    /// Sent when the source VM was running at migration time.
     Complete,
     Abandon,
     MemoryFd,
+    /// Finalizes the migration without resuming the VM on the destination.
+    /// Sent when the source VM was paused at migration time.
+    CompletePaused,
 }
 
 #[repr(C)]
@@ -161,8 +166,14 @@ impl Request {
         Self::new(Command::MemoryFd, length)
     }
 
+    /// Finalizes the migration and resumes the VM on the destination.
     pub fn complete() -> Self {
         Self::new(Command::Complete, 0)
+    }
+
+    /// Finalizes the migration without resuming the VM on the destination.
+    pub fn complete_paused() -> Self {
+        Self::new(Command::CompletePaused, 0)
     }
 
     pub fn abandon() -> Self {
