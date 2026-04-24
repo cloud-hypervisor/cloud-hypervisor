@@ -365,7 +365,12 @@ impl Vdpa {
     }
 
     fn dma_unmap(&self, iova: u64, size: u64) -> Result<()> {
-        let iova_last = iova + size - 1;
+        let Some(iova_last) = iova.checked_add(size) else {
+            return Err(Error::InvalidIovaRange(iova, u64::MAX));
+        };
+        let Some(iova_last) = iova_last.checked_sub(1) else {
+            return Err(Error::InvalidIovaRange(0, 0));
+        };
         if iova < self.iova_range.first || iova_last > self.iova_range.last {
             return Err(Error::InvalidIovaRange(iova, iova_last));
         }
