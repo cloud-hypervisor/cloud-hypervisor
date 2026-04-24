@@ -21,9 +21,7 @@ use crate::block_io_uring_is_supported;
 use crate::disk_file::AsyncFullDiskFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::fixed_vhd_disk::FixedVhdDisk;
-#[cfg(feature = "io_uring")]
-use crate::qcow_async::QcowDiskAsync;
-use crate::qcow_sync::QcowDiskSync;
+use crate::qcow_disk::QcowDisk;
 use crate::raw_disk::{RawBackend, RawDisk};
 use crate::vhdx_sync::VhdxDiskSync;
 use crate::{
@@ -179,8 +177,14 @@ fn open_qcow2(
         if io_uring_supported() {
             info!("Opening QCOW2 disk file with io_uring backend");
             return Ok(Box::new(
-                QcowDiskAsync::new(file, options.direct, options.backing_files, options.sparse)
-                    .map_err(|e| e.with_path(options.path))?,
+                QcowDisk::new(
+                    file,
+                    options.direct,
+                    options.backing_files,
+                    options.sparse,
+                    true,
+                )
+                .map_err(|e| e.with_path(options.path))?,
             ));
         }
         info!("io_uring runtime probe failed for QCOW2, using synchronous backend");
@@ -188,8 +192,14 @@ fn open_qcow2(
 
     info!("Opening QCOW2 disk file with synchronous backend");
     Ok(Box::new(
-        QcowDiskSync::new(file, options.direct, options.backing_files, options.sparse)
-            .map_err(|e| e.with_path(options.path))?,
+        QcowDisk::new(
+            file,
+            options.direct,
+            options.backing_files,
+            options.sparse,
+            false,
+        )
+        .map_err(|e| e.with_path(options.path))?,
     ))
 }
 
