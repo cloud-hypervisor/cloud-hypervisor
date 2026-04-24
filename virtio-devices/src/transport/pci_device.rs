@@ -807,7 +807,8 @@ impl VirtioPciDevice {
             }
 
             if !queue.is_valid(self.memory.memory().deref()) {
-                error!("Queue {queue_index} is not valid");
+                error!("Queue {queue_index} is not valid; skipping activation");
+                continue;
             }
 
             queues.push((
