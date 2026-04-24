@@ -9,6 +9,7 @@ IGNORE_PREFIXES = [
     # Please sort alphabetically
     " ",
     "Acked-by: ",
+    "Assisted-by: ",
     "Co-authored-by: ",
     "Co-developed-by: ",
     "Debugged-by: ",
