@@ -82,21 +82,21 @@ serde_with = { version = "3.18.0", default-features = false }
 
 # other crates
 anyhow = "1.0.102"
-bitflags = "2.11.0"
+bitflags = "2.11.1"
 byteorder = "1.5.0"
 cfg-if = "1.0.4"
-clap = "4.6.0"
+clap = "4.6.1"
 dhat = "0.3.3"
 dirs = "6.0.0"
 env_logger = "0.11.10"
 epoll = "4.4.0"
 flume = "0.12.0"
 itertools = "0.14.0"
-libc = "0.2.184"
+libc = "0.2.185"
 log = "0.4.29"
 signal-hook = "0.4.4"
 thiserror = "2.0.18"
-uuid = { version = "1.23.0" }
+uuid = { version = "1.23.1" }
 wait-timeout = "0.2.1"
 zerocopy = { version = "0.8.48", default-features = false }
 
