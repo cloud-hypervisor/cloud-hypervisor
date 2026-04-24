@@ -979,11 +979,16 @@ impl Vmm {
             StateReceived {
                 state_receive_begin,
             } => match req.command() {
-                Command::Complete => {
+                cmd @ (Command::Complete | Command::CompletePaused) => {
                     // The unwrap is safe, because the state machine makes sure we called
                     // vm_receive_state before, which creates the VM.
                     let vm = self.vm.as_mut().unwrap();
-                    let (_, resume_duration) = measure_ok(|| vm.resume())?;
+                    let resume_duration = if cmd == Command::Complete {
+                        let (_, d) = measure_ok(|| vm.resume())?;
+                        d
+                    } else {
+                        Duration::ZERO
+                    };
                     debug!(
                         "Migration (incoming): resume:{}ms",
                         resume_duration.as_millis()
@@ -1354,7 +1359,9 @@ impl Vmm {
             mem_send,
         )?;
         let downtime_begin = Instant::now();
-        vm.pause()?;
+        if vm.get_state() != VmState::Paused {
+            vm.pause()?;
+        }
 
         // Send last batch of dirty pages: final iteration
         {
@@ -1384,6 +1391,7 @@ impl Vmm {
         #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
         hypervisor: &dyn hypervisor::Hypervisor,
         send_data_migration: &VmSendMigrationData,
+        initial_vm_state: VmState,
     ) -> result::Result<(), MigratableError> {
         // State machine that is updated with more context as we progress.
         let mut ctx = OngoingMigrationContext::new();
@@ -1454,9 +1462,11 @@ impl Vmm {
         vm.start_migration()?;
 
         if send_data_migration.local {
-            // Now pause VM
+            // Now pause VM (skip if already paused, e.g. migrating a paused VM)
             let downtime_begin = Instant::now();
-            vm.pause()?;
+            if vm.get_state() != VmState::Paused {
+                vm.pause()?;
+            }
             ctx.set_vm_paused(
                 downtime_begin,
                 // No memory was transferred
@@ -1502,10 +1512,15 @@ impl Vmm {
         // When this returns, we know the VM was resumed (if it was running
         // before the migration) and that the receiving VMM acquired disk
         // locks again.
+        let complete_req = if initial_vm_state == VmState::Running {
+            Request::complete()
+        } else {
+            Request::complete_paused()
+        };
         let (_, complete_duration) = measure_ok(|| {
             migration_transport::send_request_expect_ok(
                 &mut socket,
-                Request::complete(),
+                complete_req,
                 MigratableError::MigrateSend(anyhow!("Error completing migration")),
             )
         })?;
@@ -2571,13 +2586,10 @@ impl RequestHandler for Vmm {
             .as_mut()
             .ok_or_else(|| MigratableError::MigrateSend(anyhow!("VM is not running")))?;
 
-        // Only running VMs can be migrated: Future work can fix this to allow
-        // also the migration of paused VMs while preserving the state in success
-        // and error case. See #7815.
-        if vm.get_state() != VmState::Running {
+        let initial_vm_state = vm.get_state();
+        if initial_vm_state != VmState::Running && initial_vm_state != VmState::Paused {
             return Err(MigratableError::MigrateSend(anyhow!(
-                "VM is not in running state: {:?}",
-                vm.get_state()
+                "VM is not running or paused: {initial_vm_state:?}"
             )));
         }
 
@@ -2587,6 +2599,7 @@ impl RequestHandler for Vmm {
             #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
             self.hypervisor.as_ref(),
             &send_data_migration,
+            initial_vm_state,
         )
         .map_err(|migration_err| {
             error!("Migration failed: {migration_err:?}");
@@ -2599,7 +2612,10 @@ impl RequestHandler for Vmm {
                 return e;
             }
 
-            if vm.get_state() == VmState::Paused
+            // Only resume if the VM was originally running; a VM that was already
+            // paused before migration should remain paused after failure.
+            if initial_vm_state == VmState::Running
+                && vm.get_state() == VmState::Paused
                 && let Err(e) = vm.resume()
             {
                 return e;
