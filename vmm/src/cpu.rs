@@ -1583,16 +1583,22 @@ impl CpuManager {
     /// Calls [`VcpuState::signal_thread`] and
     /// [`VcpuState::wait_until_signal_acknowledged`] for each vCPU.
     fn signal_vcpus(&mut self) -> Result<()> {
-        // Holding the lock for the whole operation is correct:
-        let vcpu_states = self.vcpu_states.lock().unwrap();
+        let vcpu_count = self.vcpu_states.lock().unwrap().len();
 
         // Splitting this into two loops reduced the time to pause many vCPUs
         // massively. Example: 254 vCPUs. >254ms -> ~4ms.
-        for state in vcpu_states.iter() {
-            state.signal_thread();
+        //
+        // Do not hold `vcpu_states` across the wait phase. A vCPU can handle
+        // the kick in userspace while servicing MMIO on the ACPI CPU hotplug
+        // device, and that path also takes `vcpu_states`. Holding the mutex
+        // here while waiting would deadlock pause against that MMIO access.
+        for cpu_id in 0..vcpu_count {
+            let vcpu_states = self.vcpu_states.lock().unwrap();
+            vcpu_states[cpu_id].signal_thread();
         }
-        for state in vcpu_states.iter() {
-            state.wait_until_signal_acknowledged()?;
+        for cpu_id in 0..vcpu_count {
+            let vcpu_states = self.vcpu_states.lock().unwrap();
+            vcpu_states[cpu_id].wait_until_signal_acknowledged()?;
         }
 
         Ok(())
