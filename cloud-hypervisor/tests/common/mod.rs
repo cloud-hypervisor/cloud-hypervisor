@@ -5,3 +5,6 @@
 pub(crate) mod live_migration;
 pub(crate) mod tests_wrappers;
 pub(crate) mod utils;
+
+#[cfg(not(feature = "mshv"))]
+pub(crate) mod snapshot_restore_common;
