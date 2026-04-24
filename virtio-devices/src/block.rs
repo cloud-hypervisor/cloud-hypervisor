@@ -211,6 +211,10 @@ impl BlockEpollHandler {
 Setting device status to 'NEEDS_RESET' and stopping processing queues until reset."
         );
 
+        self.set_needs_reset();
+    }
+
+    fn set_needs_reset(&mut self) {
         self.device_status
             .fetch_or(crate::DEVICE_NEEDS_RESET as u8, Ordering::SeqCst);
 
@@ -218,6 +222,17 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
         if let Err(e) = self.interrupt_cb.trigger(VirtioInterruptType::Config) {
             error!("Failed to signal config interrupt: {e:?}");
         }
+    }
+
+    // A spec-compliant driver never reuses a virtqueue head_index while the
+    // corresponding chain is still available (virtio 1.x §2.7.13.4).
+    // Double check the guest driver is behaving.
+    fn is_head_in_flight(
+        inflight: &VecDeque<(u16, Request)>,
+        batch: &[(u16, Request)],
+        head: u16,
+    ) -> bool {
+        batch.iter().any(|(h, _)| *h == head) || inflight.iter().any(|(h, _)| *h == head)
     }
 
     fn process_queue_submit(&mut self) -> Result<()> {
@@ -239,6 +254,14 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
                     return Ok(());
                 }
             };
+
+            let head = desc_chain.head_index();
+            if Self::is_head_in_flight(&self.inflight_requests, &batch_inflight_requests, head) {
+                warn!("Guest reused virtio-blk head_index {head} while the chain was used");
+                self.set_needs_reset();
+                return Ok(());
+            }
+
             let mut request = Request::parse(&mut desc_chain, self.access_platform.as_deref())
                 .map_err(Error::RequestParsing)?;
 
