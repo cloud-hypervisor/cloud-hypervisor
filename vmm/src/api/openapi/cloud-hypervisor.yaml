@@ -1285,12 +1285,15 @@ components:
           type: integer
 
     DeviceConfig:
-      required:
-        - path
       type: object
       properties:
         path:
           type: string
+          description: |
+            Sysfs path of the VFIO device. Exactly one of `path` or an
+            externally-opened cdev FD must be supplied; an FD is passed
+            out of band via SCM_RIGHTS on the UNIX domain socket, never
+            in this body.
         iommu:
           type: boolean
           default: false
