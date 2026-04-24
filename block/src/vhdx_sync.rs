@@ -15,7 +15,7 @@ use crate::vhdx::{Vhdx, VhdxError};
 use crate::{AsyncAdaptor, BlockBackend, Error, disk_file};
 
 #[derive(Debug)]
-pub struct VhdxDiskSync {
+pub struct VhdxDisk {
     // FIXME: The Mutex serializes all VHDX I/O operations across queues, which
     // is necessary for correctness but eliminates any parallelism benefit from
     // multiqueue. Vhdx::clone() shares the underlying file description across
@@ -27,9 +27,9 @@ pub struct VhdxDiskSync {
     vhdx_file: Arc<Mutex<Vhdx>>,
 }
 
-impl VhdxDiskSync {
+impl VhdxDisk {
     pub fn new(f: File) -> BlockResult<Self> {
-        Ok(VhdxDiskSync {
+        Ok(VhdxDisk {
             vhdx_file: Arc::new(Mutex::new(Vhdx::new(f).map_err(|e| {
                 let kind = match &e {
                     VhdxError::NotVhdx(_)
@@ -45,13 +45,13 @@ impl VhdxDiskSync {
     }
 }
 
-impl disk_file::DiskSize for VhdxDiskSync {
+impl disk_file::DiskSize for VhdxDisk {
     fn logical_size(&self) -> BlockResult<u64> {
         Ok(self.vhdx_file.lock().unwrap().virtual_disk_size())
     }
 }
 
-impl disk_file::PhysicalSize for VhdxDiskSync {
+impl disk_file::PhysicalSize for VhdxDisk {
     fn physical_size(&self) -> BlockResult<u64> {
         self.vhdx_file
             .lock()
@@ -66,17 +66,17 @@ impl disk_file::PhysicalSize for VhdxDiskSync {
     }
 }
 
-impl disk_file::DiskFd for VhdxDiskSync {
+impl disk_file::DiskFd for VhdxDisk {
     fn fd(&self) -> BorrowedDiskFd<'_> {
         BorrowedDiskFd::new(self.vhdx_file.lock().unwrap().as_raw_fd())
     }
 }
 
-impl disk_file::Geometry for VhdxDiskSync {}
+impl disk_file::Geometry for VhdxDisk {}
 
-impl disk_file::SparseCapable for VhdxDiskSync {}
+impl disk_file::SparseCapable for VhdxDisk {}
 
-impl disk_file::Resizable for VhdxDiskSync {
+impl disk_file::Resizable for VhdxDisk {
     fn resize(&mut self, _size: u64) -> BlockResult<()> {
         Err(BlockError::new(
             BlockErrorKind::UnsupportedFeature,
@@ -86,11 +86,11 @@ impl disk_file::Resizable for VhdxDiskSync {
     }
 }
 
-impl disk_file::DiskFile for VhdxDiskSync {}
+impl disk_file::DiskFile for VhdxDisk {}
 
-impl disk_file::AsyncDiskFile for VhdxDiskSync {
+impl disk_file::AsyncDiskFile for VhdxDisk {
     fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
-        Ok(Box::new(VhdxDiskSync {
+        Ok(Box::new(VhdxDisk {
             vhdx_file: Arc::clone(&self.vhdx_file),
         }))
     }
