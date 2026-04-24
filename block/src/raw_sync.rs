@@ -11,7 +11,7 @@ use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::sparse::{punch_hole, write_zeroes};
 use crate::{SECTOR_SIZE, is_block_device};
 
-pub struct RawFileSync {
+pub struct RawSync {
     fd: RawFd,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
@@ -19,10 +19,10 @@ pub struct RawFileSync {
     is_block_device: bool,
 }
 
-impl RawFileSync {
+impl RawSync {
     pub fn new(fd: RawFd) -> Self {
         let is_block_device = is_block_device(fd);
-        RawFileSync {
+        RawSync {
             fd,
             eventfd: EventFd::new(libc::EFD_NONBLOCK).expect("Failed creating EventFd for RawFile"),
             completion_list: VecDeque::new(),
@@ -32,7 +32,7 @@ impl RawFileSync {
     }
 }
 
-impl AsyncIo for RawFileSync {
+impl AsyncIo for RawSync {
     fn notifier(&self) -> &EventFd {
         &self.eventfd
     }
@@ -140,7 +140,7 @@ mod unit_tests {
     fn test_punch_hole() {
         let temp_file = TempFile::new().unwrap();
         let mut file = temp_file.into_file();
-        let mut async_io = RawFileSync::new(file.as_raw_fd());
+        let mut async_io = RawSync::new(file.as_raw_fd());
         raw_async_io_tests::test_punch_hole(&mut async_io, &mut file);
     }
 
@@ -148,7 +148,7 @@ mod unit_tests {
     fn test_write_zeroes() {
         let temp_file = TempFile::new().unwrap();
         let mut file = temp_file.into_file();
-        let mut async_io = RawFileSync::new(file.as_raw_fd());
+        let mut async_io = RawSync::new(file.as_raw_fd());
         raw_async_io_tests::test_write_zeroes(&mut async_io, &mut file);
     }
 
@@ -156,7 +156,7 @@ mod unit_tests {
     fn test_punch_hole_multiple_operations() {
         let temp_file = TempFile::new().unwrap();
         let mut file = temp_file.into_file();
-        let mut async_io = RawFileSync::new(file.as_raw_fd());
+        let mut async_io = RawSync::new(file.as_raw_fd());
         raw_async_io_tests::test_punch_hole_multiple_operations(&mut async_io, &mut file);
     }
 }

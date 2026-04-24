@@ -7,17 +7,17 @@ use std::os::unix::io::RawFd;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
-use crate::raw_sync::RawFileSync;
+use crate::raw_sync::RawSync;
 
 pub struct FixedVhdSync {
-    raw_file_sync: RawFileSync,
+    raw_file_sync: RawSync,
     size: u64,
 }
 
 impl FixedVhdSync {
     pub fn new(fd: RawFd, size: u64) -> std::io::Result<Self> {
         Ok(FixedVhdSync {
-            raw_file_sync: RawFileSync::new(fd),
+            raw_file_sync: RawSync::new(fd),
             size,
         })
     }

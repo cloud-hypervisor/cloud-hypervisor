@@ -138,7 +138,7 @@ impl AsyncIo for RawFileAsyncAio {
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
         // Linux AIO has no IOCB command for fallocate, so perform the
         // operation synchronously and signal completion via the completion
-        // list, matching the pattern used by the sync backend (RawFileSync).
+        // list, matching the pattern used by the sync backend (RawSync).
         punch_hole(self.fd, self.is_block_device, offset, length)
             .map_err(AsyncIoError::PunchHole)?;
         self.completion_list.push_back((user_data, 0));
