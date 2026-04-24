@@ -20,19 +20,14 @@ pub mod fixed_vhd;
 pub mod fixed_vhd_async;
 pub mod fixed_vhd_disk;
 pub mod fixed_vhd_sync;
+pub mod formats;
 pub mod qcow;
 #[cfg(feature = "io_uring")]
 pub(crate) mod qcow_async;
 pub(crate) mod qcow_common;
 pub mod qcow_disk;
 pub(crate) mod qcow_sync;
-#[cfg(feature = "io_uring")]
-pub(crate) mod raw_async;
-pub(crate) mod raw_async_aio;
-#[cfg(test)]
-mod raw_async_io_tests;
-pub mod raw_disk;
-pub(crate) mod raw_sync;
+pub use formats::raw as raw_disk;
 pub mod vhd;
 pub mod vhdx;
 pub mod vhdx_sync;

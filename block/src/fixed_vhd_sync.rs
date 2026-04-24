@@ -7,7 +7,7 @@ use std::os::unix::io::RawFd;
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
-use crate::raw_sync::RawSync;
+use crate::formats::raw::worker::sync::RawSync;
 
 pub struct FixedVhdSync {
     raw_file_sync: RawSync,

@@ -2,6 +2,11 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+//! Raw disk image format.
+//!
+//! Provides [`RawDisk`], the `DiskFile` wrapper for flat disk images
+//! with no metadata or copy on write layer.
+
 use std::fs::File;
 use std::io;
 use std::os::unix::fs::FileTypeExt;
@@ -9,13 +14,15 @@ use std::os::unix::io::AsRawFd;
 
 use log::warn;
 
+use self::worker::async_aio::RawAio;
+#[cfg(feature = "io_uring")]
+use self::worker::async_uring::RawAsync;
+use self::worker::sync::RawSync;
 use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
-#[cfg(feature = "io_uring")]
-use crate::raw_async::RawAsync;
-use crate::raw_async_aio::RawAio;
-use crate::raw_sync::RawSync;
 use crate::{DiskTopology, disk_file, probe_sparse_support, query_device_size};
+
+pub(crate) mod worker;
 
 /// Selects which async I/O backend a `RawDisk` uses.
 #[derive(Clone, Copy, Debug, PartialEq)]
