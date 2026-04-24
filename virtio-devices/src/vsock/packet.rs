@@ -175,6 +175,9 @@ impl VsockPacket {
         // For small packets, the data may be stored in the same descriptor as the header.
         if !head.has_next() {
             let buf_size: usize = head.len() as usize - VSOCK_PKT_HDR_SIZE;
+            if buf_size < pkt.len() as usize {
+                return Err(VsockError::BufDescTooSmall);
+            }
             let buf_ptr = get_host_address_range(
                 desc_chain.memory(),
                 head.addr()
