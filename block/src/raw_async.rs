@@ -13,14 +13,14 @@ use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::{BatchRequest, RequestType, SECTOR_SIZE};
 
-pub struct RawFileAsync {
+pub struct RawAsync {
     fd: RawFd,
     io_uring: IoUring,
     eventfd: EventFd,
     alignment: u64,
 }
 
-impl RawFileAsync {
+impl RawAsync {
     pub fn new(fd: RawFd, ring_depth: u32) -> BlockResult<Self> {
         let io_uring =
             IoUring::new(ring_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
@@ -34,7 +34,7 @@ impl RawFileAsync {
             .register_eventfd(eventfd.as_raw_fd())
             .map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
 
-        Ok(RawFileAsync {
+        Ok(RawAsync {
             fd,
             io_uring,
             eventfd,
@@ -43,7 +43,7 @@ impl RawFileAsync {
     }
 }
 
-impl AsyncIo for RawFileAsync {
+impl AsyncIo for RawAsync {
     fn notifier(&self) -> &EventFd {
         &self.eventfd
     }
