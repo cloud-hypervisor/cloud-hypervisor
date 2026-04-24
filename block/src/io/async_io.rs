@@ -44,7 +44,7 @@ pub struct BorrowedDiskFd<'fd> {
 }
 
 impl BorrowedDiskFd<'_> {
-    pub(super) fn new(raw_fd: RawFd) -> Self {
+    pub(crate) fn new(raw_fd: RawFd) -> Self {
         Self {
             raw_fd,
             _lifetime: PhantomData,
