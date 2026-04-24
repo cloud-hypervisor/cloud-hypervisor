@@ -23,7 +23,7 @@ use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::fixed_vhd_disk::FixedVhdDisk;
 use crate::qcow_disk::QcowDisk;
 use crate::raw_disk::{RawBackend, RawDisk};
-use crate::vhdx_sync::VhdxDiskSync;
+use crate::vhdx_sync::VhdxDisk;
 use crate::{
     ImageType, block_aio_is_supported, detect_image_type, open_disk_image, preallocate_disk,
 };
@@ -114,7 +114,7 @@ fn open_vhdx(
 ) -> BlockResult<Box<dyn AsyncFullDiskFile>> {
     info!("Opening VHDX disk file with synchronous backend");
     Ok(Box::new(
-        VhdxDiskSync::new(file).map_err(|e| e.with_path(options.path))?,
+        VhdxDisk::new(file).map_err(|e| e.with_path(options.path))?,
     ))
 }
 
