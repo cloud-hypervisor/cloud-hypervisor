@@ -22,8 +22,8 @@ use crate::disk_file::AsyncFullDiskFile;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::formats::raw::{RawBackend, RawDisk};
 use crate::formats::vhd::VhdDisk;
+use crate::formats::vhdx::VhdxDisk;
 use crate::qcow_disk::QcowDisk;
-use crate::vhdx_sync::VhdxDisk;
 use crate::{
     ImageType, block_aio_is_supported, detect_image_type, open_disk_image, preallocate_disk,
 };
