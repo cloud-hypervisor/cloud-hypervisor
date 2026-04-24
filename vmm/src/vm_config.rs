@@ -786,10 +786,11 @@ where
 
 impl ApplyLandlock for DeviceConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        let path = self
-            .path
-            .as_deref()
-            .expect("DeviceConfig::parse and OpenAPI spec enforce a path");
+        // When the device is supplied via an externally-opened FD, there is no
+        // path to grant access to: the file is already open. Skip the rule.
+        let Some(path) = self.path.as_deref() else {
+            return Ok(());
+        };
         let device_path = fs::read_link(path).map_err(LandlockError::OpenPath)?;
         let iommu_group = device_path.file_name();
         let iommu_group_str = iommu_group
