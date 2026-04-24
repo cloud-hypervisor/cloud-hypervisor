@@ -16,7 +16,7 @@ use crate::SECTOR_SIZE;
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 
-pub struct RawFileAsyncAio {
+pub struct RawAio {
     fd: RawFd,
     ctx: aio::IoContext,
     eventfd: EventFd,
@@ -24,14 +24,14 @@ pub struct RawFileAsyncAio {
     completion_list: VecDeque<(u64, i32)>,
 }
 
-impl RawFileAsyncAio {
+impl RawAio {
     pub fn new(fd: RawFd, queue_depth: u32) -> BlockResult<Self> {
         let eventfd =
             EventFd::new(libc::EFD_NONBLOCK).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
         let ctx =
             aio::IoContext::new(queue_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
 
-        Ok(RawFileAsyncAio {
+        Ok(RawAio {
             fd,
             ctx,
             eventfd,
@@ -41,7 +41,7 @@ impl RawFileAsyncAio {
     }
 }
 
-impl AsyncIo for RawFileAsyncAio {
+impl AsyncIo for RawAio {
     fn notifier(&self) -> &EventFd {
         &self.eventfd
     }
@@ -196,7 +196,7 @@ mod unit_tests {
     fn test_punch_hole() {
         let temp_file = TempFile::new().unwrap();
         let mut file = temp_file.into_file();
-        let mut async_io = RawFileAsyncAio::new(file.as_raw_fd(), 128).unwrap();
+        let mut async_io = RawAio::new(file.as_raw_fd(), 128).unwrap();
         raw_async_io_tests::test_punch_hole(&mut async_io, &mut file);
     }
 
@@ -204,7 +204,7 @@ mod unit_tests {
     fn test_write_zeroes() {
         let temp_file = TempFile::new().unwrap();
         let mut file = temp_file.into_file();
-        let mut async_io = RawFileAsyncAio::new(file.as_raw_fd(), 128).unwrap();
+        let mut async_io = RawAio::new(file.as_raw_fd(), 128).unwrap();
         raw_async_io_tests::test_write_zeroes(&mut async_io, &mut file);
     }
 
@@ -212,7 +212,7 @@ mod unit_tests {
     fn test_punch_hole_multiple_operations() {
         let temp_file = TempFile::new().unwrap();
         let mut file = temp_file.into_file();
-        let mut async_io = RawFileAsyncAio::new(file.as_raw_fd(), 128).unwrap();
+        let mut async_io = RawAio::new(file.as_raw_fd(), 128).unwrap();
         raw_async_io_tests::test_punch_hole_multiple_operations(&mut async_io, &mut file);
     }
 }

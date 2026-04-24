@@ -13,7 +13,7 @@ use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 #[cfg(feature = "io_uring")]
 use crate::raw_async::RawAsync;
-use crate::raw_async_aio::RawFileAsyncAio;
+use crate::raw_async_aio::RawAio;
 use crate::raw_sync::RawSync;
 use crate::{DiskTopology, disk_file, probe_sparse_support, query_device_size};
 
@@ -132,10 +132,7 @@ impl disk_file::AsyncDiskFile for RawDisk {
             RawBackend::Sync => Ok(Box::new(RawSync::new(self.file.as_raw_fd()))),
             #[cfg(feature = "io_uring")]
             RawBackend::IoUring => Ok(Box::new(RawAsync::new(self.file.as_raw_fd(), ring_depth)?)),
-            RawBackend::Aio => Ok(Box::new(RawFileAsyncAio::new(
-                self.file.as_raw_fd(),
-                ring_depth,
-            )?)),
+            RawBackend::Aio => Ok(Box::new(RawAio::new(self.file.as_raw_fd(), ring_depth)?)),
         }
     }
 }
