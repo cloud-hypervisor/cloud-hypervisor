@@ -148,9 +148,6 @@ pub enum Error {
     /// Failed parsing device parameters
     #[error("Error parsing --device")]
     ParseDevice(#[source] OptionParserError),
-    /// Missing path from device,
-    #[error("Error parsing --device: path missing")]
-    ParseDevicePathMissing,
     /// Failed parsing vsock parameters
     #[error("Error parsing --vsock")]
     ParseVsock(#[source] OptionParserError),
@@ -346,6 +343,15 @@ pub enum ValidationError {
     /// Duplicated device path (device added twice)
     #[error("Duplicated device path: {0}")]
     DuplicateDevicePath(String),
+    /// A DeviceConfig specified neither `path` nor `fd`.
+    #[error("VFIO device config must specify `path=` or `fd=`")]
+    VfioDeviceNeitherPathNorFd,
+    /// A DeviceConfig specified both `path` and `fd`.
+    #[error("VFIO device config must specify at most one of `path=` or `fd=`")]
+    VfioDeviceBothPathAndFd,
+    /// FD-based VFIO requires the `iommufd` platform option to be enabled.
+    #[error("VFIO device `fd=` requires platform `iommufd=on`")]
+    VfioFdRequiresIommufd,
     /// Provided MTU is lower than what the VIRTIO specification expects
     #[error("Provided MTU {0} is lower than 1280 (expected by VIRTIO specification)")]
     InvalidMtu(u16),
@@ -2429,10 +2435,7 @@ impl DeviceConfig {
         parser.parse(device).map_err(Error::ParseDevice)?;
 
         let pci_common = PciDeviceCommonConfig::parse(device)?;
-        let path = parser
-            .get("path")
-            .map(PathBuf::from)
-            .ok_or(Error::ParseDevicePathMissing)?;
+        let path = parser.get("path").map(PathBuf::from);
         let fd = parser.convert::<i32>("fd").map_err(Error::ParseDevice)?;
         let x_nv_gpudirect_clique = parser
             .convert::<u8>("x_nv_gpudirect_clique")
@@ -2444,7 +2447,7 @@ impl DeviceConfig {
             .unwrap_or_default();
         Ok(DeviceConfig {
             pci_common,
-            path: Some(path),
+            path,
             fd,
             x_nv_gpudirect_clique,
             x_exclude_mmap_bars,
@@ -2453,6 +2456,18 @@ impl DeviceConfig {
 
     pub fn validate(&self, vm_config: &VmConfig) -> ValidationResult<()> {
         self.pci_common.validate(vm_config)?;
+
+        match (&self.path, self.fd) {
+            (None, None) => return Err(ValidationError::VfioDeviceNeitherPathNorFd),
+            (Some(_), Some(_)) => return Err(ValidationError::VfioDeviceBothPathAndFd),
+            (None, Some(_)) => {
+                let iommufd_on = vm_config.platform.as_ref().is_some_and(|p| p.iommufd);
+                if !iommufd_on {
+                    return Err(ValidationError::VfioFdRequiresIommufd);
+                }
+            }
+            (Some(_), None) => {}
+        }
 
         if self.x_nv_gpudirect_clique.is_some() {
             let vfio_p2p_dma = vm_config.platform.as_ref().is_none_or(|p| p.vfio_p2p_dma);
@@ -4733,8 +4748,15 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
 
     #[test]
     fn test_device_parsing() -> Result<()> {
-        // Device must have a path provided
-        DeviceConfig::parse("").unwrap_err();
+        // The parser itself is purely syntactic; the "path or fd is
+        // required" rule is enforced by VmConfig::validate instead.
+        assert_eq!(
+            DeviceConfig::parse("")?,
+            DeviceConfig {
+                path: None,
+                ..device_fixture()
+            }
+        );
         assert_eq!(
             DeviceConfig::parse("path=/path/to/device")?,
             device_fixture()
@@ -4786,6 +4808,27 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
                 ..device_fixture()
             }
         );
+
+        // `fd=` is accepted alongside or in place of `path=`; exclusivity
+        // is enforced by DeviceConfig::validate, not by the parser.
+        assert_eq!(
+            DeviceConfig::parse("fd=7")?,
+            DeviceConfig {
+                path: None,
+                fd: Some(7),
+                ..device_fixture()
+            }
+        );
+        assert_eq!(
+            DeviceConfig::parse("path=/path/to/device,fd=7")?,
+            DeviceConfig {
+                fd: Some(7),
+                ..device_fixture()
+            }
+        );
+        // Non-integer fd fails at parse time.
+        DeviceConfig::parse("fd=notanint").unwrap_err();
+
         Ok(())
     }
 
@@ -6101,6 +6144,49 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             },
         ]);
         invalid_config.validate().unwrap_err();
+
+        // An fd-backed DeviceConfig is only valid with iommufd enabled.
+        let mut fd_valid_config = valid_config.clone();
+        fd_valid_config.platform = Some(PlatformConfig {
+            iommufd: true,
+            ..platform_fixture()
+        });
+        fd_valid_config.devices = Some(vec![DeviceConfig {
+            path: None,
+            fd: Some(7),
+            ..device_fixture()
+        }]);
+        fd_valid_config.validate().unwrap();
+
+        let mut fd_without_iommufd = fd_valid_config.clone();
+        fd_without_iommufd.platform = None;
+        assert!(matches!(
+            fd_without_iommufd.validate(),
+            Err(ValidationError::VfioFdRequiresIommufd),
+        ));
+
+        // Exactly one of path and fd must be set.
+        let mut both_path_and_fd = fd_valid_config.clone();
+        both_path_and_fd.devices = Some(vec![DeviceConfig {
+            path: Some("/device1".into()),
+            fd: Some(7),
+            ..device_fixture()
+        }]);
+        assert!(matches!(
+            both_path_and_fd.validate(),
+            Err(ValidationError::VfioDeviceBothPathAndFd),
+        ));
+
+        let mut neither_path_nor_fd = fd_valid_config.clone();
+        neither_path_nor_fd.devices = Some(vec![DeviceConfig {
+            path: None,
+            fd: None,
+            ..device_fixture()
+        }]);
+        assert!(matches!(
+            neither_path_nor_fd.validate(),
+            Err(ValidationError::VfioDeviceNeitherPathNorFd),
+        ));
         #[cfg(feature = "sev_snp")]
         {
             // Payload with empty host data

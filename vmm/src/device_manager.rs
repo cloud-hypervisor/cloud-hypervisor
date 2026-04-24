@@ -10,6 +10,8 @@
 //
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+#[cfg(feature = "kvm")]
+use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{self, IsTerminal, Seek, SeekFrom, stdout};
 use std::num::Wrapping;
@@ -375,6 +377,10 @@ pub enum DeviceManagerError {
     /// Cannot create a VFIO device
     #[error("Cannot create a VFIO device")]
     VfioCreate(#[source] vfio_ioctls::VfioError),
+
+    /// Failed to duplicate an externally-provided vfio cdev FD
+    #[error("Failed to duplicate VFIO device FD")]
+    VfioDupFd(#[source] io::Error),
 
     /// Cannot create a VFIO PCI device
     #[error("Cannot create a VFIO PCI device")]
@@ -3913,6 +3919,54 @@ impl DeviceManager {
         }
     }
 
+    // Build a VfioDevice from an externally-opened vfio cdev FD:
+    // The caller's FD is dup'd so the dup can be owned (and closed
+    // on drop) by the VfioDevice, while the original FD is kept alive
+    // for the lifetime of the VM via VmConfig::preserved_fds. This
+    // lets the cdev FD survive a VM reboot.
+    //
+    // Returns the built VfioDevice together with a diagnostic path
+    // resolved from /proc/self/fd/<n>.
+    #[cfg(feature = "kvm")]
+    fn create_vfio_device_from_fd(
+        &self,
+        fd: i32,
+        vfio_ops: Arc<dyn VfioOps>,
+    ) -> DeviceManagerResult<(VfioDevice, PathBuf)> {
+        assert!(
+            self.config
+                .lock()
+                .unwrap()
+                .platform
+                .as_ref()
+                .is_some_and(|p| p.iommufd),
+            "DeviceConfig::validate enforces iommufd when fd is set",
+        );
+
+        // SAFETY: FFI call to dup. Trivially safe.
+        let dup_fd = unsafe { libc::dup(fd) };
+        if dup_fd < 0 {
+            return Err(DeviceManagerError::VfioDupFd(io::Error::last_os_error()));
+        }
+        // SAFETY: dup_fd is a freshly-opened fd owned by this File.
+        let file = unsafe { File::from_raw_fd(dup_fd) };
+        let vfio_device =
+            VfioDevice::new_from_fd(file, vfio_ops).map_err(DeviceManagerError::VfioCreate)?;
+
+        // SAFETY: fd is a valid open vfio cdev FD; the VfioDevice only
+        // holds a dup, so VmConfig can safely take ownership of the
+        // original.
+        unsafe {
+            self.config.lock().unwrap().add_preserved_fds(vec![fd]);
+        }
+
+        // Diagnostic-only: resolve the FD back to the path it was opened
+        // from, falling back to /proc/self/fd/<n>.
+        let fd_link = PathBuf::from(format!("/proc/self/fd/{fd}"));
+        let device_path = fs::read_link(&fd_link).unwrap_or(fd_link);
+        Ok((vfio_device, device_path))
+    }
+
     fn add_vfio_device(
         &mut self,
         device_cfg: &mut DeviceConfig,
@@ -3976,13 +4030,25 @@ impl DeviceManager {
             vfio_ops
         };
 
-        // The CLI parser and OpenAPI spec enforce that `path` is set
-        let device_path = device_cfg
-            .path
-            .as_deref()
-            .expect("DeviceConfig::parse enforces a path");
-        let vfio_device = VfioDevice::new(device_path, Arc::clone(&vfio_ops) as Arc<dyn VfioOps>)
-            .map_err(DeviceManagerError::VfioCreate)?;
+        let (vfio_device, device_path) = match (&device_cfg.path, device_cfg.fd) {
+            (Some(path), None) => {
+                let vfio_device = VfioDevice::new(path, Arc::clone(&vfio_ops) as Arc<dyn VfioOps>)
+                    .map_err(DeviceManagerError::VfioCreate)?;
+                (vfio_device, path.clone())
+            }
+            (None, Some(fd)) => {
+                #[cfg(feature = "kvm")]
+                {
+                    self.create_vfio_device_from_fd(fd, Arc::clone(&vfio_ops) as Arc<dyn VfioOps>)?
+                }
+                #[cfg(not(feature = "kvm"))]
+                {
+                    let _ = fd;
+                    return Err(DeviceManagerError::IommufdNotSupported);
+                }
+            }
+            _ => unreachable!("DeviceConfig::validate enforces exactly one of path/fd"),
+        };
 
         if needs_dma_mapping {
             // Register DMA mapping in IOMMU.
@@ -4067,7 +4133,7 @@ impl DeviceManager {
                 .iter()
                 .map(|bar| *bar as u8)
                 .collect(),
-            device_path.to_path_buf(),
+            device_path,
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
 
@@ -4942,6 +5008,27 @@ impl DeviceManager {
                 | VirtioDeviceType::Fs
                 | VirtioDeviceType::Vsock => {}
                 _ => return Err(DeviceManagerError::RemovalNotAllowed(device_type)),
+            }
+        } else if matches!(pci_device_handle, PciDeviceHandle::Vfio(_)) {
+            // Cleanup externally-provided VFIO cdev FDs: remove the preserved
+            // original from VmConfig and close it.
+            let mut config = self.config.lock().unwrap();
+            if let Some(devices) = config.devices.as_deref_mut()
+                && let Some(device_cfg) = devices
+                    .iter_mut()
+                    .find(|d| d.pci_common.id.as_deref() == Some(id))
+                && let Some(fd) = device_cfg.fd.take()
+            {
+                debug!("Closing preserved FD from VFIO device: id={id}, fd={fd}");
+                let fd_removed = config.preserved_fds.as_mut().unwrap().remove(&fd);
+                assert!(
+                    fd_removed,
+                    "FD {fd} for device id={id} was not in preserved_fds"
+                );
+                // SAFETY: We are closing the only remaining instance of this FD.
+                unsafe {
+                    libc::close(fd);
+                }
             }
         }
 
