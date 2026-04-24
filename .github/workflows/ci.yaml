@@ -1,0 +1,769 @@
+name: CI
+on: [pull_request, merge_group]
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+jobs:
+  preflight:
+    name: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.classify.outputs.full }}
+      rust: ${{ steps.changes.outputs.rust }}
+      cargo: ${{ steps.changes.outputs.cargo }}
+      openapi: ${{ steps.changes.outputs.openapi }}
+      dockerfile: ${{ steps.changes.outputs.dockerfile }}
+      shell: ${{ steps.changes.outputs.shell }}
+      ci: ${{ steps.changes.outputs.ci }}
+      docs: ${{ steps.changes.outputs.docs }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: changes
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            rust:
+              - '**/*.rs'
+              - 'build.rs'
+              - '**/Cargo.toml'
+              - '**/Cargo.lock'
+              - 'rust-toolchain.toml'
+            cargo:
+              - '**/Cargo.toml'
+              - '**/Cargo.lock'
+            openapi:
+              - 'vmm/src/api/openapi/**'
+            dockerfile:
+              - 'resources/Dockerfile'
+            shell:
+              - '**/*.sh'
+              - 'scripts/**'
+            ci:
+              - '.github/workflows/**'
+            docs:
+              - 'docs/**'
+              - '**/*.md'
+              - '.github/ISSUE_TEMPLATE/**'
+              - 'LICENSES/**'
+              - 'CODEOWNERS'
+      - id: classify
+        name: Classify changes
+        run: |
+          set -eufo pipefail
+          full=false
+          if [[ "${{ steps.changes.outputs.rust }}" == "true" \
+             || "${{ steps.changes.outputs.dockerfile }}" == "true" \
+             || "${{ steps.changes.outputs.shell }}" == "true" \
+             || "${{ steps.changes.outputs.ci }}" == "true" ]]; then
+            full=true
+          fi
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+          echo "full=$full"
+  dco:
+    name: dco
+    needs: [preflight]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python 3.x
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+      - name: Check DCO
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eufo pipefail
+          pip3 install -U dco-check
+          dco-check -e "49699333+dependabot[bot]@users.noreply.github.com"
+  gitlint:
+    name: gitlint
+    needs: [preflight]
+    # PR-only: gitlint needs GITHUB_BASE_REF, unset on merge_group.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          # PR head, not the merge ref, so gitlint sees the PR's commits.
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade gitlint
+      - name: Lint git commit messages
+        run: |
+          gitlint --commits "origin/$GITHUB_BASE_REF.."
+  lychee:
+    name: lychee
+    needs: [preflight]
+    if: needs.preflight.outputs.docs == 'true' || needs.preflight.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Get changed files in PR
+        id: changed-files
+        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
+        with:
+          base_sha: ${{ github.event.pull_request.base.sha }}
+      - name: Verify Changed Files
+        run: |
+          set -eufo pipefail
+          echo "--- tj-actions/changed-files Outputs ---"
+          echo "any_changed: ${{ steps.changed-files.outputs.any_changed }}"
+          echo "all_changed_files: ${{ steps.changed-files.outputs.all_changed_files }}"
+          echo "added_files: ${{ steps.changed-files.outputs.added_files }}"
+          echo "modified_files: ${{ steps.changed-files.outputs.modified_files }}"
+          echo "deleted_files: ${{ steps.changed-files.outputs.deleted_files }}"
+          echo "renamed_files: ${{ steps.changed-files.outputs.renamed_files }}"
+          echo "----------------------------------------"
+          if [ -n "${{ steps.changed-files.outputs.all_changed_files }}" ]; then
+            echo "Detected changes: all_changed_files output is NOT empty."
+          else
+            echo "No changes detected: all_changed_files output IS empty."
+          fi
+      - name: Link Availability Check (Diff Only)
+        if: ${{ steps.changed-files.outputs.all_changed_files != '' }}
+        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2.8.0
+        with:
+          args: --verbose --config .lychee.toml ${{ steps.changed-files.outputs.all_changed_files }}
+          failIfEmpty: false
+          fail: true
+  taplo:
+    name: taplo
+    needs: [preflight]
+    if: needs.preflight.outputs.cargo == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v6
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get -yqq install build-essential libssl-dev
+      - name: Install taplo
+        run: cargo install taplo-cli --locked
+      - name: Check formatting
+        run: taplo fmt --check
+  audit:
+    name: audit
+    needs: [preflight]
+    if: needs.preflight.outputs.cargo == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions-rust-lang/audit@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+  shlint:
+    name: shlint
+    needs: [preflight]
+    if: needs.preflight.outputs.shell == 'true' || needs.preflight.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+      - name: Run the shell script checkers
+        uses: luizm/action-sh-checker@883217215b11c1fabbf00eb1a9a041f62d74c744 # v0.10.0
+        env:
+          SHFMT_OPTS: -i 4 -d
+          SHELLCHECK_OPTS: -x --source-path scripts
+  hadolint:
+    name: hadolint
+    needs: [preflight]
+    if: needs.preflight.outputs.dockerfile == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
+        with:
+          dockerfile: ./resources/Dockerfile
+          format: tty
+          no-fail: false
+          verbose: true
+          failure-threshold: info
+  reuse:
+    name: reuse
+    needs: [preflight]
+    if: needs.preflight.outputs.full == 'true' || needs.preflight.outputs.cargo == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: REUSE Compliance Check
+        uses: fsfe/reuse-action@v6
+  formatting:
+    name: formatting
+    needs: [preflight]
+    if: needs.preflight.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust: [nightly]
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-musl
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v6
+      - name: Install Rust toolchain (${{ matrix.rust }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          components: rustfmt
+      - name: Formatting (rustfmt)
+        run: cargo fmt --all -- --check
+      - name: Formatting (fuzz) (rustfmt)
+        run: cargo fmt --all --manifest-path fuzz/Cargo.toml -- --check
+  package-consistency:
+    name: package-consistency
+    needs: [preflight]
+    if: needs.preflight.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install dependencies
+        run: sudo apt install -y python3
+      - name: Install Rust toolchain stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - name: Check Rust VMM Package Consistency of root Workspace
+        run: python3 scripts/package-consistency-check.py github.com/rust-vmm
+      - name: Check Rust VMM Package Consistency of fuzz Workspace
+        run: |
+          set -eufo pipefail
+          pushd fuzz
+          python3 ../scripts/package-consistency-check.py github.com/rust-vmm
+          popd
+  fuzz-build:
+    name: fuzz-build
+    needs: [preflight]
+    if: needs.preflight.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust: [nightly]
+        target: [x86_64-unknown-linux-gnu]
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v6
+      - name: Install Rust toolchain (${{ matrix.rust }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+      - name: Install Cargo fuzz
+        run: cargo install cargo-fuzz
+      - name: Fuzz Build
+        run: cargo fuzz build
+      - name: Fuzz Check
+        run: cargo fuzz check
+  openapi:
+    name: openapi
+    needs: [preflight]
+    if: needs.preflight.outputs.openapi == 'true'
+    runs-on: ubuntu-latest
+    container: openapitools/openapi-generator-cli
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate OpenAPI
+        run: |
+          /usr/local/bin/docker-entrypoint.sh validate -i vmm/src/api/openapi/cloud-hypervisor.yaml
+  typos:
+    name: typos
+    needs: [preflight]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: crate-ci/typos@cf5f1c29a8ac336af8568821ec41919923b05a83 # v1.45.1
+  quality:
+    name: quality
+    needs: [preflight]
+    if: needs.preflight.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    # Beta clippy is non-blocking; continue-on-error below keeps the
+    # aggregated needs.quality.result green when only beta fails.
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        rust:
+          - beta
+          - stable
+        target:
+          - aarch64-unknown-linux-gnu
+          - aarch64-unknown-linux-musl
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+        include:
+          - rust: beta
+            experimental: true
+          - rust: stable
+            experimental: false
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install Rust toolchain (${{ matrix.rust }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          override: true
+          components: clippy
+      - name: Bisectability Check (default features)
+        if: ${{ github.event_name == 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu' }}
+        run: |
+          set -eufo pipefail
+          commits=$(git rev-list origin/${{ github.base_ref }}..${{ github.sha }})
+          for commit in $commits; do git checkout $commit; cargo check --tests --examples --all --target=${{ matrix.target }}; done
+          git checkout ${{ github.sha }}
+      - name: Clippy (kvm)
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "kvm" -- -D warnings
+      - name: Clippy (mshv)
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv" -- -D warnings
+      - name: Clippy (mshv + kvm)
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "mshv,kvm" -- -D warnings
+      - name: Clippy (default features)
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --tests --examples -- -D warnings
+      - name: Clippy (default features + guest_debug)
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --tests --examples --features "guest_debug" -- -D warnings
+      - name: Clippy (default features + pvmemcontrol)
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --tests --examples --features "pvmemcontrol" -- -D warnings
+      - name: Clippy (default features + tracing)
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --tests --examples --features "tracing" -- -D warnings
+      - name: Clippy (default features + fw_cfg)
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --target=${{ matrix.target }} --locked --all --all-targets --tests --examples --features "fw_cfg" -- -D warnings
+      - name: Clippy (default features + ivshmem)
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --tests --examples --features "ivshmem" -- -D warnings
+      - name: Clippy (sev_snp)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "sev_snp" -- -D warnings
+      - name: Clippy (igvm)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "igvm" -- -D warnings
+      - name: Clippy (kvm + tdx)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "tdx,kvm" -- -D warnings
+      - name: Clippy (kvm + igvm + sev_snp + fw_cfg)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --no-default-features --tests --examples --features "kvm,igvm,sev_snp,fw_cfg" -- -D warnings
+      - name: Clippy (default features + sev_snp + igvm + fw_cfg)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          command: clippy
+          cross-version: 3e0957637b49b1bbced23ad909170650c5b70635
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+          args: --locked --all --all-targets --tests --examples --features "sev_snp,igvm,fw_cfg" -- -D warnings
+      - name: Check build did not modify any files
+        run: test -z "$(git status --porcelain)"
+  build:
+    name: build
+    needs: [preflight]
+    if: needs.preflight.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust:
+          - stable
+          - beta
+          - nightly
+          - "1.89.0" # MSRV — keep quoted.
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install musl-gcc
+        run: sudo apt install -y musl-tools
+      - name: Install Rust toolchain (${{ matrix.rust }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+          target: ${{ matrix.target }}
+      - name: Build (default features)
+        run: cargo build --locked --bin cloud-hypervisor
+      - name: Build (kvm)
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "kvm"
+      - name: Build (default features + tdx)
+        run: cargo build --locked --bin cloud-hypervisor --features "tdx"
+      - name: Build (default features + dbus_api)
+        run: cargo build --locked --bin cloud-hypervisor --features "dbus_api"
+      - name: Build (default features + guest_debug)
+        run: cargo build --locked --bin cloud-hypervisor --features "guest_debug"
+      - name: Build (default features + pvmemcontrol)
+        run: cargo build --locked --bin cloud-hypervisor --features "pvmemcontrol"
+      - name: Build (default features + fw_cfg)
+        run: cargo build --locked --bin cloud-hypervisor --features "fw_cfg"
+      - name: Build (default features + ivshmem)
+        run: cargo build --locked --bin cloud-hypervisor --features "ivshmem"
+      - name: Build (mshv)
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv"
+      - name: Build (sev_snp)
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "sev_snp"
+      - name: Build (kvm + igvm + sev_snp + fw_cfg)
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "kvm,igvm,sev_snp,fw_cfg"
+      - name: Build (igvm)
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "igvm"
+      - name: Build (mshv + kvm)
+        run: cargo build --locked --bin cloud-hypervisor --no-default-features --features "mshv,kvm"
+      - name: Release Build (default features)
+        run: cargo build --locked --all --release --target=${{ matrix.target }}
+      - name: Check build did not modify any files
+        run: test -z "$(git status --porcelain)"
+  # garm-jammy + gnu: runs on PR and MQ. Other 3 matrix entries are in
+  # integration-x86-64-mq (sibling, MQ-only, runs in parallel).
+  integration-x86-64-pr:
+    name: integration-x86-64-pr
+    needs: [preflight, dco, quality, build]
+    if: >-
+      needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
+    timeout-minutes: 80
+    env:
+      # Our runner has 16 cores (nproc).
+      # We limit parallelism only to avoid exhausting disk space and memory
+      # resources, not to save CPU resources.
+      PARALLEL_INTEGRATION_TESTS_NUM: 12
+    runs-on: garm-jammy-16
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install Docker
+        run: |
+          set -eufo pipefail
+          sudo apt-get update
+          sudo apt-get -y install ca-certificates curl gnupg
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+          sudo chmod a+r /usr/share/keyrings/docker-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update
+          sudo apt install -y docker-ce docker-ce-cli
+      - name: Prepare for VDPA
+        run: scripts/prepare_vdpa.sh
+      - name: Run unit tests
+        run: scripts/dev_cli.sh tests --unit --libc gnu
+      - name: Load openvswitch module
+        run: sudo modprobe openvswitch
+      - name: Run integration tests
+        timeout-minutes: 60
+        run: scripts/dev_cli.sh tests --integration --libc gnu
+  # MQ-only: the 3 matrix entries that integration-x86-64-pr does not cover.
+  integration-x86-64-mq:
+    name: integration-x86-64-mq
+    needs: [preflight, dco, quality, build]
+    if: >-
+      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
+    timeout-minutes: 80
+    env:
+      # Our runner has 16 cores (nproc).
+      # We limit parallelism only to avoid exhausting disk space and memory
+      # resources, not to save CPU resources.
+      PARALLEL_INTEGRATION_TESTS_NUM: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: garm-jammy, libc: musl}
+          - {runner: garm-jammy-amd, libc: gnu}
+          - {runner: garm-jammy-amd, libc: musl}
+    # format() because `${{ matrix.runner }}-16` is not valid in runs-on.
+    runs-on: ${{ format('{0}-16', matrix.runner) }}
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install Docker
+        run: |
+          set -eufo pipefail
+          sudo apt-get update
+          sudo apt-get -y install ca-certificates curl gnupg
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+          sudo chmod a+r /usr/share/keyrings/docker-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update
+          sudo apt install -y docker-ce docker-ce-cli
+      - name: Prepare for VDPA
+        run: scripts/prepare_vdpa.sh
+      - name: Run unit tests
+        run: scripts/dev_cli.sh tests --unit --libc ${{ matrix.libc }}
+      - name: Load openvswitch module
+        run: sudo modprobe openvswitch
+      - name: Run integration tests
+        timeout-minutes: 60
+        run: scripts/dev_cli.sh tests --integration --libc ${{ matrix.libc }}
+  integration-arm64:
+    name: integration-arm64
+    needs: [preflight, dco, quality, build]
+    if: >-
+      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
+    timeout-minutes: 120
+    env:
+      # Our runner has 80 cores (nproc).
+      # We limit parallelism only to avoid exhausting disk space and memory
+      # resources, not to save CPU resources.
+      PARALLEL_INTEGRATION_TESTS_NUM: 25
+    runs-on: bookworm-arm64
+    steps:
+      # arm64 runner user is "runner" (vfio's is "github-runner").
+      - name: Fix workspace permissions
+        run: sudo chown -R runner:runner ${GITHUB_WORKSPACE}
+      - name: Code checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Run unit tests (musl)
+        run: scripts/dev_cli.sh tests --unit --libc musl
+      - name: Load openvswitch module
+        run: sudo modprobe openvswitch
+      - name: Run integration tests (musl)
+        timeout-minutes: 60
+        run: scripts/dev_cli.sh tests --integration --libc musl
+      - name: Install Azure CLI
+        run: |
+          set -eufo pipefail
+          sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg
+          curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
+          echo "deb [arch=arm64] https://packages.microsoft.com/repos/azure-cli/ bookworm main" | sudo tee /etc/apt/sources.list.d/azure-cli.list
+          sudo apt update
+          sudo apt install -y azure-cli
+      - name: Download Windows image
+        shell: bash
+        run: |
+          set -eufo pipefail
+          IMG_BASENAME=windows-11-iot-enterprise-aarch64.raw
+          IMG_PATH=$HOME/workloads/$IMG_BASENAME
+          IMG_GZ_PATH=$HOME/workloads/$IMG_BASENAME.gz
+          IMG_GZ_BLOB_NAME=windows-11-iot-enterprise-aarch64-9-min.raw.gz
+          cp "scripts/$IMG_BASENAME.sha1" "$HOME/workloads/"
+          pushd "$HOME/workloads"
+          if sha1sum "$IMG_BASENAME.sha1" --check; then
+              exit
+          fi
+          popd
+          mkdir -p "$HOME/workloads"
+          az storage blob download --container-name private-images --file "$IMG_GZ_PATH" --name "$IMG_GZ_BLOB_NAME" --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
+          gzip -d "$IMG_GZ_PATH"
+      - name: Run Windows guest integration tests
+        timeout-minutes: 30
+        run: scripts/dev_cli.sh tests --integration-windows --libc musl
+  integration-vfio:
+    name: integration-vfio
+    needs: [preflight, dco, quality, build]
+    if: >-
+      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
+    runs-on: vfio-nvidia
+    env:
+      AUTH_DOWNLOAD_TOKEN: ${{ secrets.AUTH_DOWNLOAD_TOKEN }}
+    steps:
+      # vfio-nvidia runner user is "github-runner" (not "runner" like arm64).
+      - name: Fix workspace permissions
+        run: sudo chown -R github-runner:github-runner "${GITHUB_WORKSPACE}"
+      - name: Code checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Run VFIO integration tests
+        timeout-minutes: 15
+        run: scripts/dev_cli.sh tests --integration-vfio
+    # Most tests are failing with musl, see #6790
+    # - name: Run VFIO integration tests for musl
+    #   timeout-minutes: 15
+    #   run: scripts/dev_cli.sh tests --integration-vfio --libc musl
+  integration-windows:
+    name: integration-windows
+    needs: [preflight, dco, quality, build]
+    if: >-
+      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
+    runs-on: garm-jammy-16
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Install Docker
+        run: |
+          set -eufo pipefail
+          sudo apt-get update
+          sudo apt-get -y install ca-certificates curl gnupg
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+          sudo chmod a+r /usr/share/keyrings/docker-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update
+          sudo apt install -y docker-ce docker-ce-cli
+      - name: Install Azure CLI
+        run: |
+          set -eufo pipefail
+          sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg
+          curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
+          echo "deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ jammy main" | sudo tee /etc/apt/sources.list.d/azure-cli.list
+          sudo apt update
+          sudo apt install -y azure-cli
+      - name: Download Windows image
+        run: |
+          set -eufo pipefail
+          mkdir $HOME/workloads
+          az storage blob download --container-name private-images --file "$HOME/workloads/windows-server-2025-amd64-1.raw" --name windows-server-2025-amd64-1.raw --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
+      - name: Run Windows guest integration tests
+        timeout-minutes: 15
+        run: scripts/dev_cli.sh tests --integration-windows
+      - name: Run Windows guest integration tests for musl
+        timeout-minutes: 15
+        run: scripts/dev_cli.sh tests --integration-windows --libc musl
+  integration-rate-limiter:
+    name: integration-rate-limiter
+    needs: [preflight, dco, quality, build]
+    if: >-
+      github.event_name == 'merge_group' && needs.preflight.outputs.full == 'true' && needs.dco.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success'
+    runs-on: bare-metal-9950x
+    env:
+      AUTH_DOWNLOAD_TOKEN: ${{ secrets.AUTH_DOWNLOAD_TOKEN }}
+    steps:
+      - name: Code checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Run rate-limiter integration tests
+        timeout-minutes: 20
+        run: scripts/dev_cli.sh tests --integration-rate-limiter
+  # The single required-status check. Branch protection requires this one job.
+  all-green:
+    name: all-green
+    needs:
+      - audit
+      - build
+      - dco
+      - formatting
+      - fuzz-build
+      - gitlint
+      - hadolint
+      - integration-arm64
+      - integration-vfio
+      - integration-windows
+      - integration-x86-64-mq
+      - integration-x86-64-pr
+      - lychee
+      - openapi
+      - package-consistency
+      - preflight
+      - quality
+      - reuse
+      - shlint
+      - taplo
+      - typos
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all dependencies succeeded or were skipped
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
+        run: |
+          set -eufo pipefail
+          echo "$NEEDS_JSON" | jq .
+          # success or skipped = pass; failure or cancelled = red.
+          echo "$NEEDS_JSON" | jq -e '
+            to_entries
+            | map(select(.value.result != "success" and .value.result != "skipped"))
+            | length == 0
+          ' >/dev/null
