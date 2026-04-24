@@ -23,10 +23,6 @@ pub(crate) mod qcow_common;
 pub mod qcow_disk;
 pub(crate) mod qcow_sync;
 mod sparse;
-pub use formats::raw as raw_disk;
-pub mod vhdx;
-pub mod vhdx_sync;
-
 use std::alloc::{Layout, alloc_zeroed};
 use std::collections::VecDeque;
 use std::fmt::{self, Debug};
@@ -40,6 +36,8 @@ use std::str::FromStr;
 use std::{cmp, mem, result};
 
 pub use aligned_operation::AlignedOperation;
+pub use formats::raw as raw_disk;
+pub use formats::vhdx::internal as vhdx;
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
 use libc::{
@@ -59,8 +57,8 @@ use vmm_sys_util::{aio, ioctl_io_nr, ioctl_ior_nr};
 
 use crate::async_io::{AsyncIoError, AsyncIoResult};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
+use crate::formats::vhdx::VhdxError;
 use crate::request::{DEFAULT_DESCRIPTOR_VEC_SIZE, SECTOR_SIZE};
-use crate::vhdx::VhdxError;
 
 #[derive(Error, Debug)]
 pub enum Error {
