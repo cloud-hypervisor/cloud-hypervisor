@@ -372,8 +372,7 @@ impl Debug for BackingFile {
 /// Parses and validates a QCOW2 image file, returning the metadata, backing
 /// file and sparse flag.
 ///
-/// This shared constructor is used by both QcowFile for sequential I/O
-/// and QcowDiskSync for lock based parallel I/O.
+/// Used by [`QcowFile`] and [`QcowDisk`] constructors.
 pub(crate) fn parse_qcow(
     mut file: RawFile,
     max_nesting_depth: u32,

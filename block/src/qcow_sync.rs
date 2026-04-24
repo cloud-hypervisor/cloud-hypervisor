@@ -4,156 +4,28 @@
 
 use std::cmp::min;
 use std::collections::VecDeque;
-use std::fs::File;
-use std::os::fd::{AsFd, AsRawFd};
+use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
-use std::{fmt, io};
 
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
-use crate::disk_file;
-use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::qcow::backing::shared_backing_from;
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::qcow::decoder::Decoder;
 use crate::qcow::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
 use crate::qcow::qcow_raw_file::QcowRawFile;
-use crate::qcow::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
 use crate::qcow_common::{
     AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, gather_from_iovecs,
     gather_from_iovecs_into, pread_alloc, pread_exact, pwrite_all, scatter_to_iovecs,
     zero_fill_iovecs,
 };
 
-pub struct QcowDiskSync {
-    metadata: Arc<QcowMetadata>,
-    /// Shared across queues, resolved once at construction.
-    backing_file: Option<Arc<dyn BackingRead>>,
-    sparse: bool,
-    data_raw_file: QcowRawFile,
-}
-
-impl fmt::Debug for QcowDiskSync {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("QcowDiskSync")
-            .field("sparse", &self.sparse)
-            .field("has_backing", &self.backing_file.is_some())
-            .finish_non_exhaustive()
-    }
-}
-
-impl QcowDiskSync {
-    pub fn new(
-        file: File,
-        direct_io: bool,
-        backing_files: bool,
-        sparse: bool,
-    ) -> BlockResult<Self> {
-        let max_nesting_depth = if backing_files { MAX_NESTING_DEPTH } else { 0 };
-        let (inner, backing_file, sparse) =
-            parse_qcow(RawFile::new(file, direct_io), max_nesting_depth, sparse).map_err(|e| {
-                let e = if !backing_files && matches!(e.kind(), BlockErrorKind::Overflow) {
-                    e.with_kind(BlockErrorKind::UnsupportedFeature)
-                } else {
-                    e
-                };
-                e.with_op(ErrorOp::Open)
-            })?;
-        let data_raw_file = inner.raw_file.clone();
-        Ok(QcowDiskSync {
-            metadata: Arc::new(QcowMetadata::new(inner)),
-            backing_file: backing_file.map(shared_backing_from).transpose()?,
-            sparse,
-            data_raw_file,
-        })
-    }
-}
-
-impl Drop for QcowDiskSync {
-    fn drop(&mut self) {
-        self.metadata.shutdown();
-    }
-}
-
-impl disk_file::DiskSize for QcowDiskSync {
-    fn logical_size(&self) -> BlockResult<u64> {
-        Ok(self.metadata.virtual_size())
-    }
-}
-
-impl disk_file::PhysicalSize for QcowDiskSync {
-    fn physical_size(&self) -> BlockResult<u64> {
-        Ok(self.data_raw_file.physical_size()?)
-    }
-}
-
-impl disk_file::DiskFd for QcowDiskSync {
-    fn fd(&self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.data_raw_file.as_fd().as_raw_fd())
-    }
-}
-
-impl disk_file::Geometry for QcowDiskSync {}
-
-impl disk_file::SparseCapable for QcowDiskSync {
-    fn supports_sparse_operations(&self) -> bool {
-        true
-    }
-
-    fn supports_zero_flag(&self) -> bool {
-        true
-    }
-}
-
-impl disk_file::Resizable for QcowDiskSync {
-    fn resize(&mut self, size: u64) -> BlockResult<()> {
-        if self.backing_file.is_some() {
-            return Err(BlockError::new(
-                BlockErrorKind::UnsupportedFeature,
-                DiskFileError::ResizeError(io::Error::other(
-                    "resize not supported with backing file",
-                )),
-            )
-            .with_op(ErrorOp::Resize));
-        }
-        self.metadata.resize(size).map_err(|e| {
-            BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e))
-                .with_op(ErrorOp::Resize)
-        })
-    }
-}
-
-impl disk_file::DiskFile for QcowDiskSync {}
-
-impl disk_file::AsyncDiskFile for QcowDiskSync {
-    fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
-        Ok(Box::new(QcowDiskSync {
-            metadata: Arc::clone(&self.metadata),
-            backing_file: self.backing_file.as_ref().map(Arc::clone),
-            sparse: self.sparse,
-            data_raw_file: self.data_raw_file.clone(),
-        }))
-    }
-
-    // ring_depth is unused - this sync backend performs blocking I/O
-    // instead of submitting to an async ring.
-    fn create_async_io(&self, _ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
-        Ok(Box::new(QcowSync::new(
-            Arc::clone(&self.metadata),
-            self.data_raw_file.clone(),
-            self.backing_file.as_ref().map(Arc::clone),
-            self.sparse,
-        )))
-    }
-}
-
 pub struct QcowSync {
     metadata: Arc<QcowMetadata>,
     data_file: QcowRawFile,
-    /// See the backing_file field on QcowDiskSync.
+    /// See the backing_file field on QcowDisk.
     backing_file: Option<Arc<dyn BackingRead>>,
     sparse: bool,
     /// O_DIRECT alignment requirement (0 = no alignment needed).

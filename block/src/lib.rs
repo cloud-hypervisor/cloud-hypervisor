@@ -21,10 +21,10 @@ pub mod fixed_vhd_disk;
 pub mod fixed_vhd_sync;
 pub mod qcow;
 #[cfg(feature = "io_uring")]
-pub mod qcow_async;
+pub(crate) mod qcow_async;
 pub(crate) mod qcow_common;
 pub mod qcow_disk;
-pub mod qcow_sync;
+pub(crate) mod qcow_sync;
 #[cfg(feature = "io_uring")]
 pub(crate) mod raw_async;
 pub(crate) mod raw_async_aio;
