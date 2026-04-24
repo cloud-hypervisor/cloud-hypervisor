@@ -19,7 +19,12 @@ pub struct MshvEmulatorContext<'a> {
 }
 
 impl MshvEmulatorContext<'_> {
-    // Do the actual gva -> gpa translation
+    // Do the actual gva -> gpa translation.
+    //
+    // When the hypervisor sets GvaGpaValid in the intercept message, `map`
+    // caches the (gva, gpa) pair as a fast path that avoids a translate
+    // hypercall.  When the flag is clear, `map` is set to a sentinel
+    // (u64::MAX, 0) so this shortcut never fires.
     #[allow(non_upper_case_globals)]
     fn translate(&self, gva: u64, flags: u32) -> Result<u64, PlatformError> {
         if self.map.0 == gva {
