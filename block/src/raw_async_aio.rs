@@ -135,7 +135,7 @@ impl AsyncIo for RawFileAsyncAio {
     fn punch_hole(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
         // Linux AIO has no IOCB command for fallocate, so perform the operation
         // synchronously and signal completion via the completion list, matching
-        // the pattern used by the sync backend (RawFileSync).
+        // the pattern used by the sync backend (RawSync).
         let mode = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
 
         // SAFETY: FFI call with valid arguments
@@ -160,7 +160,7 @@ impl AsyncIo for RawFileAsyncAio {
     fn write_zeroes(&mut self, offset: u64, length: u64, user_data: u64) -> AsyncIoResult<()> {
         // Linux AIO has no IOCB command for fallocate, so perform the operation
         // synchronously and signal completion via the completion list, matching
-        // the pattern used by the sync backend (RawFileSync).
+        // the pattern used by the sync backend (RawSync).
         let mode = FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE;
 
         // SAFETY: FFI call with valid arguments

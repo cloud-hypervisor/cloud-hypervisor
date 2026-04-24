@@ -14,7 +14,7 @@ use crate::error::{BlockError, BlockErrorKind, BlockResult};
 #[cfg(feature = "io_uring")]
 use crate::raw_async::RawFileAsync;
 use crate::raw_async_aio::RawFileAsyncAio;
-use crate::raw_sync::RawFileSync;
+use crate::raw_sync::RawSync;
 use crate::{DiskTopology, disk_file, probe_sparse_support, query_device_size};
 
 /// Selects which async I/O backend a `RawDisk` uses.
@@ -129,7 +129,7 @@ impl disk_file::AsyncDiskFile for RawDisk {
 
     fn create_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
         match self.backend {
-            RawBackend::Sync => Ok(Box::new(RawFileSync::new(self.file.as_raw_fd()))),
+            RawBackend::Sync => Ok(Box::new(RawSync::new(self.file.as_raw_fd()))),
             #[cfg(feature = "io_uring")]
             RawBackend::IoUring => Ok(Box::new(RawFileAsync::new(
                 self.file.as_raw_fd(),
