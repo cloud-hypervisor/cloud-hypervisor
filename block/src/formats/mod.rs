@@ -9,3 +9,4 @@
 
 pub mod raw;
 pub mod vhd;
+pub mod vhdx;

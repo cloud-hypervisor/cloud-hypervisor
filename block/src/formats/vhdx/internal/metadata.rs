@@ -11,7 +11,7 @@ use remain::sorted;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::vhdx::vhdx_header::RegionTableEntry;
+use super::header::RegionTableEntry;
 
 const METADATA_SIGN: u64 = 0x6174_6164_6174_656D;
 const METADATA_ENTRY_SIZE: usize = 32;
@@ -315,7 +315,7 @@ impl MetadataTableEntry {
         // SAFETY: the assertion above makes sure the buffer size is correct.
         let mut metadata_table_entry = unsafe { *(buffer.as_ptr() as *mut MetadataTableEntry) };
 
-        let uuid = crate::vhdx::uuid_from_guid(buffer);
+        let uuid = super::uuid_from_guid(buffer);
         metadata_table_entry.item_id = uuid;
 
         if metadata_table_entry.length > METADATA_LENGTH_MAX {

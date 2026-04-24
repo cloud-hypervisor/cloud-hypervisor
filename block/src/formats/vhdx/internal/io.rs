@@ -8,8 +8,8 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use remain::sorted;
 use thiserror::Error;
 
-use crate::vhdx::vhdx_bat::{self, BatEntry, VhdxBatError};
-use crate::vhdx::vhdx_metadata::{self, DiskSpec};
+use super::bat::{self, BatEntry, VhdxBatError};
+use super::metadata::{self, DiskSpec};
 
 const SECTOR_SIZE: u64 = 512;
 
@@ -74,7 +74,7 @@ impl Sector {
                 return Err(VhdxIoError::InvalidBatIndex);
             }
         };
-        sector.file_offset = bat_entry & vhdx_bat::BAT_FILE_OFF_MASK;
+        sector.file_offset = bat_entry & bat::BAT_FILE_OFF_MASK;
         if sector.file_offset != 0 {
             sector.file_offset += sector.block_offset;
         }
@@ -108,12 +108,12 @@ pub fn read(
             }
         };
 
-        match bat_entry & vhdx_bat::BAT_STATE_BIT_MASK {
-            vhdx_bat::PAYLOAD_BLOCK_NOT_PRESENT
-            | vhdx_bat::PAYLOAD_BLOCK_UNDEFINED
-            | vhdx_bat::PAYLOAD_BLOCK_UNMAPPED
-            | vhdx_bat::PAYLOAD_BLOCK_ZERO => {}
-            vhdx_bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
+        match bat_entry & bat::BAT_STATE_BIT_MASK {
+            bat::PAYLOAD_BLOCK_NOT_PRESENT
+            | bat::PAYLOAD_BLOCK_UNDEFINED
+            | bat::PAYLOAD_BLOCK_UNMAPPED
+            | bat::PAYLOAD_BLOCK_ZERO => {}
+            bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
                 f.seek(SeekFrom::Start(sector.file_offset))
                     .map_err(VhdxIoError::ReadSectorBlock)?;
                 f.read_exact(
@@ -122,7 +122,7 @@ pub fn read(
                 )
                 .map_err(VhdxIoError::ReadSectorBlock)?;
             }
-            vhdx_bat::PAYLOAD_BLOCK_PARTIALLY_PRESENT => {
+            bat::PAYLOAD_BLOCK_PARTIALLY_PRESENT => {
                 return Err(VhdxIoError::UnsupportedMode);
             }
             _ => {
@@ -162,13 +162,12 @@ pub fn write(
             }
         };
 
-        match bat_entry & vhdx_bat::BAT_STATE_BIT_MASK {
-            vhdx_bat::PAYLOAD_BLOCK_NOT_PRESENT
-            | vhdx_bat::PAYLOAD_BLOCK_UNDEFINED
-            | vhdx_bat::PAYLOAD_BLOCK_UNMAPPED
-            | vhdx_bat::PAYLOAD_BLOCK_ZERO => {
-                let file_offset =
-                    align!(disk_spec.image_size, vhdx_metadata::BLOCK_SIZE_MIN as u64);
+        match bat_entry & bat::BAT_STATE_BIT_MASK {
+            bat::PAYLOAD_BLOCK_NOT_PRESENT
+            | bat::PAYLOAD_BLOCK_UNDEFINED
+            | bat::PAYLOAD_BLOCK_UNMAPPED
+            | bat::PAYLOAD_BLOCK_ZERO => {
+                let file_offset = align!(disk_spec.image_size, metadata::BLOCK_SIZE_MIN as u64);
                 let new_size = file_offset
                     .checked_add(disk_spec.block_size as u64)
                     .ok_or(VhdxIoError::InvalidDiskSize)?;
@@ -176,12 +175,12 @@ pub fn write(
                 f.set_len(new_size).map_err(VhdxIoError::ResizeFile)?;
                 disk_spec.image_size = new_size;
 
-                let new_bat_entry = file_offset
-                    | (vhdx_bat::PAYLOAD_BLOCK_FULLY_PRESENT & vhdx_bat::BAT_STATE_BIT_MASK);
+                let new_bat_entry =
+                    file_offset | (bat::PAYLOAD_BLOCK_FULLY_PRESENT & bat::BAT_STATE_BIT_MASK);
                 bat[sector.bat_index as usize] = BatEntry(new_bat_entry);
                 BatEntry::write_bat_entries(f, bat_offset, bat).map_err(VhdxIoError::WriteBat)?;
 
-                if file_offset < vhdx_metadata::BLOCK_SIZE_MIN as u64 {
+                if file_offset < metadata::BLOCK_SIZE_MIN as u64 {
                     break;
                 }
 
@@ -192,8 +191,8 @@ pub fn write(
                 )
                 .map_err(VhdxIoError::ReadSectorBlock)?;
             }
-            vhdx_bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
-                if sector.file_offset < vhdx_metadata::BLOCK_SIZE_MIN as u64 {
+            bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
+                if sector.file_offset < metadata::BLOCK_SIZE_MIN as u64 {
                     break;
                 }
 
@@ -204,7 +203,7 @@ pub fn write(
                 )
                 .map_err(VhdxIoError::ReadSectorBlock)?;
             }
-            vhdx_bat::PAYLOAD_BLOCK_PARTIALLY_PRESENT => {
+            bat::PAYLOAD_BLOCK_PARTIALLY_PRESENT => {
                 return Err(VhdxIoError::UnsupportedMode);
             }
             _ => {

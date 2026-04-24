@@ -2,17 +2,25 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::VecDeque;
+//! VHDX disk format support.
+//!
+//! Provides [`VhdxDisk`], the `DiskFile` wrapper for dynamic VHDX
+//! images.
+
+pub mod internal;
+pub(crate) mod worker;
+
 use std::fs::File;
 use std::os::fd::AsRawFd;
 use std::sync::{Arc, Mutex};
 
-use vmm_sys_util::eventfd::EventFd;
+pub use internal::VhdxError;
 
-use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
+use self::internal::Vhdx;
+use self::worker::sync::VhdxSync;
+use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::vhdx::{Vhdx, VhdxError};
-use crate::{AsyncAdaptor, BlockBackend, Error, disk_file};
+use crate::{BlockBackend, Error, disk_file};
 
 #[derive(Debug)]
 pub struct VhdxDisk {
@@ -97,84 +105,5 @@ impl disk_file::AsyncDiskFile for VhdxDisk {
 
     fn create_async_io(&self, _ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
         Ok(Box::new(VhdxSync::new(Arc::clone(&self.vhdx_file))))
-    }
-}
-
-pub struct VhdxSync {
-    vhdx_file: Arc<Mutex<Vhdx>>,
-    eventfd: EventFd,
-    completion_list: VecDeque<(u64, i32)>,
-}
-
-impl VhdxSync {
-    pub fn new(vhdx_file: Arc<Mutex<Vhdx>>) -> Self {
-        VhdxSync {
-            vhdx_file,
-            eventfd: EventFd::new(libc::EFD_NONBLOCK)
-                .expect("Failed creating EventFd for VhdxSync"),
-            completion_list: VecDeque::new(),
-        }
-    }
-}
-
-impl AsyncAdaptor for Vhdx {}
-
-impl AsyncIo for VhdxSync {
-    fn notifier(&self) -> &EventFd {
-        &self.eventfd
-    }
-
-    fn read_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        self.vhdx_file.lock().unwrap().read_vectored_sync(
-            offset,
-            iovecs,
-            user_data,
-            &self.eventfd,
-            &mut self.completion_list,
-        )
-    }
-
-    fn write_vectored(
-        &mut self,
-        offset: libc::off_t,
-        iovecs: &[libc::iovec],
-        user_data: u64,
-    ) -> AsyncIoResult<()> {
-        self.vhdx_file.lock().unwrap().write_vectored_sync(
-            offset,
-            iovecs,
-            user_data,
-            &self.eventfd,
-            &mut self.completion_list,
-        )
-    }
-
-    fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
-        self.vhdx_file.lock().unwrap().fsync_sync(
-            user_data,
-            &self.eventfd,
-            &mut self.completion_list,
-        )
-    }
-
-    fn next_completed_request(&mut self) -> Option<(u64, i32)> {
-        self.completion_list.pop_front()
-    }
-
-    fn punch_hole(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
-        Err(AsyncIoError::PunchHole(std::io::Error::other(
-            "punch_hole not supported for VHDX",
-        )))
-    }
-
-    fn write_zeroes(&mut self, _offset: u64, _length: u64, _user_data: u64) -> AsyncIoResult<()> {
-        Err(AsyncIoError::WriteZeroes(std::io::Error::other(
-            "write_zeroes not supported for VHDX",
-        )))
     }
 }

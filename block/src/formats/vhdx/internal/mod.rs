@@ -12,16 +12,16 @@ use remain::sorted;
 use thiserror::Error;
 use uuid::Uuid;
 
+use self::bat::{BatEntry, VhdxBatError};
+use self::header::{RegionInfo, RegionTableEntry, VhdxHeader, VhdxHeaderError};
+use self::io::VhdxIoError;
+use self::metadata::{DiskSpec, VhdxMetadataError};
 use crate::BlockBackend;
-use crate::vhdx::vhdx_bat::{BatEntry, VhdxBatError};
-use crate::vhdx::vhdx_header::{RegionInfo, RegionTableEntry, VhdxHeader, VhdxHeaderError};
-use crate::vhdx::vhdx_io::VhdxIoError;
-use crate::vhdx::vhdx_metadata::{DiskSpec, VhdxMetadataError};
 
-mod vhdx_bat;
-mod vhdx_header;
-mod vhdx_io;
-mod vhdx_metadata;
+mod bat;
+mod header;
+mod io;
+mod metadata;
 
 #[sorted]
 #[derive(Error, Debug)]
@@ -65,7 +65,7 @@ impl Vhdx {
 
         let collected_entries = RegionInfo::new(
             &mut file,
-            vhdx_header::REGION_TABLE_1_START,
+            header::REGION_TABLE_1_START,
             vhdx_header.region_entry_count(),
         )
         .map_err(VhdxError::ParseVhdxRegionEntry)?;
@@ -103,7 +103,7 @@ impl Read for Vhdx {
         let sector_count = (buf.len() as u64).div_ceil(self.disk_spec.logical_sector_size as u64);
         let sector_index = self.current_offset / self.disk_spec.logical_sector_size as u64;
 
-        let result = vhdx_io::read(
+        let result = io::read(
             &mut self.file,
             buf,
             &self.disk_spec,
@@ -141,7 +141,7 @@ impl Write for Vhdx {
                 .map_err(|e| std::io::Error::other(format!("Failed to update VHDx header: {e}")))?;
         }
 
-        let result = vhdx_io::write(
+        let result = io::write(
             &mut self.file,
             buf,
             &mut self.disk_spec,
