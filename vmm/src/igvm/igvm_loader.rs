@@ -38,7 +38,12 @@ use crate::igvm::loader::Loader;
 use crate::igvm::{BootPageAcceptance, HV_PAGE_SIZE, IgvmLoadedInfo, StartupMemoryType};
 use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 
-#[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
+#[cfg(all(
+    feature = "kvm",
+    feature = "sev_snp",
+    feature = "fw_cfg",
+    target_arch = "x86_64"
+))]
 use hypervisor::kvm::x86_64::sev::{MeasuredBootInfo, SEV_HASH_BLOCK_ADDRESS, SEV_HASH_BLOCK_SIZE};
 
 #[cfg(feature = "sev_snp")]
@@ -97,10 +102,20 @@ pub enum Error {
     MissingIgvm,
     #[error("Error applying VMSA to vCPU registers: {0}")]
     SetVmsa(#[source] crate::cpu::Error),
-    #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
+    #[cfg(all(
+        feature = "kvm",
+        feature = "sev_snp",
+        feature = "fw_cfg",
+        target_arch = "x86_64"
+    ))]
     #[error("Error building SEV-SNP measured boot hash block")]
     MeasuredBoot(#[source] vmm_sys_util::errno::Error),
-    #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
+    #[cfg(all(
+        feature = "kvm",
+        feature = "sev_snp",
+        feature = "fw_cfg",
+        target_arch = "x86_64"
+    ))]
     #[error(
         "igvmfile inserts unmeasured parameter area [0x{region_start:x}, 0x{region_end:x}) over SEV-SNP kernel hashes region [0x{hash_start:x}, 0x{hash_end:x})"
     )]
@@ -242,7 +257,12 @@ pub fn load_igvm(
     memory_manager: Arc<Mutex<MemoryManager>>,
     cpu_manager: Arc<Mutex<CpuManager>>,
     cmdline: &str,
-    #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
+    #[cfg(all(
+        feature = "kvm",
+        feature = "sev_snp",
+        feature = "fw_cfg",
+        target_arch = "x86_64"
+    ))]
     measured_boot: Option<MeasuredBootInfo>,
     #[cfg(feature = "sev_snp")] host_data: &Option<String>,
 ) -> Result<Box<IgvmLoadedInfo>, Error> {
@@ -296,7 +316,12 @@ pub fn load_igvm(
     let mut loader = Loader::new(memory);
 
     let mut parameter_areas: HashMap<u32, ParameterAreaState> = HashMap::new();
-    #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
+    #[cfg(all(
+        feature = "kvm",
+        feature = "sev_snp",
+        feature = "fw_cfg",
+        target_arch = "x86_64"
+    ))]
     let measured_boot_hash_block = measured_boot
         .as_ref()
         .map(|measured_boot| {
@@ -305,11 +330,26 @@ pub fn load_igvm(
                 .map_err(Error::MeasuredBoot)
         })
         .transpose()?;
-    #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
+    #[cfg(all(
+        feature = "kvm",
+        feature = "sev_snp",
+        feature = "fw_cfg",
+        target_arch = "x86_64"
+    ))]
     let measured_boot_hash_page_base = SEV_HASH_BLOCK_ADDRESS / HV_PAGE_SIZE;
-    #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
+    #[cfg(all(
+        feature = "kvm",
+        feature = "sev_snp",
+        feature = "fw_cfg",
+        target_arch = "x86_64"
+    ))]
     let measured_boot_hash_offset = (SEV_HASH_BLOCK_ADDRESS % HV_PAGE_SIZE) as usize;
-    #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
+    #[cfg(all(
+        feature = "kvm",
+        feature = "sev_snp",
+        feature = "fw_cfg",
+        target_arch = "x86_64"
+    ))]
     let mut measured_boot_hash_block_inserted = measured_boot_hash_block.is_none();
 
     for header in igvm_file.directives() {
@@ -339,6 +379,7 @@ pub fn load_igvm(
                             BootPageAcceptance::ExclusiveUnmeasured
                         } else {
                             #[cfg(all(
+                                feature = "kvm",
                                 feature = "sev_snp",
                                 feature = "fw_cfg",
                                 target_arch = "x86_64"
@@ -346,6 +387,7 @@ pub fn load_igvm(
                             let has_measured_boot_table = measured_boot_hash_block.is_some()
                                 && gpa / HV_PAGE_SIZE == measured_boot_hash_page_base;
                             #[cfg(not(all(
+                                feature = "kvm",
                                 feature = "sev_snp",
                                 feature = "fw_cfg",
                                 target_arch = "x86_64"
@@ -472,7 +514,12 @@ pub fn load_igvm(
                         .map_err(Error::Loader)?;
                     imported_page = true;
                 }
-                #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
+                #[cfg(all(
+                    feature = "kvm",
+                    feature = "sev_snp",
+                    feature = "fw_cfg",
+                    target_arch = "x86_64"
+                ))]
                 if !imported_page
                     && measured_boot_hash_block.is_some()
                     && gpa / HV_PAGE_SIZE == measured_boot_hash_page_base
@@ -665,6 +712,7 @@ pub fn load_igvm(
                 match area {
                     ParameterAreaState::Allocated { data, max_size } => {
                         #[cfg(all(
+                            feature = "kvm",
                             feature = "sev_snp",
                             feature = "fw_cfg",
                             target_arch = "x86_64"
@@ -713,7 +761,12 @@ pub fn load_igvm(
         }
     }
 
-    #[cfg(all(feature = "sev_snp", feature = "fw_cfg", target_arch = "x86_64"))]
+    #[cfg(all(
+        feature = "kvm",
+        feature = "sev_snp",
+        feature = "fw_cfg",
+        target_arch = "x86_64"
+    ))]
     if let Some(hash_block) = measured_boot_hash_block.as_ref()
         && !measured_boot_hash_block_inserted
     {
