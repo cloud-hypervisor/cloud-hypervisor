@@ -8,11 +8,12 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-pub mod async_io;
 pub mod disk_file;
 pub mod error;
 pub mod factory;
-pub mod fcntl;
+#[path = "io/mod.rs"]
+mod io_impl;
+pub use io_impl::{async_io, fcntl, request};
 pub mod fixed_vhd;
 #[cfg(feature = "io_uring")]
 /// Enabled with the `"io_uring"` feature
@@ -32,7 +33,6 @@ pub(crate) mod raw_async_aio;
 mod raw_async_io_tests;
 pub mod raw_disk;
 pub(crate) mod raw_sync;
-mod request;
 pub mod vhd;
 pub mod vhdx;
 pub mod vhdx_sync;
