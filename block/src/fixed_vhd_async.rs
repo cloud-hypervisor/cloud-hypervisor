@@ -10,7 +10,7 @@ use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
 use crate::error::BlockResult;
-use crate::raw_async::RawAsync;
+use crate::formats::raw::worker::async_uring::RawAsync;
 
 pub struct FixedVhdAsync {
     raw_file_async: RawAsync,

@@ -20,21 +20,15 @@ pub mod fixed_vhd;
 pub mod fixed_vhd_async;
 pub mod fixed_vhd_disk;
 pub mod fixed_vhd_sync;
+pub mod formats;
 pub mod qcow;
 #[cfg(feature = "io_uring")]
 pub(crate) mod qcow_async;
 pub(crate) mod qcow_common;
 pub mod qcow_disk;
 pub(crate) mod qcow_sync;
-#[cfg(feature = "io_uring")]
-pub(crate) mod raw_async;
-pub(crate) mod raw_async_aio;
-#[cfg(test)]
-mod raw_async_io_tests;
-pub mod raw_disk;
-pub(crate) mod raw_sync;
 mod sparse;
-pub use sparse::{BLKDISCARD, BLKZEROOUT};
+pub use formats::raw as raw_disk;
 pub mod vhd;
 pub mod vhdx;
 pub mod vhdx_sync;
@@ -58,6 +52,7 @@ use libc::{
 use log::{debug, info, warn};
 pub use request::{ExecuteAsync, MAX_DISCARD_WRITE_ZEROES_SEG, Request, RequestType};
 use serde::{Deserialize, Serialize};
+pub use sparse::{BLKDISCARD, BLKZEROOUT};
 use thiserror::Error;
 use virtio_bindings::virtio_blk::*;
 use vm_memory::bitmap::Bitmap;
