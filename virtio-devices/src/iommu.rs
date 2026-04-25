@@ -484,6 +484,15 @@ impl Request {
                         return Err(Error::InvalidMapRequestMissingDomain);
                     }
 
+                    let Some(size) = req
+                        .virt_end
+                        .checked_sub(req.virt_start)
+                        .and_then(|d| d.checked_add(1))
+                    else {
+                        status = VIRTIO_IOMMU_S_INVAL;
+                        return Err(Error::InvalidMapRequest);
+                    };
+
                     // Find the list of endpoints attached to the given domain.
                     let endpoints: Vec<u32> = mapping
                         .endpoints
@@ -499,7 +508,6 @@ impl Request {
                     // mapping is done on a per-container level, not a per-domain level
                     for endpoint in endpoints {
                         if let Some(ext_map) = ext_mapping.get(&endpoint) {
-                            let size = req.virt_end - req.virt_start + 1;
                             ext_map
                                 .map(req.virt_start, req.phys_start, size)
                                 .map_err(Error::ExternalMapping)?;
@@ -518,7 +526,7 @@ impl Request {
                             req.virt_start,
                             Mapping {
                                 gpa: req.phys_start,
-                                size: req.virt_end - req.virt_start + 1,
+                                size,
                             },
                         );
                 }
@@ -548,6 +556,15 @@ impl Request {
                         return Err(Error::InvalidUnmapRequestMissingDomain);
                     }
 
+                    let Some(size) = req
+                        .virt_end
+                        .checked_sub(virt_start)
+                        .and_then(|d| d.checked_add(1))
+                    else {
+                        status = VIRTIO_IOMMU_S_INVAL;
+                        return Err(Error::InvalidUnmapRequest);
+                    };
+
                     // Find the list of endpoints attached to the given domain.
                     let endpoints: Vec<u32> = mapping
                         .endpoints
@@ -561,7 +578,6 @@ impl Request {
                     // Trigger external unmapping if necessary.
                     for endpoint in endpoints {
                         if let Some(ext_map) = ext_mapping.get(&endpoint) {
-                            let size = req.virt_end - virt_start + 1;
                             ext_map
                                 .unmap(virt_start, size)
                                 .map_err(Error::ExternalUnmapping)?;
