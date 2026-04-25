@@ -637,7 +637,10 @@ impl Request {
             return Err(Error::UnexpectedReadOnlyDescriptor);
         }
 
-        if status_desc.len() < hdr_len + size_of::<VirtioIommuReqTail>() as u32 {
+        let reply_len = (hdr_len as usize)
+            .checked_add(size_of::<VirtioIommuReqTail>())
+            .ok_or(Error::BufferLengthTooSmall)?;
+        if (status_desc.len() as usize) < reply_len {
             return Err(Error::BufferLengthTooSmall);
         }
 
@@ -657,7 +660,7 @@ impl Request {
         // Return the error if the result was not Ok().
         result?;
 
-        Ok((hdr_len as usize) + size_of::<VirtioIommuReqTail>())
+        Ok(reply_len)
     }
 }
 
