@@ -12,8 +12,8 @@ use std::thread;
 use std::time::Duration;
 
 use block::async_io::AsyncIo;
+use block::formats::qcow::QcowDisk;
 use block::qcow::{BackingFileConfig, ImageType, QcowFile, RawFile};
-use block::qcow_disk::QcowDisk;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::tempfile::TempFile;
 

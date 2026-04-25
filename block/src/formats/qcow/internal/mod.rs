@@ -39,6 +39,9 @@ use header::{
 use libc::{EINVAL, EIO, ENOSPC};
 use log::{error, warn};
 use metadata::ClusterReadMapping;
+use qcow_raw_file::{BeUint, QcowRawFile};
+pub use raw_file::RawFile;
+use refcount::RefCount;
 use remain::sorted;
 use thiserror::Error;
 pub(crate) use util::MAX_NESTING_DEPTH;
@@ -47,17 +50,14 @@ use util::{
     l2_entry_compressed_cluster_layout, l2_entry_is_compressed, l2_entry_is_empty,
     l2_entry_is_zero, l2_entry_make_std, l2_entry_make_zero, l2_entry_std_cluster_addr,
 };
+use vec_cache::{CacheMap, Cacheable, VecCache};
 use vmm_sys_util::file_traits::{FileSetLen, FileSync};
 use vmm_sys_util::seek_hole::SeekHole;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
+use super::common::decompress_cluster;
 use crate::BlockBackend;
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
-use crate::qcow::qcow_raw_file::{BeUint, QcowRawFile};
-pub use crate::qcow::raw_file::RawFile;
-use crate::qcow::refcount::RefCount;
-use crate::qcow::vec_cache::{CacheMap, Cacheable, VecCache};
-use crate::qcow_common::decompress_cluster;
 
 #[sorted]
 #[derive(Debug, Error)]
@@ -2352,7 +2352,7 @@ mod unit_tests {
 
     use super::util::{COMPRESSED_FLAG, ZERO_FLAG};
     use super::*;
-    use crate::qcow_common::unit_tests::compress_allocated_clusters;
+    use crate::formats::qcow::common::unit_tests::compress_allocated_clusters;
 
     fn valid_header_v3() -> Vec<u8> {
         vec![

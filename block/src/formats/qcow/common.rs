@@ -14,7 +14,9 @@ use std::cmp::min;
 use std::os::fd::RawFd;
 use std::{io, ptr, slice};
 
-use crate::qcow::decoder::Decoder;
+#[cfg(test)]
+use super::internal;
+use super::internal::decoder::Decoder;
 
 // -- Position independent I/O helpers --
 //
@@ -304,8 +306,8 @@ pub(crate) mod unit_tests {
     use flate2::write::DeflateEncoder;
     use vmm_sys_util::tempfile::TempFile;
 
+    use super::internal::decoder::ZlibDecoder;
     use super::{decompress_cluster, pread_alloc};
-    use crate::qcow::decoder::ZlibDecoder;
 
     const COMPRESSED_FLAG: u64 = 1 << 62;
     const CLUSTER_USED_FLAG: u64 = 1 << 63;
