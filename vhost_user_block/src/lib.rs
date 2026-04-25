@@ -141,11 +141,16 @@ impl VhostUserBlkThread {
                         Ok(l) => (VIRTIO_BLK_S_OK as u8, l + 1),
                         Err(e) => (e.status(), 1),
                     };
-                    desc_chain
-                        .memory()
-                        .write_obj(status, request.status_addr())
-                        .unwrap();
-                    len
+
+                    if let Err(e) = desc_chain.memory().write_obj(status, request.status_addr()) {
+                        warn!(
+                            "vhost-user-blk: failed to write status to 0x{:x}: {e:?}",
+                            request.status_addr().0
+                        );
+                        0
+                    } else {
+                        len
+                    }
                 }
                 Err(err) => {
                     error!("failed to parse available descriptor chain: {err:?}");
@@ -153,32 +158,44 @@ impl VhostUserBlkThread {
                 }
             };
 
-            vring
-                .get_queue_mut()
-                .add_used(desc_chain.memory(), desc_chain.head_index(), len)
-                .unwrap();
+            if let Err(e) =
+                vring
+                    .get_queue_mut()
+                    .add_used(desc_chain.memory(), desc_chain.head_index(), len)
+            {
+                error!("vhost-user-blk: add_used failed: {e:?}");
+                // Stop processing this batch — the queue is in a bad state.
+                break;
+            }
             used_descs = true;
         }
 
-        let mut needs_signalling = false;
-        if self.event_idx {
-            if vring
+        let needs_signalling = if self.event_idx {
+            match vring
                 .get_queue_mut()
                 .needs_notification(self.mem.memory().deref())
-                .unwrap()
             {
-                debug!("signalling queue");
-                needs_signalling = true;
-            } else {
-                debug!("omitting signal (event_idx)");
+                Ok(true) => {
+                    debug!("signalling queue");
+                    true
+                }
+                Ok(false) => {
+                    debug!("omitting signal (event_idx)");
+                    false
+                }
+                Err(e) => {
+                    error!("vhost-user-blk: needs_notification failed: {e:?}");
+                    // Just signal — the guest can re-check.
+                    true
+                }
             }
         } else {
             debug!("signalling queue");
-            needs_signalling = true;
-        }
+            true
+        };
 
-        if needs_signalling {
-            vring.signal_used_queue().unwrap();
+        if needs_signalling && let Err(e) = vring.signal_used_queue() {
+            error!("vhost-user-blk: signal_used_queue failed: {e:?}");
         }
 
         used_descs
