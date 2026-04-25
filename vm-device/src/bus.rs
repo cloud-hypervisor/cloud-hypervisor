@@ -137,10 +137,13 @@ impl Bus {
     }
 
     #[allow(clippy::type_complexity)]
-    fn resolve(&self, addr: u64) -> Option<(u64, u64, Arc<dyn BusDeviceSync>)> {
+    fn resolve(&self, addr: u64, len: u64) -> Option<(u64, u64, Arc<dyn BusDeviceSync>)> {
         if let Some((range, dev)) = self.first_before(addr) {
             let offset = addr - range.base;
-            if offset < range.len {
+            // Reject when (offset, len) wraps u64 or spills past the device's
+            // window into an adjacent device.
+            let end_offset = offset.checked_add(len)?;
+            if offset < range.len && end_offset <= range.len {
                 return Some((range.base, offset, dev));
             }
         }
@@ -223,7 +226,7 @@ impl Bus {
         new_len: u64,
     ) -> Result<()> {
         // Retrieve the device corresponding to the range
-        let device = if let Some((_, _, dev)) = self.resolve(old_base) {
+        let device = if let Some((_, _, dev)) = self.resolve(old_base, 1) {
             dev.clone()
         } else {
             return Err(Error::MissingAddressRange);
@@ -238,9 +241,12 @@ impl Bus {
 
     /// Reads data from the device that owns the range containing `addr` and puts it into `data`.
     ///
-    /// Returns true on success, otherwise `data` is untouched.
+    /// Returns `Ok(())` on success, otherwise `data` is untouched and the device is not invoked.
+    /// Accesses whose `(addr, data.len())` span extends past a single device's range are rejected
+    /// with `Error::MissingAddressRange`, mirroring the behaviour for completely unmapped
+    /// addresses.
     pub fn read(&self, addr: u64, data: &mut [u8]) -> Result<()> {
-        if let Some((base, offset, dev)) = self.resolve(addr) {
+        if let Some((base, offset, dev)) = self.resolve(addr, data.len() as u64) {
             // OK to unwrap as lock() failing is a serious error condition and should panic.
             dev.read(base, offset, data);
             Ok(())
@@ -251,9 +257,11 @@ impl Bus {
 
     /// Writes `data` to the device that owns the range containing `addr`.
     ///
-    /// Returns true on success, otherwise `data` is untouched.
+    /// Returns `Ok(...)` on success, otherwise the device is not invoked.  Accesses whose `(addr,
+    /// data.len())` span extends past a single device's range are rejected with
+    /// `Error::MissingAddressRange`, mirroring the behaviour for completely unmapped addresses.
     pub fn write(&self, addr: u64, data: &[u8]) -> Result<Option<Arc<Barrier>>> {
-        if let Some((base, offset, dev)) = self.resolve(addr) {
+        if let Some((base, offset, dev)) = self.resolve(addr, data.len() as u64) {
             // OK to unwrap as lock() failing is a serious error condition and should panic.
             Ok(dev.write(base, offset, data))
         } else {
@@ -356,6 +364,90 @@ mod unit_tests {
         bus.write(0x10, &data).unwrap();
         bus.read(0x10, &mut data).unwrap();
         assert_eq!(data, [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn bus_resolve_rejects_access_spanning_past_device() {
+        // An MMIO/PIO access that begins inside a device's window but extends past the end of that
+        // window must be rejected by the bus, not delivered to the device with a slice that
+        // overflows the device's logical size.
+        let bus = Bus::new();
+        let dummy = Arc::new(DummyDevice);
+        // Device A occupies [0x10, 0x20); device B sits adjacent at [0x20, 0x30).
+        bus.insert(dummy.clone(), 0x10, 0x10).unwrap();
+        bus.insert(dummy.clone(), 0x20, 0x10).unwrap();
+
+        let assert_rejected = |addr: u64, len: usize| {
+            assert!(matches!(
+                bus.read(addr, &mut vec![0u8; len]),
+                Err(Error::MissingAddressRange)
+            ));
+            assert!(matches!(
+                bus.write(addr, &vec![0u8; len]),
+                Err(Error::MissingAddressRange)
+            ));
+        };
+
+        // Accesses that fit entirely within device A, including ones that end
+        // exactly at device A's last byte.
+        bus.read(0x10, &mut [0u8; 4]).unwrap();
+        bus.write(0x10, &[0u8; 4]).unwrap();
+        bus.read(0x1C, &mut [0u8; 4]).unwrap();
+        bus.write(0x1C, &[0u8; 4]).unwrap();
+        bus.read(0x18, &mut [0u8; 8]).unwrap();
+        bus.write(0x18, &[0u8; 8]).unwrap();
+        bus.read(0x1F, &mut [0u8; 1]).unwrap();
+        bus.write(0x1F, &[0u8; 1]).unwrap();
+
+        // Accesses that begin in device A but spill into device B. Without
+        // the fix these would be delivered to device A with a slice longer
+        // than the device's window.
+        assert_rejected(0x1D, 4);
+        assert_rejected(0x1F, 2);
+        assert_rejected(0x19, 8);
+    }
+
+    #[test]
+    fn bus_resolve_does_not_invoke_device_on_rejected_access() {
+        // ConstantDevice::read overwrites every byte of `data`. If an access
+        // that spills past the device's end were still delivered, the buffer
+        // would be overwritten. The fix must short-circuit before invoking
+        // the device.
+        let bus = Bus::new();
+        let dev = Arc::new(ConstantDevice);
+        // Keep the Arc alive — Bus stores only a Weak.
+        bus.insert(dev.clone(), 0x10, 0x10).unwrap();
+        // 9-byte access at 0x18 spills one byte past the device's end.
+        let mut buf = [0xa5u8; 9];
+        assert!(matches!(
+            bus.read(0x18, &mut buf),
+            Err(Error::MissingAddressRange)
+        ));
+        // Buffer is untouched because the device was never called.
+        assert_eq!(buf, [0xa5u8; 9]);
+    }
+
+    #[test]
+    fn bus_resolve_handles_address_overflow() {
+        // A device placed near the top of the address space must not produce
+        // a u64 overflow when computing offset + len for an access whose
+        // length would push past u64::MAX. The checked_add guard returns None
+        // and the access is rejected.
+        let bus = Bus::new();
+        let dummy = Arc::new(DummyDevice);
+        // Device occupies [u64::MAX - 0x10 + 1, u64::MAX] inclusive — i.e. the
+        // last 0x10 bytes of the address space. Keep an Arc alive — Bus stores
+        // only a Weak.
+        let base = u64::MAX - 0x10 + 1;
+        bus.insert(dummy.clone(), base, 0x10).unwrap();
+        // 4-byte access fitting in the device's last 4 bytes is OK.
+        bus.read(u64::MAX - 3, &mut [0u8; 4]).unwrap();
+        // 4-byte access starting at u64::MAX - 2 would need to read past
+        // u64::MAX; reject.
+        assert!(matches!(
+            bus.read(u64::MAX - 2, &mut [0u8; 4]),
+            Err(Error::MissingAddressRange)
+        ));
     }
 
     #[test]
