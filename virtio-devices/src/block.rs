@@ -235,10 +235,18 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
             return Ok(());
         }
         let queue = &mut self.queue;
+        let queue_size = queue.size();
         let mut batch_requests = Vec::new();
         let mut batch_inflight_requests = Vec::new();
+        let mut processed = 0;
 
         loop {
+            // Cap a single drain at the virtqueue size. A compliant driver won't submit more that
+            // queue_size, but a buggy or malicious one can keep adding as the VMM is reading.
+            if processed >= queue_size {
+                break;
+            }
+            processed += 1;
             let mut desc_chain = match queue.iter(self.mem.memory()) {
                 Ok(mut iter) => match iter.next() {
                     Some(c) => c,
