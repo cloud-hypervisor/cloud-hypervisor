@@ -647,6 +647,10 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DeviceConfig"
+        user_devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserDeviceConfig'
         vdpa:
           type: array
           items:
@@ -1219,6 +1223,23 @@ components:
         x_nv_gpudirect_clique:
           type: integer
           format: int8
+
+    UserDeviceConfig:
+      required:
+        - socket
+      type: object
+      properties:
+        socket:
+          type: string
+        id:
+          type: string
+        pci_segment:
+          type: integer
+          format: int16
+        pci_device_id:
+          type: integer
+          format: uint8
+
     TpmConfig:
       required:
         - socket
