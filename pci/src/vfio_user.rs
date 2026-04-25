@@ -557,23 +557,34 @@ impl<M: GuestAddressSpace + Sync + Send> ExternalDmaMapping for VfioUserDmaMappi
     fn map(&self, iova: u64, gpa: u64, size: u64) -> std::result::Result<(), std::io::Error> {
         let mem = self.memory.memory();
         let guest_addr = GuestAddress(gpa);
-        let region = mem.find_region(guest_addr);
-
-        if let Some(region) = region {
-            let file_offset = region.file_offset().unwrap();
-            let offset = (GuestAddress(gpa).checked_offset_from(region.start_addr())).unwrap()
-                + file_offset.start();
-
-            self.client
-                .lock()
-                .unwrap()
-                .dma_map(offset, iova, size, file_offset.file().as_raw_fd())
-                .map_err(|e| std::io::Error::other(format!("Error mapping region: {e}")))
-        } else {
-            Err(std::io::Error::other(format!(
+        let Some(region) = mem.find_region(guest_addr) else {
+            return Err(std::io::Error::other(format!(
                 "Region not found for 0x{gpa:x}"
-            )))
+            )));
+        };
+
+        // Check that the range fits in the region.
+        let region_offset = guest_addr
+            .checked_offset_from(region.start_addr())
+            .ok_or_else(|| std::io::Error::other(format!("gpa 0x{gpa:x} below region start")))?;
+        let region_remaining = (region.len())
+            .checked_sub(region_offset)
+            .ok_or_else(|| std::io::Error::other(format!("gpa 0x{gpa:x} past region end")))?;
+        if size > region_remaining {
+            return Err(std::io::Error::other(format!(
+                "DMA map (gpa 0x{gpa:x}, size 0x{size:x}) extends past region end"
+            )));
         }
+
+        // Unwrap is safe as we only do vfio with shared mem with a backing file.
+        let file_offset = region.file_offset().unwrap();
+        let offset = region_offset + file_offset.start();
+
+        self.client
+            .lock()
+            .unwrap()
+            .dma_map(offset, iova, size, file_offset.file().as_raw_fd())
+            .map_err(|e| std::io::Error::other(format!("Error mapping region: {e}")))
     }
 
     fn unmap(&self, iova: u64, size: u64) -> std::result::Result<(), std::io::Error> {
