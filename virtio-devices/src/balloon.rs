@@ -23,7 +23,7 @@ use std::sync::{Arc, Barrier};
 
 use anyhow::anyhow;
 use event_monitor::event;
-use log::{error, info};
+use log::{error, info, warn};
 use seccompiler::SeccompAction;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -201,15 +201,30 @@ impl BalloonEpollHandler {
         let region = memory.find_region(range_base).ok_or(Error::GuestMemory(
             GuestMemoryError::InvalidGuestAddress(range_base),
         ))?;
+
+        // No underflow possible because range_base was found in the region by `find_region`.
+        let offset = range_base.0 - region.start_addr().0;
+        let region_limit = region.len() - offset;
+        let len = std::cmp::min(range_len as u64, region_limit);
+        if len < range_len as u64 {
+            warn!(
+                "Clamping reported range at GPA 0x{:x} from {} to {} bytes \
+                 to fit inside its memory region",
+                range_base.0, range_len, len
+            );
+        }
+        if len == 0 {
+            return Ok(());
+        }
+
         if let Some(f_off) = region.file_offset() {
-            let offset = range_base.0 - region.start_addr().0;
             // SAFETY: FFI call with valid arguments
             let res = unsafe {
                 libc::fallocate64(
                     f_off.file().as_raw_fd(),
                     libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
                     (offset + f_off.start()) as libc::off64_t,
-                    range_len as libc::off64_t,
+                    len as libc::off64_t,
                 )
             };
 
@@ -218,7 +233,7 @@ impl BalloonEpollHandler {
             }
         }
 
-        Self::advise_memory_range(memory, range_base, range_len, libc::MADV_DONTNEED)
+        Self::advise_memory_range(memory, range_base, len as usize, libc::MADV_DONTNEED)
     }
 
     fn release_memory_range_4k(
