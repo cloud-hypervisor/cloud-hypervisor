@@ -326,8 +326,11 @@ impl BlockEpollHandler {
                             )
                         }
                     }
+                    batch_inflight_requests.push((desc_chain.head_index(), request));
+                } else {
+                    self.inflight_requests
+                        .push_back((desc_chain.head_index(), request));
                 }
-                batch_inflight_requests.push((desc_chain.head_index(), request));
             } else {
                 let status = match result {
                     Ok(_) => VIRTIO_BLK_S_OK,
