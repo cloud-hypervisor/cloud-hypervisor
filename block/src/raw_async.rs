@@ -161,6 +161,14 @@ impl AsyncIo for RawFileAsync {
         let (submitter, mut sq, _) = self.io_uring.split();
         let mut submitted = false;
 
+        // Refuse the whole batch if it can't fit in the SQ to avoid having to unroll a partially
+        // successful push.
+        if batch_request.len() > sq.capacity() - sq.len() {
+            return Err(AsyncIoError::SubmitBatchRequests(Error::other(
+                "io_uring submission queue is full",
+            )));
+        }
+
         for req in batch_request {
             match req.request_type {
                 RequestType::In => {
