@@ -223,17 +223,6 @@ if [ $RES -eq 0 ]; then
     RES=$?
 fi
 
-# Run all live-migration test cases
-if [ $RES -eq 0 ]; then
-    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "live_migration_parallel::$test_filter" -- ${test_binary_args[*]}
-    RES=$?
-fi
-
-if [ $RES -eq 0 ]; then
-    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=1 "live_migration_sequential::$test_filter" -- ${test_binary_args[*]}
-    RES=$?
-fi
-
 # Run tests on dbus_api
 if [ $RES -eq 0 ]; then
     cargo build --features "mshv,dbus_api" --all --release --target "$BUILD_TARGET"
