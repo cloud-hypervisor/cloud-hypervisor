@@ -157,19 +157,19 @@ impl TryInto<rate_limiter::RateLimiter> for RateLimiterConfig {
 /// Return the host virtual address corresponding to the given guest address range
 ///
 /// Convert an absolute address into an address space (GuestMemory)
-/// to a host pointer and verify that the provided size define a valid
+/// to a host pointer and verify that the provided size defines a valid
 /// range within a single memory region.
-/// Return None if it is out of bounds or if addr+size overlaps a single region.
+/// Return None if it is out of bounds, spans multiple regions, or has
+/// zero size at an unmapped GPA.
 pub fn get_host_address_range<M: GuestMemory + ?Sized>(
     mem: &M,
     addr: GuestAddress,
     size: usize,
 ) -> Option<*mut u8> {
-    if mem.check_range(addr, size) {
-        let slice = mem.get_slice(addr, size).unwrap();
-        assert!(slice.len() >= size);
-        Some(slice.ptr_guard_mut().as_ptr())
-    } else {
-        None
+    // Reject zero-length, no use of a pointer to an empty range.
+    if size == 0 {
+        return None;
     }
+    let slice = mem.get_slice(addr, size).ok()?;
+    Some(slice.ptr_guard_mut().as_ptr())
 }
