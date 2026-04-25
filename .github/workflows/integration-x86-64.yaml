@@ -47,12 +47,8 @@ jobs:
         run: sudo modprobe openvswitch
       - name: Run integration tests
         if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
-        timeout-minutes: 60
+        timeout-minutes: 80
         run: scripts/dev_cli.sh tests --integration --libc ${{ matrix.libc }}
-      - name: Run live-migration integration tests
-        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
-        timeout-minutes: 20
-        run: scripts/dev_cli.sh tests --integration-live-migration --libc ${{ matrix.libc }}
       - name: Skipping build for PR
         if: ${{ github.event_name == 'pull_request' && matrix.runner != 'garm-jammy' && matrix.libc != 'gnu' }}
         run: echo "Skipping build for PR"
