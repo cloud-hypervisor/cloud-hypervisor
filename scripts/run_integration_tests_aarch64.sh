@@ -253,7 +253,7 @@ sudo bash -c "echo 1 > /sys/kernel/mm/ksm/run"
 
 # Both test_vfio and ovs-dpdk rely on hugepages
 HUGEPAGESIZE=$(grep Hugepagesize /proc/meminfo | awk '{print $2}')
-PAGE_NUM=$((12288 * 1024 / HUGEPAGESIZE))
+PAGE_NUM=$((6144 * 1024 / HUGEPAGESIZE))
 echo "$PAGE_NUM" | sudo tee /proc/sys/vm/nr_hugepages
 sudo chmod a+rwX /dev/hugepages
 
