@@ -10,17 +10,23 @@ use std::sync::Arc;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
-use crate::qcow::decoder::Decoder;
-use crate::qcow::metadata::{
-    BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
-};
-use crate::qcow::qcow_raw_file::QcowRawFile;
-use crate::qcow_common::{
+#[cfg(test)]
+use super::QcowDisk;
+#[cfg(test)]
+use super::common;
+use super::common::{
     AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, gather_from_iovecs,
     gather_from_iovecs_into, pread_alloc, pread_exact, pwrite_all, scatter_to_iovecs,
     zero_fill_iovecs,
 };
+#[cfg(test)]
+use super::internal;
+use super::internal::decoder::Decoder;
+use super::internal::metadata::{
+    BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
+};
+use super::internal::qcow_raw_file::QcowRawFile;
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 
 pub struct QcowSync {
     metadata: Arc<QcowMetadata>,
@@ -317,11 +323,10 @@ mod unit_tests {
 
     use vmm_sys_util::tempfile::TempFile;
 
-    use super::*;
+    use super::common::unit_tests::compress_allocated_clusters;
+    use super::internal::{BackingFileConfig, ImageType, QcowFile, RawFile};
+    use super::{QcowDisk, *};
     use crate::disk_file::{AsyncDiskFile, DiskSize, Resizable};
-    use crate::qcow::{BackingFileConfig, ImageType, QcowFile, RawFile};
-    use crate::qcow_common::unit_tests::compress_allocated_clusters;
-    use crate::qcow_disk::QcowDisk;
 
     fn create_disk_with_data(
         file_size: u64,

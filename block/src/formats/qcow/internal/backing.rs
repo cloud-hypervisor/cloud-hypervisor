@@ -10,11 +10,11 @@ use std::io;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use std::sync::Arc;
 
+use super::decoder::Decoder;
+use super::metadata::{BackingRead, ClusterReadMapping, QcowMetadata};
+use super::{BackingFile, BackingKind, Error as QcowError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::qcow::decoder::Decoder;
-use crate::qcow::metadata::{BackingRead, ClusterReadMapping, QcowMetadata};
-use crate::qcow::{BackingFile, BackingKind, Error as QcowError};
-use crate::qcow_common::{decompress_cluster, pread_alloc, pread_exact};
+use crate::formats::qcow::common::{decompress_cluster, pread_alloc, pread_exact};
 
 /// Raw backing file using pread64 on a duplicated fd.
 pub(crate) struct RawBacking {

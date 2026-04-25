@@ -15,12 +15,7 @@ pub mod factory;
 mod io_impl;
 pub use io_impl::{async_io, fcntl, request};
 pub mod formats;
-pub mod qcow;
-#[cfg(feature = "io_uring")]
-pub(crate) mod qcow_async;
-pub(crate) mod qcow_common;
-pub mod qcow_disk;
-pub(crate) mod qcow_sync;
+
 use std::alloc::{Layout, alloc_zeroed};
 use std::collections::VecDeque;
 use std::fmt::{self, Debug};
@@ -33,6 +28,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::{cmp, mem, result};
 
+pub use formats::qcow::internal as qcow;
 pub use formats::raw as raw_disk;
 pub use formats::vhdx::internal as vhdx;
 #[cfg(feature = "io_uring")]

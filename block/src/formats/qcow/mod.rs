@@ -2,21 +2,30 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
+//! QCOW2 disk image format.
+//!
+//! Provides [`QcowDisk`], the `DiskFile` wrapper for QCOW2 images
+//! with backing file and compression support.
+
+pub(crate) mod common;
+pub mod internal;
+pub mod worker;
+
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 use std::{fmt, io};
 
+use self::internal::backing::shared_backing_from;
+use self::internal::metadata::{BackingRead, QcowMetadata};
+use self::internal::qcow_raw_file::QcowRawFile;
+use self::internal::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
+#[cfg(feature = "io_uring")]
+use self::worker::async_uring::QcowAsync;
+use self::worker::sync::QcowSync;
 use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::disk_file;
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::qcow::backing::shared_backing_from;
-use crate::qcow::metadata::{BackingRead, QcowMetadata};
-use crate::qcow::qcow_raw_file::QcowRawFile;
-use crate::qcow::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
-#[cfg(feature = "io_uring")]
-use crate::qcow_async::QcowAsync;
-use crate::qcow_sync::QcowSync;
 
 /// Unified DiskFile wrapper for QCOW2 disk images.
 ///
@@ -191,10 +200,10 @@ impl disk_file::AsyncDiskFile for QcowDisk {
 mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
 
+    use self::internal::{QcowFile, RawFile};
     use super::*;
     use crate::async_io::AsyncIo;
     use crate::disk_file::{AsyncDiskFile, DiskSize, PhysicalSize};
-    use crate::qcow::{QcowFile, RawFile};
 
     const TEST_SIZE: u64 = 0x5566_7788;
 
