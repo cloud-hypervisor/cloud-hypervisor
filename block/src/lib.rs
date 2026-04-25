@@ -8,6 +8,7 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
+mod aligned_operation;
 pub mod async_io;
 pub mod disk_file;
 pub mod error;
@@ -49,16 +50,14 @@ use std::path::Path;
 use std::str::FromStr;
 use std::{cmp, mem, result};
 
+pub use aligned_operation::AlignedOperation;
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
 use libc::{
     FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE, S_IFBLK, S_IFMT, ioctl,
 };
 use log::{debug, info, warn};
-pub use request::{
-    AlignedOperation, BatchRequest, ExecuteAsync, MAX_DISCARD_WRITE_ZEROES_SEG, Request,
-    RequestType,
-};
+pub use request::{BatchRequest, ExecuteAsync, MAX_DISCARD_WRITE_ZEROES_SEG, Request, RequestType};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use thiserror::Error;
