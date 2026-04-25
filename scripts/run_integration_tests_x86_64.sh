@@ -11,11 +11,22 @@ mkdir -p "$WORKLOADS_DIR"
 
 process_common_args "$@"
 
+migratable_version=v39.0
 # For now these values are default for kvm
 test_features=""
 
 if [ "$hypervisor" = "mshv" ]; then
     test_features="--features mshv"
+fi
+
+# if migratable version is set to override the default
+if [ -n "${MIGRATABLE_VERSION}" ]; then
+    # validate the version if matched with vxx.0
+    if ! [[ "${MIGRATABLE_VERSION}" =~ ^v[0-9]{2,}\.[0-9]$ ]]; then
+        echo "MIGRATABLE_VERSION should be in format vxx.0, e.g. v47.0"
+        exit 1
+    fi
+    migratable_version=${MIGRATABLE_VERSION}
 fi
 
 cp scripts/sha1sums-x86_64* "$WORKLOADS_DIR"
@@ -111,6 +122,14 @@ if ! sha1sum sha1sums-x86_64 sha1sums-x86_64-common --check; then
 fi
 popd || exit
 
+# Download Cloud Hypervisor binary from its last stable release for live-upgrade tests
+CH_RELEASE_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/${migratable_version}/cloud-hypervisor-static"
+CH_RELEASE_NAME="cloud-hypervisor-static"
+pushd "$WORKLOADS_DIR" || exit
+time wget --quiet $CH_RELEASE_URL -O "$CH_RELEASE_NAME" || exit 1
+chmod +x $CH_RELEASE_NAME
+popd || exit
+
 # Build custom kernel based on virtio-pmem and virtio-fs upstream patches
 VMLINUX_IMAGE="$WORKLOADS_DIR/vmlinux-x86_64"
 if [ ! -f "$VMLINUX_IMAGE" ]; then
@@ -201,6 +220,17 @@ RES=$?
 # running in parallel.
 if [ $RES -eq 0 ]; then
     cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=1 "common_sequential::$test_filter" -- ${test_binary_args[*]}
+    RES=$?
+fi
+
+# Run all live-migration test cases
+if [ $RES -eq 0 ]; then
+    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads="${PARALLEL_INTEGRATION_TESTS_NUM}" "live_migration_parallel::$test_filter" -- ${test_binary_args[*]}
+    RES=$?
+fi
+
+if [ $RES -eq 0 ]; then
+    time cargo nextest run $test_features --retries 3 --no-fail-fast --no-tests=pass --test-threads=1 "live_migration_sequential::$test_filter" -- ${test_binary_args[*]}
     RES=$?
 fi
 

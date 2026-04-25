@@ -259,7 +259,6 @@ cmd_help() {
     echo "        --integration                Run the integration tests."
     echo "        --integration-vfio           Run the VFIO integration tests."
     echo "        --integration-windows        Run the Windows guest integration tests."
-    echo "        --integration-live-migration Run the live-migration integration tests."
     echo "        --integration-rate-limiter   Run the rate-limiter integration tests."
     echo "        --integration-cvm            Run the Confidential VM integration tests."
     echo "        --libc                       Select the C library Cloud Hypervisor will be built against. Default is gnu"
@@ -395,7 +394,6 @@ cmd_tests() {
     integration=false
     integration_vfio=false
     integration_windows=false
-    integration_live_migration=false
     integration_rate_limiter=false
     integration_cvm=false
     metrics=false
@@ -414,7 +412,6 @@ cmd_tests() {
         "--integration") { integration=true; } ;;
         "--integration-vfio") { integration_vfio=true; } ;;
         "--integration-windows") { integration_windows=true; } ;;
-        "--integration-live-migration") { integration_live_migration=true; } ;;
         "--integration-rate-limiter") { integration_rate_limiter=true; } ;;
         "--integration-cvm") { integration_cvm=true; } ;;
         "--metrics") { metrics=true; } ;;
@@ -515,6 +512,7 @@ cmd_tests() {
             --env PARALLEL_INTEGRATION_TESTS_NUM="${PARALLEL_INTEGRATION_TESTS_NUM:-}" \
             --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
+            --env MIGRATABLE_VERSION="$MIGRATABLE_VERSION" \
             "$CTR_IMAGE" \
             dbus-run-session ./scripts/run_integration_tests_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -593,33 +591,6 @@ cmd_tests() {
             --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             "$CTR_IMAGE" \
             ./scripts/run_integration_tests_windows_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
-    fi
-
-    if [ "$integration_live_migration" = true ]; then
-        say "Running 'live migration' integration tests for $target..."
-        run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+$exported_volumes} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
-            --env PARALLEL_INTEGRATION_TESTS_NUM="${PARALLEL_INTEGRATION_TESTS_NUM:-}" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
-            --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
-            --env MIGRATABLE_VERSION="$MIGRATABLE_VERSION" \
-            "$CTR_IMAGE" \
-            ./scripts/run_integration_tests_live_migration.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
     if [ "$integration_rate_limiter" = true ]; then
