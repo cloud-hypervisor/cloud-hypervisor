@@ -148,8 +148,7 @@ update_workloads() {
     popd || exit
 
     # Download Cloud Hypervisor binary from its last stable release
-    LAST_RELEASE_VERSION="v39.0"
-    CH_RELEASE_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/$LAST_RELEASE_VERSION/cloud-hypervisor-static-aarch64"
+    CH_RELEASE_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/${migratable_version}/cloud-hypervisor-static-aarch64"
     CH_RELEASE_NAME="cloud-hypervisor-static-aarch64"
     pushd "$WORKLOADS_DIR" || exit
     # Repeat a few times to workaround a random wget failure
@@ -209,10 +208,21 @@ update_workloads() {
 
 process_common_args "$@"
 
+migratable_version=v39.0
 test_features=""
 
 if [ "$hypervisor" = "mshv" ]; then
     test_features="--features mshv"
+fi
+
+# if migratable version is set to override the default
+if [ -n "${MIGRATABLE_VERSION}" ]; then
+    # validate the version if matched with vxx.0
+    if ! [[ "${MIGRATABLE_VERSION}" =~ ^v[0-9]{2,}\.[0-9]$ ]]; then
+        echo "MIGRATABLE_VERSION should be in format vxx.0, e.g. v47.0"
+        exit 1
+    fi
+    migratable_version=${MIGRATABLE_VERSION}
 fi
 
 # lock the workloads folder to avoid parallel updating by different containers
