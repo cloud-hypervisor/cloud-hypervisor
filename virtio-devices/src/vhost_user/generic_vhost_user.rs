@@ -26,13 +26,27 @@ use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::{VhostUserCommon, VhostUserState};
 use crate::{
     ActivateResult, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM,
-    VirtioCommon, VirtioDevice, VirtioInterrupt, VirtioSharedMemoryList,
+    VirtioCommon, VirtioDevice, VirtioInterrupt, VirtioInterruptType, VirtioSharedMemoryList,
 };
 
 pub type State = VhostUserState<()>;
 
-struct BackendReqHandler {}
-impl VhostUserFrontendReqHandler for BackendReqHandler {}
+struct BackendReqHandler {
+    interrupt_cb: Arc<dyn VirtioInterrupt>,
+}
+
+impl VhostUserFrontendReqHandler for BackendReqHandler {
+    fn handle_config_change(&self) -> std::io::Result<u64> {
+        self.interrupt_cb
+            .trigger(VirtioInterruptType::Config)
+            .map_err(|e| {
+                error!("Failed to signal config change: {e:?}");
+                std::io::Error::other(e)
+            })?;
+        Ok(0)
+    }
+}
+
 pub struct GenericVhostUser {
     vu_common: VhostUserCommon,
     id: String,
@@ -97,7 +111,8 @@ impl GenericVhostUser {
                 | VhostUserProtocolFeatures::REPLY_ACK
                 | VhostUserProtocolFeatures::INFLIGHT_SHMFD
                 | VhostUserProtocolFeatures::LOG_SHMFD
-                | VhostUserProtocolFeatures::DEVICE_STATE;
+                | VhostUserProtocolFeatures::DEVICE_STATE
+                | VhostUserProtocolFeatures::BACKEND_REQ;
 
             let avail_features = super::DEFAULT_VIRTIO_FEATURES;
 
@@ -275,7 +290,21 @@ impl VirtioDevice for GenericVhostUser {
             .activate(&queues, interrupt_cb.clone())?;
         self.guest_memory = Some(mem.clone());
 
-        let backend_req_handler: Option<FrontendReqHandler<BackendReqHandler>> = None;
+        let backend_req_handler = if self.vu_common.acked_protocol_features
+            & VhostUserProtocolFeatures::BACKEND_REQ.bits()
+            != 0
+        {
+            Some(
+                FrontendReqHandler::new(Arc::new(BackendReqHandler {
+                    interrupt_cb: interrupt_cb.clone(),
+                }))
+                .map_err(|e| {
+                    crate::ActivateError::VhostUserSetup(Error::FrontendReqHandlerCreation(e))
+                })?,
+            )
+        } else {
+            None
+        };
         // Run a dedicated thread for handling potential reconnections with
         // the backend.
         let (kill_evt, pause_evt) = self.vu_common.virtio_common.dup_eventfds();
