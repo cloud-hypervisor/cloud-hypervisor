@@ -16,18 +16,18 @@ use std::sync::Arc;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
+use super::common::{
+    AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, pread_alloc, pread_exact,
+    pwrite_all,
+};
+use super::internal::decoder::Decoder;
+use super::internal::metadata::{
+    BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
+};
+use super::internal::qcow_raw_file::QcowRawFile;
 use crate::SECTOR_SIZE;
 use crate::async_io::{
     AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult, UringDataIo,
-};
-use crate::qcow::decoder::Decoder;
-use crate::qcow::metadata::{
-    BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
-};
-use crate::qcow::qcow_raw_file::QcowRawFile;
-use crate::qcow_common::{
-    AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, pread_alloc, pread_exact,
-    pwrite_all,
 };
 
 /// Per queue QCOW2 I/O worker using io_uring.
@@ -534,9 +534,9 @@ mod unit_tests {
     use crate::SECTOR_SIZE;
     use crate::async_io::{AsyncIoCompletion, AsyncIoOperation, GuestMemoryTarget, OwnedIoBuffer};
     use crate::disk_file::AsyncDiskFile;
-    use crate::qcow::{BackingFileConfig, ImageType, QcowFile, RawFile};
-    use crate::qcow_common::unit_tests::compress_allocated_clusters;
-    use crate::qcow_disk::QcowDisk;
+    use crate::formats::qcow::QcowDisk;
+    use crate::formats::qcow::common::unit_tests::compress_allocated_clusters;
+    use crate::formats::qcow::internal::{BackingFileConfig, ImageType, QcowFile, RawFile};
 
     fn create_disk_with_data(
         file_size: u64,
