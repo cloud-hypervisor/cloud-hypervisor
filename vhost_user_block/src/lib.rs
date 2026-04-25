@@ -403,12 +403,14 @@ impl VhostUserBackendMut for VhostUserBlkBackend {
         let config_slice = self.config.as_mut_slice();
         let data_len = data.len() as u32;
         let config_len = config_slice.len() as u32;
-        if offset + data_len > config_len {
-            error!("Failed to write config space");
+        let end = offset
+            .checked_add(data_len)
+            .ok_or_else(|| io::Error::from_raw_os_error(libc::EINVAL))?;
+        if end > config_len {
+            error!("Failed to write config space: offset {offset} + len {data_len} > {config_len}");
             return Err(io::Error::from_raw_os_error(libc::EINVAL));
         }
-        let (_, right) = config_slice.split_at_mut(offset as usize);
-        right.copy_from_slice(data);
+        config_slice[offset as usize..end as usize].copy_from_slice(data);
         self.update_writeback();
         Ok(())
     }
