@@ -6006,7 +6006,10 @@ impl BusDevice for DeviceManager {
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
         match offset {
             PCIU_FIELD_OFFSET => {
-                assert!(data.len() == PCIU_FIELD_SIZE);
+                if data.len() != PCIU_FIELD_SIZE {
+                    warn!("Invalid sized read of PCIU register: {}", data.len());
+                    return;
+                }
                 data.copy_from_slice(
                     &self.pci_segments[self.selected_segment]
                         .pci_devices_up
@@ -6016,7 +6019,10 @@ impl BusDevice for DeviceManager {
                 self.pci_segments[self.selected_segment].pci_devices_up = 0;
             }
             PCID_FIELD_OFFSET => {
-                assert!(data.len() == PCID_FIELD_SIZE);
+                if data.len() != PCID_FIELD_SIZE {
+                    warn!("Invalid sized read of PCID register: {}", data.len());
+                    return;
+                }
                 data.copy_from_slice(
                     &self.pci_segments[self.selected_segment]
                         .pci_devices_down
