@@ -42,9 +42,9 @@ pub fn get_cache_size(cache_level: CacheLevel) -> u32 {
 
         src_digits
             * match src_unit {
-                "K" => 1024,
-                "M" => 1024u32.pow(2),
-                "G" => 1024u32.pow(3),
+                "K" => 1u32 << 10,
+                "M" => 1u32 << 20,
+                "G" => 1u32 << 30,
                 _ => 1,
             }
     } else {
