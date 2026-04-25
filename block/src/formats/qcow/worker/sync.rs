@@ -12,16 +12,16 @@ use std::sync::Arc;
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
-use crate::qcow::decoder::Decoder;
-use crate::qcow::metadata::{
-    BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
-};
-use crate::qcow::qcow_raw_file::QcowRawFile;
-use crate::qcow_common::{
+use super::common::{
     AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, pread_alloc, pread_exact,
     pwrite_all,
 };
+use super::internal::decoder::Decoder;
+use super::internal::metadata::{
+    BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
+};
+use super::internal::qcow_raw_file::QcowRawFile;
+use crate::async_io::{AsyncIo, AsyncIoCompletion, AsyncIoError, AsyncIoOperation, AsyncIoResult};
 
 pub struct QcowSync {
     metadata: Arc<QcowMetadata>,
@@ -351,11 +351,11 @@ mod unit_tests {
     use crate::async_io::{AsyncIoCompletion, OwnedIoBuffer};
     use crate::disk_file::{AsyncDiskFile, DiskSize, Resizable};
     use crate::error::BlockErrorKind;
-    use crate::qcow::{
+    use crate::formats::qcow::QcowDisk;
+    use crate::formats::qcow::common::unit_tests::compress_allocated_clusters;
+    use crate::formats::qcow::internal::{
         BackingFileConfig, Error as QcowError, ImageType, QcowFile, QcowHeader, RawFile,
     };
-    use crate::qcow_common::unit_tests::compress_allocated_clusters;
-    use crate::qcow_disk::QcowDisk;
 
     const TEST_L1_L2_ADDR_MASK: u64 = 0x00ff_ffff_ffff_fe00;
     const TEST_HEADER_L1_TABLE_OFFSET: u64 = 40;
@@ -893,7 +893,9 @@ mod unit_tests {
             .to_string_lossy()
             .into_owned();
         match err.downcast_ref::<QcowError>() {
-            Some(QcowError::BackingFileIo(path, _)) => assert_eq!(path, &expected_path),
+            Some(QcowError::BackingFileIo(path, _)) => {
+                assert_eq!(path.as_str(), expected_path.as_str());
+            }
             other => panic!("unexpected error: {other:?}"),
         }
     }

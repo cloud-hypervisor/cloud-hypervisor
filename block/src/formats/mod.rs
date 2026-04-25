@@ -7,6 +7,7 @@
 //! Each format lives in its own submodule with a `DiskFile` wrapper,
 //! format specific internals, and sync/async I/O workers.
 
+pub mod qcow;
 pub mod raw;
 pub mod vhd;
 pub mod vhdx;

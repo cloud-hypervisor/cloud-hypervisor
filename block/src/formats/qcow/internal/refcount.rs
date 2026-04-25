@@ -9,8 +9,8 @@ use std::io;
 use libc::EINVAL;
 use thiserror::Error;
 
-use crate::qcow::qcow_raw_file::QcowRawFile;
-use crate::qcow::vec_cache::{CacheMap, Cacheable, VecCache};
+use super::qcow_raw_file::QcowRawFile;
+use super::vec_cache::{CacheMap, Cacheable, VecCache};
 
 #[derive(Debug, Error)]
 pub enum Error {
