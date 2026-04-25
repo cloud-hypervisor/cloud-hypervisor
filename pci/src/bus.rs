@@ -301,11 +301,11 @@ impl PciConfigIo {
             return None;
         }
 
-        let (bus, device, _function, register) =
+        let (bus, device, function, register) =
             parse_io_config_address(self.config_address & !0x8000_0000);
 
-        // Only support one bus.
-        if bus != 0 {
+        // Only support bus 0 and single-function devices.
+        if bus != 0 || function > 0 {
             return None;
         }
 
