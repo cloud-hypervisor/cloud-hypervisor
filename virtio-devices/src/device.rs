@@ -205,10 +205,23 @@ pub trait VirtioDevice: Send {
 /// On the other side, the implementation itself should be provided by the code
 /// emulating the IOMMU for the guest.
 pub trait DmaRemapping {
-    /// Provide a way to translate GVA address ranges into GPAs.
-    fn translate_gva(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error>;
-    /// Provide a way to translate GPA address ranges into GVAs.
-    fn translate_gpa(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error>;
+    /// Provide a way to translate GVA address ranges into GPAs. The
+    /// implementation must reject translations whose [addr, addr+size)
+    /// span isn't entirely covered by a single mapping.
+    fn translate_gva(
+        &self,
+        id: u32,
+        addr: u64,
+        size: u64,
+    ) -> std::result::Result<u64, std::io::Error>;
+    /// Provide a way to translate GPA address ranges into GVAs. Same
+    /// span requirement as `translate_gva`.
+    fn translate_gpa(
+        &self,
+        id: u32,
+        addr: u64,
+        size: u64,
+    ) -> std::result::Result<u64, std::io::Error>;
 }
 
 /// Structure to handle device state common to all devices
