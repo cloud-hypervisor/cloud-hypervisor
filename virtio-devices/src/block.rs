@@ -417,9 +417,10 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
     }
 
     fn process_queue_submit_and_signal(&mut self) -> result::Result<(), EpollHelperError> {
-        self.process_queue_submit().map_err(|e| {
-            EpollHelperError::HandleEvent(anyhow!("Failed to process queue (submit): {e:?}"))
-        })?;
+        // Per-request errors are logged but non-device fatal.
+        if let Err(e) = self.process_queue_submit() {
+            warn!("Failed to process queue (submit): {e:?}");
+        }
 
         self.try_signal_used_queue()
     }
@@ -672,11 +673,9 @@ impl EpollHelperHandler for BlockEpollHandler {
                     EpollHelperError::HandleEvent(anyhow!("Failed to get queue event: {e:?}"))
                 })?;
 
-                self.process_queue_complete().map_err(|e| {
-                    EpollHelperError::HandleEvent(anyhow!(
-                        "Failed to process queue (complete): {e:?}"
-                    ))
-                })?;
+                if let Err(e) = self.process_queue_complete() {
+                    warn!("Failed to process queue (complete): {e:?}");
+                }
 
                 self.try_signal_used_queue()?;
 
