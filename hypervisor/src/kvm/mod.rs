@@ -1694,7 +1694,8 @@ pub struct KvmVcpu {
 #[cfg(feature = "sev_snp")]
 impl KvmVcpu {
     fn validate_gpa_range(&self, gpa: u64, num_pages: u64) -> cpu::Result<u64> {
-        if let Some(size) = num_pages.checked_mul(PAGE_SIZE_4K)
+        if gpa.is_multiple_of(PAGE_SIZE_4K)
+            && let Some(size) = num_pages.checked_mul(PAGE_SIZE_4K)
             && size != 0
             && let Some(end) = gpa.checked_add(size)
             && let Some(slots) = &self.memory_slots
@@ -3752,6 +3753,8 @@ mod tests {
         assert_eq!(vcpu.validate_gpa_range(0x5000, 1).unwrap(), 0x1000);
         for (gpa, pages) in [
             (0, 1),
+            (0x1001, 1),
+            (0x1fff, 1),
             (0x6000, 1),
             (0x3000, 2),
             (0x3000, 3),
