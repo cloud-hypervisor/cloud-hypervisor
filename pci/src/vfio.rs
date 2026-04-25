@@ -223,6 +223,10 @@ impl VfioMsix {
             let data = (u32::from_le_bytes(data) >> 16) as u16;
             self.bar.set_msg_ctl(data);
             self.cap.set_msg_ctl(data);
+        } else if offset == 3 && data.len() == 1 {
+            let data = u16::from(data[0]) << 8;
+            self.bar.set_msg_ctl(data);
+            self.cap.set_msg_ctl(data);
         }
 
         let new_enabled = self.bar.enabled();

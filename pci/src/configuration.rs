@@ -1102,6 +1102,11 @@ impl PciConfiguration {
                     .lock()
                     .unwrap()
                     .set_msg_ctl((u32::from_le_bytes(data) >> 16) as u16);
+            } else if msix_cap_reg_idx == reg_idx && offset == 3 && data.len() == 1 {
+                msix_config
+                    .lock()
+                    .unwrap()
+                    .set_msg_ctl(u16::from(data[0]) << 8);
             }
         }
 
