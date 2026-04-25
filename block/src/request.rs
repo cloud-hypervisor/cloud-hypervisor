@@ -194,21 +194,12 @@ impl Request {
         mem: &vm_memory::GuestMemoryMmap<B>,
         serial: &[u8],
     ) -> Result<u32, ExecuteError> {
+        self.check_data_bounds(disk_nsectors)?;
+
         disk.seek(SeekFrom::Start(self.sector << SECTOR_SHIFT))
             .map_err(ExecuteError::Seek)?;
         let mut len = 0;
         for (data_addr, data_len) in &self.data_descriptors {
-            let mut top: u64 = u64::from(*data_len) / SECTOR_SIZE;
-            if u64::from(*data_len) % SECTOR_SIZE != 0 {
-                top += 1;
-            }
-            top = top
-                .checked_add(self.sector)
-                .ok_or(ExecuteError::BadRequest(Error::InvalidOffset))?;
-            if top > disk_nsectors {
-                return Err(ExecuteError::BadRequest(Error::InvalidOffset));
-            }
-
             match self.request_type {
                 RequestType::In => {
                     let mut buf = vec![0u8; *data_len as usize];
@@ -264,6 +255,8 @@ impl Request {
         let offset = (sector << SECTOR_SHIFT) as libc::off_t;
         let alignment = disk_image.alignment();
 
+        self.check_data_bounds(disk_nsectors)?;
+
         let mut iovecs: SmallVec<[libc::iovec; DEFAULT_DESCRIPTOR_VEC_SIZE]> =
             SmallVec::with_capacity(self.data_descriptors.len());
         for &(data_addr, data_len) in &self.data_descriptors {
@@ -275,17 +268,7 @@ impl Request {
             if data_len == 0 {
                 continue;
             }
-            let mut top: u64 = u64::from(data_len) / SECTOR_SIZE;
-            if u64::from(data_len) % SECTOR_SIZE != 0 {
-                top += 1;
-            }
             let data_len = data_len as usize;
-            top = top
-                .checked_add(sector)
-                .ok_or(ExecuteError::BadRequest(Error::InvalidOffset))?;
-            if top > disk_nsectors {
-                return Err(ExecuteError::BadRequest(Error::InvalidOffset));
-            }
 
             let origin_ptr = mem
                 .get_slice(data_addr, data_len)
@@ -594,5 +577,31 @@ impl Request {
     #[inline]
     pub fn request_type(&self) -> RequestType {
         self.request_type
+    }
+
+    /// For In and Out requests, checks that the descriptors collectively fit in a backing disk of
+    /// the given size. Returns `Ok(())` if they fit, or `ExecuteError::BadRequest` otherwise.
+    fn check_data_bounds(&self, disk_nsectors: u64) -> Result<(), ExecuteError> {
+        if !matches!(self.request_type, RequestType::In | RequestType::Out) {
+            return Ok(());
+        }
+        let mut total_bytes: u64 = 0;
+        for (_, data_len) in &self.data_descriptors {
+            total_bytes = total_bytes
+                .checked_add(u64::from(*data_len))
+                .ok_or(ExecuteError::BadRequest(Error::InvalidOffset))?;
+        }
+        if total_bytes == 0 {
+            return Ok(());
+        }
+        let total_sectors = total_bytes.div_ceil(SECTOR_SIZE);
+        let end_sector = self
+            .sector
+            .checked_add(total_sectors)
+            .ok_or(ExecuteError::BadRequest(Error::InvalidOffset))?;
+        if end_sector > disk_nsectors {
+            return Err(ExecuteError::BadRequest(Error::InvalidOffset));
+        }
+        Ok(())
     }
 }
