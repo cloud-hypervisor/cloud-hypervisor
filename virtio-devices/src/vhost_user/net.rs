@@ -5,7 +5,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Barrier, Mutex};
 use std::{result, thread};
 
-use event_monitor::event;
 use log::{error, info};
 use net_util::{CtrlQueue, MacAddr, VirtioNetConfig, build_net_config_space};
 use seccompiler::SeccompAction;
@@ -366,30 +365,7 @@ impl VirtioDevice for Net {
     }
 
     fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
-        // We first must resume the virtio thread if it was paused.
-        if self.vu_common.virtio_common.pause_evt.take().is_some() {
-            self.vu_common.virtio_common.resume().ok()?;
-        }
-
-        if let Some(vu) = &self.vu_common.vu
-            && let Err(e) = vu.lock().unwrap().reset_vhost_user()
-        {
-            error!(
-                "Failed to reset vhost-user daemon for socket {}: {e:?}",
-                self.vu_common.socket_path
-            );
-            return None;
-        }
-
-        if let Some(kill_evt) = self.vu_common.virtio_common.kill_evt.take() {
-            // Ignore the result because there is nothing we can do about it.
-            let _ = kill_evt.write(1);
-        }
-
-        event!("virtio-device", "reset", "id", &self.id);
-
-        // Return the interrupt
-        Some(self.vu_common.virtio_common.interrupt_cb.take().unwrap())
+        self.vu_common.reset(&self.id)
     }
 
     fn shutdown(&mut self) {
