@@ -451,9 +451,10 @@ impl VirtioDevice for Vdpa {
     }
 
     fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
+        // Backend reset failures are logged but don't skip local cleanup:
+        // reset must converge to fresh state regardless of backend state.
         if let Err(e) = self.reset_vdpa() {
             error!("Failed to reset vhost-vdpa: {e:?}");
-            return None;
         }
 
         event!("vdpa", "reset", "id", &self.id);
