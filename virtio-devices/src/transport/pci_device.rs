@@ -359,8 +359,7 @@ pub struct VirtioPciDevice {
 
     // PCI interrupts.
     interrupt_status: Arc<AtomicUsize>,
-    virtio_interrupt: Option<Arc<dyn VirtioInterrupt>>,
-    interrupt_source_group: MaybeMutInterruptSourceGroup,
+    virtio_interrupt: Arc<dyn VirtioInterrupt>,
 
     // virtio queues
     queues: Vec<Queue>,
@@ -592,6 +591,13 @@ impl VirtioPciDevice {
         // prevents from a subtle deadlock.
         std::mem::drop(locked_device);
 
+        let virtio_interrupt = Arc::new(VirtioInterruptMsix::new(
+            msix_config.clone(),
+            common_config.msix_config.clone(),
+            common_config.msix_queues.clone(),
+            interrupt_source_group.clone(),
+        ));
+
         let mut virtio_pci_device = VirtioPciDevice {
             id,
             configuration,
@@ -601,26 +607,18 @@ impl VirtioPciDevice {
             device,
             device_activated: Arc::new(AtomicBool::new(device_activated)),
             interrupt_status: Arc::new(AtomicUsize::new(interrupt_status)),
-            virtio_interrupt: None,
+            virtio_interrupt,
             queues,
             queue_evts,
             memory,
             settings_bar: 0,
             use_64bit_bar,
-            interrupt_source_group: interrupt_source_group.clone(),
             cap_pci_cfg_info,
             bar_regions: vec![],
             activate_evt,
             dma_handler,
             pending_activations,
         };
-
-        virtio_pci_device.virtio_interrupt = Some(Arc::new(VirtioInterruptMsix::new(
-            virtio_pci_device.msix_config.clone(),
-            virtio_pci_device.common_config.msix_config.clone(),
-            virtio_pci_device.common_config.msix_queues.clone(),
-            virtio_pci_device.interrupt_source_group.clone(),
-        )));
 
         // In case of a restore, we can activate the device, as we know at
         // this point the virtqueues are in the right state and the device is
@@ -820,7 +818,7 @@ impl VirtioPciDevice {
         }
 
         VirtioPciDeviceActivator {
-            interrupt: self.virtio_interrupt.as_ref().unwrap().clone(),
+            interrupt: self.virtio_interrupt.clone(),
             memory: Some(self.memory.clone()),
             device: self.device.clone(),
             queues: Some(queues),
