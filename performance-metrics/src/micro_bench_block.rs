@@ -10,7 +10,7 @@
 use std::time::Instant;
 
 use block::disk_file::AsyncDiskFile;
-use block::raw_disk::{RawBackend, RawDisk};
+use block::formats::raw::{RawBackend, RawDisk};
 use block::{BatchRequest, RequestType};
 
 use crate::PerformanceTestControl;
