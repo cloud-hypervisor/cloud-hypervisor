@@ -30,7 +30,7 @@ use std::str::FromStr;
 use std::{cmp, mem, result};
 
 pub use aligned_operation::AlignedOperation;
-pub use formats::qcow::internal as qcow;
+use formats::qcow::internal as qcow;
 pub use formats::vhdx::internal as vhdx;
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};
