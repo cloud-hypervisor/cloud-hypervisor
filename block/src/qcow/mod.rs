@@ -43,7 +43,8 @@ use remain::sorted;
 use thiserror::Error;
 pub(crate) use util::MAX_NESTING_DEPTH;
 use util::{
-    L1_TABLE_OFFSET_MASK, L2_TABLE_OFFSET_MASK, div_round_up_u32, div_round_up_u64, l1_entry_make,
+    L1_TABLE_OFFSET_MASK, L2_TABLE_OFFSET_MASK, cluster_addr_is_valid,
+    compressed_cluster_range_is_valid, div_round_up_u32, div_round_up_u64, l1_entry_make,
     l2_entry_compressed_cluster_layout, l2_entry_is_compressed, l2_entry_is_empty,
     l2_entry_is_zero, l2_entry_make_std, l2_entry_make_zero, l2_entry_std_cluster_addr,
 };
@@ -1398,6 +1399,17 @@ impl QcowFile {
     fn decompress_l2_cluster(&mut self, l2_entry: u64) -> std::io::Result<Vec<u8>> {
         let (compressed_cluster_addr, compressed_cluster_size) =
             l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
+        let cluster_size_u64 = self.raw_file.cluster_size();
+        let max_valid = self.refcounts.max_valid_cluster_offset();
+        if !compressed_cluster_range_is_valid(
+            compressed_cluster_addr,
+            compressed_cluster_size,
+            cluster_size_u64,
+            max_valid,
+        ) {
+            self.set_corrupt_bit_best_effort();
+            return Err(io::Error::from_raw_os_error(EIO));
+        }
         // Read compressed cluster from raw file
         self.raw_file
             .file_mut()
@@ -1469,7 +1481,9 @@ impl QcowFile {
             return Ok(None);
         } else {
             let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
-            if cluster_addr & (self.raw_file.cluster_size() - 1) != 0 {
+            let cluster_size = self.raw_file.cluster_size();
+            let max_valid = self.refcounts.max_valid_cluster_offset();
+            if !cluster_addr_is_valid(cluster_addr, cluster_size, max_valid) {
                 self.set_corrupt_bit_best_effort();
                 return Err(io::Error::from_raw_os_error(EIO));
             }
@@ -1540,7 +1554,9 @@ impl QcowFile {
             cluster_addr
         } else {
             let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
-            if cluster_addr & (self.raw_file.cluster_size() - 1) != 0 {
+            let cluster_size = self.raw_file.cluster_size();
+            let max_valid = self.refcounts.max_valid_cluster_offset();
+            if !cluster_addr_is_valid(cluster_addr, cluster_size, max_valid) {
                 self.set_corrupt_bit_best_effort();
                 return Err(io::Error::from_raw_os_error(EIO));
             }
@@ -1690,12 +1706,23 @@ impl QcowFile {
     fn deallocate_compressed_cluster(&mut self, l2_entry: u64) -> std::io::Result<()> {
         let (compressed_cluster_addr, compressed_cluster_size) =
             l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
+        let cluster_size = self.raw_file.cluster_size();
+        let max_valid = self.refcounts.max_valid_cluster_offset();
+        if !compressed_cluster_range_is_valid(
+            compressed_cluster_addr,
+            compressed_cluster_size,
+            cluster_size,
+            max_valid,
+        ) {
+            self.set_corrupt_bit_best_effort();
+            return Err(io::Error::from_raw_os_error(EIO));
+        }
 
         // Calculate the end of the compressed data region
         let compressed_clusters_end = self.raw_file.cluster_address(
             compressed_cluster_addr             // Start of compressed data
             + compressed_cluster_size as u64    // Add size to get end address
-            + self.raw_file.cluster_size()
+            + cluster_size
                 - 1, // Catch possibly partially used last cluster
         );
 
@@ -1759,6 +1786,12 @@ impl QcowFile {
         }
 
         let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
+        let cluster_size = self.raw_file.cluster_size();
+        let max_valid = self.refcounts.max_valid_cluster_offset();
+        if !cluster_addr_is_valid(cluster_addr, cluster_size, max_valid) {
+            self.set_corrupt_bit_best_effort();
+            return Err(io::Error::from_raw_os_error(EIO));
+        }
 
         // Decrement the refcount.
         let refcount = self

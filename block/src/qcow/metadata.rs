@@ -27,9 +27,9 @@ use super::decoder::Decoder;
 use super::qcow_raw_file::QcowRawFile;
 use super::refcount::RefCount;
 use super::util::{
-    div_round_up_u64, l1_entry_make, l2_entry_compressed_cluster_layout, l2_entry_is_compressed,
-    l2_entry_is_empty, l2_entry_is_zero, l2_entry_make_std, l2_entry_make_zero,
-    l2_entry_std_cluster_addr,
+    cluster_addr_is_valid, compressed_cluster_range_is_valid, div_round_up_u64, l1_entry_make,
+    l2_entry_compressed_cluster_layout, l2_entry_is_compressed, l2_entry_is_empty,
+    l2_entry_is_zero, l2_entry_make_std, l2_entry_make_zero, l2_entry_std_cluster_addr,
 };
 use super::vec_cache::{CacheMap, Cacheable, VecCache};
 use super::{QcowHeader, refcount};
@@ -384,12 +384,23 @@ impl QcowState {
         let l2_index = self.l2_table_index(address) as usize;
         let l2_entry = l2_table[l2_index];
 
+        let cluster_size = self.raw_file.cluster_size();
+        let max_valid = self.refcounts.max_valid_cluster_offset();
+
         // Compressed entries: extract layout from L2 entry under read lock.
         // The caller reads and decompresses on its own fd without holding
         // the metadata lock.
         if l2_entry_is_compressed(l2_entry) {
             let (host_offset, compressed_size) =
                 l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
+            if !compressed_cluster_range_is_valid(
+                host_offset,
+                compressed_size,
+                cluster_size,
+                max_valid,
+            ) {
+                return Ok(None);
+            }
             let cluster_offset = self.raw_file.cluster_offset(address) as usize;
             return Ok(Some(ClusterReadMapping::Compressed {
                 host_offset,
@@ -416,9 +427,7 @@ impl QcowState {
             )))
         } else {
             let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
-            let cluster_size = self.raw_file.cluster_size();
-            if cluster_addr & (cluster_size - 1) != 0 {
-                // Fall through to write lock path which sets the corrupt bit
+            if !cluster_addr_is_valid(cluster_addr, cluster_size, max_valid) {
                 return Ok(None);
             }
             let intra_offset = self.raw_file.cluster_offset(address);
@@ -455,12 +464,23 @@ impl QcowState {
 
         let l2_index = self.l2_table_index(address) as usize;
         let l2_entry = self.l2_cache.get(l1_index).unwrap()[l2_index];
+        let cluster_size = self.raw_file.cluster_size();
+        let max_valid = self.refcounts.max_valid_cluster_offset();
 
         if l2_entry_is_empty(l2_entry) {
             Ok(self.unallocated_read_mapping(address, count, has_backing_file))
         } else if l2_entry_is_compressed(l2_entry) {
             let (host_offset, compressed_size) =
                 l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
+            if !compressed_cluster_range_is_valid(
+                host_offset,
+                compressed_size,
+                cluster_size,
+                max_valid,
+            ) {
+                self.set_corrupt_bit_best_effort();
+                return Err(io::Error::from_raw_os_error(EIO));
+            }
             let cluster_offset = self.raw_file.cluster_offset(address) as usize;
             Ok(ClusterReadMapping::Compressed {
                 host_offset,
@@ -475,8 +495,7 @@ impl QcowState {
             Ok(self.unallocated_read_mapping(address, count, has_backing_file))
         } else {
             let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
-            let cluster_size = self.raw_file.cluster_size();
-            if cluster_addr & (cluster_size - 1) != 0 {
+            if !cluster_addr_is_valid(cluster_addr, cluster_size, max_valid) {
                 self.set_corrupt_bit_best_effort();
                 return Err(io::Error::from_raw_os_error(EIO));
             }
@@ -562,9 +581,10 @@ impl QcowState {
             self.update_cluster_addr(l1_index, l2_index, cluster_addr, &mut set_refcounts)?;
             cluster_addr
         } else {
-            // Already allocated - validate alignment
             let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
-            if cluster_addr & (self.raw_file.cluster_size() - 1) != 0 {
+            let cluster_size = self.raw_file.cluster_size();
+            let max_valid = self.refcounts.max_valid_cluster_offset();
+            if !cluster_addr_is_valid(cluster_addr, cluster_size, max_valid) {
                 self.set_corrupt_bit_best_effort();
                 return Err(io::Error::from_raw_os_error(EIO));
             }
@@ -858,6 +878,12 @@ impl QcowState {
         }
 
         let cluster_addr = l2_entry_std_cluster_addr(l2_entry);
+        let cluster_size = self.raw_file.cluster_size();
+        let max_valid = self.refcounts.max_valid_cluster_offset();
+        if !cluster_addr_is_valid(cluster_addr, cluster_size, max_valid) {
+            self.set_corrupt_bit_best_effort();
+            return Err(io::Error::from_raw_os_error(EIO));
+        }
         let refcount = self
             .refcounts
             .get_cluster_refcount(&mut self.raw_file, cluster_addr)
@@ -1013,6 +1039,17 @@ impl QcowState {
     fn decompress_l2_cluster(&mut self, l2_entry: u64) -> io::Result<Vec<u8>> {
         let (compressed_addr, compressed_size) =
             l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
+        let cluster_size_u64 = self.raw_file.cluster_size();
+        let max_valid = self.refcounts.max_valid_cluster_offset();
+        if !compressed_cluster_range_is_valid(
+            compressed_addr,
+            compressed_size,
+            cluster_size_u64,
+            max_valid,
+        ) {
+            self.set_corrupt_bit_best_effort();
+            return Err(io::Error::from_raw_os_error(EIO));
+        }
         self.raw_file
             .file_mut()
             .seek(io::SeekFrom::Start(compressed_addr))?;
@@ -1039,6 +1076,16 @@ impl QcowState {
         let (compressed_addr, compressed_size) =
             l2_entry_compressed_cluster_layout(l2_entry, self.header.cluster_bits);
         let cluster_size = self.raw_file.cluster_size();
+        let max_valid = self.refcounts.max_valid_cluster_offset();
+        if !compressed_cluster_range_is_valid(
+            compressed_addr,
+            compressed_size,
+            cluster_size,
+            max_valid,
+        ) {
+            self.set_corrupt_bit_best_effort();
+            return Err(io::Error::from_raw_os_error(EIO));
+        }
 
         // Calculate the end of the compressed data region
         let compressed_clusters_end = self.raw_file.cluster_address(
