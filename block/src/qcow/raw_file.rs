@@ -202,7 +202,7 @@ impl Read for RawFile {
                 to_copy = buf_len;
             }
 
-            buf.copy_from_slice(&tmp_buf[file_offset..(file_offset + buf_len)]);
+            buf[..to_copy].copy_from_slice(&tmp_buf[file_offset..(file_offset + to_copy)]);
             // SAFETY: tmp_ptr was allocated by alloc_zeroed with layout
             unsafe { dealloc(tmp_ptr, layout) };
 
