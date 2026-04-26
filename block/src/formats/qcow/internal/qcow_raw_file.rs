@@ -106,7 +106,8 @@ where
     let bytes_per_entry = size_of::<T>();
     let mut buffer = BufWriter::with_capacity(table.len() * bytes_per_entry, file);
     for &val in table {
-        let converted = T::try_from(val).expect("refcount values are validated on increment");
+        let converted = T::try_from(val)
+            .map_err(|_| io::Error::other(format!("refcount value out of range: {val}")))?;
         T::write_be(&mut buffer, converted)?;
     }
     buffer.flush()
