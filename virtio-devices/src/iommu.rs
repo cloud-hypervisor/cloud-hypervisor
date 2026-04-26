@@ -505,32 +505,38 @@ impl Request {
                         .map(|(&e, _)| e)
                         .collect();
 
-                    // For viommu all endpoints receive their own VFIO container, as a result
-                    // Each endpoint within the domain needs to be separately mapped, as the
-                    // mapping is done on a per-container level, not a per-domain level
+                    let mut mapped: Vec<u32> = Vec::new();
+                    let rollback = |mapped: &[u32]| {
+                        for ep in mapped {
+                            if let Some(pmap) = ext_mapping.get(ep) {
+                                let _ = pmap.unmap(req.virt_start, size);
+                            }
+                        }
+                    };
                     for endpoint in endpoints {
                         if let Some(ext_map) = ext_mapping.get(&endpoint) {
-                            ext_map
-                                .map(req.virt_start, req.phys_start, size)
-                                .map_err(Error::ExternalMapping)?;
+                            if let Err(e) = ext_map.map(req.virt_start, req.phys_start, size) {
+                                rollback(&mapped);
+                                status = VIRTIO_IOMMU_S_DEVERR;
+                                return Err(Error::ExternalMapping(e));
+                            }
+                            mapped.push(endpoint);
                         }
                     }
 
-                    // Add new mapping associated with the domain
-                    mapping
-                        .domains
-                        .write()
-                        .unwrap()
-                        .get_mut(&domain_id)
-                        .unwrap()
-                        .mappings
-                        .insert(
-                            req.virt_start,
-                            Mapping {
-                                gpa: req.phys_start,
-                                size,
-                            },
-                        );
+                    let mut domains = mapping.domains.write().unwrap();
+                    let Some(domain) = domains.get_mut(&domain_id) else {
+                        rollback(&mapped);
+                        status = VIRTIO_IOMMU_S_INVAL;
+                        return Err(Error::InvalidMapRequestMissingDomain);
+                    };
+                    domain.mappings.insert(
+                        req.virt_start,
+                        Mapping {
+                            gpa: req.phys_start,
+                            size,
+                        },
+                    );
                 }
                 VIRTIO_IOMMU_T_UNMAP => {
                     if desc_size_left != size_of::<VirtioIommuReqUnmap>() {
@@ -609,13 +615,12 @@ impl Request {
                         }
                     }
 
-                    // Remove all mappings associated with the domain within the requested range
-                    mapping
-                        .domains
-                        .write()
-                        .unwrap()
-                        .get_mut(&domain_id)
-                        .unwrap()
+                    let mut domains = mapping.domains.write().unwrap();
+                    let Some(domain) = domains.get_mut(&domain_id) else {
+                        status = VIRTIO_IOMMU_S_INVAL;
+                        return Err(Error::InvalidUnmapRequestMissingDomain);
+                    };
+                    domain
                         .mappings
                         .retain(|&x, _| x < req.virt_start || x > req.virt_end);
                 }
