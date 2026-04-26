@@ -125,7 +125,7 @@ impl Read for Vhdx {
 
 impl Write for Vhdx {
     fn flush(&mut self) -> std::result::Result<(), std::io::Error> {
-        self.file.flush()
+        self.file.sync_all()
     }
 
     /// Wrapper function to satisfy Write trait implementation for VHDx disk.
