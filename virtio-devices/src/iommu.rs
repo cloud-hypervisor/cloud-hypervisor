@@ -151,7 +151,7 @@ struct VirtioIommuReqAttach {
     domain: u32,
     endpoint: u32,
     flags: u32,
-    _reserved: [u8; 4],
+    reserved: [u8; 4],
 }
 
 const VIRTIO_IOMMU_ATTACH_F_BYPASS: u32 = 1;
@@ -405,11 +405,25 @@ impl Request {
                         .map_err(Error::GuestMemory)?;
                     debug!("Attach request 0x{req:x?}");
 
+                    if req.reserved.iter().any(|&b| b != 0)
+                        || (req.flags & !VIRTIO_IOMMU_ATTACH_F_BYPASS) != 0
+                    {
+                        status = VIRTIO_IOMMU_S_INVAL;
+                        return Err(Error::InvalidAttachRequest);
+                    }
+
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
                     let endpoint = req.endpoint;
                     let bypass =
                         (req.flags & VIRTIO_IOMMU_ATTACH_F_BYPASS) == VIRTIO_IOMMU_ATTACH_F_BYPASS;
+
+                    if let Some(d) = mapping.domains.read().unwrap().get(&domain_id)
+                        && d.bypass != bypass
+                    {
+                        status = VIRTIO_IOMMU_S_INVAL;
+                        return Err(Error::InvalidAttachRequest);
+                    }
 
                     let mut old_domain_id = domain_id;
                     if let Some(&id) = mapping.endpoints.read().unwrap().get(&endpoint) {
