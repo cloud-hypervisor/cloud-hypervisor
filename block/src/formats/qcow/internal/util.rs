@@ -38,6 +38,7 @@ pub(super) fn l2_entry_is_compressed(l2_entry: u64) -> bool {
 
 /// Get file offset and size of compressed cluster data.
 pub(super) fn l2_entry_compressed_cluster_layout(l2_entry: u64, cluster_bits: u32) -> (u64, usize) {
+    debug_assert!(cluster_bits >= 9);
     let compressed_size_shift = 62 - (cluster_bits - 8);
     let compressed_size_mask = (1 << (cluster_bits - 8)) - 1;
     let compressed_cluster_addr = l2_entry & ((1 << compressed_size_shift) - 1);
