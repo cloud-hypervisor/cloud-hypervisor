@@ -100,7 +100,7 @@ impl RawFile {
 
     pub fn try_clone(&self) -> std::io::Result<RawFile> {
         Ok(RawFile {
-            file: self.file.try_clone().expect("RawFile cloning failed"),
+            file: self.file.try_clone()?,
             alignment: self.alignment,
             position: self.position,
             direct_io: self.direct_io,
