@@ -565,7 +565,7 @@ pub(crate) fn parse_qcow(
     let refcount_clusters = max_refcount_clusters(
         header.refcount_order,
         cluster_size as u32,
-        (num_clusters + l1_clusters + num_l2_clusters + header_clusters) as u32,
+        num_clusters + l1_clusters + num_l2_clusters + header_clusters,
     );
     // Check that the given header doesn't have a suspiciously sized refcount table.
     if u64::from(header.refcount_table_clusters) > 2 * refcount_clusters {
@@ -2524,15 +2524,18 @@ mod unit_tests {
         let mut header = QcowHeader::create_for_size_and_path(3, size, None).unwrap();
         let cluster_size = 1u32 << cluster_bits;
         let entries_per_cluster = cluster_size / std::mem::size_of::<u64>() as u32;
-        let num_clusters = div_round_up_u64(size, u64::from(cluster_size)) as u32;
-        let num_l2_clusters = div_round_up_u32(num_clusters, entries_per_cluster);
+        let num_clusters: u64 = div_round_up_u64(size, u64::from(cluster_size));
+        let num_l2_clusters = div_round_up_u64(num_clusters, u64::from(entries_per_cluster)) as u32;
         let l1_clusters = div_round_up_u32(num_l2_clusters, entries_per_cluster);
         let header_clusters =
             div_round_up_u32(std::mem::size_of::<QcowHeader>() as u32, cluster_size);
         let max_refcount_clusters = max_refcount_clusters(
             DEFAULT_REFCOUNT_ORDER,
             cluster_size,
-            num_clusters + l1_clusters + num_l2_clusters + header_clusters,
+            num_clusters
+                + u64::from(l1_clusters)
+                + u64::from(num_l2_clusters)
+                + u64::from(header_clusters),
         ) as u32;
 
         header.cluster_bits = cluster_bits;

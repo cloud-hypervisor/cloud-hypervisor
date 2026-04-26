@@ -400,8 +400,9 @@ impl QcowHeader {
 
         // L2 blocks are always one cluster long. They contain cluster_size/sizeof(u64) addresses.
         let entries_per_cluster: u32 = cluster_size / size_of::<u64>() as u32;
-        let num_clusters: u32 = div_round_up_u64(size, u64::from(cluster_size)) as u32;
-        let num_l2_clusters: u32 = div_round_up_u32(num_clusters, entries_per_cluster);
+        let num_clusters: u64 = div_round_up_u64(size, u64::from(cluster_size));
+        let num_l2_clusters: u32 =
+            div_round_up_u64(num_clusters, u64::from(entries_per_cluster)) as u32;
         let l1_clusters: u32 = div_round_up_u32(num_l2_clusters, entries_per_cluster);
         let header_clusters = div_round_up_u32(size_of::<QcowHeader>() as u32, cluster_size);
         Ok(QcowHeader {
@@ -430,7 +431,10 @@ impl QcowHeader {
                 let max_refcount_clusters = max_refcount_clusters(
                     DEFAULT_REFCOUNT_ORDER,
                     cluster_size,
-                    num_clusters + l1_clusters + num_l2_clusters + header_clusters,
+                    num_clusters
+                        + u64::from(l1_clusters)
+                        + u64::from(num_l2_clusters)
+                        + u64::from(header_clusters),
                 ) as u32;
                 // The refcount table needs to store the offset of each refcount cluster.
                 div_round_up_u32(
@@ -591,12 +595,12 @@ impl QcowHeader {
 pub(super) fn max_refcount_clusters(
     refcount_order: u32,
     cluster_size: u32,
-    num_clusters: u32,
+    num_clusters: u64,
 ) -> u64 {
     // Use u64 as the product of the u32 inputs can overflow.
     let refcount_bits = 0x01u64 << u64::from(refcount_order);
     let cluster_bits = u64::from(cluster_size) * 8;
-    let for_data = div_round_up_u64(u64::from(num_clusters) * refcount_bits, cluster_bits);
+    let for_data = div_round_up_u64(num_clusters * refcount_bits, cluster_bits);
     let for_refcounts = div_round_up_u64(for_data * refcount_bits, cluster_bits);
     for_data + for_refcounts
 }
