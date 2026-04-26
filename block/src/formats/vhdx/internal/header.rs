@@ -253,7 +253,6 @@ impl RegionTableHeader {
 pub struct RegionInfo {
     pub bat_entry: RegionTableEntry,
     pub mdr_entry: RegionTableEntry,
-    pub region_entries: BTreeMap<u64, u64>,
 }
 
 impl RegionInfo {
@@ -319,7 +318,6 @@ impl RegionInfo {
         }
 
         if bat_entry.is_none() || mdr_entry.is_none() {
-            region_entries.clear();
             return Err(VhdxHeaderError::RegionEntryCollectionFailed);
         }
 
@@ -331,7 +329,6 @@ impl RegionInfo {
         Ok(RegionInfo {
             bat_entry,
             mdr_entry,
-            region_entries,
         })
     }
 }
