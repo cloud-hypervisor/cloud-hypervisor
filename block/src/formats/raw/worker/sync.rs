@@ -159,7 +159,7 @@ mod unit_tests {
     use vmm_sys_util::tempfile::TempFile;
 
     use super::*;
-    use crate::raw_disk::worker::tests;
+    use crate::formats::raw::worker::tests;
 
     #[test]
     fn test_punch_hole() {

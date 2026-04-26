@@ -29,7 +29,6 @@ use std::str::FromStr;
 use std::{cmp, mem, result};
 
 pub use formats::qcow::internal as qcow;
-pub use formats::raw as raw_disk;
 pub use formats::vhdx::internal as vhdx;
 #[cfg(feature = "io_uring")]
 use io_uring::{IoUring, Probe, opcode};

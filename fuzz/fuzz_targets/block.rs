@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::{ffi, io};
 
 use block::fcntl::LockGranularityChoice;
-use block::raw_disk::{RawBackend, RawDisk};
+use block::formats::raw::{RawBackend, RawDisk};
 use libfuzzer_sys::{fuzz_target, Corpus};
 use seccompiler::SeccompAction;
 use virtio_devices::{Block, VirtioDevice, VirtioInterrupt, VirtioInterruptType};
