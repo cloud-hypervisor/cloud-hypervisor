@@ -81,6 +81,8 @@ pub enum VhdxHeaderError {
     SeekRegionTableEntries(#[source] io::Error),
     #[error("Failed to seek in region table header {0}")]
     SeekRegionTableHeader(#[source] io::Error),
+    #[error("Header sequence number overflowed")]
+    SequenceOverflow,
     #[error("We do not recognize this entry")]
     UnrecognizedRegionEntry,
     #[error("Failed to write header {0}")]
@@ -180,7 +182,10 @@ impl Header {
         let mut new_header = Header {
             signature: current_header.signature,
             checksum: 0,
-            sequence_number: current_header.sequence_number + 1,
+            sequence_number: current_header
+                .sequence_number
+                .checked_add(1)
+                .ok_or(VhdxHeaderError::SequenceOverflow)?,
             file_write_guid,
             data_write_guid,
             log_guid: current_header.log_guid,
@@ -196,7 +201,7 @@ impl Header {
 
         f.seek(SeekFrom::Start(start))
             .map_err(VhdxHeaderError::SeekHeader)?;
-        f.write(&buffer).map_err(VhdxHeaderError::WriteHeader)?;
+        f.write_all(&buffer).map_err(VhdxHeaderError::WriteHeader)?;
 
         Ok(new_header)
     }
