@@ -226,6 +226,11 @@ impl QcowHeader {
 
             let ext_length = u32::read_be(f).map_err(Error::ReadingHeader)?;
 
+            const MAX_EXT_LENGTH: u32 = 1 << 20;
+            if ext_length > MAX_EXT_LENGTH {
+                return Err(Error::HeaderExtensionTooLarge(ext_length));
+            }
+
             match ext_type {
                 HEADER_EXT_BACKING_FORMAT => {
                     let mut format_bytes = vec![0u8; ext_length as usize];

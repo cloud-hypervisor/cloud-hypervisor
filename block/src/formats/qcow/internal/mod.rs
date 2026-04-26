@@ -82,6 +82,8 @@ pub enum Error {
     GettingFileSize(#[source] io::Error),
     #[error("Failed to get refcount")]
     GettingRefcount(#[source] refcount::Error),
+    #[error("Header extension length too large: {0}")]
+    HeaderExtensionTooLarge(u32),
     #[error("Failed to parse filename")]
     InvalidBackingFileName(#[source] str::Utf8Error),
     #[error("Invalid cluster index")]
