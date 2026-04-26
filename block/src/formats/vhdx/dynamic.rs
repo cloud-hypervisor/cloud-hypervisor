@@ -35,7 +35,7 @@ pub(super) type Result<T> = result::Result<T, VhdxError>;
 enum VhdxIoError {
     #[error("Invalid BAT entry state")]
     InvalidBatEntryState,
-    #[error("Invalid BAT entry file offset: payload block overlaps a reserved area")]
+    #[error("Invalid BAT entry file offset")]
     InvalidBatFileOffset,
     #[error("Invalid BAT entry count")]
     InvalidBatIndex,
@@ -91,9 +91,10 @@ impl Sector {
                 return Err(VhdxIoError::InvalidBatIndex);
             }
         };
-        sector.file_offset = bat_entry & bat::BAT_FILE_OFF_MASK;
-        if sector.file_offset != 0 {
-            sector.file_offset += sector.block_offset;
+        if bat_entry & bat::BAT_STATE_BIT_MASK == bat::PAYLOAD_BLOCK_FULLY_PRESENT {
+            sector.file_offset = (bat_entry & bat::BAT_FILE_OFF_MASK)
+                .checked_add(sector.block_offset)
+                .ok_or(VhdxIoError::InvalidBatFileOffset)?;
         }
 
         Ok(sector)
@@ -419,6 +420,33 @@ mod tests {
     const VHDX_HEADER_2_OFFSET: u64 = 0x20000;
     const VHDX_HEADER_SIZE: usize = 4096;
     const VHDX_LOG_GUID_OFFSET: usize = 48;
+
+    #[test]
+    fn sector_translation_ignores_unused_offsets() {
+        let spec = DiskSpec {
+            logical_sector_size: 512,
+            sectors_per_block: 4096,
+            chunk_ratio: 2048,
+            ..Default::default()
+        };
+        for state in [
+            bat::PAYLOAD_BLOCK_NOT_PRESENT,
+            bat::PAYLOAD_BLOCK_UNDEFINED,
+            bat::PAYLOAD_BLOCK_ZERO,
+            bat::PAYLOAD_BLOCK_UNMAPPED,
+        ] {
+            let bat = [BatEntry(bat::BAT_FILE_OFF_MASK | state)];
+            let sector = Sector::new(&spec, &bat, 2048, 1).unwrap();
+            assert_eq!(sector.file_offset, 0);
+        }
+        let bat = [BatEntry(
+            bat::BAT_FILE_OFF_MASK | bat::PAYLOAD_BLOCK_FULLY_PRESENT,
+        )];
+        assert!(matches!(
+            Sector::new(&spec, &bat, 2048, 1),
+            Err(VhdxIoError::InvalidBatFileOffset)
+        ));
+    }
 
     /// A VHDX image with an active log must be rejected until replay is
     /// supported; opening it would silently use a stale BAT.
