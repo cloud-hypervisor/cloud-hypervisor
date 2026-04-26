@@ -123,6 +123,13 @@ impl DiskSpec {
             let metadata_entry =
                 MetadataTableEntry::new(&buffer[offset..offset + size_of::<MetadataTableEntry>()])?;
 
+            let entry_end = (metadata_entry.offset as u64)
+                .checked_add(metadata_entry.length as u64)
+                .ok_or(VhdxMetadataError::InvalidMetadataLength)?;
+            if entry_end > metadata_region.length as u64 {
+                return Err(VhdxMetadataError::InvalidMetadataLength);
+            }
+
             f.seek(SeekFrom::Start(
                 metadata_region.file_offset + metadata_entry.offset as u64,
             ))
