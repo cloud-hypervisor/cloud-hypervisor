@@ -737,7 +737,6 @@ pub struct Mem {
     dma_mapping_handlers: Arc<Mutex<BTreeMap<VirtioMemMappingSource, Arc<dyn ExternalDmaMapping>>>>,
     blocks_state: Arc<Mutex<BlocksState>>,
     exit_evt: EventFd,
-    interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
 }
 
 impl Mem {
@@ -830,7 +829,6 @@ impl Mem {
             dma_mapping_handlers: Arc::new(Mutex::new(BTreeMap::new())),
             blocks_state,
             exit_evt,
-            interrupt_cb: None,
         })
     }
 
@@ -844,15 +842,11 @@ impl Mem {
             Error::ResizeError(anyhow!("Failed to update virtio configuration: {e:?}"))
         })?;
 
-        if let Some(interrupt_cb) = self.interrupt_cb.as_ref() {
-            interrupt_cb
-                .trigger(VirtioInterruptType::Config)
-                .map_err(|e| {
-                    Error::ResizeError(anyhow!("Failed to signal the guest about resize: {e:?}"))
-                })
-        } else {
-            Ok(())
-        }
+        self.common
+            .trigger_interrupt(VirtioInterruptType::Config)
+            .map_err(|e| {
+                Error::ResizeError(anyhow!("Failed to signal the guest about resize: {e:?}"))
+            })
     }
 
     pub fn add_dma_mapping_handler(
@@ -966,8 +960,6 @@ impl VirtioDevice for Mem {
 
         let (_, queue, queue_evt) = queues.remove(0);
 
-        self.interrupt_cb = Some(interrupt_cb.clone());
-
         let mut handler = MemEpollHandler {
             mem,
             region: self.region.clone(),
@@ -1016,10 +1008,9 @@ impl VirtioDevice for Mem {
         Ok(())
     }
 
-    fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
-        let result = self.common.reset();
+    fn reset(&mut self) {
+        self.common.reset();
         event!("virtio-device", "reset", "id", &self.id);
-        result
     }
 }
 

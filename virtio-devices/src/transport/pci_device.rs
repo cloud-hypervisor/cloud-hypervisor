@@ -300,7 +300,7 @@ pub struct VirtioPciDeviceState {
 }
 
 pub struct VirtioPciDeviceActivator {
-    interrupt: Option<Arc<dyn VirtioInterrupt>>,
+    interrupt: Arc<dyn VirtioInterrupt>,
     memory: Option<GuestMemoryAtomic<GuestMemoryMmap>>,
     device: Arc<Mutex<dyn VirtioDevice>>,
     device_activated: Arc<AtomicBool>,
@@ -315,7 +315,7 @@ impl VirtioPciDeviceActivator {
         let mut locked_device = self.device.lock().unwrap();
         locked_device.activate(crate::device::ActivationContext {
             mem: self.memory.take().unwrap(),
-            interrupt_cb: self.interrupt.take().unwrap(),
+            interrupt_cb: self.interrupt,
             queues: self.queues.take().unwrap(),
             device_status: self.status,
         })?;
@@ -822,7 +822,7 @@ impl VirtioPciDevice {
         }
 
         VirtioPciDeviceActivator {
-            interrupt: self.virtio_interrupt.take(),
+            interrupt: self.virtio_interrupt.as_ref().unwrap().clone(),
             memory: Some(self.memory.clone()),
             device: self.device.clone(),
             queues: Some(queues),
@@ -1250,10 +1250,7 @@ impl PciDevice for VirtioPciDevice {
         if self.is_driver_init() {
             if self.device_activated.swap(false, Ordering::SeqCst) {
                 let mut device = self.device.lock().unwrap();
-                if let Some(virtio_interrupt) = device.reset() {
-                    // Upon reset the device returns its interrupt EventFD
-                    self.virtio_interrupt = Some(virtio_interrupt);
-                }
+                device.reset();
             }
 
             // Reset queue readiness and the common configuration

@@ -28,7 +28,7 @@ use super::{DEFAULT_VIRTIO_FEATURES, Error, Result};
 use crate::seccomp_filters::Thread;
 use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::{VhostUserCommon, VhostUserState};
-use crate::{GuestMemoryMmap, GuestRegionMmap, VIRTIO_F_ACCESS_PLATFORM, VirtioInterrupt};
+use crate::{GuestMemoryMmap, GuestRegionMmap, VIRTIO_F_ACCESS_PLATFORM};
 
 const DEFAULT_QUEUE_NUMBER: usize = 1;
 
@@ -307,8 +307,8 @@ impl VirtioDevice for Blk {
         Ok(())
     }
 
-    fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
-        self.vu_common.reset(&self.id)
+    fn reset(&mut self) {
+        self.vu_common.reset(&self.id);
     }
 
     fn shutdown(&mut self) {

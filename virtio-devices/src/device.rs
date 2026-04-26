@@ -123,11 +123,8 @@ pub trait VirtioDevice: Send {
     /// Activates this device for real usage.
     fn activate(&mut self, context: ActivationContext) -> ActivateResult;
 
-    /// Optionally deactivates this device and returns ownership of the guest memory map, interrupt
-    /// event, and queue events.
-    fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
-        None
-    }
+    /// Optionally deactivates this device.
+    fn reset(&mut self) {}
 
     /// Returns the list of shared memory regions required by the device.
     fn get_shm_regions(&self) -> Option<VirtioSharedMemoryList> {
@@ -290,7 +287,7 @@ impl VirtioCommon {
         Ok(())
     }
 
-    pub fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
+    pub fn reset(&mut self) {
         self.queue_evts.clear();
 
         // Resume the virtio thread if it was paused. Reset must always
@@ -315,8 +312,16 @@ impl VirtioCommon {
             }
         }
 
-        // Return the interrupt
-        Some(self.interrupt_cb.take().unwrap())
+        // Drop the interrupt callback clone
+        self.interrupt_cb = None;
+    }
+
+    pub fn trigger_interrupt(&self, int_type: VirtioInterruptType) -> std::io::Result<()> {
+        if let Some(interrupt_cb) = &self.interrupt_cb {
+            interrupt_cb.trigger(int_type)
+        } else {
+            Ok(())
+        }
     }
 
     // Wait for the worker thread to finish and return
@@ -406,12 +411,9 @@ impl Pausable for VirtioCommon {
         }
 
         // Also trigger interrupts into the guest to wake up the driver to avoid a "livelock"
-        if let Some(interrupt_cb) = &self.interrupt_cb {
-            for i in 0..self.queue_evts.len() {
-                interrupt_cb
-                    .trigger(crate::VirtioInterruptType::Queue(i as u16))
-                    .ok();
-            }
+        for i in 0..self.queue_evts.len() {
+            self.trigger_interrupt(crate::VirtioInterruptType::Queue(i as u16))
+                .ok();
         }
 
         Ok(())

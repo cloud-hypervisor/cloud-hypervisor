@@ -347,7 +347,6 @@ pub struct VhostUserCommon {
     pub vu_num_queues: usize,
     pub migration_started: bool,
     pub server: bool,
-    pub interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
     pub vring_bases: Option<Vec<u64>>,
     pub epoll_thread: Option<thread::JoinHandle<()>>,
 }
@@ -395,8 +394,6 @@ impl VhostUserCommon {
             )
             .map_err(ActivateError::VhostUserSetup)?;
 
-        self.interrupt_cb = Some(interrupt_cb.clone());
-
         Ok(VhostUserEpollHandler {
             vu: vu.clone(),
             mem,
@@ -428,7 +425,7 @@ impl VhostUserCommon {
         Ok(())
     }
 
-    pub fn reset(&mut self, id: &str) -> Option<Arc<dyn VirtioInterrupt>> {
+    pub fn reset(&mut self, id: &str) {
         // Resume the virtio thread if it was paused. Reset must always
         // converge to fresh state, so backend resume / reset failures are
         // logged but don't skip the rest of the teardown.
@@ -454,8 +451,8 @@ impl VhostUserCommon {
 
         event!("virtio-device", "reset", "id", id);
 
-        // Return the interrupt
-        Some(self.virtio_common.interrupt_cb.take().unwrap())
+        // Drop the interrupt callback clone
+        self.virtio_common.interrupt_cb = None;
     }
 
     pub fn shutdown(&mut self) {
@@ -525,12 +522,10 @@ impl VhostUserCommon {
                 MigratableError::Resume(anyhow!("Error resuming vhost-user backend: {e:?}"))
             })?;
         }
-        if let Some(interrupt_cb) = &self.interrupt_cb {
-            for i in 0..self.vu_num_queues {
-                interrupt_cb
-                    .trigger(crate::VirtioInterruptType::Queue(i as u16))
-                    .ok();
-            }
+        for i in 0..self.vu_num_queues {
+            self.virtio_common
+                .trigger_interrupt(crate::VirtioInterruptType::Queue(i as u16))
+                .ok();
         }
         Ok(())
     }

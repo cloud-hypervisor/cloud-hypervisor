@@ -1120,10 +1120,9 @@ impl VirtioDevice for Iommu {
         Ok(())
     }
 
-    fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
-        let result = self.common.reset();
+    fn reset(&mut self) {
+        self.common.reset();
         event!("virtio-device", "reset", "id", &self.id);
-        result
     }
 }
 
