@@ -80,6 +80,10 @@ const VIRTIO_IOMMU_PAGE_GRANULE: u64 = {
 // ~64 MiB at ~64 bytes/entry, well above any legitimate workload.
 const MAX_MAPPINGS_PER_DOMAIN: usize = 1 << 20;
 
+// Bound the per-device domain count so a guest cannot grow the
+// domain map indefinitely with ATTACH-only requests.
+const MAX_DOMAINS: usize = 1 << 16;
+
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
 #[allow(dead_code)]
@@ -332,6 +336,8 @@ enum Error {
     InvalidUnmapRequestPartialOverlap,
     #[error("Per-domain mapping count cap exceeded")]
     MappingCountExceeded,
+    #[error("Per-device domain count cap exceeded")]
+    DomainCountExceeded,
     #[error("Guest sent us invalid PROBE request")]
     InvalidProbeRequest,
     #[error("Failed to performing external mapping")]
@@ -430,6 +436,17 @@ impl Request {
                         return Err(Error::InvalidAttachRequest);
                     }
 
+                    // Refuse before mutating any state so a failed ATTACH
+                    // does not leave a phantom endpoint pointing at a
+                    // domain that was never created.
+                    {
+                        let domains = mapping.domains.read().unwrap();
+                        if !domains.contains_key(&domain_id) && domains.len() >= MAX_DOMAINS {
+                            status = VIRTIO_IOMMU_S_NOMEM;
+                            return Err(Error::DomainCountExceeded);
+                        }
+                    }
+
                     let mut old_domain_id = domain_id;
                     if let Some(&id) = mapping.endpoints.read().unwrap().get(&endpoint) {
                         old_domain_id = id;
@@ -460,6 +477,13 @@ impl Request {
 
                     // Add new domain with no mapping if the entry didn't exist yet
                     let mut domains = mapping.domains.write().unwrap();
+                    if !domains.contains_key(&domain_id) && domains.len() >= MAX_DOMAINS {
+                        // TOCTOU close: another ATTACH could have filled the
+                        // last slot between the read-lock pre-check and here.
+                        mapping.endpoints.write().unwrap().remove(&endpoint);
+                        status = VIRTIO_IOMMU_S_NOMEM;
+                        return Err(Error::DomainCountExceeded);
+                    }
                     let domain = Domain {
                         mappings: BTreeMap::new(),
                         bypass,
