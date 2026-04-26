@@ -14,9 +14,8 @@ use std::fs::File;
 use std::os::fd::AsRawFd;
 use std::sync::{Arc, Mutex};
 
-pub use internal::VhdxError;
+pub use internal::{Vhdx, VhdxError};
 
-use self::internal::Vhdx;
 use self::worker::sync::VhdxSync;
 use crate::async_io::{AsyncIo, BorrowedDiskFd, DiskFileError};
 use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
