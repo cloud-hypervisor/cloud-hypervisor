@@ -458,7 +458,6 @@ pub struct Balloon {
     config: VirtioBalloonConfig,
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
-    interrupt_cb: Option<Arc<dyn VirtioInterrupt>>,
 }
 
 impl Balloon {
@@ -523,20 +522,15 @@ impl Balloon {
             config,
             seccomp_action,
             exit_evt,
-            interrupt_cb: None,
         })
     }
 
     pub fn resize(&mut self, size: u64) -> Result<(), Error> {
         self.config.num_pages = (size >> VIRTIO_BALLOON_PFN_SHIFT) as u32;
 
-        if let Some(interrupt_cb) = &self.interrupt_cb {
-            interrupt_cb
-                .trigger(VirtioInterruptType::Config)
-                .map_err(Error::FailedSignal)
-        } else {
-            Ok(())
-        }
+        self.common
+            .trigger_interrupt(VirtioInterruptType::Config)
+            .map_err(Error::FailedSignal)
     }
 
     // Get the actual size of the virtio-balloon.
@@ -647,8 +641,6 @@ impl VirtioDevice for Balloon {
                 None
             };
 
-        self.interrupt_cb = Some(interrupt_cb.clone());
-
         let mut handler = BalloonEpollHandler {
             mem,
             queues: virtqueues,
@@ -688,10 +680,9 @@ impl VirtioDevice for Balloon {
         self.common.access_platform()
     }
 
-    fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
-        let result = self.common.reset();
+    fn reset(&mut self) {
+        self.common.reset();
         event!("virtio-device", "reset", "id", &self.id);
-        result
     }
 }
 

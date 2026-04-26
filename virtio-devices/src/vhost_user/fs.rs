@@ -25,7 +25,7 @@ use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::{VhostUserCommon, VhostUserState};
 use crate::{
     ActivateResult, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM,
-    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioInterrupt, VirtioSharedMemoryList,
+    VirtioCommon, VirtioDevice, VirtioDeviceType, VirtioSharedMemoryList,
 };
 
 const NUM_QUEUE_OFFSET: usize = 1;
@@ -285,8 +285,8 @@ impl VirtioDevice for Fs {
         Ok(())
     }
 
-    fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
-        self.vu_common.reset(&self.id)
+    fn reset(&mut self) {
+        self.vu_common.reset(&self.id);
     }
 
     fn shutdown(&mut self) {

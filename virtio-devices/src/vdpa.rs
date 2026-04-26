@@ -443,14 +443,13 @@ impl VirtioDevice for Vdpa {
         self.activate_vdpa(&mem.memory(), virtio_interrupt.as_ref(), &queues)
             .map_err(ActivateError::ActivateVdpa)?;
 
-        // Store the virtio interrupt handler as we need to return it on reset
         self.common.interrupt_cb = Some(virtio_interrupt);
 
         event!("vdpa", "activated", "id", &self.id);
         Ok(())
     }
 
-    fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
+    fn reset(&mut self) {
         // Backend reset failures are logged but don't skip local cleanup:
         // reset must converge to fresh state regardless of backend state.
         if let Err(e) = self.reset_vdpa() {
@@ -459,8 +458,8 @@ impl VirtioDevice for Vdpa {
 
         event!("vdpa", "reset", "id", &self.id);
 
-        // Return the virtio interrupt handler
-        self.common.interrupt_cb.take()
+        // Drop the interrupt callback clone
+        self.common.interrupt_cb = None;
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {

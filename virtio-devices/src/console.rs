@@ -773,10 +773,9 @@ impl VirtioDevice for Console {
         Ok(())
     }
 
-    fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
-        let result = self.common.reset();
+    fn reset(&mut self) {
+        self.common.reset();
         event!("virtio-device", "reset", "id", &self.id);
-        result
     }
 
     fn set_access_platform(&mut self, access_platform: Arc<dyn AccessPlatform>) {

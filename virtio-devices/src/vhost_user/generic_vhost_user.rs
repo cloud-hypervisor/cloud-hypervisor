@@ -26,7 +26,7 @@ use crate::thread_helper::spawn_virtio_thread;
 use crate::vhost_user::{VhostUserCommon, VhostUserState};
 use crate::{
     ActivateResult, GuestMemoryMmap, GuestRegionMmap, MmapRegion, VIRTIO_F_ACCESS_PLATFORM,
-    VirtioCommon, VirtioDevice, VirtioInterrupt, VirtioSharedMemoryList,
+    VirtioCommon, VirtioDevice, VirtioSharedMemoryList,
 };
 
 pub type State = VhostUserState<()>;
@@ -308,8 +308,8 @@ impl VirtioDevice for GenericVhostUser {
         Ok(())
     }
 
-    fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
-        self.vu_common.reset(&self.id)
+    fn reset(&mut self) {
+        self.vu_common.reset(&self.id);
     }
 
     fn shutdown(&mut self) {

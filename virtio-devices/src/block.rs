@@ -1025,13 +1025,9 @@ impl Block {
 
         self.common.resume().map_err(Error::ResumeVcpus)?;
 
-        if let Some(interrupt_cb) = self.common.interrupt_cb.as_ref() {
-            interrupt_cb
-                .trigger(VirtioInterruptType::Config)
-                .map_err(Error::ConfigChange)
-        } else {
-            Ok(())
-        }
+        self.common
+            .trigger_interrupt(VirtioInterruptType::Config)
+            .map_err(Error::ConfigChange)
     }
 
     #[cfg(fuzzing)]
@@ -1178,11 +1174,10 @@ impl VirtioDevice for Block {
         Ok(())
     }
 
-    fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
-        let result = self.common.reset();
+    fn reset(&mut self) {
+        self.common.reset();
         self.set_writeback_mode(true);
         event!("virtio-device", "reset", "id", &self.id);
-        result
     }
 
     fn counters(&self) -> Option<HashMap<&'static str, Wrapping<u64>>> {
