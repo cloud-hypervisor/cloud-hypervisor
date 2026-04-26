@@ -13,7 +13,7 @@ use std::time::Instant;
 
 use block::async_io::AsyncIoOperation;
 use block::disk_file::AsyncDiskFile;
-use block::raw_disk::{RawBackend, RawDisk};
+use block::formats::raw::{RawBackend, RawDisk};
 
 use crate::PerformanceTestControl;
 use crate::util::{
