@@ -180,7 +180,7 @@ pub fn write(
                     break;
                 }
 
-                f.seek(SeekFrom::Start(file_offset))
+                f.seek(SeekFrom::Start(file_offset + sector.block_offset))
                     .map_err(VhdxIoError::ReadSectorBlock)?;
                 f.write_all(&buf[write_count..(write_count + sector.free_bytes as usize)])
                     .map_err(VhdxIoError::ReadSectorBlock)?;
