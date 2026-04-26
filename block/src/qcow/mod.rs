@@ -549,7 +549,7 @@ pub(crate) fn parse_qcow(
     let refcount_clusters = max_refcount_clusters(
         header.refcount_order,
         cluster_size as u32,
-        (num_clusters + l1_clusters + num_l2_clusters + header_clusters) as u32,
+        num_clusters + l1_clusters + num_l2_clusters + header_clusters,
     );
     // Check that the given header doesn't have a suspiciously sized refcount table.
     if u64::from(header.refcount_table_clusters) > 2 * refcount_clusters {
