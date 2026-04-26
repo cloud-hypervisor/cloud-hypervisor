@@ -30,13 +30,16 @@ impl VhdFooter {
     pub fn new(file: &mut File) -> std::io::Result<VhdFooter> {
         let blocksize = DiskTopology::probe(file)?.logical_block_size as usize;
 
+        let offset = blocksize
+            .checked_sub(512)
+            .ok_or_else(|| std::io::Error::other("logical block size below 512 bytes"))?;
+
         // Place the cursor in the last block of the file
         file.seek(SeekFrom::End(0 - (blocksize as i64)))?;
         // Read in the last block
         let data = read_aligned_block_size(file)?;
 
         // We only care about the last sector
-        let offset = blocksize - 512;
         let sector = &data[offset..];
 
         Ok(VhdFooter {
