@@ -67,6 +67,8 @@ pub enum VhdxHeaderError {
     ReadRegionTableHeader(#[source] io::Error),
     #[error("Failed to read region entries")]
     RegionEntryCollectionFailed,
+    #[error("Region table entry length overflows file offset")]
+    RegionLengthOverflow,
     #[error("Overlapping regions found")]
     RegionOverlap,
     #[error("Reserved region has non-zero value")]
@@ -274,15 +276,19 @@ impl RegionInfo {
 
             offset += size_of::<RegionTableEntry>();
             let start = entry.file_offset;
-            let end = start + entry.length as u64;
+            let end = start
+                .checked_add(entry.length as u64)
+                .ok_or(VhdxHeaderError::RegionLengthOverflow)?;
 
-            for (region_ent_start, region_ent_end) in region_entries.iter() {
-                if !((start >= *region_ent_start) || (end <= *region_ent_end)) {
+            for (&region_ent_start, &region_ent_end) in region_entries.iter() {
+                if start < region_ent_end && region_ent_start < end {
                     return Err(VhdxHeaderError::RegionOverlap);
                 }
             }
 
-            region_entries.insert(entry.file_offset, entry.file_offset + entry.length as u64);
+            if region_entries.insert(start, end).is_some() {
+                return Err(VhdxHeaderError::RegionOverlap);
+            }
 
             if entry.guid == Uuid::parse_str(BAT_GUID).map_err(VhdxHeaderError::InvalidUuid)? {
                 if bat_entry.is_none() {
