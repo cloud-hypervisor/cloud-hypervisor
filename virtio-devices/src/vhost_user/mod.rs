@@ -8,6 +8,7 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::{io, thread};
 
 use anyhow::anyhow;
+use event_monitor::event;
 use log::error;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -21,7 +22,7 @@ use vm_memory::guest_memory::Error as MmapError;
 use vm_memory::mmap::MmapRegionError;
 use vm_memory::{Address, GuestAddressSpace, GuestMemory, GuestMemoryAtomic};
 use vm_migration::protocol::MemoryRangeTable;
-use vm_migration::{MigratableError, Snapshot};
+use vm_migration::{MigratableError, Pausable, Snapshot};
 use vmm_sys_util::eventfd::EventFd;
 use vu_common_ctrl::VhostUserHandle;
 
@@ -425,6 +426,33 @@ impl VhostUserCommon {
         self.vu = Some(Arc::new(Mutex::new(vu)));
 
         Ok(())
+    }
+
+    pub fn reset(&mut self, id: &str) -> Option<Arc<dyn VirtioInterrupt>> {
+        // We first must resume the virtio thread if it was paused.
+        if self.virtio_common.pause_evt.take().is_some() {
+            self.virtio_common.resume().ok()?;
+        }
+
+        if let Some(vu) = &self.vu
+            && let Err(e) = vu.lock().unwrap().reset_vhost_user()
+        {
+            error!(
+                "Failed to reset vhost-user daemon for socket {}: {e:?}",
+                self.socket_path
+            );
+            return None;
+        }
+
+        if let Some(kill_evt) = self.virtio_common.kill_evt.take() {
+            // Ignore the result because there is nothing we can do about it.
+            let _ = kill_evt.write(1);
+        }
+
+        event!("virtio-device", "reset", "id", id);
+
+        // Return the interrupt
+        Some(self.virtio_common.interrupt_cb.take().unwrap())
     }
 
     pub fn shutdown(&mut self) {
