@@ -429,9 +429,13 @@ impl VhostUserCommon {
     }
 
     pub fn reset(&mut self, id: &str) -> Option<Arc<dyn VirtioInterrupt>> {
-        // We first must resume the virtio thread if it was paused.
-        if self.virtio_common.pause_evt.take().is_some() {
-            self.virtio_common.resume().ok()?;
+        // Resume the virtio thread if it was paused. Reset must always
+        // converge to fresh state, so backend resume / reset failures are
+        // logged but don't skip the rest of the teardown.
+        if self.virtio_common.pause_evt.take().is_some()
+            && let Err(e) = self.virtio_common.resume()
+        {
+            error!("Failed to resume paused device during reset: {e:?}");
         }
 
         if let Some(vu) = &self.vu
@@ -441,7 +445,6 @@ impl VhostUserCommon {
                 "Failed to reset vhost-user daemon for socket {}: {e:?}",
                 self.socket_path
             );
-            return None;
         }
 
         if let Some(kill_evt) = self.virtio_common.kill_evt.take() {

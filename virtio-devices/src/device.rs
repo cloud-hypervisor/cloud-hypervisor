@@ -293,9 +293,13 @@ impl VirtioCommon {
     pub fn reset(&mut self) -> Option<Arc<dyn VirtioInterrupt>> {
         self.queue_evts.clear();
 
-        // We first must resume the virtio thread if it was paused.
-        if self.pause_evt.take().is_some() {
-            self.resume().ok()?;
+        // Resume the virtio thread if it was paused. Reset must always
+        // converge to fresh state, so a resume failure is logged but doesn't
+        // skip the rest of the teardown.
+        if self.pause_evt.take().is_some()
+            && let Err(e) = self.resume()
+        {
+            error!("Failed to resume paused device during reset: {e:?}");
         }
 
         if let Some(kill_evt) = self.kill_evt.take() {
