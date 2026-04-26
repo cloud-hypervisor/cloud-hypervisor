@@ -35,7 +35,9 @@ fn is_valid_alignment(fd: RawFd, alignment: usize) -> bool {
     let layout = Layout::from_size_align(alignment, alignment).unwrap();
     // SAFETY: layout has non-zero size
     let ptr = unsafe { alloc_zeroed(layout) };
-    assert!(!ptr.is_null());
+    if ptr.is_null() {
+        return false;
+    }
 
     // SAFETY: FFI call
     let ret = unsafe { ::libc::pread(fd, ptr.cast(), alignment, alignment.try_into().unwrap()) };
