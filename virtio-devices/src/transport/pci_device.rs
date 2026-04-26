@@ -465,7 +465,7 @@ impl VirtioPciDevice {
                 ))
             })?;
 
-        let (msix_config, msix_config_clone) = if msix_num > 0 {
+        let (msix_config, msix_config_clone) = {
             let interrupt_source_group: MaybeMutInterruptSourceGroup =
                 interrupt_source_group.clone();
             let msix_config = Arc::new(Mutex::new(
@@ -473,9 +473,7 @@ impl VirtioPciDevice {
                     .unwrap(),
             ));
             let msix_config_clone = msix_config.clone();
-            (Some(msix_config), Some(msix_config_clone))
-        } else {
-            (None, None)
+            (msix_config, msix_config_clone)
         };
 
         let (class, subclass) = match VirtioDeviceType::from(locked_device.device_type()) {
@@ -510,7 +508,7 @@ impl VirtioPciDevice {
             PciHeaderType::Device,
             VIRTIO_PCI_VENDOR_ID,
             pci_device_id,
-            msix_config_clone,
+            Some(msix_config_clone),
             pci_configuration_state,
         );
 
@@ -598,7 +596,7 @@ impl VirtioPciDevice {
             id,
             configuration,
             common_config,
-            msix_config,
+            msix_config: Some(msix_config),
             msix_num,
             device,
             device_activated: Arc::new(AtomicBool::new(device_activated)),
