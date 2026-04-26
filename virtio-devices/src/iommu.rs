@@ -73,6 +73,9 @@ const VIRTIO_IOMMU_F_BYPASS_CONFIG: u32 = 6;
 // Support 2MiB and 4KiB page sizes.
 const VIRTIO_IOMMU_PAGE_SIZE_MASK: u64 = (2 << 20) | (4 << 10);
 
+// ~64 MiB at ~64 bytes/entry, well above any legitimate workload.
+const MAX_MAPPINGS_PER_DOMAIN: usize = 1 << 20;
+
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
 #[allow(dead_code)]
@@ -131,7 +134,6 @@ const VIRTIO_IOMMU_S_RANGE: u8 = 5;
 const VIRTIO_IOMMU_S_NOENT: u8 = 6;
 #[allow(unused)]
 const VIRTIO_IOMMU_S_FAULT: u8 = 7;
-#[allow(unused)]
 const VIRTIO_IOMMU_S_NOMEM: u8 = 8;
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -324,6 +326,8 @@ enum Error {
     InvalidUnmapRequestMissingDomain,
     #[error("UNMAP range partially overlaps an existing mapping")]
     InvalidUnmapRequestPartialOverlap,
+    #[error("Per-domain mapping count cap exceeded")]
+    MappingCountExceeded,
     #[error("Guest sent us invalid PROBE request")]
     InvalidProbeRequest,
     #[error("Failed to performing external mapping")]
@@ -505,6 +509,16 @@ impl Request {
                         .map(|(&e, _)| e)
                         .collect();
 
+                    {
+                        let domains = mapping.domains.read().unwrap();
+                        if let Some(d) = domains.get(&domain_id)
+                            && d.mappings.len() >= MAX_MAPPINGS_PER_DOMAIN
+                        {
+                            status = VIRTIO_IOMMU_S_NOMEM;
+                            return Err(Error::MappingCountExceeded);
+                        }
+                    }
+
                     let mut mapped: Vec<u32> = Vec::new();
                     let rollback = |mapped: &[u32]| {
                         for ep in mapped {
@@ -530,6 +544,11 @@ impl Request {
                         status = VIRTIO_IOMMU_S_INVAL;
                         return Err(Error::InvalidMapRequestMissingDomain);
                     };
+                    if domain.mappings.len() >= MAX_MAPPINGS_PER_DOMAIN {
+                        rollback(&mapped);
+                        status = VIRTIO_IOMMU_S_NOMEM;
+                        return Err(Error::MappingCountExceeded);
+                    }
                     domain.mappings.insert(
                         req.virt_start,
                         Mapping {
