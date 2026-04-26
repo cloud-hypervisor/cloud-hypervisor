@@ -10,6 +10,7 @@ use libc::EINVAL;
 use thiserror::Error;
 
 use crate::qcow::qcow_raw_file::QcowRawFile;
+use crate::qcow::util::cluster_addr_is_valid;
 use crate::qcow::vec_cache::{CacheMap, Cacheable, VecCache};
 
 #[derive(Debug, Error)]
@@ -143,9 +144,15 @@ impl RefCount {
             if let Some((addr, table)) = new_cluster.take() {
                 self.ref_table[table_index] = addr;
                 let ref_table = &self.ref_table;
+                let cluster_size = self.cluster_size;
+                let max_valid = self.max_valid_cluster_offset;
                 self.refblock_cache
                     .insert(table_index, table, |index, evicted| {
-                        raw_file.write_refcount_block(ref_table[index], evicted.get_values())
+                        let target = ref_table[index];
+                        if !cluster_addr_is_valid(target, cluster_size, max_valid) {
+                            return Err(io::Error::from_raw_os_error(EINVAL));
+                        }
+                        raw_file.write_refcount_block(target, evicted.get_values())
                     })
                     .map_err(Error::EvictingRefCounts)?;
             } else {
@@ -180,11 +187,13 @@ impl RefCount {
         // Write out all dirty L2 tables.
         for (table_index, block) in self.refblock_cache.iter_mut().filter(|(_k, v)| v.dirty()) {
             let addr = self.ref_table[*table_index];
-            if addr != 0 {
-                raw_file.write_refcount_block(addr, block.get_values())?;
-            } else {
+            if addr == 0 {
                 return Err(std::io::Error::from_raw_os_error(EINVAL));
             }
+            if !cluster_addr_is_valid(addr, self.cluster_size, self.max_valid_cluster_offset) {
+                return Err(std::io::Error::from_raw_os_error(EINVAL));
+            }
+            raw_file.write_refcount_block(addr, block.get_values())?;
             block.mark_clean();
         }
         Ok(())
@@ -224,9 +233,15 @@ impl RefCount {
                     .map_err(Error::ReadingRefCounts)?,
             );
             let ref_table = &self.ref_table;
+            let cluster_size = self.cluster_size;
+            let max_valid = self.max_valid_cluster_offset;
             self.refblock_cache
                 .insert(table_index, table, |index, evicted| {
-                    raw_file.write_refcount_block(ref_table[index], evicted.get_values())
+                    let target = ref_table[index];
+                    if !cluster_addr_is_valid(target, cluster_size, max_valid) {
+                        return Err(io::Error::from_raw_os_error(EINVAL));
+                    }
+                    raw_file.write_refcount_block(target, evicted.get_values())
                 })
                 .map_err(Error::EvictingRefCounts)?;
         }
@@ -254,11 +269,16 @@ impl RefCount {
                     .read_refcount_block(block_addr_disk)
                     .map_err(Error::ReadingRefCounts)?,
             );
-            // TODO(dgreid) - closure needs to return an error.
             let ref_table = &self.ref_table;
+            let cluster_size = self.cluster_size;
+            let max_valid = self.max_valid_cluster_offset;
             self.refblock_cache
                 .insert(table_index, table, |index, evicted| {
-                    raw_file.write_refcount_block(ref_table[index], evicted.get_values())
+                    let target = ref_table[index];
+                    if !cluster_addr_is_valid(target, cluster_size, max_valid) {
+                        return Err(io::Error::from_raw_os_error(EINVAL));
+                    }
+                    raw_file.write_refcount_block(target, evicted.get_values())
                 })
                 .map_err(Error::EvictingRefCounts)?;
         }
