@@ -632,10 +632,16 @@ impl QcowState {
             self.reject_invalid_cluster_offset(l2_addr_disk)?;
             let l2_table =
                 VecCache::from_vec(self.raw_file.read_pointer_cluster(l2_addr_disk, None)?);
+            let cluster_size = self.raw_file.cluster_size();
+            let max_valid = self.refcounts.max_valid_cluster_offset();
             let l1_table = &self.l1_table;
             let raw_file = &mut self.raw_file;
             self.l2_cache.insert(l1_index, l2_table, |index, evicted| {
-                raw_file.write_pointer_table_direct(l1_table[index], evicted.iter())
+                let target = l1_table[index];
+                if !cluster_addr_is_valid(target, cluster_size, max_valid) {
+                    return Err(io::Error::from_raw_os_error(EIO));
+                }
+                raw_file.write_pointer_table_direct(target, evicted.iter())
             })?;
         }
         Ok(())
@@ -660,10 +666,16 @@ impl QcowState {
                 self.reject_invalid_cluster_offset(l2_addr_disk)?;
                 VecCache::from_vec(self.raw_file.read_pointer_cluster(l2_addr_disk, None)?)
             };
+            let cluster_size = self.raw_file.cluster_size();
+            let max_valid = self.refcounts.max_valid_cluster_offset();
             let l1_table = &self.l1_table;
             let raw_file = &mut self.raw_file;
             self.l2_cache.insert(l1_index, l2_table, |index, evicted| {
-                raw_file.write_pointer_table_direct(l1_table[index], evicted.iter())
+                let target = l1_table[index];
+                if !cluster_addr_is_valid(target, cluster_size, max_valid) {
+                    return Err(io::Error::from_raw_os_error(EIO));
+                }
+                raw_file.write_pointer_table_direct(target, evicted.iter())
             })?;
         }
         Ok(new_cluster)
