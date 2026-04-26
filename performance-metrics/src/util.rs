@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use block::async_io::{AsyncIo, GuestMemoryTarget};
 use block::formats::qcow::QcowDisk;
-use block::qcow::{BackingFileConfig, ImageType, QcowFile, RawFile};
+use block::formats::qcow::internal::{BackingFileConfig, ImageType, QcowFile, RawFile};
 use vm_memory::{Bytes, GuestAddress, GuestMemoryMmap};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::tempfile::TempFile;
