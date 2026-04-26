@@ -648,7 +648,7 @@ pub(crate) fn parse_qcow(
 /// # Example
 ///
 /// ```
-/// # use block::qcow::{self, QcowFile, RawFile};
+/// # use block::formats::qcow::internal::{QcowFile, RawFile};
 /// # use std::io::{Read, Seek, SeekFrom};
 /// # fn test(file: std::fs::File) -> std::io::Result<()> {
 ///     let mut raw_img = RawFile::new(file, false);

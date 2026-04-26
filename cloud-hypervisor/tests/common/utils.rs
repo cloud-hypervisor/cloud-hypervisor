@@ -14,6 +14,7 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 use std::{cmp, fs, io, thread};
 
+use block::formats::qcow::internal::ImageType as QcowImageType;
 use test_infra::*;
 use vmm_sys_util::tempdir::TempDir;
 #[cfg(not(feature = "mshv"))]
@@ -889,7 +890,7 @@ pub(crate) fn disk_check_consistency(
     }
 
     if let Some((backing_path, format, initial_checksum)) = initial_backing_checksum {
-        if format.parse::<block::qcow::ImageType>().ok() != Some(block::qcow::ImageType::Raw) {
+        if format.parse::<QcowImageType>().ok() != Some(QcowImageType::Raw) {
             let output = run_qemu_img(&backing_path, &["check"], None);
 
             assert!(
