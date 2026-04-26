@@ -74,7 +74,10 @@ impl Sector {
         };
         sector.file_offset = bat_entry & vhdx_bat::BAT_FILE_OFF_MASK;
         if sector.file_offset != 0 {
-            sector.file_offset += sector.block_offset;
+            sector.file_offset = sector
+                .file_offset
+                .checked_add(sector.block_offset)
+                .ok_or(VhdxIoError::InvalidBatEntryState)?;
         }
 
         Ok(sector)
