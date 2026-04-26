@@ -403,7 +403,6 @@ impl VirtioPciDevice {
         id: String,
         memory: GuestMemoryAtomic<GuestMemoryMmap>,
         device: Arc<Mutex<dyn VirtioDevice>>,
-        msix_num: u16,
         access_platform: Option<&Arc<dyn AccessPlatform>>,
         interrupt_manager: &dyn InterruptManager<GroupConfig = MsiIrqGroupConfig>,
         pci_device_bdf: u32,
@@ -433,6 +432,11 @@ impl VirtioPciDevice {
             .collect();
 
         let pci_device_id = VIRTIO_PCI_DEVICE_ID_BASE + locked_device.device_type() as u16;
+
+        // Allows support for one MSI-X vector per interrupt needed by the device.
+        // It also adds 1 as we need to take into account the dedicated vector to notify
+        // about a virtio config change.
+        let msix_num = (locked_device.queue_max_sizes().len() + 1) as u16;
 
         let interrupt_source_group: MaybeMutInterruptSourceGroup = {
             let config = MsiIrqGroupConfig {
