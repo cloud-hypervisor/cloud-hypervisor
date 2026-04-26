@@ -38,7 +38,10 @@ impl Read for FixedVhd {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self.file.read(buf) {
             Ok(r) => {
-                self.position = self.position.checked_add(r.try_into().unwrap()).unwrap();
+                self.position = self
+                    .position
+                    .checked_add(r as u64)
+                    .ok_or_else(|| std::io::Error::other("position overflow"))?;
                 Ok(r)
             }
             Err(e) => Err(e),
@@ -50,7 +53,10 @@ impl Write for FixedVhd {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match self.file.write(buf) {
             Ok(r) => {
-                self.position = self.position.checked_add(r.try_into().unwrap()).unwrap();
+                self.position = self
+                    .position
+                    .checked_add(r as u64)
+                    .ok_or_else(|| std::io::Error::other("position overflow"))?;
                 Ok(r)
             }
             Err(e) => Err(e),
