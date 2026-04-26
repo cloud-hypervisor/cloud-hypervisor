@@ -72,6 +72,10 @@ const VIRTIO_IOMMU_F_BYPASS_CONFIG: u32 = 6;
 
 // Support 2MiB and 4KiB page sizes.
 const VIRTIO_IOMMU_PAGE_SIZE_MASK: u64 = (2 << 20) | (4 << 10);
+const VIRTIO_IOMMU_PAGE_GRANULE: u64 = {
+    assert!(VIRTIO_IOMMU_PAGE_SIZE_MASK != 0);
+    1u64 << VIRTIO_IOMMU_PAGE_SIZE_MASK.trailing_zeros()
+};
 
 // ~64 MiB at ~64 bytes/entry, well above any legitimate workload.
 const MAX_MAPPINGS_PER_DOMAIN: usize = 1 << 20;
@@ -184,7 +188,7 @@ struct VirtioIommuReqMap {
     virt_start: u64,
     virt_end: u64,
     phys_start: u64,
-    _flags: u32,
+    flags: u32,
 }
 
 /// UNMAP request
@@ -492,6 +496,11 @@ impl Request {
                         .map_err(Error::GuestMemory)?;
                     debug!("Map request 0x{req:x?}");
 
+                    if (req.flags & !VIRTIO_IOMMU_MAP_F_MASK) != 0 {
+                        status = VIRTIO_IOMMU_S_INVAL;
+                        return Err(Error::InvalidMapRequest);
+                    }
+
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
 
@@ -501,7 +510,7 @@ impl Request {
                             return Err(Error::InvalidMapRequestBypassDomain);
                         }
                     } else {
-                        status = VIRTIO_IOMMU_S_INVAL;
+                        status = VIRTIO_IOMMU_S_NOENT;
                         return Err(Error::InvalidMapRequestMissingDomain);
                     }
 
@@ -513,6 +522,28 @@ impl Request {
                         status = VIRTIO_IOMMU_S_INVAL;
                         return Err(Error::InvalidMapRequest);
                     };
+
+                    let mask = VIRTIO_IOMMU_PAGE_GRANULE - 1;
+                    if (req.virt_start & mask) != 0
+                        || (req.phys_start & mask) != 0
+                        || (size & mask) != 0
+                    {
+                        status = VIRTIO_IOMMU_S_RANGE;
+                        return Err(Error::InvalidMapRequest);
+                    }
+
+                    // Going forward MAP rejects overlap, so within a domain
+                    // mappings are disjoint and the rightmost mapping with
+                    // start <= virt_end is the only candidate to overlap.
+                    if let Some(d) = mapping.domains.read().unwrap().get(&domain_id)
+                        && let Some((&start, m)) = d.mappings.range(..=req.virt_end).next_back()
+                    {
+                        let end = start.saturating_add(m.size).saturating_sub(1);
+                        if end >= req.virt_start {
+                            status = VIRTIO_IOMMU_S_INVAL;
+                            return Err(Error::InvalidMapRequest);
+                        }
+                    }
 
                     // Find the list of endpoints attached to the given domain.
                     let endpoints: Vec<u32> = mapping
