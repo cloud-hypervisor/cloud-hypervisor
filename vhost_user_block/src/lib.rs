@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::time::Instant;
 use std::{convert, io, process, result};
 
-use block::qcow::RawFile;
+use block::formats::qcow::internal::RawFile;
 use block::{Request, RequestType, VirtioBlockConfig, build_serial};
 use libc::EFD_NONBLOCK;
 use log::{debug, error, info, warn};
