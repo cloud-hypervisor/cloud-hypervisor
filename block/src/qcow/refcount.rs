@@ -75,8 +75,17 @@ impl RefCount {
             refcount_table_entries,
             None,
         )?);
-        let max_valid_cluster_index = (ref_table.len() as u64) * refcount_block_entries - 1;
-        let max_valid_cluster_offset = max_valid_cluster_index * cluster_size;
+        let max_valid_cluster_index = (ref_table.len() as u64)
+            .checked_mul(refcount_block_entries)
+            .and_then(|n| n.checked_sub(1))
+            .ok_or_else(|| {
+                io::Error::other("refcount table dimensions overflow max cluster index")
+            })?;
+        let max_valid_cluster_offset = max_valid_cluster_index
+            .checked_mul(cluster_size)
+            .ok_or_else(|| {
+                io::Error::other("refcount table dimensions overflow max cluster offset")
+            })?;
         let max_refcount = if refcount_bits >= 64 {
             u64::MAX
         } else {
