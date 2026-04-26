@@ -1232,7 +1232,9 @@ impl VirtioDevice for Iommu {
             return;
         }
 
-        self.config.bypass = data[0];
+        // virtio spec says ignore bits 1-7 and that the device must
+        // never present a value other than 0 or 1.
+        self.config.bypass = data[0] & 1;
 
         self.update_bypass();
     }
