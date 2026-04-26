@@ -9,8 +9,8 @@
 // SPDX-License-Identifier: (Apache-2.0 AND BSD-3-Clause)
 
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::ops::{Deref, DerefMut};
+use std::io::{Seek, SeekFrom};
+use std::ops::Deref;
 use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::io::{FromRawFd, IntoRawFd};
 use std::path::PathBuf;
@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex, RwLock, RwLockWriteGuard};
 use std::time::Instant;
 use std::{convert, io, process, result};
 
-use block::qcow::{self, ImageType, QcowFile};
+use block::qcow::RawFile;
 use block::{Request, RequestType, VirtioBlockConfig, build_serial};
 use libc::EFD_NONBLOCK;
 use log::{debug, error, info, warn};
@@ -47,9 +47,6 @@ const BLK_SIZE: u32 = 512;
 // Polling for 50us should be enough to cover for the device latency
 // and the overhead of the emulation layer.
 const POLL_QUEUE_US: u128 = 50;
-
-trait DiskFile: Read + Seek + Write + Send {}
-impl<D: Read + Seek + Write + Send> DiskFile for D {}
 
 type Result<T> = std::result::Result<T, Error>;
 type VhostUserBackendResult<T> = std::result::Result<T, std::io::Error>;
@@ -89,7 +86,7 @@ impl convert::From<Error> for io::Error {
 }
 
 struct VhostUserBlkThread {
-    disk_image: Arc<Mutex<dyn DiskFile>>,
+    disk_image: Arc<Mutex<RawFile>>,
     serial: Vec<u8>,
     disk_nsectors: u64,
     event_idx: bool,
@@ -100,7 +97,7 @@ struct VhostUserBlkThread {
 
 impl VhostUserBlkThread {
     fn new(
-        disk_image: Arc<Mutex<dyn DiskFile>>,
+        disk_image: Arc<Mutex<RawFile>>,
         serial: Vec<u8>,
         disk_nsectors: u64,
         writeback: Arc<AtomicBool>,
@@ -133,7 +130,7 @@ impl VhostUserBlkThread {
                     debug!("element is a valid request");
                     request.writeback = self.writeback.load(Ordering::Acquire);
                     let (status, len) = match request.execute(
-                        &mut self.disk_image.lock().unwrap().deref_mut(),
+                        &mut *self.disk_image.lock().unwrap(),
                         self.disk_nsectors,
                         desc_chain.memory(),
                         &self.serial,
@@ -217,16 +214,10 @@ impl VhostUserBlkBackend {
             options.custom_flags(libc::O_DIRECT);
         }
         let image: File = options.open(image_path).unwrap();
-        let mut raw_img: qcow::RawFile = qcow::RawFile::new(image, direct);
+        let raw_img = RawFile::new(image, direct);
 
         let serial = build_serial(&PathBuf::from(&image_path));
-        let image_type = qcow::detect_image_type(&mut raw_img).unwrap();
-        let image = match image_type {
-            ImageType::Raw => Arc::new(Mutex::new(raw_img)) as Arc<Mutex<dyn DiskFile>>,
-            ImageType::Qcow2 => Arc::new(Mutex::new(
-                QcowFile::from_with_nesting_depth(raw_img, 0, true).unwrap(),
-            )) as Arc<Mutex<dyn DiskFile>>,
-        };
+        let image = Arc::new(Mutex::new(raw_img));
 
         let nsectors = (image.lock().unwrap().seek(SeekFrom::End(0)).unwrap()) / SECTOR_SIZE;
         let config = VirtioBlockConfig {
