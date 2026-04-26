@@ -625,7 +625,7 @@ impl Request {
                             return Err(Error::InvalidUnmapRequestBypassDomain);
                         }
                     } else {
-                        status = VIRTIO_IOMMU_S_INVAL;
+                        status = VIRTIO_IOMMU_S_NOENT;
                         return Err(Error::InvalidUnmapRequestMissingDomain);
                     }
 
@@ -645,7 +645,7 @@ impl Request {
                     {
                         let domains = mapping.domains.read().unwrap();
                         let Some(domain) = domains.get(&domain_id) else {
-                            status = VIRTIO_IOMMU_S_INVAL;
+                            status = VIRTIO_IOMMU_S_NOENT;
                             return Err(Error::InvalidUnmapRequestMissingDomain);
                         };
                         for (&start, m) in domain.mappings.iter() {
@@ -682,7 +682,7 @@ impl Request {
 
                     let mut domains = mapping.domains.write().unwrap();
                     let Some(domain) = domains.get_mut(&domain_id) else {
-                        status = VIRTIO_IOMMU_S_INVAL;
+                        status = VIRTIO_IOMMU_S_NOENT;
                         return Err(Error::InvalidUnmapRequestMissingDomain);
                     };
                     domain
