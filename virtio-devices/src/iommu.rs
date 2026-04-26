@@ -358,6 +358,7 @@ impl Request {
         mapping: &Arc<IommuMapping>,
         ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
         msi_iova_space: (u64, u64),
+        input_range: Option<(u64, u64)>,
     ) -> result::Result<usize, Error> {
         let desc = desc_chain
             .next()
@@ -498,6 +499,13 @@ impl Request {
 
                     if (req.flags & !VIRTIO_IOMMU_MAP_F_MASK) != 0 {
                         status = VIRTIO_IOMMU_S_INVAL;
+                        return Err(Error::InvalidMapRequest);
+                    }
+
+                    if let Some((lo, hi)) = input_range
+                        && (req.virt_start < lo || req.virt_end > hi)
+                    {
+                        status = VIRTIO_IOMMU_S_RANGE;
                         return Err(Error::InvalidMapRequest);
                     }
 
@@ -812,6 +820,7 @@ struct IommuEpollHandler {
     mapping: Arc<IommuMapping>,
     ext_mapping: Arc<Mutex<BTreeMap<u32, Arc<dyn ExternalDmaMapping>>>>,
     msi_iova_space: (u64, u64),
+    input_range: Option<(u64, u64)>,
 }
 
 impl IommuEpollHandler {
@@ -824,6 +833,7 @@ impl IommuEpollHandler {
                 &self.mapping,
                 &self.ext_mapping.lock().unwrap(),
                 self.msi_iova_space,
+                self.input_range,
             )?;
 
             self.request_queue
@@ -1030,6 +1040,7 @@ pub struct Iommu {
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     msi_iova_space: (u64, u64),
+    input_range: Option<(u64, u64)>,
 }
 
 type EndpointsState = Vec<(u32, u32)>;
@@ -1089,13 +1100,14 @@ impl Iommu {
             ..Default::default()
         };
 
-        if address_width_bits < 64 {
+        let input_range = if address_width_bits < 64 {
             avail_features |= 1u64 << VIRTIO_IOMMU_F_INPUT_RANGE;
-            config.input_range = VirtioIommuRange64 {
-                start: 0,
-                end: (1u64 << address_width_bits) - 1,
-            }
-        }
+            let end = (1u64 << address_width_bits) - 1;
+            config.input_range = VirtioIommuRange64 { start: 0, end };
+            Some((0, end))
+        } else {
+            None
+        };
 
         let mapping = Arc::new(IommuMapping {
             endpoints: Arc::new(RwLock::new(endpoints)),
@@ -1122,6 +1134,7 @@ impl Iommu {
                 seccomp_action,
                 exit_evt,
                 msi_iova_space,
+                input_range,
             },
             mapping,
         ))
@@ -1249,6 +1262,7 @@ impl VirtioDevice for Iommu {
             mapping: self.mapping.clone(),
             ext_mapping: self.ext_mapping.clone(),
             msi_iova_space: self.msi_iova_space,
+            input_range: self.input_range,
         };
 
         let paused = self.common.paused.clone();
