@@ -3,10 +3,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fs::File;
-use std::io::{self, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::mem::size_of;
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use remain::sorted;
 use thiserror::Error;
 
@@ -61,16 +61,15 @@ impl BatEntry {
         }
 
         let mut bat: Vec<BatEntry> = Vec::with_capacity(entry_count as usize);
-        let offset = bat_entry.file_offset;
-        for i in 0..entry_count {
-            f.seek(SeekFrom::Start(offset + i * size_of::<u64>() as u64))
-                .map_err(VhdxBatError::ReadBat)?;
-
-            let bat_entry = BatEntry(
-                f.read_u64::<LittleEndian>()
-                    .map_err(VhdxBatError::ReadBat)?,
-            );
-            bat.insert(i as usize, bat_entry);
+        let bytes = (entry_count as usize)
+            .checked_mul(size_of::<u64>())
+            .ok_or(VhdxBatError::InvalidEntryCount)?;
+        f.seek(SeekFrom::Start(bat_entry.file_offset))
+            .map_err(VhdxBatError::ReadBat)?;
+        let mut buf = vec![0u8; bytes];
+        f.read_exact(&mut buf).map_err(VhdxBatError::ReadBat)?;
+        for chunk in buf.chunks_exact(size_of::<u64>()) {
+            bat.push(BatEntry(LittleEndian::read_u64(chunk)));
         }
 
         Ok(bat)
@@ -82,25 +81,15 @@ impl BatEntry {
         data_blocks_count + (data_blocks_count - 1) / chunk_ratio
     }
 
-    // Routine for writing BAT entries to the disk
-    pub fn write_bat_entries(
-        f: &mut File,
-        bat_offset: u64,
-        bat_entries: &[BatEntry],
-    ) -> Result<()> {
-        for i in 0..bat_entries.len() as u64 {
-            f.seek(SeekFrom::Start(bat_offset + i * size_of::<u64>() as u64))
-                .map_err(VhdxBatError::WriteBat)?;
-            let bat_entry = match bat_entries.get(i as usize) {
-                Some(entry) => entry.0,
-                None => {
-                    return Err(VhdxBatError::InvalidBatEntry);
-                }
-            };
-
-            f.write_u64::<LittleEndian>(bat_entry)
-                .map_err(VhdxBatError::WriteBat)?;
-        }
+    pub fn write_bat_entry(f: &mut File, bat_offset: u64, index: u64, value: u64) -> Result<()> {
+        let off = index
+            .checked_mul(size_of::<u64>() as u64)
+            .and_then(|o| bat_offset.checked_add(o))
+            .ok_or(VhdxBatError::InvalidBatEntry)?;
+        f.seek(SeekFrom::Start(off))
+            .map_err(VhdxBatError::WriteBat)?;
+        f.write_u64::<LittleEndian>(value)
+            .map_err(VhdxBatError::WriteBat)?;
         Ok(())
     }
 }

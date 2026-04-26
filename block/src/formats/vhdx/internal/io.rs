@@ -178,7 +178,8 @@ pub fn write(
                 let new_bat_entry =
                     file_offset | (bat::PAYLOAD_BLOCK_FULLY_PRESENT & bat::BAT_STATE_BIT_MASK);
                 bat[sector.bat_index as usize] = BatEntry(new_bat_entry);
-                BatEntry::write_bat_entries(f, bat_offset, bat).map_err(VhdxIoError::WriteBat)?;
+                BatEntry::write_bat_entry(f, bat_offset, sector.bat_index, new_bat_entry)
+                    .map_err(VhdxIoError::WriteBat)?;
 
                 if file_offset < metadata::BLOCK_SIZE_MIN as u64 {
                     break;
