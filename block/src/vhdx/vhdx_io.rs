@@ -11,8 +11,6 @@ use thiserror::Error;
 use crate::vhdx::vhdx_bat::{self, BatEntry, VhdxBatError};
 use crate::vhdx::vhdx_metadata::{self, DiskSpec};
 
-const SECTOR_SIZE: u64 = 512;
-
 #[sorted]
 #[derive(Error, Debug)]
 pub enum VhdxIoError {
@@ -116,11 +114,8 @@ pub fn read(
             vhdx_bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
                 f.seek(SeekFrom::Start(sector.file_offset))
                     .map_err(VhdxIoError::ReadSectorBlock)?;
-                f.read_exact(
-                    &mut buf
-                        [read_count..(read_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
-                )
-                .map_err(VhdxIoError::ReadSectorBlock)?;
+                f.read_exact(&mut buf[read_count..(read_count + sector.free_bytes as usize)])
+                    .map_err(VhdxIoError::ReadSectorBlock)?;
             }
             vhdx_bat::PAYLOAD_BLOCK_PARTIALLY_PRESENT => {
                 return Err(VhdxIoError::UnsupportedMode);
@@ -187,10 +182,8 @@ pub fn write(
 
                 f.seek(SeekFrom::Start(file_offset))
                     .map_err(VhdxIoError::ReadSectorBlock)?;
-                f.write_all(
-                    &buf[write_count..(write_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
-                )
-                .map_err(VhdxIoError::ReadSectorBlock)?;
+                f.write_all(&buf[write_count..(write_count + sector.free_bytes as usize)])
+                    .map_err(VhdxIoError::ReadSectorBlock)?;
             }
             vhdx_bat::PAYLOAD_BLOCK_FULLY_PRESENT => {
                 if sector.file_offset < vhdx_metadata::BLOCK_SIZE_MIN as u64 {
@@ -199,10 +192,8 @@ pub fn write(
 
                 f.seek(SeekFrom::Start(sector.file_offset))
                     .map_err(VhdxIoError::ReadSectorBlock)?;
-                f.write_all(
-                    &buf[write_count..(write_count + (sector.free_sectors * SECTOR_SIZE) as usize)],
-                )
-                .map_err(VhdxIoError::ReadSectorBlock)?;
+                f.write_all(&buf[write_count..(write_count + sector.free_bytes as usize)])
+                    .map_err(VhdxIoError::ReadSectorBlock)?;
             }
             vhdx_bat::PAYLOAD_BLOCK_PARTIALLY_PRESENT => {
                 return Err(VhdxIoError::UnsupportedMode);
