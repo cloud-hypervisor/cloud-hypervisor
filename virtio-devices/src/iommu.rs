@@ -389,6 +389,7 @@ impl Request {
         let mut reply: Vec<u8> = Vec::new();
         let mut status = VIRTIO_IOMMU_S_OK;
         let mut hdr_len = 0;
+        let mut unrecognised_type = false;
 
         let result = (|| {
             match req_head.type_ {
@@ -672,12 +673,18 @@ impl Request {
                     hdr_len = PROBE_PROP_SIZE;
                 }
                 _ => {
-                    status = VIRTIO_IOMMU_S_INVAL;
+                    unrecognised_type = true;
                     return Err(Error::InvalidRequest);
                 }
             }
             Ok(())
         })();
+
+        // virtio spec: unrecognised request types must not have the reply
+        // buffer written and must report a used length of zero.
+        if unrecognised_type {
+            return Ok(0);
+        }
 
         let status_desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
 
