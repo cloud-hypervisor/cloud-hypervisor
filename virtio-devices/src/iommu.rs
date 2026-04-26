@@ -322,6 +322,8 @@ enum Error {
     InvalidUnmapRequestBypassDomain,
     #[error("Invalid to unmap because the domain is missing")]
     InvalidUnmapRequestMissingDomain,
+    #[error("UNMAP range partially overlaps an existing mapping")]
+    InvalidUnmapRequestPartialOverlap,
     #[error("Guest sent us invalid PROBE request")]
     InvalidProbeRequest,
     #[error("Failed to performing external mapping")]
@@ -561,6 +563,38 @@ impl Request {
                         return Err(Error::InvalidUnmapRequestMissingDomain);
                     }
 
+                    let Some(size) = req
+                        .virt_end
+                        .checked_sub(virt_start)
+                        .and_then(|d| d.checked_add(1))
+                    else {
+                        status = VIRTIO_IOMMU_S_RANGE;
+                        return Err(Error::InvalidUnmapRequest);
+                    };
+
+                    // An UNMAP that would split an existing mapping must be
+                    // rejected with VIRTIO_IOMMU_S_RANGE without removing
+                    // anything. Inspect bookkeeping before touching VFIO so
+                    // a rejection cannot leave VFIO out of sync.
+                    {
+                        let domains = mapping.domains.read().unwrap();
+                        let Some(domain) = domains.get(&domain_id) else {
+                            status = VIRTIO_IOMMU_S_INVAL;
+                            return Err(Error::InvalidUnmapRequestMissingDomain);
+                        };
+                        for (&start, m) in domain.mappings.iter() {
+                            let Some(end) = inclusive_end(start, m.size) else {
+                                continue;
+                            };
+                            let overlaps = start <= req.virt_end && end >= req.virt_start;
+                            let split = start < req.virt_start || end > req.virt_end;
+                            if overlaps && split {
+                                status = VIRTIO_IOMMU_S_RANGE;
+                                return Err(Error::InvalidUnmapRequestPartialOverlap);
+                            }
+                        }
+                    }
+
                     // Find the list of endpoints attached to the given domain.
                     let endpoints: Vec<u32> = mapping
                         .endpoints
@@ -570,15 +604,6 @@ impl Request {
                         .filter(|&(_, &d)| d == domain_id)
                         .map(|(&e, _)| e)
                         .collect();
-
-                    let Some(size) = req
-                        .virt_end
-                        .checked_sub(virt_start)
-                        .and_then(|d| d.checked_add(1))
-                    else {
-                        status = VIRTIO_IOMMU_S_RANGE;
-                        return Err(Error::InvalidUnmapRequest);
-                    };
 
                     // Trigger external unmapping if necessary.
                     for endpoint in endpoints {
