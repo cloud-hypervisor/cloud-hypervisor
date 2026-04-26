@@ -618,7 +618,8 @@ impl QcowState {
     fn cache_l2_cluster(&mut self, l1_index: usize, l2_addr_disk: u64) -> io::Result<()> {
         if !self.l2_cache.contains_key(l1_index) {
             let cluster_size = self.raw_file.cluster_size();
-            if l2_addr_disk & (cluster_size - 1) != 0 {
+            let max_valid = self.refcounts.max_valid_cluster_offset();
+            if !cluster_addr_is_valid(l2_addr_disk, cluster_size, max_valid) {
                 self.set_corrupt_bit_best_effort();
                 return Err(io::Error::from_raw_os_error(EIO));
             }
@@ -627,7 +628,11 @@ impl QcowState {
             let l1_table = &self.l1_table;
             let raw_file = &mut self.raw_file;
             self.l2_cache.insert(l1_index, l2_table, |index, evicted| {
-                raw_file.write_pointer_table_direct(l1_table[index], evicted.iter())
+                let target = l1_table[index];
+                if !cluster_addr_is_valid(target, cluster_size, max_valid) {
+                    return Err(io::Error::from_raw_os_error(EIO));
+                }
+                raw_file.write_pointer_table_direct(target, evicted.iter())
             })?;
         }
         Ok(())
@@ -642,6 +647,8 @@ impl QcowState {
     ) -> io::Result<Option<u64>> {
         let mut new_cluster: Option<u64> = None;
         if !self.l2_cache.contains_key(l1_index) {
+            let cluster_size = self.raw_file.cluster_size();
+            let max_valid = self.refcounts.max_valid_cluster_offset();
             let l2_table = if l2_addr_disk == 0 {
                 // Allocate a new cluster to store the L2 table
                 let new_addr = self.get_new_cluster(None)?;
@@ -649,8 +656,7 @@ impl QcowState {
                 self.l1_table[l1_index] = new_addr;
                 VecCache::new(self.l2_entries as usize)
             } else {
-                let cluster_size = self.raw_file.cluster_size();
-                if l2_addr_disk & (cluster_size - 1) != 0 {
+                if !cluster_addr_is_valid(l2_addr_disk, cluster_size, max_valid) {
                     self.set_corrupt_bit_best_effort();
                     return Err(io::Error::from_raw_os_error(EIO));
                 }
@@ -659,7 +665,11 @@ impl QcowState {
             let l1_table = &self.l1_table;
             let raw_file = &mut self.raw_file;
             self.l2_cache.insert(l1_index, l2_table, |index, evicted| {
-                raw_file.write_pointer_table_direct(l1_table[index], evicted.iter())
+                let target = l1_table[index];
+                if !cluster_addr_is_valid(target, cluster_size, max_valid) {
+                    return Err(io::Error::from_raw_os_error(EIO));
+                }
+                raw_file.write_pointer_table_direct(target, evicted.iter())
             })?;
         }
         Ok(new_cluster)
