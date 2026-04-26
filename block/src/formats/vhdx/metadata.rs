@@ -110,6 +110,9 @@ impl DiskSpec {
     /// Parse all metadata from the provided file and store info in DiskSpec
     /// structure.
     pub(super) fn new(f: &AlignedFile, metadata_region: &RegionTableEntry) -> Result<DiskSpec> {
+        if metadata_region.length < METADATA_TABLE_MAX_SIZE as u32 {
+            return Err(VhdxMetadataError::InvalidMetadataLength);
+        }
         let mut disk_spec = DiskSpec::default();
         let mut metadata_presence: u16 = 0;
         let mut offset = 0;
@@ -130,6 +133,11 @@ impl DiskSpec {
         for _ in 0..metadata_header.entry_count {
             let metadata_entry =
                 MetadataTableEntry::new(&buffer[offset..offset + size_of::<MetadataTableEntry>()])?;
+
+            let entry_end = u64::from(metadata_entry.offset) + u64::from(metadata_entry.length);
+            if entry_end > metadata_region.length as u64 {
+                return Err(VhdxMetadataError::InvalidMetadataLength);
+            }
 
             let presence = if metadata_entry.item_id == METADATA_FILE_PARAMETER {
                 let item = metadata_entry.read_item::<8>(f, metadata_region.file_offset)?;
@@ -286,7 +294,12 @@ pub(super) struct MetadataTableEntry {
 
 impl MetadataTableEntry {
     fn read_item<const N: usize>(&self, f: &AlignedFile, region_offset: u64) -> Result<[u8; N]> {
-        let offset = region_offset + self.offset as u64;
+        if self.length as usize != N {
+            return Err(VhdxMetadataError::InvalidMetadataLength);
+        }
+        let offset = region_offset
+            .checked_add(self.offset as u64)
+            .ok_or(VhdxMetadataError::InvalidMetadataLength)?;
         let mut item = [0u8; N];
         f.read_exact_at(&mut item, offset)
             .map_err(VhdxMetadataError::ReadMetadata)?;
@@ -301,7 +314,10 @@ impl MetadataTableEntry {
             return Err(VhdxMetadataError::InvalidMetadataLength);
         }
 
-        if metadata_table_entry.length == 0 && metadata_table_entry.offset != 0 {
+        if (metadata_table_entry.length == 0 && metadata_table_entry.offset != 0)
+            || (metadata_table_entry.length != 0
+                && metadata_table_entry.offset < METADATA_TABLE_MAX_SIZE as u32)
+        {
             return Err(VhdxMetadataError::InvalidMetadataLength);
         }
 
@@ -310,5 +326,103 @@ impl MetadataTableEntry {
         }
 
         Ok(metadata_table_entry)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::formats::vhdx::header::{REGION_TABLE_1_START, RegionInfo, VhdxHeader};
+    use crate::formats::vhdx::test_util::create_dynamic_vhdx;
+
+    fn metadata_region() -> (AlignedFile, RegionTableEntry) {
+        let file = AlignedFile::new(create_dynamic_vhdx(1, None).into_file(), false);
+        let header = VhdxHeader::new(&file).unwrap();
+        let regions =
+            RegionInfo::new(&file, REGION_TABLE_1_START, header.region_entry_count()).unwrap();
+        (file, regions.mdr_entry)
+    }
+
+    fn metadata_item(file: &AlignedFile, region: &RegionTableEntry, guid: [u8; 16]) -> (u64, u64) {
+        let mut table = [0; METADATA_TABLE_MAX_SIZE];
+        file.read_exact_at(&mut table, region.file_offset).unwrap();
+        let header = MetadataTableHeader::new(&table[..32]).unwrap();
+        for (index, bytes) in table[32..]
+            .as_chunks::<METADATA_ENTRY_SIZE>()
+            .0
+            .iter()
+            .take(header.entry_count as usize)
+            .enumerate()
+        {
+            let entry = MetadataTableEntry::read_from_bytes(bytes).unwrap();
+            if entry.item_id == guid {
+                return (
+                    region.file_offset + ((index + 1) * METADATA_ENTRY_SIZE) as u64,
+                    region.file_offset + u64::from(entry.offset),
+                );
+            }
+        }
+        panic!("Missing metadata item {guid:x?}");
+    }
+
+    #[test]
+    fn known_metadata_lengths_are_checked() {
+        let (file, region) = metadata_region();
+        for (guid, length) in [
+            (METADATA_FILE_PARAMETER, 8u32),
+            (METADATA_VIRTUAL_DISK_SIZE, 8),
+            (METADATA_VIRTUAL_DISK_ID, 16),
+            (METADATA_LOGICAL_SECTOR_SIZE, 4),
+            (METADATA_PHYSICAL_SECTOR_SIZE, 4),
+        ] {
+            let (entry_offset, _) = metadata_item(&file, &region, guid);
+            let length_offset = entry_offset + 20;
+            for invalid in [1, length - 1, length + 1] {
+                file.write_all_at(&invalid.to_le_bytes(), length_offset)
+                    .unwrap();
+                DiskSpec::new(&file, &region).unwrap_err();
+            }
+            file.write_all_at(&length.to_le_bytes(), length_offset)
+                .unwrap();
+        }
+        DiskSpec::new(&file, &region).unwrap();
+    }
+
+    #[test]
+    fn metadata_item_locations_are_checked() {
+        let (file, region) = metadata_region();
+        let mut short_region = region;
+        short_region.length = METADATA_TABLE_MAX_SIZE as u32 - 1;
+        assert!(matches!(
+            DiskSpec::new(&file, &short_region),
+            Err(VhdxMetadataError::InvalidMetadataLength)
+        ));
+
+        let (entry_offset, _) = metadata_item(&file, &region, METADATA_VIRTUAL_DISK_SIZE);
+        let offset_field = entry_offset + 16;
+        for offset in [
+            0,
+            METADATA_TABLE_MAX_SIZE as u32 - 1,
+            region.length - 4,
+            u32::MAX,
+        ] {
+            file.write_all_at(&offset.to_le_bytes(), offset_field)
+                .unwrap();
+            assert!(matches!(
+                DiskSpec::new(&file, &region),
+                Err(VhdxMetadataError::InvalidMetadataLength)
+            ));
+        }
+
+        for offset in [region.length - 9, region.length - 8] {
+            file.write_all_at(&offset.to_le_bytes(), offset_field)
+                .unwrap();
+            file.write_all_at(
+                &(1u64 << 20).to_le_bytes(),
+                region.file_offset + u64::from(offset),
+            )
+            .unwrap();
+            DiskSpec::new(&file, &region).unwrap();
+        }
     }
 }
