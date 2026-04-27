@@ -117,7 +117,7 @@ impl MeasuredBootInfo {
         // https://github.com/virtee/sev-snp-measure/blob/main/sevsnpmeasure/sev_hashes.py#L71-L74
         let cmdline_digest: [u8; 32] = Sha256::digest(self.cmdline.as_bytes_with_nul()).into();
 
-        // If no initrd is provided, we will simply hash over an empty buffer, mimicing
+        // If no initrd is provided, we will simply hash over an empty buffer, mimicking
         // QEMU's behavior: https://gitlab.com/qemu-project/qemu/-/blob/master/target/i386/sev.c#L2387
         let initrd_digest: [u8; 32] = if let Some(initramfs) = &self.initramfs {
             let mut initramfs = initramfs.try_clone().map_err(Self::measured_boot_io)?;
