@@ -30,6 +30,7 @@ pub mod seccomp_filters;
 mod thread_helper;
 pub mod transport;
 pub mod vdpa;
+pub mod vhost_net;
 pub mod vhost_user;
 pub mod vsock;
 pub mod watchdog;
