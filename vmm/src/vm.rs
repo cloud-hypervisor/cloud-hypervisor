@@ -343,6 +343,9 @@ pub enum Error {
     #[error("Cannot load the igvm into memory")]
     IgvmLoad(#[source] igvm_loader::Error),
 
+    #[error("Error reading OEM string file")]
+    PlatformOemStringFile(#[source] std::io::Error),
+
     #[error("Error injecting NMI")]
     ErrorNmi(#[source] cpu::Error),
 
@@ -1769,13 +1772,24 @@ impl Vm {
             .as_ref()
             .and_then(|p| p.uuid.clone());
 
-        let oem_strings = self
-            .config
-            .lock()
-            .unwrap()
-            .platform
-            .as_ref()
-            .and_then(|p| p.oem_strings.clone());
+        let config_lock = self.config.lock().unwrap();
+        let platform = config_lock.platform.as_ref();
+        let mut oem_strings = platform.and_then(|p| p.oem_strings.clone());
+
+        // Resolve oem_string_files: read file contents and merge into oem_strings.
+        if let Some(files) = platform.and_then(|p| p.oem_string_files.as_ref()) {
+            let strings = oem_strings.get_or_insert_with(Vec::new);
+            for path in files {
+                let content = std::fs::read_to_string(path).map_err(|e| {
+                    Error::PlatformOemStringFile(std::io::Error::new(
+                        e.kind(),
+                        format!("{path}: {e}"),
+                    ))
+                })?;
+                strings.push(content.trim_end().to_string());
+            }
+        }
+        drop(config_lock);
 
         let oem_strings = oem_strings
             .as_deref()
