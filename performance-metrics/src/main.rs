@@ -1868,8 +1868,8 @@ fn main() {
     };
 
     // Determine which tests will actually run.
-    let tests_to_run: Vec<&&PerformanceTest> = test_list
-        .iter()
+    let tests_to_run: Vec<&PerformanceTest> = test_list
+        .into_iter()
         .filter(|t| test_filter.is_empty() || test_filter.iter().any(|&s| t.name.contains(s)))
         .filter(|t| !test_exclude.iter().any(|&s| t.name.contains(s)))
         .collect();
