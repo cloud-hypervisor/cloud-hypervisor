@@ -1398,6 +1398,12 @@ components:
       properties:
         receiver_url:
           type: string
+        tls_dir:
+          type: string
+          description: >
+            Directory containing the TLS server certificate (server-cert.pem), the TLS
+            server key (server-key.pem), and the client TLS root CA certificate (ca-cert.pem).
+            TLS is only supported with tcp:<host>:<port> receiver URLs.
 
     TimeoutStrategy:
       type: string
@@ -1445,6 +1451,12 @@ components:
             The number of parallel TCP connections to use for migration.
             Must be between 1 and 128. Multiple connections are not supported
             with local UNIX-socket migration.
+        tls_dir:
+          type: string
+          description: >
+            Directory containing the TLS root CA certificate (ca-cert.pem), the TLS client
+            certificate (client-cert.pem), and TLS client key (client-key.pem).
+            TLS is only supported with tcp:<host>:<port> destination URLs.
 
     VmAddUserDevice:
       required:
