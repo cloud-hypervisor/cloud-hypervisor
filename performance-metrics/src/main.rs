@@ -17,7 +17,7 @@ use std::{env, fmt, thread};
 use clap::{Arg, ArgAction, Command as ClapCommand};
 use performance_tests::*;
 use serde::{Deserialize, Serialize};
-use test_infra::{FioOps, ProcessRegistry};
+use test_infra::{FioOps, GuestVmType, ProcessRegistry};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -178,22 +178,25 @@ pub struct PerformanceTestOverrides {
     test_iterations: Option<u32>,
     test_timeout: Option<u32>,
     test_image_format: Option<ImageFormat>,
+    vm_type: GuestVmType,
 }
 
 impl fmt::Display for PerformanceTestOverrides {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(test_iterations) = self.test_iterations {
-            write!(f, "test_iterations = {test_iterations}, ")?;
-        }
-        if let Some(test_timeout) = self.test_timeout {
-            write!(f, "test_timeout = {test_timeout}")?;
-        }
-
-        if let Some(test_image_format) = self.test_image_format {
-            write!(f, "test_image_format = {test_image_format}")?;
-        }
-
-        Ok(())
+        write!(
+            f,
+            "{}{}{}vm_type = {}",
+            self.test_iterations
+                .map(|v| format!("test_iterations = {v}, "))
+                .unwrap_or_default(),
+            self.test_timeout
+                .map(|v| format!("test_timeout = {v}, "))
+                .unwrap_or_default(),
+            self.test_image_format
+                .map(|v| format!("test_image_format = {v}, "))
+                .unwrap_or_default(),
+            self.vm_type
+        )
     }
 }
 
@@ -215,6 +218,7 @@ pub struct PerformanceTestControl {
     block_control: Option<BlockControl>,
     num_boot_vcpus: Option<u8>,
     num_ops: Option<u32>, // Workload size for micro benchmarks
+    vm_type: GuestVmType,
 }
 
 impl fmt::Display for PerformanceTestControl {
@@ -243,6 +247,8 @@ impl fmt::Display for PerformanceTestControl {
             output = format!("{output}, num_ops = {o}");
         }
 
+        output = format!("{output}, vm_type = {}", self.vm_type);
+
         write!(f, "{output}")
     }
 }
@@ -259,6 +265,7 @@ impl PerformanceTestControl {
             block_control: None,
             num_boot_vcpus: Some(1),
             num_ops: None,
+            vm_type: GuestVmType::Regular,
         }
     }
 }
@@ -282,15 +289,18 @@ impl PerformanceTest {
             );
         }
 
+        let effective_control = {
+            let mut control = self.control.clone();
+            if let Some(test_timeout) = overrides.test_timeout {
+                control.test_timeout = test_timeout;
+            }
+            control.vm_type = overrides.vm_type;
+            control
+        };
+
         // Run warmup iterations if configured (results discarded)
         for _ in 0..self.control.warmup_iterations {
-            if let Some(test_timeout) = overrides.test_timeout {
-                let mut control: PerformanceTestControl = self.control.clone();
-                control.test_timeout = test_timeout;
-                let _ = (self.func_ptr)(&control);
-            } else {
-                let _ = (self.func_ptr)(&self.control);
-            }
+            let _ = (self.func_ptr)(&effective_control);
         }
 
         let mut metrics = Vec::new();
@@ -298,14 +308,7 @@ impl PerformanceTest {
             .test_iterations
             .unwrap_or(self.control.test_iterations)
         {
-            // update the timeout in control if passed explicitly and run testcase with it
-            if let Some(test_timeout) = overrides.test_timeout {
-                let mut control: PerformanceTestControl = self.control.clone();
-                control.test_timeout = test_timeout;
-                metrics.push((self.func_ptr)(&control));
-            } else {
-                metrics.push((self.func_ptr)(&self.control));
-            }
+            metrics.push((self.func_ptr)(&effective_control));
         }
 
         let mean = (self.unit_adjuster)(mean(&metrics).unwrap());
@@ -1834,6 +1837,16 @@ fn main() {
                 )
                 .num_args(1),
         )
+        .arg(
+            Arg::new("vm-type")
+                .long("vm-type")
+                .help(
+                    "Set the VM type: 'regular' (default) or 'confidential' (CVM).",
+                )
+                .num_args(1)
+                .value_parser(["regular","confidential"])
+                .default_value("regular"),
+        )
         .get_matches();
 
     // It seems that the tool (ethr) used for testing the virtio-net latency
@@ -1888,7 +1901,19 @@ fn main() {
             .map(|s| s.parse())
             .transpose()
             .unwrap_or_default(),
+        vm_type: cmd_arguments
+            .get_one::<String>("vm-type")
+            .map(|s| s.parse().unwrap_or_default())
+            .unwrap_or_default(),
     });
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        if overrides.vm_type == GuestVmType::Confidential {
+            eprintln!("Confidential VM is currently not supported on Arm64");
+            std::process::exit(1);
+        }
+    }
 
     // Skip heavy VM level init/cleanup when only micro benchmarks are selected.
     let needs_vm_tests = tests_to_run.iter().any(|t| !t.name.starts_with("micro_"));

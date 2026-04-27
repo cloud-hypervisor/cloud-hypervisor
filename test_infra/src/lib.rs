@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::fmt::Display;
+use std::fmt::{Display, Formatter};
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
@@ -2487,10 +2487,32 @@ pub fn extract_bar_address(output: &str, device_desc: &str, bar_index: usize) ->
     None
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Default)]
 pub enum GuestVmType {
+    #[default]
     Regular,
     Confidential,
+}
+
+impl FromStr for GuestVmType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "regular" => Ok(GuestVmType::Regular),
+            "confidential" => Ok(GuestVmType::Confidential),
+            _ => Err(()),
+        }
+    }
+}
+
+impl Display for GuestVmType {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            GuestVmType::Regular => write!(f, "regular"),
+            GuestVmType::Confidential => write!(f, "confidential"),
+        }
+    }
 }
 
 // Get the direct igvm boot file path based on the console type
