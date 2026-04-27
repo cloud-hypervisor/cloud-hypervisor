@@ -614,6 +614,8 @@ pub struct DeviceConfig {
     pub path: PathBuf,
     #[serde(default)]
     pub x_nv_gpudirect_clique: Option<u8>,
+    #[serde(default)]
+    pub x_exclude_mmap_bars: Vec<u8>,
 }
 
 impl ApplyLandlock for DeviceConfig {

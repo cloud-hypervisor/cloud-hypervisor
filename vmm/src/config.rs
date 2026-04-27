@@ -144,6 +144,9 @@ pub enum Error {
     /// Missing path from device,
     #[error("Error parsing --device: path missing")]
     ParseDevicePathMissing,
+    /// Invalid excluded-mmap BAR from device
+    #[error("Error parsing --device: invalid excluded-mmap BAR index {0}")]
+    ParseDeviceExcludeMmapBarInvalid(u64),
     /// Failed parsing vsock parameters
     #[error("Error parsing --vsock")]
     ParseVsock(#[source] OptionParserError),
@@ -310,6 +313,9 @@ pub enum ValidationError {
     /// Invalid PCI segment aperture weight
     #[error("Invalid PCI segment aperture weight: {0}")]
     InvalidPciSegmentApertureWeight(u32),
+    /// Invalid VFIO excluded-mmap BAR index
+    #[error("Invalid VFIO excluded-mmap BAR index: {0}")]
+    InvalidDeviceExcludeMmapBar(u8),
     /// Invalid IOMMU address width in bits
     #[error(
         "IOMMU address width in bits ({0}) should be less than or equal to {MAX_IOMMU_ADDRESS_WIDTH_BITS}"
@@ -2219,14 +2225,17 @@ impl DebugConsoleConfig {
 impl DeviceConfig {
     pub const SYNTAX: &'static str = "Direct device assignment parameters \
     \"path=<device_path>,iommu=on|off,id=<device_id>,\
-    pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
+    pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
+    x_nv_gpudirect_clique=<clique_id>,\
+    x_exclude_mmap_bars=[<bar>...]\"";
 
     pub fn parse(device: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
             .add("path")
             .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU)
-            .add("x_nv_gpudirect_clique");
+            .add("x_nv_gpudirect_clique")
+            .add("x_exclude_mmap_bars");
         parser.parse(device).map_err(Error::ParseDevice)?;
 
         let pci_common = PciDeviceCommonConfig::parse(device)?;
@@ -2237,10 +2246,23 @@ impl DeviceConfig {
         let x_nv_gpudirect_clique = parser
             .convert::<u8>("x_nv_gpudirect_clique")
             .map_err(Error::ParseDevice)?;
+        let IntegerList(raw_x_exclude_mmap_bars) = parser
+            .convert::<IntegerList>("x_exclude_mmap_bars")
+            .map_err(Error::ParseDevice)?
+            .unwrap_or(IntegerList(Vec::new()));
+        let mut x_exclude_mmap_bars = Vec::with_capacity(raw_x_exclude_mmap_bars.len());
+        for bar in raw_x_exclude_mmap_bars {
+            // PCI devices have six standard BARs indexed 0..=5.
+            if bar > 5 {
+                return Err(Error::ParseDeviceExcludeMmapBarInvalid(bar));
+            }
+            x_exclude_mmap_bars.push(bar as u8);
+        }
         Ok(DeviceConfig {
             pci_common,
             path,
             x_nv_gpudirect_clique,
+            x_exclude_mmap_bars,
         })
     }
 
@@ -2251,6 +2273,13 @@ impl DeviceConfig {
             let vfio_p2p_dma = vm_config.platform.as_ref().is_none_or(|p| p.vfio_p2p_dma);
             if !vfio_p2p_dma {
                 return Err(ValidationError::GpuDirectCliqueRequiresP2pDma);
+            }
+        }
+
+        // PCI devices expose six BARs, so only BAR indices 0 through 5 are valid here.
+        for bar in &self.x_exclude_mmap_bars {
+            if *bar > 5 {
+                return Err(ValidationError::InvalidDeviceExcludeMmapBar(*bar));
             }
         }
 
@@ -4396,6 +4425,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             pci_common: PciDeviceCommonConfig::default(),
             path: PathBuf::from("/path/to/device"),
             x_nv_gpudirect_clique: None,
+            x_exclude_mmap_bars: Vec::new(),
         }
     }
 
@@ -4431,6 +4461,26 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             }
         );
 
+        assert_eq!(
+            DeviceConfig::parse("path=/path/to/device,x_exclude_mmap_bars=[2]")?,
+            DeviceConfig {
+                x_exclude_mmap_bars: vec![2],
+                ..device_fixture()
+            }
+        );
+
+        assert_eq!(
+            DeviceConfig::parse("path=/path/to/device,x_exclude_mmap_bars=[0,2,5]")?,
+            DeviceConfig {
+                x_exclude_mmap_bars: vec![0, 2, 5],
+                ..device_fixture()
+            }
+        );
+
+        assert!(matches!(
+            DeviceConfig::parse("path=/path/to/device,x_exclude_mmap_bars=[6]").unwrap_err(),
+            Error::ParseDeviceExcludeMmapBarInvalid(6)
+        ));
         Ok(())
     }
 
