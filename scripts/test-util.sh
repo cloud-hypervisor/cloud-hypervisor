@@ -187,15 +187,32 @@ download_linux() {
 }
 
 prepare_linux() {
+    if [ "$build_kernel" = true ] && [ -n "$CH_CUSTOM_KERNEL" ]; then
+        echo "ERROR: --build-guest-kernel and CH_CUSTOM_KERNEL are mutually exclusive"
+        exit 1
+    fi
+
+    if [ "$(uname -m)" = "x86_64" ]; then
+        if { [ -n "$CH_CUSTOM_KERNEL" ] && [ -z "$CH_CUSTOM_BZIMAGE" ]; } ||
+            { [ -z "$CH_CUSTOM_KERNEL" ] && [ -n "$CH_CUSTOM_BZIMAGE" ]; }; then
+            echo "ERROR: On x86_64, both CH_CUSTOM_KERNEL and CH_CUSTOM_BZIMAGE must be provided"
+            exit 1
+        fi
+    fi
+
     if [ "$(uname -m)" = "aarch64" ]; then
         KERNEL_FILE="$WORKLOADS_DIR/Image-arm64"
-    else
+        if [[ -f "$KERNEL_FILE" ]]; then
+            echo "Kernel already present at $KERNEL_FILE, skipping"
+            return
+        fi
+    elif [ "$(uname -m)" = "x86_64" ]; then
         KERNEL_FILE="$WORKLOADS_DIR/vmlinux-x86_64"
         BZIMAGE_FILE="$WORKLOADS_DIR/bzImage-x86_64"
-    fi
-    if [[ -f "$KERNEL_FILE" && -f "$BZIMAGE_FILE" ]]; then
-        echo "Kernel already present at $KERNEL_FILE, skipping"
-        return
+        if [[ -f "$KERNEL_FILE" ]] && [[ -f "$BZIMAGE_FILE" ]]; then
+            echo "Kernel already present at $KERNEL_FILE and bzImage at $BZIMAGE_FILE, skipping"
+            return
+        fi
     fi
 
     if [ "$build_kernel" = true ]; then
