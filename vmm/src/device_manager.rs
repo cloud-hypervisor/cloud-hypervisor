@@ -874,6 +874,44 @@ struct DeviceManagerState {
     device_id_cnt: Wrapping<usize>,
 }
 
+struct PciHotplugSharedState {
+    pci_segments: Vec<PciSegment>,
+    // List of bus devices
+    // Let the DeviceManager keep strong references to the BusDevice devices.
+    // This allows the IO and MMIO buses to be provided with Weak references,
+    // which prevents cyclic dependencies.
+    bus_devices: Vec<Arc<dyn BusDeviceSync>>,
+    // VFIO operation instance
+    // Only one can be created, therefore it is stored as part of the
+    // DeviceManager to be reused.
+    vfio_ops: Option<Arc<dyn VfioOps>>,
+    // PCI information about devices attached to the paravirtualized IOMMU
+    // It contains the virtual IOMMU PCI BDF along with the list of PCI BDF
+    // representing the devices attached to the virtual IOMMU. This is useful
+    // information for filling the ACPI VIOT table.
+    iommu_attached_devices: Option<(PciBdf, Vec<PciBdf>)>,
+    // Possible handle to the virtio-mem device
+    virtio_mem_devices: Vec<Arc<Mutex<virtio_devices::Mem>>>,
+}
+
+impl PciHotplugSharedState {
+    fn push_bus_device(&mut self, bus_device: Arc<dyn BusDeviceSync>) {
+        self.bus_devices.push(bus_device);
+    }
+
+    fn remove_bus_device(&mut self, bus_device: &Arc<dyn BusDeviceSync>) {
+        self.bus_devices.retain(|dev| !Arc::ptr_eq(dev, bus_device));
+    }
+
+    fn cleanup_vfio_ops(&mut self) {
+        // Drop the VfioOps instance when "Self" is the only reference.
+        if let Some(1) = self.vfio_ops.as_ref().map(Arc::strong_count) {
+            debug!("Drop VfioOps given no active VFIO devices.");
+            self.vfio_ops = None;
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct PtyPair {
     pub main: File,
@@ -954,9 +992,6 @@ impl AccessPlatform for SevSnpPageAccessProxy {
 }
 
 pub struct DeviceManager {
-    // Manage address space related to devices
-    address_manager: Arc<AddressManager>,
-
     // Console abstraction
     console: Arc<Console>,
 
@@ -997,22 +1032,23 @@ pub struct DeviceManager {
     /// a weak reference).
     _acpi_cpu_hotplug_controller: Arc<Mutex<AcpiCpuHotplugController>>,
 
+    /// Owned version needed to keep the bus device alive (the bus only holds
+    /// a weak reference).
+    _acpi_pci_hotplug_controller: Arc<Mutex<AcpiPciHotplugController>>,
+
+    // Manage address space related to devices
+    address_manager: Arc<AddressManager>,
+
     // The virtio devices on the system
     virtio_devices: Vec<MetaVirtioDevice>,
 
     /// All disks. Needed for locking and unlocking the images.
     block_devices: Vec<Arc<Mutex<Block>>>,
 
-    // List of bus devices
-    // Let the DeviceManager keep strong references to the BusDevice devices.
-    // This allows the IO and MMIO buses to be provided with Weak references,
-    // which prevents cyclic dependencies.
-    bus_devices: Vec<Arc<dyn BusDeviceSync>>,
-
     // Counter to keep track of the consumed device IDs.
     device_id_cnt: Wrapping<usize>,
 
-    pci_segments: Vec<PciSegment>,
+    shared_state: Arc<Mutex<PciHotplugSharedState>>,
 
     #[cfg_attr(target_arch = "aarch64", allow(dead_code))]
     // MSI Interrupt Manager
@@ -1025,20 +1061,9 @@ pub struct DeviceManager {
     // Passthrough device handle
     passthrough_device: Option<VfioDeviceFd>,
 
-    // VFIO operation instance
-    // Only one can be created, therefore it is stored as part of the
-    // DeviceManager to be reused.
-    vfio_ops: Option<Arc<dyn VfioOps>>,
-
     // Paravirtualized IOMMU
     iommu_device: Option<Arc<Mutex<virtio_devices::Iommu>>>,
     iommu_mapping: Option<Arc<IommuMapping>>,
-
-    // PCI information about devices attached to the paravirtualized IOMMU
-    // It contains the virtual IOMMU PCI BDF along with the list of PCI BDF
-    // representing the devices attached to the virtual IOMMU. This is useful
-    // information for filling the ACPI VIOT table.
-    iommu_attached_devices: Option<(PciBdf, Vec<PciBdf>)>,
 
     // Tree of devices, representing the dependencies between devices.
     // Useful for introspection, snapshot and restore.
@@ -1070,11 +1095,6 @@ pub struct DeviceManager {
     activate_evt: EventFd,
 
     acpi_address: GuestAddress,
-
-    selected_segment: usize,
-
-    // Possible handle to the virtio-mem device
-    virtio_mem_devices: Vec<Arc<Mutex<virtio_devices::Mem>>>,
 
     #[cfg(target_arch = "aarch64")]
     // GPIO device for AArch64
@@ -1116,6 +1136,19 @@ pub struct DeviceManager {
     #[cfg(feature = "ivshmem")]
     // ivshmem device
     ivshmem_device: Option<Arc<Mutex<devices::IvshmemDevice>>>,
+}
+
+/// MMIO-accessible controller for handling ACPI PCI hotplug and unplug events.
+///
+/// Shares PCI hotplug state with the [`DeviceManager`].
+pub struct AcpiPciHotplugController {
+    shared_state: Arc<Mutex<PciHotplugSharedState>>,
+    /// The currently selected segment by the guest (via MMIO).
+    selected_segment: usize,
+    address_manager: Arc<AddressManager>,
+    memory_manager: Arc<Mutex<MemoryManager>>,
+    device_tree: Arc<Mutex<DeviceTree>>,
+    mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
 }
 
 /// Create per-PCI-segment MMIO allocators over the range `[start, end]`.
@@ -1164,7 +1197,248 @@ fn use_64bit_bar_for_virtio_device(
     pci_segment_id > 0 || device_type != VirtioDeviceType::Block as u32 || is_hotplug
 }
 
+impl AcpiPciHotplugController {
+    fn new(
+        shared_state: Arc<Mutex<PciHotplugSharedState>>,
+        address_manager: Arc<AddressManager>,
+        memory_manager: Arc<Mutex<MemoryManager>>,
+        device_tree: Arc<Mutex<DeviceTree>>,
+        mmio_regions: Arc<Mutex<Vec<MmioRegion>>>,
+    ) -> Self {
+        Self {
+            shared_state,
+            selected_segment: 0,
+            address_manager,
+            memory_manager,
+            device_tree,
+            mmio_regions,
+        }
+    }
+
+    fn eject_device(
+        &mut self,
+        pci_segment_id: u16,
+        device_id: u8,
+    ) -> DeviceManagerResult<Option<Arc<Mutex<dyn virtio_devices::VirtioDevice>>>> {
+        info!("Ejecting device_id = {device_id} on segment_id={pci_segment_id}");
+
+        // Convert the device ID into the corresponding b/d/f.
+        let pci_device_bdf = PciBdf::new(pci_segment_id, 0, device_id, 0);
+        let (pci_bus, mem32_allocator, mem64_allocator, virtio_mem_devices, iommu_attached) = {
+            let shared_state = self.shared_state.lock().unwrap();
+            let pci_segment = &shared_state.pci_segments[pci_segment_id as usize];
+
+            (
+                Arc::clone(&pci_segment.pci_bus),
+                Arc::clone(&pci_segment.mem32_allocator),
+                Arc::clone(&pci_segment.mem64_allocator),
+                shared_state.virtio_mem_devices.clone(),
+                shared_state
+                    .iommu_attached_devices
+                    .as_ref()
+                    .is_some_and(|(_, devices)| devices.contains(&pci_device_bdf)),
+            )
+        };
+
+        // Give the PCI device ID back to the PCI bus.
+        pci_bus
+            .lock()
+            .unwrap()
+            .free_device_id(device_id)
+            .map_err(DeviceManagerError::FreePciDeviceId)?;
+
+        let (pci_device_handle, id) = {
+            // Remove the device from the device tree along with its children.
+            let mut device_tree = self.device_tree.lock().unwrap();
+            let pci_device_node = device_tree
+                .remove_node_by_pci_bdf(pci_device_bdf)
+                .ok_or(DeviceManagerError::MissingPciDevice)?;
+
+            // For VFIO and vfio-user the PCI device id is the id.
+            // For virtio we overwrite it later as we want the id of the
+            // underlying device.
+            let mut id = pci_device_node.id;
+            let pci_device_handle = pci_device_node
+                .pci_device_handle
+                .ok_or(DeviceManagerError::MissingPciDevice)?;
+            if matches!(pci_device_handle, PciDeviceHandle::Virtio(_))
+                && !pci_device_node.children.is_empty()
+            {
+                // The virtio-pci device has a single child.
+                assert_eq!(pci_device_node.children.len(), 1);
+                id.clone_from(&pci_device_node.children[0]);
+            }
+            for child in &pci_device_node.children {
+                device_tree.remove(child);
+            }
+
+            (pci_device_handle, id)
+        };
+
+        let (pci_device, bus_device, virtio_device, remove_dma_handler) = match pci_device_handle {
+            // VirtioMemMappingSource::Container cleanup is handled by
+            // cleanup_vfio_ops when the last VFIO device is removed.
+            PciDeviceHandle::Vfio(vfio_pci_device) => {
+                // Remove this device's MMIO regions from the DeviceManager's
+                // mmio_regions list. We match on UserMemoryRegion slot numbers
+                // rather than MmioRegion start addresses because move_bar()
+                // updates the device's region addresses but not the
+                // DeviceManager's cloned copies.
+                let device_regions = vfio_pci_device.lock().unwrap().mmio_regions().clone();
+                let mut mmio_regions = self.mmio_regions.lock().unwrap();
+                for device_region in &device_regions {
+                    mmio_regions.retain(|x| !x.has_matching_slots(device_region));
+                }
+
+                (
+                    Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn PciDevice>>,
+                    Arc::clone(&vfio_pci_device) as Arc<dyn BusDeviceSync>,
+                    None as Option<Arc<Mutex<dyn virtio_devices::VirtioDevice>>>,
+                    false,
+                )
+            }
+            PciDeviceHandle::Virtio(virtio_pci_device) => {
+                let dev = virtio_pci_device.lock().unwrap();
+                let bar_addr = dev.config_bar_addr();
+                for (event, addr) in dev.ioeventfds(bar_addr) {
+                    let io_addr = IoEventAddress::Mmio(addr);
+                    self.address_manager
+                        .vm
+                        .unregister_ioevent(event, &io_addr)
+                        .map_err(|e| DeviceManagerError::UnRegisterIoevent(e.into()))?;
+                }
+
+                if let Some(dma_handler) = dev.dma_handler()
+                    && !iommu_attached
+                {
+                    for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+                        for region in zone.regions() {
+                            dma_handler
+                                .unmap(region.start_addr().0, region.len())
+                                .map_err(DeviceManagerError::VirtioDmaUnmap)?;
+                        }
+                    }
+                }
+
+                (
+                    Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn PciDevice>>,
+                    Arc::clone(&virtio_pci_device) as Arc<dyn BusDeviceSync>,
+                    Some(dev.virtio_device()),
+                    dev.dma_handler().is_some() && !iommu_attached,
+                )
+            }
+            PciDeviceHandle::VfioUser(vfio_user_pci_device) => {
+                let mut dev = vfio_user_pci_device.lock().unwrap();
+                for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
+                    for region in zone.regions() {
+                        dev.dma_unmap(region)
+                            .map_err(DeviceManagerError::VfioUserDmaUnmap)?;
+                    }
+                }
+
+                (
+                    Arc::clone(&vfio_user_pci_device) as Arc<Mutex<dyn PciDevice>>,
+                    Arc::clone(&vfio_user_pci_device) as Arc<dyn BusDeviceSync>,
+                    None as Option<Arc<Mutex<dyn virtio_devices::VirtioDevice>>>,
+                    true,
+                )
+            }
+        };
+
+        if remove_dma_handler {
+            for virtio_mem_device in &virtio_mem_devices {
+                let source = VirtioMemMappingSource::Device(pci_device_bdf.into());
+                virtio_mem_device
+                    .lock()
+                    .unwrap()
+                    .remove_dma_mapping_handler(&source)
+                    .map_err(DeviceManagerError::RemoveDmaMappingHandlerVirtioMem)?;
+            }
+        }
+
+        // Free the allocated BARs.
+        pci_device
+            .lock()
+            .unwrap()
+            .free_bars(
+                &mut self.address_manager.allocator.lock().unwrap(),
+                &mut mem32_allocator.lock().unwrap(),
+                &mut mem64_allocator.lock().unwrap(),
+            )
+            .map_err(DeviceManagerError::FreePciBars)?;
+
+        pci_bus
+            .lock()
+            .unwrap()
+            .remove_by_device(&pci_device)
+            .map_err(DeviceManagerError::RemoveDeviceFromPciBus)?;
+
+        #[cfg(target_arch = "x86_64")]
+        // Remove the device from the IO bus.
+        self.address_manager
+            .io_bus
+            .remove_by_device(bus_device.as_ref())
+            .map_err(DeviceManagerError::RemoveDeviceFromIoBus)?;
+
+        // Remove the device from the MMIO bus.
+        self.address_manager
+            .mmio_bus
+            .remove_by_device(bus_device.as_ref())
+            .map_err(DeviceManagerError::RemoveDeviceFromMmioBus)?;
+
+        // Shutdown and remove the underlying virtio-device if present.
+        if let Some(virtio_device) = &virtio_device {
+            for mapping in virtio_device.lock().unwrap().userspace_mappings() {
+                // SAFETY: userspace_mappings only has valid mappings.
+                // TODO: do not rely on the correctness of all the code in this
+                // file for this to hold.
+                unsafe {
+                    self.memory_manager
+                        .lock()
+                        .unwrap()
+                        .remove_userspace_mapping(
+                            mapping.addr.raw_value(),
+                            mapping.mapping.size(),
+                            mapping.mapping.as_ptr() as _,
+                            mapping.mergeable,
+                            mapping.mem_slot,
+                        )
+                        .map_err(DeviceManagerError::MemoryManager)
+                }?;
+            }
+
+            virtio_device.lock().unwrap().shutdown();
+        }
+
+        let mut shared_state = self.shared_state.lock().unwrap();
+        // Remove the device from the list of BusDevice held by the
+        // DeviceManager.
+        shared_state.remove_bus_device(&bus_device);
+        shared_state.cleanup_vfio_ops();
+        drop(shared_state);
+
+        // At this point, the device has been removed from all the list and
+        // buses where it was stored. At the end of this function, after
+        // any_device, bus_device and pci_device are released, the actual
+        // device will be dropped.
+        event!(
+            "vm",
+            "device-removed",
+            "id",
+            &id,
+            "bdf",
+            pci_device_bdf.to_string()
+        );
+
+        Ok(virtio_device)
+    }
+}
+
 impl DeviceManager {
+    fn shared_state(&self) -> std::sync::MutexGuard<'_, PciHotplugSharedState> {
+        self.shared_state.lock().unwrap()
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         io_bus: Arc<Bus>,
@@ -1302,6 +1576,23 @@ impl DeviceManager {
             AcpiCpuHotplugController::new(&cpu_manager.lock().unwrap());
         let acpi_cpu_hotplug_controller = Arc::new(Mutex::new(acpi_cpu_hotplug_controller));
 
+        let mmio_regions = Arc::new(Mutex::new(Vec::new()));
+        let shared_state = Arc::new(Mutex::new(PciHotplugSharedState {
+            pci_segments,
+            bus_devices: Vec::new(),
+            vfio_ops: None,
+            iommu_attached_devices: None,
+            virtio_mem_devices: Vec::new(),
+        }));
+        let acpi_pci_hotplug_controller = Arc::new(Mutex::new(AcpiPciHotplugController::new(
+            Arc::clone(&shared_state),
+            Arc::clone(&address_manager),
+            Arc::clone(&memory_manager),
+            Arc::clone(&device_tree),
+            Arc::clone(&mmio_regions),
+        )));
+        let acpi_pci_hotplug_bus_device = Arc::clone(&acpi_pci_hotplug_controller);
+
         if dynamic {
             let acpi_address = address_manager
                 .allocator
@@ -1348,7 +1639,6 @@ impl DeviceManager {
         }
 
         let device_manager = DeviceManager {
-            address_manager: Arc::clone(&address_manager),
             console: Arc::new(Console::default()),
             interrupt_controller: None,
             #[cfg(any(target_arch = "aarch64", target_arch = "riscv64"))]
@@ -1357,18 +1647,16 @@ impl DeviceManager {
             config,
             memory_manager,
             cpu_manager,
+            address_manager: Arc::clone(&address_manager),
             virtio_devices: Vec::new(),
             block_devices: vec![],
-            bus_devices: Vec::new(),
             device_id_cnt,
+            shared_state,
             msi_interrupt_manager,
             legacy_interrupt_manager: None,
             passthrough_device: None,
-            vfio_ops: None,
             iommu_device: None,
             iommu_mapping: None,
-            iommu_attached_devices: None,
-            pci_segments,
             device_tree,
             exit_evt,
             reset_evt,
@@ -1383,11 +1671,9 @@ impl DeviceManager {
                 .try_clone()
                 .map_err(DeviceManagerError::EventFd)?,
             acpi_address,
-            selected_segment: 0,
             serial_manager: None,
             console_resize_pipe: None,
             original_termios_opt: Arc::new(Mutex::new(None)),
-            virtio_mem_devices: Vec::new(),
             #[cfg(target_arch = "aarch64")]
             gpio_device: None,
             #[cfg(feature = "pvmemcontrol")]
@@ -1401,12 +1687,13 @@ impl DeviceManager {
             acpi_platform_addresses: AcpiPlatformAddresses::default(),
             snapshot: snapshot.cloned(),
             rate_limit_groups,
-            mmio_regions: Arc::new(Mutex::new(Vec::new())),
+            mmio_regions,
             #[cfg(feature = "fw_cfg")]
             fw_cfg: None,
             #[cfg(feature = "ivshmem")]
             ivshmem_device: None,
             _acpi_cpu_hotplug_controller: acpi_cpu_hotplug_controller,
+            _acpi_pci_hotplug_controller: acpi_pci_hotplug_controller,
         };
 
         let device_manager = Arc::new(Mutex::new(device_manager));
@@ -1414,7 +1701,7 @@ impl DeviceManager {
         address_manager
             .mmio_bus
             .insert(
-                Arc::clone(&device_manager) as Arc<dyn BusDeviceSync>,
+                acpi_pci_hotplug_bus_device as Arc<dyn BusDeviceSync>,
                 acpi_address.0,
                 DEVICE_MANAGER_ACPI_SIZE as u64,
             )
@@ -1502,8 +1789,8 @@ impl DeviceManager {
         #[cfg(not(target_arch = "riscv64"))]
         if let Some(tpm) = self.config.clone().lock().unwrap().tpm.as_ref() {
             let tpm_dev = self.add_tpm_device(&tpm.socket)?;
-            self.bus_devices
-                .push(Arc::clone(&tpm_dev) as Arc<dyn BusDeviceSync>);
+            self.shared_state()
+                .push_bus_device(Arc::clone(&tpm_dev) as Arc<dyn BusDeviceSync>);
         }
         self.legacy_interrupt_manager = Some(legacy_interrupt_manager);
 
@@ -1541,8 +1828,8 @@ impl DeviceManager {
 
         self.fw_cfg = Some(fw_cfg.clone());
 
-        self.bus_devices
-            .push(Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&fw_cfg) as Arc<dyn BusDeviceSync>);
 
         #[cfg(target_arch = "x86_64")]
         self.address_manager
@@ -1719,19 +2006,32 @@ impl DeviceManager {
                     None,
                     None,
                 )?;
-                self.iommu_attached_devices = Some((dev_id, iommu_attached_devices));
+                self.shared_state().iommu_attached_devices = Some((dev_id, iommu_attached_devices));
             }
         }
 
-        for segment in &self.pci_segments {
-            #[cfg(target_arch = "x86_64")]
-            if let Some(pci_config_io) = segment.pci_config_io.as_ref() {
-                self.bus_devices
-                    .push(Arc::clone(pci_config_io) as Arc<dyn BusDeviceSync>);
-            }
-
-            self.bus_devices
-                .push(Arc::clone(&segment.pci_config_mmio) as Arc<dyn BusDeviceSync>);
+        let pci_config_devices: Vec<Arc<dyn BusDeviceSync>> = self
+            .shared_state()
+            .pci_segments
+            .iter()
+            .flat_map(|segment| {
+                #[cfg(target_arch = "x86_64")]
+                {
+                    let mut devices =
+                        vec![Arc::clone(&segment.pci_config_mmio) as Arc<dyn BusDeviceSync>];
+                    if let Some(pci_config_io) = segment.pci_config_io.as_ref() {
+                        devices.push(Arc::clone(pci_config_io) as Arc<dyn BusDeviceSync>);
+                    }
+                    devices
+                }
+                #[cfg(not(target_arch = "x86_64"))]
+                {
+                    vec![Arc::clone(&segment.pci_config_mmio) as Arc<dyn BusDeviceSync>]
+                }
+            })
+            .collect();
+        for bus_device in pci_config_devices {
+            self.shared_state().push_bus_device(bus_device);
         }
 
         Ok(())
@@ -1853,8 +2153,8 @@ impl DeviceManager {
             .insert(interrupt_controller.clone(), IOAPIC_START.0, IOAPIC_SIZE)
             .map_err(DeviceManagerError::BusError)?;
 
-        self.bus_devices
-            .push(Arc::clone(&interrupt_controller) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&interrupt_controller) as Arc<dyn BusDeviceSync>);
 
         // Fill the device tree with a new node. In case of restore, we
         // know there is nothing to do, so we can simply override the
@@ -1885,8 +2185,8 @@ impl DeviceManager {
             vcpus_kill_signalled,
         )));
 
-        self.bus_devices
-            .push(Arc::clone(&shutdown_device) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&shutdown_device) as Arc<dyn BusDeviceSync>);
 
         #[cfg(target_arch = "x86_64")]
         {
@@ -1948,13 +2248,13 @@ impl DeviceManager {
                 devices::acpi::GED_DEVICE_ACPI_SIZE as u64,
             )
             .map_err(DeviceManagerError::BusError)?;
-        self.bus_devices
-            .push(Arc::clone(&ged_device) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&ged_device) as Arc<dyn BusDeviceSync>);
 
         let pm_timer_device = Arc::new(Mutex::new(devices::AcpiPmTimerDevice::new()));
 
-        self.bus_devices
-            .push(Arc::clone(&pm_timer_device) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&pm_timer_device) as Arc<dyn BusDeviceSync>);
 
         #[cfg(target_arch = "x86_64")]
         {
@@ -1993,8 +2293,8 @@ impl DeviceManager {
             vcpus_kill_signalled.clone(),
         )));
 
-        self.bus_devices
-            .push(Arc::clone(&i8042) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&i8042) as Arc<dyn BusDeviceSync>);
 
         self.address_manager
             .io_bus
@@ -2021,8 +2321,8 @@ impl DeviceManager {
                 Some(vcpus_kill_signalled),
             )));
 
-            self.bus_devices
-                .push(Arc::clone(&cmos) as Arc<dyn BusDeviceSync>);
+            self.shared_state()
+                .push_bus_device(Arc::clone(&cmos) as Arc<dyn BusDeviceSync>);
 
             self.address_manager
                 .io_bus
@@ -2031,8 +2331,8 @@ impl DeviceManager {
 
             let fwdebug = Arc::new(Mutex::new(devices::legacy::FwDebugDevice::new()));
 
-            self.bus_devices
-                .push(Arc::clone(&fwdebug) as Arc<dyn BusDeviceSync>);
+            self.shared_state()
+                .push_bus_device(Arc::clone(&fwdebug) as Arc<dyn BusDeviceSync>);
 
             self.address_manager
                 .io_bus
@@ -2042,8 +2342,8 @@ impl DeviceManager {
 
         // 0x80 debug port
         let debug_port = Arc::new(Mutex::new(devices::legacy::DebugPort::new(self.timestamp)));
-        self.bus_devices
-            .push(Arc::clone(&debug_port) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&debug_port) as Arc<dyn BusDeviceSync>);
         self.address_manager
             .io_bus
             .insert(debug_port, 0x80, 0x1)
@@ -2068,8 +2368,8 @@ impl DeviceManager {
 
         let rtc_device = Arc::new(Mutex::new(devices::legacy::Rtc::new()));
 
-        self.bus_devices
-            .push(Arc::clone(&rtc_device) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&rtc_device) as Arc<dyn BusDeviceSync>);
 
         let addr = arch::layout::LEGACY_RTC_MAPPED_IO_START;
 
@@ -2110,8 +2410,8 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
-        self.bus_devices
-            .push(Arc::clone(&gpio_device) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&gpio_device) as Arc<dyn BusDeviceSync>);
 
         let addr = arch::layout::LEGACY_GPIO_MAPPED_IO_START;
 
@@ -2159,8 +2459,8 @@ impl DeviceManager {
             .iobase
             .map_or(debug_console::DEFAULT_PORT, |port| port as u64);
 
-        self.bus_devices
-            .push(Arc::clone(&debug_console) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&debug_console) as Arc<dyn BusDeviceSync>);
 
         self.address_manager
             .allocator
@@ -2210,8 +2510,8 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
-        self.bus_devices
-            .push(Arc::clone(&serial) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&serial) as Arc<dyn BusDeviceSync>);
 
         self.address_manager
             .allocator
@@ -2267,8 +2567,8 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
-        self.bus_devices
-            .push(Arc::clone(&serial) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&serial) as Arc<dyn BusDeviceSync>);
 
         let addr = arch::layout::LEGACY_SERIAL_MAPPED_IO_START;
 
@@ -2330,8 +2630,8 @@ impl DeviceManager {
                 .map_err(DeviceManagerError::RestoreGetState)?,
         )));
 
-        self.bus_devices
-            .push(Arc::clone(&serial) as Arc<dyn BusDeviceSync>);
+        self.shared_state()
+            .push_bus_device(Arc::clone(&serial) as Arc<dyn BusDeviceSync>);
 
         let addr = arch::layout::LEGACY_SERIAL_MAPPED_IO_START;
 
@@ -3259,7 +3559,7 @@ impl DeviceManager {
         let (region_base, region_size) = if let Some((base, size)) = region_range {
             // The memory needs to be 2MiB aligned in order to support
             // hugepages.
-            self.pci_segments[pmem_cfg.pci_common.pci_segment as usize]
+            self.shared_state().pci_segments[pmem_cfg.pci_common.pci_segment as usize]
                 .mem64_allocator
                 .lock()
                 .unwrap()
@@ -3274,7 +3574,7 @@ impl DeviceManager {
         } else {
             // The memory needs to be 2MiB aligned in order to support
             // hugepages.
-            let base = self.pci_segments[pmem_cfg.pci_common.pci_segment as usize]
+            let base = self.shared_state().pci_segments[pmem_cfg.pci_common.pci_segment as usize]
                 .mem64_allocator
                 .lock()
                 .unwrap()
@@ -3464,7 +3764,9 @@ impl DeviceManager {
                 // if needed.
                 virtio_mem_zone.set_virtio_device(Arc::clone(&virtio_mem_device));
 
-                self.virtio_mem_devices.push(Arc::clone(&virtio_mem_device));
+                self.shared_state()
+                    .virtio_mem_devices
+                    .push(Arc::clone(&virtio_mem_device));
 
                 self.virtio_devices.push(MetaVirtioDevice {
                     virtio_device: Arc::clone(&virtio_mem_device)
@@ -3807,12 +4109,12 @@ impl DeviceManager {
             }
 
             vfio_ops
-        } else if let Some(vfio_ops) = &self.vfio_ops {
+        } else if let Some(vfio_ops) = &self.shared_state().vfio_ops {
             Arc::clone(vfio_ops)
         } else {
             let vfio_ops = self.create_vfio_ops()?;
             needs_dma_mapping = true;
-            self.vfio_ops = Some(Arc::clone(&vfio_ops));
+            self.shared_state().vfio_ops = Some(Arc::clone(&vfio_ops));
 
             vfio_ops
         };
@@ -3849,7 +4151,8 @@ impl DeviceManager {
                 Arc::clone(&self.mmio_regions),
             ));
 
-            for virtio_mem_device in self.virtio_mem_devices.iter() {
+            let virtio_mem_devices = self.shared_state().virtio_mem_devices.clone();
+            for virtio_mem_device in virtio_mem_devices.iter() {
                 virtio_mem_device
                     .lock()
                     .unwrap()
@@ -3863,12 +4166,14 @@ impl DeviceManager {
 
         let legacy_interrupt_group =
             if let Some(legacy_interrupt_manager) = &self.legacy_interrupt_manager {
+                let irq = {
+                    self.shared_state().pci_segments[pci_segment_id as usize].pci_irq_slots
+                        [pci_device_bdf.device() as usize]
+                };
                 Some(
                     legacy_interrupt_manager
                         .create_group(LegacyIrqGroupConfig {
-                            irq: self.pci_segments[pci_segment_id as usize].pci_irq_slots
-                                [pci_device_bdf.device() as usize]
-                                as InterruptIndex,
+                            irq: irq as InterruptIndex,
                         })
                         .map_err(DeviceManagerError::CreateInterruptGroup)?,
                 )
@@ -3950,16 +4255,17 @@ impl DeviceManager {
         bdf: PciBdf,
         resources: Option<Vec<Resource>>,
     ) -> DeviceManagerResult<Vec<Resource>> {
+        let mut shared_state = self.shared_state();
         let bars = pci_device
             .lock()
             .unwrap()
             .allocate_bars(
                 &mut self.address_manager.allocator.lock().unwrap(),
-                &mut self.pci_segments[segment_id as usize]
+                &mut shared_state.pci_segments[segment_id as usize]
                     .mem32_allocator
                     .lock()
                     .unwrap(),
-                &mut self.pci_segments[segment_id as usize]
+                &mut shared_state.pci_segments[segment_id as usize]
                     .mem64_allocator
                     .lock()
                     .unwrap(),
@@ -3967,25 +4273,27 @@ impl DeviceManager {
             )
             .map_err(DeviceManagerError::AllocateBars)?;
 
-        let mut pci_bus = self.pci_segments[segment_id as usize]
-            .pci_bus
-            .lock()
-            .unwrap();
+        {
+            let mut pci_bus = shared_state.pci_segments[segment_id as usize]
+                .pci_bus
+                .lock()
+                .unwrap();
 
-        pci_bus
-            .add_device(bdf.device(), pci_device)
-            .map_err(DeviceManagerError::AddPciDevice)?;
+            pci_bus
+                .add_device(bdf.device(), pci_device)
+                .map_err(DeviceManagerError::AddPciDevice)?;
 
-        self.bus_devices.push(Arc::clone(&bus_device));
+            pci_bus
+                .register_mapping(
+                    Arc::clone(&bus_device),
+                    self.address_manager.io_bus.as_ref(),
+                    self.address_manager.mmio_bus.as_ref(),
+                    bars.clone(),
+                )
+                .map_err(DeviceManagerError::AddPciDevice)?;
+        }
 
-        pci_bus
-            .register_mapping(
-                bus_device,
-                self.address_manager.io_bus.as_ref(),
-                self.address_manager.mmio_bus.as_ref(),
-                bars.clone(),
-            )
-            .map_err(DeviceManagerError::AddPciDevice)?;
+        shared_state.push_bus_device(bus_device);
 
         let mut new_resources = Vec::new();
         for bar in bars {
@@ -4040,12 +4348,14 @@ impl DeviceManager {
 
         let legacy_interrupt_group =
             if let Some(legacy_interrupt_manager) = &self.legacy_interrupt_manager {
+                let irq = {
+                    self.shared_state().pci_segments[pci_segment_id as usize].pci_irq_slots
+                        [pci_device_bdf.device() as usize]
+                };
                 Some(
                     legacy_interrupt_manager
                         .create_group(LegacyIrqGroupConfig {
-                            irq: self.pci_segments[pci_segment_id as usize].pci_irq_slots
-                                [pci_device_bdf.device() as usize]
-                                as InterruptIndex,
+                            irq: irq as InterruptIndex,
                         })
                         .map_err(DeviceManagerError::CreateInterruptGroup)?,
                 )
@@ -4074,7 +4384,8 @@ impl DeviceManager {
 
         let memory = self.memory_manager.lock().unwrap().guest_memory();
         let vfio_user_mapping = Arc::new(VfioUserDmaMapping::new(client, Arc::new(memory)));
-        for virtio_mem_device in self.virtio_mem_devices.iter() {
+        let virtio_mem_devices = self.shared_state().virtio_mem_devices.clone();
+        for virtio_mem_device in virtio_mem_devices.iter() {
             virtio_mem_device
                 .lock()
                 .unwrap()
@@ -4214,7 +4525,8 @@ impl DeviceManager {
             } else {
                 // Let every virtio-mem device handle the DMA map/unmap through the
                 // DMA handler provided.
-                for virtio_mem_device in self.virtio_mem_devices.iter() {
+                let virtio_mem_devices = self.shared_state().virtio_mem_devices.clone();
+                for virtio_mem_device in virtio_mem_devices.iter() {
                     virtio_mem_device
                         .lock()
                         .unwrap()
@@ -4379,9 +4691,11 @@ impl DeviceManager {
     }
 
     fn reserve_explicit_device_ids(&self) -> DeviceManagerResult<()> {
+        let shared_state = self.shared_state();
+
         for handle in &self.virtio_devices {
             if let Some(device_id) = handle.pci_common.pci_device_id {
-                self.pci_segments[handle.pci_common.pci_segment as usize]
+                shared_state.pci_segments[handle.pci_common.pci_segment as usize]
                     .reserve_device_id(device_id)?;
             }
         }
@@ -4391,7 +4705,7 @@ impl DeviceManager {
         if let Some(devices) = &config.devices {
             for device_cfg in devices {
                 if let Some(device_id) = device_cfg.pci_common.pci_device_id {
-                    self.pci_segments[device_cfg.pci_common.pci_segment as usize]
+                    shared_state.pci_segments[device_cfg.pci_common.pci_segment as usize]
                         .reserve_device_id(device_id)?;
                 }
             }
@@ -4400,7 +4714,7 @@ impl DeviceManager {
         if let Some(user_devices) = &config.user_devices {
             for device_cfg in user_devices {
                 if let Some(device_id) = device_cfg.pci_common.pci_device_id {
-                    self.pci_segments[device_cfg.pci_common.pci_segment as usize]
+                    shared_state.pci_segments[device_cfg.pci_common.pci_segment as usize]
                         .reserve_device_id(device_id)?;
                 }
             }
@@ -4431,7 +4745,7 @@ impl DeviceManager {
         Ok(if let Some(pci_device_bdf) = pci_device_bdf {
             let pci_segment_id = pci_device_bdf.segment();
 
-            self.pci_segments[pci_segment_id as usize]
+            self.shared_state().pci_segments[pci_segment_id as usize]
                 .pci_bus
                 .lock()
                 .unwrap()
@@ -4440,8 +4754,8 @@ impl DeviceManager {
 
             (pci_segment_id, pci_device_bdf, resources)
         } else {
-            let pci_device_bdf =
-                self.pci_segments[pci_segment_id as usize].allocate_device_id(pci_device_id)?;
+            let pci_device_bdf = self.shared_state().pci_segments[pci_segment_id as usize]
+                .allocate_device_id(pci_device_id)?;
 
             (pci_segment_id, pci_device_bdf, None)
         })
@@ -4471,8 +4785,9 @@ impl DeviceManager {
             .map(|ic| ic.clone() as Arc<Mutex<dyn InterruptController>>)
     }
 
-    pub(crate) fn pci_segments(&self) -> &Vec<PciSegment> {
-        &self.pci_segments
+    pub(crate) fn with_pci_segments<T>(&self, f: impl FnOnce(&[PciSegment]) -> T) -> T {
+        let shared_state = self.shared_state();
+        f(&shared_state.pci_segments)
     }
 
     // Get the guest PCI BDF for a device ID.
@@ -4508,7 +4823,8 @@ impl DeviceManager {
         }
 
         // Take care of updating the memory for VFIO PCI devices.
-        if let Some(vfio_ops) = &self.vfio_ops {
+        let vfio_ops = self.shared_state().vfio_ops.clone();
+        if let Some(vfio_ops) = vfio_ops {
             // vfio_dma_map is unsound and ought to be marked as unsafe
             #[allow(unused_unsafe)]
             // SAFETY: GuestMemoryMmap guarantees that region points
@@ -4582,8 +4898,8 @@ impl DeviceManager {
         let (bdf, device_name) = self.add_passthrough_device(device_cfg)?;
 
         // Update the PCIU bitmap
-        self.pci_segments[device_cfg.pci_common.pci_segment as usize].pci_devices_up |=
-            1 << bdf.device();
+        self.shared_state().pci_segments[device_cfg.pci_common.pci_segment as usize]
+            .pci_devices_up |= 1 << bdf.device();
 
         Ok(PciDeviceInfo {
             id: device_name,
@@ -4611,8 +4927,8 @@ impl DeviceManager {
         let (bdf, device_name) = self.add_vfio_user_device(device_cfg)?;
 
         // Update the PCIU bitmap
-        self.pci_segments[device_cfg.pci_common.pci_segment as usize].pci_devices_up |=
-            1 << bdf.device();
+        self.shared_state().pci_segments[device_cfg.pci_common.pci_segment as usize]
+            .pci_devices_up |= 1 << bdf.device();
 
         Ok(PciDeviceInfo {
             id: device_name,
@@ -4716,225 +5032,32 @@ impl DeviceManager {
         }
 
         // Update the PCID bitmap
-        self.pci_segments[pci_segment_id as usize].pci_devices_down |= 1 << pci_device_bdf.device();
+        self.shared_state().pci_segments[pci_segment_id as usize].pci_devices_down |=
+            1 << pci_device_bdf.device();
 
         Ok(())
     }
 
     pub fn eject_device(&mut self, pci_segment_id: u16, device_id: u8) -> DeviceManagerResult<()> {
-        info!("Ejecting device_id = {device_id} on segment_id={pci_segment_id}");
-
-        // Convert the device ID into the corresponding b/d/f.
-        let pci_device_bdf = PciBdf::new(pci_segment_id, 0, device_id, 0);
-
-        // Give the PCI device ID back to the PCI bus.
-        self.pci_segments[pci_segment_id as usize]
-            .pci_bus
+        // The caller already holds the DeviceManager lock through `&mut self`.
+        // Keep the lock order as DeviceManager -> AcpiPciHotplugController ->
+        // PciHotplugSharedState to match the hot-unplug path and avoid
+        // deadlocks.
+        let virtio_device = self
+            ._acpi_pci_hotplug_controller
             .lock()
             .unwrap()
-            .free_device_id(device_id)
-            .map_err(DeviceManagerError::FreePciDeviceId)?;
+            .eject_device(pci_segment_id, device_id)?;
 
-        let (pci_device_handle, id) = {
-            // Remove the device from the device tree along with its children.
-            let mut device_tree = self.device_tree.lock().unwrap();
-            let pci_device_node = device_tree
-                .remove_node_by_pci_bdf(pci_device_bdf)
-                .ok_or(DeviceManagerError::MissingPciDevice)?;
-
-            // For VFIO and vfio-user the PCI device id is the id.
-            // For virtio we overwrite it later as we want the id of the
-            // underlying device.
-            let mut id = pci_device_node.id;
-            let pci_device_handle = pci_device_node
-                .pci_device_handle
-                .ok_or(DeviceManagerError::MissingPciDevice)?;
-            if matches!(pci_device_handle, PciDeviceHandle::Virtio(_)) {
-                // The virtio-pci device has a single child
-                if !pci_device_node.children.is_empty() {
-                    assert_eq!(pci_device_node.children.len(), 1);
-                    let child_id = &pci_device_node.children[0];
-                    id.clone_from(child_id);
-                }
-            }
-            for child in pci_device_node.children.iter() {
-                device_tree.remove(child);
-            }
-
-            (pci_device_handle, id)
-        };
-
-        let mut iommu_attached = false;
-        if let Some((_, iommu_attached_devices)) = &self.iommu_attached_devices
-            && iommu_attached_devices.contains(&pci_device_bdf)
-        {
-            iommu_attached = true;
-        }
-
-        let (pci_device, bus_device, virtio_device, remove_dma_handler) = match pci_device_handle {
-            // VirtioMemMappingSource::Container cleanup is handled by
-            // cleanup_vfio_ops when the last VFIO device is removed.
-            PciDeviceHandle::Vfio(vfio_pci_device) => {
-                // Remove this device's MMIO regions from the DeviceManager's
-                // mmio_regions list. We match on UserMemoryRegion slot numbers
-                // rather than MmioRegion start addresses because move_bar()
-                // updates the device's region addresses but not the
-                // DeviceManager's cloned copies.
-                let device_regions = vfio_pci_device.lock().unwrap().mmio_regions();
-                let mut mmio_regions = self.mmio_regions.lock().unwrap();
-                for device_region in &device_regions {
-                    mmio_regions.retain(|x| !x.has_matching_slots(device_region));
-                }
-
-                (
-                    Arc::clone(&vfio_pci_device) as Arc<Mutex<dyn PciDevice>>,
-                    Arc::clone(&vfio_pci_device) as Arc<dyn BusDeviceSync>,
-                    None as Option<Arc<Mutex<dyn virtio_devices::VirtioDevice>>>,
-                    false,
-                )
-            }
-            PciDeviceHandle::Virtio(virtio_pci_device) => {
-                let dev = virtio_pci_device.lock().unwrap();
-                let bar_addr = dev.config_bar_addr();
-                for (event, addr) in dev.ioeventfds(bar_addr) {
-                    let io_addr = IoEventAddress::Mmio(addr);
-                    self.address_manager
-                        .vm
-                        .unregister_ioevent(event, &io_addr)
-                        .map_err(|e| DeviceManagerError::UnRegisterIoevent(e.into()))?;
-                }
-
-                if let Some(dma_handler) = dev.dma_handler()
-                    && !iommu_attached
-                {
-                    for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
-                        for region in zone.regions() {
-                            let iova = region.start_addr().0;
-                            let size = region.len();
-                            dma_handler
-                                .unmap(iova, size)
-                                .map_err(DeviceManagerError::VirtioDmaUnmap)?;
-                        }
-                    }
-                }
-
-                (
-                    Arc::clone(&virtio_pci_device) as Arc<Mutex<dyn PciDevice>>,
-                    Arc::clone(&virtio_pci_device) as Arc<dyn BusDeviceSync>,
-                    Some(dev.virtio_device()),
-                    dev.dma_handler().is_some() && !iommu_attached,
-                )
-            }
-            PciDeviceHandle::VfioUser(vfio_user_pci_device) => {
-                let mut dev = vfio_user_pci_device.lock().unwrap();
-                for (_, zone) in self.memory_manager.lock().unwrap().memory_zones().iter() {
-                    for region in zone.regions() {
-                        dev.dma_unmap(region)
-                            .map_err(DeviceManagerError::VfioUserDmaUnmap)?;
-                    }
-                }
-
-                (
-                    Arc::clone(&vfio_user_pci_device) as Arc<Mutex<dyn PciDevice>>,
-                    Arc::clone(&vfio_user_pci_device) as Arc<dyn BusDeviceSync>,
-                    None as Option<Arc<Mutex<dyn virtio_devices::VirtioDevice>>>,
-                    true,
-                )
-            }
-        };
-
-        if remove_dma_handler {
-            for virtio_mem_device in self.virtio_mem_devices.iter() {
-                let source = VirtioMemMappingSource::Device(pci_device_bdf.into());
-                virtio_mem_device
-                    .lock()
-                    .unwrap()
-                    .remove_dma_mapping_handler(&source)
-                    .map_err(DeviceManagerError::RemoveDmaMappingHandlerVirtioMem)?;
-            }
-        }
-
-        // Free the allocated BARs
-        pci_device
-            .lock()
-            .unwrap()
-            .free_bars(
-                &mut self.address_manager.allocator.lock().unwrap(),
-                &mut self.pci_segments[pci_segment_id as usize]
-                    .mem32_allocator
-                    .lock()
-                    .unwrap(),
-                &mut self.pci_segments[pci_segment_id as usize]
-                    .mem64_allocator
-                    .lock()
-                    .unwrap(),
-            )
-            .map_err(DeviceManagerError::FreePciBars)?;
-
-        // Remove the device from the PCI bus
-        self.pci_segments[pci_segment_id as usize]
-            .pci_bus
-            .lock()
-            .unwrap()
-            .remove_by_device(&pci_device)
-            .map_err(DeviceManagerError::RemoveDeviceFromPciBus)?;
-
-        #[cfg(target_arch = "x86_64")]
-        // Remove the device from the IO bus
-        self.io_bus()
-            .remove_by_device(bus_device.as_ref())
-            .map_err(DeviceManagerError::RemoveDeviceFromIoBus)?;
-
-        // Remove the device from the MMIO bus
-        self.mmio_bus()
-            .remove_by_device(bus_device.as_ref())
-            .map_err(DeviceManagerError::RemoveDeviceFromMmioBus)?;
-
-        // Remove the device from the list of BusDevice held by the
-        // DeviceManager.
-        self.bus_devices
-            .retain(|dev| !Arc::ptr_eq(dev, &bus_device));
-
-        // Shutdown and remove the underlying virtio-device if present
         if let Some(virtio_device) = virtio_device {
-            for mapping in virtio_device.lock().unwrap().userspace_mappings() {
-                // SAFETY: userspace_mappings only has valid mappings.
-                // TODO: do not rely on the correctness of all the code in this file
-                // for this to hold.
-                unsafe {
-                    self.memory_manager
-                        .lock()
-                        .unwrap()
-                        .remove_userspace_mapping(
-                            mapping.addr.raw_value(),
-                            mapping.mapping.size(),
-                            mapping.mapping.as_ptr() as _,
-                            mapping.mergeable,
-                            mapping.mem_slot,
-                        )
-                        .map_err(DeviceManagerError::MemoryManager)
-                }?;
-            }
-
-            virtio_device.lock().unwrap().shutdown();
-
+            // The controller already performed the full virtio teardown,
+            // including userspace unmapping and shutdown. Remove the stale
+            // bookkeeping entry from virtio_devices here because that list
+            // remains owned by DeviceManager rather than shared state.
             self.virtio_devices
                 .retain(|handler| !Arc::ptr_eq(&handler.virtio_device, &virtio_device));
         }
 
-        event!(
-            "vm",
-            "device-removed",
-            "id",
-            &id,
-            "bdf",
-            pci_device_bdf.to_string()
-        );
-
-        // At this point, the device has been removed from all the list and
-        // buses where it was stored. At the end of this function, after
-        // any_device, bus_device and pci_device are released, the actual
-        // device will be dropped.
         Ok(())
     }
 
@@ -4965,7 +5088,7 @@ impl DeviceManager {
         )?;
 
         // Update the PCIU bitmap
-        self.pci_segments[handle.pci_common.pci_segment as usize].pci_devices_up |=
+        self.shared_state().pci_segments[handle.pci_common.pci_segment as usize].pci_devices_up |=
             1 << bdf.device();
 
         Ok(PciDeviceInfo { id, bdf })
@@ -5145,8 +5268,8 @@ impl DeviceManager {
             .map_err(DeviceManagerError::PowerButtonNotification);
     }
 
-    pub fn iommu_attached_devices(&self) -> &Option<(PciBdf, Vec<PciBdf>)> {
-        &self.iommu_attached_devices
+    pub fn iommu_attached_devices(&self) -> Option<(PciBdf, Vec<PciBdf>)> {
+        self.shared_state().iommu_attached_devices.clone()
     }
 
     fn validate_identifier(&self, id: &Option<String>) -> DeviceManagerResult<()> {
@@ -5165,14 +5288,6 @@ impl DeviceManager {
 
     pub(crate) fn acpi_platform_addresses(&self) -> &AcpiPlatformAddresses {
         &self.acpi_platform_addresses
-    }
-
-    fn cleanup_vfio_ops(&mut self) {
-        // Drop the VfioOps instance when "Self" is the only reference
-        if let Some(1) = self.vfio_ops.as_ref().map(Arc::strong_count) {
-            debug!("Drop VfioOps given no active VFIO devices.");
-            self.vfio_ops = None;
-        }
     }
 }
 
@@ -5299,7 +5414,8 @@ impl Aml for DeviceManager {
         use arch::riscv64::DeviceInfoForFdt;
 
         let mut pci_scan_methods = Vec::new();
-        for i in 0..self.pci_segments.len() {
+        let pci_segment_count = self.with_pci_segments(|segments| segments.len());
+        for i in 0..pci_segment_count {
             pci_scan_methods.push(aml::MethodCall::new(
                 format!("\\_SB_.PC{i:02X}.PCNT").as_str().into(),
                 vec![],
@@ -5369,19 +5485,23 @@ impl Aml for DeviceManager {
         )
         .to_aml_bytes(sink);
 
-        for segment in &self.pci_segments {
-            segment.to_aml_bytes(sink);
-        }
+        self.with_pci_segments(|segments| {
+            for segment in segments {
+                segment.to_aml_bytes(sink);
+            }
+        });
 
         let mut mbrd_memory = Vec::new();
 
-        for segment in &self.pci_segments {
-            mbrd_memory.push(aml::Memory32Fixed::new(
-                true,
-                segment.mmio_config_address as u32,
-                layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT as u32,
-            ));
-        }
+        self.with_pci_segments(|segments| {
+            for segment in segments {
+                mbrd_memory.push(aml::Memory32Fixed::new(
+                    true,
+                    segment.mmio_config_address as u32,
+                    layout::PCI_MMIO_CONFIG_SIZE_PER_SEGMENT as u32,
+                ));
+            }
+        });
 
         let mut mbrd_memory_refs = Vec::new();
         for mbrd_memory_ref in &mbrd_memory {
@@ -5605,28 +5725,30 @@ const PCID_FIELD_SIZE: usize = 4;
 const B0EJ_FIELD_SIZE: usize = 4;
 const PSEG_FIELD_SIZE: usize = 4;
 
-impl BusDevice for DeviceManager {
+impl BusDevice for AcpiPciHotplugController {
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
+        let mut shared_state = self.shared_state.lock().unwrap();
+        let selected_segment = self.selected_segment;
         match offset {
             PCIU_FIELD_OFFSET => {
                 assert!(data.len() == PCIU_FIELD_SIZE);
                 data.copy_from_slice(
-                    &self.pci_segments[self.selected_segment]
+                    &shared_state.pci_segments[selected_segment]
                         .pci_devices_up
                         .to_le_bytes(),
                 );
                 // Clear the PCIU bitmap
-                self.pci_segments[self.selected_segment].pci_devices_up = 0;
+                shared_state.pci_segments[selected_segment].pci_devices_up = 0;
             }
             PCID_FIELD_OFFSET => {
                 assert!(data.len() == PCID_FIELD_SIZE);
                 data.copy_from_slice(
-                    &self.pci_segments[self.selected_segment]
+                    &shared_state.pci_segments[selected_segment]
                         .pci_devices_down
                         .to_le_bytes(),
                 );
                 // Clear the PCID bitmap
-                self.pci_segments[self.selected_segment].pci_devices_down = 0;
+                shared_state.pci_segments[selected_segment].pci_devices_down = 0;
             }
             B0EJ_FIELD_OFFSET => {
                 assert!(data.len() == B0EJ_FIELD_SIZE);
@@ -5636,7 +5758,7 @@ impl BusDevice for DeviceManager {
             }
             PSEG_FIELD_OFFSET => {
                 assert_eq!(data.len(), PSEG_FIELD_SIZE);
-                data.copy_from_slice(&(self.selected_segment as u32).to_le_bytes());
+                data.copy_from_slice(&(selected_segment as u32).to_le_bytes());
             }
             _ => error!("Accessing unknown location at base 0x{base:x}, offset 0x{offset:x}"),
         }
@@ -5648,16 +5770,16 @@ impl BusDevice for DeviceManager {
         match offset {
             B0EJ_FIELD_OFFSET => {
                 assert!(data.len() == B0EJ_FIELD_SIZE);
+                let selected_segment = self.selected_segment as u16;
                 let mut data_array: [u8; 4] = [0, 0, 0, 0];
                 data_array.copy_from_slice(data);
                 let mut slot_bitmap = u32::from_le_bytes(data_array);
 
                 while slot_bitmap > 0 {
                     let slot_id = slot_bitmap.trailing_zeros();
-                    if let Err(e) = self.eject_device(self.selected_segment as u16, slot_id as u8) {
+                    if let Err(e) = self.eject_device(selected_segment, slot_id as u8) {
                         error!("Failed ejecting device {slot_id}: {e:?}");
                     }
-                    self.cleanup_vfio_ops();
                     slot_bitmap &= !(1 << slot_id);
                 }
             }
@@ -5666,14 +5788,16 @@ impl BusDevice for DeviceManager {
                 let mut data_array: [u8; 4] = [0, 0, 0, 0];
                 data_array.copy_from_slice(data);
                 let selected_segment = u32::from_le_bytes(data_array) as usize;
-                if selected_segment >= self.pci_segments.len() {
+                let shared_state = self.shared_state.lock().unwrap();
+                if selected_segment >= shared_state.pci_segments.len() {
                     error!(
                         "Segment selection out of range: {} >= {}",
                         selected_segment,
-                        self.pci_segments.len()
+                        shared_state.pci_segments.len()
                     );
                     return None;
                 }
+                drop(shared_state);
                 self.selected_segment = selected_segment;
             }
             _ => error!("Accessing unknown location at base 0x{base:x}, offset 0x{offset:x}"),
