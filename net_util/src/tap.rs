@@ -13,6 +13,7 @@ use std::os::raw::*;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 
 use libc::{__c_anonymous_ifr_ifru, ifreq};
+use log::warn;
 use thiserror::Error;
 use vmm_sys_util::ioctl::{ioctl_with_mut_ref, ioctl_with_ref, ioctl_with_val};
 
@@ -290,6 +291,9 @@ impl Tap {
         let tap = Tap { tap_file, if_name };
         let vnet_hdr_size = vnet_hdr_len() as i32;
         tap.set_vnet_hdr_size(vnet_hdr_size)?;
+        if let Err(e) = tap.set_sndbuf(Self::SNDBUF_SIZE) {
+            warn!("Failed to set tap send buffer size: {e}");
+        }
 
         Ok(tap)
     }
@@ -487,6 +491,16 @@ impl Tap {
     pub fn set_vnet_hdr_size(&self, size: c_int) -> Result<()> {
         // SAFETY: ioctl is safe. Called with a valid tap fd, and we check the return.
         unsafe { Self::ioctl_with_ref(&self.tap_file, libc::TUNSETVNETHDRSZ as c_ulong, &size) }
+    }
+
+    /// Tap send buffer size (4MB). The kernel default is ~212KB which limits
+    /// throughput on high-bandwidth workloads.
+    pub const SNDBUF_SIZE: c_int = 4 * 1024 * 1024;
+
+    /// Set the tap send buffer size.
+    pub fn set_sndbuf(&self, size: c_int) -> Result<()> {
+        // SAFETY: ioctl is safe. Called with a valid tap fd, and we check the return.
+        unsafe { Self::ioctl_with_ref(&self.tap_file, libc::TUNSETSNDBUF as c_ulong, &size) }
     }
 
     fn get_ifreq(&self) -> libc::ifreq {
