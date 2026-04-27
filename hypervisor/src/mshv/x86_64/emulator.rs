@@ -134,11 +134,30 @@ impl MshvEmulatorContext<'_> {
             .map_err(|e| PlatformError::SetCpuStateFailure(e.into()))?;
 
         if old_state.sregs != new_state.sregs {
-            debug!("mshv emulator: Updating CPU special registers");
-            debug!("mshv emulator: {:#x?}", new_state.sregs);
-            self.vcpu
-                .set_sregs(&new_state.sregs)
-                .map_err(|e| PlatformError::SetCpuStateFailure(e.into()))?;
+            debug!("mshv emulator: Updating CPU segment registers");
+            // Emulation only modifies segment registers among special
+            // registers. Use the VP register page to write only segments,
+            // avoiding IOCTLs for other special registers (tr, ldt, gdt,
+            // idt, cr*, efer, etc.) that emulation never modifies.
+            if let Some(reg_page) = self.vcpu.fd.get_vp_reg_page() {
+                let vp_reg_page = reg_page.0;
+                let sregs: SpecialRegisters = new_state.sregs.into();
+                // SAFETY: vp_reg_page is a valid mapped pointer
+                unsafe {
+                    (*vp_reg_page).__bindgen_anon_3.__bindgen_anon_1.cs = sregs.cs.into();
+                    (*vp_reg_page).__bindgen_anon_3.__bindgen_anon_1.ds = sregs.ds.into();
+                    (*vp_reg_page).__bindgen_anon_3.__bindgen_anon_1.es = sregs.es.into();
+                    (*vp_reg_page).__bindgen_anon_3.__bindgen_anon_1.fs = sregs.fs.into();
+                    (*vp_reg_page).__bindgen_anon_3.__bindgen_anon_1.gs = sregs.gs.into();
+                    (*vp_reg_page).__bindgen_anon_3.__bindgen_anon_1.ss = sregs.ss.into();
+                    (*vp_reg_page).dirty |= 1 << HV_X64_REGISTER_CLASS_SEGMENT;
+                }
+            } else {
+                debug!("mshv emulator: {:#x?}", new_state.sregs);
+                self.vcpu
+                    .set_sregs(&new_state.sregs)
+                    .map_err(|e| PlatformError::SetCpuStateFailure(e.into()))?;
+            }
         }
 
         Ok(())
@@ -191,10 +210,31 @@ impl PlatformEmulator for MshvEmulatorContext<'_> {
             .vcpu
             .get_regs()
             .map_err(|e| PlatformError::GetCpuStateFailure(e.into()))?;
-        let sregs = self
-            .vcpu
-            .get_sregs()
-            .map_err(|e| PlatformError::GetCpuStateFailure(e.into()))?;
+
+        // For emulation, we only need segment registers, cr0, and efer
+        // from special registers. Read them directly from the VP register
+        // page to avoid IOCTLs for other special registers (tr, ldt, gdt,
+        // idt, cr2, apic_base, etc.) that emulation doesn't use.
+        let sregs = if let Some(reg_page) = self.vcpu.fd.get_vp_reg_page() {
+            let vp_reg_page = reg_page.0;
+            let mut mshv_sregs = SpecialRegisters::default();
+            // SAFETY: vp_reg_page is a valid mapped pointer
+            unsafe {
+                mshv_sregs.cs = (*vp_reg_page).__bindgen_anon_3.__bindgen_anon_1.cs.into();
+                mshv_sregs.ds = (*vp_reg_page).__bindgen_anon_3.__bindgen_anon_1.ds.into();
+                mshv_sregs.es = (*vp_reg_page).__bindgen_anon_3.__bindgen_anon_1.es.into();
+                mshv_sregs.fs = (*vp_reg_page).__bindgen_anon_3.__bindgen_anon_1.fs.into();
+                mshv_sregs.gs = (*vp_reg_page).__bindgen_anon_3.__bindgen_anon_1.gs.into();
+                mshv_sregs.ss = (*vp_reg_page).__bindgen_anon_3.__bindgen_anon_1.ss.into();
+                mshv_sregs.cr0 = (*vp_reg_page).cr0;
+                mshv_sregs.efer = (*vp_reg_page).efer;
+            }
+            mshv_sregs.into()
+        } else {
+            self.vcpu
+                .get_sregs()
+                .map_err(|e| PlatformError::GetCpuStateFailure(e.into()))?
+        };
 
         debug!("mshv emulator: Getting new CPU state");
         debug!("mshv emulator: {regs:#x?}");
