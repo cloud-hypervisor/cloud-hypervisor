@@ -501,6 +501,13 @@ pub(crate) struct VfioCommon {
     pub(crate) vfio_wrapper: Arc<dyn Vfio>,
     pub(crate) patches: HashMap<usize, ConfigPatch>,
     x_nv_gpudirect_clique: Option<u8>,
+    x_exclude_mmap_bars: Vec<u8>,
+}
+
+#[derive(Default)]
+pub(crate) struct VfioCommonConfig {
+    pub(crate) x_nv_gpudirect_clique: Option<u8>,
+    pub(crate) x_exclude_mmap_bars: Vec<u8>,
 }
 
 impl VfioCommon {
@@ -511,7 +518,7 @@ impl VfioCommon {
         subclass: &dyn PciSubclass,
         bdf: PciBdf,
         snapshot: Option<&Snapshot>,
-        x_nv_gpudirect_clique: Option<u8>,
+        config: VfioCommonConfig,
     ) -> Result<Self, VfioPciError> {
         let pci_configuration_state = vm_migration::state_from_id(snapshot, PCI_CONFIGURATION_ID)
             .map_err(|e| {
@@ -546,7 +553,8 @@ impl VfioCommon {
             legacy_interrupt_group,
             vfio_wrapper,
             patches: HashMap::new(),
-            x_nv_gpudirect_clique,
+            x_nv_gpudirect_clique: config.x_nv_gpudirect_clique,
+            x_exclude_mmap_bars: config.x_exclude_mmap_bars,
         };
 
         let state: Option<VfioCommonState> = snapshot
@@ -1499,6 +1507,7 @@ impl VfioPciDevice {
         memory_slot_allocator: MemorySlotAllocator,
         snapshot: Option<&Snapshot>,
         x_nv_gpudirect_clique: Option<u8>,
+        x_exclude_mmap_bars: Vec<u8>,
         device_path: PathBuf,
     ) -> Result<Self, VfioPciError> {
         let device = Arc::new(device);
@@ -1513,7 +1522,10 @@ impl VfioPciDevice {
             &PciVfioSubclass::VfioSubclass,
             bdf,
             vm_migration::snapshot_from_id(snapshot, VFIO_COMMON_ID),
-            x_nv_gpudirect_clique,
+            VfioCommonConfig {
+                x_nv_gpudirect_clique,
+                x_exclude_mmap_bars,
+            },
         )?;
 
         let vfio_pci_device = VfioPciDevice {
@@ -1649,6 +1661,21 @@ impl VfioPciDevice {
         // SAFETY: fd is guaranteed valid
         let fd = unsafe { BorrowedFd::borrow_raw(fd) };
         for region in self.common.mmio_regions.iter_mut() {
+            if self
+                .common
+                .x_exclude_mmap_bars
+                .contains(&(region.index as u8))
+            {
+                info!(
+                    "Skipping VFIO BAR mmap for device {} at {} BAR {} (size = 0x{:x})",
+                    self.bdf,
+                    self.device_path.display(),
+                    region.index,
+                    region.length
+                );
+                continue;
+            }
+
             let region_flags = self.device.get_region_flags(region.index);
             if region_flags & VFIO_REGION_INFO_FLAG_MMAP != 0 {
                 let mut prot = 0;

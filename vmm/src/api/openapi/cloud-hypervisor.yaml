@@ -1219,6 +1219,11 @@ components:
         x_nv_gpudirect_clique:
           type: integer
           format: int8
+        x_exclude_mmap_bars:
+          type: array
+          items:
+            type: integer
+            format: int64
     TpmConfig:
       required:
         - socket
