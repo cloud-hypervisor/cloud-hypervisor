@@ -72,6 +72,17 @@ const VIRTIO_IOMMU_F_BYPASS_CONFIG: u32 = 6;
 
 // Support 2MiB and 4KiB page sizes.
 const VIRTIO_IOMMU_PAGE_SIZE_MASK: u64 = (2 << 20) | (4 << 10);
+const VIRTIO_IOMMU_PAGE_GRANULE: u64 = {
+    assert!(VIRTIO_IOMMU_PAGE_SIZE_MASK != 0);
+    1u64 << VIRTIO_IOMMU_PAGE_SIZE_MASK.trailing_zeros()
+};
+
+// ~64 MiB at ~64 bytes/entry, well above any legitimate workload.
+const MAX_MAPPINGS_PER_DOMAIN: usize = 1 << 20;
+
+// Bound the per-device domain count so a guest cannot grow the
+// domain map indefinitely with ATTACH-only requests.
+const MAX_DOMAINS: usize = 1 << 16;
 
 #[derive(Copy, Clone, Debug, Default)]
 #[repr(C, packed)]
@@ -131,7 +142,6 @@ const VIRTIO_IOMMU_S_RANGE: u8 = 5;
 const VIRTIO_IOMMU_S_NOENT: u8 = 6;
 #[allow(unused)]
 const VIRTIO_IOMMU_S_FAULT: u8 = 7;
-#[allow(unused)]
 const VIRTIO_IOMMU_S_NOMEM: u8 = 8;
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -149,7 +159,7 @@ struct VirtioIommuReqAttach {
     domain: u32,
     endpoint: u32,
     flags: u32,
-    _reserved: [u8; 4],
+    reserved: [u8; 4],
 }
 
 const VIRTIO_IOMMU_ATTACH_F_BYPASS: u32 = 1;
@@ -182,7 +192,7 @@ struct VirtioIommuReqMap {
     virt_start: u64,
     virt_end: u64,
     phys_start: u64,
-    _flags: u32,
+    flags: u32,
 }
 
 /// UNMAP request
@@ -322,6 +332,12 @@ enum Error {
     InvalidUnmapRequestBypassDomain,
     #[error("Invalid to unmap because the domain is missing")]
     InvalidUnmapRequestMissingDomain,
+    #[error("UNMAP range partially overlaps an existing mapping")]
+    InvalidUnmapRequestPartialOverlap,
+    #[error("Per-domain mapping count cap exceeded")]
+    MappingCountExceeded,
+    #[error("Per-device domain count cap exceeded")]
+    DomainCountExceeded,
     #[error("Guest sent us invalid PROBE request")]
     InvalidProbeRequest,
     #[error("Failed to performing external mapping")]
@@ -348,6 +364,7 @@ impl Request {
         mapping: &Arc<IommuMapping>,
         ext_mapping: &BTreeMap<u32, Arc<dyn ExternalDmaMapping>>,
         msi_iova_space: (u64, u64),
+        input_range: Option<(u64, u64)>,
     ) -> result::Result<usize, Error> {
         let desc = desc_chain
             .next()
@@ -383,6 +400,7 @@ impl Request {
         let mut reply: Vec<u8> = Vec::new();
         let mut status = VIRTIO_IOMMU_S_OK;
         let mut hdr_len = 0;
+        let mut unrecognised_type = false;
 
         let result = (|| {
             match req_head.type_ {
@@ -398,11 +416,36 @@ impl Request {
                         .map_err(Error::GuestMemory)?;
                     debug!("Attach request 0x{req:x?}");
 
+                    if req.reserved.iter().any(|&b| b != 0)
+                        || (req.flags & !VIRTIO_IOMMU_ATTACH_F_BYPASS) != 0
+                    {
+                        status = VIRTIO_IOMMU_S_INVAL;
+                        return Err(Error::InvalidAttachRequest);
+                    }
+
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
                     let endpoint = req.endpoint;
                     let bypass =
                         (req.flags & VIRTIO_IOMMU_ATTACH_F_BYPASS) == VIRTIO_IOMMU_ATTACH_F_BYPASS;
+
+                    if let Some(d) = mapping.domains.read().unwrap().get(&domain_id)
+                        && d.bypass != bypass
+                    {
+                        status = VIRTIO_IOMMU_S_INVAL;
+                        return Err(Error::InvalidAttachRequest);
+                    }
+
+                    // Refuse before mutating any state so a failed ATTACH
+                    // does not leave a phantom endpoint pointing at a
+                    // domain that was never created.
+                    {
+                        let domains = mapping.domains.read().unwrap();
+                        if !domains.contains_key(&domain_id) && domains.len() >= MAX_DOMAINS {
+                            status = VIRTIO_IOMMU_S_NOMEM;
+                            return Err(Error::DomainCountExceeded);
+                        }
+                    }
 
                     let mut old_domain_id = domain_id;
                     if let Some(&id) = mapping.endpoints.read().unwrap().get(&endpoint) {
@@ -434,6 +477,13 @@ impl Request {
 
                     // Add new domain with no mapping if the entry didn't exist yet
                     let mut domains = mapping.domains.write().unwrap();
+                    if !domains.contains_key(&domain_id) && domains.len() >= MAX_DOMAINS {
+                        // TOCTOU close: another ATTACH could have filled the
+                        // last slot between the read-lock pre-check and here.
+                        mapping.endpoints.write().unwrap().remove(&endpoint);
+                        status = VIRTIO_IOMMU_S_NOMEM;
+                        return Err(Error::DomainCountExceeded);
+                    }
                     let domain = Domain {
                         mappings: BTreeMap::new(),
                         bypass,
@@ -471,6 +521,18 @@ impl Request {
                         .map_err(Error::GuestMemory)?;
                     debug!("Map request 0x{req:x?}");
 
+                    if (req.flags & !VIRTIO_IOMMU_MAP_F_MASK) != 0 {
+                        status = VIRTIO_IOMMU_S_INVAL;
+                        return Err(Error::InvalidMapRequest);
+                    }
+
+                    if let Some((lo, hi)) = input_range
+                        && (req.virt_start < lo || req.virt_end > hi)
+                    {
+                        status = VIRTIO_IOMMU_S_RANGE;
+                        return Err(Error::InvalidMapRequest);
+                    }
+
                     // Copy the value to use it as a proper reference.
                     let domain_id = req.domain;
 
@@ -480,8 +542,39 @@ impl Request {
                             return Err(Error::InvalidMapRequestBypassDomain);
                         }
                     } else {
-                        status = VIRTIO_IOMMU_S_INVAL;
+                        status = VIRTIO_IOMMU_S_NOENT;
                         return Err(Error::InvalidMapRequestMissingDomain);
+                    }
+
+                    let Some(size) = req
+                        .virt_end
+                        .checked_sub(req.virt_start)
+                        .and_then(|d| d.checked_add(1))
+                    else {
+                        status = VIRTIO_IOMMU_S_INVAL;
+                        return Err(Error::InvalidMapRequest);
+                    };
+
+                    let mask = VIRTIO_IOMMU_PAGE_GRANULE - 1;
+                    if (req.virt_start & mask) != 0
+                        || (req.phys_start & mask) != 0
+                        || (size & mask) != 0
+                    {
+                        status = VIRTIO_IOMMU_S_RANGE;
+                        return Err(Error::InvalidMapRequest);
+                    }
+
+                    // Going forward MAP rejects overlap, so within a domain
+                    // mappings are disjoint and the rightmost mapping with
+                    // start <= virt_end is the only candidate to overlap.
+                    if let Some(d) = mapping.domains.read().unwrap().get(&domain_id)
+                        && let Some((&start, m)) = d.mappings.range(..=req.virt_end).next_back()
+                    {
+                        let end = start.saturating_add(m.size).saturating_sub(1);
+                        if end >= req.virt_start {
+                            status = VIRTIO_IOMMU_S_INVAL;
+                            return Err(Error::InvalidMapRequest);
+                        }
                     }
 
                     // Find the list of endpoints attached to the given domain.
@@ -494,33 +587,53 @@ impl Request {
                         .map(|(&e, _)| e)
                         .collect();
 
-                    // For viommu all endpoints receive their own VFIO container, as a result
-                    // Each endpoint within the domain needs to be separately mapped, as the
-                    // mapping is done on a per-container level, not a per-domain level
-                    for endpoint in endpoints {
-                        if let Some(ext_map) = ext_mapping.get(&endpoint) {
-                            let size = req.virt_end - req.virt_start + 1;
-                            ext_map
-                                .map(req.virt_start, req.phys_start, size)
-                                .map_err(Error::ExternalMapping)?;
+                    {
+                        let domains = mapping.domains.read().unwrap();
+                        if let Some(d) = domains.get(&domain_id)
+                            && d.mappings.len() >= MAX_MAPPINGS_PER_DOMAIN
+                        {
+                            status = VIRTIO_IOMMU_S_NOMEM;
+                            return Err(Error::MappingCountExceeded);
                         }
                     }
 
-                    // Add new mapping associated with the domain
-                    mapping
-                        .domains
-                        .write()
-                        .unwrap()
-                        .get_mut(&domain_id)
-                        .unwrap()
-                        .mappings
-                        .insert(
-                            req.virt_start,
-                            Mapping {
-                                gpa: req.phys_start,
-                                size: req.virt_end - req.virt_start + 1,
-                            },
-                        );
+                    let mut mapped: Vec<u32> = Vec::new();
+                    let rollback = |mapped: &[u32]| {
+                        for ep in mapped {
+                            if let Some(pmap) = ext_mapping.get(ep) {
+                                let _ = pmap.unmap(req.virt_start, size);
+                            }
+                        }
+                    };
+                    for endpoint in endpoints {
+                        if let Some(ext_map) = ext_mapping.get(&endpoint) {
+                            if let Err(e) = ext_map.map(req.virt_start, req.phys_start, size) {
+                                rollback(&mapped);
+                                status = VIRTIO_IOMMU_S_DEVERR;
+                                return Err(Error::ExternalMapping(e));
+                            }
+                            mapped.push(endpoint);
+                        }
+                    }
+
+                    let mut domains = mapping.domains.write().unwrap();
+                    let Some(domain) = domains.get_mut(&domain_id) else {
+                        rollback(&mapped);
+                        status = VIRTIO_IOMMU_S_INVAL;
+                        return Err(Error::InvalidMapRequestMissingDomain);
+                    };
+                    if domain.mappings.len() >= MAX_MAPPINGS_PER_DOMAIN {
+                        rollback(&mapped);
+                        status = VIRTIO_IOMMU_S_NOMEM;
+                        return Err(Error::MappingCountExceeded);
+                    }
+                    domain.mappings.insert(
+                        req.virt_start,
+                        Mapping {
+                            gpa: req.phys_start,
+                            size,
+                        },
+                    );
                 }
                 VIRTIO_IOMMU_T_UNMAP => {
                     if desc_size_left != size_of::<VirtioIommuReqUnmap>() {
@@ -544,8 +657,40 @@ impl Request {
                             return Err(Error::InvalidUnmapRequestBypassDomain);
                         }
                     } else {
-                        status = VIRTIO_IOMMU_S_INVAL;
+                        status = VIRTIO_IOMMU_S_NOENT;
                         return Err(Error::InvalidUnmapRequestMissingDomain);
+                    }
+
+                    let Some(size) = req
+                        .virt_end
+                        .checked_sub(virt_start)
+                        .and_then(|d| d.checked_add(1))
+                    else {
+                        status = VIRTIO_IOMMU_S_INVAL;
+                        return Err(Error::InvalidUnmapRequest);
+                    };
+
+                    // An UNMAP that would split an existing mapping must be
+                    // rejected with VIRTIO_IOMMU_S_RANGE without removing
+                    // anything. Inspect bookkeeping before touching VFIO so
+                    // a rejection cannot leave VFIO out of sync.
+                    {
+                        let domains = mapping.domains.read().unwrap();
+                        let Some(domain) = domains.get(&domain_id) else {
+                            status = VIRTIO_IOMMU_S_NOENT;
+                            return Err(Error::InvalidUnmapRequestMissingDomain);
+                        };
+                        for (&start, m) in domain.mappings.iter() {
+                            let end = start
+                                .checked_add(m.size)
+                                .map_or(u64::MAX, |e| e.saturating_sub(1));
+                            let overlaps = start <= req.virt_end && end >= req.virt_start;
+                            let split = start < req.virt_start || end > req.virt_end;
+                            if overlaps && split {
+                                status = VIRTIO_IOMMU_S_RANGE;
+                                return Err(Error::InvalidUnmapRequestPartialOverlap);
+                            }
+                        }
                     }
 
                     // Find the list of endpoints attached to the given domain.
@@ -561,20 +706,18 @@ impl Request {
                     // Trigger external unmapping if necessary.
                     for endpoint in endpoints {
                         if let Some(ext_map) = ext_mapping.get(&endpoint) {
-                            let size = req.virt_end - virt_start + 1;
                             ext_map
                                 .unmap(virt_start, size)
                                 .map_err(Error::ExternalUnmapping)?;
                         }
                     }
 
-                    // Remove all mappings associated with the domain within the requested range
-                    mapping
-                        .domains
-                        .write()
-                        .unwrap()
-                        .get_mut(&domain_id)
-                        .unwrap()
+                    let mut domains = mapping.domains.write().unwrap();
+                    let Some(domain) = domains.get_mut(&domain_id) else {
+                        status = VIRTIO_IOMMU_S_NOENT;
+                        return Err(Error::InvalidUnmapRequestMissingDomain);
+                    };
+                    domain
                         .mappings
                         .retain(|&x, _| x < req.virt_start || x > req.virt_end);
                 }
@@ -607,12 +750,18 @@ impl Request {
                     hdr_len = PROBE_PROP_SIZE;
                 }
                 _ => {
-                    status = VIRTIO_IOMMU_S_INVAL;
+                    unrecognised_type = true;
                     return Err(Error::InvalidRequest);
                 }
             }
             Ok(())
         })();
+
+        // virtio spec: unrecognised request types must not have the reply
+        // buffer written and must report a used length of zero.
+        if unrecognised_type {
+            return Ok(0);
+        }
 
         let status_desc = desc_chain.next().ok_or(Error::DescriptorChainTooShort)?;
 
@@ -621,7 +770,10 @@ impl Request {
             return Err(Error::UnexpectedReadOnlyDescriptor);
         }
 
-        if status_desc.len() < hdr_len + size_of::<VirtioIommuReqTail>() as u32 {
+        let reply_len = (hdr_len as usize)
+            .checked_add(size_of::<VirtioIommuReqTail>())
+            .ok_or(Error::BufferLengthTooSmall)?;
+        if (status_desc.len() as usize) < reply_len {
             return Err(Error::BufferLengthTooSmall);
         }
 
@@ -641,7 +793,7 @@ impl Request {
         // Return the error if the result was not Ok().
         result?;
 
-        Ok((hdr_len as usize) + size_of::<VirtioIommuReqTail>())
+        Ok(reply_len)
     }
 }
 
@@ -692,6 +844,7 @@ struct IommuEpollHandler {
     mapping: Arc<IommuMapping>,
     ext_mapping: Arc<Mutex<BTreeMap<u32, Arc<dyn ExternalDmaMapping>>>>,
     msi_iova_space: (u64, u64),
+    input_range: Option<(u64, u64)>,
 }
 
 impl IommuEpollHandler {
@@ -704,6 +857,7 @@ impl IommuEpollHandler {
                 &self.mapping,
                 &self.ext_mapping.lock().unwrap(),
                 self.msi_iova_space,
+                self.input_range,
             )?;
 
             self.request_queue
@@ -795,9 +949,30 @@ pub struct IommuMapping {
     bypass: AtomicBool,
 }
 
+// Inclusive end of `[addr, addr+size)`. Rejects zero size and end-of-range
+// overflow so the caller's range check cannot be tricked.
+fn span_end(addr: u64, size: u64) -> std::result::Result<u64, io::Error> {
+    if size == 0 {
+        return Err(io::Error::other(format!(
+            "refusing to translate zero-size addr 0x{addr:x}"
+        )));
+    }
+    addr.checked_add(size - 1).ok_or_else(|| {
+        io::Error::other(format!(
+            "translate span overflow: addr 0x{addr:x} size 0x{size:x}"
+        ))
+    })
+}
+
 impl DmaRemapping for IommuMapping {
-    fn translate_gva(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error> {
-        debug!("Translate GVA addr 0x{addr:x}");
+    fn translate_gva(
+        &self,
+        id: u32,
+        addr: u64,
+        size: u64,
+    ) -> std::result::Result<u64, std::io::Error> {
+        debug!("Translate GVA addr 0x{addr:x} size 0x{size:x}");
+        let end = span_end(addr, size)?;
         if let Some(domain_id) = self.endpoints.read().unwrap().get(&id) {
             if let Some(domain) = self.domains.read().unwrap().get(domain_id) {
                 // Directly return identity mapping in case the domain is in
@@ -807,7 +982,8 @@ impl DmaRemapping for IommuMapping {
                 }
 
                 for (&key, &value) in domain.mappings.iter() {
-                    if addr >= key && addr < key + value.size {
+                    let mapping_end = key.saturating_add(value.size).saturating_sub(1);
+                    if addr >= key && end <= mapping_end {
                         let new_addr = addr - key + value.gpa;
                         debug!("Into GPA addr 0x{new_addr:x}");
                         return Ok(new_addr);
@@ -819,12 +995,18 @@ impl DmaRemapping for IommuMapping {
         }
 
         Err(io::Error::other(format!(
-            "failed to translate GVA addr 0x{addr:x}"
+            "failed to translate GVA addr 0x{addr:x} size 0x{size:x}"
         )))
     }
 
-    fn translate_gpa(&self, id: u32, addr: u64) -> std::result::Result<u64, std::io::Error> {
-        debug!("Translate GPA addr 0x{addr:x}");
+    fn translate_gpa(
+        &self,
+        id: u32,
+        addr: u64,
+        size: u64,
+    ) -> std::result::Result<u64, std::io::Error> {
+        debug!("Translate GPA addr 0x{addr:x} size 0x{size:x}");
+        let end = span_end(addr, size)?;
         if let Some(domain_id) = self.endpoints.read().unwrap().get(&id) {
             if let Some(domain) = self.domains.read().unwrap().get(domain_id) {
                 // Directly return identity mapping in case the domain is in
@@ -834,7 +1016,8 @@ impl DmaRemapping for IommuMapping {
                 }
 
                 for (&key, &value) in domain.mappings.iter() {
-                    if addr >= value.gpa && addr < value.gpa + value.size {
+                    let mapping_gpa_end = value.gpa.saturating_add(value.size).saturating_sub(1);
+                    if addr >= value.gpa && end <= mapping_gpa_end {
                         let new_addr = addr - value.gpa + key;
                         debug!("Into GVA addr 0x{new_addr:x}");
                         return Ok(new_addr);
@@ -846,7 +1029,7 @@ impl DmaRemapping for IommuMapping {
         }
 
         Err(io::Error::other(format!(
-            "failed to translate GPA addr 0x{addr:x}"
+            "failed to translate GPA addr 0x{addr:x} size 0x{size:x}"
         )))
     }
 }
@@ -864,11 +1047,11 @@ impl AccessPlatformMapping {
 }
 
 impl AccessPlatform for AccessPlatformMapping {
-    fn translate_gva(&self, base: u64, _size: u64) -> std::result::Result<u64, std::io::Error> {
-        self.mapping.translate_gva(self.id, base)
+    fn translate_gva(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error> {
+        self.mapping.translate_gva(self.id, base, size)
     }
-    fn translate_gpa(&self, base: u64, _size: u64) -> std::result::Result<u64, std::io::Error> {
-        self.mapping.translate_gpa(self.id, base)
+    fn translate_gpa(&self, base: u64, size: u64) -> std::result::Result<u64, std::io::Error> {
+        self.mapping.translate_gpa(self.id, base, size)
     }
 }
 
@@ -881,6 +1064,7 @@ pub struct Iommu {
     seccomp_action: SeccompAction,
     exit_evt: EventFd,
     msi_iova_space: (u64, u64),
+    input_range: Option<(u64, u64)>,
 }
 
 type EndpointsState = Vec<(u32, u32)>;
@@ -940,13 +1124,14 @@ impl Iommu {
             ..Default::default()
         };
 
-        if address_width_bits < 64 {
+        let input_range = if address_width_bits < 64 {
             avail_features |= 1u64 << VIRTIO_IOMMU_F_INPUT_RANGE;
-            config.input_range = VirtioIommuRange64 {
-                start: 0,
-                end: (1u64 << address_width_bits) - 1,
-            }
-        }
+            let end = (1u64 << address_width_bits) - 1;
+            config.input_range = VirtioIommuRange64 { start: 0, end };
+            Some((0, end))
+        } else {
+            None
+        };
 
         let mapping = Arc::new(IommuMapping {
             endpoints: Arc::new(RwLock::new(endpoints)),
@@ -973,6 +1158,7 @@ impl Iommu {
                 seccomp_action,
                 exit_evt,
                 msi_iova_space,
+                input_range,
             },
             mapping,
         ))
@@ -1070,7 +1256,9 @@ impl VirtioDevice for Iommu {
             return;
         }
 
-        self.config.bypass = data[0];
+        // virtio spec says ignore bits 1-7 and that the device must
+        // never present a value other than 0 or 1.
+        self.config.bypass = data[0] & 1;
 
         self.update_bypass();
     }
@@ -1100,6 +1288,7 @@ impl VirtioDevice for Iommu {
             mapping: self.mapping.clone(),
             ext_mapping: self.ext_mapping.clone(),
             msi_iova_space: self.msi_iova_space,
+            input_range: self.input_range,
         };
 
         let paused = self.common.paused.clone();
