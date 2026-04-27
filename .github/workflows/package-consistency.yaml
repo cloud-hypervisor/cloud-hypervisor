@@ -5,27 +5,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-docs-only:
+    uses: ./.github/workflows/check-docs-only.yaml
+
   build:
+    needs: [check-docs-only]
     name: Rust VMM Consistency Check
     runs-on: ubuntu-latest
     steps:
+      - name: Skip consistency checks for documentation-only changes
+        if: ${{ needs.check-docs-only.outputs.docs-only == 'true' }}
+        run: echo "Skipping consistency checks for documentation-only changes"
+
       - name: Code checkout
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Install dependencies
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         run: sudo apt install -y python3
 
       - name: Install Rust toolchain stable
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
 
       - name: Check Rust VMM Package Consistency of root Workspace
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         run: python3 scripts/package-consistency-check.py github.com/rust-vmm
 
       - name: Check Rust VMM Package Consistency of fuzz Workspace
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         run: |
           set -eufo pipefail
           pushd fuzz

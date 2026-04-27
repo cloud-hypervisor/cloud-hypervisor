@@ -5,17 +5,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-docs-only:
+    uses: ./.github/workflows/check-docs-only.yaml
+
   build:
+    needs: [check-docs-only]
     name: Tests (Windows Guest)
     runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'garm-jammy-16' }}
     steps:
+      - name: Skip tests for documentation-only changes
+        if: ${{ needs.check-docs-only.outputs.docs-only == 'true' }}
+        run: echo "Skipping tests for documentation-only changes"
+
       - name: Code checkout
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name != 'pull_request' }}
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Install Docker
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name != 'pull_request' }}
         run: |
           set -eufo pipefail
           sudo apt-get update
@@ -26,7 +34,7 @@ jobs:
           sudo apt-get update
           sudo apt install -y docker-ce docker-ce-cli
       - name: Install Azure CLI
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name != 'pull_request' }}
         run: |
           set -eufo pipefail
           sudo apt install -y ca-certificates curl apt-transport-https lsb-release gnupg
@@ -35,19 +43,19 @@ jobs:
           sudo apt update
           sudo apt install -y azure-cli
       - name: Download Windows image
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name != 'pull_request' }}
         run: |
           set -eufo pipefail
           mkdir $HOME/workloads
           az storage blob download --container-name private-images --file "$HOME/workloads/windows-server-2025-amd64-1.raw" --name windows-server-2025-amd64-1.raw --connection-string "${{ secrets.CH_PRIVATE_IMAGES }}"
       - name: Run Windows guest integration tests
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name != 'pull_request' }}
         timeout-minutes: 15
         run: scripts/dev_cli.sh tests --integration-windows
       - name: Run Windows guest integration tests for musl
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name != 'pull_request' }}
         timeout-minutes: 15
         run: scripts/dev_cli.sh tests --integration-windows --libc musl
       - name: Skipping build for PR
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name == 'pull_request' }}
         run: echo "Skipping build for PR"

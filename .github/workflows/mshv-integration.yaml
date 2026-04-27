@@ -3,7 +3,11 @@ on: [pull_request_target, merge_group]
 permissions: {}
 
 jobs:
+  check-docs-only:
+    uses: ./.github/workflows/check-docs-only.yaml
+
   infra-setup:
+    needs: [check-docs-only]
     name: MSHV Infra Setup (x86_64)
     uses: ./.github/workflows/mshv-infra.yaml
     with:
@@ -11,6 +15,7 @@ jobs:
       KEY: azure_key_${{ github.run_id }}
       OS_DISK_SIZE: 512
       RG: MSHV-INTEGRATION-${{ github.run_id }}
+      skip: ${{ needs.check-docs-only.outputs.docs-only == 'true' }}
       VM_SKU: Standard_D16s_v5
     secrets:
       MI_CLIENT_ID: ${{ secrets.MSHV_MI_CLIENT_ID }}
@@ -21,11 +26,16 @@ jobs:
 
   run-tests:
     name: Integration Tests (x86_64)
-    needs: infra-setup
+    needs: [check-docs-only, infra-setup]
     if: ${{ always() && needs.infra-setup.result == 'success' }}
-    runs-on: mshv
+    runs-on: ${{ needs.check-docs-only.outputs.docs-only == 'true' && 'ubuntu-latest' || 'mshv' }}
     steps:
+      - name: Skip integration tests for documentation-only changes
+        if: ${{ needs.check-docs-only.outputs.docs-only == 'true' }}
+        run: echo "Skipping integration tests for documentation-only changes"
+
       - name: Run integration tests
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         timeout-minutes: 60
         env:
           KEY: azure_key_${{ github.run_id }}
@@ -80,7 +90,7 @@ jobs:
           EOF
 
       - name: Dump dmesg
-        if: always()
+        if: ${{ always() && needs.check-docs-only.outputs.docs-only != 'true' }}
         continue-on-error: true
         env:
           KEY: azure_key_${{ github.run_id }}
@@ -90,7 +100,7 @@ jobs:
           ssh -i ~/.ssh/"${KEY}" -o StrictHostKeyChecking=no -- "${USERNAME}@${PRIVATE_IP}" sudo dmesg
 
       - name: Dump serial console logs
-        if: always()
+        if: ${{ always() && needs.check-docs-only.outputs.docs-only != 'true' }}
         continue-on-error: true
         env:
           RG_NAME: ${{ needs.infra-setup.outputs.RG_NAME }}
@@ -101,11 +111,16 @@ jobs:
 
   cleanup:
     name: Cleanup
-    needs: run-tests
+    needs: [check-docs-only, run-tests]
     if: always()
-    runs-on: mshv
+    runs-on: ${{ needs.check-docs-only.outputs.docs-only == 'true' && 'ubuntu-latest' || 'mshv' }}
     steps:
+      - name: Skip cleanup for documentation-only changes
+        if: ${{ needs.check-docs-only.outputs.docs-only == 'true' }}
+        run: echo "Skipping cleanup for documentation-only changes"
+
       - name: Delete RG
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         env:
           RG: MSHV-INTEGRATION-${{ github.run_id }}
         run: |
@@ -117,6 +132,7 @@ jobs:
           echo "Cleanup process completed."
 
       - name: Delete SSH Key
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
         env:
           KEY: azure_key_${{ github.run_id }}
         run: |

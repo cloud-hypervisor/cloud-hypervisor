@@ -5,7 +5,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-docs-only:
+    uses: ./.github/workflows/check-docs-only.yaml
+
   build:
+    needs: [check-docs-only]
     timeout-minutes: 80
     env:
       # Our runner has 16 cores (nproc).
@@ -20,13 +24,17 @@ jobs:
     name: Tests (x86-64)
     runs-on: ${{ github.event_name == 'pull_request' && !(matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') && 'ubuntu-latest' || format('{0}-16', matrix.runner) }}
     steps:
+      - name: Skip tests for documentation-only changes
+        if: ${{ needs.check-docs-only.outputs.docs-only == 'true' }}
+        run: echo "Skipping tests for documentation-only changes"
+
       - name: Code checkout
-        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && (github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu')) }}
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Install Docker
-        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && (github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu')) }}
         run: |
           set -eufo pipefail
           sudo apt-get update
@@ -37,22 +45,22 @@ jobs:
           sudo apt-get update
           sudo apt install -y docker-ce docker-ce-cli
       - name: Prepare for VDPA
-        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && (github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu')) }}
         run: scripts/prepare_vdpa.sh
       - name: Run unit tests
-        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && (github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu')) }}
         run: scripts/dev_cli.sh tests --unit --libc ${{ matrix.libc }}
       - name: Load openvswitch module
-        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && (github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu')) }}
         run: sudo modprobe openvswitch
       - name: Run integration tests
-        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && (github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu')) }}
         timeout-minutes: 60
         run: scripts/dev_cli.sh tests --integration --libc ${{ matrix.libc }}
       - name: Run live-migration integration tests
-        if: ${{ github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && (github.event_name != 'pull_request' || (matrix.runner == 'garm-jammy' && matrix.libc == 'gnu')) }}
         timeout-minutes: 20
         run: scripts/dev_cli.sh tests --integration-live-migration --libc ${{ matrix.libc }}
       - name: Skipping build for PR
-        if: ${{ github.event_name == 'pull_request' && matrix.runner != 'garm-jammy' && matrix.libc != 'gnu' }}
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' && github.event_name == 'pull_request' && !(matrix.runner == 'garm-jammy' && matrix.libc == 'gnu') }}
         run: echo "Skipping build for PR"

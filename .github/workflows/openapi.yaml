@@ -2,13 +2,24 @@ name: Cloud Hypervisor OpenAPI Validation
 on: [pull_request, merge_group]
 
 jobs:
+  check-docs-only:
+    uses: ./.github/workflows/check-docs-only.yaml
+
   Validate:
+    needs: [check-docs-only]
     runs-on: ubuntu-latest
     container: openapitools/openapi-generator-cli
     steps:
-    - uses: actions/checkout@v6
-    - name: Validate OpenAPI
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        /usr/local/bin/docker-entrypoint.sh validate -i vmm/src/api/openapi/cloud-hypervisor.yaml
+      - name: Skip OpenAPI validation for documentation-only changes
+        if: ${{ needs.check-docs-only.outputs.docs-only == 'true' }}
+        run: echo "Skipping OpenAPI validation for documentation-only changes"
+
+      - uses: actions/checkout@v6
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
+
+      - name: Validate OpenAPI
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          /usr/local/bin/docker-entrypoint.sh validate -i vmm/src/api/openapi/cloud-hypervisor.yaml

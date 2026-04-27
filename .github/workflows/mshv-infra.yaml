@@ -18,6 +18,11 @@ on:
         description: 'Resource Group Name'
         required: true
         type: string
+      skip:
+        description: 'Skip infra setup and report success'
+        required: false
+        default: false
+        type: boolean
       VM_SKU:
         description: 'VM SKU'
         required: true
@@ -49,13 +54,18 @@ concurrency:
 jobs:
   infra-setup:
     name: ${{ inputs.ARCH }} VM Provision
-    runs-on: mshv
+    runs-on: ${{ inputs.skip && 'ubuntu-latest' || 'mshv' }}
     outputs:
       RG_NAME: ${{ steps.rg-setup.outputs.RG_NAME }}
       VM_NAME: ${{ steps.vm-setup.outputs.VM_NAME }}
       PRIVATE_IP: ${{ steps.get-vm-ip.outputs.PRIVATE_IP }}
     steps:
+      - name: Skip infra setup for documentation-only changes
+        if: ${{ inputs.skip }}
+        run: echo "Skipping infra setup for documentation-only changes"
+
       - name: Install & login to AZ CLI
+        if: ${{ !inputs.skip }}
         env:
           MI_CLIENT_ID: ${{ secrets.MI_CLIENT_ID }}
         run: |
@@ -72,6 +82,7 @@ jobs:
 
       - name: Get Location
         id: get-location
+        if: ${{ !inputs.skip }}
         env:
           SKU: ${{ inputs.VM_SKU }}
           STORAGE_ACCOUNT_PATHS: ${{ secrets.STORAGE_ACCOUNT_PATHS }}
@@ -107,6 +118,7 @@ jobs:
 
       - name: Create Resource Group
         id: rg-setup
+        if: ${{ !inputs.skip }}
         env:
           LOCATION: ${{ steps.get-location.outputs.location }}
           RG: ${{ inputs.RG }}
@@ -122,6 +134,7 @@ jobs:
 
       - name: Generate SSH Key
         id: generate-ssh-key
+        if: ${{ !inputs.skip }}
         env:
           KEY: ${{ inputs.KEY }}
         run: |
@@ -132,6 +145,7 @@ jobs:
 
       - name: Create VM
         id: vm-setup
+        if: ${{ !inputs.skip }}
         env:
           KEY: ${{ inputs.KEY }}
           LOCATION: ${{ steps.get-location.outputs.location }}
@@ -186,6 +200,7 @@ jobs:
 
       - name: Get VM Private IP
         id: get-vm-ip
+        if: ${{ !inputs.skip }}
         env:
           RG: ${{ inputs.RG }}
           VM_NAME: ${{ inputs.ARCH }}_${{ steps.get-location.outputs.location }}_${{ github.run_id }}
@@ -201,6 +216,7 @@ jobs:
           echo "PRIVATE_IP=$PRIVATE_IP" >> "$GITHUB_OUTPUT"
 
       - name: Wait for SSH availability
+        if: ${{ !inputs.skip }}
         env:
           KEY: ${{ inputs.KEY }}
           PRIVATE_IP: ${{ steps.get-vm-ip.outputs.PRIVATE_IP }}
@@ -211,6 +227,7 @@ jobs:
           echo "VM is accessible!"
 
       - name: Remove Old Host Key
+        if: ${{ !inputs.skip }}
         env:
           PRIVATE_IP: ${{ steps.get-vm-ip.outputs.PRIVATE_IP }}
         run: |
@@ -219,6 +236,7 @@ jobs:
           ssh-keygen -R "$PRIVATE_IP"
 
       - name: SSH into VM and Install Dependencies
+        if: ${{ !inputs.skip }}
         env:
           KEY: ${{ inputs.KEY }}
           PRIVATE_IP: ${{ steps.get-vm-ip.outputs.PRIVATE_IP }}

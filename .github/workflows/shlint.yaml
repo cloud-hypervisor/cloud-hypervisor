@@ -7,14 +7,25 @@ on:
       - main
 
 jobs:
+  check-docs-only:
+    uses: ./.github/workflows/check-docs-only.yaml
+
   sh-checker:
+    needs: [check-docs-only]
     name: Check shell scripts
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v6
-    - name: Run the shell script checkers
-      uses: luizm/action-sh-checker@master
-      env:
-        SHFMT_OPTS: -i 4 -d
-        SHELLCHECK_OPTS: -x --source-path scripts
+      - name: Skip shell checks for documentation-only changes
+        if: ${{ needs.check-docs-only.outputs.docs-only == 'true' }}
+        run: echo "Skipping shell checks for documentation-only changes"
+
+      - name: Checkout repository
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
+        uses: actions/checkout@v6
+
+      - name: Run the shell script checkers
+        if: ${{ needs.check-docs-only.outputs.docs-only != 'true' }}
+        uses: luizm/action-sh-checker@master
+        env:
+          SHFMT_OPTS: -i 4 -d
+          SHELLCHECK_OPTS: -x --source-path scripts
