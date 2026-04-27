@@ -8,157 +8,25 @@
 
 use std::cmp::{max, min};
 use std::collections::VecDeque;
-use std::fs::File;
-use std::io::Error;
-use std::os::fd::{AsFd, AsRawFd};
+use std::io;
+use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
-use std::{fmt, io};
 
 use io_uring::{IoUring, opcode, types};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
 
-use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult, BorrowedDiskFd, DiskFileError};
-use crate::error::{BlockError, BlockErrorKind, BlockResult, ErrorOp};
-use crate::qcow::backing::shared_backing_from;
+use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::qcow::decoder::Decoder;
 use crate::qcow::metadata::{
     BackingRead, ClusterReadMapping, ClusterWriteMapping, DeallocAction, QcowMetadata,
 };
 use crate::qcow::qcow_raw_file::QcowRawFile;
-use crate::qcow::{MAX_NESTING_DEPTH, RawFile, parse_qcow};
 use crate::qcow_common::{
     AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, gather_from_iovecs_into,
     pread_alloc, pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
 };
-use crate::{BatchRequest, RequestType, SECTOR_SIZE, disk_file};
-
-/// Device level handle for a QCOW2 image.
-///
-/// Owns the parsed metadata and backing file chain. One instance is
-/// created per disk and shared across virtio queues.
-pub struct QcowDiskAsync {
-    metadata: Arc<QcowMetadata>,
-    backing_file: Option<Arc<dyn BackingRead>>,
-    sparse: bool,
-    data_raw_file: QcowRawFile,
-}
-
-impl fmt::Debug for QcowDiskAsync {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("QcowDiskAsync")
-            .field("sparse", &self.sparse)
-            .field("has_backing", &self.backing_file.is_some())
-            .finish_non_exhaustive()
-    }
-}
-
-impl QcowDiskAsync {
-    pub fn new(
-        file: File,
-        direct_io: bool,
-        backing_files: bool,
-        sparse: bool,
-    ) -> BlockResult<Self> {
-        let max_nesting_depth = if backing_files { MAX_NESTING_DEPTH } else { 0 };
-        let (inner, backing_file, sparse) =
-            parse_qcow(RawFile::new(file, direct_io), max_nesting_depth, sparse).map_err(|e| {
-                let e = if !backing_files && matches!(e.kind(), BlockErrorKind::Overflow) {
-                    e.with_kind(BlockErrorKind::UnsupportedFeature)
-                } else {
-                    e
-                };
-                e.with_op(ErrorOp::Open)
-            })?;
-        let data_raw_file = inner.raw_file.clone();
-        Ok(QcowDiskAsync {
-            metadata: Arc::new(QcowMetadata::new(inner)),
-            backing_file: backing_file.map(shared_backing_from).transpose()?,
-            sparse,
-            data_raw_file,
-        })
-    }
-}
-
-impl Drop for QcowDiskAsync {
-    fn drop(&mut self) {
-        self.metadata.shutdown();
-    }
-}
-
-impl disk_file::DiskSize for QcowDiskAsync {
-    fn logical_size(&self) -> BlockResult<u64> {
-        Ok(self.metadata.virtual_size())
-    }
-}
-
-impl disk_file::PhysicalSize for QcowDiskAsync {
-    fn physical_size(&self) -> BlockResult<u64> {
-        Ok(self.data_raw_file.physical_size()?)
-    }
-}
-
-impl disk_file::DiskFd for QcowDiskAsync {
-    fn fd(&self) -> BorrowedDiskFd<'_> {
-        BorrowedDiskFd::new(self.data_raw_file.as_fd().as_raw_fd())
-    }
-}
-
-impl disk_file::Geometry for QcowDiskAsync {}
-
-impl disk_file::SparseCapable for QcowDiskAsync {
-    fn supports_sparse_operations(&self) -> bool {
-        true
-    }
-
-    fn supports_zero_flag(&self) -> bool {
-        true
-    }
-}
-
-impl disk_file::Resizable for QcowDiskAsync {
-    fn resize(&mut self, size: u64) -> BlockResult<()> {
-        if self.backing_file.is_some() {
-            return Err(BlockError::new(
-                BlockErrorKind::UnsupportedFeature,
-                DiskFileError::ResizeError(io::Error::other(
-                    "resize not supported with backing file",
-                )),
-            )
-            .with_op(ErrorOp::Resize));
-        }
-        self.metadata.resize(size).map_err(|e| {
-            BlockError::new(BlockErrorKind::Io, DiskFileError::ResizeError(e))
-                .with_op(ErrorOp::Resize)
-        })
-    }
-}
-
-impl disk_file::DiskFile for QcowDiskAsync {}
-
-impl disk_file::AsyncDiskFile for QcowDiskAsync {
-    fn try_clone(&self) -> BlockResult<Box<dyn disk_file::AsyncDiskFile>> {
-        Ok(Box::new(QcowDiskAsync {
-            metadata: Arc::clone(&self.metadata),
-            backing_file: self.backing_file.as_ref().map(Arc::clone),
-            sparse: self.sparse,
-            data_raw_file: self.data_raw_file.clone(),
-        }))
-    }
-
-    fn create_async_io(&self, ring_depth: u32) -> BlockResult<Box<dyn AsyncIo>> {
-        Ok(Box::new(
-            QcowAsync::new(
-                Arc::clone(&self.metadata),
-                self.data_raw_file.clone(),
-                self.backing_file.as_ref().map(Arc::clone),
-                self.sparse,
-                ring_depth,
-            )
-            .map_err(|e| BlockError::new(BlockErrorKind::Io, DiskFileError::NewAsyncIo(e)))?,
-        ))
-    }
-}
+use crate::{BatchRequest, RequestType, SECTOR_SIZE};
 
 /// Per queue QCOW2 I/O worker using io_uring.
 ///
@@ -186,7 +54,7 @@ pub struct QcowAsync {
 }
 
 impl QcowAsync {
-    fn new(
+    pub(crate) fn new(
         metadata: Arc<QcowMetadata>,
         data_file: QcowRawFile,
         backing_file: Option<Arc<dyn BackingRead>>,
@@ -271,7 +139,7 @@ impl AsyncIo for QcowAsync {
                         .user_data(user_data),
                 )
                 .map_err(|_| {
-                    AsyncIoError::ReadVectored(Error::other("Submission queue is full"))
+                    AsyncIoError::ReadVectored(io::Error::other("Submission queue is full"))
                 })?;
             };
 
@@ -418,7 +286,9 @@ impl AsyncIo for QcowAsync {
                                 .user_data(req.user_data),
                             )
                             .map_err(|_| {
-                                AsyncIoError::ReadVectored(Error::other("Submission queue is full"))
+                                AsyncIoError::ReadVectored(io::Error::other(
+                                    "Submission queue is full",
+                                ))
                             })?;
                         }
                         needs_submit = true;
@@ -689,6 +559,7 @@ mod unit_tests {
     use crate::disk_file::AsyncDiskFile;
     use crate::qcow::{QcowFile, RawFile};
     use crate::qcow_common::unit_tests::compress_allocated_clusters;
+    use crate::qcow_disk::QcowDisk;
     use crate::{BatchRequest, RequestType, SECTOR_SIZE};
 
     fn create_disk_with_data(
@@ -696,7 +567,7 @@ mod unit_tests {
         data: &[u8],
         offset: u64,
         sparse: bool,
-    ) -> (TempFile, QcowDiskAsync) {
+    ) -> (TempFile, QcowDisk) {
         let temp_file = TempFile::new().unwrap();
         {
             let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
@@ -705,11 +576,12 @@ mod unit_tests {
             qcow_file.write_all(data).unwrap();
             qcow_file.flush().unwrap();
         }
-        let disk = QcowDiskAsync::new(
+        let disk = QcowDisk::new(
             temp_file.as_file().try_clone().unwrap(),
             false,
             false,
             sparse,
+            true,
         )
         .unwrap();
         (temp_file, disk)
@@ -730,7 +602,7 @@ mod unit_tests {
         }
     }
 
-    fn async_write(disk: &QcowDiskAsync, offset: u64, data: &[u8]) {
+    fn async_write(disk: &QcowDisk, offset: u64, data: &[u8]) {
         let mut async_io = disk.create_async_io(1).unwrap();
         let iovec = libc::iovec {
             iov_base: data.as_ptr() as *mut libc::c_void,
@@ -748,7 +620,7 @@ mod unit_tests {
         );
     }
 
-    fn async_read(disk: &QcowDiskAsync, offset: u64, len: usize) -> Vec<u8> {
+    fn async_read(disk: &QcowDisk, offset: u64, len: usize) -> Vec<u8> {
         let mut async_io = disk.create_async_io(1).unwrap();
         let mut buf = vec![0xFFu8; len];
         let iovec = libc::iovec {
@@ -814,8 +686,14 @@ mod unit_tests {
             let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
             QcowFile::new(raw_file, 3, file_size, true).unwrap();
         }
-        let disk = QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), false, false, true)
-            .unwrap();
+        let disk = QcowDisk::new(
+            temp_file.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            true,
+        )
+        .unwrap();
 
         let pattern: Vec<u8> = (0..128 * 1024).map(|i| (i % 251) as u8).collect();
         let offset = 64 * 1024;
@@ -859,8 +737,14 @@ mod unit_tests {
             let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
             QcowFile::new(raw_file, 3, file_size, true).unwrap();
         }
-        let disk = QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), false, false, true)
-            .unwrap();
+        let disk = QcowDisk::new(
+            temp_file.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            true,
+        )
+        .unwrap();
 
         let mut async_io = disk.create_async_io(8).unwrap();
 
@@ -955,8 +839,14 @@ mod unit_tests {
             let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
             QcowFile::new(raw_file, 3, file_size, true).unwrap();
         }
-        let disk = QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), false, false, true)
-            .unwrap();
+        let disk = QcowDisk::new(
+            temp_file.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            true,
+        )
+        .unwrap();
 
         let buf = async_read(&disk, 0, 128 * 1024);
         assert!(
@@ -974,8 +864,14 @@ mod unit_tests {
             let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
             QcowFile::new(raw_file, 3, file_size, true).unwrap();
         }
-        let disk = QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), false, false, true)
-            .unwrap();
+        let disk = QcowDisk::new(
+            temp_file.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            true,
+        )
+        .unwrap();
 
         // Write 4K into the middle of a cluster.
         let write_offset = 4096u64;
@@ -1063,19 +959,32 @@ mod unit_tests {
             let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
             QcowFile::new(raw_file, 3, file_size, true).unwrap();
         }
-        let disk = QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), false, false, true)
-            .unwrap();
+        let disk = QcowDisk::new(
+            temp_file.as_file().try_clone().unwrap(),
+            false,
+            false,
+            true,
+            true,
+        )
+        .unwrap();
         let async_io = disk.create_async_io(1).unwrap();
         assert_eq!(async_io.alignment(), SECTOR_SIZE);
     }
 
     /// Returns None if O_DIRECT is not supported (e.g. tmpfs).
-    fn try_create_direct_io_disk(temp_file: &TempFile, file_size: u64) -> Option<QcowDiskAsync> {
+    fn try_create_direct_io_disk(temp_file: &TempFile, file_size: u64) -> Option<QcowDisk> {
         {
             let raw_file = RawFile::new(temp_file.as_file().try_clone().unwrap(), false);
             QcowFile::new(raw_file, 3, file_size, true).unwrap();
         }
-        QcowDiskAsync::new(temp_file.as_file().try_clone().unwrap(), true, false, true).ok()
+        QcowDisk::new(
+            temp_file.as_file().try_clone().unwrap(),
+            true,
+            false,
+            true,
+            true,
+        )
+        .ok()
     }
 
     #[test]
@@ -1141,7 +1050,14 @@ mod unit_tests {
         compress_allocated_clusters(&mut temp.as_file().try_clone().unwrap());
 
         let disk = Arc::new(
-            QcowDiskAsync::new(temp.as_file().try_clone().unwrap(), false, false, false).unwrap(),
+            QcowDisk::new(
+                temp.as_file().try_clone().unwrap(),
+                false,
+                false,
+                false,
+                true,
+            )
+            .unwrap(),
         );
 
         let handles: Vec<_> = (0..4)
