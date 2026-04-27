@@ -473,6 +473,12 @@ fn get_cli_options_sorted(
             .action(ArgAction::SetTrue)
             .help("Print version")
             .num_args(0),
+        Arg::new("virtio-rtc")
+            .long("virtio-rtc")
+            .help("Enable virtio-rtc")
+            .num_args(0)
+            .action(ArgAction::SetTrue)
+            .group("vm-config"),
         Arg::new("vsock")
             .long("vsock")
             .help(VsockConfig::SYNTAX)
@@ -1070,6 +1076,7 @@ mod unit_tests {
             iommu: false,
             numa: None,
             watchdog: false,
+            virtio_rtc: false,
             #[cfg(feature = "guest_debug")]
             gdb: false,
             pci_segments: None,
