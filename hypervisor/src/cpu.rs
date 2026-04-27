@@ -460,6 +460,18 @@ pub trait Vcpu: Send + Sync {
     #[cfg(target_arch = "aarch64")]
     fn vcpu_finalize(&self, feature: i32) -> Result<()>;
     ///
+    /// Restore the subset of vCPU state that must be written *before*
+    /// `KVM_ARM_VCPU_FINALIZE`. On KVM this covers the
+    /// `KVM_REG_ARM64_SVE_VLS` pseudo-register, which selects the SVE
+    /// vector length and becomes immutable once the vcpu is finalized.
+    /// The default implementation is a no-op, which is correct for
+    /// hypervisors that do not require pre-finalize register writes.
+    ///
+    #[cfg(target_arch = "aarch64")]
+    fn restore_pre_finalize(&self, _state: &CpuState) -> Result<()> {
+        Ok(())
+    }
+    ///
     /// Gets the features that have been finalized for a given CPU.
     ///
     #[cfg(target_arch = "aarch64")]
