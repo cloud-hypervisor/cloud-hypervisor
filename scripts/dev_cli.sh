@@ -473,47 +473,82 @@ cmd_tests() {
         rustflags="$rustflags -C link-args=-Wl,-Bstatic -C link-args=-lc"
     fi
 
+    # Common base runtime args shared by all test container runs.
+    common_args=(
+        --name "$CLH_CTR_NAME"
+        --workdir "$CTR_CLH_ROOT_DIR"
+        --rm
+        --security-opt seccomp=unconfined
+        --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR"
+        ${exported_volumes:+$exported_volumes}
+    )
+
+    # Common base environment variables shared by all test container runs.
+    common_env_args=(
+        --env BUILD_TARGET="$target"
+        --env RUSTFLAGS="$rustflags"
+        --env TARGET_CC="$target_cc"
+    )
+
     if [[ "$unit" = true ]]; then
         say "Running unit tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
+            "${common_args[@]}" \
             --device $exported_device \
             --device /dev/net/tun \
             --cap-add net_admin \
-            --security-opt seccomp=unconfined \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+$exported_volumes} \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
+            "${common_env_args[@]}" \
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             "$CTR_IMAGE" \
             ./scripts/run_unit_tests.sh "$@" || fix_dir_perms $? || exit $?
     fi
 
+    # Extend common_args with integration-specific runtime settings.
+    common_args+=(
+        --privileged
+        --ipc=host
+        --net="$CTR_CLH_NET"
+        "--mount" "type=tmpfs,destination=/tmp"
+        --volume /dev:/dev
+        --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS"
+    )
+
+    # Extend common_env_args with integration-specific settings.
+    common_env_args+=(
+        --env USER="root"
+        --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN"
+    )
+
+    # Copy custom kernel/firmware into the workloads directory on the
+    # host so they are visible inside the container at the default
+    # paths.  Each variable is independent; only set vars are copied.
+    if [ -n "$CH_CUSTOM_KERNEL" ]; then
+        say "Copying custom kernel from $CH_CUSTOM_KERNEL"
+        if [ "$(uname -m)" = "aarch64" ]; then
+            cp "$CH_CUSTOM_KERNEL" "$CLH_INTEGRATION_WORKLOADS/Image-arm64"
+        else
+            cp "$CH_CUSTOM_KERNEL" "$CLH_INTEGRATION_WORKLOADS/vmlinux-x86_64"
+        fi
+    fi
+    if [ -n "$CH_CUSTOM_FIRMWARE" ]; then
+        say "Copying custom firmware from $CH_CUSTOM_FIRMWARE"
+        cp "$CH_CUSTOM_FIRMWARE" "$CLH_INTEGRATION_WORKLOADS/hypervisor-fw"
+    fi
+    if [ -n "$CH_CUSTOM_OVMF" ]; then
+        say "Copying custom OVMF from $CH_CUSTOM_OVMF"
+        if [ "$(uname -m)" = "aarch64" ]; then
+            cp "$CH_CUSTOM_OVMF" "$CLH_INTEGRATION_WORKLOADS/CLOUDHV_EFI.fd"
+        else
+            cp "$CH_CUSTOM_OVMF" "$CLH_INTEGRATION_WORKLOADS/CLOUDHV.fd"
+        fi
+    fi
+
     if [ "$integration" = true ]; then
         say "Running integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+$exported_volumes} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
+            "${common_args[@]}" \
+            "${common_env_args[@]}" \
             --env PARALLEL_INTEGRATION_TESTS_NUM="${PARALLEL_INTEGRATION_TESTS_NUM:-}" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             "$CTR_IMAGE" \
             dbus-run-session ./scripts/run_integration_tests_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
@@ -524,24 +559,9 @@ cmd_tests() {
         copy_igvm_files "$SRC_IGVM_FILES_PATH" "$DEST_IGVM_FILES_PATH"
         say "Running CVM integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
+            "${common_args[@]}" \
             --volume "$DEST_IGVM_FILES_PATH:$CTR_IGVM_FILES_PATH" \
-            ${exported_volumes:+"$exported_volumes"} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            "${common_env_args[@]}" \
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             "$CTR_IMAGE" \
             ./scripts/run_integration_tests_cvm.sh "$@" || fix_dir_perms $? || exit $?
@@ -550,23 +570,8 @@ cmd_tests() {
     if [ "$integration_vfio" = true ]; then
         say "Running VFIO integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+$exported_volumes} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            "${common_args[@]}" \
+            "${common_env_args[@]}" \
             "$CTR_IMAGE" \
             ./scripts/run_integration_tests_vfio.sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -574,23 +579,8 @@ cmd_tests() {
     if [ "$integration_windows" = true ]; then
         say "Running Windows integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+$exported_volumes} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            "${common_args[@]}" \
+            "${common_env_args[@]}" \
             "$CTR_IMAGE" \
             ./scripts/run_integration_tests_windows_"$(uname -m)".sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -598,24 +588,9 @@ cmd_tests() {
     if [ "$integration_live_migration" = true ]; then
         say "Running 'live migration' integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+$exported_volumes} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
+            "${common_args[@]}" \
+            "${common_env_args[@]}" \
             --env PARALLEL_INTEGRATION_TESTS_NUM="${PARALLEL_INTEGRATION_TESTS_NUM:-}" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             --env LLVM_PROFILE_FILE="$LLVM_PROFILE_FILE" \
             --env MIGRATABLE_VERSION="$MIGRATABLE_VERSION" \
             "$CTR_IMAGE" \
@@ -625,23 +600,8 @@ cmd_tests() {
     if [ "$integration_rate_limiter" = true ]; then
         say "Running 'rate limiter' integration tests for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+$exported_volumes} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            "${common_args[@]}" \
+            "${common_env_args[@]}" \
             "$CTR_IMAGE" \
             ./scripts/run_integration_tests_rate_limiter.sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -649,24 +609,9 @@ cmd_tests() {
     if [ "$metrics" = true ]; then
         say "Generating performance metrics for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+$exported_volumes} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
+            "${common_args[@]}" \
+            "${common_env_args[@]}" \
             --env RUST_BACKTRACE="${RUST_BACKTRACE}" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
             "$CTR_IMAGE" \
             ./scripts/run_metrics.sh "$@" || fix_dir_perms $? || exit $?
     fi
@@ -674,23 +619,8 @@ cmd_tests() {
     if [ "$coverage" = true ]; then
         say "Generating code coverage information for $target..."
         run_container "$DOCKER_RUNTIME" run \
-            --name "$CLH_CTR_NAME" \
-            --workdir "$CTR_CLH_ROOT_DIR" \
-            --rm \
-            --privileged \
-            --security-opt seccomp=unconfined \
-            --ipc=host \
-            --net="$CTR_CLH_NET" \
-            --mount type=tmpfs,destination=/tmp \
-            --volume /dev:/dev \
-            --volume "$CLH_ROOT_DIR:$CTR_CLH_ROOT_DIR" \
-            ${exported_volumes:+$exported_volumes} \
-            --volume "$CLH_INTEGRATION_WORKLOADS:$CTR_CLH_INTEGRATION_WORKLOADS" \
-            --env USER="root" \
-            --env BUILD_TARGET="$target" \
-            --env RUSTFLAGS="$rustflags" \
-            --env TARGET_CC="$target_cc" \
-            --env AUTH_DOWNLOAD_TOKEN="$AUTH_DOWNLOAD_TOKEN" \
+            "${common_args[@]}" \
+            "${common_env_args[@]}" \
             "$CTR_IMAGE" \
             dbus-run-session ./scripts/run_coverage.sh "$@" || fix_dir_perms $? || exit $?
     fi

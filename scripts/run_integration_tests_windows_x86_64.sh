@@ -18,7 +18,9 @@ WIN_IMAGE_FILE="/root/workloads/windows-server-2025-amd64-1.raw"
 WORKLOADS_DIR="/root/workloads"
 
 # Download amd64 ovmf
-download_amd64_ovmf
+if [ ! -f "$WORKLOADS_DIR/CLOUDHV.fd" ]; then
+    download_amd64_ovmf
+fi
 
 CFLAGS=""
 if [[ "${BUILD_TARGET}" == "x86_64-unknown-linux-musl" ]]; then

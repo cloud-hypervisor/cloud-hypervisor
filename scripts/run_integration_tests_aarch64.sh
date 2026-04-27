@@ -137,13 +137,23 @@ update_workloads() {
     fi
 
     # Download aarch64 ovmf
-    download_aarch64_ovmf
+    if [ ! -f "$WORKLOADS_DIR/CLOUDHV_EFI.fd" ]; then
+        download_aarch64_ovmf
+    fi
 
     pushd "$WORKLOADS_DIR" || exit
 
-    if ! sha1sum sha1sums-aarch64-common --check; then
-        echo "sha1sum validation of images failed, remove invalid images to fix the issue."
-        exit 1
+    # Skip checksum verification for custom-provided workloads
+    if [ -n "$CH_CUSTOM_OVMF" ]; then
+        if ! grep -v "CLOUDHV_EFI.fd" sha1sums-aarch64-common | sha1sum --check; then
+            echo "sha1sum validation of images failed, remove invalid images to fix the issue."
+            exit 1
+        fi
+    else
+        if ! sha1sum sha1sums-aarch64-common --check; then
+            echo "sha1sum validation of images failed, remove invalid images to fix the issue."
+            exit 1
+        fi
     fi
     popd || exit
 
