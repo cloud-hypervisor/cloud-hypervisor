@@ -8,7 +8,7 @@
 
 use std::cmp::{max, min};
 use std::collections::VecDeque;
-use std::io;
+use std::io::{self, Error, ErrorKind};
 use std::os::unix::io::AsRawFd;
 use std::sync::Arc;
 
@@ -64,6 +64,12 @@ impl QcowAsync {
         let alignment = data_file.file().alignment();
         let io_alignment = max(alignment as u64, SECTOR_SIZE);
         let io_uring = IoUring::new(ring_depth)?;
+        if !io_uring.params().is_feature_submit_stable() {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "io_uring requires IORING_FEAT_SUBMIT_STABLE",
+            ));
+        }
         let eventfd = EventFd::new(libc::EFD_NONBLOCK)?;
         io_uring.submitter().register_eventfd(eventfd.as_raw_fd())?;
 
