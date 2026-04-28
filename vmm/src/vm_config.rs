@@ -758,7 +758,8 @@ impl ApplyLandlock for DebugConsoleConfig {
 pub struct DeviceConfig {
     #[serde(flatten)]
     pub pci_common: PciDeviceCommonConfig,
-    pub path: PathBuf,
+    #[serde(default)]
+    pub path: Option<PathBuf>,
     #[serde(default)]
     pub x_nv_gpudirect_clique: Option<u8>,
     #[serde(default)]
@@ -767,7 +768,11 @@ pub struct DeviceConfig {
 
 impl ApplyLandlock for DeviceConfig {
     fn apply_landlock(&self, landlock: &mut Landlock) -> LandlockResult<()> {
-        let device_path = fs::read_link(self.path.as_path()).map_err(LandlockError::OpenPath)?;
+        let path = self
+            .path
+            .as_deref()
+            .expect("DeviceConfig::parse and OpenAPI spec enforce a path");
+        let device_path = fs::read_link(path).map_err(LandlockError::OpenPath)?;
         let iommu_group = device_path.file_name();
         let iommu_group_str = iommu_group
             .ok_or(LandlockError::InvalidPath)?

@@ -2442,7 +2442,7 @@ impl DeviceConfig {
             .unwrap_or_default();
         Ok(DeviceConfig {
             pci_common,
-            path,
+            path: Some(path),
             x_nv_gpudirect_clique,
             x_exclude_mmap_bars,
         })
@@ -3312,9 +3312,11 @@ impl VmConfig {
         if let Some(devices) = &self.devices {
             let mut device_paths = BTreeSet::new();
             for device in devices {
-                if !device_paths.insert(device.path.to_string_lossy()) {
+                if let Some(path) = device.path.as_deref()
+                    && !device_paths.insert(path.to_string_lossy())
+                {
                     return Err(ValidationError::DuplicateDevicePath(
-                        device.path.to_string_lossy().to_string(),
+                        path.to_string_lossy().to_string(),
                     ));
                 }
 
@@ -4719,7 +4721,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
     fn device_fixture() -> DeviceConfig {
         DeviceConfig {
             pci_common: PciDeviceCommonConfig::default(),
-            path: PathBuf::from("/path/to/device"),
+            path: Some(PathBuf::from("/path/to/device")),
             x_nv_gpudirect_clique: None,
             x_exclude_mmap_bars: Vec::new(),
         }
@@ -6073,11 +6075,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut still_valid_config = valid_config.clone();
         still_valid_config.devices = Some(vec![
             DeviceConfig {
-                path: "/device1".into(),
+                path: Some("/device1".into()),
                 ..device_fixture()
             },
             DeviceConfig {
-                path: "/device2".into(),
+                path: Some("/device2".into()),
                 ..device_fixture()
             },
         ]);
@@ -6086,11 +6088,11 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
         let mut invalid_config = valid_config.clone();
         invalid_config.devices = Some(vec![
             DeviceConfig {
-                path: "/device1".into(),
+                path: Some("/device1".into()),
                 ..device_fixture()
             },
             DeviceConfig {
-                path: "/device1".into(),
+                path: Some("/device1".into()),
                 ..device_fixture()
             },
         ]);
