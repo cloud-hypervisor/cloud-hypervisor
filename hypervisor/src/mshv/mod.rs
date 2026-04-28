@@ -737,11 +737,7 @@ impl cpu::Vcpu for MshvVcpu {
 
                     let mut context = MshvEmulatorContext {
                         vcpu: self,
-                        map: if gva_gpa_valid {
-                            (gva, gpa)
-                        } else {
-                            (u64::MAX, 0)
-                        },
+                        mapping: gva_gpa_valid.then_some((gva, gpa)),
                     };
 
                     let old_state = context

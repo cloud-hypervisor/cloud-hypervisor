@@ -15,20 +15,20 @@ use crate::mshv::MshvVcpu;
 
 pub struct MshvEmulatorContext<'a> {
     pub vcpu: &'a MshvVcpu,
-    pub map: (u64, u64), // Initial GVA to GPA mapping provided by the hypervisor
+    /// Initial (GVA, GPA) mapping provided by the hypervisor if the hypervisor provided a
+    /// valid mapping. Used as a fast path in [`MshvEmulatorContext::translate`] to avoid a
+    /// translate hypercall. `None` when the hypervisor did not provide a valid mapping.
+    pub mapping: Option<(u64, u64)>,
 }
 
 impl MshvEmulatorContext<'_> {
-    // Do the actual gva -> gpa translation.
-    //
-    // When the hypervisor sets GvaGpaValid in the intercept message, `map`
-    // caches the (gva, gpa) pair as a fast path that avoids a translate
-    // hypercall.  When the flag is clear, `map` is set to a sentinel
-    // (u64::MAX, 0) so this shortcut never fires.
+    // Do the actual gva -> gpa translation
     #[allow(non_upper_case_globals)]
     fn translate(&self, gva: u64, flags: u32) -> Result<u64, PlatformError> {
-        if self.map.0 == gva {
-            return Ok(self.map.1);
+        if let Some((cached_gva, cached_gpa)) = self.mapping
+            && cached_gva == gva
+        {
+            return Ok(cached_gpa);
         }
 
         let (gpa, result_code) = self
