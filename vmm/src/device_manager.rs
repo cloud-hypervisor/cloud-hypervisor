@@ -3976,9 +3976,13 @@ impl DeviceManager {
             vfio_ops
         };
 
-        let vfio_device =
-            VfioDevice::new(&device_cfg.path, Arc::clone(&vfio_ops) as Arc<dyn VfioOps>)
-                .map_err(DeviceManagerError::VfioCreate)?;
+        // The CLI parser and OpenAPI spec enforce that `path` is set
+        let device_path = device_cfg
+            .path
+            .as_deref()
+            .expect("DeviceConfig::parse enforces a path");
+        let vfio_device = VfioDevice::new(device_path, Arc::clone(&vfio_ops) as Arc<dyn VfioOps>)
+            .map_err(DeviceManagerError::VfioCreate)?;
 
         if needs_dma_mapping {
             // Register DMA mapping in IOMMU.
@@ -4063,7 +4067,7 @@ impl DeviceManager {
                 .iter()
                 .map(|bar| *bar as u8)
                 .collect(),
-            device_cfg.path.clone(),
+            device_path.to_path_buf(),
         )
         .map_err(DeviceManagerError::VfioPciCreate)?;
 
