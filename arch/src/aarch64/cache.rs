@@ -123,3 +123,63 @@ pub fn get_cache_shared(cache_level: CacheLevel) -> bool {
 
     result
 }
+
+#[derive(Default, Copy, Clone, Debug)]
+pub struct CacheTopologyInfo {
+    pub l1_d_cache_size: u32,
+    pub l1_d_cache_line_size: u32,
+    pub l1_d_cache_sets: u32,
+
+    pub l1_i_cache_size: u32,
+    pub l1_i_cache_line_size: u32,
+    pub l1_i_cache_sets: u32,
+
+    pub l2_cache_size: u32,
+    pub l2_cache_line_size: u32,
+    pub l2_cache_sets: u32,
+
+    pub l3_cache_size: u32,
+    pub l3_cache_line_size: u32,
+    pub l3_cache_sets: u32,
+
+    pub l2_cache_shared: bool,
+    pub l3_cache_shared: bool,
+}
+
+/// Reads cache topology information from sysfs for cpu0.
+pub fn read_cache_topology() -> Option<CacheTopologyInfo> {
+    let cache_path = Path::new("/sys/devices/system/cpu/cpu0/cache");
+    if !cache_path.exists() {
+        return None;
+    }
+
+    let mut info = CacheTopologyInfo {
+        l1_d_cache_size: get_cache_size(CacheLevel::L1D),
+        l1_d_cache_line_size: get_cache_coherency_line_size(CacheLevel::L1D),
+        l1_d_cache_sets: get_cache_number_of_sets(CacheLevel::L1D),
+
+        l1_i_cache_size: get_cache_size(CacheLevel::L1I),
+        l1_i_cache_line_size: get_cache_coherency_line_size(CacheLevel::L1I),
+        l1_i_cache_sets: get_cache_number_of_sets(CacheLevel::L1I),
+
+        l2_cache_size: get_cache_size(CacheLevel::L2),
+        l2_cache_line_size: get_cache_coherency_line_size(CacheLevel::L2),
+        l2_cache_sets: get_cache_number_of_sets(CacheLevel::L2),
+
+        l3_cache_size: get_cache_size(CacheLevel::L3),
+        l3_cache_line_size: get_cache_coherency_line_size(CacheLevel::L3),
+        l3_cache_sets: get_cache_number_of_sets(CacheLevel::L3),
+
+        l2_cache_shared: false,
+        l3_cache_shared: false,
+    };
+
+    if info.l2_cache_size != 0 {
+        info.l2_cache_shared = get_cache_shared(CacheLevel::L2);
+    }
+    if info.l3_cache_size != 0 {
+        info.l3_cache_shared = get_cache_shared(CacheLevel::L3);
+    }
+
+    Some(info)
+}
