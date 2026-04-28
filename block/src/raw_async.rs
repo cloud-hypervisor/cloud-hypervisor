@@ -26,6 +26,15 @@ impl RawFileAsync {
     pub fn new(fd: RawFd, ring_depth: u32) -> BlockResult<Self> {
         let io_uring =
             IoUring::new(ring_depth).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
+        if !io_uring.params().is_feature_submit_stable() {
+            return Err(BlockError::new(
+                BlockErrorKind::UnsupportedFeature,
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "io_uring requires IORING_FEAT_SUBMIT_STABLE",
+                ),
+            ));
+        }
         let eventfd =
             EventFd::new(libc::EFD_NONBLOCK).map_err(|e| BlockError::new(BlockErrorKind::Io, e))?;
 

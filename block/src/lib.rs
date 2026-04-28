@@ -267,10 +267,9 @@ impl<'a> DestructorClear<'a> {
     }
 }
 
-const MAX_ZERO_SUBMITS: u32 = 100;
-
 #[cfg(feature = "io_uring")]
 fn submit_all(submitter: &Submitter<'_>, sq: &mut SubmissionQueue<'_>) -> std::io::Result<()> {
+    const MAX_ZERO_SUBMITS: u32 = 100;
     let mut len = sq.len();
     while len > 0 {
         sq.sync();
