@@ -226,6 +226,30 @@ pub fn request_type<B: Bitmap + 'static>(
     }
 }
 
+#[cfg(feature = "io_uring")]
+fn submit_all(submitter: &Submitter<'_>, sq: &mut SubmissionQueue<'_>) -> std::io::Result<()> {
+    const MAX_ZERO_SUBMITS: u32 = 100;
+    let mut len = sq.len();
+    while len > 0 {
+        sq.sync();
+        let mut submissions_that_submitted_no_sqes = 0u32;
+        loop {
+            let submitted = submitter.submit()?;
+            if submitted != 0 {
+                len = len.saturating_sub(submitted);
+                break;
+            }
+            submissions_that_submitted_no_sqes += 1;
+            if submissions_that_submitted_no_sqes >= MAX_ZERO_SUBMITS {
+                return Err(std::io::Error::other(
+                    "100 consecutive calls to io_uring_enter didn't submit any SQEs",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn sector<B: Bitmap + 'static>(
     mem: &vm_memory::GuestMemoryMmap<B>,
     desc_addr: GuestAddress,
