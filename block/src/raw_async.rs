@@ -12,7 +12,7 @@ use vmm_sys_util::eventfd::EventFd;
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::sparse::{blkdiscard, blkzeroout};
-use crate::{BatchRequest, DestructorClear, RequestType, SECTOR_SIZE, is_block_device};
+use crate::{BatchRequest, DestructorClear, RequestType, SECTOR_SIZE, is_block_device, submit_all};
 
 pub struct RawFileAsync {
     fd: RawFd,
@@ -110,9 +110,8 @@ impl AsyncIo for RawFileAsync {
 
         // Update the submission queue and submit new operations to the
         // io_uring instance.
-        sq.sync();
+        submit_all(&submitter, &mut sq).map_err(AsyncIoError::ReadVectored)?;
         drop(sq);
-        submitter.submit().map_err(AsyncIoError::ReadVectored)?;
         destructor_clear.0 = &mut nothing;
 
         Ok(())
@@ -149,9 +148,8 @@ impl AsyncIo for RawFileAsync {
 
         // Update the submission queue and submit new operations to the
         // io_uring instance.
-        sq.sync();
+        submit_all(&submitter, &mut sq).map_err(AsyncIoError::WriteVectored)?;
         drop(sq);
-        submitter.submit().map_err(AsyncIoError::WriteVectored)?;
         destructor_clear.0 = &mut nothing;
 
         Ok(())
@@ -175,8 +173,7 @@ impl AsyncIo for RawFileAsync {
 
             // Update the submission queue and submit new operations to the
             // io_uring instance.
-            sq.sync();
-            submitter.submit().map_err(AsyncIoError::Fsync)?;
+            submit_all(&submitter, &mut sq).map_err(AsyncIoError::Fsync)?;
         } else {
             // SAFETY: FFI call with a valid fd
             unsafe { libc::fsync(self.fd) };
@@ -280,16 +277,9 @@ impl AsyncIo for RawFileAsync {
 
         // Only submit if we actually queued something
         if submitted {
-            // Update the submission queue and submit new operations to the
-            // io_uring instance.
-            sq.sync();
-            drop(sq);
-            submitter
-                .submit()
-                .map_err(AsyncIoError::SubmitBatchRequests)?;
-        } else {
-            drop(sq);
+            submit_all(&submitter, &mut sq).map_err(AsyncIoError::SubmitBatchRequests)?;
         }
+        drop(sq);
         destructor_clear.0 = &mut nothing;
         Ok(())
     }
@@ -325,8 +315,9 @@ impl AsyncIo for RawFileAsync {
             })?;
         };
 
-        sq.sync();
-        submitter.submit().map_err(AsyncIoError::PunchHole)?;
+        // Update the submission queue and submit new operations to the
+        // io_uring instance.
+        submit_all(&submitter, &mut sq).map_err(AsyncIoError::PunchHole)?;
 
         Ok(())
     }
@@ -358,8 +349,7 @@ impl AsyncIo for RawFileAsync {
             })?;
         };
 
-        sq.sync();
-        submitter.submit().map_err(AsyncIoError::WriteZeroes)?;
+        submit_all(&submitter, &mut sq).map_err(AsyncIoError::WriteZeroes)?;
 
         Ok(())
     }

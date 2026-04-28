@@ -26,7 +26,7 @@ use crate::qcow_common::{
     AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, gather_from_iovecs_into,
     pread_alloc, pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
 };
-use crate::{BatchRequest, DestructorClear, RequestType, SECTOR_SIZE};
+use crate::{BatchRequest, DestructorClear, RequestType, SECTOR_SIZE, submit_all};
 
 /// Per queue QCOW2 I/O worker using io_uring.
 ///
@@ -154,10 +154,7 @@ impl AsyncIo for QcowAsync {
                     AsyncIoError::ReadVectored(io::Error::other("Submission queue is full"))
                 })?;
             };
-
-            sq.sync();
-            drop(sq);
-            submitter.submit().map_err(AsyncIoError::ReadVectored)?;
+            submit_all(&submitter, &mut sq).map_err(AsyncIoError::ReadVectored)?;
         } else {
             self.completion_list
                 .push_back((user_data, total_len as i32));
@@ -342,10 +339,7 @@ impl AsyncIo for QcowAsync {
         }
 
         if needs_submit {
-            sq.sync();
-            submitter
-                .submit()
-                .map_err(AsyncIoError::SubmitBatchRequests)?;
+            submit_all(&submitter, &mut sq).map_err(AsyncIoError::SubmitBatchRequests)?;
         }
         destructor_clear.0 = &mut nothing;
 
