@@ -9,7 +9,6 @@ mod test_util;
 
 use std::fs::File;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
-use std::sync::Mutex;
 use std::sync::mpsc::channel;
 use std::{env, io};
 
@@ -97,6 +96,8 @@ enum Error {
     BareGdb,
     #[error("Error creating log file")]
     LogFileCreation(#[source] std::io::Error),
+    #[error("Error parsing logger format")]
+    LoggerFormat(#[source] logger::Error),
     #[error("Error setting up logger")]
     LoggerSetup(#[source] log::SetLoggerError),
     #[error("Failed to gracefully shutdown http api")]
@@ -514,12 +515,10 @@ fn start_vmm(
         Box::new(std::io::stderr())
     };
 
-    log::set_boxed_logger(Box::new(Logger {
-        output: Mutex::new(log_file),
-        start: std::time::Instant::now(),
-    }))
-    .map(|()| log::set_max_level(log_level))
-    .map_err(Error::LoggerSetup)?;
+    let logger = Logger::new(log_file).map_err(Error::LoggerFormat)?;
+    log::set_boxed_logger(Box::new(logger))
+        .map(|()| log::set_max_level(log_level))
+        .map_err(Error::LoggerSetup)?;
 
     let (api_request_sender, api_request_receiver) = channel();
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
