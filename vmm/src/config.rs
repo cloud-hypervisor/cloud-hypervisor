@@ -310,6 +310,9 @@ pub enum ValidationError {
     /// Invalid PCI segment aperture weight
     #[error("Invalid PCI segment aperture weight: {0}")]
     InvalidPciSegmentApertureWeight(u32),
+    /// Invalid VFIO excluded-mmap BAR index
+    #[error("Invalid VFIO excluded-mmap BAR index: {0}")]
+    InvalidDeviceExcludeMmapBar(u64),
     /// Invalid IOMMU address width in bits
     #[error(
         "IOMMU address width in bits ({0}) should be less than or equal to {MAX_IOMMU_ADDRESS_WIDTH_BITS}"
@@ -2219,14 +2222,17 @@ impl DebugConsoleConfig {
 impl DeviceConfig {
     pub const SYNTAX: &'static str = "Direct device assignment parameters \
     \"path=<device_path>,iommu=on|off,id=<device_id>,\
-    pci_segment=<segment_id>,pci_device_id=<pci_slot>\"";
+    pci_segment=<segment_id>,pci_device_id=<pci_slot>,\
+    x_nv_gpudirect_clique=<clique_id>,\
+    x_exclude_mmap_bars=[<bar>...]\"";
 
     pub fn parse(device: &str) -> Result<Self> {
         let mut parser = OptionParser::new();
         parser
             .add("path")
             .add_all(PciDeviceCommonConfig::OPTIONS_IOMMU)
-            .add("x_nv_gpudirect_clique");
+            .add("x_nv_gpudirect_clique")
+            .add("x_exclude_mmap_bars");
         parser.parse(device).map_err(Error::ParseDevice)?;
 
         let pci_common = PciDeviceCommonConfig::parse(device)?;
@@ -2237,10 +2243,16 @@ impl DeviceConfig {
         let x_nv_gpudirect_clique = parser
             .convert::<u8>("x_nv_gpudirect_clique")
             .map_err(Error::ParseDevice)?;
+        let x_exclude_mmap_bars = parser
+            .convert::<IntegerList>("x_exclude_mmap_bars")
+            .map_err(Error::ParseDevice)?
+            .map(|bars| bars.0)
+            .unwrap_or_default();
         Ok(DeviceConfig {
             pci_common,
             path,
             x_nv_gpudirect_clique,
+            x_exclude_mmap_bars,
         })
     }
 
@@ -2251,6 +2263,13 @@ impl DeviceConfig {
             let vfio_p2p_dma = vm_config.platform.as_ref().is_none_or(|p| p.vfio_p2p_dma);
             if !vfio_p2p_dma {
                 return Err(ValidationError::GpuDirectCliqueRequiresP2pDma);
+            }
+        }
+
+        // PCI devices expose six BARs, so only BAR indices 0 through 5 are valid here.
+        for bar in &self.x_exclude_mmap_bars {
+            if *bar > 5 {
+                return Err(ValidationError::InvalidDeviceExcludeMmapBar(*bar));
             }
         }
 
@@ -4396,6 +4415,7 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             pci_common: PciDeviceCommonConfig::default(),
             path: PathBuf::from("/path/to/device"),
             x_nv_gpudirect_clique: None,
+            x_exclude_mmap_bars: Vec::new(),
         }
     }
 
@@ -4431,6 +4451,29 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             }
         );
 
+        assert_eq!(
+            DeviceConfig::parse("path=/path/to/device,x_exclude_mmap_bars=[2]")?,
+            DeviceConfig {
+                x_exclude_mmap_bars: vec![2],
+                ..device_fixture()
+            }
+        );
+
+        assert_eq!(
+            DeviceConfig::parse("path=/path/to/device,x_exclude_mmap_bars=[0,2,5]")?,
+            DeviceConfig {
+                x_exclude_mmap_bars: vec![0, 2, 5],
+                ..device_fixture()
+            }
+        );
+
+        assert_eq!(
+            DeviceConfig::parse("path=/path/to/device,x_exclude_mmap_bars=[6]")?,
+            DeviceConfig {
+                x_exclude_mmap_bars: vec![6],
+                ..device_fixture()
+            }
+        );
         Ok(())
     }
 
@@ -5751,6 +5794,17 @@ id=\"{id}\",pci_segment={pci_segment},queue_sizes={queue_sizes}"
             ..device_fixture()
         }]);
         still_valid_config.validate().unwrap();
+
+        // x_exclude_mmap_bars only accepts PCI BAR indices 0 through 5
+        let mut invalid_config = valid_config.clone();
+        invalid_config.devices = Some(vec![DeviceConfig {
+            x_exclude_mmap_bars: vec![6],
+            ..device_fixture()
+        }]);
+        assert_eq!(
+            invalid_config.validate(),
+            Err(ValidationError::InvalidDeviceExcludeMmapBar(6))
+        );
 
         let mut still_valid_config = valid_config.clone();
         // SAFETY: Safe as the file was just opened
