@@ -760,10 +760,28 @@ pub struct DeviceConfig {
     pub pci_common: PciDeviceCommonConfig,
     #[serde(default)]
     pub path: Option<PathBuf>,
+    // FDs are not serialized and any deserialized value is invalid; see NetConfig::fds.
+    #[serde(default, deserialize_with = "deserialize_deviceconfig_fd")]
+    pub fd: Option<i32>,
     #[serde(default)]
     pub x_nv_gpudirect_clique: Option<u8>,
     #[serde(default)]
     pub x_exclude_mmap_bars: Vec<u64>,
+}
+
+fn deserialize_deviceconfig_fd<'de, D>(d: D) -> Result<Option<i32>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let invalid_fd: Option<i32> = Option::deserialize(d)?;
+    if invalid_fd.is_some() {
+        debug!(
+            "FD in 'DeviceConfig' won't be deserialized as it is most likely invalid now. Deserializing it as -1."
+        );
+        Ok(Some(-1))
+    } else {
+        Ok(None)
+    }
 }
 
 impl ApplyLandlock for DeviceConfig {
