@@ -26,7 +26,7 @@ use crate::qcow_common::{
     AlignedBuf, aligned_pread, aligned_pwrite, decompress_cluster, gather_from_iovecs_into,
     pread_alloc, pread_exact, pwrite_all, scatter_to_iovecs, zero_fill_iovecs,
 };
-use crate::{BatchRequest, RequestType, SECTOR_SIZE};
+use crate::{BatchRequest, DestructorClear, RequestType, SECTOR_SIZE};
 
 /// Per queue QCOW2 I/O worker using io_uring.
 ///
@@ -48,7 +48,7 @@ pub struct QcowAsync {
     io_alignment: u64,
     cluster_size: u64,
     decoder: Arc<dyn Decoder>,
-    io_uring: IoUring,
+    io_uring: Option<IoUring>,
     eventfd: EventFd,
     completion_list: VecDeque<(u64, i32)>,
 }
@@ -76,7 +76,7 @@ impl QcowAsync {
             sparse,
             alignment,
             io_alignment,
-            io_uring,
+            io_uring: Some(io_uring),
             eventfd,
             completion_list: VecDeque::new(),
         })
@@ -115,6 +115,17 @@ impl AsyncIo for QcowAsync {
         user_data: u64,
     ) -> AsyncIoResult<()> {
         let total_len: usize = iovecs.iter().map(|v| v.iov_len).sum();
+        let mut nothing = None;
+        let mut destructor_clear = DestructorClear(&mut self.io_uring);
+        let (submitter, mut sq, _) = destructor_clear
+            .0
+            .as_mut()
+            .ok_or_else(|| {
+                AsyncIoError::ReadVectored(std::io::Error::other(
+                    "io_uring submission queue already dropped",
+                ))
+            })?
+            .split();
 
         if let Some(host_offset) = Self::resolve_read(
             &self.metadata,
@@ -127,16 +138,17 @@ impl AsyncIo for QcowAsync {
             self.cluster_size,
             &*self.decoder,
         )? {
-            let fd = self.data_file.as_raw_fd();
-            let (submitter, mut sq, _) = self.io_uring.split();
-
             // SAFETY: fd is valid and iovecs point to valid guest memory.
             unsafe {
                 sq.push(
-                    &opcode::Readv::new(types::Fd(fd), iovecs.as_ptr(), iovecs.len() as u32)
-                        .offset(host_offset)
-                        .build()
-                        .user_data(user_data),
+                    &opcode::Readv::new(
+                        types::Fd(self.data_file.as_raw_fd()),
+                        iovecs.as_ptr(),
+                        iovecs.len() as u32,
+                    )
+                    .offset(host_offset)
+                    .build()
+                    .user_data(user_data),
                 )
                 .map_err(|_| {
                     AsyncIoError::ReadVectored(io::Error::other("Submission queue is full"))
@@ -144,12 +156,14 @@ impl AsyncIo for QcowAsync {
             };
 
             sq.sync();
+            drop(sq);
             submitter.submit().map_err(AsyncIoError::ReadVectored)?;
         } else {
             self.completion_list
                 .push_back((user_data, total_len as i32));
             self.eventfd.write(1).unwrap();
         }
+        destructor_clear.0 = &mut nothing;
         Ok(())
     }
 
@@ -193,6 +207,7 @@ impl AsyncIo for QcowAsync {
     fn next_completed_request(&mut self) -> Option<(u64, i32)> {
         // Drain io_uring completions first, then synthetic ones.
         self.io_uring
+            .as_mut()?
             .completion()
             .next()
             .map(|entry| (entry.user_data(), entry.result()))
@@ -252,7 +267,18 @@ impl AsyncIo for QcowAsync {
     }
 
     fn submit_batch_requests(&mut self, batch_request: &[BatchRequest]) -> AsyncIoResult<()> {
-        let (submitter, mut sq, _) = self.io_uring.split();
+        let mut nothing = None;
+        let mut destructor_clear = DestructorClear(&mut self.io_uring);
+        let (submitter, mut sq, _) = destructor_clear
+            .0
+            .as_mut()
+            .ok_or_else(|| {
+                AsyncIoError::SubmitBatchRequests(std::io::Error::other(
+                    "io_uring submission queue already dropped",
+                ))
+            })?
+            .split();
+
         let mut needs_submit = false;
         let mut sync_completions: Vec<(u64, i32)> = Vec::new();
 
@@ -321,6 +347,7 @@ impl AsyncIo for QcowAsync {
                 .submit()
                 .map_err(AsyncIoError::SubmitBatchRequests)?;
         }
+        destructor_clear.0 = &mut nothing;
 
         if !sync_completions.is_empty() {
             for c in sync_completions {

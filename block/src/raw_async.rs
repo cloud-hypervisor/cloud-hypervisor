@@ -2,21 +2,21 @@
 //
 // SPDX-License-Identifier: Apache-2.0 AND BSD-3-Clause
 
-use std::io::Error;
+use std::io::{Error, ErrorKind};
 use std::os::unix::io::{AsRawFd, RawFd};
 
-use io_uring::{IoUring, opcode, types};
+use io_uring::{IoUring, SubmissionQueue, Submitter, opcode, types};
 use libc::{FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE};
 use vmm_sys_util::eventfd::EventFd;
 
 use crate::async_io::{AsyncIo, AsyncIoError, AsyncIoResult};
 use crate::error::{BlockError, BlockErrorKind, BlockResult};
 use crate::sparse::{blkdiscard, blkzeroout};
-use crate::{BatchRequest, RequestType, SECTOR_SIZE, is_block_device};
+use crate::{BatchRequest, DestructorClear, RequestType, SECTOR_SIZE, is_block_device};
 
 pub struct RawFileAsync {
     fd: RawFd,
-    io_uring: IoUring,
+    io_uring: Option<IoUring>,
     eventfd: EventFd,
     alignment: u64,
     is_block_device: bool,
@@ -40,7 +40,7 @@ impl RawFileAsync {
 
         Ok(RawFileAsync {
             fd,
-            io_uring,
+            io_uring: Some(io_uring),
             eventfd,
             alignment: SECTOR_SIZE,
             is_block_device,
@@ -51,7 +51,7 @@ impl RawFileAsync {
     /// completed operation (e.g. a BLK* ioctl) is reaped through the normal
     /// io_uring completion path.
     fn submit_nop(&mut self, user_data: u64) -> Result<(), Error> {
-        let (submitter, mut sq, _) = self.io_uring.split();
+        let (submitter, mut sq, _) = self.split_ring()?;
         // SAFETY: Nop carries no buffer; only `user_data` is consumed by the
         // kernel.
         unsafe {
@@ -61,6 +61,14 @@ impl RawFileAsync {
         sq.sync();
         submitter.submit()?;
         Ok(())
+    }
+
+    fn split_ring(&mut self) -> std::io::Result<(Submitter<'_>, SubmissionQueue<'_>, i32)> {
+        let Some(ref mut io_uring) = self.io_uring else {
+            return Err(Error::other("io_uring instance already deleted"));
+        };
+        let (submitter, sq, _) = io_uring.split();
+        Ok((submitter, sq, self.fd))
     }
 }
 
@@ -79,13 +87,18 @@ impl AsyncIo for RawFileAsync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        let (submitter, mut sq, _) = self.io_uring.split();
+        let mut nothing = None;
+        let fd = self.fd;
+        let mut destructor_clear = DestructorClear(&mut self.io_uring);
+        let (submitter, mut sq) = destructor_clear
+            .split_ring()
+            .map_err(AsyncIoError::ReadVectored)?;
 
         // SAFETY: we know the file descriptor is valid and we
         // relied on vm-memory to provide the buffer address.
         unsafe {
             sq.push(
-                &opcode::Readv::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
+                &opcode::Readv::new(types::Fd(fd), iovecs.as_ptr(), iovecs.len() as u32)
                     .offset(offset.try_into().unwrap())
                     .build()
                     .user_data(user_data),
@@ -98,7 +111,9 @@ impl AsyncIo for RawFileAsync {
         // Update the submission queue and submit new operations to the
         // io_uring instance.
         sq.sync();
+        drop(sq);
         submitter.submit().map_err(AsyncIoError::ReadVectored)?;
+        destructor_clear.0 = &mut nothing;
 
         Ok(())
     }
@@ -109,13 +124,18 @@ impl AsyncIo for RawFileAsync {
         iovecs: &[libc::iovec],
         user_data: u64,
     ) -> AsyncIoResult<()> {
-        let (submitter, mut sq, _) = self.io_uring.split();
+        let mut nothing = None;
+        let fd = self.fd;
+        let mut destructor_clear = DestructorClear(&mut self.io_uring);
+        let (submitter, mut sq) = destructor_clear
+            .split_ring()
+            .map_err(AsyncIoError::WriteVectored)?;
 
         // SAFETY: we know the file descriptor is valid and we
         // relied on vm-memory to provide the buffer address.
         unsafe {
             sq.push(
-                &opcode::Writev::new(types::Fd(self.fd), iovecs.as_ptr(), iovecs.len() as u32)
+                &opcode::Writev::new(types::Fd(fd), iovecs.as_ptr(), iovecs.len() as u32)
                     .offset(offset.try_into().unwrap())
                     .build()
                     .user_data(user_data),
@@ -130,19 +150,21 @@ impl AsyncIo for RawFileAsync {
         // Update the submission queue and submit new operations to the
         // io_uring instance.
         sq.sync();
+        drop(sq);
         submitter.submit().map_err(AsyncIoError::WriteVectored)?;
+        destructor_clear.0 = &mut nothing;
 
         Ok(())
     }
 
     fn fsync(&mut self, user_data: Option<u64>) -> AsyncIoResult<()> {
         if let Some(user_data) = user_data {
-            let (submitter, mut sq, _) = self.io_uring.split();
+            let (submitter, mut sq, fd) = self.split_ring().map_err(AsyncIoError::Fsync)?;
 
             // SAFETY: we know the file descriptor is valid.
             unsafe {
                 sq.push(
-                    &opcode::Fsync::new(types::Fd(self.fd))
+                    &opcode::Fsync::new(types::Fd(fd))
                         .build()
                         .user_data(user_data),
                 )
@@ -165,6 +187,7 @@ impl AsyncIo for RawFileAsync {
 
     fn next_completed_request(&mut self) -> Option<(u64, i32)> {
         self.io_uring
+            .as_mut()?
             .completion()
             .next()
             .map(|entry| (entry.user_data(), entry.result()))
@@ -179,7 +202,20 @@ impl AsyncIo for RawFileAsync {
             return Ok(());
         }
 
-        let (submitter, mut sq, _) = self.io_uring.split();
+        let mut nothing = None;
+        let fd = self.fd;
+        // If there is an error, the io_uring instance will be destroyed.
+        let mut destructor_clear = DestructorClear(&mut self.io_uring);
+        let (submitter, mut sq) = destructor_clear
+            .split_ring()
+            .map_err(AsyncIoError::SubmitBatchRequests)?;
+
+        if batch_request.len() > sq.capacity() - sq.len() {
+            return Err(AsyncIoError::SubmitBatchRequests(Error::new(
+                ErrorKind::WouldBlock,
+                "io_uring submission queue is full",
+            )));
+        }
         let mut submitted = false;
 
         // Refuse the whole batch if it can't fit in the SQ to avoid having to unroll a partially
@@ -198,7 +234,7 @@ impl AsyncIo for RawFileAsync {
                     unsafe {
                         sq.push(
                             &opcode::Readv::new(
-                                types::Fd(self.fd),
+                                types::Fd(fd),
                                 req.iovecs.as_ptr(),
                                 req.iovecs.len() as u32,
                             )
@@ -220,7 +256,7 @@ impl AsyncIo for RawFileAsync {
                     unsafe {
                         sq.push(
                             &opcode::Writev::new(
-                                types::Fd(self.fd),
+                                types::Fd(fd),
                                 req.iovecs.as_ptr(),
                                 req.iovecs.len() as u32,
                             )
@@ -247,11 +283,14 @@ impl AsyncIo for RawFileAsync {
             // Update the submission queue and submit new operations to the
             // io_uring instance.
             sq.sync();
+            drop(sq);
             submitter
                 .submit()
                 .map_err(AsyncIoError::SubmitBatchRequests)?;
+        } else {
+            drop(sq);
         }
-
+        destructor_clear.0 = &mut nothing;
         Ok(())
     }
 
@@ -268,14 +307,14 @@ impl AsyncIo for RawFileAsync {
             return self.submit_nop(user_data).map_err(AsyncIoError::PunchHole);
         }
 
-        let (submitter, mut sq, _) = self.io_uring.split();
+        let (submitter, mut sq, fd) = self.split_ring().map_err(AsyncIoError::PunchHole)?;
 
         let mode = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
 
         // SAFETY: The file descriptor is known to be valid.
         unsafe {
             sq.push(
-                &opcode::Fallocate::new(types::Fd(self.fd), length)
+                &opcode::Fallocate::new(types::Fd(fd), length)
                     .offset(offset)
                     .mode(mode)
                     .build()
@@ -301,14 +340,14 @@ impl AsyncIo for RawFileAsync {
                 .map_err(AsyncIoError::WriteZeroes);
         }
 
-        let (submitter, mut sq, _) = self.io_uring.split();
+        let (submitter, mut sq, fd) = self.split_ring().map_err(AsyncIoError::WriteZeroes)?;
 
         let mode = FALLOC_FL_ZERO_RANGE | FALLOC_FL_KEEP_SIZE;
 
         // SAFETY: The file descriptor is known to be valid.
         unsafe {
             sq.push(
-                &opcode::Fallocate::new(types::Fd(self.fd), length)
+                &opcode::Fallocate::new(types::Fd(fd), length)
                     .offset(offset)
                     .mode(mode)
                     .build()
