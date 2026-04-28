@@ -10,6 +10,8 @@
 
 mod aligned_operation;
 pub mod async_io;
+#[cfg(feature = "io_uring")]
+mod destructor_clear;
 pub mod disk_file;
 pub mod error;
 pub mod factory;
@@ -54,7 +56,9 @@ use std::{cmp, mem, result};
 
 pub use aligned_operation::AlignedOperation;
 #[cfg(feature = "io_uring")]
-use io_uring::{IoUring, Probe, opcode};
+use destructor_clear::DestructorClear;
+#[cfg(feature = "io_uring")]
+use io_uring::{IoUring, Probe, SubmissionQueue, Submitter, opcode};
 use libc::{
     FALLOC_FL_KEEP_SIZE, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_ZERO_RANGE, S_IFBLK, S_IFMT, ioctl,
 };
