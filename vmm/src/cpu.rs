@@ -303,7 +303,7 @@ fn core_scheduling_cookie() -> u64 {
             PR_SCHED_CORE_GET,
             0,
             PR_SCHED_CORE_SCOPE_THREAD,
-            &mut cookie as *mut u64,
+            &raw mut cookie,
         )
     };
     if ret == -1 {
@@ -1187,12 +1187,13 @@ impl CpuManager {
                 .spawn(move || {
                     // Schedule the thread to run on the expected CPU set
                     if let Some(cpuset) = cpuset.as_ref() {
+                        let cpuset: *const libc::cpu_set_t = cpuset;
                         // SAFETY: FFI call with correct arguments
                         let ret = unsafe {
                             libc::sched_setaffinity(
                                 0,
                                 std::mem::size_of::<libc::cpu_set_t>(),
-                                cpuset as *const libc::cpu_set_t,
+                                cpuset,
                             )
                         };
 

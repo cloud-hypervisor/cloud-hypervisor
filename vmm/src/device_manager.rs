@@ -4902,7 +4902,7 @@ impl DeviceManager {
                         .remove_userspace_mapping(
                             mapping.addr.raw_value(),
                             mapping.mapping.size(),
-                            mapping.mapping.as_ptr() as _,
+                            mapping.mapping.as_ptr().cast(),
                             mapping.mergeable,
                             mapping.mem_slot,
                         )
