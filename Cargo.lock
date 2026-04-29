@@ -2557,6 +2557,7 @@ dependencies = [
  "serde_json",
  "serial_buffer",
  "signal-hook",
+ "tempfile",
  "thiserror",
  "tracer",
  "uuid",

@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read as _, Seek, SeekFrom};
 use std::ops::{BitAnd, Not, Sub};
-use std::os::fd::{AsFd, OwnedFd};
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -56,6 +56,43 @@ use crate::coredump::{
 use crate::migration::url_to_path;
 use crate::vm_config::{HotplugMethod, MemoryConfig, MemoryZoneConfig};
 use crate::{GuestMemoryMmap, GuestRegionMmap, MEMORY_MANAGER_SNAPSHOT_ID, uffd};
+
+/// Find the next populated (data) extent in `[cursor, end)` of `fd`,
+/// driven by `lseek(SEEK_DATA)` / `lseek(SEEK_HOLE)`. Returns
+/// `Ok(Some((offset, len)))` for the next data extent within the window,
+/// or `Ok(None)` if there is no more data. Returns `Err` if the fd or
+/// filesystem does not support `SEEK_HOLE` (e.g. hugetlbfs) or for any
+/// other I/O error. Callers should treat a first-call error as "fall
+/// back to the dense path".
+#[allow(dead_code)]
+fn next_data_extent(fd: BorrowedFd<'_>, cursor: u64, end: u64) -> io::Result<Option<(u64, u64)>> {
+    let raw = fd.as_raw_fd();
+    // SAFETY: BorrowedFd guarantees the fd is valid for the lifetime of
+    // the borrow; lseek does not consume or close it.
+    let data_off = unsafe { libc::lseek(raw, cursor as i64, libc::SEEK_DATA) };
+    if data_off < 0 {
+        let e = io::Error::last_os_error();
+        // ENXIO from SEEK_DATA means there is no more data at or after
+        // cursor. Any other error means the filesystem does not support
+        // SEEK_HOLE; the caller falls back to the dense path.
+        return if e.raw_os_error() == Some(libc::ENXIO) {
+            Ok(None)
+        } else {
+            Err(e)
+        };
+    }
+    let data_off = data_off as u64;
+    if data_off >= end {
+        return Ok(None);
+    }
+    // SAFETY: same as above.
+    let hole_off = unsafe { libc::lseek(raw, data_off as i64, libc::SEEK_HOLE) };
+    if hole_off < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let hole_off = (hole_off as u64).min(end);
+    Ok(Some((data_off, hole_off - data_off)))
+}
 
 struct UffdHandler {
     stop_event: EventFd,
@@ -3107,5 +3144,89 @@ impl Migratable for MemoryManager {
             table.extend(sub_table);
         }
         Ok(table)
+    }
+}
+
+#[cfg(test)]
+mod unit_tests {
+    use std::io::{Seek, SeekFrom, Write};
+    use std::os::fd::{AsFd, BorrowedFd, FromRawFd};
+
+    use super::next_data_extent;
+
+    fn make_memfd(size: u64) -> std::fs::File {
+        // SAFETY: memfd_create is a self-contained syscall; we own the
+        // returned fd.
+        let fd = unsafe { libc::syscall(libc::SYS_memfd_create, c"sparse-test".as_ptr(), 0u32) };
+        assert!(fd >= 0, "memfd_create failed");
+        // SAFETY: memfd_create returned a valid fd that we now own; wrap it
+        // in File so it is closed on drop.
+        let f = unsafe { std::fs::File::from_raw_fd(fd as i32) };
+        f.set_len(size).unwrap();
+        f
+    }
+
+    fn collect_extents(
+        fd: BorrowedFd<'_>,
+        start: u64,
+        end: u64,
+    ) -> std::io::Result<Vec<(u64, u64)>> {
+        let mut out = Vec::new();
+        let mut cursor = start;
+        while let Some((off, len)) = next_data_extent(fd, cursor, end)? {
+            out.push((off, len));
+            cursor = off + len;
+        }
+        Ok(out)
+    }
+
+    #[test]
+    fn empty_memfd_has_no_data_extents() {
+        let f = make_memfd(4096 * 16);
+        let extents = collect_extents(f.as_fd(), 0, 4096 * 16).unwrap();
+        assert!(extents.is_empty(), "got {extents:?}");
+    }
+
+    #[test]
+    fn written_pages_show_as_data_extents() {
+        let mut f = make_memfd(4096 * 16);
+        f.seek(SeekFrom::Start(4096 * 2)).unwrap();
+        f.write_all(&[0xAB; 4096]).unwrap();
+        f.seek(SeekFrom::Start(4096 * 5)).unwrap();
+        f.write_all(&[0xCD; 4096 * 2]).unwrap();
+
+        let extents = collect_extents(f.as_fd(), 0, 4096 * 16).unwrap();
+        assert_eq!(extents, vec![(4096 * 2, 4096), (4096 * 5, 4096 * 2)]);
+    }
+
+    #[test]
+    fn enumeration_respects_window() {
+        let mut f = make_memfd(4096 * 16);
+        for page in 0..16u64 {
+            f.seek(SeekFrom::Start(4096 * page)).unwrap();
+            f.write_all(&[page as u8; 4096]).unwrap();
+        }
+        let extents = collect_extents(f.as_fd(), 4096 * 4, 4096 * 8).unwrap();
+        assert_eq!(extents, vec![(4096 * 4, 4096 * 4)]);
+    }
+
+    #[test]
+    fn dense_file_yields_single_extent() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        tmp.write_all(&vec![0xEEu8; 4096 * 8]).unwrap();
+        let f = tmp.reopen().unwrap();
+        let extents = collect_extents(f.as_fd(), 0, 4096 * 8).unwrap();
+        assert_eq!(extents, vec![(0, 4096 * 8)]);
+    }
+
+    #[test]
+    fn sparse_file_yields_extents_at_written_positions() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut f = tmp.reopen().unwrap();
+        f.set_len(4096 * 16).unwrap();
+        f.seek(SeekFrom::Start(4096 * 4)).unwrap();
+        f.write_all(&[0x55; 4096 * 2]).unwrap();
+        let extents = collect_extents(f.as_fd(), 0, 4096 * 16).unwrap();
+        assert_eq!(extents, vec![(4096 * 4, 4096 * 2)]);
     }
 }
