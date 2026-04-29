@@ -280,7 +280,7 @@ impl MetadataTableHeader {
     pub fn new(buffer: &[u8]) -> Result<MetadataTableHeader> {
         assert!(buffer.len() == std::mem::size_of::<MetadataTableHeader>());
         // SAFETY: the assertion above makes sure the buffer size is correct.
-        let metadata_table_header = unsafe { *(buffer.as_ptr() as *mut MetadataTableHeader) };
+        let metadata_table_header: MetadataTableHeader = unsafe { *(buffer.as_ptr().cast()) };
 
         if metadata_table_header.signature != METADATA_SIGN {
             return Err(VhdxMetadataError::InvalidMetadataSign);
@@ -313,7 +313,7 @@ impl MetadataTableEntry {
     fn new(buffer: &[u8]) -> Result<MetadataTableEntry> {
         assert!(buffer.len() == std::mem::size_of::<MetadataTableEntry>());
         // SAFETY: the assertion above makes sure the buffer size is correct.
-        let mut metadata_table_entry = unsafe { *(buffer.as_ptr() as *mut MetadataTableEntry) };
+        let mut metadata_table_entry: MetadataTableEntry = unsafe { *(buffer.as_ptr().cast()) };
 
         let uuid = crate::vhdx::uuid_from_guid(buffer);
         metadata_table_entry.item_id = uuid;

@@ -135,7 +135,7 @@ impl Header {
             .map_err(VhdxHeaderError::ReadHeader)?;
 
         // SAFETY: buffer is of correct size and has been successfully filled.
-        let header = unsafe { *(buffer.as_ptr() as *mut Header) };
+        let header: Header = unsafe { *(buffer.as_ptr().cast()) };
         if header.signature != HEADER_SIGN {
             return Err(VhdxHeaderError::InvalidHeaderSign);
         }
@@ -151,9 +151,8 @@ impl Header {
     /// Converts the header structure into a buffer
     fn write_to_buffer(&self, buffer: &mut [u8; HEADER_SIZE as usize]) {
         // SAFETY: self is a valid header.
-        let reference = unsafe {
-            std::slice::from_raw_parts(self as *const Header as *const u8, HEADER_SIZE as usize)
-        };
+        let reference =
+            unsafe { std::slice::from_raw_parts((&raw const *self).cast(), HEADER_SIZE as usize) };
         *buffer = reference.try_into().unwrap();
     }
 
@@ -222,7 +221,7 @@ impl RegionTableHeader {
             .map_err(VhdxHeaderError::ReadRegionTableHeader)?;
 
         // SAFETY: buffer is of correct size and has been successfully filled.
-        let region_table_header = unsafe { *(buffer.as_ptr() as *mut RegionTableHeader) };
+        let region_table_header: RegionTableHeader = unsafe { *(buffer.as_ptr().cast()) };
         if region_table_header.signature != REGION_SIGN {
             return Err(VhdxHeaderError::InvalidRegionSign);
         }
@@ -340,7 +339,7 @@ impl RegionTableEntry {
     pub fn new(buffer: &[u8]) -> Result<RegionTableEntry> {
         assert!(buffer.len() == std::mem::size_of::<RegionTableEntry>());
         // SAFETY: the assertion above makes sure the buffer size is correct.
-        let mut region_table_entry = unsafe { *(buffer.as_ptr() as *mut RegionTableEntry) };
+        let mut region_table_entry: RegionTableEntry = unsafe { *(buffer.as_ptr().cast()) };
 
         let uuid = crate::vhdx::uuid_from_guid(buffer);
         region_table_entry.guid = uuid;

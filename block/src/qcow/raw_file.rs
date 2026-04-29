@@ -15,7 +15,6 @@ use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::slice;
 
-use libc::c_void;
 use vmm_sys_util::file_traits::FileSync;
 use vmm_sys_util::seek_hole::SeekHole;
 use vmm_sys_util::write_zeroes::{PunchHole, WriteZeroesAt};
@@ -39,14 +38,7 @@ fn is_valid_alignment(fd: RawFd, alignment: usize) -> bool {
     assert!(!ptr.is_null());
 
     // SAFETY: FFI call
-    let ret = unsafe {
-        ::libc::pread(
-            fd,
-            ptr as *mut c_void,
-            alignment,
-            alignment.try_into().unwrap(),
-        )
-    };
+    let ret = unsafe { ::libc::pread(fd, ptr.cast(), alignment, alignment.try_into().unwrap()) };
 
     // SAFETY: ptr was allocated by alloc_zeroed with layout
     unsafe { dealloc(ptr, layout) };
@@ -187,7 +179,7 @@ impl Read for RawFile {
             let ret = unsafe {
                 ::libc::pread64(
                     self.file.as_raw_fd(),
-                    tmp_buf.as_mut_ptr() as *mut c_void,
+                    tmp_buf.as_mut_ptr().cast(),
                     tmp_buf.len(),
                     rounded_pos.try_into().unwrap(),
                 )
@@ -267,7 +259,7 @@ impl Write for RawFile {
             let ret = unsafe {
                 ::libc::pread64(
                     self.file.as_raw_fd(),
-                    tmp_buf.as_mut_ptr() as *mut c_void,
+                    tmp_buf.as_mut_ptr().cast(),
                     tmp_buf.len(),
                     rounded_pos.try_into().unwrap(),
                 )
@@ -286,7 +278,7 @@ impl Write for RawFile {
             let ret = unsafe {
                 ::libc::pwrite64(
                     self.file.as_raw_fd(),
-                    tmp_buf.as_ptr() as *const c_void,
+                    tmp_buf.as_ptr().cast(),
                     tmp_buf.len(),
                     rounded_pos.try_into().unwrap(),
                 )
