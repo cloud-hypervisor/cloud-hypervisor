@@ -8,7 +8,7 @@ use std::path::Path;
 use std::{mem, ptr};
 
 use anyhow::anyhow;
-use libc::{c_void, sockaddr_storage, socklen_t};
+use libc::{sockaddr_storage, socklen_t};
 use log::{debug, error};
 use thiserror::Error;
 
@@ -158,7 +158,7 @@ impl Emulator {
                 fds[0],
                 libc::SOL_SOCKET,
                 libc::SO_RCVTIMEO,
-                &tv as *const _ as *const libc::c_void,
+                (&raw const tv).cast(),
                 std::mem::size_of::<libc::timeval>() as u32,
             );
             if ret == -1 {
@@ -318,8 +318,8 @@ impl Emulator {
             cmd.buffer, cmd.input_len
         );
 
-        let data_vecs = [libc::iovec {
-            iov_base: cmd.buffer.as_ptr() as *mut libc::c_void,
+        let mut data_vecs = [libc::iovec {
+            iov_base: cmd.buffer.as_mut_ptr().cast(),
             iov_len: cmd.input_len,
         }; 1];
 
@@ -327,7 +327,7 @@ impl Emulator {
         let mut msghdr: libc::msghdr = unsafe { mem::zeroed() };
         msghdr.msg_name = ptr::null_mut();
         msghdr.msg_namelen = 0;
-        msghdr.msg_iov = data_vecs.as_ptr() as *mut libc::iovec;
+        msghdr.msg_iov = data_vecs.as_mut_ptr().cast();
         msghdr.msg_iovlen = data_vecs.len() as _;
         msghdr.msg_control = ptr::null_mut();
         msghdr.msg_controllen = 0;
@@ -348,11 +348,11 @@ impl Emulator {
         unsafe {
             let ret = libc::recvfrom(
                 self.data_fd,
-                cmd.buffer.as_mut_ptr() as *mut c_void,
+                cmd.buffer.as_mut_ptr().cast(),
                 cmd.buffer.len(),
                 0,
-                &mut addr as *mut libc::sockaddr_storage as *mut libc::sockaddr,
-                &mut len as *mut socklen_t,
+                (&raw mut addr).cast(),
+                &raw mut len,
             );
             if ret == -1 {
                 return Err(Error::SendReceive(anyhow!(
