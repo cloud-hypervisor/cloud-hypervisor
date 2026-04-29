@@ -49,8 +49,9 @@ const PCI_SUPPORTED: u64 = 1 << 7;
 const IS_VIRTUAL_MACHINE: u8 = 1 << 4;
 
 fn compute_checksum<T: Copy>(v: &T) -> u8 {
+    let v: *const T = v;
     // SAFETY: we are only reading the bytes within the size of the `T` reference `v`.
-    let v_slice = unsafe { slice::from_raw_parts(v as *const T as *const u8, mem::size_of::<T>()) };
+    let v_slice = unsafe { slice::from_raw_parts(v.cast(), mem::size_of::<T>()) };
     let mut checksum: u8 = 0;
     for i in v_slice.iter() {
         checksum = checksum.wrapping_add(*i);

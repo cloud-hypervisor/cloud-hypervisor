@@ -163,7 +163,7 @@ pub fn parse_tdvf_sections(file: &mut File) -> Result<(Vec<TdvfSection>, bool), 
     // SAFETY: we read exactly the size of the descriptor header
     file.read_exact(unsafe {
         std::slice::from_raw_parts_mut(
-            &mut descriptor as *mut _ as *mut u8,
+            (&raw mut descriptor).cast(),
             std::mem::size_of::<TdvfDescriptor>(),
         )
     })
@@ -190,7 +190,7 @@ pub fn parse_tdvf_sections(file: &mut File) -> Result<(Vec<TdvfSection>, bool), 
     // SAFETY: we read exactly the advertised sections
     file.read_exact(unsafe {
         std::slice::from_raw_parts_mut(
-            sections.as_mut_ptr() as *mut u8,
+            sections.as_mut_ptr().cast(),
             descriptor.num_sections as usize * std::mem::size_of::<TdvfSection>(),
         )
     })
