@@ -207,7 +207,7 @@ impl SevFd {
         };
         let mut sev_cmd = kvm_sev_cmd {
             id: KVM_SEV_INIT2,
-            data: &mut init as *mut KvmSevInit as _,
+            data: &raw mut init as u64,
             sev_fd: self.fd.as_raw_fd() as _,
             ..Default::default()
         };
@@ -221,7 +221,7 @@ impl SevFd {
         };
         let mut sev_cmd = kvm_sev_cmd {
             id: KVM_SEV_SNP_LAUNCH_START,
-            data: &mut start as *mut KvmSevSnpLaunchStart as _,
+            data: &raw mut start as u64,
             sev_fd: self.fd.as_raw_fd() as _,
             ..Default::default()
         };
@@ -247,7 +247,7 @@ impl SevFd {
         };
         let mut sev_cmd = kvm_sev_cmd {
             id: KVM_SEV_SNP_LAUNCH_UPDATE,
-            data: &mut update as *mut KvmSevSnpLaunchUpdate as _,
+            data: &raw mut update as u64,
             sev_fd: self.fd.as_raw_fd() as _,
             ..Default::default()
         };
@@ -276,7 +276,7 @@ impl SevFd {
         };
         let mut sev_cmd = kvm_sev_cmd {
             id: KVM_SEV_SNP_LAUNCH_FINISH,
-            data: &mut finish as *mut KvmSevSnpLaunchFinish as _,
+            data: &raw mut finish as u64,
             sev_fd: self.fd.as_raw_fd() as _,
             ..Default::default()
         };

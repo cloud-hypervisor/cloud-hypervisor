@@ -100,7 +100,7 @@ fn redist_attr_set(gic: &DeviceFd, offset: u32, typer: u64, val: u32) -> Result<
     let gic_redist_attr = kvm_device_attr {
         group: KVM_DEV_ARM_VGIC_GRP_REDIST_REGS,
         attr: (typer & KVM_DEV_ARM_VGIC_V3_MPIDR_MASK) | (offset as u64), // this needs the mpidr
-        addr: &val as *const u32 as u64,
+        addr: &raw const val as u64,
         flags: 0,
     };
 
@@ -117,7 +117,7 @@ fn redist_attr_get(gic: &DeviceFd, offset: u32, typer: u64) -> Result<u32> {
     let mut gic_redist_attr = kvm_device_attr {
         group: KVM_DEV_ARM_VGIC_GRP_REDIST_REGS,
         attr: (typer & KVM_DEV_ARM_VGIC_V3_MPIDR_MASK) | (offset as u64), // this needs the mpidr
-        addr: &mut val as *mut u32 as u64,
+        addr: &raw mut val as u64,
         flags: 0,
     };
 

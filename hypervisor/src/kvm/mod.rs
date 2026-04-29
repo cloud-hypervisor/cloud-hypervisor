@@ -121,7 +121,7 @@ use kvm_bindings::{
 #[cfg(target_arch = "riscv64")]
 use kvm_bindings::{KVM_REG_RISCV_CORE, kvm_riscv_core};
 #[cfg(feature = "tdx")]
-use kvm_bindings::{KVM_X86_SW_PROTECTED_VM, KVMIO, kvm_run__bindgen_ty_1};
+use kvm_bindings::{KVM_X86_SW_PROTECTED_VM, KVMIO};
 #[cfg(target_arch = "x86_64")]
 use kvm_bindings::{Xsave as xsave2, kvm_xsave2};
 pub use kvm_ioctls::{self, Cap, Kvm, VcpuExit};
@@ -1331,7 +1331,7 @@ impl vm::Vm for KvmVm {
             &self.fd.as_raw_fd(),
             TdxCommand::InitVm,
             0,
-            &data as *const _ as *const _,
+            (&raw const data).cast(),
         )
         .map_err(vm::HypervisorVmError::InitializeTdx)
     }
@@ -1379,7 +1379,7 @@ impl vm::Vm for KvmVm {
             &self.fd.as_raw_fd(),
             TdxCommand::InitMemRegion,
             u32::from(measure),
-            &data as *const _ as *const _,
+            (&raw const data).cast(),
         )
         .map_err(vm::HypervisorVmError::InitMemRegionTdx)
     }
@@ -1417,7 +1417,7 @@ fn tdx_command(
         ioctl_with_val(
             fd,
             KVM_MEMORY_ENCRYPT_OP(),
-            &cmd as *const TdxIoctlCmd as std::os::raw::c_ulong,
+            &raw const cmd as std::os::raw::c_ulong,
         )
     };
 
@@ -1677,7 +1677,7 @@ impl hypervisor::Hypervisor for KvmHypervisor {
             &self.kvm.as_raw_fd(),
             TdxCommand::Capabilities,
             0,
-            &data as *const _ as *const _,
+            (&raw const data).cast(),
         )
         .map_err(|e| hypervisor::HypervisorError::TdxCapabilities(e.into()))?;
 
@@ -3155,8 +3155,7 @@ impl cpu::Vcpu for KvmVcpu {
         let kvm_run = self.fd.get_kvm_run();
         // SAFETY: accessing a union field in a valid structure
         let tdx_vmcall = unsafe {
-            &mut (*((&mut kvm_run.__bindgen_anon_1) as *mut kvm_run__bindgen_ty_1
-                as *mut KvmTdxExit))
+            &mut (*((&raw mut kvm_run.__bindgen_anon_1).cast::<KvmTdxExit>()))
                 .u
                 .vmcall
         };
@@ -3184,8 +3183,7 @@ impl cpu::Vcpu for KvmVcpu {
         let kvm_run = self.fd.get_kvm_run();
         // SAFETY: accessing a union field in a valid structure
         let tdx_vmcall = unsafe {
-            &mut (*((&mut kvm_run.__bindgen_anon_1) as *mut kvm_run__bindgen_ty_1
-                as *mut KvmTdxExit))
+            &mut (*((&raw mut kvm_run.__bindgen_anon_1).cast::<KvmTdxExit>()))
                 .u
                 .vmcall
         };
@@ -3243,7 +3241,7 @@ impl cpu::Vcpu for KvmVcpu {
         let cpu_attr_irq = kvm_bindings::kvm_device_attr {
             group: kvm_bindings::KVM_ARM_VCPU_PMU_V3_CTRL,
             attr: u64::from(kvm_bindings::KVM_ARM_VCPU_PMU_V3_IRQ),
-            addr: &irq as *const u32 as u64,
+            addr: &raw const irq as u64,
             flags: 0,
         };
         self.fd
