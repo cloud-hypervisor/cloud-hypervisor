@@ -23,12 +23,14 @@ use log::info;
 #[cfg(feature = "mshv")]
 use mshv_bindings::*;
 use thiserror::Error;
+#[cfg(all(feature = "kvm", feature = "sev_snp"))]
+use vm_memory::Bytes;
 #[cfg(feature = "sev_snp")]
-use vm_memory::{Bytes, GuestAddress, GuestAddressSpace, GuestMemory};
+use vm_memory::{GuestAddress, GuestAddressSpace, GuestMemory};
 #[cfg(all(feature = "kvm", feature = "sev_snp"))]
 use vm_migration::Snapshottable;
 use zerocopy::IntoBytes;
-#[cfg(feature = "sev_snp")]
+#[cfg(all(feature = "kvm", feature = "sev_snp"))]
 use zerocopy::{FromBytes, FromZeros};
 
 #[cfg(feature = "sev_snp")]
@@ -40,11 +42,11 @@ use crate::memory_manager::{Error as MemoryManagerError, MemoryManager};
 
 #[cfg(feature = "sev_snp")]
 const ISOLATED_PAGE_SHIFT: u32 = 12;
-#[cfg(feature = "sev_snp")]
+#[cfg(all(feature = "kvm", feature = "sev_snp"))]
 const SNP_CPUID_LIMIT: u32 = 64;
 // see section 7.1
 // https://www.amd.com/content/dam/amd/en/documents/epyc-technical-docs/specifications/56860.pdf
-#[cfg(feature = "sev_snp")]
+#[cfg(all(feature = "kvm", feature = "sev_snp"))]
 #[repr(C)]
 #[derive(Debug, Clone, PartialEq, Eq, IntoBytes, FromBytes)]
 pub struct SnpCpuidFunc {
@@ -59,7 +61,7 @@ pub struct SnpCpuidFunc {
     pub reserved: u64,
 }
 
-#[cfg(feature = "sev_snp")]
+#[cfg(all(feature = "kvm", feature = "sev_snp"))]
 #[repr(C)]
 #[derive(Debug, Clone, FromBytes, IntoBytes)]
 pub struct SnpCpuidInfo {
@@ -656,8 +658,12 @@ pub fn load_igvm(
                 .collect();
             #[cfg(feature = "kvm")]
             let page_type = group[0].page_type;
+            #[cfg(feature = "kvm")]
             let mut new_cp = SnpCpuidInfo::new_zeroed();
-            let _ = guest_memory.read(new_cp.as_mut_bytes(), GuestAddress(group[0].gpa));
+            #[cfg(feature = "kvm")]
+            if hypervisor_type == HypervisorType::Kvm {
+                let _ = guest_memory.read(new_cp.as_mut_bytes(), GuestAddress(group[0].gpa));
+            }
             let import_result = memory_manager
                 .lock()
                 .unwrap()
