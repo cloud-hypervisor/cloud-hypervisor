@@ -1547,7 +1547,9 @@ impl Vm {
         // Only reserve bootloader/VMSA regions for KVM + SEV-SNP; other hypervisors
         // (e.g. MSHV) handle this through their own import path.
         #[cfg(all(feature = "kvm", feature = "sev_snp"))]
-        if cpu_manager.lock().unwrap().sev_snp_enabled() {
+        if cpu_manager.lock().unwrap().sev_snp_enabled()
+            && cpu_manager.lock().unwrap().hypervisor_type() == hypervisor::HypervisorType::Kvm
+        {
             Self::reserve_bootloader_regions(&memory_manager)?;
         }
 
