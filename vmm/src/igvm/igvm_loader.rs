@@ -232,8 +232,8 @@ pub fn load_igvm(
             isolated_page_size_4kb: mshv_bindings::hv_isolated_page_size_HV_ISOLATED_PAGE_SIZE_4KB,
             normal: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_NORMAL,
             unmeasured: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_UNMEASURED,
-            cpuid: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_NORMAL,
-            secrets: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_UNMEASURED,
+            cpuid: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_CPUID,
+            secrets: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_SECRETS,
             vmsa: mshv_bindings::hv_isolated_page_type_HV_ISOLATED_PAGE_TYPE_VMSA,
         },
         #[cfg(feature = "kvm")]
