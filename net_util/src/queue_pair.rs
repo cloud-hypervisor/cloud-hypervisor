@@ -81,7 +81,7 @@ impl TxVirtio {
                     assert!(buf.len() >= desc.len() as usize);
                     let buf = buf.ptr_guard_mut();
                     let iovec = libc::iovec {
-                        iov_base: buf.as_ptr() as *mut libc::c_void,
+                        iov_base: buf.as_ptr().cast(),
                         iov_len: desc.len() as libc::size_t,
                     };
                     iovecs.push(iovec);
@@ -238,7 +238,7 @@ impl RxVirtio {
                     assert!(buf.len() >= desc.len() as usize);
                     let buf = buf.ptr_guard_mut();
                     let iovec = libc::iovec {
-                        iov_base: buf.as_ptr() as *mut libc::c_void,
+                        iov_base: buf.as_ptr().cast(),
                         iov_len: desc.len() as libc::size_t,
                     };
                     iovecs.push(iovec);
