@@ -32,12 +32,12 @@ pub fn micro_bench_aio_drain(control: &PerformanceTestControl) -> f64 {
         .create_async_io(num_ops as u32)
         .expect("failed to create AIO context");
 
-    let buf = vec![0xA5u8; BLOCK_SIZE as usize];
+    let mut buf = vec![0xA5u8; BLOCK_SIZE as usize];
 
     // Submit all writes.
     for i in 0..num_ops {
         let iovec = libc::iovec {
-            iov_base: buf.as_ptr() as *mut _,
+            iov_base: buf.as_mut_ptr().cast(),
             iov_len: buf.len(),
         };
         aio.write_vectored((i as u64 * BLOCK_SIZE) as libc::off_t, &[iovec], i as u64)
@@ -378,7 +378,7 @@ pub fn micro_bench_qcow_batch_read(control: &PerformanceTestControl) -> f64 {
             BatchRequest {
                 offset: (i as u64 * QCOW_CLUSTER_SIZE) as libc::off_t,
                 iovecs: vec![libc::iovec {
-                    iov_base: slice.as_mut_ptr() as *mut libc::c_void,
+                    iov_base: slice.as_mut_ptr().cast(),
                     iov_len: QCOW_CLUSTER_SIZE as usize,
                 }]
                 .into(),
@@ -565,15 +565,16 @@ pub fn micro_bench_qcow_batch_write(control: &PerformanceTestControl) -> f64 {
         .create_async_io(num_ops as u32)
         .expect("create_async_io failed");
 
-    let buf = vec![0xA5u8; num_ops * QCOW_CLUSTER_SIZE as usize];
+    let mut buf = vec![0xA5u8; num_ops * QCOW_CLUSTER_SIZE as usize];
 
     let batch: Vec<BatchRequest> = (0..num_ops)
         .map(|i| {
-            let slice = &buf[i * QCOW_CLUSTER_SIZE as usize..(i + 1) * QCOW_CLUSTER_SIZE as usize];
+            let slice =
+                &mut buf[i * QCOW_CLUSTER_SIZE as usize..(i + 1) * QCOW_CLUSTER_SIZE as usize];
             BatchRequest {
                 offset: (i as u64 * QCOW_CLUSTER_SIZE) as libc::off_t,
                 iovecs: vec![libc::iovec {
-                    iov_base: slice.as_ptr() as *mut libc::c_void,
+                    iov_base: slice.as_mut_ptr().cast(),
                     iov_len: QCOW_CLUSTER_SIZE as usize,
                 }]
                 .into(),
