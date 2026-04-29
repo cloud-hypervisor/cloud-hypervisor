@@ -387,6 +387,11 @@ pub fn load_igvm(
                 data_type,
                 data,
             } => {
+                // With the "mshv" feature enabled, `data` is modified via pointer, so `data` needs
+                // to be mutable.
+                #[cfg(feature = "mshv")]
+                let mut data = data.clone();
+
                 debug_assert!((data.len() as u64).is_multiple_of(HV_PAGE_SIZE));
 
                 // TODO: only 4k or empty page data supported right now
@@ -428,8 +433,7 @@ pub fn load_igvm(
                         if hypervisor_type == HypervisorType::Mshv {
                             // SAFETY: CPUID is readonly
                             unsafe {
-                                let cpuid_page_p: *mut hv_psp_cpuid_page =
-                                    data.as_ptr() as *mut hv_psp_cpuid_page; // as *mut hv_psp_cpuid_page;
+                                let cpuid_page_p = data.as_mut_ptr().cast();
                                 let cpuid_page: &mut hv_psp_cpuid_page = &mut *cpuid_page_p;
                                 for i in 0..cpuid_page.count {
                                     let leaf = cpuid_page.cpuid_leaf_info[i as usize];
@@ -557,7 +561,7 @@ pub fn load_igvm(
                 }
                 if !imported_page {
                     loader
-                        .import_pages(gpa / HV_PAGE_SIZE, 1, acceptance, data)
+                        .import_pages(gpa / HV_PAGE_SIZE, 1, acceptance, data.as_ref())
                         .map_err(Error::Loader)?;
                 }
             }
