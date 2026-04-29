@@ -605,13 +605,10 @@ Setting device status to 'NEEDS_RESET' and stopping processing queues until rese
 
         // Schedule the thread to run on the expected CPU set
         if let Some(cpuset) = cpuset.as_ref() {
+            let cpuset: *const libc::cpu_set_t = cpuset;
             // SAFETY: FFI call with correct arguments
             let ret = unsafe {
-                libc::sched_setaffinity(
-                    0,
-                    std::mem::size_of::<libc::cpu_set_t>(),
-                    cpuset as *const libc::cpu_set_t,
-                )
+                libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), cpuset)
             };
 
             if ret != 0 {
@@ -1070,7 +1067,7 @@ impl VirtioDevice for Block {
     fn write_config(&mut self, offset: u64, data: &[u8]) {
         // The "writeback" field is the only mutable field
         let writeback_offset =
-            (&self.config.writeback as *const _ as u64) - (&self.config as *const _ as u64);
+            (&raw const self.config.writeback as u64) - (&raw const self.config as u64);
         if offset != writeback_offset || data.len() != std::mem::size_of_val(&self.config.writeback)
         {
             error!(

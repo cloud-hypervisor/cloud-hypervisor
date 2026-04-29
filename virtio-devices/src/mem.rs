@@ -480,7 +480,7 @@ impl MemEpollHandler {
             // alone is not past the end.
             let res = unsafe {
                 libc::madvise(
-                    self.region.as_ptr().offset(offset as isize) as *mut libc::c_void,
+                    self.region.as_ptr().offset(offset as isize).cast(),
                     size as libc::size_t,
                     libc::MADV_DONTNEED,
                 )
